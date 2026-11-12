@@ -57,18 +57,18 @@ func (f *guardFixture) add(id, skillID, action string, status models.ActionCallS
 	return entry
 }
 
-func (f *guardFixture) views() []governedToolView {
+func (f *guardFixture) views() []GovernedToolView {
 	return governedToolViews(f.path, f.run.ID, f.calls)
 }
 
 func (f *guardFixture) rateLimitedLightpanda(id string) {
-	f.add(id, lightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusFailed, nil,
+	f.add(id, LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusFailed, nil,
 		"source_rate_limited", map[string]string{"httpStatus": "429"})
 }
 
 func TestLiveBrowserRefusedAfterRateLimitedLightpandaFailure(t *testing.T) {
 	f := newGuardFixture(t)
-	f.add("read-ok", lightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusSucceeded, map[string]interface{}{"title": "x"}, "", nil)
+	f.add("read-ok", LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusSucceeded, map[string]interface{}{"title": "x"}, "", nil)
 	f.rateLimitedLightpanda("read-429")
 	// An unrelated Skill's success does not clear the Lightpanda verdict.
 	f.add("other", "skill-weather", "forecast", models.ActionCallStatusSucceeded, nil, "", nil)
@@ -77,7 +77,7 @@ func TestLiveBrowserRefusedAfterRateLimitedLightpandaFailure(t *testing.T) {
 	if !browserSourceRateLimited(views) {
 		t.Fatal("expected the typed 429 Lightpanda failure to rate-limit the live browser")
 	}
-	result, refused := refuseLiveBrowserWhileRateLimited(views, "live-browser-open")
+	result, refused := RefuseLiveBrowserWhileRateLimited(views, "live-browser-open")
 	if !refused || result == nil {
 		t.Fatal("expected the live browser call to be refused")
 	}
@@ -88,17 +88,17 @@ func TestLiveBrowserRefusedAfterRateLimitedLightpandaFailure(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].Value, &content); err != nil {
 		t.Fatal(err)
 	}
-	if content["error"] != liveBrowserRateLimitedError || content["status"] != "refused" || content["code"] != "source_rate_limited" {
+	if content["error"] != LiveBrowserRateLimitedError || content["status"] != "refused" || content["code"] != "source_rate_limited" {
 		t.Fatalf("unexpected refusal content: %v", content)
 	}
 	// Only live-browser actions are refused; the tool list itself never changes.
-	if _, refused := refuseLiveBrowserWhileRateLimited(views, "lightpanda-read"); refused {
+	if _, refused := RefuseLiveBrowserWhileRateLimited(views, "lightpanda-read"); refused {
 		t.Fatal("a non live-browser action must not be refused")
 	}
 
 	// A batch whose every read failed with a 429 item counts too.
 	g := newGuardFixture(t)
-	g.add("batch", lightpandaBrowserSkillID, "lightpanda-read-many", models.ActionCallStatusFailed, nil, "source_reads_failed",
+	g.add("batch", LightpandaBrowserSkillID, "lightpanda-read-many", models.ActionCallStatusFailed, nil, "source_reads_failed",
 		map[string]string{"failedCount": "2", "totalCount": "2", "failures": `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429}]`})
 	if !browserSourceRateLimited(g.views()) {
 		t.Fatal("expected a rate-limited batch item to rate-limit the live browser")
@@ -108,17 +108,17 @@ func TestLiveBrowserRefusedAfterRateLimitedLightpandaFailure(t *testing.T) {
 func TestLiveBrowserAllowedAfterNewerLightpandaSuccess(t *testing.T) {
 	f := newGuardFixture(t)
 	f.rateLimitedLightpanda("read-429")
-	f.add("read-ok", lightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusSucceeded, nil, "", nil)
+	f.add("read-ok", LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusSucceeded, nil, "", nil)
 	if browserSourceRateLimited(f.views()) {
 		t.Fatal("a newer Lightpanda success must clear the rate limit")
 	}
-	if _, refused := refuseLiveBrowserWhileRateLimited(f.views(), "live-browser-open"); refused {
+	if _, refused := RefuseLiveBrowserWhileRateLimited(f.views(), "live-browser-open"); refused {
 		t.Fatal("live browser must be allowed after a newer success")
 	}
 	// A newer typed non-429 source failure also decides (not rate-limited).
 	g := newGuardFixture(t)
 	g.rateLimitedLightpanda("read-429")
-	g.add("read-500", lightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusFailed, nil, "source_http_error", map[string]string{"httpStatus": "500"})
+	g.add("read-500", LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusFailed, nil, "source_http_error", map[string]string{"httpStatus": "500"})
 	if browserSourceRateLimited(g.views()) {
 		t.Fatal("a newer typed non-429 source failure supersedes the earlier rate limit")
 	}
@@ -127,19 +127,19 @@ func TestLiveBrowserAllowedAfterNewerLightpandaSuccess(t *testing.T) {
 func TestUntypedSourceErrorDoesNotRateLimit(t *testing.T) {
 	f := newGuardFixture(t)
 	// Error text alone, or an unknown code, is never evidence of HTTP status.
-	call := f.add("untyped", lightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusFailed, nil, "", nil)
+	call := f.add("untyped", LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusFailed, nil, "", nil)
 	f.calls[call.ActionCallID].Error = "HTTP 429 Too Many Requests"
-	f.add("unknown", lightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusFailed, nil, "source_made_up", map[string]string{"httpStatus": "429"})
+	f.add("unknown", LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusFailed, nil, "source_made_up", map[string]string{"httpStatus": "429"})
 	if browserSourceRateLimited(f.views()) {
 		t.Fatal("untyped or unknown source errors must not rate-limit")
 	}
-	if _, refused := refuseLiveBrowserWhileRateLimited(f.views(), "live-browser-open"); refused {
+	if _, refused := RefuseLiveBrowserWhileRateLimited(f.views(), "live-browser-open"); refused {
 		t.Fatal("live browser must not be refused on untyped evidence")
 	}
 	// An untyped newer failure does not clear an earlier typed rate limit.
 	g := newGuardFixture(t)
 	g.rateLimitedLightpanda("read-429")
-	g.add("untyped", lightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusFailed, nil, "", nil)
+	g.add("untyped", LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusFailed, nil, "", nil)
 	if !browserSourceRateLimited(g.views()) {
 		t.Fatal("an untyped failure must not clear the typed rate limit")
 	}
@@ -281,7 +281,7 @@ func TestForegroundPendingSetupAppendsNoteNotToolChange(t *testing.T) {
 	if plan := finalAnswerPark(f.run, f.views(), true, "Please finish the form.", nil); plan != nil {
 		t.Fatalf("a foreground Run must not park on setup, got %+v", plan)
 	}
-	note := pendingSkillSetupNote(f.run, f.run.SessionID, entry, call, nil)
+	note := PendingSkillSetupNote(f.run, f.run.SessionID, entry, call, nil)
 	if note == nil {
 		t.Fatal("expected a setup note after the request_setup entry")
 	}
@@ -297,22 +297,22 @@ func TestForegroundPendingSetupAppendsNoteNotToolChange(t *testing.T) {
 		t.Fatalf("unexpected note text: %q", note.Note.Text)
 	}
 	// Deterministic: a second evaluation gives the same idempotent entry.
-	if again := pendingSkillSetupNote(f.run, f.run.SessionID, entry, call, nil); again == nil || again.ID != note.ID {
+	if again := PendingSkillSetupNote(f.run, f.run.SessionID, entry, call, nil); again == nil || again.ID != note.ID {
 		t.Fatal("the note must be idempotent by source key")
 	}
 	// No note for background task Runs (they park), resolved forms, or other calls.
 	task := *f.run
 	task.Kind, task.Context = models.RunKindAgentWork, map[string]interface{}{models.ConversationTaskContextKey: "task-1"}
-	if pendingSkillSetupNote(&task, f.run.SessionID, entry, call, nil) != nil {
+	if PendingSkillSetupNote(&task, f.run.SessionID, entry, call, nil) != nil {
 		t.Fatal("background task Runs park instead of getting a note")
 	}
 	resolved := []models.AgentRunIntervention{{ID: "i", SkillSetupResolution: &models.SkillSetupResolutionReceipt{
 		Scope: f.run.Scope, RunID: f.run.ID, RequestID: "setup-1", Status: "resolved", ActionCallID: "setup-call"}}}
-	if pendingSkillSetupNote(f.run, f.run.SessionID, entry, call, resolved) != nil {
+	if PendingSkillSetupNote(f.run, f.run.SessionID, entry, call, resolved) != nil {
 		t.Fatal("a resolved form needs no note")
 	}
 	other := f.add("weather", "skill-weather", "forecast", models.ActionCallStatusSucceeded, nil, "", nil)
-	if pendingSkillSetupNote(f.run, f.run.SessionID, other, f.calls["weather"], nil) != nil {
+	if PendingSkillSetupNote(f.run, f.run.SessionID, other, f.calls["weather"], nil) != nil {
 		t.Fatal("only setup calls get the note")
 	}
 }
@@ -324,12 +324,12 @@ func TestGovernedToolViewsReadsRunCallsInPathOrder(t *testing.T) {
 	f.path.Compaction = &models.SessionEntry{Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntry{ActionCallIDs: []string{"compacted-429"}}}
 	f.add("mine", "skill-weather", "forecast", models.ActionCallStatusSucceeded, nil, "", nil)
 	// Another Run's entry in the same session, an open entry and a vm call are skipped.
-	foreign := f.add("foreign", lightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusSucceeded, nil, "", nil)
+	foreign := f.add("foreign", LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusSucceeded, nil, "", nil)
 	foreign.RunID = "run-else"
 	f.calls["foreign"].RunID = "run-else"
-	open := f.add("open", lightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusSucceeded, nil, "", nil)
+	open := f.add("open", LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusSucceeded, nil, "", nil)
 	open.State = models.ToolEntryRunning
-	f.add("vm", lightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusSucceeded, nil, "", nil)
+	f.add("vm", LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusSucceeded, nil, "", nil)
 	f.calls["vm"].Origin = models.ActionOriginVM
 
 	views := f.views()
@@ -348,7 +348,7 @@ func TestGovernedToolViewsReadsRunCallsInPathOrder(t *testing.T) {
 	for _, call := range f.calls {
 		storetest.SeedActionCall(t, store, call)
 	}
-	loaded, err := loadGovernedToolViews(context.Background(), store, f.run.Scope, f.path, f.run.ID)
+	loaded, err := LoadGovernedToolViews(context.Background(), store, f.run.Scope, f.path, f.run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

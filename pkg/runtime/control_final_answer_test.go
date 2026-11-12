@@ -24,7 +24,7 @@ import (
 func newFinalFixture(t *testing.T, calls ...agentrun.LoopToolCall) *controlFixture {
 	t.Helper()
 	f := newControlFixture(t, calls)
-	registry := controlRegistry{}
+	registry := Registry{}
 	registry.register(models.ControlToolFinalAnswer, finalAnswerHandler{})
 	f.exec.handlers = registry
 	return f
@@ -80,7 +80,7 @@ func requireRejected(t *testing.T, f *controlFixture, result ControlResult, call
 	}
 	stored := f.stored(callID)
 	value := requireControlError(t, stored.Tool.Result, models.ToolResultFailed, code)
-	if code != controlArgumentsInvalidCode {
+	if code != ArgumentsInvalidCode {
 		meta, err := DecodeControlEntryMeta(stored)
 		if err != nil || meta == nil || meta.ErrorCode != code || meta.Kind != models.ControlToolFinalAnswer {
 			t.Fatalf("meta = %#v, %v", meta, err)
@@ -250,13 +250,13 @@ func TestSilentOnlySpoken(t *testing.T) {
 		finalCall("spoken-missing", `{"answer":"Hi"}`),
 	)
 	// silent is not offered outside spoken Runs.
-	value := requireRejected(t, f, f.settleFinal("default", agentrun.ControlAuthority{}), "default", controlArgumentsInvalidCode)
+	value := requireRejected(t, f, f.settleFinal("default", agentrun.ControlAuthority{}), "default", ArgumentsInvalidCode)
 	if !strings.Contains(value["message"].(string), `"silent"`) {
 		t.Fatalf("message = %v", value["message"])
 	}
 	spoken := agentrun.ControlAuthority{FinalMode: conversationrun.FinalModeSpoken}
 	requireRejected(t, f, f.settleFinal("spoken-text", spoken), "spoken-text", finalSilentInvalidCode)
-	value = requireRejected(t, f, f.settleFinal("spoken-missing", spoken), "spoken-missing", controlArgumentsInvalidCode)
+	value = requireRejected(t, f, f.settleFinal("spoken-missing", spoken), "spoken-missing", ArgumentsInvalidCode)
 	if value["message"] != `missing required field "silent"` {
 		t.Fatalf("message = %v", value["message"])
 	}
@@ -353,7 +353,7 @@ func TestInvalidVisualOnceThenDropped(t *testing.T) {
 	}
 	// visual is not offered without VisualAllowed.
 	g := newFinalFixture(t, finalCall("final", invalid))
-	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{}), "final", controlArgumentsInvalidCode)
+	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{}), "final", ArgumentsInvalidCode)
 }
 
 func TestValidVisualRidesOnOutput(t *testing.T) {
@@ -383,7 +383,7 @@ func TestReportTakesPrecedenceOverAnswer(t *testing.T) {
 	}
 	// report is not offered on spoken Runs.
 	g := newFinalFixture(t, finalCall("final", `{"answer":"Hi","silent":false,"report":"x"}`))
-	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{FinalMode: conversationrun.FinalModeSpoken}), "final", controlArgumentsInvalidCode)
+	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{FinalMode: conversationrun.FinalModeSpoken}), "final", ArgumentsInvalidCode)
 }
 
 func TestBroadcastToChannelInOutput(t *testing.T) {
@@ -401,7 +401,7 @@ func TestBroadcastToChannelInOutput(t *testing.T) {
 		t.Fatal("false broadcast written to output")
 	}
 	g := newFinalFixture(t, finalCall("final", `{"answer":"x","broadcastToChannel":true}`))
-	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{}), "final", controlArgumentsInvalidCode)
+	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{}), "final", ArgumentsInvalidCode)
 }
 
 func TestFinalAnswerSkillSelections(t *testing.T) {
@@ -412,7 +412,7 @@ func TestFinalAnswerSkillSelections(t *testing.T) {
 		finalCall("ok", `{"answer":"x","appliedSkillRefs":["s2"]}`),
 	)
 	authority := agentrun.ControlAuthority{SkillPromptRefs: []string{"s1", "s2"}}
-	requireRejected(t, f, f.settleFinal("missing", authority), "missing", controlArgumentsInvalidCode)
+	requireRejected(t, f, f.settleFinal("missing", authority), "missing", ArgumentsInvalidCode)
 	// A ref cited twice counts once; a ref no loaded Skill has is left out.
 	for _, id := range []string{"dup", "unknown"} {
 		got := requireFinal(t, f.settleFinal(id, authority))
@@ -772,7 +772,7 @@ func TestSilentStillRejectedForChatRuns(t *testing.T) {
 	if finalFieldOffered("silent", authority) {
 		t.Fatal("silent offered to a chat Run")
 	}
-	value := requireRejected(t, f, f.settleFinal("chat", authority), "chat", controlArgumentsInvalidCode)
+	value := requireRejected(t, f, f.settleFinal("chat", authority), "chat", ArgumentsInvalidCode)
 	if !strings.Contains(value["message"].(string), `"silent"`) {
 		t.Fatalf("message = %v", value["message"])
 	}
@@ -819,7 +819,7 @@ func TestFinalAnswerSchemaStableAcrossSkillRefs(t *testing.T) {
 	more.ForkTargets = append(more.ForkTargets, agentrun.HostedAgentTarget{ID: "agent-3"})
 	more.Operations = append(more.Operations, agentrun.HostedRunbookOperation{Entrypoint: "audit", Name: "Audit"})
 	for _, name := range []models.ControlToolName{models.ControlToolDelegate, models.ControlToolFork, models.ControlToolRunOperation} {
-		handler := newControlRegistry(builtinControlTools()...)[name]
+		handler := NewRegistry(BuiltinTools()...)[name]
 		if mustJSON(t, handler.Spec(targets)) != mustJSON(t, handler.Spec(more)) {
 			t.Fatalf("%s changes with its targets", name)
 		}

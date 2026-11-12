@@ -156,7 +156,7 @@ func (x *resumeTools) run(ctx context.Context, in agentrun.StepToolsInput, entri
 		if entry == nil || entry.Tool == nil || !entry.State.Open() {
 			continue
 		}
-		if isFinalControlTool(ControlToolName(entry.Tool.Name)) {
+		if IsFinalTool(ControlToolName(entry.Tool.Name)) {
 			if inline {
 				return agentrun.StepToolsOutcome{SettlePending: true}, nil
 			}

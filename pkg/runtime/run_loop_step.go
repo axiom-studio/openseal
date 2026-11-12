@@ -764,7 +764,7 @@ func (d *drive) recordDeterministicStep(ctx context.Context, st *stepState, out 
 // entries, or "".
 func finalToolEntryID(entries []*SessionEntry) string {
 	for _, entry := range entries {
-		if entry != nil && entry.Tool != nil && isFinalControlTool(ControlToolName(entry.Tool.Name)) {
+		if entry != nil && entry.Tool != nil && IsFinalTool(ControlToolName(entry.Tool.Name)) {
 			return entry.ID
 		}
 	}

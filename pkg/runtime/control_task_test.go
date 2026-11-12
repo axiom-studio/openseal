@@ -430,7 +430,7 @@ func TestStartTaskReplayAfterCrashReturnsSameTask(t *testing.T) {
 func TestStartTaskNotAloneIsRefused(t *testing.T) {
 	calls := []models.ModelToolCall{startTaskCall("call-task", startTaskTestGoal, startTaskTestAck),
 		{ID: "call-react", Name: string(models.ControlToolReact), Arguments: json.RawMessage(`{"messageId":"m","emoji":"eyes"}`)}}
-	refusals := controlCallRefusals(calls, agentrun.ControlAuthority{CanReact: true,
+	refusals := CallRefusals(calls, agentrun.ControlAuthority{CanReact: true,
 		TaskStart: &models.HostedConversationTaskContext{ConversationID: "c", CanStart: true}})
 	if refusals["call-task"] == nil || refusals["call-react"] != nil {
 		t.Fatalf("refusals = %#v", refusals)

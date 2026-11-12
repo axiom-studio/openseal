@@ -250,14 +250,14 @@ func (x *ControlExecutor) controlSessionPath(ctx context.Context, cc agentrun.Co
 // runHasExternalReceipt: some succeeded ActionCall of this Run carries an
 // external operation receipt.
 func (x *ControlExecutor) runHasExternalReceipt(ctx context.Context, cc agentrun.ControlContext) (bool, error) {
-	actions, ok := x.Portfolio.(loopActionCallLister)
+	actions, ok := x.Portfolio.(ActionCallLister)
 	if !ok {
 		return false, errors.New("control executor portfolio is not an action store; the external claim check needs the Run's calls")
 	}
-	for offset := 0; ; offset += loopActionCallPageSize {
+	for offset := 0; ; offset += ActionCallPageSize {
 		page, err := actions.ListActionCalls(ctx, models.ActionFilter{
 			Scope: cc.Run.Scope, RunID: cc.Run.ID, Status: []models.ActionCallStatus{models.ActionCallStatusSucceeded},
-			Limit: loopActionCallPageSize, Offset: offset,
+			Limit: ActionCallPageSize, Offset: offset,
 		})
 		if err != nil {
 			return false, fmt.Errorf("load the run's action calls: %w", err)
@@ -268,7 +268,7 @@ func (x *ControlExecutor) runHasExternalReceipt(ctx context.Context, cc agentrun
 				return true, nil
 			}
 		}
-		if len(page) < loopActionCallPageSize {
+		if len(page) < ActionCallPageSize {
 			return false, nil
 		}
 	}
@@ -355,9 +355,9 @@ func negatedBefore(words []string, i int) bool {
 	return false
 }
 
-// loopActionCallPageSize pages a Run's failed action calls.
-const loopActionCallPageSize = 200
+// ActionCallPageSize pages a Run's failed action calls.
+const ActionCallPageSize = 200
 
-type loopActionCallLister interface {
+type ActionCallLister interface {
 	ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error)
 }

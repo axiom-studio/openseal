@@ -131,7 +131,7 @@ func (delegateHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.
 	if cc.Origin != ControlOriginKernel {
 		agentID, err := modelstep.ResolveHostedAgentTarget(args.AgentID, cc.Authority.DelegateTargets)
 		if err != nil {
-			return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, controlDelegationRejectedCode, err.Error(), nil))
+			return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, controlDelegationRejectedCode, err.Error(), nil))
 		}
 		spec.AgentID = agentID
 	}
@@ -139,7 +139,7 @@ func (delegateHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.
 }
 
 func (delegateHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
-	return x.resumeDelegation(ctx, cc)
+	return x.ResumeDelegation(ctx, cc)
 }
 
 // Delegate creates the durable AgentRequest of spec and parks the source on
@@ -172,7 +172,7 @@ func (x *ControlExecutor) Delegate(ctx context.Context, cc agentrun.ControlConte
 	if err != nil {
 		return x.rejectDelegation(ctx, cc, err.Error())
 	}
-	key := delegationIdempotencyKey(run.ID, spec.StepID)
+	key := DelegationIdempotencyKey(run.ID, spec.StepID)
 	requestID := collaboration.StableCollaborationID(run.Scope, key, "request")
 	existing, err := x.Collaboration.GetAgentRequest(ctx, run.Scope, requestID)
 	if err != nil && !errors.Is(err, models.ErrAgentRequestNotFound) {
@@ -185,7 +185,7 @@ func (x *ControlExecutor) Delegate(ctx context.Context, cc agentrun.ControlConte
 	if err != nil {
 		var insufficient *modelstep.ControlBudgetInsufficientError
 		if errors.As(err, &insufficient) {
-			return x.refuseIfEntry(ctx, cc, controlErrorResult(models.ToolResultRefused, insufficient.Code(), insufficient.Message(), nil))
+			return x.RefuseIfEntry(ctx, cc, ErrorResult(models.ToolResultRefused, insufficient.Code(), insufficient.Message(), nil))
 		}
 		return ControlResult{}, err
 	}
@@ -215,7 +215,7 @@ func (x *ControlExecutor) Delegate(ctx context.Context, cc agentrun.ControlConte
 	created, err := x.Collaboration.CreateAgentRequest(ctx, request)
 	if err != nil {
 		if errors.Is(err, models.ErrSteeringArrived) {
-			return x.refuseIfEntry(ctx, cc, controlErrorResult(models.ToolResultRefused, controlNewMessageCode,
+			return x.RefuseIfEntry(ctx, cc, ErrorResult(models.ToolResultRefused, controlNewMessageCode,
 				"A new message arrived; read it first.", nil))
 		}
 		if delegationRejection(err) {
@@ -241,7 +241,7 @@ func (x *ControlExecutor) Delegate(ctx context.Context, cc agentrun.ControlConte
 	return ControlResult{Kind: ControlParked, Run: created.Source, Entry: entry, Park: park}, nil
 }
 
-func delegationIdempotencyKey(runID, stepID string) string {
+func DelegationIdempotencyKey(runID, stepID string) string {
 	return strings.Join([]string{"delegation", runID, stepID}, ":")
 }
 
@@ -292,7 +292,7 @@ func (x *ControlExecutor) delegationBudget(cc agentrun.ControlContext, spec Dele
 	}
 	allocation := spec.Budget
 	if cc.Origin != ControlOriginKernel || allocation == nil {
-		allocations, err := modelstep.ControlBranchBudgets(cc.Run, stepIDOf(cc.Step), 1)
+		allocations, err := modelstep.ControlBranchBudgets(cc.Run, StepIDOf(cc.Step), 1)
 		if err != nil {
 			return nil, err
 		}
@@ -316,12 +316,12 @@ func delegationRejection(err error) bool {
 }
 
 func (x *ControlExecutor) rejectDelegation(ctx context.Context, cc agentrun.ControlContext, message string) (ControlResult, error) {
-	return x.refuseIfEntry(ctx, cc, controlErrorResult(models.ToolResultRefused, controlDelegationRejectedCode, message, nil))
+	return x.RefuseIfEntry(ctx, cc, ErrorResult(models.ToolResultRefused, controlDelegationRejectedCode, message, nil))
 }
 
-// refuseIfEntry is refuse for calls that may have no entry (kernel origin):
+// RefuseIfEntry is refuse for calls that may have no entry (kernel origin):
 // without an entry the refusal is returned as a Go error.
-func (x *ControlExecutor) refuseIfEntry(ctx context.Context, cc agentrun.ControlContext, result *models.ToolResult) (ControlResult, error) {
+func (x *ControlExecutor) RefuseIfEntry(ctx context.Context, cc agentrun.ControlContext, result *models.ToolResult) (ControlResult, error) {
 	if cc.Entry == nil {
 		return ControlResult{}, fmt.Errorf("%w: %s", models.ErrInvalidAgentRequestState, controlResultMessage(result))
 	}
@@ -476,11 +476,11 @@ func (delegateReplyHandler) Run(ctx context.Context, x *ControlExecutor, cc agen
 		return ControlResult{}, err
 	}
 	if request == nil || request.SourceRunID != cc.Run.ID {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, controlRequestNotAwaitingCode,
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, controlRequestNotAwaitingCode,
 			fmt.Sprintf("Request %s is not one of your delegations.", args.RequestID), nil))
 	}
 	if request.Status != models.AgentRequestStatusClarificationRequested {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, controlRequestNotAwaitingCode,
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, controlRequestNotAwaitingCode,
 			fmt.Sprintf("Request %s is %s.", request.ID, request.Status), nil))
 	}
 	entry, err := x.awaitDelegation(ctx, cc, request.ID, request.Revision)
@@ -502,7 +502,7 @@ func (x *ControlExecutor) answerClarification(ctx context.Context, cc agentrun.C
 	if err != nil {
 		if delegationRejection(err) {
 			entry, transitionErr := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil,
-				controlErrorResult(models.ToolResultRefused, controlDelegationRejectedCode, err.Error(), nil), nil)
+				ErrorResult(models.ToolResultRefused, controlDelegationRejectedCode, err.Error(), nil), nil)
 			if transitionErr != nil {
 				return ControlResult{}, transitionErr
 			}
@@ -521,17 +521,17 @@ func (x *ControlExecutor) answerClarification(ctx context.Context, cc agentrun.C
 }
 
 func (delegateReplyHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
-	return x.resumeDelegation(ctx, cc)
+	return x.ResumeDelegation(ctx, cc)
 }
 
 // ---------------------------------------------------------------------------
 // Resume (§8.4)
 
-// resumeDelegation turns the request of an awaiting_child delegate or reply
+// ResumeDelegation turns the request of an awaiting_child delegate or reply
 // entry into its tool result, or re-parks while the request is open. A reply
 // whose answer was never recorded (crash between the entry transition and the
 // answer) records it now.
-func (x *ControlExecutor) resumeDelegation(ctx context.Context, cc agentrun.ControlContext) (ControlResume, error) {
+func (x *ControlExecutor) ResumeDelegation(ctx context.Context, cc agentrun.ControlContext) (ControlResume, error) {
 	if x.Collaboration == nil {
 		return ControlResume{}, errors.New("delegation needs the collaboration service")
 	}
@@ -692,7 +692,7 @@ func delegatedRunbookOrigin(contextValues map[string]interface{}) map[string]int
 	return origin
 }
 
-func stepIDOf(step *models.AgentTurn) string {
+func StepIDOf(step *models.AgentTurn) string {
 	if step == nil {
 		return ""
 	}

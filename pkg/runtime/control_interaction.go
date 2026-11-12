@@ -48,7 +48,7 @@ func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agent
 	args := cc.Arguments.(*reactControlArgs)
 	reaction := runtimeconversation.TurnReaction{MessageID: strings.TrimSpace(args.MessageID), Emoji: args.Emoji}
 	if !models.IsValidOpaqueIdentifier(reaction.MessageID, 256) || models.ValidateReactionEmoji(reaction.Emoji) != nil {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultFailed, "reaction_invalid",
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultFailed, "reaction_invalid",
 			"Use one emoji and a message id from this conversation.", nil))
 	}
 	done, err := completedRunReactionEntries(ctx, x.Sessions, cc.Run)
@@ -56,14 +56,14 @@ func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agent
 		return ControlResult{}, err
 	}
 	if len(done) >= runtimeconversation.MaximumTurnReactions {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "reaction_limit",
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "reaction_limit",
 			fmt.Sprintf("This reply already added %d reactions, the most one reply may add.", runtimeconversation.MaximumTurnReactions), nil))
 	}
 	if err := x.addRunReaction(ctx, cc.Run, reaction); err != nil {
 		if errors.Is(err, models.ErrLeaseLost) {
 			return ControlResult{}, err
 		}
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultFailed, "reaction_failed",
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultFailed, "reaction_failed",
 			"The reaction could not be added: "+err.Error()+".", nil))
 	}
 	return x.complete(ctx, cc, models.ControlJSONResult(models.ToolResultSucceeded, map[string]interface{}{

@@ -18,7 +18,7 @@ func TestRunbookProducerReportsDelegatedAgentFailureReason(t *testing.T) {
 	producer := &RunbookStepProducer{definition: &runbook.Definition{}}
 	run := &AgentRun{ID: "run-1", Scope: Scope{Kind: "tenant", ID: "1"}, Output: map[string]interface{}{}}
 	stepID := "perform-hourly"
-	requestID := collaboration.StableCollaborationID(run.Scope, delegationIdempotencyKey(run.ID, stepID), "request")
+	requestID := collaboration.StableCollaborationID(run.Scope, DelegationIdempotencyKey(run.ID, stepID), "request")
 	run.Output["collaborationResults"] = map[string]interface{}{
 		requestID: map[string]interface{}{
 			"status": string(AgentRequestStatusFailed),

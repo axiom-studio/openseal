@@ -116,13 +116,13 @@ func (askUserHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.C
 		return ControlResult{}, err
 	}
 	if conversation == nil {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "cannot_post",
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "cannot_post",
 			"There is no conversation this work can ask in; continue with what you have.", nil))
 	}
 	if prior, answer, err := x.askUserAnsweredBefore(ctx, cc, args.Question); err != nil {
 		return ControlResult{}, err
 	} else if prior != nil {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "already_asked",
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "already_asked",
 			fmt.Sprintf("You asked this at step %d; the answer was: %s", prior.Step, answer), nil))
 	}
 	key := runtimeconversation.ConversationClarificationKey(cc.Run.ID, cc.Entry.ID)
@@ -234,7 +234,7 @@ func (askUserHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentru
 	if conversation == nil {
 		// The conversation went away while the question was open: nobody can
 		// answer it now.
-		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil, controlErrorResult(models.ToolResultFailed, "cannot_post",
+		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil, ErrorResult(models.ToolResultFailed, "cannot_post",
 			"The conversation can no longer be asked; continue with what you have.", nil), nil)
 		if err != nil {
 			return ControlResume{}, err

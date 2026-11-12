@@ -85,7 +85,7 @@ func taskCompletionReviewCheck(ctx context.Context, x *ControlExecutor, cc agent
 // (it carries the task hint but is not the task's work Run and finishes its
 // own partial goal), or a continuation task (the conversation owns it).
 func (x *ControlExecutor) reviewedConversationTask(ctx context.Context, cc agentrun.ControlContext) (*models.ConversationTask, error) {
-	if !backgroundTaskRun(cc.Run) {
+	if !IsBackgroundTaskRun(cc.Run) {
 		return nil, nil
 	}
 	taskID, _ := cc.Run.Context[models.ConversationTaskContextKey].(string)

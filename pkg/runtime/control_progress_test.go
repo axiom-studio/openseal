@@ -16,7 +16,7 @@ import (
 func progressFixture(t *testing.T, calls ...agentrun.LoopToolCall) *controlFixture {
 	t.Helper()
 	f := newControlFixture(t, calls)
-	registry := controlRegistry{}
+	registry := Registry{}
 	registry.register(models.ControlToolReportProgress, reportProgressHandler{})
 	f.exec.handlers = registry
 	f.exec.Activity = activity.NewRunActivityService(f.store, f.store)

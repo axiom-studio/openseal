@@ -293,7 +293,7 @@ func TestDelegateParksWaitingForAgentDecision(t *testing.T) {
 	if request.Recipient != (models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "specialist"}) || request.Status != models.AgentRequestStatusPending ||
 		request.AcceptancePolicy != models.AgentRequestAcceptanceRecipientReview || request.Goal != "Analyze the release" ||
 		request.SharedContext["release"] != "2026.07" || request.SharedContext[agentrun.DelegationModeContextKey] != "reason" ||
-		len(request.ChildCheckpoint) != 0 || request.IdempotencyKey != delegationIdempotencyKey(f.run.ID, "delegate-"+f.entry.ID) {
+		len(request.ChildCheckpoint) != 0 || request.IdempotencyKey != DelegationIdempotencyKey(f.run.ID, "delegate-"+f.entry.ID) {
 		t.Fatalf("request = %#v", request)
 	}
 	if want := collaboration.StableCollaborationID(f.scope, request.IdempotencyKey, "request"); request.ID != want {

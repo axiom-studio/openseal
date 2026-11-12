@@ -228,7 +228,7 @@ func (c *operationCall) startOperation(n int64, arguments string) string {
 	result := c.settle()
 	if result.Kind != ControlParked || result.Park == nil || !result.Park.Committed ||
 		result.Park.Status != models.AgentRunStatusWaitingForDependency {
-		c.t.Fatalf("settle = %#v: %s", result, controlResultText(c.entry.Tool.Result))
+		c.t.Fatalf("settle = %#v: %s", result, ResultText(c.entry.Tool.Result))
 	}
 	meta := c.meta()
 	if meta.Kind != models.ControlToolRunOperation || meta.ForkID != "op-"+c.entry.ID || len(meta.ChildRunIDs) != 1 {
@@ -249,8 +249,8 @@ func TestRunOperationValidatesInputSchema(t *testing.T) {
 			{"wrong type", `{"entrypoint":"engage-now","arguments":{"account":7}}`, operationInputInvalidCode},
 			{"unknown field", `{"entrypoint":"engage-now","arguments":{"account":"a","extra":true}}`, operationInputInvalidCode},
 			{"unknown entrypoint", `{"entrypoint":"other","arguments":{"account":"a"}}`, operationNotAuthorizedCode},
-			{"no arguments", `{"entrypoint":"engage-now"}`, controlArgumentsInvalidCode},
-			{"unknown top-level", `{"entrypoint":"engage-now","arguments":{"account":"a"},"summary":"x"}`, controlArgumentsInvalidCode},
+			{"no arguments", `{"entrypoint":"engage-now"}`, ArgumentsInvalidCode},
+			{"unknown top-level", `{"entrypoint":"engage-now","arguments":{"account":"a"},"summary":"x"}`, ArgumentsInvalidCode},
 		}
 		for i, tc := range cases {
 			c := newOperationCall(t, store, nil)

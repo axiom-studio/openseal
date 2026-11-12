@@ -95,7 +95,7 @@ func (reportProgressHandler) Run(ctx context.Context, x *ControlExecutor, cc age
 		return ControlResult{}, err
 	}
 	if repeated {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, reportProgressRepeatCode,
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, reportProgressRepeatCode,
 			"Already reported. Add a new finding or keep working.", nil))
 	}
 	if x.Activity == nil {

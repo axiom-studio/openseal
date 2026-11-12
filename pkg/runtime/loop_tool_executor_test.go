@@ -39,8 +39,8 @@ type toolExecFixture struct {
 
 // fakeLoopControls fakes every control tool of the run loop, except the
 // tools in real, which keep the handler given there.
-func fakeLoopControls(real ...controlTool) (controlRegistry, map[ControlToolName]*fakeControlHandler) {
-	registry := newControlRegistry(real...)
+func fakeLoopControls(real ...Tool) (Registry, map[ControlToolName]*fakeControlHandler) {
+	registry := NewRegistry(real...)
 	fakes := map[ControlToolName]*fakeControlHandler{}
 	for name := range loopControlRegistry() {
 		if _, ok := registry[name]; !ok {
@@ -52,7 +52,7 @@ func fakeLoopControls(real ...controlTool) (controlRegistry, map[ControlToolName
 }
 
 // newToolExecFixture fakes the control tools, except the tools in real.
-func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real ...controlTool) *toolExecFixture {
+func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real ...Tool) *toolExecFixture {
 	t.Helper()
 	ctx := context.Background()
 	store := newTestKernelStore(t)
@@ -80,7 +80,7 @@ func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real 
 	registry, handlers := fakeLoopControls(real...)
 	f.handlers = handlers
 	f.control = &ControlExecutor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }}
-	f.control.useTools(registry)
+	f.control.UseTools(registry)
 	dispatcher, err := NewStepToolDispatcher(StepToolDispatcherConfig{
 		Sessions: store, Turns: store, Actions: store, Control: f.control,
 		Host: modelstep.NewHostToolDispatcher(f.host, nil, nil), Now: func() time.Time { return now },
@@ -411,7 +411,7 @@ func TestPlanToolEntriesRefusesUnusableArguments(t *testing.T) {
 	call.ArgumentsError = "unexpected end of JSON input"
 	step := f.step("step-1", AgentTurnStatusRunning, call)
 	entry := step.entries[0]
-	if entry.State != ToolEntryError || entry.Tool.Result.Status != ToolResultRefused || resultValue(t, entry)["error"] != controlArgumentsInvalidCode {
+	if entry.State != ToolEntryError || entry.Tool.Result.Status != ToolResultRefused || resultValue(t, entry)["error"] != ArgumentsInvalidCode {
 		t.Fatalf("entry = %s %#v", entry.State, entry.Tool.Result)
 	}
 	out, err := f.binding.Tools.ExecuteStepTools(f.ctx, f.input(step))
@@ -460,7 +460,7 @@ func (h *committedForkHandler) Run(ctx context.Context, x *ControlExecutor, cc a
 // CTL-6b).
 func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
 	fork := &committedForkHandler{groups: map[string]int{}}
-	f := newToolExecFixture(t, agentrun.ControlAuthority{ForkAllowed: true}, newControlTool(ControlToolFork, fork))
+	f := newToolExecFixture(t, agentrun.ControlAuthority{ForkAllowed: true}, NewTool(ControlToolFork, fork))
 	// Step 1 asked for a fork; the step finished and was applied, then the
 	// worker died before the settle phase created the group.
 	step := f.step("step-1", AgentTurnStatusCompleted, toolCall("call-fork", "control_fork", `{"goal":"split"}`))

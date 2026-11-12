@@ -245,7 +245,7 @@ func TestWaitSecondsOutOfRangeIsArgumentsError(t *testing.T) {
 		if err != nil || result.Kind != ControlContinue {
 			t.Fatalf("%s: %#v, %v", callID, result, err)
 		}
-		if value := controlResultValue(t, f.stored(callID)); value["error"] != controlArgumentsInvalidCode {
+		if value := controlResultValue(t, f.stored(callID)); value["error"] != ArgumentsInvalidCode {
 			t.Fatalf("%s: %v", callID, value)
 		}
 	}

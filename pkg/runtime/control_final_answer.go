@@ -570,7 +570,7 @@ func (x *ControlExecutor) rejectFinal(ctx context.Context, cc agentrun.ControlCo
 		recorded = note
 	} else {
 		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil,
-			controlErrorResult(models.ToolResultFailed, r.Code, r.Message, r.Extra), &ControlEntryMeta{ErrorCode: r.Code})
+			ErrorResult(models.ToolResultFailed, r.Code, r.Message, r.Extra), &ControlEntryMeta{ErrorCode: r.Code})
 		if err != nil {
 			return ControlResult{}, err
 		}
@@ -768,7 +768,7 @@ func (x *ControlExecutor) finalPark(ctx context.Context, cc agentrun.ControlCont
 	if !ok {
 		return nil, errors.New("control executor portfolio is not an action store; the final answer park needs the Run's calls")
 	}
-	views, err := loadGovernedToolViews(ctx, actions, cc.Run.Scope, path, cc.Run.ID)
+	views, err := LoadGovernedToolViews(ctx, actions, cc.Run.Scope, path, cc.Run.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -881,7 +881,7 @@ func finalToolRequired(mode agentrun.FinalAnswerMode) models.ControlToolName {
 	return ""
 }
 
-func (r controlRegistry) finalToolRequiredFields(tool models.ControlToolName, a agentrun.ControlAuthority) string {
+func (r Registry) finalToolRequiredFields(tool models.ControlToolName, a agentrun.ControlAuthority) string {
 	if tool == models.ControlToolFinalAnswer {
 		return strings.Join(finalRequiredFields(a), ", ")
 	}

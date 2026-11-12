@@ -43,8 +43,8 @@ func (h *fakeControlHandler) Run(ctx context.Context, x *ControlExecutor, cc age
 	return x.complete(ctx, cc, models.ControlJSONResult(models.ToolResultSucceeded, map[string]interface{}{"status": "done"}), &ControlEntryMeta{ForkID: "fork-" + cc.Entry.ID})
 }
 
-func fakeControlRegistry() (controlRegistry, map[models.ControlToolName]*fakeControlHandler) {
-	registry := controlRegistry{}
+func fakeControlRegistry() (Registry, map[models.ControlToolName]*fakeControlHandler) {
+	registry := Registry{}
 	handlers := map[models.ControlToolName]*fakeControlHandler{}
 	for _, name := range controlToolOrder {
 		h := &fakeControlHandler{}
@@ -58,7 +58,7 @@ func fakeControlRegistry() (controlRegistry, map[models.ControlToolName]*fakeCon
 // under a. The runbook tools are never offered, so they are the specs every
 // loop step gets.
 func builtinControlSpecs(a agentrun.ControlAuthority) []ControlToolSpec {
-	return newControlRegistry(builtinControlTools()...).specs(a)
+	return NewRegistry(BuiltinTools()...).Specs(a)
 }
 
 // builtinControlModelStepTools are builtinControlSpecs as model step tools.
@@ -117,12 +117,12 @@ func TestControlToolSpecsStableOrderAndPresence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			authority := everything
 			tc.edit(&authority)
-			specs := registry.specs(authority)
+			specs := registry.Specs(authority)
 			if got := specNames(specs); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("specs = %v, want %v", got, tc.want)
 			}
 			// The list is a pure function of the authority (prompt cache).
-			if again := specNames(registry.specs(authority)); !reflect.DeepEqual(again, tc.want) {
+			if again := specNames(registry.Specs(authority)); !reflect.DeepEqual(again, tc.want) {
 				t.Fatalf("second listing = %v", again)
 			}
 			for _, spec := range specs {
@@ -137,9 +137,9 @@ func TestControlToolSpecsStableOrderAndPresence(t *testing.T) {
 		})
 	}
 	// Unregistered tools are never offered.
-	partial := controlRegistry{}
+	partial := Registry{}
 	partial.register(models.ControlToolWait, &fakeControlHandler{})
-	if got := specNames(partial.specs(everything)); !reflect.DeepEqual(got, []string{"wait"}) {
+	if got := specNames(partial.Specs(everything)); !reflect.DeepEqual(got, []string{"wait"}) {
 		t.Fatalf("partial registry specs = %v", got)
 	}
 	// Every ordered name has a rule, and every rule is ordered once.
@@ -181,7 +181,7 @@ func requireControlError(t *testing.T, result *models.ToolResult, status models.
 
 func TestControlSecondSettleCallInSameMessageIsRefused(t *testing.T) {
 	calls := modelCalls("control_fork", "react", "ask_user", "linear_get_issue", "wait")
-	refusals := controlCallRefusals(calls, allSettleTools)
+	refusals := CallRefusals(calls, allSettleTools)
 	if len(refusals) != 2 || refusals["call-a"] != nil || refusals["call-b"] != nil || refusals["call-d"] != nil {
 		t.Fatalf("refusals = %v", refusals)
 	}
@@ -194,13 +194,13 @@ func TestControlSecondSettleCallInSameMessageIsRefused(t *testing.T) {
 		t.Fatalf("conflicts = %v", got)
 	}
 	// One settle call among inline and governed calls is fine.
-	if refusals := controlCallRefusals(modelCalls("react", "control_fork", "linear_get_issue"), allSettleTools); len(refusals) != 0 {
+	if refusals := CallRefusals(modelCalls("react", "control_fork", "linear_get_issue"), allSettleTools); len(refusals) != 0 {
 		t.Fatalf("single settle call refused: %v", refusals)
 	}
 }
 
 func TestFinalAnswerWithOtherCallsIsRefusedOthersRun(t *testing.T) {
-	refusals := controlCallRefusals(modelCalls("linear_get_issue", "turn_final_answer", "react"), allSettleTools)
+	refusals := CallRefusals(modelCalls("linear_get_issue", "turn_final_answer", "react"), allSettleTools)
 	if len(refusals) != 1 {
 		t.Fatalf("refusals = %v", refusals)
 	}
@@ -209,13 +209,13 @@ func TestFinalAnswerWithOtherCallsIsRefusedOthersRun(t *testing.T) {
 		t.Fatalf("message = %v", value["message"])
 	}
 	// A refused final does not take the settle slot: the fork still settles.
-	refusals = controlCallRefusals(modelCalls("turn_final_answer", "control_fork"), allSettleTools)
+	refusals = CallRefusals(modelCalls("turn_final_answer", "control_fork"), allSettleTools)
 	if len(refusals) != 1 || refusals["call-b"] != nil {
 		t.Fatalf("refusals = %v", refusals)
 	}
 	requireControlError(t, refusals["call-a"], models.ToolResultRefused, "final_answer_not_alone")
 	// Task start must also be alone (A4).
-	refusals = controlCallRefusals(modelCalls("conversation_start_task", "react"), allSettleTools)
+	refusals = CallRefusals(modelCalls("conversation_start_task", "react"), allSettleTools)
 	if len(refusals) != 1 {
 		t.Fatalf("refusals = %v", refusals)
 	}
@@ -224,7 +224,7 @@ func TestFinalAnswerWithOtherCallsIsRefusedOthersRun(t *testing.T) {
 		t.Fatalf("message = %v", value["message"])
 	}
 	// Alone, the final answer settles.
-	if refusals := controlCallRefusals(modelCalls("turn_final_answer"), allSettleTools); len(refusals) != 0 {
+	if refusals := CallRefusals(modelCalls("turn_final_answer"), allSettleTools); len(refusals) != 0 {
 		t.Fatalf("lone final refused: %v", refusals)
 	}
 }
@@ -564,7 +564,7 @@ func TestControlJSONResultIsCompactWithStatus(t *testing.T) {
 	if string(result.Content[0].Value) != `{"status":"started"}` {
 		t.Fatalf("result = %s", result.Content[0].Value)
 	}
-	refused := controlErrorResult(models.ToolResultSucceeded, "x", "Nope.", map[string]interface{}{"error": "ignored"})
+	refused := ErrorResult(models.ToolResultSucceeded, "x", "Nope.", map[string]interface{}{"error": "ignored"})
 	requireControlError(t, refused, models.ToolResultFailed, "x")
 }
 
@@ -581,11 +581,11 @@ func cloneRunForTest(run *models.AgentRun) *models.AgentRun {
 
 func TestControlNotOfferedCallDoesNotTakeSettleSlot(t *testing.T) {
 	calls := modelCalls("wait", "control_fork")
-	refusals := controlCallRefusals(calls, agentrun.ControlAuthority{ForkAllowed: true})
+	refusals := CallRefusals(calls, agentrun.ControlAuthority{ForkAllowed: true})
 	if len(refusals) != 0 {
 		t.Fatalf("refusals = %v", refusals)
 	}
-	refusals = controlCallRefusals(calls, agentrun.ControlAuthority{ForkAllowed: true, CanWait: true})
+	refusals = CallRefusals(calls, agentrun.ControlAuthority{ForkAllowed: true, CanWait: true})
 	requireControlError(t, refusals["call-b"], models.ToolResultRefused, "control_one_settle_call")
 }
 

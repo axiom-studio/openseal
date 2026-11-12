@@ -282,7 +282,7 @@ func TestRunbookProducerFailsKernelCallThatEndedWithoutResult(t *testing.T) {
 	path.Entries = []*SessionEntry{{
 		ID: "tool:step-1:" + out.ToolCalls[0].ID, RunID: run.ID, StepID: "step-1", Type: SessionEntryTool, State: ToolEntryError,
 		ToolCallID: out.ToolCalls[0].ID,
-		Tool:       &ToolEntry{Name: string(ControlToolRunbookFork), Result: controlErrorResult(ToolResultRefused, "fork_rejected", "budget exhausted", nil)},
+		Tool:       &ToolEntry{Name: string(ControlToolRunbookFork), Result: ErrorResult(ToolResultRefused, "fork_rejected", "budget exhausted", nil)},
 	}}
 	failed := produceRunbook(t, producer, runbookInput(run, 3, nil, path))
 	if failed.Failure == nil || !strings.Contains(failed.Failure.Message, "ended without a durable result") || !strings.Contains(failed.Failure.Message, "budget exhausted") {
@@ -567,7 +567,7 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 	if err != nil || state.PendingDelegation != "delegate" || state.PendingCall == "" {
 		t.Fatalf("engine state was not applied before the delegation: %#v err=%v", state, err)
 	}
-	requestID := collaboration.StableCollaborationID(f.scope, delegationIdempotencyKey(source.ID, "delegate"), "request")
+	requestID := collaboration.StableCollaborationID(f.scope, DelegationIdempotencyKey(source.ID, "delegate"), "request")
 	request, err := f.control.Collaboration.GetAgentRequest(f.ctx, f.scope, requestID)
 	if err != nil || request.Recipient.ID != "specialist" || request.Goal != "Analyze the release" ||
 		request.SharedContext["release"] != "2026.07" || request.BudgetAllocation == nil || request.BudgetAllocation.MaxTurns != 2 {

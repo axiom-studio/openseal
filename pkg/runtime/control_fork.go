@@ -136,13 +136,13 @@ func (forkHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.Cont
 	for i, arg := range args.Branches {
 		id := fmt.Sprintf("branch-%d", i+1)
 		if err := validateForkBranchContext(arg.Context); err != nil {
-			return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "context_invalid",
+			return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "context_invalid",
 				fmt.Sprintf("Branch %d context is not allowed: %v.", i+1, err), nil))
 		}
 		agentID := ""
 		if arg.AgentID != "" && arg.AgentID != cc.Run.AssignedAgentID {
 			if !forkTargetEligible(arg.AgentID, cc.Authority.ForkTargets) {
-				return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "agent_not_eligible",
+				return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "agent_not_eligible",
 					fmt.Sprintf("Branch %d names an Agent you cannot run a branch as; omit agentId to run it as yourself.", i+1),
 					map[string]interface{}{"agentId": arg.AgentID}))
 			}
@@ -161,7 +161,7 @@ func (forkHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.Cont
 	if err != nil {
 		var insufficient *modelstep.ControlBudgetInsufficientError
 		if errors.As(err, &insufficient) {
-			return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, insufficient.Code(), insufficient.Message(), nil))
+			return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, insufficient.Code(), insufficient.Message(), nil))
 		}
 		return ControlResult{}, err
 	}
@@ -266,7 +266,7 @@ func (x *ControlExecutor) Fork(ctx context.Context, cc agentrun.ControlContext, 
 		if model {
 			count := len(run.PendingInterventions)
 			if len(current.PendingInterventions) != count {
-				return x.forkRefuse(ctx, cc, controlErrorResult(models.ToolResultRefused, forkNewMessageCode, forkNewMessageMessage, nil))
+				return x.forkRefuse(ctx, cc, ErrorResult(models.ToolResultRefused, forkNewMessageCode, forkNewMessageMessage, nil))
 			}
 			required = &count
 		}
@@ -291,7 +291,7 @@ func (x *ControlExecutor) Fork(ctx context.Context, cc agentrun.ControlContext, 
 		case err == nil:
 			return x.forkParked(ctx, cc, created, groupID, len(childIDs))
 		case errors.Is(err, models.ErrSteeringArrived):
-			return x.forkRefuse(ctx, cc, controlErrorResult(models.ToolResultRefused, forkNewMessageCode, forkNewMessageMessage, nil))
+			return x.forkRefuse(ctx, cc, ErrorResult(models.ToolResultRefused, forkNewMessageCode, forkNewMessageMessage, nil))
 		case attempt == 0 && errors.Is(err, models.ErrRevisionConflict):
 			continue
 		case attempt == 0 && errors.Is(err, models.ErrToolEntryStateConflict) && entry != nil:
@@ -307,7 +307,7 @@ func (x *ControlExecutor) Fork(ctx context.Context, cc agentrun.ControlContext, 
 		case forkAbortsClaim(err):
 			return ControlResult{}, err
 		default:
-			return x.forkRefuse(ctx, cc, controlErrorResult(models.ToolResultRefused, forkRejectedCode, err.Error(), nil))
+			return x.forkRefuse(ctx, cc, ErrorResult(models.ToolResultRefused, forkRejectedCode, err.Error(), nil))
 		}
 	}
 }
@@ -330,7 +330,7 @@ func forkAbortsClaim(err error) bool {
 // tool entry gets the refusal as a Go error.
 func (x *ControlExecutor) forkRefuse(ctx context.Context, cc agentrun.ControlContext, result *models.ToolResult) (ControlResult, error) {
 	if cc.Entry == nil {
-		return ControlResult{}, fmt.Errorf("fork refused: %s", controlResultText(result))
+		return ControlResult{}, fmt.Errorf("fork refused: %s", ResultText(result))
 	}
 	return x.refuse(ctx, cc, result)
 }
@@ -363,10 +363,10 @@ func (x *ControlExecutor) forkParked(ctx context.Context, cc agentrun.ControlCon
 // Resume turns the resolved dependency group into the entry's result: every
 // branch's final answer, or its failure. A group still waiting re-parks.
 func (forkHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
-	return x.resumeFork(ctx, cc)
+	return x.ResumeFork(ctx, cc)
 }
 
-func (x *ControlExecutor) resumeFork(ctx context.Context, cc agentrun.ControlContext) (ControlResume, error) {
+func (x *ControlExecutor) ResumeFork(ctx context.Context, cc agentrun.ControlContext) (ControlResume, error) {
 	if !x.Forks.Configured() {
 		return ControlResume{}, errors.New("control executor has no fork coordinator")
 	}
@@ -391,7 +391,7 @@ func (x *ControlExecutor) resumeFork(ctx context.Context, cc agentrun.ControlCon
 	if group == nil {
 		// The group is created with the entry's transition, so this is a
 		// store the kernel can no longer read; tell the model plainly.
-		result, err := x.complete(ctx, cc, controlErrorResult(models.ToolResultFailed, forkLostCode,
+		result, err := x.complete(ctx, cc, ErrorResult(models.ToolResultFailed, forkLostCode,
 			"The forked work can no longer be found; start it again if it is still needed.", nil), nil)
 		return ControlResume{Resolved: true, Result: result}, err
 	}
@@ -477,8 +477,8 @@ func (x *ControlExecutor) forkResultValue(ctx context.Context, source *models.Ag
 	}, nil
 }
 
-// controlResultText is the message of an is_error control result.
-func controlResultText(result *models.ToolResult) string {
+// ResultText is the message of an is_error control result.
+func ResultText(result *models.ToolResult) string {
 	if result == nil {
 		return ""
 	}

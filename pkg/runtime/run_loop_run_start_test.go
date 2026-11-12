@@ -47,12 +47,12 @@ func TestRunStartNoteIdempotent(t *testing.T) {
 	if len(notes) != 2 || notes[0].Note.Kind != NoteRateLimitedSource || notes[1].Note.Kind != NoteSetupPending {
 		t.Fatalf("governed notes = %+v", notes)
 	}
-	if notes[0].SourceKey != RateLimitedSourceKey(g.run.ID, "read-429") || notes[0].Note.Text != liveBrowserRateLimitedError {
+	if notes[0].SourceKey != RateLimitedSourceKey(g.run.ID, "read-429") || notes[0].Note.Text != LiveBrowserRateLimitedError {
 		t.Fatalf("rate-limited note = %+v", notes[0].Note)
 	}
 	// The setup note is the same entry the governed executor appends.
 	setupEntry := g.path.Entries[len(g.path.Entries)-1]
-	executorNote := pendingSkillSetupNote(g.run, session.ID, setupEntry, g.calls["setup-1"], nil)
+	executorNote := PendingSkillSetupNote(g.run, session.ID, setupEntry, g.calls["setup-1"], nil)
 	if executorNote == nil || notes[1].ID != executorNote.ID || notes[1].SourceKey != executorNote.SourceKey ||
 		notes[1].Note.Text != executorNote.Note.Text || string(notes[1].Note.Data) != string(executorNote.Note.Data) {
 		t.Fatalf("setup note %+v differs from executor note %+v", notes[1], executorNote)
@@ -82,7 +82,7 @@ func TestRunStartNoteIdempotent(t *testing.T) {
 		t.Fatalf("task Run notes = %+v", got)
 	}
 	// A newer Lightpanda success clears the rate limit.
-	g.add("read-ok", lightpandaBrowserSkillID, "lightpanda-read", ActionCallStatusSucceeded, nil, "", nil)
+	g.add("read-ok", LightpandaBrowserSkillID, "lightpanda-read", ActionCallStatusSucceeded, nil, "", nil)
 	actions.lister.calls = append(actions.lister.calls, g.calls["read-ok"])
 	if got := prepare(g.run, g.path); len(got) != 1 || got[0].Note.Kind != NoteSetupPending {
 		t.Fatalf("after success notes = %+v", got)

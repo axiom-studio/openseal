@@ -61,7 +61,7 @@ type catalogModelStepPreparerConfig struct {
 
 type catalogModelStepPreparer struct {
 	config   catalogModelStepPreparerConfig
-	controls controlRegistry // loopControlRegistry; tests substitute their own
+	controls Registry // loopControlRegistry; tests substitute their own
 }
 
 var _ agentrun.ModelStepPreparer = (*catalogModelStepPreparer)(nil)
@@ -73,8 +73,8 @@ func newCatalogModelStepPreparer(config catalogModelStepPreparerConfig) *catalog
 
 // loopControlRegistry is every control tool a Run loop runs: the built-in
 // tools and the kernel-only runbook tools.
-func loopControlRegistry() controlRegistry {
-	return newControlRegistry(append(builtinControlTools(), runbookControlTools()...)...)
+func loopControlRegistry() Registry {
+	return NewRegistry(append(BuiltinTools(), runbookControlTools()...)...)
 }
 
 // ModelCredential is a copy of the model credential the prepared steps send
@@ -160,7 +160,7 @@ func (p *catalogModelStepPreparer) PrepareModelStep(ctx context.Context, in agen
 // (applySurfaces): each tool exactly as its load froze it.
 func (p *catalogModelStepPreparer) tools(binding *agentrun.TurnRunnerBinding, set *modelstep.CapabilitySet) []ModelStepTool {
 	var harness, core []ModelStepTool
-	for _, spec := range p.controls.specs(binding.Authority) {
+	for _, spec := range p.controls.Specs(binding.Authority) {
 		harness = append(harness, spec.ModelStepTool())
 	}
 	if !binding.Authority.OffersCapabilities() {
@@ -326,7 +326,7 @@ func loopCapabilityToolName(actions []capability.ModelAction) func(id string) st
 // ControlToolSpecs lists the control tools offered under a in the stable
 // advertised order (SPEC §5.1).
 func ControlToolSpecs(a agentrun.ControlAuthority) []ControlToolSpec {
-	return loopControlRegistry().specs(a)
+	return loopControlRegistry().Specs(a)
 }
 
 // ControlModelStepTools is ControlToolSpecs as harness tools of a model step.

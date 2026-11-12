@@ -65,7 +65,7 @@ func NewStepToolDispatcher(cfg StepToolDispatcherConfig) (*StepToolDispatcher, e
 		cfg.Logger = zap.NewNop().Sugar()
 	}
 	if cfg.Control != nil {
-		cfg.Control.useTools(loopControlRegistry())
+		cfg.Control.UseTools(loopControlRegistry())
 	}
 	return &StepToolDispatcher{cfg: cfg}, nil
 }
@@ -360,12 +360,12 @@ func (x *claimToolExecutor) planEntry(binding *agentrun.TurnRunnerBinding, entry
 		tool.ArgumentsError = fmt.Sprintf("The tool arguments are %d bytes; the limit is %d.", len(tool.Arguments), MaxToolArgumentsBytes)
 		tool.Arguments = nil
 		entry.State = ToolEntryError
-		tool.Result = controlErrorResult(ToolResultRefused, loopToolArgumentsTooLargeCode, tool.ArgumentsError, nil)
+		tool.Result = ErrorResult(ToolResultRefused, loopToolArgumentsTooLargeCode, tool.ArgumentsError, nil)
 		return nil
 	}
 	if tool.ArgumentsError != "" {
 		entry.State = ToolEntryError
-		tool.Result = controlErrorResult(ToolResultRefused, controlArgumentsInvalidCode, tool.ArgumentsError, nil)
+		tool.Result = ErrorResult(ToolResultRefused, ArgumentsInvalidCode, tool.ArgumentsError, nil)
 		return nil
 	}
 	resolved, err := x.resolveLoopTool(binding, tool.Name, tool.Arguments, directive)
@@ -416,7 +416,7 @@ type stepToolRun struct {
 	setErr   error
 	setMu    sync.Mutex // ExecuteLoadCapabilities updates the set in place
 	viewOnce sync.Once
-	views    []governedToolView
+	views    []GovernedToolView
 	viewErr  error
 }
 
@@ -435,7 +435,7 @@ func (x *claimToolExecutor) newStepToolRun(in agentrun.StepToolsInput, step *Age
 	if r.current == nil {
 		r.current = step
 	}
-	if in.Assistant != nil && in.Assistant.Assistant != nil && in.Assistant.StepID == stepIDOf(step) {
+	if in.Assistant != nil && in.Assistant.Assistant != nil && in.Assistant.StepID == StepIDOf(step) {
 		r.narration = in.Assistant.Assistant.Text
 	}
 	for i, entry := range entries {
@@ -565,7 +565,7 @@ func (r *stepToolRun) transition(ctx context.Context, i int, to ToolEntryState, 
 		ActionCallID: actionCallID, Wait: wait, Result: result, Kernel: kernel, Now: lease.Now,
 	}
 	if result != nil {
-		req.Tokens = modelstep.EstimateEntryTokens(withToolResult(entry, to, result))
+		req.Tokens = modelstep.EstimateEntryTokens(WithToolResult(entry, to, result))
 	}
 	if executed {
 		req = withRepeatKernelFields(req)
@@ -651,7 +651,7 @@ func (r *stepToolRun) visible(ctx context.Context, tool resolvedLoopTool) (bool,
 func (r *stepToolRun) precheck(ctx context.Context) error {
 	authority := r.binding.Authority
 	if r.in.Assistant != nil && r.in.Assistant.Assistant != nil {
-		refusals := controlCallRefusals(r.in.Assistant.Assistant.ToolCalls, authority)
+		refusals := CallRefusals(r.in.Assistant.Assistant.ToolCalls, authority)
 		for i, entry := range r.entries {
 			if result := refusals[entry.ToolCallID]; result != nil && entry.State == ToolEntryPending {
 				if err := r.refuse(ctx, i, result, nil); err != nil {
@@ -675,7 +675,7 @@ func (r *stepToolRun) precheck(ctx context.Context) error {
 				return fmt.Errorf("check tool call %s: %w", entry.ToolCallID, err)
 			}
 			if strings.TrimSpace(refusal) != "" {
-				result = controlErrorResult(ToolResultRefused, loopToolRefusedCode, strings.TrimSpace(refusal), nil)
+				result = ErrorResult(ToolResultRefused, loopToolRefusedCode, strings.TrimSpace(refusal), nil)
 			}
 		}
 		if result != nil {
@@ -694,12 +694,12 @@ func (r *stepToolRun) offerRefusal(ctx context.Context, i int) (*ToolResult, err
 	entry, tool := r.entry(i), r.tools[i]
 	kernel := len(entry.Tool.Directive) > 0
 	notAvailable := func() *ToolResult {
-		return controlErrorResult(ToolResultRefused, loopToolNotAvailableCode,
+		return ErrorResult(ToolResultRefused, loopToolNotAvailableCode,
 			"This tool is not available in this conversation.", map[string]interface{}{"tool": entry.Tool.Name})
 	}
 	switch tool.Route {
 	case loopRouteUnknown:
-		return controlErrorResult(ToolResultRefused, loopToolNotAvailableCode,
+		return ErrorResult(ToolResultRefused, loopToolNotAvailableCode,
 			fmt.Sprintf("No tool named %q is available here.", entry.Tool.Name), map[string]interface{}{"tool": entry.Tool.Name}), nil
 	case loopRouteControl:
 		if !kernel && (r.x.cfg.Control == nil || !modelstep.ControlToolOffered(tool.Control, r.binding.Authority)) {
@@ -731,7 +731,7 @@ func (r *stepToolRun) offerRefusal(ctx context.Context, i int) (*ToolResult, err
 			return nil, err
 		}
 		if !ok {
-			return controlErrorResult(ToolResultRefused, loopToolNotLoadedCode,
+			return ErrorResult(ToolResultRefused, loopToolNotLoadedCode,
 				"This tool is not loaded yet; load its capability with load_capabilities, then call it in your next step.",
 				map[string]interface{}{"tool": entry.Tool.Name}), nil
 		}
@@ -821,7 +821,7 @@ func (r *stepToolRun) runCall(ctx context.Context, i int) error {
 		return r.runControlInline(ctx, i)
 	}
 	entry := r.entry(i)
-	return r.refuse(ctx, i, controlErrorResult(ToolResultRefused, loopToolNotAvailableCode,
+	return r.refuse(ctx, i, ErrorResult(ToolResultRefused, loopToolNotAvailableCode,
 		fmt.Sprintf("No tool named %q is available here.", entry.Tool.Name), nil), nil)
 }
 
@@ -918,7 +918,7 @@ func loadKernelPatch(set *modelstep.CapabilitySet, actions []capability.ModelAct
 
 func (r *stepToolRun) controlContext(i int) agentrun.ControlContext {
 	in := r.input()
-	if r.in.Assistant == nil || r.in.Assistant.StepID != stepIDOf(r.step) {
+	if r.in.Assistant == nil || r.in.Assistant.StepID != StepIDOf(r.step) {
 		in.Assistant = nil
 	}
 	return NewControlContext(in, r.entry(i))
@@ -926,7 +926,7 @@ func (r *stepToolRun) controlContext(i int) agentrun.ControlContext {
 
 func (r *stepToolRun) runControlInline(ctx context.Context, i int) error {
 	if r.x.cfg.Control == nil {
-		return r.refuse(ctx, i, controlErrorResult(ToolResultRefused, loopToolNotAvailableCode,
+		return r.refuse(ctx, i, ErrorResult(ToolResultRefused, loopToolNotAvailableCode,
 			"This tool is not available in this conversation.", nil), nil)
 	}
 	result, err := r.x.cfg.Control.Inline(ctx, r.controlContext(i))
@@ -987,12 +987,12 @@ func (r *stepToolRun) runGoverned(ctx context.Context, i int) error {
 			result, guard := imageProviderRejectionRefusal(prior)
 			return r.refuse(ctx, i, result, guard)
 		}
-		if strings.HasPrefix(action.Name, liveBrowserActionPrefix) {
+		if strings.HasPrefix(action.Name, LiveBrowserActionPrefix) {
 			views, err := r.governedViews(ctx)
 			if err != nil {
 				return err
 			}
-			if result, refused := refuseLiveBrowserWhileRateLimited(views, action.Name); refused {
+			if result, refused := RefuseLiveBrowserWhileRateLimited(views, action.Name); refused {
 				return r.refuse(ctx, i, result, nil)
 			}
 		}
@@ -1032,7 +1032,7 @@ func (r *stepToolRun) resumeGoverned(ctx context.Context, i int) error {
 	return r.applyGoverned(ctx, i, outcome)
 }
 
-func (r *stepToolRun) governedViews(ctx context.Context) ([]governedToolView, error) {
+func (r *stepToolRun) governedViews(ctx context.Context) ([]GovernedToolView, error) {
 	r.viewOnce.Do(func() {
 		path := r.in.Path
 		if path == nil && r.sessionID() != "" {
@@ -1041,7 +1041,7 @@ func (r *stepToolRun) governedViews(ctx context.Context) ([]governedToolView, er
 				return
 			}
 		}
-		r.views, r.viewErr = loadGovernedToolViews(ctx, r.x.cfg.Actions, r.in.Run.Scope, path, r.in.Run.ID)
+		r.views, r.viewErr = LoadGovernedToolViews(ctx, r.x.cfg.Actions, r.in.Run.Scope, path, r.in.Run.ID)
 	})
 	return r.views, r.viewErr
 }
@@ -1221,7 +1221,7 @@ func (r *stepToolRun) appendSetupNotes(ctx context.Context) error {
 			return err
 		}
 		run := r.run()
-		note := pendingSkillSetupNote(run, r.sessionID(), entry, call, run.PendingInterventions)
+		note := PendingSkillSetupNote(run, r.sessionID(), entry, call, run.PendingInterventions)
 		if note == nil {
 			continue
 		}

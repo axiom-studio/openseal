@@ -80,7 +80,7 @@ func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 	run := cc.Run
 	op, ok := authorizedOperation(cc.Authority.Operations, args.Entrypoint)
 	if !ok {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, operationNotAuthorizedCode,
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, operationNotAuthorizedCode,
 			"That operation is not available to you; use one listed in this tool's description.",
 			map[string]interface{}{"entrypoint": args.Entrypoint}))
 	}
@@ -89,12 +89,12 @@ func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 		schema = map[string]interface{}{"type": "object"}
 	}
 	if err := runbook.ValidateInterfaceInput(schema, args.Arguments); err != nil {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, operationInputInvalidCode,
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, operationInputInvalidCode,
 			fmt.Sprintf("The arguments do not match the input schema of %s: %v.", op.Entrypoint, err), nil))
 	}
 	if err := controlRejectRecursiveRunbook(ctx, x.Portfolio, run, op); err != nil {
 		if errors.Is(err, errRecursiveOperation) {
-			return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, operationRecursiveCode,
+			return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, operationRecursiveCode,
 				"This operation is already running above you; it cannot start itself again.", nil))
 		}
 		return ControlResult{}, err
@@ -106,7 +106,7 @@ func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 	if run.Budget != nil {
 		allocated, err := models.CompleteChildBudgetAllocation(run, &models.BudgetPolicy{})
 		if err != nil {
-			return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, operationBudgetCode,
+			return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, operationBudgetCode,
 				"This Run's remaining budget cannot fund the operation.", nil))
 		}
 		budget = allocated
@@ -286,7 +286,7 @@ func (operationHandler) Resume(ctx context.Context, x *ControlExecutor, cc agent
 		}
 	}
 	if child == nil {
-		result, err := x.complete(ctx, cc, controlErrorResult(models.ToolResultFailed, operationLostCode,
+		result, err := x.complete(ctx, cc, ErrorResult(models.ToolResultFailed, operationLostCode,
 			"The operation can no longer be found; start it again if it is still needed.", nil), nil)
 		return ControlResume{Resolved: true, Result: result}, err
 	}

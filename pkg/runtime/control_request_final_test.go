@@ -75,7 +75,7 @@ func newRequestFinalFixture(t *testing.T, store *sqlite.Store, run *models.Agent
 			f.entries[entry.ToolCallID] = entry
 		}
 	}
-	registry := controlRegistry{}
+	registry := Registry{}
 	registry.register(models.ControlToolRequestDecision, requestDecisionHandler{})
 	registry.register(models.ControlToolCompletionReview, completionReviewHandler{})
 	f.exec = &ControlExecutor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
@@ -202,7 +202,7 @@ func TestClarificationDecisionRequiresQuestion(t *testing.T) {
 	if _, err := f.exec.Settle(f.ctx, f.context("decide", authority)); err != nil {
 		t.Fatal(err)
 	}
-	requireControlError(t, f.stored("decide").Tool.Result, models.ToolResultFailed, controlArgumentsInvalidCode)
+	requireControlError(t, f.stored("decide").Tool.Result, models.ToolResultFailed, ArgumentsInvalidCode)
 	// One concrete question is accepted.
 	store, _, _, run = reconcileDecisionRun(t)
 	g := newRequestFinalFixture(t, store.Store, run,
@@ -317,7 +317,7 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 	// A review needs an evidence-based reason and a known verdict.
 	for _, args := range []string{`{"decision":"approve","message":" "}`, `{"decision":"accept","message":"fine"}`} {
 		other := newControlFixture(t, []agentrun.LoopToolCall{completionReviewCall("review", args)})
-		registry := controlRegistry{}
+		registry := Registry{}
 		registry.register(models.ControlToolCompletionReview, completionReviewHandler{})
 		other.exec.handlers = registry
 		if _, err := other.exec.Settle(other.ctx, other.context("review", authority)); err != nil {
@@ -357,7 +357,7 @@ func TestRequestFinalToolSchemas(t *testing.T) {
 		t.Fatalf("review enum = %#v", enum)
 	}
 	// The plain-text note names the tool's required fields.
-	if got := newControlRegistry(builtinControlTools()...).finalToolRequiredFields(models.ControlToolRequestDecision, agentrun.ControlAuthority{FinalMode: agentrun.FinalModeDecision}); got != "decision, message" {
+	if got := NewRegistry(BuiltinTools()...).finalToolRequiredFields(models.ControlToolRequestDecision, agentrun.ControlAuthority{FinalMode: agentrun.FinalModeDecision}); got != "decision, message" {
 		t.Fatalf("required fields = %q", got)
 	}
 }

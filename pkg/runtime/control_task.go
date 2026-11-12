@@ -49,11 +49,11 @@ func (startTaskHandler) Decode(raw json.RawMessage) (interface{}, error) {
 }
 
 func startTaskRejected(message string) *models.ToolResult {
-	return controlErrorResult(models.ToolResultRefused, "task_rejected", message, nil)
+	return ErrorResult(models.ToolResultRefused, "task_rejected", message, nil)
 }
 
 func startTaskNewMessage() *models.ToolResult {
-	return controlErrorResult(models.ToolResultRefused, "new_message",
+	return ErrorResult(models.ToolResultRefused, "new_message",
 		"A new message arrived before the task started; read it and decide again.", nil)
 }
 
@@ -63,7 +63,7 @@ func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 	// refuses mixed entries before the inline phase; this keeps a resumed
 	// or directly settled entry to the same rule.
 	if cc.Assistant == nil || cc.Assistant.Assistant == nil || len(cc.Assistant.Assistant.ToolCalls) != 1 {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, controlTaskNotAloneCode,
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, controlTaskNotAloneCode,
 			"Call conversation_start_task alone; other work belongs inside the task.", nil))
 	}
 	if x.Tasks == nil {
@@ -123,7 +123,7 @@ func (x *ControlExecutor) startTaskResult(ctx context.Context, cc agentrun.Contr
 		return ControlResult{}, errors.New("conversation task admission returned no task")
 	}
 	if result.Task.Mode == models.ConversationTaskModeContinuation {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "already_background",
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "already_background",
 			"This conversation already continues as a background task; keep working on it here.", map[string]interface{}{"taskId": result.Task.ID}))
 	}
 	if result.SourceRun == nil || result.SourceRun.Status != models.AgentRunStatusCompleted {

@@ -21,7 +21,7 @@ import (
 // tool; the kernel executes them inline, under the claim, inside the RunLoop.
 // This file owns the tool names, the advertised order, the phase rules and the
 // dispatcher. Each tool's schema, settle and resume live in its own file;
-// builtinControlTools lists them.
+// BuiltinTools lists them.
 
 // controlToolOrder is the stable advertised order (SPEC §5.1, prompt cache):
 // the final tool of the Run's mode first, then progress, interaction, task
@@ -83,7 +83,7 @@ func ControlToolPhase(name string) (ControlPhase, bool) {
 	return rule.Phase, ok
 }
 
-func isFinalControlTool(name models.ControlToolName) bool {
+func IsFinalTool(name models.ControlToolName) bool {
 	return name == models.ControlToolFinalAnswer || name == models.ControlToolRequestDecision || name == models.ControlToolCompletionReview
 }
 
@@ -221,11 +221,11 @@ type ControlResume struct {
 	Result   ControlResult
 }
 
-// controlHandler implements one control tool. Spec is called only when the
+// Handler implements one control tool. Spec is called only when the
 // authority offers the tool; Decode is the strict argument decoder (use
 // models.DecodeControlInto); Run is the inline or settle execution, by the
 // tool's phase.
-type controlHandler interface {
+type Handler interface {
 	Spec(a agentrun.ControlAuthority) ControlToolSpec
 	Decode(raw json.RawMessage) (interface{}, error)
 	Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error)
@@ -237,33 +237,33 @@ type controlResumer interface {
 	Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error)
 }
 
-type controlRegistry map[models.ControlToolName]controlHandler
+type Registry map[models.ControlToolName]Handler
 
-// controlTool names the handler of one control tool.
-type controlTool struct {
+// Tool names the handler of one control tool.
+type Tool struct {
 	name    models.ControlToolName
-	handler controlHandler
+	handler Handler
 }
 
-// newControlTool names handler as the tool name.
-func newControlTool(name models.ControlToolName, handler controlHandler) controlTool {
-	return controlTool{name: name, handler: handler}
+// NewTool names handler as the tool name.
+func NewTool(name models.ControlToolName, handler Handler) Tool {
+	return Tool{name: name, handler: handler}
 }
 
-// newControlRegistry builds the registry of tools. It panics on an unknown
+// NewRegistry builds the registry of tools. It panics on an unknown
 // tool name or a tool listed twice: the lists are fixed in code.
-func newControlRegistry(tools ...controlTool) controlRegistry {
-	r := controlRegistry{}
+func NewRegistry(tools ...Tool) Registry {
+	r := Registry{}
 	for _, tool := range tools {
 		r.register(tool.name, tool.handler)
 	}
 	return r
 }
 
-// builtinControlTools are the control tools every Run kind shares. The
+// BuiltinTools are the control tools every Run kind shares. The
 // kernel-only runbook tools are added by the run loop (loopControlRegistry).
-func builtinControlTools() []controlTool {
-	return []controlTool{
+func BuiltinTools() []Tool {
+	return []Tool{
 		{name: models.ControlToolAskUser, handler: askUserHandler{}},
 		{name: models.ControlToolDelegate, handler: delegateHandler{}},
 		{name: models.ControlToolDelegateReply, handler: delegateReplyHandler{}},
@@ -279,7 +279,7 @@ func builtinControlTools() []controlTool {
 	}
 }
 
-func (r controlRegistry) register(name models.ControlToolName, h controlHandler) {
+func (r Registry) register(name models.ControlToolName, h Handler) {
 	if _, ok := controlToolRules[name]; !ok {
 		panic(fmt.Sprintf("register unknown control tool %q", name))
 	}
@@ -292,9 +292,9 @@ func (r controlRegistry) register(name models.ControlToolName, h controlHandler)
 	r[name] = h
 }
 
-// specs lists the offered tools in the stable order. A tool is offered when
+// Specs lists the offered tools in the stable order. A tool is offered when
 // the authority allows it and a handler is registered.
-func (r controlRegistry) specs(a agentrun.ControlAuthority) []ControlToolSpec {
+func (r Registry) Specs(a agentrun.ControlAuthority) []ControlToolSpec {
 	var specs []ControlToolSpec
 	for _, name := range controlToolOrder {
 		h, ok := r[name]
@@ -322,24 +322,24 @@ type ControlExecutor struct {
 	Reporting     models.ConversationStore // conversationrun.ProjectConversationRunbookStart / runbookSourceMessage
 	Now           func() time.Time
 
-	// handlers are the tools x runs; nil runs builtinControlTools.
+	// handlers are the tools x runs; nil runs BuiltinTools.
 	// NewStepToolDispatcher gives an executor without its own the run loop's
-	// tools (useTools). Tests set their own.
-	handlers controlRegistry
+	// tools (UseTools). Tests set their own.
+	handlers Registry
 	// finalChecks run on every accepted final answer, in order; nil runs
 	// builtinFinalAnswerChecks. Tests set their own.
 	finalChecks []finalAnswerCheck
 }
 
-func (x *ControlExecutor) registry() controlRegistry {
+func (x *ControlExecutor) registry() Registry {
 	if x.handlers != nil {
 		return x.handlers
 	}
-	return newControlRegistry(builtinControlTools()...)
+	return NewRegistry(BuiltinTools()...)
 }
 
-// useTools makes x run tools when it was built without its own.
-func (x *ControlExecutor) useTools(tools controlRegistry) {
+// UseTools makes x run tools when it was built without its own.
+func (x *ControlExecutor) UseTools(tools Registry) {
 	if x.handlers == nil {
 		x.handlers = tools
 	}
@@ -406,7 +406,7 @@ func (x *ControlExecutor) dispatch(ctx context.Context, cc agentrun.ControlConte
 	// Rule 1: a tool the claim does not offer. Kernel-origin calls are
 	// preauthorized by their producer.
 	if !registered || (cc.Origin != ControlOriginKernel && !modelstep.ControlToolOffered(name, cc.Authority)) {
-		return x.refuse(ctx, cc, controlErrorResult(models.ToolResultRefused, "tool_not_available",
+		return x.refuse(ctx, cc, ErrorResult(models.ToolResultRefused, "tool_not_available",
 			"This tool is not available in this conversation.", map[string]interface{}{"tool": string(name)}))
 	}
 	// Rule 4: strict argument decoding.
@@ -538,7 +538,7 @@ func (x *ControlExecutor) transitionControlEntry(ctx context.Context, cc agentru
 			Wait: wait, Result: result, Kernel: kernel, Now: now,
 		}
 		if result != nil {
-			req.Tokens = modelstep.EstimateEntryTokens(withToolResult(current, to, result))
+			req.Tokens = modelstep.EstimateEntryTokens(WithToolResult(current, to, result))
 		}
 		transitioned, err := x.Sessions.TransitionToolEntry(ctx, req)
 		if err == nil {
@@ -558,8 +558,8 @@ func (x *ControlExecutor) transitionControlEntry(ctx context.Context, cc agentru
 	}
 }
 
-// withToolResult is the entry as it will be stored, for the token estimate.
-func withToolResult(entry *models.SessionEntry, to models.ToolEntryState, result *models.ToolResult) *models.SessionEntry {
+// WithToolResult is the entry as it will be stored, for the token estimate.
+func WithToolResult(entry *models.SessionEntry, to models.ToolEntryState, result *models.ToolResult) *models.SessionEntry {
 	clone := *entry
 	tool := *entry.Tool
 	tool.Result = result
@@ -572,13 +572,13 @@ func withToolResult(entry *models.SessionEntry, to models.ToolEntryState, result
 // Phase rules applied by the loop before the inline phase (§3.2 rules 2, 3)
 
 const (
-	controlOneSettleCallCode    = "control_one_settle_call"
-	controlFinalNotAloneCode    = "final_answer_not_alone"
-	controlTaskNotAloneCode     = "task_not_alone"
-	controlArgumentsInvalidCode = "tool_arguments_invalid"
+	controlOneSettleCallCode = "control_one_settle_call"
+	controlFinalNotAloneCode = "final_answer_not_alone"
+	controlTaskNotAloneCode  = "task_not_alone"
+	ArgumentsInvalidCode     = "tool_arguments_invalid"
 )
 
-// controlCallRefusals applies rules 2 and 3 to the tool calls of one
+// CallRefusals applies rules 2 and 3 to the tool calls of one
 // assistant entry, in call order. It returns the is_error result for every
 // call that must not execute, keyed by tool call id:
 //   - a tool that must run alone (final tools, conversation_start_task)
@@ -587,16 +587,16 @@ const (
 //     the others are refused. A call to a tool the claim does not offer never
 //     takes the settle slot (the dispatcher refuses it with
 //     tool_not_available), so it cannot block an offered settle call.
-func controlCallRefusals(calls []models.ModelToolCall, authority agentrun.ControlAuthority) map[string]*models.ToolResult {
+func CallRefusals(calls []models.ModelToolCall, authority agentrun.ControlAuthority) map[string]*models.ToolResult {
 	refusals := map[string]*models.ToolResult{}
 	for _, call := range calls {
 		name := models.ControlToolName(call.Name)
 		if len(calls) > 1 && controlToolRules[name].Alone {
-			if isFinalControlTool(name) {
-				refusals[call.ID] = controlErrorResult(models.ToolResultRefused, controlFinalNotAloneCode,
+			if IsFinalTool(name) {
+				refusals[call.ID] = ErrorResult(models.ToolResultRefused, controlFinalNotAloneCode,
 					fmt.Sprintf("Call %s alone after your other tools have returned.", name), nil)
 			} else {
-				refusals[call.ID] = controlErrorResult(models.ToolResultRefused, controlTaskNotAloneCode,
+				refusals[call.ID] = ErrorResult(models.ToolResultRefused, controlTaskNotAloneCode,
 					"Call conversation_start_task alone; other work belongs inside the task.", nil)
 			}
 		}
@@ -606,7 +606,7 @@ func controlCallRefusals(calls []models.ModelToolCall, authority agentrun.Contro
 		if refusals[call.ID] != nil {
 			continue
 		}
-		refusals[call.ID] = controlErrorResult(models.ToolResultRefused, controlOneSettleCallCode,
+		refusals[call.ID] = ErrorResult(models.ToolResultRefused, controlOneSettleCallCode,
 			fmt.Sprintf("Call %s alone in its own message after this one returns.", call.Name), nil)
 	}
 	return refusals
@@ -654,13 +654,13 @@ func controlSettleEntry(entries []*models.SessionEntry) *models.SessionEntry {
 // Arguments and results on the wire (§3.3)
 
 func controlArgumentsInvalid(message string) *models.ToolResult {
-	return controlErrorResult(models.ToolResultFailed, controlArgumentsInvalidCode, message, nil)
+	return ErrorResult(models.ToolResultFailed, ArgumentsInvalidCode, message, nil)
 }
 
-// controlErrorResult is an is_error control result with a stable code and a
+// ErrorResult is an is_error control result with a stable code and a
 // one-sentence message for the model. extra adds fields (never overriding
 // status, error or message).
-func controlErrorResult(status models.ToolResultStatus, code, message string, extra map[string]interface{}) *models.ToolResult {
+func ErrorResult(status models.ToolResultStatus, code, message string, extra map[string]interface{}) *models.ToolResult {
 	if status == models.ToolResultSucceeded || status == "" {
 		status = models.ToolResultFailed
 	}
