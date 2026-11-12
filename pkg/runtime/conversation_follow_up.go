@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -324,7 +325,7 @@ func (s *ConversationRunScheduler) replaceApprovalWithMessage(ctx context.Contex
 		return nil, nil
 	}
 	result, err := s.approvals.ResolveSupersededByMessage(ctx, run.Scope, approval.ID, approval.Revision, message.ID)
-	if errors.Is(err, ErrApprovalResolved) || errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidRunTransition) || errors.Is(err, ErrApprovalExpired) {
+	if errors.Is(err, ErrApprovalResolved) || errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidRunTransition) || errors.Is(err, action.ErrApprovalExpired) {
 		return nil, nil
 	}
 	if err != nil || result == nil || !result.Resolved {

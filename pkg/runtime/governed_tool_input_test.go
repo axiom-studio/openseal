@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 func governedTestAction(sideEffect capability.SideEffect, risk capability.RiskLevel, policy capability.ExternalOperationPolicy) capability.ModelAction {
@@ -46,9 +47,9 @@ func requiredOf(schema map[string]interface{}) []string {
 	return names
 }
 
-func expectRejection(t *testing.T, err error, code string) *ActionProposalRejection {
+func expectRejection(t *testing.T, err error, code string) *runtimeaction.ActionProposalRejection {
 	t.Helper()
-	var rejection *ActionProposalRejection
+	var rejection *runtimeaction.ActionProposalRejection
 	if !errors.As(err, &rejection) {
 		t.Fatalf("error = %v, want *ActionProposalRejection %s", err, code)
 	}
@@ -224,14 +225,14 @@ func TestParseReviewedEnvelopeStrict(t *testing.T) {
 		raw    string
 		code   string
 	}{
-		"not an object":               {required, `["x"]`, ProposalRejectionToolArgumentsInvalid},
-		"unknown key":                 {required, `{"arguments":{},"reviewContext":{"summary":"s","content":"c"},"externalOperation":{"resource":"#g","operation":"p"},"extra":1}`, ProposalRejectionToolArgumentsInvalid},
-		"missing arguments":           {required, `{"reviewContext":{"summary":"s","content":"c"},"externalOperation":{"resource":"#g","operation":"p"}}`, ProposalRejectionToolArgumentsInvalid},
-		"missing reviewContext":       {required, `{"arguments":{},"externalOperation":{"resource":"#g","operation":"p"}}`, ProposalRejectionReviewInvalid},
-		"invalid reviewContext":       {required, `{"arguments":{},"reviewContext":{"summary":" ","content":"c"},"externalOperation":{"resource":"#g","operation":"p"}}`, ProposalRejectionReviewInvalid},
-		"missing externalOperation":   {required, `{"arguments":{},"reviewContext":{"summary":"s","content":"c"}}`, ProposalRejectionExternalIdentityInvalid},
-		"forbidden externalOperation": {forbidden, `{"arguments":{},"reviewContext":{"summary":"s","content":"c"},"externalOperation":{"resource":"#g","operation":"p"}}`, ProposalRejectionExternalIdentityInvalid},
-		"invalid externalOperation":   {required, `{"arguments":{},"reviewContext":{"summary":"s","content":"c"},"externalOperation":{"resource":"#g","operation":"a/b"}}`, ProposalRejectionExternalIdentityInvalid},
+		"not an object":               {required, `["x"]`, runtimeaction.ProposalRejectionToolArgumentsInvalid},
+		"unknown key":                 {required, `{"arguments":{},"reviewContext":{"summary":"s","content":"c"},"externalOperation":{"resource":"#g","operation":"p"},"extra":1}`, runtimeaction.ProposalRejectionToolArgumentsInvalid},
+		"missing arguments":           {required, `{"reviewContext":{"summary":"s","content":"c"},"externalOperation":{"resource":"#g","operation":"p"}}`, runtimeaction.ProposalRejectionToolArgumentsInvalid},
+		"missing reviewContext":       {required, `{"arguments":{},"externalOperation":{"resource":"#g","operation":"p"}}`, runtimeaction.ProposalRejectionReviewInvalid},
+		"invalid reviewContext":       {required, `{"arguments":{},"reviewContext":{"summary":" ","content":"c"},"externalOperation":{"resource":"#g","operation":"p"}}`, runtimeaction.ProposalRejectionReviewInvalid},
+		"missing externalOperation":   {required, `{"arguments":{},"reviewContext":{"summary":"s","content":"c"}}`, runtimeaction.ProposalRejectionExternalIdentityInvalid},
+		"forbidden externalOperation": {forbidden, `{"arguments":{},"reviewContext":{"summary":"s","content":"c"},"externalOperation":{"resource":"#g","operation":"p"}}`, runtimeaction.ProposalRejectionExternalIdentityInvalid},
+		"invalid externalOperation":   {required, `{"arguments":{},"reviewContext":{"summary":"s","content":"c"},"externalOperation":{"resource":"#g","operation":"a/b"}}`, runtimeaction.ProposalRejectionExternalIdentityInvalid},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseGovernedToolInput(tc.action, json.RawMessage(tc.raw), nil)
@@ -250,8 +251,8 @@ func TestReviewedActionRequiresContent(t *testing.T) {
 			`{"arguments":{"text":"x"},"reviewContext":{"summary":"Delete the draft","content":"  "}}`,
 		} {
 			_, err := ParseGovernedToolInput(action, json.RawMessage(raw), nil)
-			rejection := expectRejection(t, err, ProposalRejectionReviewInvalid)
-			if !strings.Contains(rejection.Message, "content") || !errors.Is(err, ErrInvalidApprovalReviewContext) {
+			rejection := expectRejection(t, err, runtimeaction.ProposalRejectionReviewInvalid)
+			if !strings.Contains(rejection.Message, "content") || !errors.Is(err, runtimeaction.ErrInvalidApprovalReviewContext) {
 				t.Fatalf("rejection = %q (%v)", rejection.Message, err)
 			}
 		}
@@ -279,7 +280,7 @@ func TestParseStripsReviewSummaryAndIdempotencyKey(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseGovernedToolInput(write, json.RawMessage(raw), nil)
-			rejection := expectRejection(t, err, ProposalRejectionReviewInvalid)
+			rejection := expectRejection(t, err, runtimeaction.ProposalRejectionReviewInvalid)
 			if rejection.Message != "_reviewSummary must be one sentence of 1 to 600 characters." {
 				t.Fatalf("message = %q", rejection.Message)
 			}
@@ -325,14 +326,14 @@ func TestParseDirectiveOverrides(t *testing.T) {
 		t.Fatalf("summary from review context = %+v, %v", input, err)
 	}
 	_, err = ParseGovernedToolInput(reviewed, json.RawMessage(`{"text":"report"}`), &governedInputDirective{Summary: "x"})
-	expectRejection(t, err, ProposalRejectionExternalIdentityInvalid)
+	expectRejection(t, err, runtimeaction.ProposalRejectionExternalIdentityInvalid)
 	write := governedTestAction(capability.SideEffectWrite, capability.RiskLevelWrite, "")
 	input, err = ParseGovernedToolInput(write, json.RawMessage(`{"text":"x"}`), &governedInputDirective{Summary: "Save it"})
 	if err != nil || input.ReviewSummary != "Save it" {
 		t.Fatalf("write directive = %+v, %v", input, err)
 	}
 	_, err = ParseGovernedToolInput(write, json.RawMessage(`{"text":"x"}`), &governedInputDirective{ReviewContext: &ApprovalReviewContext{}})
-	expectRejection(t, err, ProposalRejectionReviewInvalid)
+	expectRejection(t, err, runtimeaction.ProposalRejectionReviewInvalid)
 }
 
 func TestNarrationSummaryFirstSentence(t *testing.T) {

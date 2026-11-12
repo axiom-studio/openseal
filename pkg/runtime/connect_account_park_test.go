@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -21,22 +22,22 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 		t.Fatal("test needs an external operation")
 	}
 	connected := false
-	var checks []CredentialAvailabilityRequest
-	var resolutions []CredentialResolutionRequest
+	var checks []action.CredentialAvailabilityRequest
+	var resolutions []action.CredentialResolutionRequest
 	dispatches := 0
-	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(_ context.Context, req CredentialResolutionRequest) (map[string]string, error) {
+	worker := action.NewActionWorker(store, catalog, action.CredentialResolverFunc(func(_ context.Context, req action.CredentialResolutionRequest) (map[string]string, error) {
 		resolutions = append(resolutions, req)
 		return map[string]string{"google": "token"}, nil
-	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		return map[string]interface{}{"sent": true}, nil
 	}))
-	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(_ context.Context, req CredentialAvailabilityRequest) (CredentialAvailability, error) {
+	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(_ context.Context, req action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
 		checks = append(checks, req)
 		if connected {
-			return CredentialAvailability{}, nil
+			return action.CredentialAvailability{}, nil
 		}
-		return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapPersonSignIn}}, nil
+		return action.CredentialAvailability{Gaps: map[string]action.CredentialGap{"google": action.CredentialGapPersonSignIn}}, nil
 	}))
 	result := executePersonAction(t, worker, scope, proposal)
 	call := result.Call

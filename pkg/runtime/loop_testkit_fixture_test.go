@@ -26,6 +26,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -54,7 +55,7 @@ type loopFixtureConfig struct {
 	contextWindow int64
 	maxSteps      int
 	team          []string
-	credentials   CredentialResolver
+	credentials   action.CredentialResolver
 }
 
 type loopOption func(*loopFixtureConfig)
@@ -97,7 +98,7 @@ func withTeam(members ...string) loopOption {
 }
 
 // withCredentials gives the action worker a credential resolver.
-func withCredentials(resolver CredentialResolver) loopOption {
+func withCredentials(resolver action.CredentialResolver) loopOption {
 	return func(c *loopFixtureConfig) { c.credentials = resolver }
 }
 
@@ -207,17 +208,17 @@ type fixturePolicy struct {
 	deny               map[string]bool
 }
 
-func (p *fixturePolicy) evaluate(_ context.Context, in ActionPolicyInput) (ActionPolicyDecision, error) {
+func (p *fixturePolicy) evaluate(_ context.Context, in action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if in.Bound != nil && p.deny[in.Bound.Action.Name] {
-		return ActionPolicyDecision{Disposition: ActionDispositionDeny, Reason: "the fixture policy denies " + in.Bound.Action.Name}, nil
+		return action.ActionPolicyDecision{Disposition: action.ActionDispositionDeny, Reason: "the fixture policy denies " + in.Bound.Action.Name}, nil
 	}
 	if in.Bound == nil || in.Bound.Action.SideEffect == skill.SideEffectRead || !p.writesNeedApproval {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
 	}
-	return ActionPolicyDecision{
-		Disposition: ActionDispositionRequireApproval, Reason: "writes need review",
+	return action.ActionPolicyDecision{
+		Disposition: action.ActionDispositionRequireApproval, Reason: "writes need review",
 		EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: loopFixtureUser}}, ApprovalTTL: time.Hour,
 	}, nil
 }
@@ -282,9 +283,9 @@ type loopFixture struct {
 	tools    *fakeHostTools
 	dispatch *fakeDispatcher
 	policy   *fixturePolicy
-	actions  *ActionCoordinator
-	approve  *ApprovalCoordinator
-	executor *ActionWorker
+	actions  *action.ActionCoordinator
+	approve  *action.ApprovalCoordinator
+	executor *action.ActionWorker
 	loop     *RunLoop
 	convs    *ConversationService
 	workerID string // "loop-worker-1"; crash() switches to "loop-worker-2"
@@ -424,11 +425,11 @@ func (f *loopFixture) coordinator() *ConversationCoordinator {
 // loop. crash() calls it again for the second worker.
 func (f *loopFixture) build() {
 	f.t.Helper()
-	policy := ActionPolicyEvaluatorFunc(f.policy.evaluate)
+	policy := action.ActionPolicyEvaluatorFunc(f.policy.evaluate)
 	clock := models.WithClock(f.clock.Now)
-	f.actions = NewActionCoordinator(f.store, f.store, f.catalog, policy, nil, clock)
-	f.approve = NewApprovalCoordinator(f.store, f.store, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }), clock)
-	f.executor = NewActionWorker(f.store, f.catalog, f.config.credentials, ActionDispatcherFunc(f.dispatch.Dispatch), clock)
+	f.actions = action.NewActionCoordinator(f.store, f.store, f.catalog, policy, nil, clock)
+	f.approve = action.NewApprovalCoordinator(f.store, f.store, action.ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }), clock)
+	f.executor = action.NewActionWorker(f.store, f.catalog, f.config.credentials, action.ActionDispatcherFunc(f.dispatch.Dispatch), clock)
 	governed, err := NewGovernedToolExecutor(GovernedToolExecutorConfig{
 		Actions: f.actions, Approvals: f.approve, Worker: f.executor, Store: f.store, Now: f.clock.Now,
 	})
@@ -800,7 +801,7 @@ func (f *loopFixture) decide(runID string, decision ApprovalDecision, reason str
 		f.t.Fatalf("run %s has %d pending approvals, want 1", runID, len(pending))
 	}
 	approval := pending[0]
-	if _, err := f.approve.Resolve(f.ctx, ResolveApprovalRequest{
+	if _, err := f.approve.Resolve(f.ctx, action.ResolveApprovalRequest{
 		Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision, DecisionID: "decision-" + approval.ID,
 		Decision: decision, Principal: ApprovalPrincipal{Type: "user", ID: loopFixtureUser}, Reason: reason,
 	}); err != nil {

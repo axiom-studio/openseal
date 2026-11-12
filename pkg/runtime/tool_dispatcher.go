@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/fileinput"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -41,7 +42,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input agentru
 	if d == nil || d.invoker == nil || input.Bound == nil || input.Bound.Definition == nil || input.Bound.Binding == nil {
 		return nil, errors.New("tool action dispatcher is not configured")
 	}
-	transportEndpoint, transportErr := boundActionToolTransport(input.Bound)
+	transportEndpoint, transportErr := action.BoundActionToolTransport(input.Bound)
 	if transportErr != nil {
 		return nil, transportErr
 	}
@@ -62,7 +63,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input agentru
 		if input.Call == nil || input.Run == nil {
 			return nil, errors.New("opaque credential lease requires its durable ActionCall and Run")
 		}
-		if err := MatchActionCredentialLeaseReferences(input.CredentialLease, input.Call, input.Run, transportEndpoint); err != nil {
+		if err := action.MatchActionCredentialLeaseReferences(input.CredentialLease, input.Call, input.Run, transportEndpoint); err != nil {
 			return nil, fmt.Errorf("validate opaque credential lease transport: %w", err)
 		}
 		if !reflect.DeepEqual(input.CredentialReferences, input.Call.CredentialRefs) {
@@ -98,7 +99,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input agentru
 		SkillSourceIdentity: sourceIdentity, SkillDefinitionDigest: definitionDigest,
 		Action: input.Bound.Action.Name, Arguments: arguments, FileArguments: fileinput.Properties(input.Bound.Action.InputSchema),
 		FileReferences: fileReferences, OutputSchema: maps.Clone(input.Bound.Action.OutputSchema), BindingConfig: maps.Clone(input.Bound.Binding.Config), Credentials: input.Credentials,
-		CredentialLease: cloneSignedActionCredentialLease(input.CredentialLease), CredentialReferences: maps.Clone(input.CredentialReferences),
+		CredentialLease: action.CloneSignedActionCredentialLease(input.CredentialLease), CredentialReferences: maps.Clone(input.CredentialReferences),
 	}
 	if input.Call != nil {
 		invocation.ActionCallID = input.Call.ID

@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 // ApprovalCallbackConsumer applies one verified approval decision to the
@@ -80,8 +81,8 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 	}
 	// EligibleApprovalAuthorizer is no AgentBuilderApprovalAuthorizer, so a
 	// callback can reject but never approve an agent-builder card (D11).
-	coordinator := NewApprovalCoordinator(c.store, c.store, EligibleApprovalAuthorizer{}, models.WithClock(c.now))
-	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
+	coordinator := action.NewApprovalCoordinator(c.store, c.store, action.EligibleApprovalAuthorizer{}, models.WithClock(c.now))
+	resolution, err := coordinator.Resolve(ctx, action.ResolveApprovalRequest{
 		Scope: event.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
 		DecisionID: event.ID, Decision: ApprovalDecision(decision),
 		Principal: ApprovalPrincipal{Type: principalType, ID: principalID}, Reason: reason,

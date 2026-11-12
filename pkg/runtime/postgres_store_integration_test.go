@@ -13,6 +13,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -392,12 +393,12 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("created proposals = %d, proposal=%#v", createdProposals, proposal)
 	}
 	approvalNow := proposal.Approval.CreatedAt.Add(time.Second)
-	approvals := NewApprovalCoordinator(replica, replica, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }), models.WithClock(func() time.Time { return approvalNow }))
-	resolved, err := approvals.Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
+	approvals := action.NewApprovalCoordinator(replica, replica, action.ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }), models.WithClock(func() time.Time { return approvalNow }))
+	resolved, err := approvals.Resolve(ctx, action.ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
 	if err != nil || !resolved.Resolved || resolved.Call.Status != ActionCallStatusReady || resolved.Run.Status != AgentRunStatusWaitingForDependency {
 		t.Fatalf("resolved approval = %#v, %v", resolved, err)
 	}
-	replayed, err := approvals.Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
+	replayed, err := approvals.Resolve(ctx, action.ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
 	if err != nil || replayed.Resolved {
 		t.Fatalf("replayed approval = %#v, %v", replayed, err)
 	}

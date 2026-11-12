@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 // D9 repeat detection (section 08 §5.4, SPEC §5.4). The executor builds a
@@ -152,7 +154,7 @@ func repeatExecuted(entry *SessionEntry) bool {
 
 func repeatRefused(entry *SessionEntry) bool {
 	switch repeatGuardKind(entry) {
-	case RefusedLoopCallRepeat, RefusedLoopCallDuplicateSuppressed:
+	case action.RefusedLoopCallRepeat, action.RefusedLoopCallDuplicateSuppressed:
 		return repeatCounted(entry)
 	}
 	return false
@@ -254,16 +256,16 @@ func (l *repeatLedger) evaluate(subject RepeatSubject, key string, stepKeys map[
 			switch {
 			case repeatExecuted(entry) && entry.State == ToolEntryCompleted:
 				succeeded, suppressed = entry, 0
-			case succeeded != nil && repeatGuardKind(entry) == RefusedLoopCallDuplicateSuppressed:
+			case succeeded != nil && repeatGuardKind(entry) == action.RefusedLoopCallDuplicateSuppressed:
 				suppressed++
 			}
 		}
 		if succeeded != nil {
 			count := 1 + suppressed + 1
 			if count >= repeatLimitCount {
-				return repeatVerdict{Kind: repeatFailRun, Code: RefusedLoopCallRepeatLimit, Prior: succeeded, Count: count}
+				return repeatVerdict{Kind: repeatFailRun, Code: action.RefusedLoopCallRepeatLimit, Prior: succeeded, Count: count}
 			}
-			return repeatVerdict{Kind: repeatSuppressWrite, Code: RefusedLoopCallDuplicateSuppressed, Prior: succeeded, Count: count}
+			return repeatVerdict{Kind: repeatSuppressWrite, Code: action.RefusedLoopCallDuplicateSuppressed, Prior: succeeded, Count: count}
 		}
 		// Never succeeded in this Run: a failed write may be retried under
 		// the streak rule.
@@ -274,9 +276,9 @@ func (l *repeatLedger) evaluate(subject RepeatSubject, key string, stepKeys map[
 	case count <= 2:
 		return repeatVerdict{Kind: repeatRun}
 	case count < repeatLimitCount:
-		return repeatVerdict{Kind: repeatRefuse, Code: RefusedLoopCallRepeat, Prior: last, Count: count}
+		return repeatVerdict{Kind: repeatRefuse, Code: action.RefusedLoopCallRepeat, Prior: last, Count: count}
 	default:
-		return repeatVerdict{Kind: repeatFailRun, Code: RefusedLoopCallRepeatLimit, Prior: last, Count: count}
+		return repeatVerdict{Kind: repeatFailRun, Code: action.RefusedLoopCallRepeatLimit, Prior: last, Count: count}
 	}
 }
 
@@ -365,11 +367,11 @@ func (v repeatVerdict) refusal() (*repeatRefusal, bool) {
 	status := ToolResultRefused
 	var extra []ContentPart
 	switch v.Code {
-	case RefusedLoopCallRepeat:
+	case action.RefusedLoopCallRepeat:
 		out.Message = repeatRefusedText(v.Count, repeatPriorStep(v.Prior))
-	case RefusedLoopCallRepeatLimit:
+	case action.RefusedLoopCallRepeatLimit:
 		out.Message = repeatLimitText(v.Count)
-	case RefusedLoopCallDuplicateSuppressed:
+	case action.RefusedLoopCallDuplicateSuppressed:
 		status = ToolResultDuplicateSuppressed
 		out.Message = repeatSuppressedText(repeatPriorStep(v.Prior))
 		if v.Prior != nil && v.Prior.Tool != nil && v.Prior.Tool.Result != nil {
@@ -387,7 +389,7 @@ func (v repeatVerdict) refusal() (*repeatRefusal, bool) {
 		return nil, false
 	}
 	switch v.Code {
-	case RefusedLoopCallRepeat, RefusedLoopCallRepeatLimit, RefusedLoopCallDuplicateSuppressed:
+	case action.RefusedLoopCallRepeat, action.RefusedLoopCallRepeatLimit, action.RefusedLoopCallDuplicateSuppressed:
 		out.ActionCallCode = v.Code
 		if v.Prior != nil {
 			out.DuplicateOfEntryID = v.Prior.ID
@@ -416,6 +418,6 @@ func repeatPriorStep(entry *SessionEntry) int64 {
 // the executor returns it once every tool entry of the step is terminal and
 // the buffered notes are appended.
 func repeatLimitRunFailure() guardRunFailure {
-	failure, _ := guardRunFailureFor(RunFailureCodeRepeatLimit)
+	failure, _ := guardRunFailureFor(action.RunFailureCodeRepeatLimit)
 	return failure
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -15,7 +16,7 @@ func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 	if definition.Version != "2.2.0" {
 		t.Fatalf("version = %s", definition.Version)
 	}
-	action, ok := definition.Actions[TeamActionCreateTeam]
+	action, ok := definition.Actions[runtimeaction.TeamActionCreateTeam]
 	if !ok || action.Risk != skill.RiskLevelWrite || action.Review != skill.ActionReviewAlways || action.Idempotency != skill.IdempotencyRequired {
 		t.Fatalf("create_team = %#v", action)
 	}
@@ -26,7 +27,7 @@ func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 	// The builder dispatcher takes the current create_team and passes a
 	// 2.0.0 binding's on to the next dispatcher.
 	f := newAgentBuilderDispatchFixture(t)
-	fallback := ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	fallback := runtimeaction.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"fallback": true}, nil
 	})
 	dispatcher, err := newTestAgentBuilderDispatcher(f.store, f.agents, f.teams, f.catalog, f.provision, nil, fallback)
@@ -57,13 +58,13 @@ func teamCreateGetsBuilderCard(t *testing.T, definition *skill.Definition) bool 
 	}
 	if err := fixture.catalog.Bind(ctx, &skill.Binding{
 		ID: "bundled:teams", Revision: 1, Scope: skill.ScopeReference{Kind: fixture.scope.Kind, ID: fixture.scope.ID}, DeploymentID: "finn",
-		SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
+		SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{runtimeaction.TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := coordinator.Propose(ctx, loopProposeRequest(ProposeActionRequest{
+	result, err := coordinator.Propose(ctx, loopProposeRequest(runtimeaction.ProposeActionRequest{
 		Scope: fixture.scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
-		SkillID: definition.ID, SkillVersion: definition.Version, Action: TeamActionCreateTeam,
+		SkillID: definition.ID, SkillVersion: definition.Version, Action: runtimeaction.TeamActionCreateTeam,
 		Arguments: teamCreateArgumentsFor(""), Summary: "Review the team",
 	}, "create-team"))
 	if err != nil {

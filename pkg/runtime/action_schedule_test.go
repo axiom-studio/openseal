@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -112,7 +113,7 @@ func createDispatchableNestedAction(t *testing.T, store KernelStore, now time.Ti
 	}
 	result, err := store.CreateActionProposal(ctx, ActionProposalRecord{
 		Call: call, Lease: &AgentRunLeaseGuard{WorkerID: "agent-worker", Now: at},
-		Nested: &NestedActionFence{WorkerID: "agent-worker", Now: at, MaxCalls: MaxNestedActionCallsPerTurn, MaxConcurrent: MaxConcurrentNestedActionCalls},
+		Nested: &NestedActionFence{WorkerID: "agent-worker", Now: at, MaxCalls: action.MaxNestedActionCallsPerTurn, MaxConcurrent: action.MaxConcurrentNestedActionCalls},
 		Event:  &ActivityEvent{ID: "proposed-call", Scope: scope, RunID: run.ID, TurnID: "step-1", EventType: "action.proposed", Summary: "Proposed deploy", CreatedAt: at},
 	})
 	if err != nil || !result.Created {

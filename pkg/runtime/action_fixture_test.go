@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
@@ -31,7 +32,7 @@ func (f proposalValidatorFunc) ValidateActionProposal(ctx context.Context, input
 
 // loopProposeRequest is req as the loop proposes tool call toolCallID of
 // step-1: loop origin and execution and the per-call idempotency key.
-func loopProposeRequest(req ProposeActionRequest, toolCallID string) ProposeActionRequest {
+func loopProposeRequest(req action.ProposeActionRequest, toolCallID string) action.ProposeActionRequest {
 	req.Origin, req.Execution = models.ActionOriginLoop, models.ActionExecutionLoop
 	if req.TurnID == "" {
 		req.TurnID = "step-1"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -58,7 +59,7 @@ func (d *drive) hostUnavailable(ctx context.Context, st *stepState, cause error)
 	st.produced = false
 	if err := d.finishStep(ctx, st, FinishAgentTurnRequest{
 		Status: AgentTurnStatusFailed, FailureCode: StepFailureHostUnavailable,
-		Error: boundedTurnFailureText(sanitizeActionError(cause, nil)),
+		Error: boundedTurnFailureText(action.SanitizeActionError(cause, nil)),
 	}); err != nil {
 		return exitResultPtr(d.writeErrorExit(err))
 	}

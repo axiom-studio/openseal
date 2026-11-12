@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/google/uuid"
 )
 
@@ -47,7 +48,7 @@ func newLoopProposalFixture(t *testing.T, store KernelStore, run *AgentRun, work
 // request is req as this fixture's step proposes tool call toolCallID: the
 // fixture's Run, scope and lease owner unless req names them, loop origin and
 // execution, and the per-call idempotency key unless req has one.
-func (f *loopProposalFixture) request(req ProposeActionRequest, toolCallID string) ProposeActionRequest {
+func (f *loopProposalFixture) request(req action.ProposeActionRequest, toolCallID string) action.ProposeActionRequest {
 	if req.Scope == (Scope{}) {
 		req.Scope = f.run.Scope
 	}
@@ -101,7 +102,7 @@ func (f *loopProposalFixture) parkOnApproval(approvalID string) {
 
 // execute runs call inline for the Run's lease owner, as the loop's governed
 // executor does after a ready proposal.
-func (f *loopProposalFixture) execute(worker *ActionWorker, callID string) *ActionExecutionResult {
+func (f *loopProposalFixture) execute(worker *action.ActionWorker, callID string) *ActionExecutionResult {
 	f.t.Helper()
 	result, err := worker.ExecuteOwnLoopCall(context.Background(), f.run.Scope, callID, f.worker)
 	if err != nil || result == nil {

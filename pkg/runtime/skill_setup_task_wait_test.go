@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
@@ -168,7 +169,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator}).Propose(t.Context(), ProposeActionRequest{
+	proposal, err := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator}).Propose(t.Context(), action.ProposeActionRequest{
 		Scope: run.Scope, RunID: run.ID, TurnID: step.ID, WorkerID: "setup-worker", DeploymentID: run.AssignedAgentID,
 		SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: agentrun.SkillActionRequestSetup,
 		Arguments: arguments,
@@ -203,7 +204,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(t.Context(), run.Scope, proposal.Call.ID, "setup-worker")
+	executed, err := action.NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(t.Context(), run.Scope, proposal.Call.ID, "setup-worker")
 	if err != nil || executed == nil || executed.Call.Status != ActionCallStatusSucceeded {
 		if executed != nil && executed.Call != nil {
 			t.Fatalf("canonical setup execution: status=%s action error=%s worker error=%v", executed.Call.Status, executed.Call.Error, err)

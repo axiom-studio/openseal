@@ -13,6 +13,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -59,11 +60,11 @@ func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ..
 	if err := catalog.Register(ctx, def); err != nil {
 		t.Fatal(err)
 	}
-	binding := &skill.Binding{ID: "routines", Revision: 1, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: owner.ID, SkillID: def.ID, SkillVersion: def.Version, AllowedActions: []string{RunbookActionCreateTask, RunbookActionList, RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule, RunbookActionEventSources, RunbookActionSendTestEvent}, MaximumRisk: skill.RiskLevelWrite}
+	binding := &skill.Binding{ID: "routines", Revision: 1, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: owner.ID, SkillID: def.ID, SkillVersion: def.Version, AllowedActions: []string{action.RunbookActionCreateTask, action.RunbookActionList, action.RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule, RunbookActionEventSources, RunbookActionSendTestEvent}, MaximumRisk: skill.RiskLevelWrite}
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	bound, err := catalog.Resolve(ctx, binding.Scope, owner.ID, def.ID, def.Version, RunbookActionCreateTask)
+	bound, err := catalog.Resolve(ctx, binding.Scope, owner.ID, def.ID, def.Version, action.RunbookActionCreateTask)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,10 +272,10 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 			}
 			validator, _ := NewRunbookActionValidator(store.(routineActionStore))
 			policyCalls := 0
-			coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+			coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 				policyCalls++
-				return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-			}), []ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
+				return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
+			}), []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
 			invalid := []struct {
 				name  string
 				value interface{}
@@ -288,7 +289,7 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 					if err := catalog.ValidateInput(t.Context(), bound, candidate); err == nil {
 						t.Fatal("invalid occurrence limit accepted by the tool contract")
 					}
-					if _, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: RunbookActionCreateTask, Arguments: candidate, IdempotencyKey: value.name, Summary: "Create recurring research"}); err == nil {
+					if _, err := coordinator.Propose(t.Context(), action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: action.RunbookActionCreateTask, Arguments: candidate, IdempotencyKey: value.name, Summary: "Create recurring research"}); err == nil {
 						t.Fatal("invalid occurrence limit persisted")
 					}
 				})
@@ -321,7 +322,7 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 	store := newTestKernelStore(t)
 	run, catalog, bound, args := scheduledTaskFixture(t, store)
 	a := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*RunbookActivation)
-	statusBound, err := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, RunbookActionSetStatus)
+	statusBound, err := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, action.RunbookActionSetStatus)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +344,7 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 	if active.Status != RunbookActivationActive {
 		t.Fatal("resume failed")
 	}
-	listBound, _ := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, RunbookActionList)
+	listBound, _ := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, action.RunbookActionList)
 	listed := dispatchTaskForTest(t, store, run, listBound, map[string]interface{}{}, "list")
 	if len(listed["activations"].([]*RunbookActivation)) != 1 {
 		t.Fatal("list failed")
@@ -388,10 +389,10 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 				t.Fatalf("claim=%#v,%v", claimed, err)
 			}
 			validator, _ := NewRunbookActionValidator(store)
-			coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-				return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
-			}), []ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
-			result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: RunbookActionCreateTask, Arguments: args, IdempotencyKey: "user-schedule", Summary: "Create recurring research", Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
+			coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+				return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
+			}), []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
+			result, err := coordinator.Propose(t.Context(), loopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: action.RunbookActionCreateTask, Arguments: args, IdempotencyKey: "user-schedule", Summary: "Create recurring research", Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -407,7 +408,7 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 			binding.MaximumRisk = skill.RiskLevelRead
 			binding.Revision++
 			if err := catalog.Bind(t.Context(), &binding); err == nil {
-				if _, err := catalog.Resolve(t.Context(), binding.Scope, binding.DeploymentID, binding.SkillID, binding.SkillVersion, RunbookActionCreateTask); err == nil {
+				if _, err := catalog.Resolve(t.Context(), binding.Scope, binding.DeploymentID, binding.SkillID, binding.SkillVersion, action.RunbookActionCreateTask); err == nil {
 					t.Fatal("read-only binding allowed schedule creation")
 				}
 			}

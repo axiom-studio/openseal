@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -57,13 +58,13 @@ func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	loop := newLoopProposalFixture(t, store, child.Run, "worker", time.Now().UTC())
-	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{
-			Disposition: ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour,
+	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+		return action.ActionPolicyDecision{
+			Disposition: action.ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour,
 			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}},
 		}, nil
 	}), nil)
-	proposal, err := coordinator.Propose(ctx, loop.request(ProposeActionRequest{
+	proposal, err := coordinator.Propose(ctx, loop.request(action.ProposeActionRequest{
 		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0",
 		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "child-action",
 		Summary: "Send reviewed reply",
@@ -110,13 +111,13 @@ func assertCanceledApproval(t *testing.T, store cancellationStore) {
 		t.Fatal(err)
 	}
 	loop := newLoopProposalFixture(t, store, created.Run, "worker", now)
-	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{
-			Disposition: ActionDispositionRequireApproval, Reason: "human review is required", ApprovalTTL: time.Hour,
+	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+		return action.ActionPolicyDecision{
+			Disposition: action.ActionDispositionRequireApproval, Reason: "human review is required", ApprovalTTL: time.Hour,
 			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}},
 		}, nil
 	}), nil, models.WithClock(func() time.Time { return now }))
-	proposal, err := coordinator.Propose(ctx, loop.request(ProposeActionRequest{
+	proposal, err := coordinator.Propose(ctx, loop.request(action.ProposeActionRequest{
 		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0", Action: "reply",
 		Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "reply-1", Summary: "Send reviewed reply",
 	}, "reply"))
@@ -148,7 +149,7 @@ func assertCanceledApproval(t *testing.T, store cancellationStore) {
 	if err != nil || approval.Status != ApprovalStatusCanceled || approval.DecisionBy == nil || approval.DecisionBy.ID != "operator" {
 		t.Fatalf("approval = %#v err=%v", approval, err)
 	}
-	if _, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
+	if _, err := action.NewApprovalCoordinator(store, store, action.EligibleApprovalAuthorizer{}).Resolve(ctx, action.ResolveApprovalRequest{
 		Scope: scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision, DecisionID: "late-approval", Decision: ApprovalDecisionApprove,
 		Principal: ApprovalPrincipal{Type: "role", ID: "reviewer"},
 	}); !errors.Is(err, ErrApprovalResolved) {

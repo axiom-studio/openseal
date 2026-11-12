@@ -8,6 +8,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -350,7 +351,7 @@ func (d *drive) publishFinalOutput(ctx context.Context, st *stepState, final *ag
 func (d *drive) fail(ctx context.Context, st *stepState, failure agentrun.LoopFailure, cause error, stepCode string) stepResult {
 	causeText := ""
 	if cause != nil {
-		causeText = boundedTurnFailureText(sanitizeActionError(cause, nil))
+		causeText = boundedTurnFailureText(action.SanitizeActionError(cause, nil))
 	}
 	if stepCode == "" {
 		stepCode = failure.Code

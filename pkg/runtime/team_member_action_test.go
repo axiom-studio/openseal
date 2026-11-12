@@ -9,6 +9,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -40,19 +41,19 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{
-			Disposition: ActionDispositionRequireApproval, Reason: "Team behavior changes require review",
+	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+		return action.ActionPolicyDecision{
+			Disposition: action.ActionDispositionRequireApproval, Reason: "Team behavior changes require review",
 			EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	coordinator := NewActionCoordinator(store, store, catalog, policy, []ActionProposalValidator{validator})
+	coordinator := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator})
 	arguments := map[string]interface{}{
 		"memberId": "ux-reviewer", "expectedDeploymentRevision": 1, "channelParticipation": "active",
 	}
-	proposal, err := coordinator.Propose(ctx, loopProposeRequest(ProposeActionRequest{
+	proposal, err := coordinator.Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: owner.ID,
-		SkillID: TeamManagementSkillID, SkillVersion: TeamManagementSkillVersion, Action: TeamActionUpdateMember,
+		SkillID: TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion, Action: action.TeamActionUpdateMember,
 		Arguments: arguments, IdempotencyKey: "message-42:enable-ux-reviewer", Summary: "Let the UX Reviewer speak",
 	}, "enable-ux-reviewer"))
 	if err != nil {
@@ -63,11 +64,11 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	}
 	preview := proposal.Approval.ProposedAction
 	changes, _ := preview["changes"].(map[string]interface{})
-	if preview["resourceType"] != "team" || preview["operation"] != TeamActionUpdateMember ||
+	if preview["resourceType"] != "team" || preview["operation"] != action.TeamActionUpdateMember ||
 		preview["memberName"] != "UX Reviewer" || fmt.Sprint(changes["channelParticipation"]) != string(kernelteam.ChannelActive) {
 		t.Fatalf("typed Team diff = %#v", preview)
 	}
-	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
+	resolved, err := action.NewApprovalCoordinator(store, store, action.EligibleApprovalAuthorizer{}).Resolve(ctx, action.ResolveApprovalRequest{
 		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 		DecisionID: "decision-42", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "operator"}, Reason: "Reviewed",
 	})
@@ -78,7 +79,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := NewActionWorker(store, catalog, nil, dispatcher)
+	worker := action.NewActionWorker(store, catalog, nil, dispatcher)
 	executed, err := worker.ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +104,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	if amendments, err := teams.ListAmendments(ctx, reference, owner.ID); err != nil || len(amendments) != 0 {
 		t.Fatalf("amendments = %#v, %v", amendments, err)
 	}
-	bound, err := catalog.Resolve(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, TeamManagementSkillID, TeamManagementSkillVersion, TeamActionUpdateMember)
+	bound, err := catalog.Resolve(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, TeamManagementSkillID, action.TeamManagementSkillVersion, action.TeamActionUpdateMember)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,7 @@ func TestTeamMemberActionRejectsStaleForeignAndPolicyForbiddenChangesBeforeAppro
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	teams, agentDeploymentID := teamMemberActionRegistry(t, ctx, scope)
 	validator, _ := NewTeamMemberActionValidator(teams)
-	bound := &skill.BoundAction{Definition: TeamManagementSkill(), Action: TeamManagementSkill().Actions[TeamActionUpdateMember]}
+	bound := &skill.BoundAction{Definition: TeamManagementSkill(), Action: TeamManagementSkill().Actions[action.TeamActionUpdateMember]}
 
 	for name, testCase := range map[string]struct {
 		run       *AgentRun
@@ -227,8 +228,8 @@ func teamMemberActionCatalog(t *testing.T, ctx context.Context, scope Scope, dep
 	}
 	if err := catalog.Bind(ctx, &skill.Binding{
 		ID: "teams", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: deploymentID,
-		SkillID: TeamManagementSkillID, SkillVersion: TeamManagementSkillVersion,
-		AllowedActions: []string{TeamActionUpdateMember}, MaximumRisk: skill.RiskLevelWrite,
+		SkillID: TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion,
+		AllowedActions: []string{action.TeamActionUpdateMember}, MaximumRisk: skill.RiskLevelWrite,
 	}); err != nil {
 		t.Fatal(err)
 	}

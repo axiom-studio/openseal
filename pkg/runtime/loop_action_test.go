@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
@@ -38,11 +39,11 @@ type governedFixture struct {
 	step      *AgentTurn
 	binding   *agentrun.TurnRunnerBinding
 	executor  *GovernedToolExecutor
-	actions   *ActionCoordinator
-	approvals *ApprovalCoordinator
-	worker    *ActionWorker
+	actions   *runtimeaction.ActionCoordinator
+	approvals *runtimeaction.ApprovalCoordinator
+	worker    *runtimeaction.ActionWorker
 	// policy maps a Skill action to its decision; allow by default.
-	policy      map[string]ActionPolicyDecision
+	policy      map[string]runtimeaction.ActionPolicyDecision
 	dispatch    func(agentrun.ActionDispatchInput) (map[string]interface{}, error)
 	dispatches  int
 	validations int
@@ -62,7 +63,7 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 	start := time.Now().UTC().Truncate(time.Millisecond)
 	f := &governedFixture{
 		t: t, ctx: context.Background(), store: store, scope: scope, start: start, clock: start.Add(time.Second),
-		step: &AgentTurn{ID: governedStep, Scope: scope}, policy: map[string]ActionPolicyDecision{},
+		step: &AgentTurn{ID: governedStep, Scope: scope}, policy: map[string]runtimeaction.ActionPolicyDecision{},
 		dispatch: func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"providerResult": "delivered"}, nil
 		},
@@ -82,12 +83,12 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 	f.step.RunID = f.run.ID
 	catalog := loopWorkerCatalog(t, scope)
 	now := func() time.Time { return f.clock }
-	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(_ context.Context, input ActionPolicyInput) (ActionPolicyDecision, error) {
+	coordinator := runtimeaction.NewActionCoordinator(store, store, catalog, runtimeaction.ActionPolicyEvaluatorFunc(func(_ context.Context, input runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
 		if decision, ok := f.policy[input.Bound.Action.Name]; ok {
 			return decision, nil
 		}
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-	}), []ActionProposalValidator{proposalValidatorFunc(func(_ context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
+		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow}, nil
+	}), []runtimeaction.ActionProposalValidator{proposalValidatorFunc(func(_ context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 		f.validations++
 		if f.validate != nil {
 			return nil, f.validate(input)
@@ -95,11 +96,11 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 		return nil, nil
 	})}, models.WithClock(now))
 	f.actions = coordinator
-	f.approvals = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(now))
-	f.worker = NewActionWorker(store, catalog,
-		CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+	f.approvals = runtimeaction.NewApprovalCoordinator(store, store, runtimeaction.EligibleApprovalAuthorizer{}, models.WithClock(now))
+	f.worker = runtimeaction.NewActionWorker(store, catalog,
+		runtimeaction.CredentialResolverFunc(func(context.Context, runtimeaction.CredentialResolutionRequest) (map[string]string, error) {
 			return map[string]string{"token": "loop-secret"}, nil
-		}), ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		}), runtimeaction.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			f.dispatches++
 			return f.dispatch(input)
 		}), models.WithClock(now))
@@ -140,8 +141,8 @@ func (f *governedFixture) claim(worker string) *AgentRun {
 func (f *governedFixture) advance(d time.Duration) { f.clock = f.clock.Add(d) }
 
 func (f *governedFixture) requireApprovalFor(action string) {
-	f.policy[action] = ActionPolicyDecision{
-		Disposition: ActionDispositionRequireApproval, Reason: "deploys need review",
+	f.policy[action] = runtimeaction.ActionPolicyDecision{
+		Disposition: runtimeaction.ActionDispositionRequireApproval, Reason: "deploys need review",
 		EligibleApprovers: []ApprovalPrincipal{governedApprover}, ApprovalTTL: time.Hour,
 	}
 }
@@ -235,7 +236,7 @@ func (f *governedFixture) parkOn(park *GovernedPark) {
 func (f *governedFixture) decide(approvalID string, decision ApprovalDecision, reason string) *ApprovalResolutionResult {
 	f.t.Helper()
 	approval := f.approval(approvalID)
-	result, err := f.approvals.Resolve(f.ctx, ResolveApprovalRequest{
+	result, err := f.approvals.Resolve(f.ctx, runtimeaction.ResolveApprovalRequest{
 		Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision,
 		DecisionID: "decision-" + approval.ID, Decision: decision, Principal: governedApprover, Reason: reason,
 	})
@@ -322,12 +323,12 @@ func TestGovernedExecuteUnknownToolRefused(t *testing.T) {
 		}
 		outcome := f.execute(f.call("tool-1", "release_rollback", statusArguments()))
 		value := requireGovernedState(t, outcome, ToolEntryError, ToolResultRefused)
-		if value["code"] != ProposalRejectionUnknownTool || outcome.ActionCallID != "" {
+		if value["code"] != runtimeaction.ProposalRejectionUnknownTool || outcome.ActionCallID != "" {
 			t.Fatalf("value = %#v, outcome = %#v", value, outcome)
 		}
 		// Bad arguments are a refusal too, and no row is written.
 		outcome = f.execute(f.call("tool-2", governedDeploy, json.RawMessage(`{"environment":"production"}`)))
-		if value := requireGovernedState(t, outcome, ToolEntryError, ToolResultRefused); value["code"] != ProposalRejectionToolArgumentsInvalid {
+		if value := requireGovernedState(t, outcome, ToolEntryError, ToolResultRefused); value["code"] != runtimeaction.ProposalRejectionToolArgumentsInvalid {
 			t.Fatalf("value = %#v", value)
 		}
 		calls, err := store.ListActionCalls(f.ctx, ActionFilter{Scope: f.scope, RunID: f.run.ID})
@@ -422,7 +423,7 @@ func TestGovernedResumeEachDecisionOutcome(t *testing.T) {
 			}
 		}, state: ToolEntryError, status: ToolResultSuperseded,
 			check: func(t *testing.T, value map[string]interface{}) {
-				if value["reason"] != ApprovalSupersededReason {
+				if value["reason"] != runtimeaction.ApprovalSupersededReason {
 					t.Fatalf("value = %#v", value)
 				}
 			}},
@@ -642,7 +643,7 @@ func TestGovernedResumeReplayDoesNotRevalidate(t *testing.T) {
 			t.Fatalf("validations = %d, want the replay unvalidated", f.validations)
 		}
 		fresh := f.execute(f.call("tool-2", governedDeploy, deployArguments("production")))
-		if value := requireGovernedState(t, fresh, ToolEntryError, ToolResultRefused); value["code"] != ProposalRejectionNotAdmitted {
+		if value := requireGovernedState(t, fresh, ToolEntryError, ToolResultRefused); value["code"] != runtimeaction.ProposalRejectionNotAdmitted {
 			t.Fatalf("fresh = %#v", value)
 		}
 	})

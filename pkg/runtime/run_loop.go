@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
@@ -93,14 +94,14 @@ type RunLoop struct {
 	sessions AgentSessionStore
 	activity *RunActivityService
 	turns    *AgentTurnService
-	actions  *ActionCoordinator // nil: no nested-action window
+	actions  *action.ActionCoordinator // nil: no nested-action window
 	config   RunLoopConfig
 	logger   *zap.SugaredLogger
 }
 
 // NewRunLoop builds the loop over the kernel store. The store must also be
 // the session log (AgentSessionStore).
-func NewRunLoop(store KernelStore, actions *ActionCoordinator, logger *zap.SugaredLogger, config RunLoopConfig) (*RunLoop, error) {
+func NewRunLoop(store KernelStore, actions *action.ActionCoordinator, logger *zap.SugaredLogger, config RunLoopConfig) (*RunLoop, error) {
 	if store == nil {
 		return nil, errors.New("run loop needs a kernel store")
 	}
@@ -137,7 +138,7 @@ func NewRunLoop(store KernelStore, actions *ActionCoordinator, logger *zap.Sugar
 func (l *RunLoop) now() time.Time { return l.config.Now().UTC() }
 
 // setActionCoordinator opens each step's nested-action window on actions.
-func (l *RunLoop) setActionCoordinator(actions *ActionCoordinator) { l.actions = actions }
+func (l *RunLoop) setActionCoordinator(actions *action.ActionCoordinator) { l.actions = actions }
 
 type RunLoopClaim struct {
 	Run      *AgentRun // claimed, status running, LeaseOwner == WorkerID

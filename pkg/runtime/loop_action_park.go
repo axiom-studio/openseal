@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
@@ -19,11 +20,11 @@ type governedParker struct {
 	runs        RunCommandStore
 	setups      SkillSetupRequestStore
 	credentials CredentialRequestStore
-	approvals   *ApprovalCoordinator
+	approvals   *action.ApprovalCoordinator
 	now         func() time.Time
 }
 
-func newGovernedParker(store KernelStore, approvals *ApprovalCoordinator, now func() time.Time) governedParker {
+func newGovernedParker(store KernelStore, approvals *action.ApprovalCoordinator, now func() time.Time) governedParker {
 	if now == nil {
 		now = time.Now
 	}
@@ -344,7 +345,7 @@ func (p *governedParker) supersedeHeld(ctx context.Context, run *AgentRun, toolC
 		return nil, false, errors.New("governed parker has no approval coordinator")
 	}
 	result, err := p.approvals.ResolveSupersededByMessage(ctx, run.Scope, approval.ID, approval.Revision, message.ConversationMessage.MessageID)
-	if errors.Is(err, ErrApprovalResolved) || errors.Is(err, ErrApprovalExpired) || errors.Is(err, ErrRevisionConflict) {
+	if errors.Is(err, ErrApprovalResolved) || errors.Is(err, action.ErrApprovalExpired) || errors.Is(err, ErrRevisionConflict) {
 		return nil, true, nil
 	}
 	if err != nil {

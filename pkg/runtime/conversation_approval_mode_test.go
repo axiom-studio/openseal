@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -24,15 +25,15 @@ func TestDefaultActionPolicyApprovalModeMatrix(t *testing.T) {
 		{"write", skill.RiskLevelWrite, skill.SideEffectWrite},
 		{"external", skill.RiskLevelExternal, skill.SideEffectExternal},
 	}
-	want := map[ConversationApprovalMode][3]ActionDisposition{
-		"":                         {ActionDispositionAllow, ActionDispositionRequireApproval, ActionDispositionRequireApproval},
-		ConversationApprovalManual: {ActionDispositionAllow, ActionDispositionRequireApproval, ActionDispositionRequireApproval},
-		ConversationApprovalAuto:   {ActionDispositionAllow, ActionDispositionAllow, ActionDispositionRequireApproval},
-		ConversationApprovalSkip:   {ActionDispositionAllow, ActionDispositionAllow, ActionDispositionAllow},
+	want := map[ConversationApprovalMode][3]runtimeaction.ActionDisposition{
+		"":                         {runtimeaction.ActionDispositionAllow, runtimeaction.ActionDispositionRequireApproval, runtimeaction.ActionDispositionRequireApproval},
+		ConversationApprovalManual: {runtimeaction.ActionDispositionAllow, runtimeaction.ActionDispositionRequireApproval, runtimeaction.ActionDispositionRequireApproval},
+		ConversationApprovalAuto:   {runtimeaction.ActionDispositionAllow, runtimeaction.ActionDispositionAllow, runtimeaction.ActionDispositionRequireApproval},
+		ConversationApprovalSkip:   {runtimeaction.ActionDispositionAllow, runtimeaction.ActionDispositionAllow, runtimeaction.ActionDispositionAllow},
 	}
 	for mode, expected := range want {
 		for index, class := range classes {
-			decision, err := NewDefaultActionPolicy().EvaluateAction(context.Background(), ActionPolicyInput{
+			decision, err := runtimeaction.NewDefaultActionPolicy().EvaluateAction(context.Background(), runtimeaction.ActionPolicyInput{
 				ApprovalMode: mode,
 				Bound: &skill.BoundAction{
 					Definition: &skill.Definition{ID: "work"}, Binding: &skill.Binding{},
@@ -56,10 +57,10 @@ func TestApprovalModeAutoStillReviewsExternalEffectsAndHigherRisk(t *testing.T) 
 		{skill.RiskLevelProduction, skill.SideEffectWrite},
 		{skill.RiskLevelDestructive, skill.SideEffectDestructive},
 	} {
-		if ApprovalModeAllowsAction(ConversationApprovalAuto, "", tc.risk, tc.effect) {
+		if runtimeaction.ApprovalModeAllowsAction(ConversationApprovalAuto, "", tc.risk, tc.effect) {
 			t.Errorf("auto allowed %s risk with %s effect", tc.risk, tc.effect)
 		}
-		if !ApprovalModeAllowsAction(ConversationApprovalSkip, "", tc.risk, tc.effect) {
+		if !runtimeaction.ApprovalModeAllowsAction(ConversationApprovalSkip, "", tc.risk, tc.effect) {
 			t.Errorf("skip required approval for %s risk with %s effect", tc.risk, tc.effect)
 		}
 	}
@@ -72,11 +73,11 @@ func TestApprovalModeNeverWaivesAgentBehaviorReview(t *testing.T) {
 		if !action.AlwaysReview() {
 			t.Fatalf("%s must declare review: always", name)
 		}
-		decision, err := NewDefaultActionPolicy().EvaluateAction(context.Background(), ActionPolicyInput{
+		decision, err := runtimeaction.NewDefaultActionPolicy().EvaluateAction(context.Background(), runtimeaction.ActionPolicyInput{
 			ApprovalMode: ConversationApprovalSkip,
 			Bound:        &skill.BoundAction{Definition: definition, Binding: &skill.Binding{}, Action: action},
 		})
-		if err != nil || decision.Disposition != ActionDispositionRequireApproval {
+		if err != nil || decision.Disposition != runtimeaction.ActionDispositionRequireApproval {
 			t.Fatalf("%s decision = %#v, error = %v", name, decision, err)
 		}
 	}
@@ -85,19 +86,19 @@ func TestApprovalModeNeverWaivesAgentBehaviorReview(t *testing.T) {
 func TestAlwaysReviewActionKeepsApprovalInEveryMode(t *testing.T) {
 	action := skill.Action{Name: "pay", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways}
 	for _, mode := range []ConversationApprovalMode{"", ConversationApprovalManual, ConversationApprovalAuto, ConversationApprovalSkip} {
-		if ApprovalModeAllowsAction(mode, action.Review, action.Risk, action.SideEffect) {
+		if runtimeaction.ApprovalModeAllowsAction(mode, action.Review, action.Risk, action.SideEffect) {
 			t.Fatalf("mode %q waived an always-reviewed action", mode)
 		}
-		decision, err := NewDefaultActionPolicy().EvaluateAction(context.Background(), ActionPolicyInput{
+		decision, err := runtimeaction.NewDefaultActionPolicy().EvaluateAction(context.Background(), runtimeaction.ActionPolicyInput{
 			ApprovalMode: mode,
 			Bound:        &skill.BoundAction{Definition: &skill.Definition{ID: "skill-live-browser"}, Binding: &skill.Binding{}, Action: action},
 		})
-		if err != nil || decision.Disposition != ActionDispositionRequireApproval || decision.Reason != "action always requires explicit review" {
+		if err != nil || decision.Disposition != runtimeaction.ActionDispositionRequireApproval || decision.Reason != "action always requires explicit review" {
 			t.Fatalf("mode %q decision = %#v, error = %v", mode, decision, err)
 		}
 	}
 	action.Review = ""
-	if !ApprovalModeAllowsAction(ConversationApprovalSkip, action.Review, action.Risk, action.SideEffect) {
+	if !runtimeaction.ApprovalModeAllowsAction(ConversationApprovalSkip, action.Review, action.Risk, action.SideEffect) {
 		t.Fatal("skip must still allow an ordinary write action")
 	}
 }
@@ -175,7 +176,7 @@ func TestLooseningApprovalModeApprovesAllowedPendingApprovals(t *testing.T) {
 	service := NewConversationApprovalModeService(store)
 	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalManual).Conversation
 	catalog := approvalModeCatalog(t)
-	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), nil)
+	coordinator := runtimeaction.NewActionCoordinator(store, store, catalog, runtimeaction.NewDefaultActionPolicy(), nil)
 
 	writeApproval := proposeForApprovalMode(t, store, coordinator, conversation, "note")
 	externalApproval := proposeForApprovalMode(t, store, coordinator, conversation, "send")
@@ -188,7 +189,7 @@ func TestLooseningApprovalModeApprovesAllowedPendingApprovals(t *testing.T) {
 		t.Fatalf("auto sweep = %#v", result)
 	}
 	approved, _ := store.GetApproval(ctx, conversation.Scope, writeApproval.ID)
-	if approved.Status != ApprovalStatusApproved || approved.DecisionBy == nil || *approved.DecisionBy != ApprovalModePrincipal || approved.DecisionReason != "approval mode auto" {
+	if approved.Status != ApprovalStatusApproved || approved.DecisionBy == nil || *approved.DecisionBy != runtimeaction.ApprovalModePrincipal || approved.DecisionReason != "approval mode auto" {
 		t.Fatalf("write approval = %#v", approved)
 	}
 	// The Run parked on the approval at step end; the decision queues it.
@@ -229,7 +230,7 @@ func TestTighteningApprovalModeLeavesPendingApprovals(t *testing.T) {
 	store := newTestKernelStore(t)
 	conversation := approvalModeConversation(t, store)
 	service := NewConversationApprovalModeService(store)
-	coordinator := NewActionCoordinator(store, store, approvalModeCatalog(t), NewDefaultActionPolicy(), nil)
+	coordinator := runtimeaction.NewActionCoordinator(store, store, approvalModeCatalog(t), runtimeaction.NewDefaultActionPolicy(), nil)
 	// Under auto, the write proceeds and the external action waits for review.
 	allowed := proposeResultForApprovalMode(t, store, coordinator, conversation.ID, "note", "allowed-run")
 	if allowed.Approval != nil || allowed.Call.Status != ActionCallStatusReady {
@@ -268,25 +269,25 @@ func TestRunConversationIDFallsBackToRootRun(t *testing.T) {
 	root := &AgentRun{ID: "root", Scope: scope, RootRunID: "root", Context: map[string]interface{}{"conversationId": "chat"}}
 	child := &AgentRun{ID: "child", Scope: scope, RootRunID: "root", ParentRunID: "root", Context: map[string]interface{}{}}
 	runs := runsByID{root.ID: cloneAgentRun(root)}
-	if id, err := RunConversationID(ctx, runs, child); err != nil || id != "chat" {
+	if id, err := runtimeaction.RunConversationID(ctx, runs, child); err != nil || id != "chat" {
 		t.Fatalf("child conversation = %q, %v", id, err)
 	}
 	own := &AgentRun{ID: "own", Scope: scope, RootRunID: "root", Context: map[string]interface{}{"conversationId": "direct"}}
-	if id, err := RunConversationID(ctx, runs, own); err != nil || id != "direct" {
+	if id, err := runtimeaction.RunConversationID(ctx, runs, own); err != nil || id != "direct" {
 		t.Fatalf("own conversation = %q, %v", id, err)
 	}
 	orphan := &AgentRun{ID: "orphan", Scope: scope, RootRunID: "missing"}
-	if id, err := RunConversationID(ctx, runs, orphan); err != nil || id != "" {
+	if id, err := runtimeaction.RunConversationID(ctx, runs, orphan); err != nil || id != "" {
 		t.Fatalf("orphan conversation = %q, %v", id, err)
 	}
 	// A Run acting for no stored conversation has no mode (manual behavior).
-	if id, mode, err := RunConversationApprovalMode(ctx, runs, store, child); err != nil || id != "chat" || mode != "" {
+	if id, mode, err := runtimeaction.RunConversationApprovalMode(ctx, runs, store, child); err != nil || id != "chat" || mode != "" {
 		t.Fatalf("missing conversation mode = %q %q %v", id, mode, err)
 	}
 	conversation := approvalModeConversation(t, store)
 	root.Context["conversationId"] = conversation.ID
 	runs[root.ID] = cloneAgentRun(root)
-	if _, mode, err := RunConversationApprovalMode(ctx, runs, store, child); err != nil || mode != ConversationApprovalAuto {
+	if _, mode, err := runtimeaction.RunConversationApprovalMode(ctx, runs, store, child); err != nil || mode != ConversationApprovalAuto {
 		t.Fatalf("root conversation mode = %q %v", mode, err)
 	}
 }
@@ -294,10 +295,10 @@ func TestRunConversationIDFallsBackToRootRun(t *testing.T) {
 func TestActionCoordinatorPassesConversationApprovalModeToPolicy(t *testing.T) {
 	store := newTestKernelStore(t)
 	conversation := approvalModeConversation(t, store)
-	var seen ActionPolicyInput
-	coordinator := NewActionCoordinator(store, store, approvalModeCatalog(t), ActionPolicyEvaluatorFunc(func(_ context.Context, input ActionPolicyInput) (ActionPolicyDecision, error) {
+	var seen runtimeaction.ActionPolicyInput
+	coordinator := runtimeaction.NewActionCoordinator(store, store, approvalModeCatalog(t), runtimeaction.ActionPolicyEvaluatorFunc(func(_ context.Context, input runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
 		seen = input
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "test"}, nil
+		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow, Reason: "test"}, nil
 	}), nil)
 	proposeResultForApprovalMode(t, store, coordinator, conversation.ID, "note", "seen-run")
 	if seen.ConversationID != conversation.ID || seen.ApprovalMode != ConversationApprovalAuto {
@@ -368,7 +369,7 @@ func approvalModeCatalog(t *testing.T) *skill.Catalog {
 
 var approvalModeRunCounter int
 
-func proposeForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *ActionCoordinator, conversation *Conversation, action string) *ApprovalCheckpoint {
+func proposeForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.ActionCoordinator, conversation *Conversation, action string) *ApprovalCheckpoint {
 	t.Helper()
 	approvalModeRunCounter++
 	return proposeForApprovalModeInConversation(t, store, coordinator, conversation.ID, action, fmt.Sprintf("run-%s-%d", action, approvalModeRunCounter))
@@ -377,7 +378,7 @@ func proposeForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *Acti
 // proposeForApprovalModeInConversation proposes action as a loop step of a
 // new Run of the conversation and parks the Run on its approval, as the loop
 // does at step end.
-func proposeForApprovalModeInConversation(t *testing.T, store *sqlite.Store, coordinator *ActionCoordinator, conversationID, action, key string) *ApprovalCheckpoint {
+func proposeForApprovalModeInConversation(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.ActionCoordinator, conversationID, action, key string) *ApprovalCheckpoint {
 	t.Helper()
 	result, f, err := proposeLoopForApprovalMode(t, store, coordinator, conversationID, action, key, map[string]interface{}{})
 	if err != nil {
@@ -391,7 +392,7 @@ func proposeForApprovalModeInConversation(t *testing.T, store *sqlite.Store, coo
 	return result.Approval
 }
 
-func proposeResultForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *ActionCoordinator, conversationID, action, key string) *ActionProposalResult {
+func proposeResultForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.ActionCoordinator, conversationID, action, key string) *ActionProposalResult {
 	t.Helper()
 	result, err := proposeWithArgumentsForApprovalMode(t, store, coordinator, conversationID, action, key, map[string]interface{}{})
 	if err != nil {
@@ -400,7 +401,7 @@ func proposeResultForApprovalMode(t *testing.T, store *sqlite.Store, coordinator
 	return result
 }
 
-func proposeWithArgumentsForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, error) {
+func proposeWithArgumentsForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, error) {
 	t.Helper()
 	result, _, err := proposeLoopForApprovalMode(t, store, coordinator, conversationID, action, key, arguments)
 	return result, err
@@ -408,14 +409,14 @@ func proposeWithArgumentsForApprovalMode(t *testing.T, store *sqlite.Store, coor
 
 // proposeLoopForApprovalMode proposes action as tool call key of a loop step
 // of a new Run acting for conversationID.
-func proposeLoopForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, *loopProposalFixture, error) {
+func proposeLoopForApprovalMode(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, *loopProposalFixture, error) {
 	t.Helper()
 	return proposeLoopForApprovalModeWithContext(t, store, coordinator, map[string]interface{}{"conversationId": conversationID}, action, key, arguments)
 }
 
 // proposeLoopForApprovalModeWithContext is proposeLoopForApprovalMode for a
 // new Run with this Context.
-func proposeLoopForApprovalModeWithContext(t *testing.T, store *sqlite.Store, coordinator *ActionCoordinator, runContext map[string]interface{}, action, key string, arguments map[string]interface{}) (*ActionProposalResult, *loopProposalFixture, error) {
+func proposeLoopForApprovalModeWithContext(t *testing.T, store *sqlite.Store, coordinator *runtimeaction.ActionCoordinator, runContext map[string]interface{}, action, key string, arguments map[string]interface{}) (*ActionProposalResult, *loopProposalFixture, error) {
 	t.Helper()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
@@ -429,7 +430,7 @@ func proposeLoopForApprovalModeWithContext(t *testing.T, store *sqlite.Store, co
 		t.Fatal(err)
 	}
 	f := newLoopProposalFixture(t, store, run, "worker", now)
-	result, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+	result, err := coordinator.Propose(ctx, f.request(runtimeaction.ProposeActionRequest{
 		DeploymentID: "assistant", SkillID: "workspace", SkillVersion: "1.0.0", Action: action, Arguments: arguments,
 		Summary: "Run " + action + " for " + key,
 	}, key))
@@ -538,7 +539,7 @@ func TestApprovalWithoutReviewContextIsNamedByActionIntent(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
 	conversation := approvalModeConversation(t, store)
-	coordinator := NewActionCoordinator(store, store, approvalModeCatalog(t), NewDefaultActionPolicy(), nil)
+	coordinator := runtimeaction.NewActionCoordinator(store, store, approvalModeCatalog(t), runtimeaction.NewDefaultActionPolicy(), nil)
 	scope := conversation.Scope
 	now := time.Now().UTC()
 	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
@@ -550,7 +551,7 @@ func TestApprovalWithoutReviewContextIsNamedByActionIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := newLoopProposalFixture(t, store, run, "worker", now)
-	result, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+	result, err := coordinator.Propose(ctx, f.request(runtimeaction.ProposeActionRequest{
 		DeploymentID: "assistant", SkillID: "workspace", SkillVersion: "1.0.0", Action: "send",
 		Arguments: map[string]interface{}{"intent": "Click 'Search' on google.com", "url": "https://www.google.com/"}, Summary: "Search on google.com",
 	}, "search"))
@@ -582,9 +583,9 @@ func TestAlwaysReviewActionApprovalShowsInputsAndSurvivesSkip(t *testing.T) {
 	conversation := approvalModeConversation(t, store)
 	service := NewConversationApprovalModeService(store)
 	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalSkip).Conversation
-	policy := NewDefaultActionPolicy()
+	policy := runtimeaction.NewDefaultActionPolicy()
 	policy.ApprovalTimeout = ApprovalTimeoutApprove
-	coordinator := NewActionCoordinator(store, store, approvalModeCatalog(t), policy, nil)
+	coordinator := runtimeaction.NewActionCoordinator(store, store, approvalModeCatalog(t), policy, nil)
 
 	arguments := map[string]interface{}{"amount": "1499.00", "currency": "INR", "merchant": "https://www.amazon.in", "cardToken": "tok-secret"}
 	result, err := proposeWithArgumentsForApprovalMode(t, store, coordinator, conversation.ID, "pay", "pay-run", arguments)
@@ -611,8 +612,8 @@ func TestAlwaysReviewActionApprovalShowsInputsAndSurvivesSkip(t *testing.T) {
 		t.Fatalf("always-reviewed approval = %#v", pending)
 	}
 
-	permissive := NewActionCoordinator(store, store, approvalModeCatalog(t), ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "test"}, nil
+	permissive := runtimeaction.NewActionCoordinator(store, store, approvalModeCatalog(t), runtimeaction.ActionPolicyEvaluatorFunc(func(context.Context, runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
+		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow, Reason: "test"}, nil
 	}), nil)
 	if _, err := proposeWithArgumentsForApprovalMode(t, store, permissive, conversation.ID, "pay", "pay-allowed", arguments); err == nil {
 		t.Fatal("a policy allowed an always-reviewed action without review")
@@ -628,8 +629,8 @@ func TestPolicyReviewFloorParksInSkipAndSurvivesSweep(t *testing.T) {
 	service := NewConversationApprovalModeService(store)
 	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalSkip).Conversation
 	approvers := []ApprovalPrincipal{{Type: "user", ID: "owner"}}
-	floor := NewActionCoordinator(store, store, approvalModeCatalog(t), ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "computer asks", Review: skill.ActionReviewAlways,
+	floor := runtimeaction.NewActionCoordinator(store, store, approvalModeCatalog(t), runtimeaction.ActionPolicyEvaluatorFunc(func(context.Context, runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
+		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow, Reason: "computer asks", Review: skill.ActionReviewAlways,
 			EligibleApprovers: approvers, ApprovalTimeout: ApprovalTimeoutApprove}, nil
 	}), nil)
 
@@ -669,15 +670,15 @@ func TestPolicyWithoutReviewFloorKeepsDisposition(t *testing.T) {
 	conversation := approvalModeConversation(t, store)
 	service := NewConversationApprovalModeService(store)
 	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalSkip).Conversation
-	allow := NewActionCoordinator(store, store, approvalModeCatalog(t), ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "test"}, nil
+	allow := runtimeaction.NewActionCoordinator(store, store, approvalModeCatalog(t), runtimeaction.ActionPolicyEvaluatorFunc(func(context.Context, runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
+		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow, Reason: "test"}, nil
 	}), nil)
 	result, err := proposeWithArgumentsForApprovalMode(t, store, allow, conversation.ID, "note", "plain-run", map[string]interface{}{"text": "hi"})
 	if err != nil || result.Approval != nil || result.Call.Status != ActionCallStatusReady || result.Call.Review != "" {
 		t.Fatalf("plain allow = %#v %v", result, err)
 	}
-	invalid := NewActionCoordinator(store, store, approvalModeCatalog(t), ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "test", Review: "sometimes"}, nil
+	invalid := runtimeaction.NewActionCoordinator(store, store, approvalModeCatalog(t), runtimeaction.ActionPolicyEvaluatorFunc(func(context.Context, runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
+		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow, Reason: "test", Review: "sometimes"}, nil
 	}), nil)
 	if _, err := proposeWithArgumentsForApprovalMode(t, store, invalid, conversation.ID, "note", "invalid-run", map[string]interface{}{"text": "hi"}); err == nil {
 		t.Fatal("an unsupported policy review was accepted")

@@ -10,6 +10,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
@@ -82,7 +83,7 @@ func proposeInteractionCall(t *testing.T, ctx context.Context, store *sqlite.Sto
 	}
 	f := newLoopProposalFixture(t, store, created, "worker", time.Now().UTC())
 	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, store)
-	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator}).Propose(ctx, f.request(ProposeActionRequest{
+	proposal, err := runtimeaction.NewActionCoordinator(store, store, catalog, runtimeaction.NewDefaultActionPolicy(), []runtimeaction.ActionProposalValidator{validator}).Propose(ctx, f.request(runtimeaction.ProposeActionRequest{
 		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: action, Arguments: arguments, Summary: "Ask the user"}, "interaction"))
 	if err != nil || proposal.Approval != nil || proposal.Call.Status != ActionCallStatusReady {
 		t.Fatalf("proposal: %#v %v", proposal, err)
@@ -107,7 +108,7 @@ func TestRequestCredentialParksRunUntilTheUserSavesIt(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
 		"kind": "website_login", "website": "https://www.amazon.in/", "reason": "Add your amazon.in login so I can finish the order"})
-	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
+	executed := f.execute(runtimeaction.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["credentialRequest"] == nil {
 		t.Fatalf("credential action: %#v", executed.Call)
 	}
@@ -144,7 +145,7 @@ func TestFailedInteractionRequestsAreExplainedInsteadOfFailingTheRun(t *testing.
 		t.Run(name, func(t *testing.T) {
 			ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 			f, call := proposeInteractionCall(t, ctx, store, catalog, scope, tc.action, tc.arguments)
-			executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
+			executed := f.execute(runtimeaction.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 			refused, _ := executed.Call.Output["refused"].(map[string]interface{})
 			if executed.Call.Status != ActionCallStatusSucceeded || refused == nil || refused["message"] == "" {
 				t.Fatalf("refusal not returned to the model: %#v", executed.Call)
@@ -202,13 +203,13 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	f := newLoopProposalFixture(t, store, created, "worker", time.Now().UTC())
 	run := f.run
 	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, store)
-	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator}).Propose(ctx, f.request(ProposeActionRequest{
+	proposal, err := runtimeaction.NewActionCoordinator(store, store, catalog, runtimeaction.NewDefaultActionPolicy(), []runtimeaction.ActionProposalValidator{validator}).Propose(ctx, f.request(runtimeaction.ProposeActionRequest{
 		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: agentrun.SkillActionRequestCredential,
 		Arguments: map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in", "reason": "Add the login"}, Summary: "Ask the user"}, "request-credential"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, f.worker)
+	executed, err := runtimeaction.NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, f.worker)
 	if err != nil || executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["credentialRequest"] == nil {
 		t.Fatalf("credential action: %#v %v", executed, err)
 	}

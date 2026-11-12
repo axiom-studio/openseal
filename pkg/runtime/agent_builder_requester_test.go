@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 // TestAgentBuilderCardIsDecidedByTheRequester: an agent or team card names
@@ -33,9 +35,9 @@ func TestAgentBuilderCardIsDecidedByTheRequester(t *testing.T) {
 		if err != nil || run == nil {
 			t.Fatalf("claim = %#v, %v", run, err)
 		}
-		policy := NewDefaultActionPolicy()
+		policy := action.NewDefaultActionPolicy()
 		policy.Approvers = []ApprovalPrincipal{{Type: "user", ID: "operator"}}
-		coordinator := NewActionCoordinator(store, store, fixture.catalog, policy, []ActionProposalValidator{fixture.validator})
+		coordinator := action.NewActionCoordinator(store, store, fixture.catalog, policy, []action.ActionProposalValidator{fixture.validator})
 		create := agentBuilderCreateArguments()
 		create["spaceId"] = fixture.salesID
 		result, err := coordinator.Propose(ctx, agentBuilderApprovalRequest(fixture, run, AgentActionCreateAgent, create, "requester-"+tc.actingUser))

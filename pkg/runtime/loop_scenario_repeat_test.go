@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
@@ -177,7 +178,7 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 		for i, entry := range lookups[2:4] {
 			count := i + 3
 			times := []string{"twice", "3 times"}[i]
-			if entry.State != ToolEntryError || repeatGuard(entry) != RefusedLoopCallRepeat ||
+			if entry.State != ToolEntryError || repeatGuard(entry) != action.RefusedLoopCallRepeat ||
 				entry.Tool.Result.Status != ToolResultRefused || !entry.Tool.Result.IsError {
 				t.Fatalf("call %d = %s, want refused", count, describeRepeatEntries(lookups))
 			}
@@ -189,7 +190,7 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 			t.Fatalf("3rd call text = %q, want it to say the call was already made twice", repeatResultText(lookups[2]))
 		}
 		fifth := lookups[4]
-		if fifth.State != ToolEntryError || repeatGuard(fifth) != RefusedLoopCallRepeatLimit || repeatResultText(fifth) != wantRepeatLimit("5 times") {
+		if fifth.State != ToolEntryError || repeatGuard(fifth) != action.RefusedLoopCallRepeatLimit || repeatResultText(fifth) != wantRepeatLimit("5 times") {
 			t.Fatalf("5th call = %s, want the repeat_limit refusal", describeRepeatEntries(lookups[4:]))
 		}
 
@@ -204,20 +205,20 @@ func TestLoopIdenticalReadNoteThenRefusalThenFailure(t *testing.T) {
 				t.Fatalf("refused row = %#v, want loop origin and its prior call", row)
 			}
 		}
-		if codes[RefusedLoopCallRepeat] != 2 {
-			t.Fatalf("repeat_refused rows = %d, want 2 (codes %v)", codes[RefusedLoopCallRepeat], codes)
+		if codes[action.RefusedLoopCallRepeat] != 2 {
+			t.Fatalf("repeat_refused rows = %d, want 2 (codes %v)", codes[action.RefusedLoopCallRepeat], codes)
 		}
 		for i, entry := range lookups[2:] {
 			if entry.ActionCallID == "" {
 				t.Fatalf("refused call %d names no action_calls row", i+3)
 			}
 		}
-		if len(f.events(run.ID, ActivityEventActionRefused)) != len(refused) {
-			t.Fatalf("action.refused events = %d, want %d", len(f.events(run.ID, ActivityEventActionRefused)), len(refused))
+		if len(f.events(run.ID, action.ActivityEventActionRefused)) != len(refused) {
+			t.Fatalf("action.refused events = %d, want %d", len(f.events(run.ID, action.ActivityEventActionRefused)), len(refused))
 		}
 
 		final := f.mustRun(run.ID)
-		if final.FailureExplanation == nil || final.FailureExplanation.Code != RunFailureCodeRepeatLimit ||
+		if final.FailureExplanation == nil || final.FailureExplanation.Code != action.RunFailureCodeRepeatLimit ||
 			final.FailureExplanation.Kind != RunFailureKindRepeatLimit || !final.FailureExplanation.Explained {
 			t.Fatalf("failure = %#v, want an explained repeat_limit", final.FailureExplanation)
 		}
@@ -382,7 +383,7 @@ func TestLoopIdenticalReadsAreCanonicalisedByArguments(t *testing.T) {
 		if updates[0].Tool.ArgumentsDigest != updates[1].Tool.ArgumentsDigest {
 			t.Fatal("reordered write arguments have different digests")
 		}
-		if updates[1].State != ToolEntryError || repeatGuard(updates[1]) != RefusedLoopCallDuplicateSuppressed {
+		if updates[1].State != ToolEntryError || repeatGuard(updates[1]) != action.RefusedLoopCallDuplicateSuppressed {
 			t.Fatalf("reordered write = %s, want duplicate_suppressed", describeRepeatEntries(updates))
 		}
 		if got := f.dispatch.count("update_status"); got != 1 {
@@ -420,7 +421,7 @@ func TestLoopIdenticalWriteAfterSuccessIsSuppressed(t *testing.T) {
 			t.Fatalf("send entries = %s", describeRepeatEntries(sends))
 		}
 		second := sends[1]
-		if second.State != ToolEntryError || repeatGuard(second) != RefusedLoopCallDuplicateSuppressed ||
+		if second.State != ToolEntryError || repeatGuard(second) != action.RefusedLoopCallDuplicateSuppressed ||
 			second.Tool.Result.Status != ToolResultDuplicateSuppressed || second.Tool.DuplicateOfEntryID != sends[0].ID {
 			t.Fatalf("second send = %s (dup of %q), want duplicate_suppressed of the first", describeRepeatEntries(sends[1:]), second.Tool.DuplicateOfEntryID)
 		}
@@ -432,14 +433,14 @@ func TestLoopIdenticalWriteAfterSuccessIsSuppressed(t *testing.T) {
 			t.Fatalf("suppressed text %q does not carry step %d's result %q", text, sends[0].Step, repeatResultText(sends[0]))
 		}
 		rows := repeatCallsByStatus(f, run.ID, "send", ActionCallStatusRefused)
-		if len(rows) != 1 || rows[0].ErrorCode != RefusedLoopCallDuplicateSuppressed || rows[0].ID != second.ActionCallID {
+		if len(rows) != 1 || rows[0].ErrorCode != action.RefusedLoopCallDuplicateSuppressed || rows[0].ID != second.ActionCallID {
 			t.Fatalf("refused send rows = %#v, want one duplicate_suppressed row named by the entry", rows)
 		}
 		succeeded := repeatCallsByStatus(f, run.ID, "send", ActionCallStatusSucceeded)
 		if len(succeeded) != 1 || rows[0].DuplicateOfActionCallID != succeeded[0].ID {
 			t.Fatalf("suppressed row duplicates %q, want the succeeded send", rows[0].DuplicateOfActionCallID)
 		}
-		if refusedEvents := f.events(run.ID, ActivityEventActionRefused); len(refusedEvents) != 1 || refusedEvents[0].Summary != "Already done; not repeated" {
+		if refusedEvents := f.events(run.ID, action.ActivityEventActionRefused); len(refusedEvents) != 1 || refusedEvents[0].Summary != "Already done; not repeated" {
 			t.Fatalf("action.refused events = %d", len(refusedEvents))
 		}
 	})
@@ -519,13 +520,13 @@ func TestLoopRepeatsAreCountedAcrossClaimsAndParks(t *testing.T) {
 			t.Fatalf("lookup dispatched %d times, want 2", got)
 		}
 		lookups := repeatToolEntries(f, run.ID, "lookup")
-		if len(lookups) != 3 || repeatGuard(lookups[2]) != RefusedLoopCallRepeat || lookups[2].State != ToolEntryError {
+		if len(lookups) != 3 || repeatGuard(lookups[2]) != action.RefusedLoopCallRepeat || lookups[2].State != ToolEntryError {
 			t.Fatalf("lookups = %s, want the 3rd refused in the second claim", describeRepeatEntries(lookups))
 		}
 		if lookups[2].StepID == lookups[1].StepID {
 			t.Fatal("the refused lookup ran in the same step as the second")
 		}
-		if rows := repeatCallsByStatus(f, run.ID, "lookup", ActionCallStatusRefused); len(rows) != 1 || rows[0].ErrorCode != RefusedLoopCallRepeat {
+		if rows := repeatCallsByStatus(f, run.ID, "lookup", ActionCallStatusRefused); len(rows) != 1 || rows[0].ErrorCode != action.RefusedLoopCallRepeat {
 			t.Fatalf("refused rows = %#v", rows)
 		}
 	})
@@ -551,7 +552,7 @@ func TestLoopVMNestedCallsAreNotCountedAsRepeats(t *testing.T) {
 					return hostText("no lookup tool"), nil
 				}
 				for i := 1; i <= 3; i++ {
-					nested, err := f.actions.ProposeNested(ctx, NestedActionRequest{
+					nested, err := f.actions.ProposeNested(ctx, action.NestedActionRequest{
 						Scope: req.Scope, RunID: req.RunID, TurnID: req.StepID, Capability: capabilityName,
 						Arguments: map[string]interface{}{"id": "6815"}, Origin: ActionOriginVM,
 						OriginRef: req.CommandRef, IdempotencyKey: fmt.Sprintf("bridge-%d", i),
@@ -611,7 +612,7 @@ func TestLoopVMNestedCallsAreNotCountedAsRepeats(t *testing.T) {
 		if notes := repeatNotes(f, run.ID); len(notes) != 0 {
 			t.Fatalf("repeat notes = %d, want 0", len(notes))
 		}
-		if len(f.events(run.ID, ActivityEventActionRefused)) != 0 {
+		if len(f.events(run.ID, action.ActivityEventActionRefused)) != 0 {
 			t.Fatal("a nested call was refused")
 		}
 	})

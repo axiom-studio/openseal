@@ -19,6 +19,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -209,8 +210,8 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 			failed := f.driveToRest(run.ID, 4)
 			f.mustStatus(failed, AgentRunStatusFailed)
 			portRequireTypedFailure(t, failed)
-			if failed.FailureExplanation.Code != RunFailureCodeRepeatLimit || !failed.FailureExplanation.Explained {
-				t.Fatalf("failure = %#v, want an explained %s", failed.FailureExplanation, RunFailureCodeRepeatLimit)
+			if failed.FailureExplanation.Code != action.RunFailureCodeRepeatLimit || !failed.FailureExplanation.Explained {
+				t.Fatalf("failure = %#v, want an explained %s", failed.FailureExplanation, action.RunFailureCodeRepeatLimit)
 			}
 			answers := portAgentMessages(f, conversation.ID)
 			if len(answers) != 1 || !strings.Contains(answers[0].Content, "so I stopped") {

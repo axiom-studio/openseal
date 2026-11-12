@@ -14,6 +14,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -179,7 +180,7 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 		(!replay && approval.Revision != revision) || !destination {
 		return nil, fmt.Errorf("%w: approval decision does not match the reviewed action", ErrInvalidExternalConversation)
 	}
-	var authorizer ApprovalAuthorizer = EligibleApprovalAuthorizer{}
+	var authorizer action.ApprovalAuthorizer = action.EligibleApprovalAuthorizer{}
 	if originReview && principalType == "external_participant" {
 		if strings.TrimSpace(event.ExternalParticipantID) == "" || principalID != event.ExternalParticipantID {
 			return nil, fmt.Errorf("%w: approval participant does not match the source event", ErrInvalidExternalConversation)
@@ -187,13 +188,13 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 		// Source conversation members may decide without an app account mapping.
 		// The adapter authenticates the provider identity; the durable imported
 		// trigger above limits this authority to the originating conversation.
-		authorizer = ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil })
+		authorizer = action.ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil })
 	}
 	// Neither authorizer above is an AgentBuilderApprovalAuthorizer, so an
 	// external channel reply can reject but never approve an agent-builder
 	// card (D11); those cards also get no external destinations.
-	coordinator := NewApprovalCoordinator(store, store, authorizer, models.WithClock(s.now))
-	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
+	coordinator := action.NewApprovalCoordinator(store, store, authorizer, models.WithClock(s.now))
+	resolution, err := coordinator.Resolve(ctx, action.ResolveApprovalRequest{
 		Scope: endpoint.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
 		DecisionID: event.ID, Decision: ApprovalDecision(decision),
 		Principal: ApprovalPrincipal{Type: principalType, ID: principalID}, Reason: reason,

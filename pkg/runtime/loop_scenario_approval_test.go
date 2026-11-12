@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -249,7 +250,7 @@ func TestLoopApprovalDecisionOutcomes(t *testing.T) {
 			{name: "superseded", decide: func(f *loopFixture, conversation *Conversation, _ *AgentRun) {
 				f.clock.Advance(time.Second)
 				f.postUser(conversation.ID, loopFixtureUser, "actually leave it open")
-			}, tail: "tool:error,user,assistant", contains: []string{string(ToolResultSuperseded), ApprovalSupersededReason}, reply: "Leaving 6815 open."},
+			}, tail: "tool:error,user,assistant", contains: []string{string(ToolResultSuperseded), action.ApprovalSupersededReason}, reply: "Leaving 6815 open."},
 			{name: "expired", decide: func(f *loopFixture, _ *Conversation, run *AgentRun) {
 				f.clock.Advance(time.Hour + time.Second)
 				approval := f.approvals(run.ID)[0]

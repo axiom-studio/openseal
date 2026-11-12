@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -31,7 +32,7 @@ func BenchmarkActionWorkerIdleClaims(b *testing.B) {
 				for range b.N {
 					store := &countingActionPoolStore{Store: newTestKernelStore(b)}
 					catalog := skill.NewCatalog()
-					dispatcher := ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+					dispatcher := action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 						return nil, errors.New("idle benchmark cannot dispatch")
 					})
 					scope := Scope{Kind: "tenant", ID: "idle-benchmark"}
@@ -39,15 +40,15 @@ func BenchmarkActionWorkerIdleClaims(b *testing.B) {
 					var stop func()
 					started := time.Now()
 					if coalesced {
-						pool, err := NewActionWorkerPool(store, catalog, nil, dispatcher, nil,
-							ActionWorkerConfig{Scope: scope, Concurrency: workers, PollInterval: interval})
+						pool, err := action.NewActionWorkerPool(store, catalog, nil, dispatcher, nil,
+							action.ActionWorkerConfig{Scope: scope, Concurrency: workers, PollInterval: interval})
 						if err != nil {
 							b.Fatal(err)
 						}
 						pool.Start(ctx)
 						stop = pool.Stop
 					} else {
-						worker := NewActionWorker(store, catalog, nil, dispatcher)
+						worker := action.NewActionWorker(store, catalog, nil, dispatcher)
 						var wg sync.WaitGroup
 						for index := range workers {
 							wg.Add(1)

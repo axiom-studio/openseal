@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -17,7 +18,7 @@ func TestTeamMemberActionIsOnlyInTheCurrentContract(t *testing.T) {
 		}
 		definition := TeamManagementSkill()
 		definition.Version = version
-		bound := &skill.BoundAction{Definition: definition, Action: definition.Actions[TeamActionUpdateMember]}
+		bound := &skill.BoundAction{Definition: definition, Action: definition.Actions[action.TeamActionUpdateMember]}
 		if got := isTeamMemberAction(bound); got != want {
 			t.Errorf("isTeamMemberAction(%s) = %v", version, got)
 		}

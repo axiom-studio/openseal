@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
-func refusedLoopCallRequest(f *loopStoreFixture, prior *ActionCall, code string) RefusedLoopCallRequest {
-	return RefusedLoopCallRequest{
+func refusedLoopCallRequest(f *loopStoreFixture, prior *ActionCall, code string) action.RefusedLoopCallRequest {
+	return action.RefusedLoopCallRequest{
 		Scope: f.scope, Run: f.run, StepID: "step-5", DeploymentID: prior.DeploymentID,
 		SkillID: prior.SkillID, SkillVersion: prior.SkillVersion, Action: prior.Action,
 		Risk: prior.Risk, SideEffect: prior.SideEffect,
@@ -25,9 +26,9 @@ func TestNewRefusedLoopCallRow(t *testing.T) {
 	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newLoopStoreFixture(t, store)
 		prior := f.propose(f.loopCall("prior"))
-		coordinator := NewActionCoordinator(store, store, nil, nil, nil, models.WithClock(func() time.Time { return f.now }))
+		coordinator := action.NewActionCoordinator(store, store, nil, nil, nil, models.WithClock(func() time.Time { return f.now }))
 
-		result, err := coordinator.RecordRefusedLoopCall(f.ctx, refusedLoopCallRequest(f, prior, RefusedLoopCallRepeat))
+		result, err := coordinator.RecordRefusedLoopCall(f.ctx, refusedLoopCallRequest(f, prior, action.RefusedLoopCallRepeat))
 		if err != nil || result == nil || !result.Created || result.Run != nil {
 			t.Fatalf("record refused = %#v, %v", result, err)
 		}
@@ -36,7 +37,7 @@ func TestNewRefusedLoopCallRow(t *testing.T) {
 			t.Fatal(err)
 		}
 		if call.Status != ActionCallStatusRefused || call.Origin != ActionOriginLoop || call.Execution != ActionExecutionLoop ||
-			call.TurnID != "step-5" || call.ErrorCode != RefusedLoopCallRepeat || call.DuplicateOfActionCallID != prior.ID ||
+			call.TurnID != "step-5" || call.ErrorCode != action.RefusedLoopCallRepeat || call.DuplicateOfActionCallID != prior.ID ||
 			call.MaxAttempts != 1 || call.CompletedAt == nil || call.ExternalOperationDigest != "" || call.IdempotencyKey != "" {
 			t.Fatalf("refused row = %#v", call)
 		}
@@ -50,8 +51,8 @@ func TestNewRefusedLoopCallRow(t *testing.T) {
 			t.Fatalf("digests = %q %q", call.InvocationDigest, call.SemanticDigest)
 		}
 		event := result.Event
-		if event == nil || event.EventType != ActivityEventActionRefused || event.Summary != "Skipped a repeated call" || event.TurnID != "step-5" ||
-			event.Payload["actionCallId"] != call.ID || event.Payload["duplicateOfActionCallId"] != prior.ID || event.Payload["errorCode"] != RefusedLoopCallRepeat ||
+		if event == nil || event.EventType != action.ActivityEventActionRefused || event.Summary != "Skipped a repeated call" || event.TurnID != "step-5" ||
+			event.Payload["actionCallId"] != call.ID || event.Payload["duplicateOfActionCallId"] != prior.ID || event.Payload["errorCode"] != action.RefusedLoopCallRepeat ||
 			event.Payload["skillId"] != prior.SkillID || event.Payload["action"] != prior.Action {
 			t.Fatalf("event = %#v", event)
 		}
@@ -68,8 +69,8 @@ func TestNewRefusedLoopCallRow(t *testing.T) {
 func TestNewRefusedLoopCallDuplicateSuppressedSummary(t *testing.T) {
 	f := newLoopStoreFixture(t, newTestKernelStore(t))
 	prior := f.propose(f.loopCall("prior"))
-	coordinator := NewActionCoordinator(f.store, f.store, nil, nil, nil)
-	_, event, err := coordinator.NewRefusedLoopCall(refusedLoopCallRequest(f, prior, RefusedLoopCallDuplicateSuppressed))
+	coordinator := action.NewActionCoordinator(f.store, f.store, nil, nil, nil)
+	_, event, err := coordinator.NewRefusedLoopCall(refusedLoopCallRequest(f, prior, action.RefusedLoopCallDuplicateSuppressed))
 	if err != nil || event.Summary != "Already done; not repeated" {
 		t.Fatalf("event = %#v, %v", event, err)
 	}
@@ -78,7 +79,7 @@ func TestNewRefusedLoopCallDuplicateSuppressedSummary(t *testing.T) {
 			t.Fatalf("code %q got a refused row", code)
 		}
 	}
-	missingPrior := refusedLoopCallRequest(f, prior, RefusedLoopCallRepeatLimit)
+	missingPrior := refusedLoopCallRequest(f, prior, action.RefusedLoopCallRepeatLimit)
 	missingPrior.DuplicateOfActionCallID = ""
 	if _, _, err := coordinator.NewRefusedLoopCall(missingPrior); err == nil {
 		t.Fatal("a refused row without its prior call was built")
@@ -88,8 +89,8 @@ func TestNewRefusedLoopCallDuplicateSuppressedSummary(t *testing.T) {
 func TestRefusedLoopCallRequiresLiveLease(t *testing.T) {
 	f := newLoopStoreFixture(t, newTestKernelStore(t))
 	prior := f.propose(f.loopCall("prior"))
-	coordinator := NewActionCoordinator(f.store, f.store, nil, nil, nil)
-	req := refusedLoopCallRequest(f, prior, RefusedLoopCallRepeat)
+	coordinator := action.NewActionCoordinator(f.store, f.store, nil, nil, nil)
+	req := refusedLoopCallRequest(f, prior, action.RefusedLoopCallRepeat)
 	req.Lease = &AgentRunLeaseGuard{WorkerID: "other-worker", Now: f.now}
 	if _, err := coordinator.RecordRefusedLoopCall(f.ctx, req); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("foreign lease err = %v", err)
@@ -109,7 +110,7 @@ func TestRefusedDoesNotProtectExternalOperation(t *testing.T) {
 		digest := "sha256:0000000000000000000000000000000000000000000000000000000000000abc"
 		refused := f.loopCall("refused")
 		refused.Status, refused.ExternalOperationDigest, refused.CompletedAt = ActionCallStatusRefused, digest, &f.now
-		refused.ErrorCode = RefusedLoopCallRepeat
+		refused.ErrorCode = action.RefusedLoopCallRepeat
 		f.propose(refused)
 		if _, err := store.GetActionCallByExternalOperation(f.ctx, f.scope, digest); !errors.Is(err, ErrActionNotFound) {
 			t.Fatalf("refused row protects external operation: %v", err)

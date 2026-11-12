@@ -11,6 +11,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -112,7 +113,7 @@ func prepareActivationReporting(ctx context.Context, store ConversationStore, a 
 // run_command; the kernel pins the script's current version when the
 // routine is proposed.
 func scheduledTaskCreateAction() skill.Action {
-	return skill.Action{Name: RunbookActionCreateTask, Description: "Create and activate a routine when the user wants future, repeated or event-driven work. The current Agent executes the supplied goal with its authorized tools on each occurrence and posts results to this chat. This creates a real routine, not a sleeping chat reply. Tool access and approval requirements still apply on each run." +
+	return skill.Action{Name: action.RunbookActionCreateTask, Description: "Create and activate a routine when the user wants future, repeated or event-driven work. The current Agent executes the supplied goal with its authorized tools on each occurrence and posts results to this chat. This creates a real routine, not a sleeping chat reply. Tool access and approval requirements still apply on each run." +
 		" To start the work when something happens rather than on a clock, call event_sources first and pass trigger.event with a source from it; prefer an event over a frequent schedule whenever a source exists. Put conditions in filter rather than in goal. Use maximumOccurrences 1 for a one-time follow-up such as 'tell me when Ana replies'. In goal, say what to do with the event; the event itself is given to each run." +
 		" To keep an app's data fresh, pass its appId; each occurrence then saves results to that app with save_app_data." +
 		" The user always approves a brief before the routine is created: always pass brief with a one-sentence summary of what it does and when, deliverTo naming where results go, and grants listing only the actions its runs need to perform without asking (for example web search or page reads and an email to the user). Runs ask in this chat before any other side effect, and actions that always ask, such as paying, cannot be granted." +
@@ -163,7 +164,7 @@ func scheduledTaskCreateAction() skill.Action {
 					"filesVersion":   map[string]interface{}{"type": "integer", "minimum": 1, "description": "Filled in by the system; omit it."},
 				},
 			},
-		}}, OutputSchema: scheduledTaskResultSchema(RunbookActionCreateTask)}
+		}}, OutputSchema: scheduledTaskResultSchema(action.RunbookActionCreateTask)}
 }
 
 // scheduledTaskTriggerSchema is create_task's trigger: exactly one of a
@@ -225,21 +226,21 @@ func scheduledTaskTriggerSchema() map[string]interface{} {
 }
 
 func scheduledTaskListAction() skill.Action {
-	return skill.Action{Name: RunbookActionList, Description: "List routines owned by this Agent or Team, including exact activation IDs, schedules, status, revisions, next occurrence and originating chat. Use these IDs to start, pause, resume, cancel or replace a schedule.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"offset": map[string]interface{}{"type": "integer", "minimum": 0}}}, OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"activations": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}, "nextOffset": map[string]interface{}{"type": "integer"}}, "required": []interface{}{"activations"}}}
+	return skill.Action{Name: action.RunbookActionList, Description: "List routines owned by this Agent or Team, including exact activation IDs, schedules, status, revisions, next occurrence and originating chat. Use these IDs to start, pause, resume, cancel or replace a schedule.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"offset": map[string]interface{}{"type": "integer", "minimum": 0}}}, OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"activations": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}, "nextOffset": map[string]interface{}{"type": "integer"}}, "required": []interface{}{"activations"}}}
 }
 func scheduledTaskStatusAction() skill.Action {
-	return skill.Action{Name: RunbookActionSetStatus, Description: "Pause, resume or cancel future occurrences of an owned routine using its exact activationId and expectedRevision from list. active resumes; paused suspends; retired cancels permanently. Existing runs continue separately and can be controlled with Run tools. To change timing, retire then replace_schedule; the work and reporting destination remain unchanged.", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"activationId", "expectedRevision", "status", "reason"}, "properties": map[string]interface{}{"activationId": map[string]interface{}{"type": "string", "minLength": 1}, "expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1}, "status": map[string]interface{}{"type": "string", "enum": []interface{}{"active", "paused", "retired"}}, "reason": map[string]interface{}{"type": "string", "minLength": 1}}}, OutputSchema: scheduledTaskResultSchema(RunbookActionSetStatus)}
+	return skill.Action{Name: action.RunbookActionSetStatus, Description: "Pause, resume or cancel future occurrences of an owned routine using its exact activationId and expectedRevision from list. active resumes; paused suspends; retired cancels permanently. Existing runs continue separately and can be controlled with Run tools. To change timing, retire then replace_schedule; the work and reporting destination remain unchanged.", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"activationId", "expectedRevision", "status", "reason"}, "properties": map[string]interface{}{"activationId": map[string]interface{}{"type": "string", "minLength": 1}, "expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1}, "status": map[string]interface{}{"type": "string", "enum": []interface{}{"active", "paused", "retired"}}, "reason": map[string]interface{}{"type": "string", "minLength": 1}}}, OutputSchema: scheduledTaskResultSchema(action.RunbookActionSetStatus)}
 }
 
 // scheduledTaskSetScriptAction re-pins a script routine to its chat file's
 // current version. Like creating the routine, it always shows the brief.
 func scheduledTaskSetScriptAction() skill.Action {
-	return skill.Action{Name: RunbookActionSetScript, Description: "Make a routine that runs a saved script run the script's current version from this chat's files. A routine keeps running the version approved in its brief after the script changes; use this only when the person wants the new version, after you tested it with run_command. The person approves the routine's brief again before it changes. Use the exact activationId and expectedRevision from list.", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Review: skill.ActionReviewAlways,
+	return skill.Action{Name: action.RunbookActionSetScript, Description: "Make a routine that runs a saved script run the script's current version from this chat's files. A routine keeps running the version approved in its brief after the script changes; use this only when the person wants the new version, after you tested it with run_command. The person approves the routine's brief again before it changes. Use the exact activationId and expectedRevision from list.", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Review: skill.ActionReviewAlways,
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"activationId", "expectedRevision"}, "properties": map[string]interface{}{
 			"activationId": map[string]interface{}{"type": "string", "minLength": 1}, "expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1},
 			"digest":       map[string]interface{}{"type": "string", "description": "Filled in by the system; omit it."},
 			"filesVersion": map[string]interface{}{"type": "integer", "minimum": 1, "description": "Filled in by the system; omit it."},
-		}}, OutputSchema: scheduledTaskResultSchema(RunbookActionSetScript)}
+		}}, OutputSchema: scheduledTaskResultSchema(action.RunbookActionSetScript)}
 }
 
 func scheduledTaskResultSchema(operation string) map[string]interface{} {
@@ -455,12 +456,12 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		return nil, err
 	}
 	switch input.Bound.Action.Name {
-	case RunbookActionCreateTask:
+	case action.RunbookActionCreateTask:
 		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, files, events, input.Run, "", input.Arguments)
 		if err != nil {
 			return nil, err
 		}
-		preview := map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionCreateTask, "title": args.Title, "goal": task.Goal, "conversationId": task.ConversationID}
+		preview := map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": action.RunbookActionCreateTask, "title": args.Title, "goal": task.Goal, "conversationId": task.ConversationID}
 		if input.IdempotencyKey != "" {
 			// The activation the approved call creates has this ID, so the
 			// decided approval can open the routine (a webhook's address)
@@ -480,7 +481,7 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			preview["script"] = routineScriptMap(task.Script)
 		}
 		return preview, nil
-	case RunbookActionSetScript:
+	case action.RunbookActionSetScript:
 		_, a, script, err := resolveOwnedTaskScript(ctx, store, files, input.Run, input.Arguments)
 		if err != nil {
 			return nil, err
@@ -489,7 +490,7 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			return nil, err
 		}
 		return routineScriptChangePreview(ctx, store, a, script)
-	case RunbookActionList, RunbookActionEventSources:
+	case action.RunbookActionList, RunbookActionEventSources:
 		return nil, nil
 	case RunbookActionSendTestEvent:
 		a, _, err := resolveRoutineTestEvent(ctx, store, events, input.Run, input.Arguments)
@@ -497,12 +498,12 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			return nil, err
 		}
 		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSendTestEvent, "activationId": a.ID, "event": routineEventPreview(a.Task.Event)}, nil
-	case RunbookActionSetStatus:
+	case action.RunbookActionSetStatus:
 		args, a, err := resolveOwnedTaskStatus(ctx, store, input.Run, input.Arguments)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSetStatus, "activationId": a.ID, "currentStatus": a.Status, "status": args.Status, "reason": args.Reason}, nil
+		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": action.RunbookActionSetStatus, "activationId": a.ID, "currentStatus": a.Status, "status": args.Status, "reason": args.Reason}, nil
 	}
 	return nil, errors.New("unsupported scheduled task action")
 }
@@ -518,7 +519,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		return nil, err
 	}
 	switch input.Bound.Action.Name {
-	case RunbookActionList:
+	case action.RunbookActionList:
 		var args struct {
 			Offset int `json:"offset"`
 		}
@@ -541,7 +542,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		return dispatchRoutineEventSources(ctx, store, events, run, input.Arguments)
 	case RunbookActionSendTestEvent:
 		return dispatchRoutineTestEvent(ctx, store, events, run, input.Arguments)
-	case RunbookActionCreateTask:
+	case action.RunbookActionCreateTask:
 		if input.Call.IdempotencyKey == "" {
 			return nil, errors.New("scheduled task requires action idempotency")
 		}
@@ -576,8 +577,8 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionCreateTask, "activation": activation, "objective": objective.Objective, "replayed": !objective.Created}, nil
-	case RunbookActionSetStatus:
+		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": action.RunbookActionCreateTask, "activation": activation, "objective": objective.Objective, "replayed": !objective.Created}, nil
+	case action.RunbookActionSetStatus:
 		// Replay after the lifecycle update committed but the action receipt did not.
 		var args scheduledTaskStatusArguments
 		if err := decodeScheduledTaskArguments(input.Arguments, &args); err != nil {
@@ -592,7 +593,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		}
 		// The action checkpoint uses CAS; arbitrary stale revisions remain conflicts.
 		if current.LifecycleActionID == input.Call.ID && current.Status == args.Status {
-			return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSetStatus, "activation": current, "replayed": true}, nil
+			return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": action.RunbookActionSetStatus, "activation": current, "replayed": true}, nil
 		}
 		_, owned, err := resolveOwnedTaskStatus(ctx, store, run, input.Arguments)
 		if err != nil {
@@ -606,8 +607,8 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSetStatus, "activation": activation, "replayed": false}, nil
-	case RunbookActionSetScript:
+		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": action.RunbookActionSetStatus, "activation": activation, "replayed": false}, nil
+	case action.RunbookActionSetScript:
 		var args scheduledTaskSetScriptArguments
 		if err := decodeScheduledTaskArguments(input.Arguments, &args); err != nil {
 			return nil, err
@@ -624,7 +625,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			if err := authorizeRoutineChange(current, run); err != nil {
 				return nil, err
 			}
-			return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSetScript, "activation": current, "replayed": true}, nil
+			return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": action.RunbookActionSetScript, "activation": current, "replayed": true}, nil
 		}
 		_, a, script, err := resolveOwnedTaskScript(ctx, store, files, run, input.Arguments)
 		if err != nil {
@@ -637,7 +638,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSetScript, "activation": activation, "replayed": false}, nil
+		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": action.RunbookActionSetScript, "activation": activation, "replayed": false}, nil
 	}
 	return nil, errors.New("unsupported scheduled task action")
 }

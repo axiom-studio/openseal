@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -51,14 +52,14 @@ func (f *routineGrantFixtureState) withBindingTools(t *testing.T) {
 	}
 }
 
-func (f *routineGrantFixtureState) proposeTool(t *testing.T, coordinator *ActionCoordinator, run *AgentRun, slug, action, tool, key string) *ActionProposalResult {
+func (f *routineGrantFixtureState) proposeTool(t *testing.T, coordinator *runtimeaction.ActionCoordinator, run *AgentRun, slug, action, tool, key string) *ActionProposalResult {
 	t.Helper()
 	return f.proposeBindingTool(t, coordinator, run, slug+"-binding", 1, action, tool, slug+"-"+tool, key)
 }
 
-func (f *routineGrantFixtureState) proposeBindingTool(t *testing.T, coordinator *ActionCoordinator, run *AgentRun, bindingID string, revision int64, action, tool, hash, key string) *ActionProposalResult {
+func (f *routineGrantFixtureState) proposeBindingTool(t *testing.T, coordinator *runtimeaction.ActionCoordinator, run *AgentRun, bindingID string, revision int64, action, tool, hash, key string) *ActionProposalResult {
 	t.Helper()
-	result, err := coordinator.Propose(t.Context(), ProposeActionRequest{
+	result, err := coordinator.Propose(t.Context(), runtimeaction.ProposeActionRequest{
 		Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, BindingID: bindingID, BindingRevision: revision,
 		SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: action, IdempotencyKey: key,
 		Arguments: map[string]interface{}{"tool": tool, "hash": hash, "arguments": map[string]interface{}{"title": "Forecast"}},
@@ -120,7 +121,7 @@ func TestRoutineGrantCoversOnlyTheGrantedBindingTool(t *testing.T) {
 	f.withBindingTools(t)
 	activation, _ := f.createRoutine(t, map[string]interface{}{"action": "mcp.github.create_issue"})
 	f.reviewEverything(t, activation)
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy(), nil)
+	coordinator := runtimeaction.NewActionCoordinator(f.store, f.store, f.catalog, runtimeaction.NewDefaultActionPolicy(), nil)
 
 	cases := []struct {
 		name, slug, action, tool string
@@ -169,7 +170,7 @@ func TestRoutineGrantPinsTheApprovedTool(t *testing.T) {
 	if pin := activation.Task.Grants[0].ToolArguments; !reflect.DeepEqual(pin, map[string]interface{}{"tool": "create_issue", "hash": "github-create_issue"}) {
 		t.Fatalf("stored pin = %#v", pin)
 	}
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy(), nil)
+	coordinator := runtimeaction.NewActionCoordinator(f.store, f.store, f.catalog, runtimeaction.NewDefaultActionPolicy(), nil)
 	if result := f.proposeTool(t, coordinator, f.routineOccurrence(t, activation, "pinned"), "github", "call", "create_issue", "pinned"); result.Approval != nil {
 		t.Fatal("the approved tool asked")
 	}

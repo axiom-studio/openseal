@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -521,13 +522,13 @@ func (f *loopStoreFixture) parkOn(approvalID string) {
 	f.run = f.currentRun()
 }
 
-func (f *loopStoreFixture) approvalCoordinator(at time.Time) *ApprovalCoordinator {
-	coordinator := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return at }))
+func (f *loopStoreFixture) approvalCoordinator(at time.Time) *action.ApprovalCoordinator {
+	coordinator := action.NewApprovalCoordinator(f.store, f.store, action.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return at }))
 	return coordinator
 }
 
-func (f *loopStoreFixture) decide(coordinator *ApprovalCoordinator, approval *models.ApprovalCheckpoint, decision models.ApprovalDecision, reason string) (*models.ApprovalResolutionResult, error) {
-	return coordinator.Resolve(f.ctx, ResolveApprovalRequest{
+func (f *loopStoreFixture) decide(coordinator *action.ApprovalCoordinator, approval *models.ApprovalCheckpoint, decision models.ApprovalDecision, reason string) (*models.ApprovalResolutionResult, error) {
+	return coordinator.Resolve(f.ctx, action.ResolveApprovalRequest{
 		Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision,
 		DecisionID: "decision-" + approval.ID, Decision: decision, Principal: loopApprover, Reason: reason,
 	})

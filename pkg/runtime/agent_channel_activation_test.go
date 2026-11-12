@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -28,7 +29,7 @@ type channelActionFixture struct {
 	scope       Scope
 	endpoint    *ExternalConversationEndpoint
 	run         *AgentRun
-	coordinator *ActionCoordinator
+	coordinator *action.ActionCoordinator
 	dispatcher  *AgentBehaviorActionDispatcher
 }
 
@@ -94,15 +95,15 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "Review routing", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour}, nil
+	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review routing", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour}, nil
 	})
 	dispatcher, err := NewAgentBehaviorActionDispatcher(store, agents, nil, endpoints)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &channelActionFixture{store: store, db: db, agents: agents, endpoints: endpoints, resolver: resolver, catalog: catalog, scope: scope, endpoint: endpoint, run: run,
-		coordinator: NewActionCoordinator(store, store, catalog, policy, []ActionProposalValidator{validator}), dispatcher: dispatcher}
+		coordinator: action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}), dispatcher: dispatcher}
 }
 
 func (f *channelActionFixture) propose(t *testing.T, extra map[string]interface{}) (*ActionProposalResult, error) {
@@ -111,7 +112,7 @@ func (f *channelActionFixture) propose(t *testing.T, extra map[string]interface{
 	for key, value := range extra {
 		arguments[key] = value
 	}
-	return f.coordinator.Propose(context.Background(), loopProposeRequest(ProposeActionRequest{
+	return f.coordinator.Propose(context.Background(), loopProposeRequest(action.ProposeActionRequest{
 		Scope: f.scope, RunID: f.run.ID, WorkerID: "conversation-worker", DeploymentID: "slack-agent",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionConfigureChannel,
 		Arguments: arguments, IdempotencyKey: "configure-channel", Summary: "Configure channel",
@@ -120,7 +121,7 @@ func (f *channelActionFixture) propose(t *testing.T, extra map[string]interface{
 
 func (f *channelActionFixture) approve(t *testing.T, proposal *ActionProposalResult) *ActionCall {
 	t.Helper()
-	resolved, err := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}).Resolve(context.Background(), ResolveApprovalRequest{
+	resolved, err := action.NewApprovalCoordinator(f.store, f.store, action.EligibleApprovalAuthorizer{}).Resolve(context.Background(), action.ResolveApprovalRequest{
 		Scope: f.scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 		DecisionID: "approve-channel", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "operator"}, Reason: "Reviewed",
 	})

@@ -6,6 +6,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -144,7 +145,7 @@ func TestTeamSkillActionDispatcherStopsRevokedRosterAuthority(t *testing.T) {
 		Action:  capability.Action{Name: "search", Risk: capability.RiskLevelRead},
 	}
 	dispatched := 0
-	dispatcher, err := skillbinding.NewTeamSkillActionDispatcher(catalog, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	dispatcher, err := skillbinding.NewTeamSkillActionDispatcher(catalog, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatched++
 		return map[string]interface{}{"ok": true}, nil
 	}))

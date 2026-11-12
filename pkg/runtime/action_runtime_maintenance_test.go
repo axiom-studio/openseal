@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -153,7 +154,7 @@ func TestActionRuntimeMaintenanceStableGateSkipsLegacyReadyCallBeforeAuthority(t
 		worker := actionRuntimeMaintenanceWorker(kernel, fixture, &catalogCalls, &credentialCalls, &dispatches)
 		for attempt := 0; attempt < 3; attempt++ {
 			result, err := worker.ExecuteOwnLoopCall(t.Context(), beforeRun.Scope, beforeCall.ID, "agent-worker")
-			var held *LoopActionMaintenanceError
+			var held *action.LoopActionMaintenanceError
 			if result != nil || !errors.As(err, &held) || held.Call.ID != beforeCall.ID {
 				t.Fatalf("stable gate claimed a call queued before it: %#v, %v", result, err)
 			}
@@ -177,11 +178,11 @@ func TestActionRuntimeMaintenanceCoordinatorRejectsBeforeCatalogAndPolicy(t *tes
 		}
 		before := getActionLifecycleRun(t, kernel, fixture.proposal.Call)
 		catalogCalls, policyCalls := 0, 0
-		coordinator := NewActionCoordinator(kernel, kernel, &actionLifecycleCountingCatalog{ActionExecutionCatalog: fixture.catalog, calls: &catalogCalls}, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		coordinator := action.NewActionCoordinator(kernel, kernel, &actionLifecycleCountingCatalog{ActionExecutionCatalog: fixture.catalog, calls: &catalogCalls}, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 			policyCalls++
-			return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+			return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
 		}), nil, models.WithClock(func() time.Time { return fixture.now.Add(time.Second) }))
-		result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
+		result, err := coordinator.Propose(t.Context(), loopProposeRequest(action.ProposeActionRequest{
 			Scope: before.Scope, RunID: before.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
 			BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision, SkillID: fixture.binding.SkillID, SkillVersion: fixture.binding.SkillVersion,
 			Action: "deploy", Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: fixture.proposal.Call.IdempotencyKey,
@@ -215,17 +216,17 @@ func TestActionRuntimeMaintenanceObservedAfterClaimDefersWithoutFailure(t *testi
 				if boundary == "after_catalog" {
 					catalog.afterResolve = func() { wrapped.active = true }
 				}
-				worker := NewActionWorker(wrapped, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+				worker := action.NewActionWorker(wrapped, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 					credentialCalls++
 					return map[string]string{"token": "secret"}, nil
-				}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+				}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 					dispatches++
 					return map[string]interface{}{"providerResult": "delivered"}, nil
 				}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
 				// The loop parks the call on maintenance (awaiting_event until
 				// RetryAt); the call stays ready and nothing is charged.
 				result, err := worker.ExecuteOwnLoopCall(t.Context(), before.Scope, fixture.proposal.Call.ID, "agent-worker")
-				var held *LoopActionMaintenanceError
+				var held *action.LoopActionMaintenanceError
 				if result != nil || !errors.As(err, &held) || held.Call == nil || held.Call.ID != fixture.proposal.Call.ID || held.Call.Status != ActionCallStatusReady || held.RetryAt.IsZero() {
 					t.Fatalf("maintenance observation became a failure or false result: %#v, %v", result, err)
 				}
@@ -273,9 +274,9 @@ func TestActionRuntimeMaintenanceVerifiedReleaseUsesFreshVersion(t *testing.T) {
 			t.Fatalf("released gate did not permit a fresh-version action: %#v, %v", created, err)
 		}
 		dispatches := 0
-		worker := NewActionWorker(kernel, fixture.catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+		worker := action.NewActionWorker(kernel, fixture.catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 			return map[string]string{"token": "secret"}, nil
-		}), ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		}), action.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			dispatches++
 			if input.Bound.Definition.Version != "1.1.0" || input.Bound.Binding.SourceIdentity != gate.SourceIdentity || input.Call.BindingRevision != binding.Revision {
 				t.Fatalf("released action used stale executable authority: %#v", input)
@@ -468,11 +469,11 @@ func assertActionRuntimeMaintenanceNoSubmission(t *testing.T, kernel KernelStore
 	}
 }
 
-func actionRuntimeMaintenanceWorker(kernel KernelStore, fixture *actionBindingFenceFixture, catalogCalls, credentialCalls, dispatches *int) *ActionWorker {
-	worker := NewActionWorker(kernel, &actionLifecycleCountingCatalog{ActionExecutionCatalog: fixture.catalog, calls: catalogCalls}, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+func actionRuntimeMaintenanceWorker(kernel KernelStore, fixture *actionBindingFenceFixture, catalogCalls, credentialCalls, dispatches *int) *action.ActionWorker {
+	worker := action.NewActionWorker(kernel, &actionLifecycleCountingCatalog{ActionExecutionCatalog: fixture.catalog, calls: catalogCalls}, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		(*credentialCalls)++
 		return map[string]string{"token": "secret"}, nil
-	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		(*dispatches)++
 		return map[string]interface{}{"providerResult": "delivered"}, nil
 	}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))

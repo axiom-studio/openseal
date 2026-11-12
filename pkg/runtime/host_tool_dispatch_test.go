@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
@@ -47,13 +48,13 @@ func hostReplyError(err error) func(context.Context, HostToolRequest) (HostToolR
 
 type hostToolDispatchFixture struct {
 	host       *fakeHostToolHost
-	actions    *ActionCoordinator
+	actions    *action.ActionCoordinator
 	dispatcher *HostToolDispatcher
 	slept      []time.Duration
 }
 
 func newHostToolDispatchFixture(replies ...func(context.Context, HostToolRequest) (HostToolResult, error)) *hostToolDispatchFixture {
-	f := &hostToolDispatchFixture{host: &fakeHostToolHost{replies: replies}, actions: NewActionCoordinator(nil, nil, nil, nil, nil)}
+	f := &hostToolDispatchFixture{host: &fakeHostToolHost{replies: replies}, actions: action.NewActionCoordinator(nil, nil, nil, nil, nil)}
 	f.dispatcher = NewHostToolDispatcher(f.host, f.actions, nil)
 	f.dispatcher.sleep = func(ctx context.Context, wait time.Duration) error {
 		f.slept = append(f.slept, wait)
@@ -237,7 +238,7 @@ func TestHostToolRunCommandSetsCommandRefAndSortedVMTools(t *testing.T) {
 // has no stores, so a call the step's authority allows fails as not
 // configured, after the authority checks.
 func (f *hostToolDispatchFixture) proposeNested(call HostToolCall, runID, capability string) error {
-	_, err := f.actions.ProposeNested(context.Background(), NestedActionRequest{
+	_, err := f.actions.ProposeNested(context.Background(), action.NestedActionRequest{
 		Scope: call.Step.Scope, Origin: ActionOriginVM, RunID: runID, TurnID: call.Step.ID,
 		Capability: capability, IdempotencyKey: "probe",
 	})
@@ -257,8 +258,8 @@ func TestHostToolRunCommandOpensNestedAuthorityForStepAndClosesIt(t *testing.T) 
 	runHostTool(t, f, call)
 	// During the call the step's authority is open for run_1 with the call's
 	// binding: it offers alpha.lookup and nothing else.
-	if offered == nil || errors.Is(offered, ErrNestedTurnNotActive) || errors.Is(offered, ErrNestedActionNotAuthorized) ||
-		!errors.Is(notOffered, ErrNestedActionNotAuthorized) || !errors.Is(otherRun, ErrNestedTurnNotActive) {
+	if offered == nil || errors.Is(offered, ErrNestedTurnNotActive) || errors.Is(offered, action.ErrNestedActionNotAuthorized) ||
+		!errors.Is(notOffered, action.ErrNestedActionNotAuthorized) || !errors.Is(otherRun, ErrNestedTurnNotActive) {
 		t.Fatalf("nested authority during the call: offered=%v notOffered=%v otherRun=%v", offered, notOffered, otherRun)
 	}
 	if after := f.proposeNested(call, "run_1", "alpha.lookup"); !errors.Is(after, ErrNestedTurnNotActive) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
@@ -72,7 +73,7 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published190SHA256 {
 		t.Fatalf("published 1.9.0 definition changed: got %s", got)
 	}
-	for _, action := range []string{RunbookActionCreateTask, RunbookActionEventSources, RunbookActionSendTestEvent, RunbookActionSetScript, RunbookActionList, RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule} {
+	for _, action := range []string{runtimeaction.RunbookActionCreateTask, RunbookActionEventSources, RunbookActionSendTestEvent, runtimeaction.RunbookActionSetScript, runtimeaction.RunbookActionList, runtimeaction.RunbookActionSetStatus, RunbookActionStart, RunbookActionReplaceSchedule} {
 		if _, ok := current.Actions[action]; !ok {
 			t.Fatalf("1.9.0 lacks %s", action)
 		}
@@ -80,11 +81,11 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 	if len(current.Actions) != 8 || current.Name != "Routines" {
 		t.Fatalf("definition=%s with %d actions", current.Name, len(current.Actions))
 	}
-	create := current.Actions[RunbookActionCreateTask]
+	create := current.Actions[runtimeaction.RunbookActionCreateTask]
 	if _, ok := create.InputSchema["properties"].(map[string]interface{})["script"]; !ok || !strings.Contains(create.Description, "test it in this chat's sandbox with run_command") {
 		t.Fatalf("create_task contract=%s", create.Description)
 	}
-	if setScript, ok := current.Actions[RunbookActionSetScript]; !ok || !setScript.AlwaysReview() {
+	if setScript, ok := current.Actions[runtimeaction.RunbookActionSetScript]; !ok || !setScript.AlwaysReview() {
 		t.Fatal("set_script must always be reviewed")
 	}
 	if !strings.Contains(workspace.ChatSandboxDescription, "a routine can run that exact script") {
@@ -98,13 +99,13 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 // Creating and re-pinning a script routine both always ask, in every mode.
 func TestRoutineScriptChangesAlwaysNeedApproval(t *testing.T) {
 	definition := RunbookManagementSkill()
-	for _, action := range []string{RunbookActionCreateTask, RunbookActionSetScript} {
-		decision, err := NewDefaultActionPolicy().EvaluateAction(t.Context(), ActionPolicyInput{
+	for _, action := range []string{runtimeaction.RunbookActionCreateTask, runtimeaction.RunbookActionSetScript} {
+		decision, err := runtimeaction.NewDefaultActionPolicy().EvaluateAction(t.Context(), runtimeaction.ActionPolicyInput{
 			Run:   &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}},
 			Bound: &skill.BoundAction{Definition: definition, Binding: &skill.Binding{ID: "routines"}, Action: definition.Actions[action]}, ApprovalMode: ConversationApprovalSkip,
 			RoutineGrant: &RoutineGrant{Action: RunbookManagementSkillID + "." + action, Label: "anything"},
 		})
-		if err != nil || decision.Disposition != ActionDispositionRequireApproval || decision.ApprovalTimeout == ApprovalTimeoutApprove {
+		if err != nil || decision.Disposition != runtimeaction.ActionDispositionRequireApproval || decision.ApprovalTimeout == ApprovalTimeoutApprove {
 			t.Fatalf("%s: %#v %v", action, decision, err)
 		}
 	}
@@ -214,7 +215,7 @@ func loopRunCommandEntry(t *testing.T, routine *loopRoutineScript, sequence int6
 		}
 	}
 	dispatcher := NewHostToolDispatcher(&fakeHostToolHost{replies: []func(context.Context, HostToolRequest) (HostToolResult, error){answer}},
-		NewActionCoordinator(nil, nil, nil, nil, nil), nil)
+		runtimeaction.NewActionCoordinator(nil, nil, nil, nil, nil), nil)
 	call := hostToolCallFixture(t, workspace.OperationRunCommand, arguments)
 	call.ToolEntryID = fmt.Sprintf("ent_%d", sequence)
 	call.CommandPins = routine.CommandPins()

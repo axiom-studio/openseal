@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -765,7 +766,7 @@ func TestTeamReplacedApprovalEndsMemberSilently(t *testing.T) {
 				f.actions.calls["action-deploy"] = &ActionCall{ID: "action-deploy", Scope: run.Scope, RunID: run.ID, Status: ActionCallStatusDenied, ApprovalID: "approval-deploy"}
 				f.actions.approvals["approval-deploy"] = &ApprovalCheckpoint{ID: "approval-deploy", Scope: run.Scope, Status: ApprovalStatusSuperseded, SupersededByMessageID: newer.ID}
 				f.settle(run, entries["deploy"], ToolEntryError, "action-deploy", governedJSONResult(ToolResultSuperseded, map[string]interface{}{
-					"status": string(ToolResultSuperseded), "reason": ApprovalSupersededReason,
+					"status": string(ToolResultSuperseded), "reason": action.ApprovalSupersededReason,
 				}))
 				if followUp {
 					current := f.run(run.ID)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -21,7 +22,7 @@ func TestKernelResolvedActionArgumentResolverUsesDurableAgentSession(t *testing.
 			"required": []interface{}{"sessionId"},
 		},
 	}
-	resolver := KernelResolvedActionArgumentResolver{}
+	resolver := runtimeaction.KernelResolvedActionArgumentResolver{}
 	tests := []struct {
 		name, assignedAgentID, expected string
 	}{
@@ -49,7 +50,7 @@ func TestKernelResolvedActionArgumentResolverRequiresAssignedAgent(t *testing.T)
 			skill.SchemaExtensionKernelSource: skill.KernelSourceAgentSessionID,
 		}},
 	}}
-	_, _, err := (KernelResolvedActionArgumentResolver{}).ResolveActionProposalArguments(context.Background(), agentrun.ActionProposalValidationInput{
+	_, _, err := (runtimeaction.KernelResolvedActionArgumentResolver{}).ResolveActionProposalArguments(context.Background(), agentrun.ActionProposalValidationInput{
 		Run: &AgentRun{Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}}, Bound: &skill.BoundAction{Action: action},
 	})
 	if err == nil {

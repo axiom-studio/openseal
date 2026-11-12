@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -103,10 +104,10 @@ func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *t
 						t.Fatal(err)
 					}
 				}
-				coordinator := NewActionCoordinator(fixture.store, intercepted, fixture.catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-					return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+				coordinator := action.NewActionCoordinator(fixture.store, intercepted, fixture.catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+					return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
 				}), nil, models.WithClock(func() time.Time { return fixture.now.Add(time.Second) }))
-				result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
+				result, err := coordinator.Propose(t.Context(), loopProposeRequest(action.ProposeActionRequest{
 					Scope: run.Scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
 					BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision,
 					SkillID: fixture.binding.SkillID, SkillVersion: fixture.binding.SkillVersion, Action: "deploy",
@@ -229,11 +230,11 @@ func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.
 		for index, run := range runs {
 			go func(index int, run *AgentRun) {
 				defer proposals.Done()
-				coordinator := NewActionCoordinator(fixture.store, fixture.store, fixture.catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-					return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+				coordinator := action.NewActionCoordinator(fixture.store, fixture.store, fixture.catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+					return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
 				}), nil, models.WithClock(func() time.Time { return fixture.now.Add(time.Second) }))
 				<-start
-				outcomes[index], failures[index] = coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
+				outcomes[index], failures[index] = coordinator.Propose(t.Context(), loopProposeRequest(action.ProposeActionRequest{
 					Scope: run.Scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
 					BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision,
 					SkillID: fixture.binding.SkillID, SkillVersion: fixture.binding.SkillVersion, Action: "deploy",
@@ -376,9 +377,9 @@ func completeActionBindingFenceFixture(t *testing.T, fixture *actionBindingFence
 	if _, err := fixture.store.CreateActionProposal(t.Context(), fixture.proposal); err != nil {
 		t.Fatal(err)
 	}
-	worker := NewActionWorker(fixture.store, fixture.catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+	worker := action.NewActionWorker(fixture.store, fixture.catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "secret"}, nil
-	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"providerResult": "delivered"}, nil
 	}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
 	completed, err := worker.ExecuteOwnLoopCall(t.Context(), fixture.proposal.Call.Scope, fixture.proposal.Call.ID, "agent-worker")

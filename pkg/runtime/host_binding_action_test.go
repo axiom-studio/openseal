@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -30,12 +31,12 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 	// Another run in the workspace, e.g. another user's chat.
 	other := claimedOwnedActionRun(t, store, scope, time.Now().UTC(), "worker", ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"})
 	catalog := skillbindingtest.HostConnectorCatalog(t, scope, map[string]bool{claimed.ID: true})
-	allow := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "read-only"}, nil
+	allow := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow, Reason: "read-only"}, nil
 	})
-	coordinator := NewActionCoordinator(store, store, durableCatalog{catalog}, allow, nil)
+	coordinator := action.NewActionCoordinator(store, store, durableCatalog{catalog}, allow, nil)
 	propose := func(run *AgentRun, key string) (*ActionProposalResult, error) {
-		return coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
+		return coordinator.Propose(t.Context(), loopProposeRequest(action.ProposeActionRequest{
 			Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", BindingID: "mcp:linear", BindingRevision: 1,
 			SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: "read", Summary: "Search Linear",
 			Arguments: map[string]interface{}{"tool": "search", "hash": "linear-search", "arguments": map[string]interface{}{"title": "mcp bug"}},
@@ -51,7 +52,7 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 	}
 
 	dispatched := 0
-	worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	worker := action.NewActionWorker(store, catalog, nil, action.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatched++
 		if !input.Bound.Host || input.Bound.Binding.ID != "mcp:linear" || input.Arguments["tool"] != "search" {
 			t.Fatalf("dispatch = %#v", input.Bound)
@@ -156,11 +157,11 @@ func TestRoutineGrantsCoverHostBindingTools(t *testing.T) {
 	if pin := activation.Task.Grants[0].ToolArguments; pin["hash"] != "linear-create_issue" {
 		t.Fatalf("pin = %#v", pin)
 	}
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy(), nil)
+	coordinator := action.NewActionCoordinator(f.store, f.store, f.catalog, action.NewDefaultActionPolicy(), nil)
 	occurrence := f.routineOccurrence(t, activation, "host-occurrence")
 	allowed[occurrence.ID] = true
 	proposeCreateIssue := func(run *AgentRun, toolCallID string) (*ActionProposalResult, error) {
-		return coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
+		return coordinator.Propose(t.Context(), loopProposeRequest(action.ProposeActionRequest{
 			Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, BindingID: "mcp:linear", BindingRevision: 1,
 			SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: "call",
 			Arguments: map[string]interface{}{"tool": "create_issue", "hash": "linear-create_issue", "arguments": map[string]interface{}{"title": "Forecast"}},

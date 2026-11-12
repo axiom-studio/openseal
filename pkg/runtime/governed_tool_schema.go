@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 // GovernedReviewSummaryField is the one-sentence review summary a write
@@ -121,7 +122,7 @@ func governedSchemaWithReviewSummary(arguments map[string]interface{}) map[strin
 func governedReviewedEnvelopeSchema(action capability.ModelAction, arguments map[string]interface{}) map[string]interface{} {
 	properties := map[string]interface{}{
 		"arguments":     arguments,
-		"reviewContext": reviewedActionReviewContextJSONSchema(),
+		"reviewContext": runtimeaction.ReviewedActionReviewContextJSONSchema(),
 		"evidenceRefs": map[string]interface{}{"type": "array", "items": map[string]interface{}{
 			"type": "string", "description": governedEvidenceRefsDescription,
 		}},

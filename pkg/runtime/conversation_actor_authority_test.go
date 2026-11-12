@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -235,10 +236,10 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 	// The run loop claims member A's Run; one of its steps proposes the
 	// reviewed action and the step-end park waits on its approval.
 	loop := newLoopProposalFixture(t, f.store, root, "worker", time.Now().UTC())
-	coordinator := NewActionCoordinator(f.store, f.store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
+	coordinator := action.NewActionCoordinator(f.store, f.store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
 	}), nil)
-	proposal, err := coordinator.Propose(t.Context(), loop.request(ProposeActionRequest{
+	proposal, err := coordinator.Propose(t.Context(), loop.request(action.ProposeActionRequest{
 		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0",
 		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed report"}, Summary: "Send reviewed report",
 	}, "reviewed-action"))

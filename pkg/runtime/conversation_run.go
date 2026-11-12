@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
@@ -64,7 +65,7 @@ type ConversationRunReconcileResult struct {
 type ConversationRunScheduler struct {
 	conversations  *ConversationService
 	runs           *agentrun.RunCommandService
-	approvals      *ApprovalCoordinator
+	approvals      *action.ApprovalCoordinator
 	config         ConversationRunSchedulerConfig
 	sessionContext ConversationSessionContextResolver
 	// conversationStore and runStore are the stores behind conversations
@@ -97,7 +98,7 @@ func NewConversationRunScheduler(
 		runs:              agentrun.NewRunCommandService(runStore, opts...),
 		conversationStore: conversationStore,
 		runStore:          runStore,
-		approvals:         NewApprovalCoordinator(runStore, runStore, nil, opts...),
+		approvals:         action.NewApprovalCoordinator(runStore, runStore, nil, opts...),
 		config:            normalized,
 		now:               models.ClockFrom(opts),
 	}, nil

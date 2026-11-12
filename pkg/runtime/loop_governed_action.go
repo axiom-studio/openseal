@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -81,5 +82,5 @@ func selectGovernedAction(binding *agentrun.TurnRunnerBinding, name string, dire
 		request.BindingID, request.BindingRevision = directive.BindingID, directive.BindingRevision
 		request.ExpectedSkillVersion = directive.ExpectedSkillVersion
 	}
-	return selectTurnModelAction(binding.ModelActions, request)
+	return action.SelectTurnModelAction(binding.ModelActions, request)
 }

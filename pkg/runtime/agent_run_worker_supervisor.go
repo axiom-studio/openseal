@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
@@ -85,7 +86,7 @@ type AgentRunWorkerSupervisor struct {
 	pools    *workqueue.ScopePools[*AgentRunWorkerPool]
 
 	mu                sync.RWMutex
-	actions           *ActionCoordinator
+	actions           *action.ActionCoordinator
 	runFinalizer      agentrun.RunTerminalFinalizer
 	limiter           *workqueue.WorkerLimiter
 	executionPreparer AcceptedRunExecutionPreparer
@@ -100,7 +101,7 @@ func (s *AgentRunWorkerSupervisor) SetRunTerminalFinalizer(finalizer agentrun.Ru
 
 // SetActionCoordinator supplies the shared governed action lifecycle to every
 // scope pool created by this supervisor.
-func (s *AgentRunWorkerSupervisor) SetActionCoordinator(actions *ActionCoordinator) {
+func (s *AgentRunWorkerSupervisor) SetActionCoordinator(actions *action.ActionCoordinator) {
 	s.mu.Lock()
 	s.actions = actions
 	s.mu.Unlock()

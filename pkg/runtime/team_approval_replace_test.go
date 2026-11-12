@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 // A Team message routed to another member still replaces the person's pending
@@ -20,8 +22,8 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 	}
 	f.conversation = team
 	person := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
-	coordinator := NewActionCoordinator(f.store, f.store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
+	coordinator := action.NewActionCoordinator(f.store, f.store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
 	}), nil)
 	waiting := func(agentID string, trigger *ChannelMessage) *ActionProposalResult {
 		created, err := f.scheduler.runs.CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -34,7 +36,7 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 			t.Fatal(err)
 		}
 		member := newLoopProposalFixture(t, f.store, created.Run, "worker-"+agentID, time.Now().UTC())
-		proposal, err := coordinator.Propose(ctx, member.request(ProposeActionRequest{
+		proposal, err := coordinator.Propose(ctx, member.request(action.ProposeActionRequest{
 			DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0",
 			Action: "reply", Arguments: map[string]interface{}{"body": "Launch moved to Thursday"}, Summary: "Post in #launch",
 		}, "post-"+agentID))

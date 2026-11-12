@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
@@ -24,9 +25,9 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	deploymentID := "research-agent"
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)
-	policy := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{
-			Disposition: ActionDispositionRequireApproval, Reason: "Skill access requires review",
+	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+		return action.ActionPolicyDecision{
+			Disposition: action.ActionDispositionRequireApproval, Reason: "Skill access requires review",
 			EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
@@ -34,7 +35,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator := NewActionCoordinator(store, store, catalog, policy, []ActionProposalValidator{validator})
+	coordinator := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator})
 	f := newLoopProposalFixture(t, store, skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-upsert"), "worker-upsert", time.Now().UTC())
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	// A person connects the account; the model may only change the rest.
@@ -53,13 +54,13 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	}
 	withCredential := maps.Clone(arguments)
 	withCredential["accessReferences"] = map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "credential://tenant-a/other"}}
-	if _, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+	if _, err := coordinator.Propose(ctx, f.request(action.ProposeActionRequest{
 		DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: skillbinding.SkillActionUpsertBinding,
 		Arguments: withCredential, Summary: "Swap the Reddit account",
 	}, "swap-account")); err == nil {
 		t.Fatal("a model-proposed upsert changed credentials")
 	}
-	proposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+	proposal, err := coordinator.Propose(ctx, f.request(action.ProposeActionRequest{
 		DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: skillbinding.SkillActionUpsertBinding,
 		Arguments: arguments, Summary: "Enable Reddit research",
 	}, "add-reddit"))
@@ -81,7 +82,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := NewActionWorker(store, catalog, nil, dispatcher)
+	worker := action.NewActionWorker(store, catalog, nil, dispatcher)
 	executed := f.execute(worker, proposal.Call.ID)
 	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["operation"] != skillbinding.SkillActionUpsertBinding || executed.Call.Output["replayed"] != false {
 		t.Fatalf("upsert execution status=%s error=%q output=%#v", executed.Call.Status, executed.Call.Error, executed.Call.Output)
@@ -95,7 +96,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	}
 
 	// A later step of the same Run disables the binding.
-	disableProposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+	disableProposal, err := coordinator.Propose(ctx, f.request(action.ProposeActionRequest{
 		TurnID: "step-2", DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: skillbinding.SkillActionDisableBinding,
 		Arguments: map[string]interface{}{"bindingId": "reddit", "expectedRevision": 2}, Summary: "Disable Reddit research",
 	}, "disable-reddit"))
@@ -115,7 +116,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	reenable := maps.Clone(arguments)
 	reenable["expectedRevision"] = 3
 	reenable["config"] = map[string]interface{}{"subreddits": []interface{}{"kubernetes"}}
-	reenableProposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+	reenableProposal, err := coordinator.Propose(ctx, f.request(action.ProposeActionRequest{
 		TurnID: "step-3", DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: skillbinding.SkillActionUpsertBinding,
 		Arguments: reenable, Summary: "Re-enable Reddit research",
 	}, "reenable-reddit"))
@@ -169,9 +170,9 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator})
+	coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
 	f := newLoopProposalFixture(t, store, skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-discover"), "worker-discover", time.Now().UTC())
-	proposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+	proposal, err := coordinator.Propose(ctx, f.request(action.ProposeActionRequest{
 		DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: skillbinding.SkillActionDiscoverBinding,
 		Arguments: map[string]interface{}{
 			"query": "reddit research", "requiredActions": []interface{}{"read"}, "maximumRisk": "read", "limit": 4,
@@ -188,7 +189,7 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), proposal.Call.ID)
+	executed := f.execute(action.NewActionWorker(store, catalog, nil, dispatcher), proposal.Call.ID)
 	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["nextCursor"] != "page-2" {
 		t.Fatalf("discovery execution status=%s error=%q output=%#v", executed.Call.Status, executed.Call.Error, executed.Call.Output)
 	}
@@ -475,7 +476,7 @@ func approveParkedSkillAction(t *testing.T, ctx context.Context, store *sqlite.S
 
 func approveSkillAction(t *testing.T, ctx context.Context, store *sqlite.Store, scope Scope, proposal *ActionProposalResult) {
 	t.Helper()
-	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
+	resolved, err := action.NewApprovalCoordinator(store, store, action.EligibleApprovalAuthorizer{}).Resolve(ctx, action.ResolveApprovalRequest{
 		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 		DecisionID: "approve-" + proposal.Call.ID, Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "operator"}, Reason: "Reviewed",
 	})

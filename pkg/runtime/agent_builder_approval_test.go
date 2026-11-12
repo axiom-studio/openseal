@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // agentBuilderApprovalCoordinator wires the builder fixture to a kernel store
 // with a claimed Finn Run, so proposals take the real coordinator path.
-func agentBuilderApprovalCoordinator(t *testing.T, policy ActionPolicyEvaluator, now time.Time) (*agentBuilderFixture, *sqlite.Store, *AgentRun, *ActionCoordinator) {
+func agentBuilderApprovalCoordinator(t *testing.T, policy runtimeaction.ActionPolicyEvaluator, now time.Time) (*agentBuilderFixture, *sqlite.Store, *AgentRun, *runtimeaction.ActionCoordinator) {
 	t.Helper()
 	ctx := context.Background()
 	fixture := newAgentBuilderFixture(t, true)
@@ -31,12 +32,12 @@ func agentBuilderApprovalCoordinator(t *testing.T, policy ActionPolicyEvaluator,
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	coordinator := NewActionCoordinator(store, store, fixture.catalog, policy, []ActionProposalValidator{fixture.validator}, models.WithClock(func() time.Time { return now }))
+	coordinator := runtimeaction.NewActionCoordinator(store, store, fixture.catalog, policy, []runtimeaction.ActionProposalValidator{fixture.validator}, models.WithClock(func() time.Time { return now }))
 	return fixture, store, claimed, coordinator
 }
 
-func agentBuilderApprovalRequest(fixture *agentBuilderFixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) ProposeActionRequest {
-	return loopProposeRequest(ProposeActionRequest{
+func agentBuilderApprovalRequest(fixture *agentBuilderFixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) runtimeaction.ProposeActionRequest {
+	return loopProposeRequest(runtimeaction.ProposeActionRequest{
 		Scope: fixture.scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: action,
 		Arguments: arguments, Summary: "Review the agent",
@@ -46,10 +47,10 @@ func agentBuilderApprovalRequest(fixture *agentBuilderFixture, run *AgentRun, ac
 // generousBuilderPolicy is a host policy that would waive or loosen the card
 // every way it can: skip mode, a routine grant, auto-approve on timeout, a
 // one-hour TTL and an external destination.
-func generousBuilderPolicy() ActionPolicyEvaluator {
-	base := NewDefaultActionPolicy()
+func generousBuilderPolicy() runtimeaction.ActionPolicyEvaluator {
+	base := runtimeaction.NewDefaultActionPolicy()
 	base.Approvers = []ApprovalPrincipal{{Type: "user", ID: "operator"}}
-	return ActionPolicyEvaluatorFunc(func(ctx context.Context, input ActionPolicyInput) (ActionPolicyDecision, error) {
+	return runtimeaction.ActionPolicyEvaluatorFunc(func(ctx context.Context, input runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
 		input.ApprovalMode = ConversationApprovalSkip
 		input.RoutineGrant = &RoutineGrant{Action: input.Bound.Definition.ID + "." + input.Bound.Action.Name, Label: "Create agents"}
 		decision, err := base.EvaluateAction(ctx, input)
@@ -102,8 +103,8 @@ func TestAgentBuilderApprovalCardPolicy(t *testing.T) {
 }
 
 func TestAgentBuilderApprovalCannotBeAllowedByPolicy(t *testing.T) {
-	allow := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "host allows everything"}, nil
+	allow := runtimeaction.ActionPolicyEvaluatorFunc(func(context.Context, runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
+		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow, Reason: "host allows everything"}, nil
 	})
 	fixture, store, run, coordinator := agentBuilderApprovalCoordinator(t, allow, time.Now().UTC())
 	create := agentBuilderCreateArguments()
@@ -130,12 +131,12 @@ func TestAgentBuilderApprovalExpiresAndNeverApproves(t *testing.T) {
 	}
 	approval := result.Approval
 
-	early := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(-time.Minute) }))
+	early := runtimeaction.NewApprovalCoordinator(store, store, runtimeaction.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(-time.Minute) }))
 	if _, err := early.ResolveTimeout(ctx, fixture.scope, approval.ID, approval.Revision, approval.ID); err == nil {
 		t.Fatal("a card was timed out before its 30 days elapsed")
 	}
 
-	late := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(time.Second) }))
+	late := runtimeaction.NewApprovalCoordinator(store, store, runtimeaction.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(time.Second) }))
 	resolved, err := late.ResolveTimeout(ctx, fixture.scope, approval.ID, approval.Revision, approval.ID)
 	if err != nil {
 		t.Fatal(err)

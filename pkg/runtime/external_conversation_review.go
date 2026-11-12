@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 type channelReviewStore interface {
@@ -35,7 +36,7 @@ func (w *RunProgressAcknowledgementWorker) projectReviewRequests(ctx context.Con
 			return result, err
 		}
 		for _, approval := range approvals {
-			delivery, err := w.projectReview(ctx, scope, "approval", approval.ID, approval.RunID, "", "", PresentApproval(approval))
+			delivery, err := w.projectReview(ctx, scope, "approval", approval.ID, approval.RunID, "", "", action.PresentApproval(approval))
 			if err != nil {
 				failures = append(failures, err)
 			} else if delivery != nil {
@@ -52,7 +53,7 @@ func (w *RunProgressAcknowledgementWorker) projectReviewRequests(ctx context.Con
 			return result, err
 		}
 		for _, request := range requests {
-			delivery, err := w.projectReview(ctx, scope, "setup", request.ID, request.RunID, request.ConversationID, request.TriggerMessageID, ApprovalPresentation{Title: request.Reason})
+			delivery, err := w.projectReview(ctx, scope, "setup", request.ID, request.RunID, request.ConversationID, request.TriggerMessageID, action.ApprovalPresentation{Title: request.Reason})
 			if err != nil {
 				failures = append(failures, err)
 			} else if delivery != nil {
@@ -72,7 +73,7 @@ func (w *RunProgressAcknowledgementWorker) projectReviewRequests(ctx context.Con
 // projectReview posts a review request into the connector thread that started
 // the Run. Seal Chat renders approvals and setup requests as its own cards, so
 // only connector-originated conversations get this projection.
-func (w *RunProgressAcknowledgementWorker) projectReview(ctx context.Context, scope Scope, kind, id, runID, conversationID, triggerID string, presentation ApprovalPresentation) (*ExternalConversationDelivery, error) {
+func (w *RunProgressAcknowledgementWorker) projectReview(ctx context.Context, scope Scope, kind, id, runID, conversationID, triggerID string, presentation action.ApprovalPresentation) (*ExternalConversationDelivery, error) {
 	run, err := w.store.GetAgentRun(ctx, scope, runID)
 	if err != nil || run == nil {
 		return nil, err
@@ -264,7 +265,7 @@ func (w *RunProgressAcknowledgementWorker) syncReviewApprovalCards(ctx context.C
 				continue
 			}
 			review["approval"] = channelReviewApprovalPayload(approval, call)
-			review["presentation"] = PresentApproval(approval).Payload()
+			review["presentation"] = action.PresentApproval(approval).Payload()
 			parameters["providerMessageId"] = original.ProviderMessageID
 			result, err := w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageUpdate, ConversationID: original.ConversationID, ChannelMessageID: original.ChannelMessageID, ExternalConversationID: original.ExternalConversationID, ExternalThreadID: original.ExternalThreadID, Parameters: parameters, IdempotencyKey: "review-card:" + id + ":" + endpoint.ID + ":" + phase, Correlation: &ExternalConversationDeliveryCorrelation{Kind: "review_request", ID: original.Correlation.ID, Phase: phase}})
 			if err != nil {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -84,9 +85,9 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 		t.Fatal(err)
 	}
 
-	objectiveDefinition := ObjectiveManagementSkill()
-	objectiveBound := &skill.BoundAction{Definition: objectiveDefinition, Binding: &skill.Binding{DeploymentID: owner.ID}, Action: objectiveDefinition.Actions[ObjectiveActionUpdate]}
-	objectiveValidator, err := NewObjectiveActionValidator(store)
+	objectiveDefinition := action.ObjectiveManagementSkill()
+	objectiveBound := &skill.BoundAction{Definition: objectiveDefinition, Binding: &skill.Binding{DeploymentID: owner.ID}, Action: objectiveDefinition.Actions[action.ObjectiveActionUpdate]}
+	objectiveValidator, err := action.NewObjectiveActionValidator(store)
 	if err != nil {
 		t.Fatal(err)
 	}

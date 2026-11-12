@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -14,16 +15,16 @@ func TestDefaultActionPolicyProfileImageExceptionIsNarrow(t *testing.T) {
 		name, skillID, action string
 		risk                  skill.RiskLevel
 		effect                skill.SideEffect
-		want                  ActionDisposition
+		want                  action.ActionDisposition
 	}{
-		{"profile", builtin.SkillID, builtin.GenerateProfileImage, skill.RiskLevelWrite, skill.SideEffectWrite, ActionDispositionAllow},
-		{"other skill", "other", builtin.GenerateProfileImage, skill.RiskLevelWrite, skill.SideEffectWrite, ActionDispositionRequireApproval},
-		{"other action", builtin.SkillID, "generate_image", skill.RiskLevelWrite, skill.SideEffectWrite, ActionDispositionRequireApproval},
-		{"higher risk", builtin.SkillID, builtin.GenerateProfileImage, skill.RiskLevelDestructive, skill.SideEffectWrite, ActionDispositionRequireApproval},
-		{"external effect", builtin.SkillID, builtin.GenerateProfileImage, skill.RiskLevelWrite, skill.SideEffectExternal, ActionDispositionRequireApproval},
+		{"profile", builtin.SkillID, builtin.GenerateProfileImage, skill.RiskLevelWrite, skill.SideEffectWrite, action.ActionDispositionAllow},
+		{"other skill", "other", builtin.GenerateProfileImage, skill.RiskLevelWrite, skill.SideEffectWrite, action.ActionDispositionRequireApproval},
+		{"other action", builtin.SkillID, "generate_image", skill.RiskLevelWrite, skill.SideEffectWrite, action.ActionDispositionRequireApproval},
+		{"higher risk", builtin.SkillID, builtin.GenerateProfileImage, skill.RiskLevelDestructive, skill.SideEffectWrite, action.ActionDispositionRequireApproval},
+		{"external effect", builtin.SkillID, builtin.GenerateProfileImage, skill.RiskLevelWrite, skill.SideEffectExternal, action.ActionDispositionRequireApproval},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			decision, err := NewDefaultActionPolicy().EvaluateAction(context.Background(), ActionPolicyInput{Bound: &skill.BoundAction{
+			decision, err := action.NewDefaultActionPolicy().EvaluateAction(context.Background(), action.ActionPolicyInput{Bound: &skill.BoundAction{
 				Definition: &skill.Definition{ID: tc.skillID}, Binding: &skill.Binding{},
 				Action: skill.Action{Name: tc.action, Risk: tc.risk, SideEffect: tc.effect},
 			}})
@@ -50,7 +51,7 @@ func TestProfileImageProposalProceedsWithoutApproval(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	run := claimedActionRun(t, store, scope, now, "worker")
-	result, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), nil).Propose(ctx, loopProposeRequest(ProposeActionRequest{
+	result, err := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), nil).Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent",
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: builtin.GenerateProfileImage,
 		Arguments: map[string]interface{}{"prompt": "A friendly illustrated portrait"},

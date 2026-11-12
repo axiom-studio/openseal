@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -189,11 +190,11 @@ func TestRepeatReadNoteThenRefusalThenFailure(t *testing.T) {
 		t.Fatalf("2nd note = %q, want %q", second.note, want)
 	}
 	third := sim.one(3, read)
-	expectRefused(t, "3rd", third, repeatRefuse, RefusedLoopCallRepeat, 3)
+	expectRefused(t, "3rd", third, repeatRefuse, action.RefusedLoopCallRepeat, 3)
 	if want := "Not run: this exact call was already made twice in this run with the same result (last at step 2). Use the earlier result, try a different step, or say what is blocking you."; third.refusal.Message != want {
 		t.Fatalf("3rd text = %q", third.refusal.Message)
 	}
-	if third.refusal.Result.Status != ToolResultRefused || third.refusal.ActionCallCode != RefusedLoopCallRepeat {
+	if third.refusal.Result.Status != ToolResultRefused || third.refusal.ActionCallCode != action.RefusedLoopCallRepeat {
 		t.Fatalf("3rd refusal = %+v", third.refusal)
 	}
 	if third.refusal.DuplicateOfEntryID != second.entry.ID || third.refusal.DuplicateOfActionCallID != second.entry.ActionCallID ||
@@ -204,7 +205,7 @@ func TestRepeatReadNoteThenRefusalThenFailure(t *testing.T) {
 		t.Fatalf("refused call got a note")
 	}
 	fourth := sim.one(4, read)
-	expectRefused(t, "4th", fourth, repeatRefuse, RefusedLoopCallRepeat, 4)
+	expectRefused(t, "4th", fourth, repeatRefuse, action.RefusedLoopCallRepeat, 4)
 	if !strings.Contains(fourth.refusal.Message, "already made 3 times") || !strings.Contains(fourth.refusal.Message, "last at step 2") {
 		t.Fatalf("4th text = %q", fourth.refusal.Message)
 	}
@@ -212,15 +213,15 @@ func TestRepeatReadNoteThenRefusalThenFailure(t *testing.T) {
 	if !failed {
 		t.Fatalf("5th identical call did not fail the Run")
 	}
-	expectRefused(t, "5th", outcomes[0], repeatFailRun, RefusedLoopCallRepeatLimit, 5)
+	expectRefused(t, "5th", outcomes[0], repeatFailRun, action.RefusedLoopCallRepeatLimit, 5)
 	if want := "Not run: this exact call has now been repeated 5 times without progress, so this run is stopping."; outcomes[0].refusal.Message != want {
 		t.Fatalf("5th text = %q", outcomes[0].refusal.Message)
 	}
-	if outcomes[0].refusal.ActionCallCode != RefusedLoopCallRepeatLimit {
+	if outcomes[0].refusal.ActionCallCode != action.RefusedLoopCallRepeatLimit {
 		t.Fatalf("5th refusal gets the repeat_limit row: %+v", outcomes[0].refusal)
 	}
 	failure := repeatLimitRunFailure()
-	if failure.Kind != RunFailureKindRepeatLimit || failure.Code != RunFailureCodeRepeatLimit || !failure.Explainable {
+	if failure.Kind != RunFailureKindRepeatLimit || failure.Code != action.RunFailureCodeRepeatLimit || !failure.Explainable {
 		t.Fatalf("failure = %+v", failure)
 	}
 }
@@ -240,7 +241,7 @@ func TestRepeatReadChangedResultRestartsStreak(t *testing.T) {
 	if !strings.Contains(third.note, "at step 3") {
 		t.Fatalf("note = %q", third.note)
 	}
-	expectRefused(t, "5th", sim.one(5, poll("done")), repeatRefuse, RefusedLoopCallRepeat, 3)
+	expectRefused(t, "5th", sim.one(5, poll("done")), repeatRefuse, action.RefusedLoopCallRepeat, 3)
 }
 
 func TestRepeatWriteResetsReadStreak(t *testing.T) {
@@ -257,7 +258,7 @@ func TestRepeatWriteResetsReadStreak(t *testing.T) {
 	// A failed write is not a reset point.
 	expectRun(t, "2nd after", sim.one(5, read))
 	expectRun(t, "failed write", sim.one(6, simCall{subject: slackSend("other"), failed: true, result: "rate limited"}))
-	expectRefused(t, "3rd after", sim.one(7, read), repeatRefuse, RefusedLoopCallRepeat, 3)
+	expectRefused(t, "3rd after", sim.one(7, read), repeatRefuse, action.RefusedLoopCallRepeat, 3)
 }
 
 func TestRepeatWriteDuplicateSuppressedWithPriorResult(t *testing.T) {
@@ -267,7 +268,7 @@ func TestRepeatWriteDuplicateSuppressedWithPriorResult(t *testing.T) {
 	expectRun(t, "1st", first)
 	sim.user("send it again please")
 	second := sim.one(3, send)
-	expectRefused(t, "2nd", second, repeatSuppressWrite, RefusedLoopCallDuplicateSuppressed, 2)
+	expectRefused(t, "2nd", second, repeatSuppressWrite, action.RefusedLoopCallDuplicateSuppressed, 2)
 	result := second.refusal.Result
 	if result.Status != ToolResultDuplicateSuppressed || len(result.Content) != 2 {
 		t.Fatalf("suppressed result = %+v", result)
@@ -279,7 +280,7 @@ func TestRepeatWriteDuplicateSuppressedWithPriorResult(t *testing.T) {
 		t.Fatalf("prior result block = %+v", result.Content[1])
 	}
 	if second.refusal.DuplicateOfEntryID != first.entry.ID || second.refusal.DuplicateOfActionCallID != first.entry.ActionCallID ||
-		second.refusal.ActionCallCode != RefusedLoopCallDuplicateSuppressed {
+		second.refusal.ActionCallCode != action.RefusedLoopCallDuplicateSuppressed {
 		t.Fatalf("suppressed refusal = %+v", second.refusal)
 	}
 }
@@ -292,13 +293,13 @@ func TestRepeatWriteFifthIdenticalFailsRun(t *testing.T) {
 		// Reset points never lift write suppression.
 		sim.one(int64(n*10), simCall{subject: slackSend(fmt.Sprintf("other %d", n)), result: "ok"})
 		sim.user("again")
-		expectRefused(t, fmt.Sprintf("call %d", n), sim.one(int64(n*10+1), send), repeatSuppressWrite, RefusedLoopCallDuplicateSuppressed, n)
+		expectRefused(t, fmt.Sprintf("call %d", n), sim.one(int64(n*10+1), send), repeatSuppressWrite, action.RefusedLoopCallDuplicateSuppressed, n)
 	}
 	outcomes, failed := sim.step(50, false, send)
 	if !failed {
 		t.Fatalf("5th identical write did not fail the Run")
 	}
-	expectRefused(t, "5th", outcomes[0], repeatFailRun, RefusedLoopCallRepeatLimit, 5)
+	expectRefused(t, "5th", outcomes[0], repeatFailRun, action.RefusedLoopCallRepeatLimit, 5)
 }
 
 func TestRepeatFailedWriteUsesStreakRule(t *testing.T) {
@@ -310,13 +311,13 @@ func TestRepeatFailedWriteUsesStreakRule(t *testing.T) {
 	if second.note == "" {
 		t.Fatalf("same failed write twice got no note")
 	}
-	expectRefused(t, "3rd", sim.one(3, send), repeatRefuse, RefusedLoopCallRepeat, 3)
+	expectRefused(t, "3rd", sim.one(3, send), repeatRefuse, action.RefusedLoopCallRepeat, 3)
 
 	// A retry that then succeeds becomes suppressible.
 	sim2 := newRepeatSim(t)
 	expectRun(t, "fail", sim2.one(1, send))
 	expectRun(t, "succeed", sim2.one(2, simCall{subject: slackSend("x"), result: "ok"}))
-	expectRefused(t, "again", sim2.one(3, send), repeatSuppressWrite, RefusedLoopCallDuplicateSuppressed, 2)
+	expectRefused(t, "again", sim2.one(3, send), repeatSuppressWrite, action.RefusedLoopCallDuplicateSuppressed, 2)
 }
 
 func TestRepeatParkedWaitResetsPolling(t *testing.T) {
@@ -337,7 +338,7 @@ func TestRepeatParkedWaitResetsPolling(t *testing.T) {
 	expectRun(t, "a", sim2.one(1, check))
 	expectRun(t, "b", sim2.one(2, check))
 	expectRun(t, "unparked wait", sim2.one(3, simCall{subject: wait.subject, result: "elapsed"}))
-	expectRefused(t, "c", sim2.one(4, check), repeatRefuse, RefusedLoopCallRepeat, 3)
+	expectRefused(t, "c", sim2.one(4, check), repeatRefuse, action.RefusedLoopCallRepeat, 3)
 }
 
 func TestRepeatUserEntryResetsReadsNotWrites(t *testing.T) {
@@ -351,7 +352,7 @@ func TestRepeatUserEntryResetsReadsNotWrites(t *testing.T) {
 	expectRun(t, "read 4", sim.one(5, read))
 	sim.user("try again")
 	expectRun(t, "read after user", sim.one(6, read))
-	expectRefused(t, "send after user", sim.one(7, send), repeatSuppressWrite, RefusedLoopCallDuplicateSuppressed, 2)
+	expectRefused(t, "send after user", sim.one(7, send), repeatSuppressWrite, action.RefusedLoopCallDuplicateSuppressed, 2)
 }
 
 func browserClick() RepeatSubject {
@@ -389,7 +390,7 @@ func TestRepeatBrowserStuckClickRefused(t *testing.T) {
 		}
 		sim.one(step+1, snapshot)
 	}
-	if refused == nil || refused.verdict.Code != RefusedLoopCallRepeat {
+	if refused == nil || refused.verdict.Code != action.RefusedLoopCallRepeat {
 		t.Fatalf("a click that never changes the page was not refused: %+v", refused)
 	}
 }
@@ -416,7 +417,7 @@ func TestRepeatRunCommandSameOutputRefused(t *testing.T) {
 	if second := sim.one(2, test); second.note == "" {
 		t.Fatalf("same output twice got no note")
 	}
-	expectRefused(t, "3rd", sim.one(3, test), repeatRefuse, RefusedLoopCallRepeat, 3)
+	expectRefused(t, "3rd", sim.one(3, test), repeatRefuse, action.RefusedLoopCallRepeat, 3)
 }
 
 func TestRepeatSameStepDuplicateNotCounted(t *testing.T) {
@@ -451,7 +452,7 @@ func TestRepeatInterruptedNotCounted(t *testing.T) {
 	expectRun(t, "interrupted", sim.one(2, simCall{subject: read.subject, interrupted: true}))
 	expectRun(t, "interrupted again", sim.one(3, simCall{subject: read.subject, interrupted: true}))
 	expectRun(t, "2", sim.one(4, read))
-	expectRefused(t, "3", sim.one(5, read), repeatRefuse, RefusedLoopCallRepeat, 3)
+	expectRefused(t, "3", sim.one(5, read), repeatRefuse, action.RefusedLoopCallRepeat, 3)
 }
 
 func TestRepeatControlToolsNotCounted(t *testing.T) {
@@ -492,8 +493,8 @@ func TestRepeatFailRunStopsSiblings(t *testing.T) {
 		t.Fatalf("5th identical read did not fail the Run")
 	}
 	expectRefused(t, "sibling read", outcomes[0], repeatRefuse, ToolGuardRunStopping, 0)
-	expectRefused(t, "failing", outcomes[1], repeatFailRun, RefusedLoopCallRepeatLimit, 5)
-	expectRefused(t, "suppressed sibling", outcomes[2], repeatSuppressWrite, RefusedLoopCallDuplicateSuppressed, 2)
+	expectRefused(t, "failing", outcomes[1], repeatFailRun, action.RefusedLoopCallRepeatLimit, 5)
+	expectRefused(t, "suppressed sibling", outcomes[2], repeatSuppressWrite, action.RefusedLoopCallDuplicateSuppressed, 2)
 	expectRefused(t, "control sibling", outcomes[3], repeatRefuse, ToolGuardRunStopping, 0)
 	if outcomes[0].refusal.Message != "Not run: this run is stopping because a call was repeated without progress." ||
 		outcomes[0].refusal.ActionCallCode != "" || outcomes[0].refusal.DuplicateOfEntryID != "" {

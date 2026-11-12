@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -110,16 +111,16 @@ func (f *routineGrantFixtureState) createRoutine(t *testing.T, grants ...map[str
 
 func TestCreateTaskAlwaysAsksForItsBriefInEveryMode(t *testing.T) {
 	f := routineGrantFixture(t)
-	if action := RunbookManagementSkill().Actions[RunbookActionCreateTask]; !action.AlwaysReview() {
+	if action := RunbookManagementSkill().Actions[runtimeaction.RunbookActionCreateTask]; !action.AlwaysReview() {
 		t.Fatalf("create_task review = %q, want always", action.Review)
 	}
-	policy := NewDefaultActionPolicy()
+	policy := runtimeaction.NewDefaultActionPolicy()
 	policy.ApprovalTimeout = ApprovalTimeoutApprove
 	definition := RunbookManagementSkill()
-	bound := &skill.BoundAction{Definition: definition, Binding: f.bound.Binding, Action: definition.Actions[RunbookActionCreateTask]}
+	bound := &skill.BoundAction{Definition: definition, Binding: f.bound.Binding, Action: definition.Actions[runtimeaction.RunbookActionCreateTask]}
 	for _, mode := range []ConversationApprovalMode{"", ConversationApprovalManual, ConversationApprovalAuto, ConversationApprovalSkip} {
-		decision, err := policy.EvaluateAction(t.Context(), ActionPolicyInput{Run: f.run, Bound: bound, ApprovalMode: mode, RoutineGrant: &RoutineGrant{Action: "openseal.runbooks.create_task", Label: "x"}})
-		if err != nil || decision.Disposition != ActionDispositionRequireApproval || decision.ApprovalTimeout != ApprovalTimeoutExpire {
+		decision, err := policy.EvaluateAction(t.Context(), runtimeaction.ActionPolicyInput{Run: f.run, Bound: bound, ApprovalMode: mode, RoutineGrant: &RoutineGrant{Action: "openseal.runbooks.create_task", Label: "x"}})
+		if err != nil || decision.Disposition != runtimeaction.ActionDispositionRequireApproval || decision.ApprovalTimeout != ApprovalTimeoutExpire {
 			t.Fatalf("mode %q create_task decision = %#v, %v", mode, decision, err)
 		}
 	}
@@ -183,7 +184,7 @@ func TestApprovedBriefGrantsArePersistedOnTheRoutine(t *testing.T) {
 	f := routineGrantFixture(t)
 	activation, preview := f.createRoutine(t, map[string]interface{}{"action": "mail.search"}, map[string]interface{}{"action": "mail.send", "label": "Email you the summary", "toOwnerOnly": true})
 	brief, _ := preview["brief"].(map[string]interface{})
-	if preview["operation"] != RunbookActionCreateTask || brief["summary"] != "Every morning at 8, reads the forecast and emails you a summary." || brief["deliverTo"] != "kev@example.com, from your Gmail" || len(brief["grants"].([]interface{})) != 2 {
+	if preview["operation"] != runtimeaction.RunbookActionCreateTask || brief["summary"] != "Every morning at 8, reads the forecast and emails you a summary." || brief["deliverTo"] != "kev@example.com, from your Gmail" || len(brief["grants"].([]interface{})) != 2 {
 		t.Fatalf("approval preview = %#v", preview)
 	}
 	want := []RoutineGrant{{Action: "mail.search", Label: "Search the web"}, {Action: "mail.send", Label: "Email you the summary", ToOwnerOnly: true}}
@@ -272,9 +273,9 @@ func (f *routineGrantFixtureState) reviewEverything(t *testing.T, activation *Ru
 	}
 }
 
-func (f *routineGrantFixtureState) propose(t *testing.T, coordinator *ActionCoordinator, run *AgentRun, action, key string, arguments map[string]interface{}) *ActionProposalResult {
+func (f *routineGrantFixtureState) propose(t *testing.T, coordinator *runtimeaction.ActionCoordinator, run *AgentRun, action, key string, arguments map[string]interface{}) *ActionProposalResult {
 	t.Helper()
-	result, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, SkillID: "mail", SkillVersion: "1.0.0", Action: action, Arguments: arguments, IdempotencyKey: key})
+	result, err := coordinator.Propose(t.Context(), runtimeaction.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, SkillID: "mail", SkillVersion: "1.0.0", Action: action, Arguments: arguments, IdempotencyKey: key})
 	if err != nil {
 		t.Fatalf("%s: %v", key, err)
 	}
@@ -286,7 +287,7 @@ func TestRoutineRunsPerformGrantedActionsWithoutAsking(t *testing.T) {
 	activation, _ := f.createRoutine(t, map[string]interface{}{"action": "mail.send", "label": "Email you the summary", "toOwnerOnly": true})
 	// Manual review in the chat does not stop what the brief approved.
 	f.reviewEverything(t, activation)
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy(), nil)
+	coordinator := runtimeaction.NewActionCoordinator(f.store, f.store, f.catalog, runtimeaction.NewDefaultActionPolicy(), nil)
 	coordinator.SetRoutineOwnerAddresses(f.owners)
 
 	cases := []struct {
@@ -326,7 +327,7 @@ func TestRoutineGrantWithoutOwnerLimitAndRevoke(t *testing.T) {
 	f := routineGrantFixture(t)
 	activation, _ := f.createRoutine(t, map[string]interface{}{"action": "mail.note"})
 	f.reviewEverything(t, activation)
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy(), nil)
+	coordinator := runtimeaction.NewActionCoordinator(f.store, f.store, f.catalog, runtimeaction.NewDefaultActionPolicy(), nil)
 	run := f.routineOccurrence(t, activation, "before-revoke")
 	if result := f.propose(t, coordinator, run, "note", "note-before", map[string]interface{}{}); result.Approval != nil {
 		t.Fatal("granted note asked")

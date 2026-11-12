@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -117,7 +118,7 @@ type loopRepeatSessionStore interface {
 // refusedLoopCallRecorder stores a refused governed loop call
 // (*ActionCoordinator).
 type refusedLoopCallRecorder interface {
-	RecordRefusedLoopCall(ctx context.Context, req RefusedLoopCallRequest) (*ActionProposalResult, error)
+	RecordRefusedLoopCall(ctx context.Context, req action.RefusedLoopCallRequest) (*ActionProposalResult, error)
 }
 
 type loopRepeatGuardConfig struct {
@@ -201,7 +202,7 @@ func startLoopRepeatGuard(ctx context.Context, cfg loopRepeatGuardConfig, calls 
 			if g.verdicts[i].Kind == repeatFailRun {
 				g.failed = true
 			}
-		case repeatGuardKind(entry) == RefusedLoopCallRepeatLimit:
+		case repeatGuardKind(entry) == action.RefusedLoopCallRepeatLimit:
 			g.failed = true // decided before a crash or park
 		}
 		if effect != RepeatEffectControl && key != "" {
@@ -298,7 +299,7 @@ func (g *loopRepeatGuard) recordRefusedRow(ctx context.Context, entry *SessionEn
 		return "", errors.New("a governed repeat refusal needs the action coordinator")
 	}
 	lease := g.lease()
-	result, err := g.cfg.Refusals.RecordRefusedLoopCall(ctx, RefusedLoopCallRequest{
+	result, err := g.cfg.Refusals.RecordRefusedLoopCall(ctx, action.RefusedLoopCallRequest{
 		Scope: g.cfg.Run.Scope, Run: g.cfg.Run, StepID: entry.StepID, DeploymentID: governed.DeploymentID,
 		SkillID: governed.SkillID, SkillVersion: governed.SkillVersion, Action: governed.Action,
 		BindingID: governed.BindingID, BindingRevision: governed.BindingRevision,

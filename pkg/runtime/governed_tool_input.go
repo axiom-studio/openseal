@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -75,7 +76,7 @@ func ParseGovernedToolInput(action capability.ModelAction, raw json.RawMessage, 
 func decodeGovernedObject(raw json.RawMessage) (map[string]interface{}, error) {
 	var object map[string]interface{}
 	if err := json.Unmarshal(raw, &object); err != nil || object == nil {
-		return nil, &ActionProposalRejection{Code: ProposalRejectionToolArgumentsInvalid, Message: "The tool input must be a JSON object.", Cause: err}
+		return nil, &runtimeaction.ActionProposalRejection{Code: runtimeaction.ProposalRejectionToolArgumentsInvalid, Message: "The tool input must be a JSON object.", Cause: err}
 	}
 	return object, nil
 }
@@ -90,17 +91,17 @@ func governedReviewedInput(action capability.ModelAction, raw json.RawMessage) (
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil {
-		return GovernedToolInput{}, rejectProposal(ProposalRejectionToolArgumentsInvalid,
+		return GovernedToolInput{}, runtimeaction.RejectProposal(runtimeaction.ProposalRejectionToolArgumentsInvalid,
 			fmt.Errorf("The tool input must be the object {arguments, reviewContext, externalOperation, evidenceRefs} with no other keys: %v", err))
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return GovernedToolInput{}, rejectProposal(ProposalRejectionToolArgumentsInvalid, errors.New("The tool input must be a single JSON object."))
+		return GovernedToolInput{}, runtimeaction.RejectProposal(runtimeaction.ProposalRejectionToolArgumentsInvalid, errors.New("The tool input must be a single JSON object."))
 	}
 	if envelope.Arguments == nil {
-		return GovernedToolInput{}, rejectProposal(ProposalRejectionToolArgumentsInvalid, errors.New("The tool input needs arguments: an object with the action's arguments."))
+		return GovernedToolInput{}, runtimeaction.RejectProposal(runtimeaction.ProposalRejectionToolArgumentsInvalid, errors.New("The tool input needs arguments: an object with the action's arguments."))
 	}
-	if err := validateReviewedActionReviewContext(envelope.ReviewContext); err != nil {
-		return GovernedToolInput{}, rejectProposal(ProposalRejectionReviewInvalid, fmt.Errorf("reviewContext is invalid: %w", err))
+	if err := runtimeaction.ValidateReviewedActionReviewContext(envelope.ReviewContext); err != nil {
+		return GovernedToolInput{}, runtimeaction.RejectProposal(runtimeaction.ProposalRejectionReviewInvalid, fmt.Errorf("reviewContext is invalid: %w", err))
 	}
 	if err := checkGovernedExternalOperation(action, envelope.ExternalOperation); err != nil {
 		return GovernedToolInput{}, err
@@ -124,7 +125,7 @@ func governedPlainInput(action capability.ModelAction, arguments map[string]inte
 	text, _ := value.(string)
 	text = strings.TrimSpace(text)
 	if !present || !utf8.ValidString(text) || text == "" || utf8.RuneCountInString(text) > maxGovernedReviewSummaryRunes {
-		return GovernedToolInput{}, &ActionProposalRejection{Code: ProposalRejectionReviewInvalid, Message: governedReviewSummaryInvalidMessage}
+		return GovernedToolInput{}, &runtimeaction.ActionProposalRejection{Code: runtimeaction.ProposalRejectionReviewInvalid, Message: governedReviewSummaryInvalidMessage}
 	}
 	input.ReviewSummary = text
 	return input, nil
@@ -134,15 +135,15 @@ func governedPlainInput(action capability.ModelAction, arguments map[string]inte
 // directive. The review context is validated but its content is not required:
 // deterministic producers do not author published text.
 func governedDirectiveInput(action capability.ModelAction, arguments map[string]interface{}, directive *governedInputDirective) (GovernedToolInput, error) {
-	if err := validateApprovalReviewContext(directive.ReviewContext); err != nil {
-		return GovernedToolInput{}, rejectProposal(ProposalRejectionReviewInvalid, fmt.Errorf("reviewContext is invalid: %w", err))
+	if err := runtimeaction.ValidateApprovalReviewContext(directive.ReviewContext); err != nil {
+		return GovernedToolInput{}, runtimeaction.RejectProposal(runtimeaction.ProposalRejectionReviewInvalid, fmt.Errorf("reviewContext is invalid: %w", err))
 	}
 	if err := checkGovernedExternalOperation(action, directive.ExternalOperation); err != nil {
 		return GovernedToolInput{}, err
 	}
 	input := GovernedToolInput{
 		Arguments:         arguments,
-		ReviewContext:     cloneApprovalReviewContext(directive.ReviewContext),
+		ReviewContext:     runtimeaction.CloneApprovalReviewContext(directive.ReviewContext),
 		ExternalOperation: cloneExternalOperationIdentity(directive.ExternalOperation),
 		EvidenceRefs:      append([]string(nil), directive.EvidenceRefs...),
 		ReviewSummary:     strings.TrimSpace(directive.Summary),
@@ -156,14 +157,14 @@ func governedDirectiveInput(action capability.ModelAction, arguments map[string]
 func checkGovernedExternalOperation(action capability.ModelAction, operation *ExternalOperationIdentity) error {
 	switch {
 	case operation == nil && governedExternalOperationRequired(action):
-		return &ActionProposalRejection{Code: ProposalRejectionExternalIdentityInvalid,
+		return &runtimeaction.ActionProposalRejection{Code: runtimeaction.ProposalRejectionExternalIdentityInvalid,
 			Message: "This action needs externalOperation: the stable resource it changes and the operation it performs."}
 	case operation != nil && !governedExternalOperationOffered(action):
-		return &ActionProposalRejection{Code: ProposalRejectionExternalIdentityInvalid,
+		return &runtimeaction.ActionProposalRejection{Code: runtimeaction.ProposalRejectionExternalIdentityInvalid,
 			Message: "This action does not take externalOperation; call it again without it."}
 	case operation != nil:
 		if err := operation.Validate(); err != nil {
-			return rejectProposal(ProposalRejectionExternalIdentityInvalid, fmt.Errorf("externalOperation is invalid: %w", err))
+			return runtimeaction.RejectProposal(runtimeaction.ProposalRejectionExternalIdentityInvalid, fmt.Errorf("externalOperation is invalid: %w", err))
 		}
 	}
 	return nil

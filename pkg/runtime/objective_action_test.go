@@ -7,17 +7,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestObjectiveManagementSkillVersionsRunbookOnlyContract(t *testing.T) {
-	definition := ObjectiveManagementSkill()
+	definition := action.ObjectiveManagementSkill()
 	if definition.Version != "1.2.0" {
 		t.Fatalf("Objective management Skill version = %q", definition.Version)
 	}
-	for _, actionName := range []string{ObjectiveActionCreate, ObjectiveActionUpdate} {
+	for _, actionName := range []string{action.ObjectiveActionCreate, action.ObjectiveActionUpdate} {
 		action := definition.Actions[actionName]
 		properties, _ := action.InputSchema["properties"].(map[string]interface{})
 		if _, exists := properties["cadence"]; exists {
@@ -51,15 +52,15 @@ func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testin
 			if err != nil || claimed == nil || claimed.ID != run.ID {
 				t.Fatalf("claim = %#v, %v", claimed, err)
 			}
-			validator, err := NewObjectiveActionValidator(store)
+			validator, err := action.NewObjectiveActionValidator(store)
 			if err != nil {
 				t.Fatal(err)
 			}
 			f := newLoopProposalFixture(t, store, claimed, "conversation-worker", time.Now().UTC())
-			coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator})
-			proposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+			coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
+			proposal, err := coordinator.Propose(ctx, f.request(action.ProposeActionRequest{
 				DeploymentID: owner.ID,
-				SkillID:      ObjectiveManagementSkillID, SkillVersion: ObjectiveManagementSkillVersion, Action: ObjectiveActionCreate,
+				SkillID:      ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion, Action: action.ObjectiveActionCreate,
 				Arguments:      map[string]interface{}{"title": "Publish release notes", "goal": "Create and review release notes", "priority": 2},
 				IdempotencyKey: "message-42:create-release-notes", Summary: "Create objective: Publish release notes", TurnID: "turn-42",
 			}, "create-release-notes"))
@@ -70,22 +71,22 @@ func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testin
 				t.Fatalf("proposal lifecycle = %#v", proposal)
 			}
 			preview := proposal.Approval.ProposedAction
-			if preview["resourceType"] != "objective" || preview["operation"] != ObjectiveActionCreate || preview["resultingStatus"] != string(ObjectiveStatusDraft) || preview["owner"] == nil || preview["arguments"] != nil {
+			if preview["resourceType"] != "objective" || preview["operation"] != action.ObjectiveActionCreate || preview["resultingStatus"] != string(ObjectiveStatusDraft) || preview["owner"] == nil || preview["arguments"] != nil {
 				t.Fatalf("typed approval preview = %#v", preview)
 			}
-			dispatcher, err := NewObjectiveActionDispatcher(store, nil)
+			dispatcher, err := action.NewObjectiveActionDispatcher(store, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			executed := approveAndExecuteLoopAction(t, store, f, proposal, NewActionWorker(store, catalog, nil, dispatcher), "decision-42")
-			if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["resourceType"] != "objective" || executed.Call.Output["operation"] != ObjectiveActionCreate || executed.Call.Output["created"] != true {
+			executed := approveAndExecuteLoopAction(t, store, f, proposal, action.NewActionWorker(store, catalog, nil, dispatcher), "decision-42")
+			if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["resourceType"] != "objective" || executed.Call.Output["operation"] != action.ObjectiveActionCreate || executed.Call.Output["created"] != true {
 				t.Fatalf("execution = %#v", executed)
 			}
 			objectives, err := portfolio.ListObjectives(ctx, ObjectiveFilter{Scope: scope, Owner: &owner})
 			if err != nil || len(objectives) != 1 || objectives[0].Status != ObjectiveStatusDraft || objectives[0].Title != "Publish release notes" {
 				t.Fatalf("objectives = %#v, %v", objectives, err)
 			}
-			bound, err := catalog.Resolve(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, ObjectiveManagementSkillID, ObjectiveManagementSkillVersion, ObjectiveActionCreate)
+			bound, err := catalog.Resolve(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, ObjectiveManagementSkillID, action.ObjectiveManagementSkillVersion, action.ObjectiveActionCreate)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -117,14 +118,14 @@ func TestObjectiveActionsRejectInjectedOwnerForeignTargetAndStaleRevisionBeforeA
 	if err != nil || claimed == nil {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	validator, _ := NewObjectiveActionValidator(store)
-	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator})
-	base := loopProposeRequest(ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: ObjectiveManagementSkillVersion, Action: ObjectiveActionCreate, IdempotencyKey: "create"}, "create")
+	validator, _ := action.NewObjectiveActionValidator(store)
+	coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
+	base := loopProposeRequest(action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion, Action: action.ObjectiveActionCreate, IdempotencyKey: "create"}, "create")
 	base.Arguments = map[string]interface{}{"title": "Campaign", "goal": "Launch campaign", "owner": map[string]interface{}{"type": "team", "id": "finance"}}
 	if _, err := coordinator.Propose(ctx, base); err == nil {
 		t.Fatal("model-supplied owner should fail schema validation")
 	}
-	base.Action = ObjectiveActionUpdate
+	base.Action = action.ObjectiveActionUpdate
 	base.Arguments = map[string]interface{}{"objectiveId": foreign.ID, "expectedRevision": foreign.Revision, "goal": "Exfiltrate finance work"}
 	if _, err := coordinator.Propose(ctx, base); err == nil || !stringsContain(err.Error(), "not owned") {
 		t.Fatalf("foreign target error = %v", err)
@@ -162,10 +163,10 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	validator, _ := NewObjectiveActionValidator(store)
+	validator, _ := action.NewObjectiveActionValidator(store)
 	f := newLoopProposalFixture(t, store, claimed, "worker", time.Now().UTC())
-	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator})
-	proposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: ObjectiveManagementSkillVersion, Action: ObjectiveActionPause, Arguments: map[string]interface{}{"objectiveId": objective.ID}, IdempotencyKey: "pause-on-request", Summary: "Pause objective: Watch production"}, "pause-on-request"))
+	coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
+	proposal, err := coordinator.Propose(ctx, f.request(action.ProposeActionRequest{DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion, Action: action.ObjectiveActionPause, Arguments: map[string]interface{}{"objectiveId": objective.ID}, IdempotencyKey: "pause-on-request", Summary: "Pause objective: Watch production"}, "pause-on-request"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,13 +176,13 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 	if proposal.Approval.ProposedAction["changes"].(map[string]interface{})["status"] != string(ObjectiveStatusPaused) {
 		t.Fatalf("pause preview = %#v", proposal.Approval.ProposedAction)
 	}
-	dispatcher, _ := NewObjectiveActionDispatcher(store, nil)
-	executed := approveAndExecuteLoopAction(t, store, f, proposal, NewActionWorker(store, catalog, nil, dispatcher), "approve-pause")
+	dispatcher, _ := action.NewObjectiveActionDispatcher(store, nil)
+	executed := approveAndExecuteLoopAction(t, store, f, proposal, action.NewActionWorker(store, catalog, nil, dispatcher), "approve-pause")
 	paused, err := portfolio.GetObjective(ctx, scope, objective.ID)
 	if err != nil || paused.Status != ObjectiveStatusPaused || paused.Revision != objective.Revision+1 {
 		t.Fatalf("paused = %#v, %v", paused, err)
 	}
-	bound, _ := catalog.Resolve(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, ObjectiveManagementSkillID, ObjectiveManagementSkillVersion, ObjectiveActionPause)
+	bound, _ := catalog.Resolve(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, ObjectiveManagementSkillID, action.ObjectiveManagementSkillVersion, action.ObjectiveActionPause)
 	if _, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: executed.Call, Bound: bound, Arguments: executed.Call.Arguments}); err != nil {
 		t.Fatalf("approved replay = %v", err)
 	}
@@ -195,11 +196,11 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 // end, approves it as an operator, re-leases the queued Run to f's worker as
 // the loop's next claim does, and executes the ready call inline as the
 // loop's governed executor does.
-func approveAndExecuteLoopAction(t *testing.T, store KernelStore, f *loopProposalFixture, proposal *ActionProposalResult, worker *ActionWorker, decisionID string) *ActionExecutionResult {
+func approveAndExecuteLoopAction(t *testing.T, store KernelStore, f *loopProposalFixture, proposal *ActionProposalResult, worker *action.ActionWorker, decisionID string) *ActionExecutionResult {
 	t.Helper()
 	f.assertUntouched()
 	f.parkOnApproval(proposal.Approval.ID)
-	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(context.Background(), ResolveApprovalRequest{
+	resolved, err := action.NewApprovalCoordinator(store, store, action.EligibleApprovalAuthorizer{}).Resolve(context.Background(), action.ResolveApprovalRequest{
 		Scope: f.run.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 		DecisionID: decisionID, Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Reviewed",
 	})
@@ -252,13 +253,13 @@ func objectiveActionCatalog(t *testing.T, store KernelStore, scope Scope, deploy
 	} else {
 		catalog = skill.NewCatalog()
 	}
-	if err := catalog.Register(context.Background(), ObjectiveManagementSkill()); err != nil {
+	if err := catalog.Register(context.Background(), action.ObjectiveManagementSkill()); err != nil {
 		t.Fatal(err)
 	}
 	if err := catalog.Bind(context.Background(), &skill.Binding{
 		ID: "objectives", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: deploymentID,
-		SkillID: ObjectiveManagementSkillID, SkillVersion: ObjectiveManagementSkillVersion,
-		AllowedActions: []string{ObjectiveActionCreate, ObjectiveActionUpdate, ObjectiveActionPause}, MaximumRisk: skill.RiskLevelWrite,
+		SkillID: ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion,
+		AllowedActions: []string{action.ObjectiveActionCreate, action.ObjectiveActionUpdate, action.ObjectiveActionPause}, MaximumRisk: skill.RiskLevelWrite,
 	}); err != nil {
 		t.Fatal(err)
 	}

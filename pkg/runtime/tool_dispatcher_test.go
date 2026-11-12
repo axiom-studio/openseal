@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
@@ -142,7 +143,7 @@ func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	envelope, err := SignActionCredentialLease(t.Context(), *lease, testCredentialLeaseSigner{key: []byte("lease-signing-key")})
+	envelope, err := action.SignActionCredentialLease(t.Context(), *lease, testCredentialLeaseSigner{key: []byte("lease-signing-key")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,17 +276,17 @@ func TestBoundActionToolTransportUsesActionOverrideAndRejectsNonTool(t *testing.
 		Definition: &skill.Definition{Transport: skill.TransportReference{Kind: "tool", Endpoint: "definition_tool"}},
 		Action:     skill.Action{Transport: &override},
 	}
-	endpoint, err := boundActionToolTransport(bound)
+	endpoint, err := action.BoundActionToolTransport(bound)
 	if err != nil || endpoint != "action_tool" {
 		t.Fatalf("action transport override = %q, %v", endpoint, err)
 	}
 	bound.Action.Transport = nil
 	bound.Definition.Transport = skill.TransportReference{Kind: "http", Endpoint: "https://example.invalid"}
-	if _, err := boundActionToolTransport(bound); err == nil {
+	if _, err := action.BoundActionToolTransport(bound); err == nil {
 		t.Fatal("non-tool delegated transport was accepted")
 	}
 	bound.Definition.Transport = skill.TransportReference{Kind: "tool"}
-	if _, err := boundActionToolTransport(bound); err == nil {
+	if _, err := action.BoundActionToolTransport(bound); err == nil {
 		t.Fatal("empty delegated tool endpoint was accepted")
 	}
 }

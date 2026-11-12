@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -31,7 +32,7 @@ func routineBindingToolGrantInstruction(actions []skill.ModelAction) string {
 }
 
 func routineBriefAction(skillID, action string) bool {
-	return skillID == RunbookManagementSkillID && action == RunbookActionCreateTask
+	return skillID == RunbookManagementSkillID && action == runtimeaction.RunbookActionCreateTask
 }
 
 // declinedRoutineBrief reports a routine brief the person declined.

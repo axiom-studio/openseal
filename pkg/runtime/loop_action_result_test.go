@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -117,8 +118,8 @@ func TestRenderGovernedResultTable(t *testing.T) {
 			c := governedResultCall(ActionCallStatusDenied)
 			c.ApprovalID = "approval-1"
 			return c
-		}, approval: governedResultApproval(ApprovalStatusSuperseded, ApprovalSupersededReason), state: ToolEntryError, status: ToolResultSuperseded,
-			json: `{"evidenceRef":"action-call:call-1","reason":"` + ApprovalSupersededReason + `","status":"superseded"}`},
+		}, approval: governedResultApproval(ApprovalStatusSuperseded, action.ApprovalSupersededReason), state: ToolEntryError, status: ToolResultSuperseded,
+			json: `{"evidenceRef":"action-call:call-1","reason":"` + action.ApprovalSupersededReason + `","status":"superseded"}`},
 		{name: "approval expired", call: func() *ActionCall {
 			c := governedResultCall(ActionCallStatusDenied)
 			c.ApprovalID = "approval-1"
@@ -139,10 +140,10 @@ func TestRenderGovernedResultTable(t *testing.T) {
 			json: `{"evidenceRef":"action-call:call-1","reason":"The run that made this call ended before it ran.","status":"canceled"}`},
 		{name: "refused row", call: func() *ActionCall {
 			c := governedResultCall(ActionCallStatusRefused)
-			c.ErrorCode, c.Error = RefusedLoopCallRepeat, "already done"
+			c.ErrorCode, c.Error = action.RefusedLoopCallRepeat, "already done"
 			return c
 		}, state: ToolEntryError, status: ToolResultRefused,
-			json: `{"code":"` + RefusedLoopCallRepeat + `","error":"already done","evidenceRef":"action-call:call-1","status":"refused"}`},
+			json: `{"code":"` + action.RefusedLoopCallRepeat + `","error":"already done","evidenceRef":"action-call:call-1","status":"refused"}`},
 		{name: "compensated", call: func() *ActionCall { return governedResultCall(ActionCallStatusCompensated) },
 			state: ToolEntryError, status: ToolResultFailed,
 			json: `{"error":"The action was reverted.","evidenceRef":"action-call:call-1","status":"failed"}`},
@@ -151,7 +152,7 @@ func TestRenderGovernedResultTable(t *testing.T) {
 			json: `{"error":"The action was reverted.","evidenceRef":"action-call:call-1","status":"failed"}`},
 		{name: "budget exhausted", call: func() *ActionCall {
 			c := governedResultCall(ActionCallStatusDenied)
-			c.Error = actionBudgetExhaustedReason
+			c.Error = action.ActionBudgetExhaustedReason
 			return c
 		}, state: ToolEntryError, status: ToolResultDenied,
 			json: `{"evidenceRef":"action-call:call-1","reason":"This run has used its action budget.","status":"denied"}`},
@@ -164,9 +165,9 @@ func TestRenderGovernedResultTable(t *testing.T) {
 	}
 
 	t.Run("proposal rejection", func(t *testing.T) {
-		state, result := renderGovernedRejection(&ActionProposalRejection{Code: ProposalRejectionToolArgumentsInvalid, Message: "path is required"})
+		state, result := renderGovernedRejection(&action.ActionProposalRejection{Code: action.ProposalRejectionToolArgumentsInvalid, Message: "path is required"})
 		requireGovernedResult(t, state, result, ToolEntryError, ToolResultRefused,
-			`{"code":"`+ProposalRejectionToolArgumentsInvalid+`","error":"path is required","status":"refused"}`)
+			`{"code":"`+action.ProposalRejectionToolArgumentsInvalid+`","error":"path is required","status":"refused"}`)
 	})
 	t.Run("maintenance at proposal", func(t *testing.T) {
 		state, result := renderGovernedMaintenanceRefusal()

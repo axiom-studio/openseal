@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	"go.uber.org/zap"
@@ -76,12 +77,12 @@ func (o HostToolOutcome) KernelPatch() (*ToolEntryKernelPatch, error) {
 // HostToolDispatcher runs host tool calls of the loop's steps on the step host.
 type HostToolDispatcher struct {
 	host    HostToolExecutor
-	actions *ActionCoordinator // OpenNestedActionTurn
+	actions *action.ActionCoordinator // OpenNestedActionTurn
 	sleep   func(context.Context, time.Duration) error
 	logger  *zap.SugaredLogger
 }
 
-func NewHostToolDispatcher(host HostToolExecutor, actions *ActionCoordinator, logger *zap.SugaredLogger) *HostToolDispatcher {
+func NewHostToolDispatcher(host HostToolExecutor, actions *action.ActionCoordinator, logger *zap.SugaredLogger) *HostToolDispatcher {
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}

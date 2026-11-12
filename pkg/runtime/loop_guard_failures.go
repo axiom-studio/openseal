@@ -1,5 +1,7 @@
 package runtime
 
+import "github.com/axiom-studio/openseal/pkg/runtime/action"
+
 // Run failure kinds and codes raised by the kernel guards (repeat detection,
 // the error streak and compaction). They end in AgentRun.FailureExplanation
 // and Run.Error. The context-overflow rejection keeps the host code
@@ -31,8 +33,8 @@ type guardRunFailure struct {
 }
 
 var guardRunFailures = map[string]guardRunFailure{
-	RunFailureCodeRepeatLimit: {
-		Kind: RunFailureKindRepeatLimit, Code: RunFailureCodeRepeatLimit,
+	action.RunFailureCodeRepeatLimit: {
+		Kind: RunFailureKindRepeatLimit, Code: action.RunFailureCodeRepeatLimit,
 		Message: runFailureMessageRepeatLimit, Explainable: true,
 	},
 	RunFailureCodeErrorStreak: {

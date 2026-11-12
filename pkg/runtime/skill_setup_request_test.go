@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
@@ -102,12 +103,12 @@ func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, store)
-	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator})
+	coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
 	step, err := NewAgentTurnService(store, store).BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: run.ID, SessionID: run.SessionID, Producer: StepProducerModel, WorkerID: "worker", LeaseDuration: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{Scope: scope, RunID: run.ID, TurnID: step.ID, WorkerID: "worker", DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: agentrun.SkillActionRequestSetup, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Read the community"}, Summary: "Ask for Reddit setup",
+	proposal, err := coordinator.Propose(ctx, action.ProposeActionRequest{Scope: scope, RunID: run.ID, TurnID: step.ID, WorkerID: "worker", DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: agentrun.SkillActionRequestSetup, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Read the community"}, Summary: "Ask for Reddit setup",
 		Origin: ActionOriginLoop, Execution: ActionExecutionLoop, IdempotencyKey: "loop:" + step.ID + ":call-setup", CausationID: step.ID})
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +120,7 @@ func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "1.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessBindable}}}, nil
 	})
 	dispatcher, _ := skillbinding.NewSkillBindingActionDispatcher(store, catalog, nil, provider)
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "worker")
+	executed, err := action.NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "worker")
 	if err != nil {
 		t.Fatal(err)
 	}

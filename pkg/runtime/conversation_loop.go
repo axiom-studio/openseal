@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -56,7 +57,7 @@ func (r *ConversationRunTurnRunner) conversationLoopAuthority(ctx context.Contex
 	authority.CanAskConversationQuestion = conversation != nil && trigger != nil &&
 		run.AssignedAgentID != "" && run.AssignedAgentID == ConversationRunAgentID(conversation, run)
 	authority.ExternalChannelReply = externalChannelContext(conversation)
-	if _, authority.ApprovalMode, err = RunConversationApprovalMode(ctx, r.portfolio, r.conversationStore, run); err != nil {
+	if _, authority.ApprovalMode, err = action.RunConversationApprovalMode(ctx, r.portfolio, r.conversationStore, run); err != nil {
 		return ConversationLoopAuthority{}, err
 	}
 	return authority, nil

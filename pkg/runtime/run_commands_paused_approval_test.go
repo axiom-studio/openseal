@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -91,7 +92,7 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 				if len(tools) != 1 || !tools[0].State.Terminal() || tools[0].State == ToolEntryCompleted {
 					t.Fatalf("tool entry after cancel = %v", f.entryTypes(run.ID))
 				}
-				if _, err := f.approve.Resolve(f.ctx, ResolveApprovalRequest{
+				if _, err := f.approve.Resolve(f.ctx, action.ResolveApprovalRequest{
 					Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: gotApproval.Revision, DecisionID: "late-approval",
 					Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: loopFixtureUser},
 				}); !errors.Is(err, ErrApprovalResolved) {

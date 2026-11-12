@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -270,16 +271,16 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 
 	t.Run("connect_account", func(t *testing.T) {
 		eachStore(t, "wait-connect-account", func(t *testing.T, store KernelStore) {
-			f := newLoopFixture(t, store, withCredentials(CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+			f := newLoopFixture(t, store, withCredentials(action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 				return map[string]string{"google": "token"}, nil
 			})))
 			waitCardSkills(f)
 			connected := false
-			f.executor.SetCredentialAvailabilityChecker(availabilityFunc(func(_ context.Context, req CredentialAvailabilityRequest) (CredentialAvailability, error) {
+			f.executor.SetCredentialAvailabilityChecker(availabilityFunc(func(_ context.Context, req action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
 				if connected {
-					return CredentialAvailability{}, nil
+					return action.CredentialAvailability{}, nil
 				}
-				return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapPersonSignIn}}, nil
+				return action.CredentialAvailability{Gaps: map[string]action.CredentialGap{"google": action.CredentialGapPersonSignIn}}, nil
 			}))
 			f.dispatch.on("send_mail", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				return map[string]interface{}{"sent": true}, nil

@@ -13,6 +13,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -34,7 +35,7 @@ const (
 
 func teamCreateTeamAction() skill.Action {
 	return skill.Action{
-		Name:        TeamActionCreateTeam,
+		Name:        action.TeamActionCreateTeam,
 		Description: "Create a Team from two or more existing Agents, after the person reviews it. Use openseal.agents.list_agents for the exact Agent ids; you cannot be a member. Choose a short, distinctive name that no current Agent or Team uses.",
 		Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways,
 		Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
@@ -56,7 +57,7 @@ func teamCreateTeamAction() skill.Action {
 			"type": "object",
 			"properties": map[string]interface{}{
 				"resourceType": map[string]interface{}{"type": "string", "const": teamResourceType},
-				"operation":    map[string]interface{}{"type": "string", "const": TeamActionCreateTeam},
+				"operation":    map[string]interface{}{"type": "string", "const": action.TeamActionCreateTeam},
 				"replayed":     map[string]interface{}{"type": "boolean"},
 				"deploymentId": map[string]interface{}{"type": "string"},
 				"displayName":  map[string]interface{}{"type": "string"},
@@ -81,7 +82,7 @@ type teamCreateArguments struct {
 // version has it.
 func isTeamCreateAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == TeamManagementSkillID &&
-		bound.Definition.Version == TeamManagementSkillVersion && bound.Action.Name == TeamActionCreateTeam
+		bound.Definition.Version == action.TeamManagementSkillVersion && bound.Action.Name == action.TeamActionCreateTeam
 }
 
 // TeamCreateActionValidator checks create_team before a card exists and
@@ -385,7 +386,7 @@ func (d *AgentBuilderActionDispatcher) createTeam(ctx context.Context, input age
 		return nil, err
 	}
 	result := map[string]interface{}{
-		"resourceType": teamResourceType, "operation": TeamActionCreateTeam,
+		"resourceType": teamResourceType, "operation": action.TeamActionCreateTeam,
 		"deploymentId": deployment.ID, "displayName": definition.DisplayName, "replayed": replayed,
 		"definition": definition, "deployment": deployment,
 		"space":   map[string]interface{}{"id": space.ID, "name": space.Name},

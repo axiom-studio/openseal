@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -648,7 +649,7 @@ func TestRepeatedReadRefusedByExecutor(t *testing.T) {
 		}
 	}
 	third := f.entry(last.entries[0])
-	if third.State != ToolEntryError || third.Tool.Guard == nil || third.Tool.Guard.Kind != RefusedLoopCallRepeat {
+	if third.State != ToolEntryError || third.Tool.Guard == nil || third.Tool.Guard.Kind != action.RefusedLoopCallRepeat {
 		t.Fatalf("third identical read = %s guard %#v", third.State, third.Tool.Guard)
 	}
 	if len(f.host.order) != 2 {

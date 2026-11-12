@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -21,7 +22,7 @@ import (
 type repeatExecFixture struct {
 	*loopStoreFixture
 	sessions    AgentSessionStore
-	coordinator *ActionCoordinator
+	coordinator *action.ActionCoordinator
 	step        int64
 }
 
@@ -39,7 +40,7 @@ func newRepeatExecFixture(t *testing.T) *repeatExecFixture {
 	if f.run.SessionID == "" {
 		t.Fatal("the Run has no session")
 	}
-	coordinator := NewActionCoordinator(store, store, nil, nil, nil, models.WithClock(func() time.Time { return f.now }))
+	coordinator := action.NewActionCoordinator(store, store, nil, nil, nil, models.WithClock(func() time.Time { return f.now }))
 	return &repeatExecFixture{loopStoreFixture: f, sessions: store, coordinator: coordinator}
 }
 
@@ -251,7 +252,7 @@ func TestWithRepeatKernelFields(t *testing.T) {
 		t.Fatalf("resume patch = %#v", req.Kernel)
 	}
 	req = withRepeatKernelFields(ToolEntryTransitionRequest{From: ToolEntryPending, To: ToolEntryError, Result: result,
-		Kernel: &ToolEntryKernelPatch{Guard: &ToolGuardOutcome{Kind: RefusedLoopCallRepeat}}})
+		Kernel: &ToolEntryKernelPatch{Guard: &ToolGuardOutcome{Kind: action.RefusedLoopCallRepeat}}})
 	if req.Kernel.ResultDigest != "" {
 		t.Fatal("a refusal got a result digest")
 	}
@@ -281,18 +282,18 @@ func TestRepeatGuardReadNoteRefusalThenFailure(t *testing.T) {
 	if failure != nil {
 		t.Fatalf("3rd failure = %#v", failure)
 	}
-	requireGuardRefusal(t, third[0], RefusedLoopCallRepeat, 3, ToolResultRefused, repeatRefusedText(3, 2))
+	requireGuardRefusal(t, third[0], action.RefusedLoopCallRepeat, 3, ToolResultRefused, repeatRefusedText(3, 2))
 	if third[0].Tool.DuplicateOfEntryID != second[0].ID || third[0].ActionCallID != "" {
 		t.Fatalf("3rd duplicateOf = %q, action call %q", third[0].Tool.DuplicateOfEntryID, third[0].ActionCallID)
 	}
 	fourth, _ := f.runStep(nil, read)
-	requireGuardRefusal(t, fourth[0], RefusedLoopCallRepeat, 4, ToolResultRefused, repeatRefusedText(4, 2))
+	requireGuardRefusal(t, fourth[0], action.RefusedLoopCallRepeat, 4, ToolResultRefused, repeatRefusedText(4, 2))
 
 	other := readCall("read_file", `{"path":"b.txt"}`)
 	fifth, failure := f.runStep(nil, read, other)
-	requireGuardRefusal(t, fifth[0], RefusedLoopCallRepeatLimit, 5, ToolResultRefused, repeatLimitText(5))
+	requireGuardRefusal(t, fifth[0], action.RefusedLoopCallRepeatLimit, 5, ToolResultRefused, repeatLimitText(5))
 	requireGuardRefusal(t, fifth[1], ToolGuardRunStopping, 0, ToolResultRefused, repeatRunStoppingText)
-	if failure == nil || failure.Kind != RunFailureKindRepeatLimit || failure.Code != RunFailureCodeRepeatLimit || !failure.Explainable ||
+	if failure == nil || failure.Kind != RunFailureKindRepeatLimit || failure.Code != action.RunFailureCodeRepeatLimit || !failure.Explainable ||
 		failure.Message != repeatLimitRunError {
 		t.Fatalf("5th failure = %#v", failure)
 	}
@@ -322,7 +323,7 @@ func TestRepeatGuardSuppressesSucceededWrite(t *testing.T) {
 	if failure != nil {
 		t.Fatalf("failure = %#v", failure)
 	}
-	requireGuardRefusal(t, second[0], RefusedLoopCallDuplicateSuppressed, 2, ToolResultDuplicateSuppressed, repeatSuppressedText(1))
+	requireGuardRefusal(t, second[0], action.RefusedLoopCallDuplicateSuppressed, 2, ToolResultDuplicateSuppressed, repeatSuppressedText(1))
 	content := second[0].Tool.Result.Content
 	if len(content) != 2 || content[1].Text != "sent #1" || second[0].Tool.DuplicateOfEntryID != first[0].ID {
 		t.Fatalf("suppressed result = %#v", second[0].Tool)
@@ -356,13 +357,13 @@ func TestRepeatGuardGovernedRefusalRecordsRefusedRow(t *testing.T) {
 		t.Fatalf("refusals = %d, %v", len(refused), err)
 	}
 	entry := refused[0]
-	requireGuardRefusal(t, entry, RefusedLoopCallRepeat, 3, ToolResultRefused, "")
+	requireGuardRefusal(t, entry, action.RefusedLoopCallRepeat, 3, ToolResultRefused, "")
 	row, err := f.store.GetActionCall(f.ctx, f.scope, entry.ActionCallID)
 	if err != nil {
 		t.Fatalf("refused row %q: %v", entry.ActionCallID, err)
 	}
 	if row.Status != ActionCallStatusRefused || row.TurnID != entry.StepID || row.DuplicateOfActionCallID != priorCallID ||
-		row.ErrorCode != RefusedLoopCallRepeat || row.Error != entry.Tool.Result.Content[0].Text || row.ErrorDetails["count"] != "3" ||
+		row.ErrorCode != action.RefusedLoopCallRepeat || row.Error != entry.Tool.Result.Content[0].Text || row.ErrorDetails["count"] != "3" ||
 		row.ErrorDetails["step"] != "2" || row.BindingID != "binding-1" {
 		t.Fatalf("refused row = %#v", row)
 	}
@@ -437,7 +438,7 @@ func TestRepeatGuardResumeKeepsStepDecisions(t *testing.T) {
 		}
 		requireGuardRefusal(t, f.stepEntries(planned)[1], ToolGuardRunStopping, 0, ToolResultRefused, repeatRunStoppingText)
 		failure, err := guard.Finish(f.ctx)
-		if err != nil || failure == nil || failure.Code != RunFailureCodeRepeatLimit {
+		if err != nil || failure == nil || failure.Code != action.RunFailureCodeRepeatLimit {
 			t.Fatalf("finish = %#v, %v", failure, err)
 		}
 	})

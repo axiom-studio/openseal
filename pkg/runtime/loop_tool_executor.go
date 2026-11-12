@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -32,7 +33,7 @@ type StepToolDispatcherConfig struct {
 	// setup guards).
 	Actions ActionStore
 	// Coordinator records the refused row of a governed repeat refusal.
-	Coordinator *ActionCoordinator
+	Coordinator *runtimeaction.ActionCoordinator
 	Governed    *GovernedToolExecutor
 	// Control runs the control calls. One built without its own tools gets
 	// every tool of the run loop (loopControlRegistry) here.
@@ -784,7 +785,7 @@ func (r *stepToolRun) repeatGoverned(i int) *loopRepeatGovernedCall {
 	}
 	action := tool.Action
 	return &loopRepeatGovernedCall{
-		DeploymentID: actionDeploymentForSelection(r.binding, action),
+		DeploymentID: runtimeaction.ActionDeploymentForSelection(r.binding, action),
 		SkillID:      action.SkillID, SkillVersion: action.Version, Action: action.Action,
 		BindingID: action.BindingID, BindingRevision: action.BindingRevision,
 		Risk: skill.RiskLevel(action.Risk), SideEffect: skill.SideEffect(action.SideEffect),

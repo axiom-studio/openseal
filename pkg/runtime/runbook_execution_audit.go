@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 type RunbookExecutionAuditRun struct {
@@ -703,8 +704,8 @@ func runbookAuditVisitForChild(result *RunbookExecutionAudit, stepID string, cre
 }
 
 func projectRunbookActionAudit(call *ActionCall) RunbookActionAudit {
-	arguments, _ := sanitizePersistedApprovalValue(call.Arguments).(map[string]interface{})
-	result, _ := sanitizePersistedApprovalValue(call.Output).(map[string]interface{})
+	arguments, _ := action.SanitizePersistedApprovalValue(call.Arguments).(map[string]interface{})
+	result, _ := action.SanitizePersistedApprovalValue(call.Output).(map[string]interface{})
 	return RunbookActionAudit{
 		ID: call.ID, TurnID: call.TurnID, SkillID: call.SkillID, SkillVersion: call.SkillVersion, Action: call.Action,
 		Status: call.Status, Risk: string(call.Risk), SideEffect: string(call.SideEffect), ApprovalID: call.ApprovalID,
@@ -715,7 +716,7 @@ func projectRunbookActionAudit(call *ActionCall) RunbookActionAudit {
 }
 
 func projectRunbookApprovalAudit(approval *ApprovalCheckpoint) RunbookApprovalAudit {
-	proposedAction, _ := sanitizePersistedApprovalValue(approval.ProposedAction).(map[string]interface{})
+	proposedAction, _ := action.SanitizePersistedApprovalValue(approval.ProposedAction).(map[string]interface{})
 	return RunbookApprovalAudit{
 		ID: approval.ID, ActionCallID: approval.ActionCallID, Status: approval.Status, Summary: approval.Summary,
 		PolicyReason: approval.PolicyReason, ProposedAction: proposedAction,

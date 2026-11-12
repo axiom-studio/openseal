@@ -1,0 +1,394 @@
+package action
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
+	"reflect"
+	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
+	"github.com/axiom-studio/openseal/pkg/skill"
+)
+
+const (
+	ObjectiveManagementSkillVersion = "1.2.0"
+	ObjectiveActionCreate           = "create"
+	ObjectiveActionUpdate           = "update"
+	ObjectiveActionPause            = "pause"
+	ObjectiveManagementEndpoint     = "kernel://objectives"
+)
+
+// ObjectiveManagementSkill is the portable, model-visible contract for
+// managing the Objective portfolio owned by the current Agent or Team. Owner
+// is deliberately absent from every input schema: the kernel derives it from
+// the durable conversation Run.
+func ObjectiveManagementSkill() *skill.Definition {
+	fields := objectiveMutableSchema()
+	createFields := maps.Clone(fields)
+	delete(createFields, "objectiveId")
+	delete(createFields, "expectedRevision")
+	updateFields := maps.Clone(fields)
+	return &skill.Definition{
+		ID: models.ObjectiveManagementSkillID, Version: ObjectiveManagementSkillVersion,
+		Name: "Objectives", Description: "Propose governed changes to the current Agent or Team's objectives.",
+		Transport: skill.TransportReference{Kind: "kernel", Endpoint: ObjectiveManagementEndpoint},
+		Actions: map[string]skill.Action{
+			ObjectiveActionCreate: objectiveSkillAction(ObjectiveActionCreate, "Propose a new draft objective for this Agent or Team. The change may require human approval.", createFields, []interface{}{"title", "goal"}),
+			ObjectiveActionUpdate: objectiveSkillAction(ObjectiveActionUpdate, "Propose changes to an existing objective owned by this Agent or Team using its current revision. In an Objective channel, the kernel resolves an omitted objectiveId to that channel's Objective.", updateFields, []interface{}{"expectedRevision"}),
+			ObjectiveActionPause: objectiveSkillAction(ObjectiveActionPause, "Propose pausing an existing objective owned by this Agent or Team using its current revision.", map[string]interface{}{
+				"objectiveId":      map[string]interface{}{"type": "string", "minLength": 1},
+				"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true},
+			}, []interface{}{"expectedRevision"}),
+		},
+	}
+}
+
+func objectiveSkillAction(name, description string, properties map[string]interface{}, required []interface{}) skill.Action {
+	return skill.Action{
+		Name: name, Description: description, Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
+		Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
+		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": properties, "required": required},
+		OutputSchema: map[string]interface{}{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]interface{}{
+				"resourceType": map[string]interface{}{"type": "string", "const": "objective"},
+				"operation":    map[string]interface{}{"type": "string", "enum": []interface{}{ObjectiveActionCreate, ObjectiveActionUpdate, ObjectiveActionPause}},
+				"created":      map[string]interface{}{"type": "boolean"},
+				"objective":    map[string]interface{}{"type": "object"},
+			},
+			"required": []interface{}{"resourceType", "operation", "created", "objective"},
+		},
+	}
+}
+
+func objectiveMutableSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"objectiveId":      map[string]interface{}{"type": "string", "minLength": 1},
+		"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true},
+		"title":            map[string]interface{}{"type": "string", "minLength": 1},
+		"goal":             map[string]interface{}{"type": "string", "minLength": 1},
+		"priority":         map[string]interface{}{"type": "integer", "minimum": 0},
+		"executionPolicy": map[string]interface{}{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]interface{}{
+				"maximumConcurrentRuns": map[string]interface{}{"type": "integer", "minimum": 0},
+				"resourceCapacities": map[string]interface{}{
+					"type": "object", "maxProperties": 64,
+					"propertyNames":        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128},
+					"additionalProperties": map[string]interface{}{"type": "integer", "minimum": 0, "maximum": 1000000000},
+				},
+			},
+			"required": []interface{}{"maximumConcurrentRuns"},
+		},
+		"budget":          map[string]interface{}{"type": "object"},
+		"constraints":     map[string]interface{}{"type": "object"},
+		"successCriteria": map[string]interface{}{"type": "object"},
+	}
+}
+
+// ObjectiveActionValidator enforces ownership, target existence, lifecycle,
+// and CAS before an Objective mutation can become an approval request.
+type ObjectiveActionValidator struct{ store models.PortfolioStore }
+
+func NewObjectiveActionValidator(store models.PortfolioStore) (*ObjectiveActionValidator, error) {
+	if store == nil {
+		return nil, errors.New("portfolio store is required")
+	}
+	return &ObjectiveActionValidator{store: store}, nil
+}
+
+func (v *ObjectiveActionValidator) ResolveActionProposalArguments(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+	if !isObjectiveAction(input.Bound) || input.Bound.Action.Name == ObjectiveActionCreate {
+		return nil, false, nil
+	}
+	arguments := maps.Clone(input.Arguments)
+	if target, _ := arguments["objectiveId"].(string); strings.TrimSpace(target) == "" && input.Run != nil {
+		if conversations, ok := v.store.(models.ConversationStore); ok {
+			objectiveID, err := ConversationObjectiveOrigin(ctx, conversations, input.Run)
+			if err != nil {
+				return nil, true, err
+			}
+			if objectiveID != "" {
+				arguments["objectiveId"] = objectiveID
+			}
+		}
+	}
+	if _, supplied := arguments["expectedRevision"]; supplied {
+		return arguments, true, nil
+	}
+	if v == nil || v.store == nil || input.Run == nil {
+		return nil, true, errors.New("objective action validator is not configured")
+	}
+	target, _ := arguments["objectiveId"].(string)
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return arguments, true, nil
+	}
+	objective, err := v.store.GetObjective(ctx, input.Run.Scope, target)
+	if err != nil {
+		return nil, true, err
+	}
+	if objective == nil {
+		return nil, true, models.ErrObjectiveNotFound
+	}
+	arguments["expectedRevision"] = objective.Revision
+	return arguments, true, nil
+}
+
+func (v *ObjectiveActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
+	if !isObjectiveAction(input.Bound) {
+		return nil, nil
+	}
+	if v == nil || v.store == nil || input.Run == nil {
+		return nil, errors.New("objective action validator is not configured")
+	}
+	if err := input.Run.Owner.Validate(); err != nil {
+		return nil, fmt.Errorf("objective action run owner: %w", err)
+	}
+	preview := map[string]interface{}{"resourceType": "objective", "operation": input.Bound.Action.Name, "owner": input.Run.Owner, "changes": maps.Clone(input.Arguments)}
+	if input.Bound.Action.Name == ObjectiveActionCreate {
+		preview["resultingStatus"] = models.ObjectiveStatusDraft
+		return preview, validateObjectiveCreateArguments(input.Arguments)
+	}
+	target, expectedRevision, err := objectiveTarget(input.Arguments)
+	if err != nil {
+		return nil, err
+	}
+	objective, err := v.store.GetObjective(ctx, input.Run.Scope, target)
+	if err != nil {
+		return nil, err
+	}
+	if objective == nil {
+		return nil, models.ErrObjectiveNotFound
+	}
+	if objective.Owner != input.Run.Owner {
+		return nil, errors.New("objective action target is not owned by the conversation Agent or Team")
+	}
+	if objective.Revision != expectedRevision {
+		return nil, models.ErrRevisionConflict
+	}
+	if input.Bound.Action.Name == ObjectiveActionUpdate {
+		var args objectiveUpdateArguments
+		if err := decodeObjectiveArguments(input.Arguments, &args); err != nil {
+			return nil, err
+		}
+		if !args.hasChanges() {
+			return nil, errors.New("objective update requires at least one changed field")
+		}
+		candidate := models.CloneObjective(objective)
+		portfolio.ApplyObjectiveUpdate(candidate, args.updateRequest(models.ActivityActor{}))
+		if err := candidate.Validate(); err != nil {
+			return nil, err
+		}
+	}
+	if input.Bound.Action.Name == ObjectiveActionPause && !models.CanTransitionObjective(objective.Status, models.ObjectiveStatusPaused) {
+		return nil, fmt.Errorf("%w: %s -> %s", portfolio.ErrInvalidObjectiveTransition, objective.Status, models.ObjectiveStatusPaused)
+	}
+	preview["objectiveId"] = objective.ID
+	preview["expectedRevision"] = expectedRevision
+	preview["current"] = map[string]interface{}{"revision": objective.Revision, "title": objective.Title, "goal": objective.Goal, "status": objective.Status, "priority": objective.Priority, "executionPolicy": objective.ExecutionPolicy}
+	if input.Bound.Action.Name == ObjectiveActionPause {
+		preview["changes"] = map[string]interface{}{"status": models.ObjectiveStatusPaused}
+	}
+	return preview, nil
+}
+
+// ObjectiveActionDispatcher executes the approved kernel action. Non-objective
+// calls are delegated, allowing one worker to compose kernel and external
+// Skills without a parallel execution runtime.
+type ObjectiveActionDispatcher struct {
+	store    models.KernelStore
+	fallback agentrun.ActionDispatcher
+}
+
+func NewObjectiveActionDispatcher(store models.KernelStore, fallback agentrun.ActionDispatcher) (*ObjectiveActionDispatcher, error) {
+	if store == nil {
+		return nil, errors.New("kernel store is required")
+	}
+	return &ObjectiveActionDispatcher{store: store, fallback: fallback}, nil
+}
+
+func (d *ObjectiveActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	if !isObjectiveAction(input.Bound) {
+		if d == nil || d.fallback == nil {
+			return nil, errors.New("action dispatcher does not support this action")
+		}
+		return d.fallback.DispatchAction(ctx, input)
+	}
+	if d == nil || d.store == nil || input.Call == nil {
+		return nil, errors.New("objective action dispatcher is not configured")
+	}
+	run, err := d.store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
+	if err != nil || run == nil {
+		if err == nil {
+			err = models.ErrRunNotFound
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(run.AssignedAgentID) == "" {
+		return nil, errors.New("objective actions require the Run's acting Agent")
+	}
+	service := portfolio.NewPortfolioService(d.store)
+	actor := models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}
+	var objective *models.Objective
+	created := false
+	switch input.Bound.Action.Name {
+	case ObjectiveActionCreate:
+		var args objectiveCreateArguments
+		if err := decodeObjectiveArguments(input.Arguments, &args); err != nil {
+			return nil, err
+		}
+		result, err := service.CreateObjectiveIdempotent(ctx, portfolio.CreateObjectiveRequest{
+			Scope: run.Scope, Owner: run.Owner, Title: args.Title, Goal: args.Goal, Status: models.ObjectiveStatusDraft, Priority: args.Priority,
+			ExecutionPolicy: args.ExecutionPolicy, Budget: args.Budget, Constraints: args.Constraints, SuccessCriteria: args.SuccessCriteria,
+			IdempotencyKey: input.Call.IdempotencyKey, Actor: actor, Visibility: models.ActivityVisibilityScope,
+		})
+		if err != nil {
+			return nil, err
+		}
+		objective, created = result.Objective, result.Created
+	case ObjectiveActionUpdate, ObjectiveActionPause:
+		var args objectiveUpdateArguments
+		if err := decodeObjectiveArguments(input.Arguments, &args); err != nil {
+			return nil, err
+		}
+		current, err := service.GetObjective(ctx, run.Scope, args.ObjectiveID)
+		if err != nil {
+			return nil, err
+		}
+		if current == nil {
+			return nil, models.ErrObjectiveNotFound
+		}
+		if current.Owner != run.Owner {
+			return nil, errors.New("objective action target is not owned by the conversation Agent or Team")
+		}
+		request := args.updateRequest(actor)
+		if input.Bound.Action.Name == ObjectiveActionPause {
+			paused := models.ObjectiveStatusPaused
+			request.Status = &paused
+		}
+		objective, err = service.UpdateObjective(ctx, run.Scope, args.ObjectiveID, request)
+		if errors.Is(err, models.ErrRevisionConflict) {
+			latest, getErr := service.GetObjective(ctx, run.Scope, args.ObjectiveID)
+			if getErr == nil && objectiveActionAlreadyApplied(latest, args, input.Bound.Action.Name) {
+				objective, err = latest, nil
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, errors.New("unsupported objective action")
+	}
+	return map[string]interface{}{"resourceType": "objective", "operation": input.Bound.Action.Name, "created": created, "objective": objective}, nil
+}
+
+type objectiveCreateArguments struct {
+	Title           string                           `json:"title"`
+	Goal            string                           `json:"goal"`
+	Priority        int                              `json:"priority,omitempty"`
+	ExecutionPolicy *models.ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
+	Budget          *models.BudgetPolicy             `json:"budget,omitempty"`
+	Constraints     map[string]interface{}           `json:"constraints,omitempty"`
+	SuccessCriteria map[string]interface{}           `json:"successCriteria,omitempty"`
+}
+
+type objectiveUpdateArguments struct {
+	ObjectiveID      string                           `json:"objectiveId"`
+	ExpectedRevision int64                            `json:"expectedRevision"`
+	Title            *string                          `json:"title,omitempty"`
+	Goal             *string                          `json:"goal,omitempty"`
+	Priority         *int                             `json:"priority,omitempty"`
+	ExecutionPolicy  *models.ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
+	Budget           *models.BudgetPolicy             `json:"budget,omitempty"`
+	Constraints      map[string]interface{}           `json:"constraints,omitempty"`
+	SuccessCriteria  map[string]interface{}           `json:"successCriteria,omitempty"`
+}
+
+func (a objectiveUpdateArguments) hasChanges() bool {
+	return a.Title != nil || a.Goal != nil || a.Priority != nil || a.ExecutionPolicy != nil || a.Budget != nil || a.Constraints != nil || a.SuccessCriteria != nil
+}
+
+func (a objectiveUpdateArguments) updateRequest(actor models.ActivityActor) portfolio.UpdateObjectiveRequest {
+	return portfolio.UpdateObjectiveRequest{
+		ExpectedRevision: a.ExpectedRevision, Title: a.Title, Goal: a.Goal, Priority: a.Priority,
+		ExecutionPolicy: a.ExecutionPolicy, Budget: a.Budget, Constraints: a.Constraints, SuccessCriteria: a.SuccessCriteria,
+		Actor: actor, Visibility: models.ActivityVisibilityScope, Summary: "Objective changed through conversation",
+	}
+}
+
+func validateObjectiveCreateArguments(arguments map[string]interface{}) error {
+	var args objectiveCreateArguments
+	if err := decodeObjectiveArguments(arguments, &args); err != nil {
+		return err
+	}
+	probe := &models.Objective{Scope: models.Scope{Kind: "validation", ID: "validation"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "validation"}, Title: args.Title, Goal: args.Goal, Status: models.ObjectiveStatusDraft, Priority: args.Priority, ExecutionPolicy: args.ExecutionPolicy, Budget: args.Budget, Constraints: args.Constraints, SuccessCriteria: args.SuccessCriteria, Revision: 1}
+	return probe.Validate()
+}
+
+func objectiveTarget(arguments map[string]interface{}) (string, int64, error) {
+	var args objectiveUpdateArguments
+	if err := decodeObjectiveArguments(arguments, &args); err != nil {
+		return "", 0, err
+	}
+	if strings.TrimSpace(args.ObjectiveID) == "" || args.ExpectedRevision < 1 {
+		return "", 0, errors.New("objectiveId and expectedRevision are required")
+	}
+	return args.ObjectiveID, args.ExpectedRevision, nil
+}
+
+func decodeObjectiveArguments(arguments map[string]interface{}, target interface{}) error {
+	encoded, err := json.Marshal(arguments)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("invalid objective action: %w", err)
+	}
+	return nil
+}
+
+func objectiveActionAlreadyApplied(objective *models.Objective, args objectiveUpdateArguments, action string) bool {
+	if objective == nil || objective.Revision != args.ExpectedRevision+1 {
+		return false
+	}
+	if action == ObjectiveActionPause {
+		return objective.Status == models.ObjectiveStatusPaused
+	}
+	return (args.Title == nil || objective.Title == *args.Title) && (args.Goal == nil || objective.Goal == *args.Goal) &&
+		(args.Priority == nil || objective.Priority == *args.Priority) && (args.ExecutionPolicy == nil || reflect.DeepEqual(objective.ExecutionPolicy, args.ExecutionPolicy)) && (args.Budget == nil || reflect.DeepEqual(objective.Budget, args.Budget)) &&
+		(args.Constraints == nil || reflect.DeepEqual(objective.Constraints, args.Constraints)) && (args.SuccessCriteria == nil || reflect.DeepEqual(objective.SuccessCriteria, args.SuccessCriteria))
+}
+
+func isObjectiveAction(bound *skill.BoundAction) bool {
+	if bound == nil || bound.Definition == nil || bound.Definition.ID != models.ObjectiveManagementSkillID || bound.Definition.Version != ObjectiveManagementSkillVersion {
+		return false
+	}
+	switch bound.Action.Name {
+	case ObjectiveActionCreate, ObjectiveActionUpdate, ObjectiveActionPause:
+		return true
+	}
+	return false
+}
+
+func ConversationObjectiveOrigin(ctx context.Context, store models.ConversationStore, run *models.AgentRun) (string, error) {
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	if strings.TrimSpace(conversationID) == "" {
+		return "", nil
+	}
+	conversation, err := store.GetConversation(ctx, run.Scope, conversationID)
+	if err != nil {
+		return "", err
+	}
+	if conversation.Origin != nil && conversation.Origin.Kind == models.ConversationReferenceObjective {
+		return conversation.Origin.ID, nil
+	}
+	return "", nil
+}

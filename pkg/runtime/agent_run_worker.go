@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/google/uuid"
@@ -91,7 +92,7 @@ type AgentRunWorkerPool struct {
 	loop                 *RunLoop
 	wakeService          *agentrun.AgentRunWakeService
 	activity             *RunActivityService
-	actions              *ActionCoordinator
+	actions              *action.ActionCoordinator
 	runFinalizer         agentrun.RunTerminalFinalizer
 	runCommands          *agentrun.RunCommandService
 	lastFinalizationScan time.Time
@@ -122,7 +123,7 @@ type AgentRunWorkerPool struct {
 
 // SetActionCoordinator opens each step's nested-action window (a running
 // command's governed calls) on the pool's ActionCoordinator.
-func (p *AgentRunWorkerPool) SetActionCoordinator(actions *ActionCoordinator) {
+func (p *AgentRunWorkerPool) SetActionCoordinator(actions *action.ActionCoordinator) {
 	p.actions = actions
 	p.loop.setActionCoordinator(actions)
 }

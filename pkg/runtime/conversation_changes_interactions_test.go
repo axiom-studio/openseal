@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -129,8 +130,8 @@ func TestConversationChangesProjectApprovalsWithConversationContext(t *testing.T
 			if unchanged.ApprovalsChanged || len(unchanged.Approvals) != 0 || unchanged.HasChanges {
 				t.Fatalf("unchanged approvals = %#v", unchanged)
 			}
-			coordinator := NewApprovalCoordinator(f.store, actions, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }))
-			if _, err := coordinator.Resolve(f.ctx, ResolveApprovalRequest{
+			coordinator := action.NewApprovalCoordinator(f.store, actions, action.ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }))
+			if _, err := coordinator.Resolve(f.ctx, action.ResolveApprovalRequest{
 				Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision, DecisionID: "decision",
 				Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"},
 			}); err != nil {

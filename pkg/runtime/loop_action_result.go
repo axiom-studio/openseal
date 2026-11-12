@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -168,7 +169,7 @@ func renderGovernedDenial(call *ActionCall, approval *ApprovalCheckpoint) (ToolE
 			})
 		case ApprovalStatusSuperseded:
 			return ToolEntryError, governedJSONResult(ToolResultSuperseded, map[string]interface{}{
-				"evidenceRef": ref, "status": string(ToolResultSuperseded), "reason": ApprovalSupersededReason,
+				"evidenceRef": ref, "status": string(ToolResultSuperseded), "reason": action.ApprovalSupersededReason,
 			})
 		case ApprovalStatusExpired:
 			return ToolEntryError, governedJSONResult(ToolResultExpired, map[string]interface{}{
@@ -180,7 +181,7 @@ func renderGovernedDenial(call *ActionCall, approval *ApprovalCheckpoint) (ToolE
 			})
 		}
 	}
-	if call.Error == actionBudgetExhaustedReason {
+	if call.Error == action.ActionBudgetExhaustedReason {
 		return renderGovernedBudgetExhausted(call)
 	}
 	return ToolEntryError, governedJSONResult(ToolResultDenied, map[string]interface{}{
@@ -200,7 +201,7 @@ func renderGovernedBudgetExhausted(call *ActionCall) (ToolEntryState, *ToolResul
 
 // renderGovernedRejection renders a proposal the coordinator rejected before
 // any row existed.
-func renderGovernedRejection(rejection *ActionProposalRejection) (ToolEntryState, *ToolResult) {
+func renderGovernedRejection(rejection *action.ActionProposalRejection) (ToolEntryState, *ToolResult) {
 	return ToolEntryError, governedJSONResult(ToolResultRefused, map[string]interface{}{
 		"status": string(ToolResultRefused), "code": rejection.Code, "error": rejection.Message,
 	})

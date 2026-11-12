@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/google/uuid"
 )
 
@@ -48,7 +49,7 @@ type ConversationApprovalModeService struct {
 	modes         ConversationApprovalModeStore
 	actions       ActionStore
 	runs          agentRunReader
-	approvals     *ApprovalCoordinator
+	approvals     *action.ApprovalCoordinator
 	now           func() time.Time
 	newID         func() string
 }
@@ -58,7 +59,7 @@ func NewConversationApprovalModeService(store ConversationApprovalModeKernelStor
 		conversations: store, modes: store, actions: store, runs: store,
 		// Approval modes never approve an agent-builder card (D11): those
 		// actions are Review always, and the coordinator refuses the approve.
-		approvals: NewApprovalCoordinator(store, store, nil, opts...), now: models.ClockFrom(opts), newID: uuid.NewString,
+		approvals: action.NewApprovalCoordinator(store, store, nil, opts...), now: models.ClockFrom(opts), newID: uuid.NewString,
 	}
 }
 
@@ -90,7 +91,7 @@ func (s *ConversationApprovalModeService) SetApprovalMode(ctx context.Context, r
 	if conversation.Revision != req.ExpectedRevision {
 		return nil, ErrRevisionConflict
 	}
-	previous := conversationApprovalModeOrDefault(conversation.ApprovalMode)
+	previous := action.ConversationApprovalModeOrDefault(conversation.ApprovalMode)
 	result := &SetConversationApprovalModeResult{Conversation: cloneConversation(conversation), ApprovedApprovalIDs: []string{}}
 	if previous != req.Mode {
 		if conversation.Status != ConversationStatusActive {
@@ -159,7 +160,7 @@ func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Cont
 			incomplete = true
 			continue
 		}
-		if call.Status != ActionCallStatusWaitingApproval || !ApprovalModeAllowsAction(mode, call.Review, call.Risk, call.SideEffect) {
+		if call.Status != ActionCallStatusWaitingApproval || !action.ApprovalModeAllowsAction(mode, call.Review, call.Risk, call.SideEffect) {
 			continue
 		}
 		// An event routine occurrence stays manual whatever the chat's mode,
@@ -172,14 +173,14 @@ func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Cont
 			incomplete = true
 			continue
 		}
-		if routineEventOccurrenceRun(run) {
+		if action.IsRoutineEventOccurrenceRun(run) {
 			continue
 		}
 		current, err := s.conversations.GetConversation(ctx, scope, conversationID)
 		if err != nil || current == nil {
 			return approved, true
 		}
-		if !ApprovalModeAllowsAction(conversationApprovalModeOrDefault(current.ApprovalMode), call.Review, call.Risk, call.SideEffect) {
+		if !action.ApprovalModeAllowsAction(action.ConversationApprovalModeOrDefault(current.ApprovalMode), call.Review, call.Risk, call.SideEffect) {
 			continue
 		}
 		result, err := s.approvals.ResolveByApprovalMode(ctx, scope, approval.ID, approval.Revision, mode, correlationID)
@@ -188,8 +189,8 @@ func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Cont
 			if result != nil && result.Resolved {
 				approved = append(approved, approval.ID)
 			}
-		case errors.Is(err, ErrApprovalResolved), errors.Is(err, ErrRevisionConflict), errors.Is(err, ErrApprovalExpired),
-			errors.Is(err, ErrInvalidRunTransition), errors.Is(err, ErrAgentBuilderApprovalForbidden):
+		case errors.Is(err, ErrApprovalResolved), errors.Is(err, ErrRevisionConflict), errors.Is(err, action.ErrApprovalExpired),
+			errors.Is(err, ErrInvalidRunTransition), errors.Is(err, action.ErrAgentBuilderApprovalForbidden):
 			// A concurrent decision, expiry, or paused Run owns this checkpoint,
 			// or it is an agent-builder card only a person approves (D11).
 		default:

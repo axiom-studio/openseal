@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -87,7 +88,7 @@ func TestRoutineRunsPostOnlyToPinnedDestinationsWithoutAsking(t *testing.T) {
 		t.Fatalf("persisted grants = %#v, %v", stored.Task, err)
 	}
 	f.reviewEverything(t, activation)
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy(), nil)
+	coordinator := action.NewActionCoordinator(f.store, f.store, f.catalog, action.NewDefaultActionPolicy(), nil)
 	for index, tc := range []struct {
 		name      string
 		arguments map[string]interface{}
@@ -101,7 +102,7 @@ func TestRoutineRunsPostOnlyToPinnedDestinationsWithoutAsking(t *testing.T) {
 		{"default destination", map[string]interface{}{"message": "Digest"}, true},
 	} {
 		run := f.routineOccurrence(t, activation, "post-"+tc.name)
-		result, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, SkillID: "chat", SkillVersion: "1.0.0", Action: "post", Arguments: tc.arguments, IdempotencyKey: "post-" + string(rune('a'+index))})
+		result, err := coordinator.Propose(t.Context(), action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, SkillID: "chat", SkillVersion: "1.0.0", Action: "post", Arguments: tc.arguments, IdempotencyKey: "post-" + string(rune('a'+index))})
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}

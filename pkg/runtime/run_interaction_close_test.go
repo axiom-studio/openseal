@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
@@ -43,7 +44,7 @@ func TestCanceledRunDismissesItsOpenInteractionRequests(t *testing.T) {
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
 		"kind": "payment_card", "reason": "Add your card so I can pay 319.00 INR on amazon.in"})
 	run := f.run
-	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
+	executed := f.execute(action.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 	card, _ := executed.Call.Output["credentialRequest"].(map[string]interface{})
 	requestID, _ := card["id"].(string)
 	if executed.Call.Status != ActionCallStatusSucceeded || requestID == "" {

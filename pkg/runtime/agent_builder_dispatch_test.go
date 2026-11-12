@@ -10,6 +10,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -625,7 +626,7 @@ func TestAgentBuilderListAgents(t *testing.T) {
 
 func TestAgentBuilderDispatcherPassesOtherActionsOn(t *testing.T) {
 	f := newAgentBuilderDispatchFixture(t)
-	fallback := ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	fallback := action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"fallback": true}, nil
 	})
 	dispatcher, err := newTestAgentBuilderDispatcher(f.store, f.agents, f.teams, f.catalog, f.provision, nil, fallback)

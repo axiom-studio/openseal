@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -206,7 +207,7 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 		if eventRoutine && !routineSendGrantPinned(bound.action, grant) {
 			return nil, ErrRoutineEventSendGrantNotPinned
 		}
-		if grant.Label == "" || approvalNamesIdentifier(grant.Label, bound.skillID, bound.name, grant.Action) {
+		if grant.Label == "" || action.ApprovalNamesIdentifier(grant.Label, bound.skillID, bound.name, grant.Action) {
 			grant.Label = routineGrantCatalogLabel(bound.name, bound.action)
 		}
 		if grant.Label, err = routineGrantDestinationLabel(grant.Label, grant.ToDestinations); err != nil {

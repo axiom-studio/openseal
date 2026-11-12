@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 // An event routine occurrence, and a Run under one, is manual whatever the
@@ -15,7 +16,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	store := newTestKernelStore(t)
 	conversation := approvalModeConversation(t, store)
 	service := NewConversationApprovalModeService(store)
-	coordinator := NewActionCoordinator(store, store, approvalModeCatalog(t), NewDefaultActionPolicy(), nil)
+	coordinator := action.NewActionCoordinator(store, store, approvalModeCatalog(t), action.NewDefaultActionPolicy(), nil)
 	scope := conversation.Scope
 
 	occurrence := &AgentRun{ID: "occurrence", Scope: scope, RootRunID: "occurrence", Context: map[string]interface{}{
@@ -34,7 +35,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 		{child, ConversationApprovalManual},
 		{scheduled, ConversationApprovalAuto},
 	} {
-		id, mode, err := RunConversationApprovalMode(ctx, runs, store, test.run)
+		id, mode, err := action.RunConversationApprovalMode(ctx, runs, store, test.run)
 		if err != nil || id != conversation.ID || mode != test.want {
 			t.Fatalf("%s mode = %q %q %v, want %q", test.run.ID, id, mode, err, test.want)
 		}
@@ -101,7 +102,7 @@ func TestRoutineEventBatchInheritedWithoutRootRead(t *testing.T) {
 			t.Fatalf("%s child batch = %q, want %q", test.source.ID, got, test.wantBatch)
 		}
 		reader := &countingRunReader{AgentRunReader: store}
-		id, mode, err := RunConversationApprovalMode(ctx, reader, store, child)
+		id, mode, err := action.RunConversationApprovalMode(ctx, reader, store, child)
 		if err != nil || id != conversation.ID || mode != test.wantMode {
 			t.Fatalf("%s child mode = %q %q %v, want %q", test.source.ID, id, mode, err, test.wantMode)
 		}

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 // The run_context note (run-loop section 05 §5, SPEC §6). Each chat Run
@@ -446,7 +448,7 @@ func runContextTeam(team *agentConversationTeam) string {
 // changed mid-Run reaches the next step as a one-line update instead of
 // rewriting the prompt.
 func approvalModeText(mode ConversationApprovalMode) string {
-	switch conversationApprovalModeOrDefault(mode) {
+	switch action.ConversationApprovalModeOrDefault(mode) {
 	case ConversationApprovalManual:
 		return "Approval mode: manual. Every action that changes something waits for the user's approval in chat."
 	case ConversationApprovalSkip:

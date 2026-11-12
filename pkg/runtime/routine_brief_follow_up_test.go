@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 // A chat message that answers a pending approval replaces it (the approval
@@ -52,12 +53,12 @@ func TestLoopMessageDuringParkedApprovalSupersedesIt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Status != ApprovalStatusSuperseded || got.DecisionReason != ApprovalSupersededReason || got.DecisionBy == nil ||
-			*got.DecisionBy != ApprovalSupersededPrincipal || got.DecisionID != "superseded:"+got.ID || got.DecidedAt == nil ||
+		if got.Status != ApprovalStatusSuperseded || got.DecisionReason != action.ApprovalSupersededReason || got.DecisionBy == nil ||
+			*got.DecisionBy != action.ApprovalSupersededPrincipal || got.DecisionID != "superseded:"+got.ID || got.DecidedAt == nil ||
 			got.SupersededByMessageID != message.ID {
 			t.Fatalf("approval = %#v", got)
 		}
-		if title := PresentApproval(got).Title; !strings.HasPrefix(title, "Replaced by your message: ") {
+		if title := action.PresentApproval(got).Title; !strings.HasPrefix(title, "Replaced by your message: ") {
 			t.Fatalf("approval outcome = %q", title)
 		}
 		if current, err := f.raw.GetActionCall(f.ctx, f.scope, call.ID); err != nil || current.Status != ActionCallStatusDenied {
@@ -214,6 +215,6 @@ func TestLoopDeclinedApprovalCompletesCalmly(t *testing.T) {
 
 // schedulerApprovals is the approval coordinator the fixture's scheduler
 // builds: the chat store with no authorizer, on the fixture clock.
-func schedulerApprovals(f *loopFixture) *ApprovalCoordinator {
-	return NewApprovalCoordinator(f.chats, f.chats, nil, models.WithClock(f.clock.Now))
+func schedulerApprovals(f *loopFixture) *action.ApprovalCoordinator {
+	return action.NewApprovalCoordinator(f.chats, f.chats, nil, models.WithClock(f.clock.Now))
 }

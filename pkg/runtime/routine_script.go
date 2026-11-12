@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/chatpath"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 // A routine can run a saved script: a chat file the Agent wrote and tested
@@ -364,7 +365,7 @@ func resolveOwnedTaskScript(ctx context.Context, store runbookActionStore, files
 // routine runs a new version of its script.
 func routineScriptChangePreview(ctx context.Context, store runbookActionStore, a *RunbookActivation, script *RoutineScript) (map[string]interface{}, error) {
 	preview := map[string]interface{}{
-		"resourceType": runbookActivationResourceType, "operation": RunbookActionSetScript, "activationId": a.ID,
+		"resourceType": runbookActivationResourceType, "operation": action.RunbookActionSetScript, "activationId": a.ID,
 		"goal": a.Task.Goal, "conversationId": a.Task.ConversationID,
 		"script": routineScriptMap(script), "previousScript": routineScriptMap(a.Task.Script),
 	}

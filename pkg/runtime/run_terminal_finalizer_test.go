@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -100,7 +101,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 		t.Fatal(err)
 	}
 	dispatches := 0
-	finalizer := agentrun.NewActionRunTerminalFinalizer(store, catalog, ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	finalizer := agentrun.NewActionRunTerminalFinalizer(store, catalog, action.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		if input.Bound.Action.Name != "release" || input.Arguments["sessionId"] != "agent-session" ||
 			input.Run.ID != terminal.ID {
@@ -172,7 +173,7 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 	}
 	store.actions.put(&ActionCall{ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: binding.ID, BindingRevision: 1, SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Output: map[string]interface{}{"sessionId": "old-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	dispatches := 0
-	finalizer := agentrun.NewActionRunTerminalFinalizer(store, catalog, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	finalizer := agentrun.NewActionRunTerminalFinalizer(store, catalog, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		return map[string]interface{}{"released": true}, nil
 	}), models.WithClock(func() time.Time { return now.Add(time.Second) }))

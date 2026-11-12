@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -109,7 +110,7 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (age
 		authority.CanAskUser = conversation != nil && trigger != nil && run.AssignedAgentID == agentID &&
 			run.AssignedAgentID == ConversationRunAgentID(conversation, run)
 		authority.ExternalChannelReply = externalChannelContext(conversation)
-		_, authority.ApprovalMode, err = RunConversationApprovalMode(ctx, in.Runs, in.Conversations, run)
+		_, authority.ApprovalMode, err = action.RunConversationApprovalMode(ctx, in.Runs, in.Conversations, run)
 		if err != nil {
 			return agentrun.ControlAuthority{}, fmt.Errorf("resolve conversation approval mode: %w", err)
 		}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -36,7 +37,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 	// like a 1:1 chat's active Run; nobody's work is interrupted.
 	followUps := &ConversationRunScheduler{
 		conversations: r.conversations, runs: r.runs, conversationStore: r.conversationStore, runStore: r.runStore,
-		approvals: NewApprovalCoordinator(r.runStore, r.runStore, nil, models.WithClock(r.now)),
+		approvals: action.NewApprovalCoordinator(r.runStore, r.runStore, nil, models.WithClock(r.now)),
 	}
 	root, _ := run.Context["threadRootMessageId"].(string)
 	runIDs := make([]interface{}, 0, len(result.Round.Responders))

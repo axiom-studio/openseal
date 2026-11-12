@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
@@ -29,7 +30,7 @@ func TestSkillReferenceUpgradeDrainsQueuedCallsAndLiveReceiptsAcrossStores(t *te
 			t.Fatalf("queued call was not drained: %v", err)
 		}
 		assertSkillUpgradePin(t, catalog, proposal.Call, "1.0.0", 1)
-		worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		worker := action.NewActionWorker(store, catalog, nil, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"channel": "provider-conversation"}, nil
 		}))
 		result, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "chat-worker")
@@ -91,10 +92,10 @@ func skillUpgradeDrainFixture(t *testing.T, store KernelStore) (*skill.Catalog, 
 	if err != nil || run == nil {
 		t.Fatalf("claim run: %#v %v", run, err)
 	}
-	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
+		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
 	}), nil)
-	proposal, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "chat-worker", DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "follow-up", SkillVersion: "1.0.0", Action: "read", Arguments: map[string]interface{}{}, Summary: "Read messages"}, "read"))
+	proposal, err := coordinator.Propose(t.Context(), loopProposeRequest(action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "chat-worker", DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "follow-up", SkillVersion: "1.0.0", Action: "read", Arguments: map[string]interface{}{}, Summary: "Read messages"}, "read"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +147,7 @@ func TestSkillRuntimeUsageScopesAndRetentionAcrossStores(t *testing.T) {
 		}
 		// The loop's inline execution retires a stale/revoked call instead of
 		// issuing side effects.
-		worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		worker := action.NewActionWorker(store, catalog, nil, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			t.Fatal("revoked call dispatched")
 			return nil, nil
 		}))
