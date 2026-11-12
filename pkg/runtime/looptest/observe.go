@@ -33,7 +33,8 @@ func (f *Fixture) MustRun(runID string) *models.AgentRun {
 	return run
 }
 
-func (f *Fixture) Session(runID string) *Session {
+// Session is the agent session log of the Run.
+func (f *Fixture) Session(runID string) *models.AgentSession {
 	f.T.Helper()
 	run := f.MustRun(runID)
 	if run.SessionID == "" {
@@ -45,9 +46,6 @@ func (f *Fixture) Session(runID string) *Session {
 	}
 	return session
 }
-
-// Session is the agent session log of a Run.
-type Session = models.AgentSession
 
 // Entries is the Run's full session, ordered by sequence.
 func (f *Fixture) Entries(runID string) []*models.SessionEntry {
