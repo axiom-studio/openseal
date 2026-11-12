@@ -116,11 +116,16 @@ func (f *fakeGovernedCards) addConnectAccount(call *ActionCall, status string) {
 }
 
 func cardParker(cards *fakeGovernedCards, calls ...*ActionCall) governedParker {
+	return cardParkerAt(time.Now, cards, calls...)
+}
+
+// cardParkerAt is cardParker on the clock now.
+func cardParkerAt(now func() time.Time, cards *fakeGovernedCards, calls ...*ActionCall) governedParker {
 	actions := &fakeGovernedActions{calls: map[string]*ActionCall{}}
 	for _, call := range calls {
 		actions.calls[call.ID] = call
 	}
-	return governedParker{actions: actions, setups: cards, credentials: cards, now: time.Now}
+	return governedParker{actions: actions, setups: cards, credentials: cards, now: now}
 }
 
 func requireCardWait(t *testing.T, p governedParker, run *AgentRun, call *ActionCall, wantType, wantReference, wantSummary string) {
@@ -448,15 +453,15 @@ func TestReplanParkNilWhenCardSettled(t *testing.T) {
 	}
 
 	t.Run("skill maintenance", func(t *testing.T) {
-		p := cardParker(newFakeGovernedCards())
-		p.now = func() time.Time { return now }
+		clock := now
+		p := cardParkerAt(func() time.Time { return clock }, newFakeGovernedCards())
 		retryAt := now.Add(time.Minute)
 		entries := []*SessionEntry{awaitingEventEntry("tool-1", "call-1", ToolEntryWait{Reason: governedMaintenanceWaitReason, RetryAt: &retryAt})}
 		plan, err := p.ReplanPark(ctx, governedCardRun(), entries)
 		if err != nil || plan.Settled || plan.Park == nil || plan.Park.Status != AgentRunStatusSleeping || !plan.Park.Wake.WakeAt.Equal(retryAt) {
 			t.Fatalf("maintenance plan = %#v, %v", plan, err)
 		}
-		p.now = func() time.Time { return retryAt }
+		clock = retryAt
 		plan, err = p.ReplanPark(ctx, governedCardRun(), entries)
 		if err != nil || !plan.Settled || plan.Park != nil {
 			t.Fatalf("due maintenance plan = %#v, %v", plan, err)
