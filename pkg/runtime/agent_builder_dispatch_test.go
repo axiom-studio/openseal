@@ -723,9 +723,28 @@ func TestAgentBuilderCreatedAgentKeepsGrantRiskInTeams(t *testing.T) {
 	}
 	members := []resolvedTeamMember{{deployment: deployment, definition: definition, name: definition.DisplayName}}
 	team := teamBuilderDefinition("team-x", teamCreateArguments{DisplayName: "Crew"}, members, "call-team", agentBuilderApprover.ID)
-	authority := &teamSkillAuthority{deployment: &kernelteam.Deployment{}, definition: team, agent: deployment, agentDefinition: definition}
-	if !authority.allowsRisk(capability.RiskLevelWrite) || authority.allowsRisk(capability.RiskLevelExternal) {
-		t.Fatalf("Team ceiling for the member: write %v, external %v", authority.allowsRisk(capability.RiskLevelWrite), authority.allowsRisk(capability.RiskLevelExternal))
+	// The Team Skill authority of the member in a Team deployment of that
+	// definition with no restrictions of its own.
+	validator, err := NewTeamSkillActionValidator(builderTeamAuthorityCatalog{
+		deployment: &kernelteam.Deployment{
+			ID: "team-x", Scope: f.reference(), DefinitionID: team.ID, ActiveVersion: team.Version, Status: kernelteam.DeploymentActive,
+			Roster: []kernelteam.RosterAssignment{{ID: "member", AgentDeploymentID: deployment.ID}},
+		},
+		definition: team, agent: deployment, agentDefinition: definition,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	memberRun := &AgentRun{Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-x"}, AssignedAgentID: deployment.ID}
+	teamBinding := &skill.Binding{Scope: f.reference(), DeploymentID: "team-x", SkillID: "acme.notes", SkillVersion: "1.0.0"}
+	allowsRisk := func(risk capability.RiskLevel) bool {
+		_, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+			Run: memberRun, Bound: &skill.BoundAction{Binding: teamBinding, Action: capability.Action{Name: "write_note", Risk: risk}},
+		})
+		return err == nil
+	}
+	if !allowsRisk(capability.RiskLevelWrite) || allowsRisk(capability.RiskLevelExternal) {
+		t.Fatalf("Team ceiling for the member: write %v, external %v", allowsRisk(capability.RiskLevelWrite), allowsRisk(capability.RiskLevelExternal))
 	}
 	external := cloneAgentDefinitionForAction(definition)
 	external.Authority.MaximumRisk = capability.RiskLevelExternal
@@ -773,6 +792,31 @@ func TestAgentBuilderUpdateAgentRaisesAuthorityForAddedSkills(t *testing.T) {
 	if again, _ := f.agents.ListActivations(ctx, f.reference(), "researcher"); len(again) != 2 {
 		t.Fatalf("replay activated again: %#v", again)
 	}
+}
+
+// builderTeamAuthorityCatalog serves one Team and member Agent to the Team
+// Skill authority.
+type builderTeamAuthorityCatalog struct {
+	deployment      *kernelteam.Deployment
+	definition      *kernelteam.Definition
+	agent           *kernelagent.AgentDeployment
+	agentDefinition *kernelagent.AgentDefinition
+}
+
+func (c builderTeamAuthorityCatalog) GetAgentDeployment(context.Context, skill.ScopeReference, string) (*kernelagent.AgentDeployment, error) {
+	return c.agent, nil
+}
+
+func (c builderTeamAuthorityCatalog) GetAgentDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error) {
+	return c.agentDefinition, nil
+}
+
+func (c builderTeamAuthorityCatalog) GetTeamDeployment(context.Context, skill.ScopeReference, string) (*kernelteam.Deployment, error) {
+	return c.deployment, nil
+}
+
+func (c builderTeamAuthorityCatalog) GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error) {
+	return c.definition, nil
 }
 
 // newTestAgentBuilderDispatcher builds a dispatcher over its own installer.
