@@ -26,7 +26,7 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 	waiting := func(agentID string, trigger *ChannelMessage) *ActionProposalResult {
 		created, err := f.scheduler.runs.CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: scope, Kind: RunKindConversation, Owner: team.Owner, AssignedAgentID: agentID,
-			ConcurrencyKey: ConversationRunLane(team.ID, "", agentID), Goal: teamMemberRunGoal, Source: RunSourceChat,
+			ConcurrencyKey: ConversationRunLane(team.ID, "", agentID), Goal: "Respond to a Team channel message", Source: RunSourceChat,
 			Context:        map[string]interface{}{conversationRunContextConversationID: team.ID, conversationRunContextTriggerID: trigger.ID, conversationRunContextTriggerSeq: trigger.Sequence},
 			IdempotencyKey: "member-" + agentID + "-" + trigger.ID, Actor: ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
 		})
