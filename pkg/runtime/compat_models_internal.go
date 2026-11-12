@@ -61,10 +61,6 @@ type (
 	workItemKey                     = models.WorkItemKey
 )
 
-func firstNonEmpty(values ...string) string {
-	return models.FirstNonEmpty(values...)
-}
-
 func matchActionCredentialLeaseCore(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string) error {
 	return models.MatchActionCredentialLeaseCore(lease, call, run, transport)
 }

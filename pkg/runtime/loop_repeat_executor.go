@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -406,4 +407,13 @@ func (g *loopRepeatGuard) repeatNote(after *SessionEntry, text string) *SessionE
 
 func loopFailureFromGuard(failure guardRunFailure) *LoopFailure {
 	return &LoopFailure{Kind: failure.Kind, Code: failure.Code, Message: failure.Message, Explainable: failure.Explainable}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
