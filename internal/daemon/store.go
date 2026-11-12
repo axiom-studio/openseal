@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 
 	artifactstore "github.com/axiom-studio/openseal/pkg/artifact"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 // OpenKernelStore opens the standalone durable kernel store. Relative paths
 // are anchored to the daemon configuration directory rather than the caller's
 // current working directory.
-func OpenKernelStore(config StorageConfig, configDir string) (*runtime.SQLiteStore, string, error) {
+func OpenKernelStore(config StorageConfig, configDir string) (*sqlite.Store, string, error) {
 	if config.Driver != "sqlite" {
 		return nil, "", fmt.Errorf("unsupported storage driver %q", config.Driver)
 	}
@@ -23,7 +23,7 @@ func OpenKernelStore(config StorageConfig, configDir string) (*runtime.SQLiteSto
 	if err := ensureParentDirectory(path); err != nil {
 		return nil, "", err
 	}
-	store, err := runtime.NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		return nil, "", err
 	}

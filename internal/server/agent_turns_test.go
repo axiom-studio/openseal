@@ -10,7 +10,9 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
@@ -18,55 +20,55 @@ import (
 func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 	t.Parallel()
 	store := runtimetest.NewKernelStore(t)
-	scope := runtime.Scope{Kind: "local", ID: "workspace"}
-	run, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
-		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
-		AssignedAgentID: "operator", Goal: "Inspect the cluster", Source: runtime.RunSourceManual,
+	scope := models.Scope{Kind: "local", ID: "workspace"}
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"},
+		AssignedAgentID: "operator", Goal: "Inspect the cluster", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, _, err = runtime.NewRunActivityService(store, store).TransitionRun(
+	run, _, err = activity.NewRunActivityService(store, store).TransitionRun(
 		t.Context(), scope, run.ID,
-		runtime.RunTransitionRequest{ExpectedRevision: run.Revision, Status: runtime.AgentRunStatusRunning},
+		activity.RunTransitionRequest{ExpectedRevision: run.Revision, Status: models.AgentRunStatusRunning},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	turnService := runtime.NewAgentTurnService(store, store)
-	turn, err := turnService.BeginTurn(t.Context(), runtime.BeginAgentTurnRequest{
-		Scope: scope, RunID: run.ID, SessionID: "ses-1", Producer: runtime.StepProducerModel,
+	turnService := activity.NewAgentTurnService(store, store)
+	turn, err := turnService.BeginTurn(t.Context(), activity.BeginAgentTurnRequest{
+		Scope: scope, RunID: run.ID, SessionID: "ses-1", Producer: models.StepProducerModel,
 		DefinitionID: "sre", DefinitionVersion: "4", ModelProvider: "hosted", Model: "bounded", WorkerID: "worker-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err = turnService.RecordStepModel(t.Context(), scope, turn.ID, runtime.StepModelRecord{
+	turn, err = turnService.RecordStepModel(t.Context(), scope, turn.ID, activity.StepModelRecord{
 		ExpectedRevision: turn.Revision, WorkerID: "worker-1", ModelProvider: "hosted", Model: "bounded",
 		AssistantEntryID: "private-assistant-entry", OutputSummary: "Inspected warning events",
-		ToolCallCount: 2, StopReason: string(runtime.ModelStopToolCalls),
-		SkillSelections: []runtime.HostedSkillSelection{{}},
-		Usage:           runtime.TurnUsage{InputTokens: 1840, OutputTokens: 64, ProviderDurationMS: 910},
+		ToolCallCount: 2, StopReason: string(models.ModelStopToolCalls),
+		SkillSelections: []models.HostedSkillSelection{{}},
+		Usage:           models.TurnUsage{InputTokens: 1840, OutputTokens: 64, ProviderDurationMS: 910},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err = turnService.FinishTurn(t.Context(), scope, turn.ID, runtime.FinishAgentTurnRequest{
-		ExpectedRevision: turn.Revision, Status: runtime.AgentTurnStatusCompleted, WorkerID: "worker-1",
-		Usage: runtime.TurnUsage{InputTokens: 1840, OutputTokens: 64, ProviderDurationMS: 910},
+	turn, err = turnService.FinishTurn(t.Context(), scope, turn.ID, activity.FinishAgentTurnRequest{
+		ExpectedRevision: turn.Revision, Status: models.AgentTurnStatusCompleted, WorkerID: "worker-1",
+		Usage: models.TurnUsage{InputTokens: 1840, OutputTokens: 64, ProviderDurationMS: 910},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err := turnService.BeginTurn(t.Context(), runtime.BeginAgentTurnRequest{
-		Scope: scope, RunID: run.ID, SessionID: "ses-1", Producer: runtime.StepProducerModel,
+	failed, err := turnService.BeginTurn(t.Context(), activity.BeginAgentTurnRequest{
+		Scope: scope, RunID: run.ID, SessionID: "ses-1", Producer: models.StepProducerModel,
 		ModelProvider: "hosted", Model: "bounded", WorkerID: "worker-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, err = turnService.FinishTurn(t.Context(), scope, failed.ID, runtime.FinishAgentTurnRequest{
-		ExpectedRevision: failed.Revision, Status: runtime.AgentTurnStatusFailed, WorkerID: "worker-1",
+	failed, err = turnService.FinishTurn(t.Context(), scope, failed.ID, activity.FinishAgentTurnRequest{
+		ExpectedRevision: failed.Revision, Status: models.AgentTurnStatusFailed, WorkerID: "worker-1",
 		FailureCode: "host_unavailable", Error: "model host unreachable",
 	})
 	if err != nil {
@@ -86,25 +88,25 @@ func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 	if !ok || !capability.Supports(kernelapi.OperationGet) || !capability.Supports(kernelapi.OperationList) {
 		t.Fatalf("agent turn capability = %#v", capability)
 	}
-	listed, err := kernel.ListAgentTurns(t.Context(), runtime.AgentTurnFilter{
-		Scope: scope, RunID: run.ID, Statuses: []runtime.AgentTurnStatus{runtime.AgentTurnStatusCompleted}, Limit: 10,
+	listed, err := kernel.ListAgentTurns(t.Context(), models.AgentTurnFilter{
+		Scope: scope, RunID: run.ID, Statuses: []models.AgentTurnStatus{models.AgentTurnStatusCompleted}, Limit: 10,
 	})
 	if err != nil || len(listed) != 1 || listed[0].ID != turn.ID || listed[0].OutputSummary != "Inspected warning events" {
 		t.Fatalf("listed turns = %#v, %v", listed, err)
 	}
 	step := listed[0]
-	if step.SessionID != "ses-1" || step.Producer != runtime.StepProducerModel || step.ToolCallCount != 2 ||
+	if step.SessionID != "ses-1" || step.Producer != models.StepProducerModel || step.ToolCallCount != 2 ||
 		step.StopReason != "tool_calls" || step.Final || step.FailureCode != "" || step.Usage.InputTokens != 1840 {
 		t.Fatalf("step projection = %#v", step)
 	}
-	failedListed, err := kernel.ListAgentTurns(t.Context(), runtime.AgentTurnFilter{
-		Scope: scope, RunID: run.ID, Statuses: []runtime.AgentTurnStatus{runtime.AgentTurnStatusFailed}, Limit: 10,
+	failedListed, err := kernel.ListAgentTurns(t.Context(), models.AgentTurnFilter{
+		Scope: scope, RunID: run.ID, Statuses: []models.AgentTurnStatus{models.AgentTurnStatusFailed}, Limit: 10,
 	})
 	if err != nil || len(failedListed) != 1 || failedListed[0].ID != failed.ID ||
 		failedListed[0].FailureCode != "host_unavailable" || failedListed[0].Error != "model host unreachable" {
 		t.Fatalf("failed steps = %#v, %v", failedListed, err)
 	}
-	if after, err := kernel.ListAgentTurns(t.Context(), runtime.AgentTurnFilter{
+	if after, err := kernel.ListAgentTurns(t.Context(), models.AgentTurnFilter{
 		Scope: scope, RunID: run.ID, AfterSequence: turn.Sequence, Limit: 10,
 	}); err != nil || len(after) != 1 || after[0].ID != failed.ID {
 		t.Fatalf("cursor page = %#v, %v", after, err)
@@ -113,7 +115,7 @@ func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 	if err != nil || restored.ID != turn.ID {
 		t.Fatalf("restored turn = %#v, %v", restored, err)
 	}
-	_, err = kernel.GetAgentTurn(t.Context(), runtime.Scope{Kind: "local", ID: "other"}, turn.ID)
+	_, err = kernel.GetAgentTurn(t.Context(), models.Scope{Kind: "local", ID: "other"}, turn.ID)
 	var apiError *client.APIError
 	if !errors.As(err, &apiError) || apiError.StatusCode != http.StatusNotFound {
 		t.Fatalf("cross-scope turn error = %#v", err)

@@ -3,7 +3,8 @@ package server
 import (
 	"net/http"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 // Channel activity is selected before pagination, using the canonical channel
@@ -32,9 +33,9 @@ func (s *Server) handleListConversationRuns(w http.ResponseWriter, r *http.Reque
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	runs, err := runtime.NewPortfolioService(s.store).ListAgentRuns(r.Context(), runtime.AgentRunFilter{
-		Scope: scope, Owner: &channel.Owner, Kind: runtime.RunKindConversation,
-		ConversationID: channel.ID, Order: runtime.AgentRunOrderCreatedDesc,
+	runs, err := portfolio.NewPortfolioService(s.store).ListAgentRuns(r.Context(), models.AgentRunFilter{
+		Scope: scope, Owner: &channel.Owner, Kind: models.RunKindConversation,
+		ConversationID: channel.ID, Order: models.AgentRunOrderCreatedDesc,
 		Limit: limit, Offset: offset,
 	})
 	if err != nil {

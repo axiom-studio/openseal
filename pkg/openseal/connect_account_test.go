@@ -8,8 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -21,7 +24,7 @@ func (f availabilityCheck) CheckCredentialAvailability(ctx context.Context, req 
 
 // connectAccountEngine has a per_person Mail binding on Agent "agent"; the
 // host reports Ana's ("7") Google sign-in only once connected is set.
-func connectAccountEngine(t *testing.T) (context.Context, *runtime.SQLiteStore, *Engine, *atomic.Bool, *[]CredentialAvailabilityRequest) {
+func connectAccountEngine(t *testing.T) (context.Context, *sqlite.Store, *Engine, *atomic.Bool, *[]CredentialAvailabilityRequest) {
 	t.Helper()
 	ctx := context.Background()
 	store := runtimetest.NewKernelStore(t)
@@ -67,11 +70,11 @@ func connectAccountEngine(t *testing.T) (context.Context, *runtime.SQLiteStore, 
 
 // parkedConnectAccountRun is a chat run acting for actingUser that waits on
 // its own connect_account card for requestedFor.
-func parkedConnectAccountRun(t *testing.T, ctx context.Context, store *runtime.SQLiteStore, call, actingUser, requestedFor, mode string) (*runtime.AgentRun, *SkillSetupRequest) {
+func parkedConnectAccountRun(t *testing.T, ctx context.Context, store *sqlite.Store, call, actingUser, requestedFor, mode string) (*models.AgentRun, *SkillSetupRequest) {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "one"}
-	run, err := runtime.NewPortfolioService(store).CreateAgentRun(ctx, runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindConversation,
-		Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "Send mail", Source: runtime.RunSourceChat, ActingUser: actingUser,
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
+		Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "Send mail", Source: models.RunSourceChat, ActingUser: actingUser,
 		Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message-" + call}})
 	if err != nil {
 		t.Fatal(err)
@@ -87,14 +90,14 @@ func parkedConnectAccountRun(t *testing.T, ctx context.Context, store *runtime.S
 	if err := store.SaveSkillSetupRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(ctx, runtime.AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v %v", claimed, err)
 	}
-	waiting, _, err := runtime.NewRunActivityService(store, store).TransitionRun(ctx, scope, run.ID, runtime.RunTransitionRequest{
-		ExpectedRevision: claimed.Revision, LeaseOwner: "worker", Status: runtime.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
-		Actor:         runtime.ActivityActor{Type: "worker", ID: "worker"},
-		WakeCondition: &runtime.WakeCondition{Type: ConnectAccountWakeType, Reference: request.ID},
+	waiting, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, scope, run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: claimed.Revision, LeaseOwner: "worker", Status: models.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
+		Actor:         models.ActivityActor{Type: "worker", ID: "worker"},
+		WakeCondition: &models.WakeCondition{Type: ConnectAccountWakeType, Reference: request.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -179,9 +182,9 @@ func TestConnectAccountSiblingsSettleAndResumeOnlyTheirPerson(t *testing.T) {
 	if _, err := e.ResolveConnectAccountRequest(ctx, scope, owner, firstCard.ID, 1, InteractionResolver{UserID: "7"}, false); err != nil {
 		t.Fatal(err)
 	}
-	for _, run := range []*runtime.AgentRun{first, second} {
+	for _, run := range []*models.AgentRun{first, second} {
 		resumed, err := store.GetAgentRun(ctx, scope, run.ID)
-		if err != nil || resumed.Status != runtime.AgentRunStatusQueued || len(resumed.PendingInterventions) != 1 ||
+		if err != nil || resumed.Status != models.AgentRunStatusQueued || len(resumed.PendingInterventions) != 1 ||
 			!strings.Contains(resumed.PendingInterventions[0].Instruction, "connected Google. Retry the step that needed it.") {
 			t.Fatalf("run %s not resumed: %#v %v", run.ID, resumed, err)
 		}
@@ -197,7 +200,7 @@ func TestConnectAccountSiblingsSettleAndResumeOnlyTheirPerson(t *testing.T) {
 		t.Fatalf("stranger card = %#v", settled)
 	}
 	waiting, _ := store.GetAgentRun(ctx, scope, stranger.ID)
-	if waiting.Status != runtime.AgentRunStatusWaitingForEvent {
+	if waiting.Status != models.AgentRunStatusWaitingForEvent {
 		t.Fatalf("a run acting for someone else resumed on Ana's card: %s", waiting.Status)
 	}
 }
@@ -219,7 +222,7 @@ func TestReconcileConnectAccountRequestsByRequestedFor(t *testing.T) {
 		t.Fatalf("evidence check = %#v", last)
 	}
 	resumed, _ := store.GetAgentRun(ctx, scope, run.ID)
-	if resumed.Status != runtime.AgentRunStatusQueued {
+	if resumed.Status != models.AgentRunStatusQueued {
 		t.Fatalf("run not resumed: %s", resumed.Status)
 	}
 }

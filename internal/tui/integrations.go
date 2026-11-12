@@ -8,18 +8,18 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 type conversationGatewaysLoaded struct {
-	items []*runtime.ExternalConversationGatewayRegistration
+	items []*models.ExternalConversationGatewayRegistration
 	err   error
 }
 
 type conversationGatewayChanged struct {
-	gateway *runtime.ExternalConversationGatewayRegistration
+	gateway *models.ExternalConversationGatewayRegistration
 	action  string
 	err     error
 }
@@ -68,12 +68,12 @@ func (m *Model) loadConversationGateways() tea.Cmd {
 	}
 	client, ctx, scope := m.conversationGatewayClient, m.ctx, m.config.Scope
 	return func() tea.Msg {
-		items, err := client.ListExternalConversationGateways(ctx, runtime.ExternalConversationGatewayFilter{Scope: scope, Limit: 100})
+		items, err := client.ListExternalConversationGateways(ctx, models.ExternalConversationGatewayFilter{Scope: scope, Limit: 100})
 		return conversationGatewaysLoaded{items: items, err: err}
 	}
 }
 
-func (m *Model) selectedConversationGatewayRecord() *runtime.ExternalConversationGatewayRegistration {
+func (m *Model) selectedConversationGatewayRecord() *models.ExternalConversationGatewayRegistration {
 	if m.conversationGatewaySelected < 0 || m.conversationGatewaySelected >= len(m.conversationGateways) {
 		return nil
 	}
@@ -178,14 +178,14 @@ func (m *Model) submitConversationGatewayCreation() tea.Cmd {
 	}
 	request := kernelapi.CreateExternalConversationGatewayRequest{
 		Name: name,
-		Gateway: runtime.ExternalConversationIngressGateway{
+		Gateway: models.ExternalConversationIngressGateway{
 			Scope: m.config.Scope, DeploymentID: choice.DeploymentID, Provider: choice.Provider,
-			Adapter: runtime.ExternalConversationAdapterReference{
+			Adapter: models.ExternalConversationAdapterReference{
 				SkillID: choice.SkillID, SkillVersion: choice.SkillVersion, SourceIdentity: choice.SourceIdentity,
 				BindingID: choice.BindingID, BindingRevision: choice.BindingRevision, AdapterID: choice.AdapterID,
 			},
 		},
-		Status: runtime.ExternalConversationGatewayPaused,
+		Status: models.ExternalConversationGatewayPaused,
 		Reason: reason,
 	}
 	m.busy, m.err, m.status = true, nil, "Creating the reviewed connection in a paused state…"
@@ -198,7 +198,7 @@ func (m *Model) submitConversationGatewayCreation() tea.Cmd {
 
 func (m *Model) prepareConversationGatewayLifecycle(mode editorMode) {
 	item := m.selectedConversationGatewayRecord()
-	if item == nil || item.Status == runtime.ExternalConversationGatewayRetired || !m.supportsConversationGateway(kernelapi.OperationUpdate) {
+	if item == nil || item.Status == models.ExternalConversationGatewayRetired || !m.supportsConversationGateway(kernelapi.OperationUpdate) {
 		return
 	}
 	m.mode = mode
@@ -229,7 +229,7 @@ func parseConversationGatewayLifecycleReason(mode editorMode, value string) (str
 	return value, nil
 }
 
-func (m *Model) submitConversationGatewayLifecycle(status runtime.ExternalConversationGatewayStatus, action string) tea.Cmd {
+func (m *Model) submitConversationGatewayLifecycle(status models.ExternalConversationGatewayStatus, action string) tea.Cmd {
 	item := m.selectedConversationGatewayRecord()
 	if item == nil || !m.supportsConversationGateway(kernelapi.OperationUpdate) {
 		m.err = errors.New("select a manageable connection")
@@ -295,9 +295,9 @@ func (m *Model) renderConversationGatewaysContent(width int) string {
 			lines = append(lines, compact(fmt.Sprintf("%s · %s · %s", entry.Action, entry.Actor.Type, entry.Reason), max(width-8, 24)))
 		}
 	}
-	if item.Status != runtime.ExternalConversationGatewayRetired && m.supportsConversationGateway(kernelapi.OperationUpdate) {
+	if item.Status != models.ExternalConversationGatewayRetired && m.supportsConversationGateway(kernelapi.OperationUpdate) {
 		verb := "activate"
-		if item.Status == runtime.ExternalConversationGatewayActive {
+		if item.Status == models.ExternalConversationGatewayActive {
 			verb = "pause"
 		}
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(success).Render("p "+verb)+"  ·  "+lipgloss.NewStyle().Foreground(danger).Render("x retire")+"  ·  r refresh")

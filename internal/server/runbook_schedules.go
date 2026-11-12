@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 )
 
 const (
@@ -31,7 +31,7 @@ func (s *Server) handleReconcileRunbookSchedules(w http.ResponseWriter, r *http.
 	if limit == 0 {
 		limit = defaultRunbookScheduleReconcileLimit
 	}
-	result, err := runtime.NewRunbookScheduler(s.store).ReconcileScope(r.Context(), payload.Scope, limit)
+	result, err := routine.NewRunbookScheduler(s.store).ReconcileScope(r.Context(), payload.Scope, limit)
 	if err != nil {
 		s.respondError(w, http.StatusInternalServerError, err.Error())
 		return

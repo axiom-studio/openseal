@@ -14,8 +14,13 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/artifact"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 )
 
 // desktopLoop is the daemon's task wiring over a real kernel: SQLite under
@@ -23,20 +28,20 @@ import (
 // httptest Chat Completions endpoint and the generated-files publisher.
 type desktopLoop struct {
 	kernel   *opensealkernel.Engine
-	store    *runtime.SQLiteStore
+	store    *sqlite.Store
 	provider *fakeProvider
 }
 
 const loopAgent = "analyst"
 
-func newDesktopLoop(t *testing.T, provider *fakeProvider, wrap func(runtime.ArtifactContentStore) runtime.ArtifactContentStore) *desktopLoop {
+func newDesktopLoop(t *testing.T, provider *fakeProvider, wrap func(models.ArtifactContentStore) models.ArtifactContentStore) *desktopLoop {
 	t.Helper()
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	var content runtime.ArtifactContentStore
+	var content models.ArtifactContentStore
 	local, err := artifact.NewLocalStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -47,13 +52,13 @@ func newDesktopLoop(t *testing.T, provider *fakeProvider, wrap func(runtime.Arti
 	}
 	resolver := &DesktopTurnResolver{
 		Scope: localScope, Host: provider.host(t, 0),
-		Publisher: &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: runtime.NewArtifactCatalog(store)},
+		Publisher: &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: artifactcatalog.NewArtifactCatalog(store)},
 	}
-	scopes := runtime.WorkerScopeSourceFunc(func(context.Context) ([]runtime.Scope, error) { return []runtime.Scope{localScope}, nil })
+	scopes := workqueue.WorkerScopeSourceFunc(func(context.Context) ([]models.Scope, error) { return []models.Scope{localScope}, nil })
 	kernel, err := opensealkernel.New(
 		opensealkernel.WithPersistentStore(store),
-		opensealkernel.WithDynamicAgentRunWorkers(runtime.DynamicAgentRunWorkerConfig{
-			Kind: runtime.RunKindAgentWork, Concurrency: 1, WorkerIDPrefix: "desktop-test",
+		opensealkernel.WithDynamicAgentRunWorkers(runworker.DynamicAgentRunWorkerConfig{
+			Kind: models.RunKindAgentWork, Concurrency: 1, WorkerIDPrefix: "desktop-test",
 			PollInterval: 10 * time.Millisecond, ReconcileInterval: 10 * time.Millisecond,
 		}, scopes, resolver),
 	)
@@ -87,10 +92,10 @@ func newDesktopLoop(t *testing.T, provider *fakeProvider, wrap func(runtime.Arti
 }
 
 // start creates the task the way the daemon's run creation dispatcher does.
-func (l *desktopLoop) start(t *testing.T, goal string) *runtime.AgentRun {
+func (l *desktopLoop) start(t *testing.T, goal string) *models.AgentRun {
 	t.Helper()
-	request, err := ResolveDesktopWork(t.Context(), l.kernel, localScope, runtime.CreateAgentRunRequest{
-		Scope: localScope, Kind: runtime.RunKindAgentWork, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: loopAgent},
+	request, err := ResolveDesktopWork(t.Context(), l.kernel, localScope, models.CreateAgentRunRequest{
+		Scope: localScope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: loopAgent},
 		AssignedAgentID: loopAgent, Goal: goal, IdempotencyKey: "task-" + goal,
 	})
 	if err != nil {
@@ -104,7 +109,7 @@ func (l *desktopLoop) start(t *testing.T, goal string) *runtime.AgentRun {
 	return result.Run
 }
 
-func (l *desktopLoop) wait(t *testing.T, runID string, want runtime.AgentRunStatus) *runtime.AgentRun {
+func (l *desktopLoop) wait(t *testing.T, runID string, want models.AgentRunStatus) *models.AgentRun {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
@@ -116,7 +121,7 @@ func (l *desktopLoop) wait(t *testing.T, runID string, want runtime.AgentRunStat
 			return run
 		}
 		switch run.Status {
-		case runtime.AgentRunStatusCompleted, runtime.AgentRunStatusFailed, runtime.AgentRunStatusCanceled, runtime.AgentRunStatusPaused:
+		case models.AgentRunStatusCompleted, models.AgentRunStatusFailed, models.AgentRunStatusCanceled, models.AgentRunStatusPaused:
 			t.Fatalf("run %s is %s (%s), want %s", runID, run.Status, run.Error, want)
 		}
 		if time.Now().After(deadline) {
@@ -126,18 +131,18 @@ func (l *desktopLoop) wait(t *testing.T, runID string, want runtime.AgentRunStat
 	}
 }
 
-func (l *desktopLoop) steps(t *testing.T, runID string) []*runtime.AgentTurn {
+func (l *desktopLoop) steps(t *testing.T, runID string) []*models.AgentTurn {
 	t.Helper()
-	steps, err := l.kernel.ListAgentTurns(t.Context(), runtime.AgentTurnFilter{Scope: localScope, RunID: runID})
+	steps, err := l.kernel.ListAgentTurns(t.Context(), models.AgentTurnFilter{Scope: localScope, RunID: runID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return steps
 }
 
-func (l *desktopLoop) artifacts(t *testing.T, runID string) []*runtime.Artifact {
+func (l *desktopLoop) artifacts(t *testing.T, runID string) []*models.Artifact {
 	t.Helper()
-	artifacts, err := l.kernel.ListArtifacts(t.Context(), runtime.ArtifactFilter{Scope: localScope, ProducerRunID: runID})
+	artifacts, err := l.kernel.ListArtifacts(t.Context(), models.ArtifactFilter{Scope: localScope, ProducerRunID: runID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +155,7 @@ func finalCall(id string) map[string]interface{} {
 		"answer":         "The report is attached.",
 		"generatedFiles": []interface{}{map[string]string{"name": "report.md", "mediaType": "text/markdown", "text": "# Report\n\nAll good."}},
 	})
-	return chatCall(id, string(runtime.ControlToolFinalAnswer), string(args))
+	return chatCall(id, string(models.ControlToolFinalAnswer), string(args))
 }
 
 // offersGeneratedFiles reports whether the request's turn_final_answer tool
@@ -160,7 +165,7 @@ func offersGeneratedFiles(body map[string]interface{}) bool {
 	for _, raw := range tools {
 		tool, _ := raw.(map[string]interface{})
 		function, _ := tool["function"].(map[string]interface{})
-		if function["name"] != string(runtime.ControlToolFinalAnswer) {
+		if function["name"] != string(models.ControlToolFinalAnswer) {
 			continue
 		}
 		parameters, _ := function["parameters"].(map[string]interface{})
@@ -206,7 +211,7 @@ func TestDesktopTaskLoopRunsStepsAndPublishesGeneratedFiles(t *testing.T) {
 		}
 	})
 	loop := newDesktopLoop(t, provider, nil)
-	run := loop.wait(t, loop.start(t, "Write the weather report").ID, runtime.AgentRunStatusCompleted)
+	run := loop.wait(t, loop.start(t, "Write the weather report").ID, models.AgentRunStatusCompleted)
 
 	if got := provider.n.Load(); got != 2 {
 		t.Fatalf("provider calls = %d, want 2", got)
@@ -239,13 +244,13 @@ func TestDesktopTaskLoopRunsStepsAndPublishesGeneratedFiles(t *testing.T) {
 
 // failFirstPut refuses the first content write.
 type failFirstPut struct {
-	runtime.ArtifactContentStore
+	models.ArtifactContentStore
 	mu    sync.Mutex
 	puts  int
 	fails int
 }
 
-func (s *failFirstPut) Put(ctx context.Context, write runtime.ArtifactContentWrite) (runtime.ArtifactStoredContent, error) {
+func (s *failFirstPut) Put(ctx context.Context, write models.ArtifactContentWrite) (models.ArtifactStoredContent, error) {
 	s.mu.Lock()
 	s.puts++
 	fail := s.puts == 1
@@ -254,7 +259,7 @@ func (s *failFirstPut) Put(ctx context.Context, write runtime.ArtifactContentWri
 	}
 	s.mu.Unlock()
 	if fail {
-		return runtime.ArtifactStoredContent{}, errors.New("simulated disk interruption")
+		return models.ArtifactStoredContent{}, errors.New("simulated disk interruption")
 	}
 	return s.ArtifactContentStore.Put(ctx, write)
 }
@@ -268,23 +273,23 @@ func TestDesktopTaskLoopResumesPublicationWithoutModelReinvocation(t *testing.T)
 			"tool_calls": []interface{}{finalCall("call-1")}}, map[string]int{"prompt_tokens": 800, "completion_tokens": 30})
 	})
 	content := &failFirstPut{}
-	loop := newDesktopLoop(t, provider, func(inner runtime.ArtifactContentStore) runtime.ArtifactContentStore {
+	loop := newDesktopLoop(t, provider, func(inner models.ArtifactContentStore) models.ArtifactContentStore {
 		content.ArtifactContentStore = inner
 		return content
 	})
 	created := loop.start(t, "Write the paused report")
-	paused := loop.wait(t, created.ID, runtime.AgentRunStatusPaused)
+	paused := loop.wait(t, created.ID, models.AgentRunStatusPaused)
 	if len(loop.artifacts(t, created.ID)) != 0 {
 		t.Fatal("a failed publication registered an artifact")
 	}
-	if _, err := loop.kernel.CommandAgentRun(t.Context(), runtime.AgentRunCommandRequest{
-		Scope: localScope, RunID: paused.ID, ExpectedRevision: paused.Revision, Kind: runtime.AgentRunCommandResume,
-		Actor: runtime.ActivityActor{Type: "user", ID: "local-operator"},
+	if _, err := loop.kernel.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
+		Scope: localScope, RunID: paused.ID, ExpectedRevision: paused.Revision, Kind: agentrun.AgentRunCommandResume,
+		Actor: models.ActivityActor{Type: "user", ID: "local-operator"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	loop.kernel.WakeAgentWorkers()
-	run := loop.wait(t, created.ID, runtime.AgentRunStatusCompleted)
+	run := loop.wait(t, created.ID, models.AgentRunStatusCompleted)
 
 	if got := provider.n.Load(); got != 1 {
 		t.Fatalf("provider calls = %d, want 1", got)
@@ -332,14 +337,14 @@ func TestDesktopTaskLoopCanceledStepPublishesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loop.kernel.CommandAgentRun(t.Context(), runtime.AgentRunCommandRequest{
-		Scope: localScope, RunID: current.ID, ExpectedRevision: current.Revision, Kind: runtime.AgentRunCommandCancel,
-		Actor: runtime.ActivityActor{Type: "user", ID: "local-operator"}, Summary: "Stop",
+	if _, err := loop.kernel.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
+		Scope: localScope, RunID: current.ID, ExpectedRevision: current.Revision, Kind: agentrun.AgentRunCommandCancel,
+		Actor: models.ActivityActor{Type: "user", ID: "local-operator"}, Summary: "Stop",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	close(release)
-	run := loop.wait(t, created.ID, runtime.AgentRunStatusCanceled)
+	run := loop.wait(t, created.ID, models.AgentRunStatusCanceled)
 	// Stopping waits for the worker, so its step has settled however it ended.
 	loop.kernel.Stop()
 
@@ -353,7 +358,7 @@ func TestDesktopTaskLoopCanceledStepPublishesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if final.Status != runtime.AgentRunStatusCanceled {
+	if final.Status != models.AgentRunStatusCanceled {
 		t.Fatalf("run status after the step settled = %s", final.Status)
 	}
 	if got := provider.n.Load(); got != 1 {

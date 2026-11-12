@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
 )
 
 func TestSkillActionDiscoveryReturnsExactSecretSafeSemanticBindings(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

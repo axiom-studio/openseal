@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/google/uuid"
 )
 
@@ -18,7 +18,7 @@ func TestPostgresTeamRostersFollowSpaces(t *testing.T) {
 		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
 	}
 	schema := "openseal_team_spaces_" + uuid.NewString()[:8]
-	store, err := runtime.NewPostgresStore(t.Context(), dsn, runtime.WithPostgresSchema(schema))
+	store, err := postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

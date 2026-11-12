@@ -10,12 +10,12 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"go.uber.org/zap"
 )
 
 func TestAgentCompilationAPIIsCapabilityAdvertisedAndScopeIsolated(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "compilations.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "compilations.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,7 +15,8 @@ import (
 
 	artifactstore "github.com/axiom-studio/openseal/pkg/artifact"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 const (
@@ -83,7 +84,7 @@ type snakesAcceptance struct {
 	host          *loopStepHost
 	mu            sync.RWMutex
 	engine        *Engine
-	store         *runtime.SQLiteStore
+	store         *sqlite.Store
 	recovered     bool
 	gameRunIDs    map[string]string
 	sideRunIDs    map[string]string
@@ -192,7 +193,7 @@ func runSnakesAndLaddersAcceptance(t *testing.T, commentator moveCommentator) {
 		t.Fatal(err)
 	}
 
-	finalStore, err := runtime.NewSQLiteStore(harness.path)
+	finalStore, err := sqlite.NewSQLiteStore(harness.path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +213,7 @@ func runSnakesAndLaddersAcceptance(t *testing.T, commentator moveCommentator) {
 
 func (h *snakesAcceptance) open(ctx context.Context) *Engine {
 	h.t.Helper()
-	store, err := runtime.NewSQLiteStore(h.path)
+	store, err := sqlite.NewSQLiteStore(h.path)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -317,9 +318,9 @@ func (h *snakesAcceptance) replay(ctx context.Context) ([]gameMove, error) {
 		if runID == "" {
 			continue
 		}
-		entries, err := engine.Store().ListAgentSessionEntries(ctx, runtime.SessionEntryFilter{
+		entries, err := engine.Store().ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 			Scope: Scope{Kind: "tenant", ID: "acceptance"}, RunID: runID,
-			Types: []runtime.SessionEntryType{runtime.SessionEntryAssistant}, Limit: 1000,
+			Types: []models.SessionEntryType{models.SessionEntryAssistant}, Limit: 1000,
 		})
 		if err != nil {
 			return nil, err
@@ -365,7 +366,7 @@ func (h *snakesAcceptance) assertGameRunsObservedWinner(ctx context.Context, win
 	}
 }
 
-func (h *snakesAcceptance) setEngine(engine *Engine, store *runtime.SQLiteStore) {
+func (h *snakesAcceptance) setEngine(engine *Engine, store *sqlite.Store) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.engine, h.store = engine, store
@@ -672,7 +673,7 @@ func (h *snakesAcceptance) assertDurableOutcome(ctx context.Context, engine *Eng
 	}
 	logs := map[string]interface{}{}
 	for _, runID := range h.allRunIDs() {
-		entries, err := engine.Store().ListAgentSessionEntries(ctx, runtime.SessionEntryFilter{Scope: artifact.Scope, RunID: runID, Limit: 1000})
+		entries, err := engine.Store().ListAgentSessionEntries(ctx, models.SessionEntryFilter{Scope: artifact.Scope, RunID: runID, Limit: 1000})
 		if err != nil {
 			h.t.Fatal(err)
 		}

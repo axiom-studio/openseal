@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
@@ -48,7 +48,7 @@ func TestTargetedSkillSetupResolvesFromTheBuildersChat(t *testing.T) {
 			t.Fatalf("%s cannot open the card: %v", owner.ID, err)
 		}
 	}
-	if _, err := e.GetSkillSetupRequest(ctx, scope, agentOwner("other"), request.ID); !errors.Is(err, runtime.ErrInvalidSkillSetup) {
+	if _, err := e.GetSkillSetupRequest(ctx, scope, agentOwner("other"), request.ID); !errors.Is(err, models.ErrInvalidSkillSetup) {
 		t.Fatalf("an unrelated umbrella opened the card: %v", err)
 	}
 	// A binding with the same id on the builder does not satisfy the card.

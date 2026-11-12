@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func conversationGatewayCapabilityFixture() kernelapi.Capability {
@@ -17,16 +17,16 @@ func conversationGatewayCapabilityFixture() kernelapi.Capability {
 	}})
 }
 
-func conversationGatewayRecordFixture() *runtime.ExternalConversationGatewayRegistration {
+func conversationGatewayRecordFixture() *models.ExternalConversationGatewayRegistration {
 	now := time.Now().UTC()
-	return &runtime.ExternalConversationGatewayRegistration{
-		ID: "gateway-one", IngressRoute: "opaque-public-route", Name: "Product Slack", Status: runtime.ExternalConversationGatewayPaused,
+	return &models.ExternalConversationGatewayRegistration{
+		ID: "gateway-one", IngressRoute: "opaque-public-route", Name: "Product Slack", Status: models.ExternalConversationGatewayPaused,
 		Revision: 4, CreatedAt: now.Add(-time.Hour), UpdatedAt: now,
-		Gateway: runtime.ExternalConversationIngressGateway{
-			Scope: runtime.Scope{Kind: "local", ID: "default"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "research-agent"}, DeploymentID: "research-agent", Provider: "slack",
-			Adapter: runtime.ExternalConversationAdapterReference{SkillID: "skill-slack", SkillVersion: "2.0.0", SourceIdentity: "https://github.com/axiom-studio/skills::skill-slack", BindingID: "slack-binding", BindingRevision: 7, AdapterID: "events"},
+		Gateway: models.ExternalConversationIngressGateway{
+			Scope: models.Scope{Kind: "local", ID: "default"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "research-agent"}, DeploymentID: "research-agent", Provider: "slack",
+			Adapter: models.ExternalConversationAdapterReference{SkillID: "skill-slack", SkillVersion: "2.0.0", SourceIdentity: "https://github.com/axiom-studio/skills::skill-slack", BindingID: "slack-binding", BindingRevision: 7, AdapterID: "events"},
 		},
-		Lifecycle: []runtime.ExternalConversationGatewayLifecycleEntry{{Revision: 4, Action: runtime.ExternalConversationGatewayCreated, Actor: runtime.ActivityActor{Type: "user", ID: "operator"}, Reason: "forward-ported connection", At: now}},
+		Lifecycle: []models.ExternalConversationGatewayLifecycleEntry{{Revision: 4, Action: models.ExternalConversationGatewayCreated, Actor: models.ActivityActor{Type: "user", ID: "operator"}, Reason: "forward-ported connection", At: now}},
 	}
 }
 
@@ -47,7 +47,7 @@ func TestConversationIntegrationUsesTypedChoiceAndCreatesPaused(t *testing.T) {
 		t.Fatalf("creates = %#v", fake.conversationGatewayCreates)
 	}
 	request := fake.conversationGatewayCreates[0]
-	if request.Status != runtime.ExternalConversationGatewayPaused || request.Name != "Customer feedback Slack" || request.Reason != "receive reviewed customer feedback events" ||
+	if request.Status != models.ExternalConversationGatewayPaused || request.Name != "Customer feedback Slack" || request.Reason != "receive reviewed customer feedback events" ||
 		request.Gateway.DeploymentID != "research-agent" || request.Gateway.Adapter.BindingID != "slack-binding" || request.Gateway.Adapter.BindingRevision != 7 || request.Gateway.Adapter.SourceIdentity != "https://github.com/axiom-studio/skills::skill-slack" {
 		t.Fatalf("create request = %#v", request)
 	}
@@ -59,7 +59,7 @@ func TestConversationIntegrationUsesTypedChoiceAndCreatesPaused(t *testing.T) {
 
 func TestConversationIntegrationLifecycleUsesExactRevisionAndReason(t *testing.T) {
 	item := conversationGatewayRecordFixture()
-	fake := &fakeKernelClient{conversationGateways: []*runtime.ExternalConversationGatewayRegistration{item}}
+	fake := &fakeKernelClient{conversationGateways: []*models.ExternalConversationGatewayRegistration{item}}
 	model := newModelWithClient(t, fake)
 	model.ready = true
 	model.section = sectionIntegrations
@@ -69,12 +69,12 @@ func TestConversationIntegrationLifecycleUsesExactRevisionAndReason(t *testing.T
 	model.mode = modeIntegrationActivate
 	model.editor.SetValue("provider callback was verified")
 
-	message := model.submitConversationGatewayLifecycle(runtime.ExternalConversationGatewayActive, "activated")()
+	message := model.submitConversationGatewayLifecycle(models.ExternalConversationGatewayActive, "activated")()
 	if _, ok := message.(conversationGatewayChanged); !ok || len(fake.conversationGatewayUpdates) != 1 {
 		t.Fatalf("message=%T updates=%#v", message, fake.conversationGatewayUpdates)
 	}
 	request := fake.conversationGatewayUpdates[0]
-	if request.ExpectedRevision != 4 || request.Status == nil || *request.Status != runtime.ExternalConversationGatewayActive || request.Reason != "provider callback was verified" {
+	if request.ExpectedRevision != 4 || request.Status == nil || *request.Status != models.ExternalConversationGatewayActive || request.Reason != "provider callback was verified" {
 		t.Fatalf("update request = %#v", request)
 	}
 }

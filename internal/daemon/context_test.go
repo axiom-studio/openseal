@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestStandaloneContextResolvesScopedEnvironmentAndPrivateFileCredentials(t *testing.T) {
@@ -45,7 +45,7 @@ credentials:
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := runtime.Scope{Kind: "local", ID: "default"}
+	scope := models.Scope{Kind: "local", ID: "default"}
 	if got, err := configured.ResolveReference(scope, capability.CredentialReference{Kind: "api-key", ID: "model"}); err != nil || got != "environment-secret" {
 		t.Fatalf("environment credential = %q, %v", got, err)
 	}
@@ -56,7 +56,7 @@ credentials:
 	if len(choices) != 2 || choices[0].Reference.ID != "model" || choices[0].DisplayName != "Local model provider" {
 		t.Fatalf("credential choices = %#v", choices)
 	}
-	if _, err := configured.ResolveReference(runtime.Scope{Kind: "local", ID: "other"}, capability.CredentialReference{Kind: "api-key", ID: "model"}); err == nil {
+	if _, err := configured.ResolveReference(models.Scope{Kind: "local", ID: "other"}, capability.CredentialReference{Kind: "api-key", ID: "model"}); err == nil {
 		t.Fatal("cross-scope credential resolution succeeded")
 	}
 }
@@ -99,12 +99,12 @@ credentials:
 	}
 	configured := emptyStandaloneContext(dir)
 	configured.Credentials = []StandaloneCredential{{
-		Scope: runtime.Scope{Kind: "local", ID: "default"}, Kind: "api-key", ID: "unsafe", DisplayName: "Unsafe", File: secretPath,
+		Scope: models.Scope{Kind: "local", ID: "default"}, Kind: "api-key", ID: "unsafe", DisplayName: "Unsafe", File: secretPath,
 	}}
 	if err := configured.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := configured.ResolveReference(runtime.Scope{Kind: "local", ID: "default"}, capability.CredentialReference{Kind: "api-key", ID: "unsafe"}); err == nil {
+	if _, err := configured.ResolveReference(models.Scope{Kind: "local", ID: "default"}, capability.CredentialReference{Kind: "api-key", ID: "unsafe"}); err == nil {
 		t.Fatal("world-readable credential file succeeded")
 	}
 
@@ -117,19 +117,19 @@ credentials:
 		t.Fatal(err)
 	}
 	configured.Credentials = []StandaloneCredential{{
-		Scope: runtime.Scope{Kind: "local", ID: "default"}, Kind: "api-key", ID: "link", DisplayName: "Link", File: linkPath,
+		Scope: models.Scope{Kind: "local", ID: "default"}, Kind: "api-key", ID: "link", DisplayName: "Link", File: linkPath,
 	}}
 	if err := configured.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := configured.ResolveReference(runtime.Scope{Kind: "local", ID: "default"}, capability.CredentialReference{Kind: "api-key", ID: "link"}); err == nil {
+	if _, err := configured.ResolveReference(models.Scope{Kind: "local", ID: "default"}, capability.CredentialReference{Kind: "api-key", ID: "link"}); err == nil {
 		t.Fatal("symbolic-link credential file succeeded")
 	}
 }
 
 func TestMissingStandaloneContextIsAnEmptyOptionalVault(t *testing.T) {
 	configured, err := LoadStandaloneContext(filepath.Join(t.TempDir(), "missing.yaml"))
-	if err != nil || len(configured.CredentialChoices(runtime.Scope{Kind: "local", ID: "default"})) != 0 {
+	if err != nil || len(configured.CredentialChoices(models.Scope{Kind: "local", ID: "default"})) != 0 {
 		t.Fatalf("missing context = %#v, %v", configured, err)
 	}
 }

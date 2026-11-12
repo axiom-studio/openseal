@@ -10,7 +10,9 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"go.uber.org/zap"
@@ -19,7 +21,7 @@ import (
 func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "team-skills.db")
-	store, err := runtime.NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,17 +88,17 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"deploymentId":"research-one"`) || !strings.Contains(created.Body.String(), `"action":"created"`) {
 		t.Fatalf("create Team binding = %d %s", created.Code, created.Body.String())
 	}
-	planPayload, _ := json.Marshal(runtime.PlanSkillReferenceUpgradeRequest{ToVersion: "2"})
+	planPayload, _ := json.Marshal(skillbinding.PlanSkillReferenceUpgradeRequest{ToVersion: "2"})
 	planned := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/team-deployments/research-one/skill-bindings/forum/upgrade-plan?scopeKind=tenant&scopeId=one", string(planPayload), "")
 	if planned.Code != http.StatusOK || !strings.Contains(planned.Body.String(), `"version":"2"`) || strings.Contains(planned.Body.String(), "teamAuthority") {
 		t.Fatalf("plan Team binding upgrade = %d %s", planned.Code, planned.Body.String())
 	}
-	var plan runtime.SkillReferenceUpgradePlan
+	var plan models.SkillReferenceUpgradePlan
 	if err := json.Unmarshal(planned.Body.Bytes(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	applyPayload, _ := json.Marshal(runtime.ApplySkillReferenceUpgradeRequest{
-		Plan: &plan, Actor: runtime.ActivityActor{Type: "user", ID: "operator"}, Reason: "reviewed exact forum upgrade",
+	applyPayload, _ := json.Marshal(skillbinding.ApplySkillReferenceUpgradeRequest{
+		Plan: &plan, Actor: models.ActivityActor{Type: "user", ID: "operator"}, Reason: "reviewed exact forum upgrade",
 	})
 	applied := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/team-deployments/research-one/skill-bindings/forum/upgrade?scopeKind=tenant&scopeId=one", string(applyPayload), "")
 	if applied.Code != http.StatusOK || !strings.Contains(applied.Body.String(), `"bindingRevision":2`) || !strings.Contains(applied.Body.String(), `"reason":"reviewed exact forum upgrade"`) {
@@ -118,7 +120,7 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restartedStore, err := runtime.NewSQLiteStore(path)
+	restartedStore, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

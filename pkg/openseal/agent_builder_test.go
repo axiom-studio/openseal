@@ -5,7 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -39,20 +42,20 @@ func TestAgentBuilderEngineWiresValidatorAndDispatchers(t *testing.T) {
 	}
 	validators := 0
 	for _, validator := range engine.actionValidators {
-		if _, ok := validator.(*runtime.AgentBuilderActionValidator); ok {
+		if _, ok := validator.(*agentbuilder.AgentBuilderActionValidator); ok {
 			validators++
 		}
 	}
 	if validators != 1 {
 		t.Fatalf("builder validators = %d", validators)
 	}
-	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*runtime.AgentBuilderActionDispatcher); !ok {
+	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*agentbuilder.AgentBuilderActionDispatcher); !ok {
 		t.Fatalf("pool dispatcher = %T", engine.actionPoolSpecs[0].dispatcher)
 	}
 	if governed := engine.GovernedTools(); governed == nil {
 		t.Fatal("the inline executor was not built over the builder dispatcher")
 	}
-	var _ runtime.AgentProvisioner = engine
+	var _ agentbuilder.AgentProvisioner = engine
 	if _, err := New(WithAgentBuilderHost(nil)); err == nil {
 		t.Fatal("a nil builder host was accepted")
 	}
@@ -66,7 +69,7 @@ func TestAgentBuilderEngineEnsuresControlConversation(t *testing.T) {
 	}
 	t.Cleanup(func() { engine.Close() })
 	reference := skill.ScopeReference{Kind: "tenant", ID: "one"}
-	home := seedSpace(t, engine, runtime.Scope{Kind: reference.Kind, ID: reference.ID}, "person")
+	home := seedSpace(t, engine, models.Scope{Kind: reference.Kind, ID: reference.ID}, "person")
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
 		ID: "helper-definition", Version: "1.0.0", DisplayName: "Helper", Purpose: "Help", SystemPrompt: "Help.",
 		Authority: AgentAuthorityPolicy{MaximumRisk: skill.RiskLevelRead, MaxConcurrentRuns: 1},
@@ -86,7 +89,7 @@ func TestAgentBuilderEngineEnsuresControlConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := engine.EnsureAgentControlConversation(ctx, deployment)
-	if err != nil || second.ID != first.ID || first.Origin == nil || first.Origin.Kind != runtime.ConversationReferenceAgentControl || first.SpaceID != home.ID {
+	if err != nil || second.ID != first.ID || first.Origin == nil || first.Origin.Kind != models.ConversationReferenceAgentControl || first.SpaceID != home.ID {
 		t.Fatalf("control conversation = %#v then %#v, %v", first, second, err)
 	}
 }
@@ -98,9 +101,9 @@ func TestAgentBuilderStartConversationOriginSpaceAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { engine.Close() })
-	scope := runtime.Scope{Kind: "tenant", ID: "one"}
-	requester := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "ana"}
-	space, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: scope, Name: "Press", Look: runtime.DefaultSpaceLook, OwnerID: "ana"})
+	scope := models.Scope{Kind: "tenant", ID: "one"}
+	requester := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "ana"}
+	space, err := engine.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: "Press", Look: models.DefaultSpaceLook, OwnerID: "ana"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,13 +116,13 @@ func TestAgentBuilderStartConversationOriginSpaceAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	conversation, message := first.Conversation, first.Message
-	if first.Replayed || conversation.Owner != (runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: AgentBuilderDeploymentID}) ||
-		conversation.Origin == nil || *conversation.Origin != (runtime.ConversationReference{Kind: runtime.ConversationReferenceAgentBuilder, ID: "key-1"}) ||
+	if first.Replayed || conversation.Owner != (models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: AgentBuilderDeploymentID}) ||
+		conversation.Origin == nil || *conversation.Origin != (models.ConversationReference{Kind: models.ConversationReferenceAgentBuilder, ID: "key-1"}) ||
 		conversation.SpaceID != space.ID || conversation.Title != "Press Desk" {
 		t.Fatalf("conversation = %#v", conversation)
 	}
 	if message.Sender != requester || message.Content != "An agent that drafts press releases" || message.BuilderParameters == nil ||
-		*message.BuilderParameters != (AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent, Name: "Press Desk", Model: "openai/gpt-5"}) {
+		*message.BuilderParameters != (AgentBuilderParameters{Kind: models.AgentBuilderKindAgent, Name: "Press Desk", Model: "openai/gpt-5"}) {
 		t.Fatalf("message = %#v", message)
 	}
 	again, err := engine.StartAgentBuilderConversation(ctx, request)
@@ -128,34 +131,34 @@ func TestAgentBuilderStartConversationOriginSpaceAndReplay(t *testing.T) {
 	}
 	changed := request
 	changed.Prompt = "Something else"
-	if _, err := engine.StartAgentBuilderConversation(ctx, changed); !errors.Is(err, runtime.ErrMessageConflict) {
+	if _, err := engine.StartAgentBuilderConversation(ctx, changed); !errors.Is(err, models.ErrMessageConflict) {
 		t.Fatalf("a changed replay = %v", err)
 	}
 
 	personal, err := engine.StartAgentBuilderConversation(ctx, StartAgentBuilderRequest{
-		Scope: scope, Requester: requester, Prompt: "A team for launches", Parameters: AgentBuilderParameters{Kind: runtime.AgentBuilderKindTeam}, IdempotencyKey: "key-2",
+		Scope: scope, Requester: requester, Prompt: "A team for launches", Parameters: AgentBuilderParameters{Kind: models.AgentBuilderKindTeam}, IdempotencyKey: "key-2",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// With no space named, the chat is in the requester's default space.
 	home, err := engine.DefaultSpace(ctx, scope, requester.ID)
-	if err != nil || personal.Conversation.SpaceID != home.ID || personal.Conversation.Title != "New team" || personal.Message.BuilderParameters.Kind != runtime.AgentBuilderKindTeam {
+	if err != nil || personal.Conversation.SpaceID != home.ID || personal.Conversation.Title != "New team" || personal.Message.BuilderParameters.Kind != models.AgentBuilderKindTeam {
 		t.Fatalf("personal = %#v, %v", personal.Conversation, err)
 	}
 
 	for name, bad := range map[string]StartAgentBuilderRequest{
 		"sensitive prompt": {Scope: scope, Requester: requester, Prompt: "Use api key: sk-1234567890abcdefghijklmnop", IdempotencyKey: "key-3"},
 		"sensitive name":   {Scope: scope, Requester: requester, Prompt: "Hi", Parameters: AgentBuilderParameters{Name: "Password: hunter2-secret"}, IdempotencyKey: "key-4"},
-		"agent requester":  {Scope: scope, Requester: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "x"}, Prompt: "Hi", IdempotencyKey: "key-5"},
+		"agent requester":  {Scope: scope, Requester: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "x"}, Prompt: "Hi", IdempotencyKey: "key-5"},
 		"bad kind":         {Scope: scope, Requester: requester, Prompt: "Hi", Parameters: AgentBuilderParameters{Kind: "robot"}, IdempotencyKey: "key-6"},
 		"no key":           {Scope: scope, Requester: requester, Prompt: "Hi"},
 	} {
-		if _, err := engine.StartAgentBuilderConversation(ctx, bad); !errors.Is(err, runtime.ErrInvalidConversation) {
+		if _, err := engine.StartAgentBuilderConversation(ctx, bad); !errors.Is(err, models.ErrInvalidConversation) {
 			t.Fatalf("%s accepted: %v", name, err)
 		}
 	}
-	conversations, err := engine.ListConversations(ctx, runtime.ConversationFilter{Scope: scope, OriginKind: runtime.ConversationReferenceAgentBuilder})
+	conversations, err := engine.ListConversations(ctx, models.ConversationFilter{Scope: scope, OriginKind: models.ConversationReferenceAgentBuilder})
 	if err != nil || len(conversations) != 2 {
 		t.Fatalf("builder conversations = %d, %v", len(conversations), err)
 	}
@@ -168,12 +171,12 @@ func TestAgentBuilderListDraftsKeepsRequesterActiveConversations(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { engine.Close() })
-	scope := runtime.Scope{Kind: "tenant", ID: "one"}
-	ana := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "ana"}
-	bo := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "bo"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
+	ana := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "ana"}
+	bo := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "bo"}
 	// Each requester's drafts start in their own default space.
 	homes := map[string]string{ana.ID: seedSpace(t, engine, scope, ana.ID).ID, bo.ID: seedSpace(t, engine, scope, bo.ID).ID}
-	start := func(requester runtime.ConversationParticipant, key, name string) *runtime.Conversation {
+	start := func(requester models.ConversationParticipant, key, name string) *models.Conversation {
 		t.Helper()
 		result, err := engine.StartAgentBuilderConversation(ctx, StartAgentBuilderRequest{
 			Scope: scope, Requester: requester, Prompt: "Build " + name, Parameters: AgentBuilderParameters{Name: name}, IdempotencyKey: key,
@@ -193,22 +196,22 @@ func TestAgentBuilderListDraftsKeepsRequesterActiveConversations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.UpdateConversation(ctx, runtime.UpdateConversationRequest{
-		Scope: scope, ConversationID: archived.ID, ExpectedRevision: current.Revision, Status: ptr(runtime.ConversationStatusArchived),
+	if _, err := engine.UpdateConversation(ctx, conversation.UpdateConversationRequest{
+		Scope: scope, ConversationID: archived.ID, ExpectedRevision: current.Revision, Status: ptr(models.ConversationStatusArchived),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	// A plain chat with the builder is not a builder conversation.
-	if _, _, err := engine.CreateConversation(ctx, runtime.CreateConversationRequest{
-		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: AgentBuilderDeploymentID}, Title: "Chat", CreatedBy: ana.ID, IdempotencyKey: "chat",
+	if _, _, err := engine.CreateConversation(ctx, conversation.CreateConversationRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: AgentBuilderDeploymentID}, Title: "Chat", CreatedBy: ana.ID, IdempotencyKey: "chat",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	drafts, err := engine.ListAgentBuilderDrafts(ctx, AgentBuilderDraftFilter{Scope: scope, Requester: ana, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "ana"}})
+	drafts, err := engine.ListAgentBuilderDrafts(ctx, AgentBuilderDraftFilter{Scope: scope, Requester: ana, Principal: models.ApprovalPrincipal{Type: "user", ID: "ana"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(drafts) != 1 || drafts[0].ConversationID != first.ID || drafts[0].Status != runtime.AgentBuilderDraftIdle || drafts[0].Title != "Scout" || drafts[0].Approval != nil {
+	if len(drafts) != 1 || drafts[0].ConversationID != first.ID || drafts[0].Status != agentbuilder.AgentBuilderDraftIdle || drafts[0].Title != "Scout" || drafts[0].Approval != nil {
 		t.Fatalf("drafts = %#v", drafts)
 	}
 }

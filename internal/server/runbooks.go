@@ -6,8 +6,9 @@ import (
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 )
 
 func (s *Server) handleListRunbooks(w http.ResponseWriter, r *http.Request) {
@@ -35,13 +36,13 @@ func (s *Server) handleGetRunbook(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusNotImplemented, err.Error())
 		return
 	}
-	value, err := runtime.ResolveRunbookDetail(r.Context(), s.store, registry, scope, strings.TrimSpace(r.PathValue("id")))
+	value, err := routine.ResolveRunbookDetail(r.Context(), s.store, registry, scope, strings.TrimSpace(r.PathValue("id")))
 	if err != nil {
 		s.respondRunbookError(w, err)
 		return
 	}
 	if value == nil {
-		s.respondRunbookError(w, runtime.ErrRunbookActivationNotFound)
+		s.respondRunbookError(w, models.ErrRunbookActivationNotFound)
 		return
 	}
 	s.respondJSON(w, http.StatusOK, value)
@@ -53,12 +54,12 @@ func (s *Server) handleUpdateRunbook(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var request runtime.UpdateRunbookActivationRequest
+	var request routine.UpdateRunbookActivationRequest
 	if err = decodeStrictJSON(r, &request); err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	value, err := runtime.NewRunbookActivationService(s.store).Update(r.Context(), scope, strings.TrimSpace(r.PathValue("id")), request)
+	value, err := routine.NewRunbookActivationService(s.store).Update(r.Context(), scope, strings.TrimSpace(r.PathValue("id")), request)
 	if err != nil {
 		s.respondRunbookError(w, err)
 		return
@@ -72,12 +73,12 @@ func (s *Server) handleStartRunbook(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var request runtime.StartRunbookActivationRequest
+	var request routine.StartRunbookActivationRequest
 	if err = decodeStrictJSON(r, &request); err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	value, err := runtime.StartRunbookActivation(r.Context(), s.store, scope, strings.TrimSpace(r.PathValue("id")), request)
+	value, err := routine.StartRunbookActivation(r.Context(), s.store, scope, strings.TrimSpace(r.PathValue("id")), request)
 	if err != nil {
 		s.respondRunbookError(w, err)
 		return
@@ -85,37 +86,37 @@ func (s *Server) handleStartRunbook(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusCreated, value)
 }
 
-func runbookFilterFromQuery(r *http.Request) (runtime.RunbookActivationFilter, error) {
+func runbookFilterFromQuery(r *http.Request) (models.RunbookActivationFilter, error) {
 	scope, err := scopeFromQuery(r)
 	if err != nil {
-		return runtime.RunbookActivationFilter{}, err
+		return models.RunbookActivationFilter{}, err
 	}
 	limit, err := boundedIntQuery(r, "limit", 100, 1, 500)
 	if err != nil {
-		return runtime.RunbookActivationFilter{}, err
+		return models.RunbookActivationFilter{}, err
 	}
 	offset, err := boundedIntQuery(r, "offset", 0, 0, 1000000)
 	if err != nil {
-		return runtime.RunbookActivationFilter{}, err
+		return models.RunbookActivationFilter{}, err
 	}
-	filter := runtime.RunbookActivationFilter{
+	filter := models.RunbookActivationFilter{
 		Scope: scope, ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), Limit: limit, Offset: offset,
 	}
 	ownerType, ownerID := strings.TrimSpace(r.URL.Query().Get("ownerType")), strings.TrimSpace(r.URL.Query().Get("ownerId"))
 	if ownerType != "" || ownerID != "" {
-		owner := runtime.ObjectiveOwner{Type: runtime.OwnerType(ownerType), ID: ownerID}
+		owner := models.ObjectiveOwner{Type: models.OwnerType(ownerType), ID: ownerID}
 		if err := owner.Validate(); err != nil {
-			return runtime.RunbookActivationFilter{}, err
+			return models.RunbookActivationFilter{}, err
 		}
 		filter.Owner = &owner
 	}
 	for _, value := range queryValues(r, "status") {
-		status := runtime.RunbookActivationStatus(value)
+		status := models.RunbookActivationStatus(value)
 		switch status {
-		case runtime.RunbookActivationActive, runtime.RunbookActivationPaused, runtime.RunbookActivationRetired:
+		case models.RunbookActivationActive, models.RunbookActivationPaused, models.RunbookActivationRetired:
 			filter.Statuses = append(filter.Statuses, status)
 		default:
-			return runtime.RunbookActivationFilter{}, errors.New("invalid Runbook status")
+			return models.RunbookActivationFilter{}, errors.New("invalid Runbook status")
 		}
 	}
 	for _, value := range queryValues(r, "triggerKind") {
@@ -124,30 +125,30 @@ func runbookFilterFromQuery(r *http.Request) (runtime.RunbookActivationFilter, e
 		case runbook.TriggerSchedule, runbook.TriggerEvent:
 			filter.TriggerKinds = append(filter.TriggerKinds, kind)
 		default:
-			return runtime.RunbookActivationFilter{}, errors.New("invalid Runbook trigger kind")
+			return models.RunbookActivationFilter{}, errors.New("invalid Runbook trigger kind")
 		}
 	}
 	return filter, nil
 }
 
 func (s *Server) respondRunbookError(w http.ResponseWriter, err error) {
-	if errors.Is(err, runtime.ErrRunbookActivationNotFound) {
+	if errors.Is(err, models.ErrRunbookActivationNotFound) {
 		s.respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	if errors.Is(err, runtime.ErrRunbookActivationRevision) {
+	if errors.Is(err, models.ErrRunbookActivationRevision) {
 		s.respondError(w, http.StatusConflict, err.Error())
 		return
 	}
-	if errors.Is(err, runtime.ErrRoutineSourceUnavailable) {
+	if errors.Is(err, routine.ErrRoutineSourceUnavailable) {
 		s.respondError(w, http.StatusConflict, err.Error())
 		return
 	}
-	if errors.Is(err, runtime.ErrRunbookActivationInactive) {
+	if errors.Is(err, routine.ErrRunbookActivationInactive) {
 		s.respondError(w, http.StatusConflict, err.Error())
 		return
 	}
-	if errors.Is(err, runtime.ErrRunbookDefinitionNotFound) || errors.Is(err, kernelagent.ErrDeploymentNotFound) || errors.Is(err, kernelagent.ErrDefinitionNotFound) {
+	if errors.Is(err, routine.ErrRunbookDefinitionNotFound) || errors.Is(err, kernelagent.ErrDeploymentNotFound) || errors.Is(err, kernelagent.ErrDefinitionNotFound) {
 		s.respondError(w, http.StatusConflict, err.Error())
 		return
 	}

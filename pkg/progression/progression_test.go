@@ -10,7 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -194,7 +194,7 @@ func TestProgressionProposalRetrySurvivesSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	scope := capability.ScopeReference{Kind: "tenant", ID: "7"}
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := runtime.NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestProgressionProposalRetrySurvivesSQLiteRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := runtime.NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

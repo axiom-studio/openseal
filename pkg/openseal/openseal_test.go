@@ -12,8 +12,17 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -43,10 +52,10 @@ func TestRunTerminalFinalizationIsAutomaticWhenActionsCanExecute(t *testing.T) {
 	// Without action execution only the try_agent trial hand-off remains.
 	engine.actionPoolSpecs = nil
 	finalizer, err = engine.newRunTerminalFinalizer()
-	if _, trial := finalizer.(*runtime.AgentTrialFinalizer); err != nil || !trial {
+	if _, trial := finalizer.(*agentbuilder.AgentTrialFinalizer); err != nil || !trial {
 		t.Fatalf("non-executing engine finalizer = %#v, %v", finalizer, err)
 	}
-	completed := &runtime.AgentRun{ID: "run-1", Scope: runtime.Scope{Kind: "tenant", ID: "t"}, Status: runtime.AgentRunStatusCompleted}
+	completed := &models.AgentRun{ID: "run-1", Scope: models.Scope{Kind: "tenant", ID: "t"}, Status: models.AgentRunStatusCompleted}
 	if err := finalizer.FinalizeRun(context.Background(), completed); err != nil {
 		t.Fatalf("finalize a Run that is no trial: %v", err)
 	}
@@ -68,9 +77,9 @@ func TestPublicFacadeExposesRunbookScheduleReconciliation(t *testing.T) {
 }
 
 func TestPublicFacadeExposesRunbookActivationErrors(t *testing.T) {
-	if !errors.Is(ErrRunbookActivationNotFound, runtime.ErrRunbookActivationNotFound) ||
-		!errors.Is(ErrRunbookActivationRevision, runtime.ErrRunbookActivationRevision) ||
-		!errors.Is(ErrRunbookActivationIdempotency, runtime.ErrRunbookActivationIdempotency) {
+	if !errors.Is(ErrRunbookActivationNotFound, models.ErrRunbookActivationNotFound) ||
+		!errors.Is(ErrRunbookActivationRevision, models.ErrRunbookActivationRevision) ||
+		!errors.Is(ErrRunbookActivationIdempotency, models.ErrRunbookActivationIdempotency) {
 		t.Fatal("Runbook activation errors are not exposed through the public facade")
 	}
 }
@@ -152,7 +161,7 @@ func TestEngineExposesExternalConversationEndpointLifecycle(t *testing.T) {
 
 func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := runtime.NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +182,7 @@ func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened, err := runtime.NewSQLiteStore(path)
+	reopened, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +367,7 @@ func (h *loopStepHost) ExecuteModelStep(ctx context.Context, req ModelStepReques
 	}
 	result := ModelStepResult{
 		APIVersion: ModelStepAPIVersion, StepID: req.StepID,
-		Assistant: runtime.AssistantEntry{
+		Assistant: models.AssistantEntry{
 			Provider: ModelStepProviderChat, Model: "fake-model", Text: reply.Text, ToolCalls: calls, StopReason: stop,
 			Usage: ModelStepUsage{InputTokens: int64(usage.InputTokens), OutputTokens: int64(usage.OutputTokens), Attempts: 1},
 		},
@@ -370,8 +379,8 @@ func (h *loopStepHost) ExecuteModelStep(ctx context.Context, req ModelStepReques
 	return result, nil
 }
 
-func (h *loopStepHost) ExecuteHostTool(context.Context, runtime.HostToolRequest) (runtime.HostToolResult, error) {
-	return runtime.HostToolResult{}, errors.New("the Engine test host runs no host tools")
+func (h *loopStepHost) ExecuteHostTool(context.Context, models.HostToolRequest) (models.HostToolResult, error) {
+	return models.HostToolResult{}, errors.New("the Engine test host runs no host tools")
 }
 
 func (h *loopStepHost) requestsFor(runID string) []ModelStepRequest {
@@ -390,7 +399,7 @@ func (h *loopStepHost) requestsFor(runID string) []ModelStepRequest {
 // result parts and assistant texts, in order.
 func loopRequestText(req ModelStepRequest) string {
 	var b strings.Builder
-	parts := func(content []runtime.ContentPart) {
+	parts := func(content []models.ContentPart) {
 		for _, part := range content {
 			b.WriteString(part.Text)
 			b.Write(part.Value)
@@ -426,7 +435,7 @@ func loopResolver(engine **Engine, host StepHost) TurnRunnerResolver {
 	var configErr error
 	return TurnRunnerResolverFunc(func(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 		if *engine == nil {
-			return nil, runtime.ErrTurnHostUnavailable
+			return nil, modelstep.ErrTurnHostUnavailable
 		}
 		once.Do(func() { config, configErr = loopBindingConfig(*engine, host) })
 		if configErr != nil {
@@ -438,17 +447,17 @@ func loopResolver(engine **Engine, host StepHost) TurnRunnerResolver {
 
 func loopBindingConfig(engine *Engine, host StepHost) (LoopBindingConfig, error) {
 	store := engine.Store()
-	control := &runtime.ControlExecutor{Portfolio: store, Sessions: store, Activity: runtime.NewRunActivityService(store, store)}
-	var conversations runtime.ConversationStore
-	if reporting, ok := store.(runtime.ConversationStore); ok {
+	control := &control.ControlExecutor{Portfolio: store, Sessions: store, Activity: activity.NewRunActivityService(store, store)}
+	var conversations models.ConversationStore
+	if reporting, ok := store.(models.ConversationStore); ok {
 		conversations = reporting
 		control.Reporting = reporting
-		control.Conversations = runtime.NewConversationService(reporting)
+		control.Conversations = conversation.NewConversationService(reporting)
 		control.Conversations.SetReactionProjector(engine.ReactionProjector())
 	}
-	tools, err := runtime.NewStepToolDispatcher(runtime.StepToolDispatcherConfig{
+	tools, err := runloop.NewStepToolDispatcher(runloop.StepToolDispatcherConfig{
 		Sessions: store, Turns: store, Actions: store,
-		Coordinator: runtime.NewActionCoordinator(store, store, nil, nil, nil),
+		Coordinator: action.NewActionCoordinator(store, store, nil, nil, nil),
 		Governed:    engine.GovernedTools(), Control: control,
 	})
 	if err != nil {
@@ -675,11 +684,11 @@ func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T)
 	}
 	// Bypass the Engine hook to model a process dying after the message store
 	// commit and before the immediate Run scheduling call.
-	committedOnly, err := runtime.NewConversationService(store).PostChannelMessage(ctx, runtime.PostChannelMessageRequest{
+	committedOnly, err := conversation.NewConversationService(store).PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: recovered.ID, ExpectedRevision: recovered.Revision,
-		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "operator"},
-		Intent: runtime.MessageIntentQuestion, Content: "What is the recovered channel state?",
-		Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, RequiresResponse: true,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"},
+		Intent: models.MessageIntentQuestion, Content: "What is the recovered channel state?",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, RequiresResponse: true,
 		IdempotencyKey: "recovered-question",
 	})
 	if err != nil || committedOnly.Run != nil {
@@ -798,7 +807,7 @@ func TestEngineWakeAgentWorkersForScopeClaimsWithoutPolling(t *testing.T) {
 	}
 	defer engine.Stop()
 	time.Sleep(20 * time.Millisecond) // let the start-up claim pass find nothing
-	run, err := runtime.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+	run, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "wake me", Source: RunSourceObjective,
 	})

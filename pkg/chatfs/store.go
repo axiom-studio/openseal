@@ -11,22 +11,24 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 // Artifacts is the artifact catalog a chat's snapshots are versions in.
 type Artifacts interface {
-	RegisterArtifact(context.Context, runtime.RegisterArtifactRequest) (*runtime.ArtifactRegistrationResult, error)
-	GetArtifact(context.Context, runtime.Scope, string, int64) (*runtime.Artifact, error)
-	ListArtifacts(context.Context, runtime.ArtifactFilter) ([]*runtime.Artifact, error)
+	RegisterArtifact(context.Context, artifactcatalog.RegisterArtifactRequest) (*artifactcatalog.ArtifactRegistrationResult, error)
+	GetArtifact(context.Context, models.Scope, string, int64) (*models.Artifact, error)
+	ListArtifacts(context.Context, models.ArtifactFilter) ([]*models.Artifact, error)
 }
 
 // Chat identifies one chat's filesystem. Its fields must come from the
 // persisted conversation, never from model arguments.
 type Chat struct {
-	Scope          runtime.Scope
-	Owner          runtime.ObjectiveOwner
+	Scope          models.Scope
+	Owner          models.ObjectiveOwner
 	ConversationID string
 }
 
@@ -42,7 +44,7 @@ func ArtifactID(conversationID string) string { return "chatfs-" + strings.TrimS
 
 // Author records who committed a snapshot.
 type Author struct {
-	Producer runtime.ActivityActor
+	Producer models.ActivityActor
 	RunID    string
 	TurnID   string
 }
@@ -55,7 +57,7 @@ type Onboarder func(context.Context, Chat) ([]Change, error)
 // Store reads and commits chat filesystems.
 type Store struct {
 	Artifacts Artifacts
-	Content   runtime.ArtifactContentStore
+	Content   models.ArtifactContentStore
 	// Onboard, when set, gives a chat that has no snapshot yet its first one.
 	Onboard Onboarder
 	// Conversations, when set, lets a turn read and copy from the other
@@ -68,9 +70,9 @@ type Store struct {
 }
 
 // onboardingAuthor commits a chat's first snapshot.
-var onboardingAuthor = Author{Producer: runtime.ActivityActor{Type: "service", ID: "chat-files-onboarding"}}
+var onboardingAuthor = Author{Producer: models.ActivityActor{Type: "service", ID: "chat-files-onboarding"}}
 
-func NewStore(artifacts Artifacts, content runtime.ArtifactContentStore) *Store {
+func NewStore(artifacts Artifacts, content models.ArtifactContentStore) *Store {
 	return &Store{Artifacts: artifacts, Content: content, now: time.Now}
 }
 
@@ -85,7 +87,7 @@ func (s *Store) Head(ctx context.Context, chat Chat) (Snapshot, error) {
 	if err := chat.validate(); err != nil {
 		return Snapshot{}, err
 	}
-	artifacts, err := s.Artifacts.ListArtifacts(ctx, runtime.ArtifactFilter{Scope: chat.Scope, ID: ArtifactID(chat.ConversationID), LatestOnly: true, Limit: 1})
+	artifacts, err := s.Artifacts.ListArtifacts(ctx, models.ArtifactFilter{Scope: chat.Scope, ID: ArtifactID(chat.ConversationID), LatestOnly: true, Limit: 1})
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("read chat files: %w", err)
 	}
@@ -111,8 +113,8 @@ func (s *Store) onboard(ctx context.Context, chat Chat) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	snapshot, err := s.save(ctx, chat, onboardingAuthor, tree, 0)
-	if errors.Is(err, runtime.ErrArtifactVersionConflict) || errors.Is(err, runtime.ErrArtifactImmutable) {
-		artifacts, listErr := s.Artifacts.ListArtifacts(ctx, runtime.ArtifactFilter{Scope: chat.Scope, ID: ArtifactID(chat.ConversationID), LatestOnly: true, Limit: 1})
+	if errors.Is(err, models.ErrArtifactVersionConflict) || errors.Is(err, models.ErrArtifactImmutable) {
+		artifacts, listErr := s.Artifacts.ListArtifacts(ctx, models.ArtifactFilter{Scope: chat.Scope, ID: ArtifactID(chat.ConversationID), LatestOnly: true, Limit: 1})
 		if listErr != nil || len(artifacts) == 0 || artifacts[0] == nil {
 			return Snapshot{}, errors.New("chat files are busy; try again")
 		}
@@ -136,7 +138,7 @@ func (s *Store) At(ctx context.Context, chat Chat, version int64) (Snapshot, err
 	return s.load(ctx, chat, artifact)
 }
 
-func (s *Store) load(ctx context.Context, chat Chat, artifact *runtime.Artifact) (Snapshot, error) {
+func (s *Store) load(ctx context.Context, chat Chat, artifact *models.Artifact) (Snapshot, error) {
 	if artifact.Scope != chat.Scope || artifact.Type != ArtifactType || artifact.Provenance.Owner == nil || *artifact.Provenance.Owner != chat.Owner {
 		return Snapshot{}, errors.New("chat files belong to another owner")
 	}
@@ -168,7 +170,7 @@ func (s *Store) Put(ctx context.Context, chat Chat, content io.Reader, size int6
 		return Entry{}, err
 	}
 	owner := chat.Owner
-	stored, err := s.Content.Put(ctx, runtime.ArtifactContentWrite{Scope: chat.Scope, MediaType: mediaType, Reader: content, SizeBytes: size, Owner: &owner})
+	stored, err := s.Content.Put(ctx, models.ArtifactContentWrite{Scope: chat.Scope, MediaType: mediaType, Reader: content, SizeBytes: size, Owner: &owner})
 	if err != nil {
 		return Entry{}, fmt.Errorf("store file: %w", err)
 	}
@@ -244,7 +246,7 @@ func (s *Store) Commit(ctx context.Context, chat Chat, author Author, changes []
 			return Snapshot{}, err
 		}
 		snapshot, err := s.save(ctx, chat, author, tree, head.Version)
-		if errors.Is(err, runtime.ErrArtifactVersionConflict) || errors.Is(err, runtime.ErrArtifactImmutable) {
+		if errors.Is(err, models.ErrArtifactVersionConflict) || errors.Is(err, models.ErrArtifactImmutable) {
 			continue
 		}
 		return snapshot, err
@@ -284,19 +286,19 @@ func (s *Store) save(ctx context.Context, chat Chat, author Author, tree Tree, p
 		return Snapshot{}, err
 	}
 	owner := chat.Owner
-	stored, err := s.Content.Put(ctx, runtime.ArtifactContentWrite{Scope: chat.Scope, MediaType: MediaType, Reader: bytes.NewReader(encoded), SizeBytes: int64(len(encoded)), Owner: &owner})
+	stored, err := s.Content.Put(ctx, models.ArtifactContentWrite{Scope: chat.Scope, MediaType: MediaType, Reader: bytes.NewReader(encoded), SizeBytes: int64(len(encoded)), Owner: &owner})
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("store chat files: %w", err)
 	}
-	_, err = s.Artifacts.RegisterArtifact(ctx, runtime.RegisterArtifactRequest{ExpectedLatestVersion: previous, Artifact: &runtime.Artifact{
+	_, err = s.Artifacts.RegisterArtifact(ctx, artifactcatalog.RegisterArtifactRequest{ExpectedLatestVersion: previous, Artifact: &models.Artifact{
 		ID: ArtifactID(chat.ConversationID), Version: previous + 1, Scope: chat.Scope,
 		Name: "Chat files", Type: ArtifactType, MediaType: MediaType,
 		ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes,
-		Classification: runtime.ArtifactClassificationInternal,
+		Classification: models.ArtifactClassificationInternal,
 		Metadata:       map[string]interface{}{"conversationId": chat.ConversationID},
-		Provenance:     runtime.ArtifactProvenance{Producer: author.Producer, Owner: &owner, RunID: author.RunID, TurnID: author.TurnID, ConversationID: chat.ConversationID},
+		Provenance:     models.ArtifactProvenance{Producer: author.Producer, Owner: &owner, RunID: author.RunID, TurnID: author.TurnID, ConversationID: chat.ConversationID},
 	}})
-	if errors.Is(err, runtime.ErrArtifactVersionConflict) || errors.Is(err, runtime.ErrArtifactImmutable) {
+	if errors.Is(err, models.ErrArtifactVersionConflict) || errors.Is(err, models.ErrArtifactImmutable) {
 		return Snapshot{}, err
 	}
 	if err != nil {
@@ -328,7 +330,7 @@ func checkPlacement(tree Tree, name string) error {
 
 // ResolveChatFile is runtime.ChatFileResolver: the file at path in a chat's
 // latest snapshot (version 0) or in the snapshot at version.
-func (s *Store) ResolveChatFile(ctx context.Context, scope runtime.Scope, owner runtime.ObjectiveOwner, conversationID, path string, version int64) (*runtime.ChatFile, error) {
+func (s *Store) ResolveChatFile(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID, path string, version int64) (*routine.ChatFile, error) {
 	name, err := Clean(path)
 	if err != nil {
 		return nil, err
@@ -345,9 +347,9 @@ func (s *Store) ResolveChatFile(ctx context.Context, scope runtime.Scope, owner 
 	}
 	entry, ok := snapshot.Tree.Files[name]
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", runtime.ErrChatFileNotFound, name)
+		return nil, fmt.Errorf("%w: %s", routine.ErrChatFileNotFound, name)
 	}
-	return &runtime.ChatFile{Path: name, Digest: entry.Digest, SizeBytes: entry.SizeBytes, FilesVersion: snapshot.Version}, nil
+	return &routine.ChatFile{Path: name, Digest: entry.Digest, SizeBytes: entry.SizeBytes, FilesVersion: snapshot.Version}, nil
 }
 
-var _ runtime.ChatFileResolver = (*Store)(nil)
+var _ routine.ChatFileResolver = (*Store)(nil)

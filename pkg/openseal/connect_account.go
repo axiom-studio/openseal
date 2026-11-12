@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -32,7 +34,7 @@ type InteractionResolver struct {
 func (r InteractionResolver) actor() (string, error) {
 	user, system := strings.TrimSpace(r.UserID), strings.TrimSpace(r.System)
 	if (user == "") == (system == "") || user != r.UserID || system != r.System {
-		return "", runtime.ErrInvalidSkillSetup
+		return "", models.ErrInvalidSkillSetup
 	}
 	if system != "" {
 		return system, nil
@@ -65,7 +67,7 @@ func authorizePersonInteraction(resolver InteractionResolver, requestedFor strin
 
 // authorizeSkillSetupInteraction applies the resolution authority of a
 // connect_account or connect_app request by its mode.
-func authorizeSkillSetupInteraction(resolver InteractionResolver, r *runtime.SkillSetupRequest, dismiss bool) error {
+func authorizeSkillSetupInteraction(resolver InteractionResolver, r *models.SkillSetupRequest, dismiss bool) error {
 	if r.Mode == "per_person" {
 		return authorizePersonInteraction(resolver, r.RequestedFor, dismiss)
 	}
@@ -78,7 +80,7 @@ const connectAccountReconciliationActor = "system:connection-reconciliation"
 // needs evidence: the card's binding is current and enabled, and the host's
 // credential check reports no gap for its slots. Dismissing needs none.
 // Either way the waiting run (and every sibling card's run) resumes.
-func (e *Engine) ResolveConnectAccountRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, resolver InteractionResolver, dismiss bool) (*runtime.SkillSetupRequest, error) {
+func (e *Engine) ResolveConnectAccountRequest(ctx context.Context, scope models.Scope, owner ObjectiveOwner, id string, expected int64, resolver InteractionResolver, dismiss bool) (*models.SkillSetupRequest, error) {
 	actor, err := resolver.actor()
 	if err != nil {
 		return nil, err
@@ -87,8 +89,8 @@ func (e *Engine) ResolveConnectAccountRequest(ctx context.Context, scope runtime
 	if err != nil {
 		return nil, err
 	}
-	if r.Kind != runtime.SkillSetupKindConnectAccount {
-		return nil, runtime.ErrInvalidSkillSetup
+	if r.Kind != models.SkillSetupKindConnectAccount {
+		return nil, models.ErrInvalidSkillSetup
 	}
 	if err := authorizeSkillSetupInteraction(resolver, r, dismiss); err != nil {
 		return nil, err
@@ -99,7 +101,7 @@ func (e *Engine) ResolveConnectAccountRequest(ctx context.Context, scope runtime
 	}
 	if r.Status == "pending" {
 		if r.Revision != expected {
-			return nil, runtime.ErrSkillSetupConflict
+			return nil, models.ErrSkillSetupConflict
 		}
 		if !dismiss {
 			binding, satisfied, checkErr := e.connectAccountSatisfied(ctx, r)
@@ -118,7 +120,7 @@ func (e *Engine) ResolveConnectAccountRequest(ctx context.Context, scope runtime
 			return nil, err
 		}
 	} else if r.Status != want {
-		return nil, runtime.ErrSkillSetupConflict
+		return nil, models.ErrSkillSetupConflict
 	}
 	e.settleSkillSetupSiblings(ctx, r, e.continueConnectAccountRun)
 	if _, err := e.continueConnectAccountRun(ctx, r); err != nil {
@@ -127,12 +129,12 @@ func (e *Engine) ResolveConnectAccountRequest(ctx context.Context, scope runtime
 	return r, nil
 }
 
-func (e *Engine) continueConnectAccountRun(ctx context.Context, r *runtime.SkillSetupRequest) (bool, error) {
+func (e *Engine) continueConnectAccountRun(ctx context.Context, r *models.SkillSetupRequest) (bool, error) {
 	return e.continueInteractionRun(ctx, interactionContinuation{
 		scope: r.Scope, owner: r.Owner, agentID: r.AgentID, runID: r.RunID, requestID: r.ID, actionCallID: r.ActionCallID, status: r.Status, revision: r.Revision,
-		updatedAt: r.UpdatedAt, wakeType: runtime.ConnectAccountWakeType, coordinator: "connect-account-coordinator",
+		updatedAt: r.UpdatedAt, wakeType: models.ConnectAccountWakeType, coordinator: "connect-account-coordinator",
 		eventType: "run.connection_request_settled", summary: "Received the account connection result; continuing",
-		interventionPrefix: "connect-account-result:", instruction: runtime.ConnectAccountResolutionInstruction(r),
+		interventionPrefix: "connect-account-result:", instruction: skillbinding.ConnectAccountResolutionInstruction(r),
 		requestedFor: r.RequestedFor,
 	})
 }
@@ -141,7 +143,7 @@ func (e *Engine) continueConnectAccountRun(ctx context.Context, r *runtime.Skill
 // binding: the person a per_person card is for (or the run's person for a
 // shared one) must have every slot available now. A binding whose mode
 // changed is evaluated as it is now.
-func (e *Engine) connectAccountSatisfied(ctx context.Context, r *runtime.SkillSetupRequest) (*skill.Binding, bool, error) {
+func (e *Engine) connectAccountSatisfied(ctx context.Context, r *models.SkillSetupRequest) (*skill.Binding, bool, error) {
 	if e.credentialAvailability == nil {
 		return nil, false, errors.New("account connections cannot be checked on this host")
 	}
@@ -158,7 +160,7 @@ func (e *Engine) connectAccountSatisfied(ctx context.Context, r *runtime.SkillSe
 	scope := skill.ScopeReference{Kind: r.Scope.Kind, ID: r.Scope.ID}
 	var binding *skill.Binding
 	if strings.HasPrefix(r.BindingID, "mcp:") {
-		set, err := e.skills.HostBindings(ctx, scope, r.Owner.ID, skill.RunActor{RunID: r.RunID, AgentID: r.AgentID, Umbrella: runtime.SkillUmbrella(r.Owner), ActingUser: actingUser})
+		set, err := e.skills.HostBindings(ctx, scope, r.Owner.ID, skill.RunActor{RunID: r.RunID, AgentID: r.AgentID, Umbrella: models.SkillUmbrella(r.Owner), ActingUser: actingUser})
 		if err != nil {
 			return nil, false, err
 		}
@@ -187,7 +189,7 @@ func (e *Engine) connectAccountSatisfied(ctx context.Context, r *runtime.SkillSe
 		}
 		references[slot.Name], requirements[slot.Name] = reference, slot.Requirement
 	}
-	availability, err := e.credentialAvailability.CheckCredentialAvailability(ctx, runtime.CredentialAvailabilityRequest{
+	availability, err := e.credentialAvailability.CheckCredentialAvailability(ctx, action.CredentialAvailabilityRequest{
 		Scope: r.Scope, Umbrella: r.Owner, ActingUser: actingUser, DeploymentID: r.Owner.ID, BindingID: binding.ID,
 		References: references, Requirements: requirements,
 	})
@@ -208,26 +210,26 @@ type ConnectAccountReconcileFilter struct {
 // the filter selects whose accounts are now available, for example right
 // after a person signed in or a binding changed. It returns the resolved
 // cards; an unsatisfied card stays for the next reconciliation.
-func (e *Engine) ReconcileConnectAccountRequests(ctx context.Context, scope runtime.Scope, filter ConnectAccountReconcileFilter) ([]*runtime.SkillSetupRequest, error) {
+func (e *Engine) ReconcileConnectAccountRequests(ctx context.Context, scope models.Scope, filter ConnectAccountReconcileFilter) ([]*models.SkillSetupRequest, error) {
 	if e == nil || e.credentialAvailability == nil {
 		return nil, nil
 	}
-	matches, err := e.pendingSkillSetupRequests(ctx, scope, func(r *runtime.SkillSetupRequest) bool {
-		return r.Kind == runtime.SkillSetupKindConnectAccount &&
+	matches, err := e.pendingSkillSetupRequests(ctx, scope, func(r *models.SkillSetupRequest) bool {
+		return r.Kind == models.SkillSetupKindConnectAccount &&
 			(filter.RequestedFor == "" || r.RequestedFor == filter.RequestedFor) &&
 			(filter.Umbrella == nil || r.Owner == *filter.Umbrella)
 	})
 	if err != nil {
 		return nil, err
 	}
-	var resolved []*runtime.SkillSetupRequest
+	var resolved []*models.SkillSetupRequest
 	var failures []error
 	for _, request := range matches {
 		result, err := e.ResolveConnectAccountRequest(ctx, scope, request.Owner, request.ID, request.Revision, InteractionResolver{System: connectAccountReconciliationActor}, false)
 		switch {
 		case err == nil:
 			resolved = append(resolved, result)
-		case errors.Is(err, ErrConnectAccountNotSatisfied), errors.Is(err, runtime.ErrSkillSetupConflict):
+		case errors.Is(err, ErrConnectAccountNotSatisfied), errors.Is(err, models.ErrSkillSetupConflict):
 		default:
 			failures = append(failures, err)
 		}
@@ -237,15 +239,15 @@ func (e *Engine) ReconcileConnectAccountRequests(ctx context.Context, scope runt
 
 // pendingSkillSetupRequests lists a workspace's pending setup-store requests
 // that match keep.
-func (e *Engine) pendingSkillSetupRequests(ctx context.Context, scope runtime.Scope, keep func(*runtime.SkillSetupRequest) bool) ([]*runtime.SkillSetupRequest, error) {
+func (e *Engine) pendingSkillSetupRequests(ctx context.Context, scope models.Scope, keep func(*models.SkillSetupRequest) bool) ([]*models.SkillSetupRequest, error) {
 	pending, ok := e.store.(interface {
-		ListPendingSkillSetupRequests(context.Context, runtime.Scope, int, int) ([]*runtime.SkillSetupRequest, error)
+		ListPendingSkillSetupRequests(context.Context, models.Scope, int, int) ([]*models.SkillSetupRequest, error)
 	})
 	if !ok || scope.Validate() != nil {
 		return nil, nil
 	}
 	const pageSize, maximumPages = 100, 20
-	var matches []*runtime.SkillSetupRequest
+	var matches []*models.SkillSetupRequest
 	for page := 0; page < maximumPages; page++ {
 		requests, err := pending.ListPendingSkillSetupRequests(ctx, scope, pageSize, page*pageSize)
 		if err != nil {
@@ -266,5 +268,5 @@ func (e *Engine) pendingSkillSetupRequests(ctx context.Context, scope runtime.Sc
 // reconcileConnectAccountRequestsForUmbrella runs after a binding of owner
 // changed. Failures leave the cards for the next reconciliation.
 func (e *Engine) reconcileConnectAccountRequestsForUmbrella(ctx context.Context, scope skill.ScopeReference, owner ObjectiveOwner) {
-	_, _ = e.ReconcileConnectAccountRequests(ctx, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, ConnectAccountReconcileFilter{Umbrella: &owner})
+	_, _ = e.ReconcileConnectAccountRequests(ctx, models.Scope{Kind: scope.Kind, ID: scope.ID}, ConnectAccountReconcileFilter{Umbrella: &owner})
 }

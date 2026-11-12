@@ -9,14 +9,17 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/mcp"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // waitingConnectAppFixture is a run parked on a Linear connect card. Linear
 // is supplied to that run only once connected is set and only for that run.
-func waitingConnectAppFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *Engine, *runtime.AgentRun, *SkillSetupRequest, *atomic.Bool) {
+func waitingConnectAppFixture(t *testing.T) (context.Context, *sqlite.Store, *Engine, *models.AgentRun, *SkillSetupRequest, *atomic.Bool) {
 	t.Helper()
 	ctx := context.Background()
 	store := runtimetest.NewKernelStore(t)
@@ -29,8 +32,8 @@ func waitingConnectAppFixture(t *testing.T) (context.Context, *runtime.SQLiteSto
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: "one"}
-	run, err := runtime.NewPortfolioService(store).CreateAgentRun(ctx, runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindConversation,
-		Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "List my Linear issues", Source: runtime.RunSourceChat,
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
+		Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "List my Linear issues", Source: models.RunSourceChat,
 		Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}})
 	if err != nil {
 		t.Fatal(err)
@@ -56,14 +59,14 @@ func waitingConnectAppFixture(t *testing.T) (context.Context, *runtime.SQLiteSto
 	if err := store.SaveSkillSetupRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
 	}
-	run, err = store.ClaimNextAgentRun(ctx, runtime.AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	run, err = store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || run == nil {
 		t.Fatal(err)
 	}
-	waiting, _, err := runtime.NewRunActivityService(store, store).TransitionRun(ctx, scope, run.ID, runtime.RunTransitionRequest{
-		ExpectedRevision: run.Revision, LeaseOwner: "worker", Status: runtime.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
-		Actor:         runtime.ActivityActor{Type: "worker", ID: "worker"},
-		WakeCondition: &runtime.WakeCondition{Type: ConnectAppWakeType, Reference: request.ID},
+	waiting, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, scope, run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, LeaseOwner: "worker", Status: models.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
+		Actor:         models.ActivityActor{Type: "worker", ID: "worker"},
+		WakeCondition: &models.WakeCondition{Type: ConnectAppWakeType, Reference: request.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +95,7 @@ func TestConnectedAppResolvesTheCardAndResumesTheRunWithItsTools(t *testing.T) {
 		t.Fatalf("request: %#v", settled)
 	}
 	resumed, err := store.GetAgentRun(ctx, run.Scope, run.ID)
-	if err != nil || resumed.Status != runtime.AgentRunStatusQueued || resumed.WakeCondition != nil || len(resumed.PendingInterventions) != 1 {
+	if err != nil || resumed.Status != models.AgentRunStatusQueued || resumed.WakeCondition != nil || len(resumed.PendingInterventions) != 1 {
 		t.Fatalf("run not resumed: %#v %v", resumed, err)
 	}
 	if instruction := resumed.PendingInterventions[0].Instruction; !strings.Contains(instruction, "mcp.linear.list_issues") {
@@ -116,7 +119,7 @@ func TestDismissedConnectCardResumesTheRunWithAnExplanation(t *testing.T) {
 		t.Fatalf("dismissal: %#v %v", dismissed, err)
 	}
 	resumed, err := store.GetAgentRun(ctx, run.Scope, run.ID)
-	if err != nil || resumed.Status != runtime.AgentRunStatusQueued || len(resumed.PendingInterventions) != 1 ||
+	if err != nil || resumed.Status != models.AgentRunStatusQueued || len(resumed.PendingInterventions) != 1 ||
 		!strings.Contains(resumed.PendingInterventions[0].Instruction, "chose not to connect Linear") {
 		t.Fatalf("run: %#v %v", resumed, err)
 	}
@@ -124,9 +127,9 @@ func TestDismissedConnectCardResumesTheRunWithAnExplanation(t *testing.T) {
 
 func TestConnectCardForAnEndedRunAsksTheHostToReply(t *testing.T) {
 	ctx, store, e, run, request, connected := waitingConnectAppFixture(t)
-	if _, _, err := runtime.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, runtime.RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: runtime.AgentRunStatusCanceled, EventType: "run.canceled", Summary: "Canceled",
-		Actor: runtime.ActivityActor{Type: "user", ID: "5"},
+	if _, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusCanceled, EventType: "run.canceled", Summary: "Canceled",
+		Actor: models.ActivityActor{Type: "user", ID: "5"},
 	}); err != nil {
 		t.Fatal(err)
 	}

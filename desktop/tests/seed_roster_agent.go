@@ -10,7 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 	if *db == "" || *source == "" {
 		panic("-db and -source required")
 	}
-	store, err := runtime.NewSQLiteStore(*db)
+	store, err := sqlite.NewSQLiteStore(*db)
 	check(err)
 	defer store.Close()
 	registry := agent.NewRegistryWithStore(store)

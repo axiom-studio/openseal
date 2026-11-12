@@ -4,8 +4,9 @@ import (
 	"context"
 	"sync"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 )
 
 // desktopRoutineEventSources is the daemon's host source catalog. The
@@ -17,7 +18,7 @@ import (
 // hook key and public ingress, which the daemon has neither of.
 type desktopRoutineEventSources struct{}
 
-func (desktopRoutineEventSources) ListRoutineEventSources(context.Context, runtime.Scope, runtime.ObjectiveOwner, string) ([]runtime.RoutineEventSourceOption, error) {
+func (desktopRoutineEventSources) ListRoutineEventSources(context.Context, models.Scope, models.ObjectiveOwner, string) ([]routine.RoutineEventSourceOption, error) {
 	return nil, nil
 }
 
@@ -38,7 +39,7 @@ func StartRoutineEventDispatcher(ctx context.Context, kernel *opensealkernel.Eng
 	done.Add(1)
 	go func() {
 		defer done.Done()
-		kernel.RunRoutineEventDispatcher(ctx, runtime.RoutineEventDispatchInterval, nil)
+		kernel.RunRoutineEventDispatcher(ctx, routine.RoutineEventDispatchInterval, nil)
 	}()
 	return func() {
 		cancel()

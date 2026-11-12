@@ -4,8 +4,17 @@ import (
 	"fmt"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/progression"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/sourceartifact"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -23,41 +32,41 @@ func (e *Engine) wireStore() error {
 	}
 	store := e.store
 
-	e.portfolio = runtime.NewPortfolioService(store)
-	e.activity = runtime.NewRunActivityService(store, store)
-	e.turns = runtime.NewAgentTurnService(store, store)
-	e.runQueue = runtime.NewAgentRunScheduler(store)
-	e.wake = runtime.NewAgentRunWakeService(store, store)
-	if dependencyStore, ok := store.(runtime.DependencyKernelStore); ok {
-		e.dependencies = runtime.NewDependencyCoordinator(dependencyStore)
+	e.portfolio = portfolio.NewPortfolioService(store)
+	e.activity = activity.NewRunActivityService(store, store)
+	e.turns = activity.NewAgentTurnService(store, store)
+	e.runQueue = agentrun.NewAgentRunScheduler(store)
+	e.wake = agentrun.NewAgentRunWakeService(store, store)
+	if dependencyStore, ok := store.(models.DependencyKernelStore); ok {
+		e.dependencies = portfolio.NewDependencyCoordinator(dependencyStore)
 	}
-	if conversationStore, ok := store.(runtime.ConversationStore); ok {
-		e.conversations = runtime.NewConversationService(conversationStore)
-		e.conversationChanges, _ = runtime.NewConversationChangeService(conversationStore, store)
+	if conversationStore, ok := store.(models.ConversationStore); ok {
+		e.conversations = conversation.NewConversationService(conversationStore)
+		e.conversationChanges, _ = conversation.NewConversationChangeService(conversationStore, store)
 		e.conversationChanges.SetSkillSetupRequestReader(e.reconciledSkillSetupRequests)
-		if embedStore, ok := store.(runtime.EmbedStore); ok {
-			e.embeds, _ = runtime.NewEmbedSessionService(embedStore, conversationStore)
+		if embedStore, ok := store.(models.EmbedStore); ok {
+			e.embeds, _ = conversation.NewEmbedSessionService(embedStore, conversationStore)
 		}
 	}
-	if spaceStore, ok := store.(runtime.SpaceStore); ok {
-		e.spaces = runtime.NewSpaceService(spaceStore)
+	if spaceStore, ok := store.(models.SpaceStore); ok {
+		e.spaces = portfolio.NewSpaceService(spaceStore)
 	}
-	if collaborationStore, ok := store.(runtime.CollaborationKernelStore); ok {
-		e.collaboration = runtime.NewCollaborationService(collaborationStore)
+	if collaborationStore, ok := store.(models.CollaborationKernelStore); ok {
+		e.collaboration = collaboration.NewCollaborationService(collaborationStore)
 		e.collaboration.SetAcceptedRunExecutionPreparer(e)
 	}
-	if artifactStore, ok := store.(runtime.ArtifactStore); ok {
-		e.artifacts = runtime.NewArtifactCatalog(artifactStore).WithPlacement(runtime.NewStoreArtifactPlacement(store))
+	if artifactStore, ok := store.(models.ArtifactStore); ok {
+		e.artifacts = artifactcatalog.NewArtifactCatalog(artifactStore).WithPlacement(artifactcatalog.NewStoreArtifactPlacement(store))
 	}
 
 	if err := e.wireRegistries(); err != nil {
 		return err
 	}
-	if auditStore, ok := store.(runtime.RunbookExecutionAuditStore); ok {
-		e.runbookAudits = runtime.NewRunbookExecutionAuditService(auditStore, e.agents)
+	if auditStore, ok := store.(models.RunbookExecutionAuditStore); ok {
+		e.runbookAudits = routine.NewRunbookExecutionAuditService(auditStore, e.agents)
 	}
-	if upgradeStore, ok := store.(runtime.SkillReferenceUpgradeStore); ok {
-		e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(upgradeStore, e.skills)
+	if upgradeStore, ok := store.(models.SkillReferenceUpgradeStore); ok {
+		e.skillReferenceUpgrades = skillbinding.NewSkillReferenceUpgradeService(upgradeStore, e.skills)
 	}
 	if sourceStore, ok := store.(sourceartifact.Store); e.skillSources == nil && ok {
 		e.skillSources, _ = sourceartifact.NewService(sourceStore)
@@ -124,11 +133,11 @@ func (e *Engine) wireRegistries() error {
 
 // openOwnedStore returns the in-memory store the Engine owns, opening it on
 // first use.
-func (e *Engine) openOwnedStore() (*runtime.SQLiteStore, error) {
+func (e *Engine) openOwnedStore() (*sqlite.Store, error) {
 	if e.ownedStore != nil {
 		return e.ownedStore, nil
 	}
-	store, err := runtime.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemorySQLiteStore()
 	if err != nil {
 		return nil, fmt.Errorf("default store: %w", err)
 	}

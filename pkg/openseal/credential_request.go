@@ -5,24 +5,27 @@ import (
 	"errors"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
 
-type CredentialRequest = runtime.CredentialRequest
+type CredentialRequest = models.CredentialRequest
 
-const SkillActionRequestCredential = runtime.SkillActionRequestCredential
-const CredentialRequestWakeType = runtime.CredentialRequestWakeType
+const SkillActionRequestCredential = agentrun.SkillActionRequestCredential
+const CredentialRequestWakeType = skillbinding.CredentialRequestWakeType
 
 const (
-	CredentialRequestKindWebsiteLogin = runtime.CredentialRequestKindWebsiteLogin
-	CredentialRequestKindPaymentCard  = runtime.CredentialRequestKindPaymentCard
-	CredentialRequestStatusPending    = runtime.CredentialRequestStatusPending
-	CredentialRequestStatusResolved   = runtime.CredentialRequestStatusResolved
-	CredentialRequestStatusDismissed  = runtime.CredentialRequestStatusDismissed
+	CredentialRequestKindWebsiteLogin = models.CredentialRequestKindWebsiteLogin
+	CredentialRequestKindPaymentCard  = models.CredentialRequestKindPaymentCard
+	CredentialRequestStatusPending    = models.CredentialRequestStatusPending
+	CredentialRequestStatusResolved   = models.CredentialRequestStatusResolved
+	CredentialRequestStatusDismissed  = models.CredentialRequestStatusDismissed
 )
 
-var ErrCredentialRequestConflict = runtime.ErrCredentialRequestConflict
-var ErrInvalidCredentialRequest = runtime.ErrInvalidCredentialRequest
+var ErrCredentialRequestConflict = models.ErrCredentialRequestConflict
+var ErrInvalidCredentialRequest = models.ErrInvalidCredentialRequest
 
 // CredentialRequestResolution is the saved request and what happened to the
 // Run that asked for it.
@@ -34,7 +37,7 @@ type CredentialRequestResolution struct {
 	Continued bool `json:"continued"`
 }
 
-func (e *Engine) credentialRequestStore() (runtime.CredentialRequestStore, error) {
+func (e *Engine) credentialRequestStore() (models.CredentialRequestStore, error) {
 	if e == nil || e.store == nil {
 		return nil, errors.New("credential requests are unavailable")
 	}
@@ -43,7 +46,7 @@ func (e *Engine) credentialRequestStore() (runtime.CredentialRequestStore, error
 
 // ListCredentialRequests lists a conversation's credential requests. owner
 // must own the conversation: every request there is saved to it.
-func (e *Engine) ListCredentialRequests(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, conversationID string) ([]*CredentialRequest, error) {
+func (e *Engine) ListCredentialRequests(ctx context.Context, scope models.Scope, owner ObjectiveOwner, conversationID string) ([]*CredentialRequest, error) {
 	store, err := e.credentialRequestStore()
 	if err != nil {
 		return nil, err
@@ -55,7 +58,7 @@ func (e *Engine) ListCredentialRequests(ctx context.Context, scope runtime.Scope
 }
 
 // GetCredentialRequest returns request id when it is saved to owner.
-func (e *Engine) GetCredentialRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string) (*CredentialRequest, error) {
+func (e *Engine) GetCredentialRequest(ctx context.Context, scope models.Scope, owner ObjectiveOwner, id string) (*CredentialRequest, error) {
 	store, err := e.credentialRequestStore()
 	if err != nil {
 		return nil, err
@@ -65,7 +68,7 @@ func (e *Engine) GetCredentialRequest(ctx context.Context, scope runtime.Scope, 
 		return nil, err
 	}
 	if r == nil || r.Owner != owner || r.DeploymentID != owner.ID {
-		return nil, runtime.ErrInvalidCredentialRequest
+		return nil, models.ErrInvalidCredentialRequest
 	}
 	return r, nil
 }
@@ -76,14 +79,14 @@ func (e *Engine) GetCredentialRequest(ctx context.Context, scope runtime.Scope, 
 // settles it. Hosts verify the saved credential first; the kernel never sees
 // credential values. Settling it settles the same request of other runs in
 // the conversation.
-func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, resolver InteractionResolver, dismiss bool) (*CredentialRequestResolution, error) {
+func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope models.Scope, owner ObjectiveOwner, id string, expected int64, resolver InteractionResolver, dismiss bool) (*CredentialRequestResolution, error) {
 	store, err := e.credentialRequestStore()
 	if err != nil {
 		return nil, err
 	}
 	actor, err := resolver.actor()
 	if err != nil {
-		return nil, runtime.ErrInvalidCredentialRequest
+		return nil, models.ErrInvalidCredentialRequest
 	}
 	r, err := e.GetCredentialRequest(ctx, scope, owner, id)
 	if err != nil {
@@ -92,13 +95,13 @@ func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Sco
 	if err := authorizeManagerInteraction(resolver); err != nil {
 		return nil, err
 	}
-	want := runtime.CredentialRequestStatusResolved
+	want := models.CredentialRequestStatusResolved
 	if dismiss {
-		want = runtime.CredentialRequestStatusDismissed
+		want = models.CredentialRequestStatusDismissed
 	}
-	if r.Status == runtime.CredentialRequestStatusPending {
+	if r.Status == models.CredentialRequestStatusPending {
 		if r.Revision != expected {
-			return nil, runtime.ErrCredentialRequestConflict
+			return nil, models.ErrCredentialRequestConflict
 		}
 		r.Status, r.ResolvedBy = want, actor
 		r.Revision++
@@ -107,7 +110,7 @@ func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Sco
 			return nil, err
 		}
 	} else if r.Status != want {
-		return nil, runtime.ErrCredentialRequestConflict
+		return nil, models.ErrCredentialRequestConflict
 	}
 	e.settleCredentialRequestSiblings(ctx, r)
 	continued, err := e.continueCredentialRequestRun(ctx, r)
@@ -120,19 +123,19 @@ func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Sco
 func (e *Engine) continueCredentialRequestRun(ctx context.Context, r *CredentialRequest) (bool, error) {
 	return e.continueInteractionRun(ctx, interactionContinuation{
 		scope: r.Scope, owner: r.Owner, agentID: r.AgentID, runID: r.RunID, requestID: r.ID, actionCallID: r.ActionCallID, status: r.Status, revision: r.Revision,
-		updatedAt: r.UpdatedAt, wakeType: runtime.CredentialRequestWakeType, coordinator: "credential-request-coordinator",
+		updatedAt: r.UpdatedAt, wakeType: skillbinding.CredentialRequestWakeType, coordinator: "credential-request-coordinator",
 		eventType: "run.credential_request_settled", summary: "Received the credential request result; continuing",
-		interventionPrefix: "credential-request-result:", instruction: runtime.CredentialRequestResolutionInstruction(r),
+		interventionPrefix: "credential-request-result:", instruction: skillbinding.CredentialRequestResolutionInstruction(r),
 	})
 }
 
 // interactionContinuation is one settled in-chat request whose Run may be
 // waiting for it.
 type interactionContinuation struct {
-	scope runtime.Scope
+	scope models.Scope
 	// owner and agentID are the umbrella and member that asked; the Run
 	// resumes only while it still acts as both.
-	owner                                                  runtime.ObjectiveOwner
+	owner                                                  models.ObjectiveOwner
 	agentID                                                string
 	runID, requestID, actionCallID, status                 string
 	revision                                               int64
@@ -163,35 +166,35 @@ func (e *Engine) continueInteractionRun(ctx context.Context, c interactionContin
 			return false, nil
 		}
 		switch run.Status {
-		case runtime.AgentRunStatusCompleted, runtime.AgentRunStatusFailed, runtime.AgentRunStatusCanceled:
+		case models.AgentRunStatusCompleted, models.AgentRunStatusFailed, models.AgentRunStatusCanceled:
 			return false, nil
 		}
 		if c.requestedFor != "" && run.ActingUser != c.requestedFor {
 			return false, nil
 		}
-		resumable, err := runtime.InteractionRunResumable(ctx, e, run, c.owner, c.agentID)
+		resumable, err := models.InteractionRunResumable(ctx, e, run, c.owner, c.agentID)
 		if err != nil || !resumable {
 			return false, err
 		}
-		waiting := run.Status == runtime.AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
+		waiting := run.Status == models.AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
 			run.WakeCondition.Type == c.wakeType && run.WakeCondition.Reference == c.requestID
 		if !waiting && interactionDelivered(run, interventionID) {
 			return true, nil
 		}
-		status, wake := runtime.AgentRunStatusQueued, (*runtime.WakeCondition)(nil)
+		status, wake := models.AgentRunStatusQueued, (*models.WakeCondition)(nil)
 		if !waiting {
 			status, wake = run.Status, run.WakeCondition
 		}
-		actor := runtime.ActivityActor{Type: "service", ID: c.coordinator}
-		_, _, err = runtime.NewRunActivityService(e.store, e.store).TransitionRun(ctx, c.scope, run.ID, runtime.RunTransitionRequest{
+		actor := models.ActivityActor{Type: "service", ID: c.coordinator}
+		_, _, err = activity.NewRunActivityService(e.store, e.store).TransitionRun(ctx, c.scope, run.ID, activity.RunTransitionRequest{
 			ExpectedRevision: run.Revision, Status: status, WakeCondition: wake,
 			Summary: c.summary, EventType: c.eventType,
 			Actor: actor, CorrelationID: c.requestID, CausationID: c.actionCallID,
 			Payload: map[string]interface{}{"requestId": c.requestID, "status": c.status, "revision": c.revision},
-			Intervention: &runtime.AgentRunIntervention{ID: interventionID, Actor: actor,
+			Intervention: &models.AgentRunIntervention{ID: interventionID, Actor: actor,
 				Instruction: c.instruction, CreatedAt: c.updatedAt, ActionCallID: c.actionCallID},
 		})
-		if errors.Is(err, runtime.ErrRevisionConflict) {
+		if errors.Is(err, models.ErrRevisionConflict) {
 			continue
 		}
 		if err != nil {
@@ -202,12 +205,12 @@ func (e *Engine) continueInteractionRun(ctx context.Context, c interactionContin
 		}
 		return true, nil
 	}
-	return false, runtime.ErrRevisionConflict
+	return false, models.ErrRevisionConflict
 }
 
 // interactionDelivered reports whether the Run already holds this request's
 // settled result, so a replayed settle does not append it twice.
-func interactionDelivered(run *runtime.AgentRun, interventionID string) bool {
+func interactionDelivered(run *models.AgentRun, interventionID string) bool {
 	for _, intervention := range run.PendingInterventions {
 		if intervention.ID == interventionID {
 			return true

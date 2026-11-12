@@ -10,7 +10,10 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 )
 
 func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +30,7 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 	if idempotencyKey == "" {
 		idempotencyKey = strings.TrimSpace(payload.IdempotencyKey)
 	}
-	result, err := s.agentRunCreation(r.Context(), runtime.CreateAgentRunRequest{
+	result, err := s.agentRunCreation(r.Context(), models.CreateAgentRunRequest{
 		Scope: payload.Scope, Kind: payload.Kind, ObjectiveID: strings.TrimSpace(payload.ObjectiveID), ParentRunID: strings.TrimSpace(payload.ParentRunID),
 		Owner: payload.Owner, AssignedAgentID: strings.TrimSpace(payload.AssignedAgentID), ConcurrencyKey: strings.TrimSpace(payload.ConcurrencyKey),
 		// A client never names the person a run acts for.
@@ -55,7 +58,7 @@ func (s *Server) handleListAgentRuns(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	runs, err := runtime.NewPortfolioService(s.store).ListAgentRuns(r.Context(), filter)
+	runs, err := portfolio.NewPortfolioService(s.store).ListAgentRuns(r.Context(), filter)
 	if err != nil {
 		s.respondAgentRunError(w, err)
 		return
@@ -69,8 +72,8 @@ func (s *Server) handleInspectAgentRunAdmission(w http.ResponseWriter, r *http.R
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	request := runtime.AgentRunClaimRequest{
-		Scope: scope, Kind: runtime.RunKind(strings.TrimSpace(r.URL.Query().Get("kind"))),
+	request := agentrun.AgentRunClaimRequest{
+		Scope: scope, Kind: models.RunKind(strings.TrimSpace(r.URL.Query().Get("kind"))),
 		AssignedAgentID: strings.TrimSpace(r.URL.Query().Get("assignedAgentId")),
 	}
 	for key, target := range map[string]*int{
@@ -84,7 +87,7 @@ func (s *Server) handleInspectAgentRunAdmission(w http.ResponseWriter, r *http.R
 		}
 		*target = value
 	}
-	decision, err := runtime.NewAgentRunScheduler(s.store).Inspect(r.Context(), request)
+	decision, err := agentrun.NewAgentRunScheduler(s.store).Inspect(r.Context(), request)
 	if err != nil {
 		s.respondAgentRunError(w, err)
 		return
@@ -98,7 +101,7 @@ func (s *Server) handleGetAgentRun(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	run, err := runtime.NewPortfolioService(s.store).GetAgentRun(r.Context(), scope, strings.TrimSpace(r.PathValue("id")))
+	run, err := portfolio.NewPortfolioService(s.store).GetAgentRun(r.Context(), scope, strings.TrimSpace(r.PathValue("id")))
 	if err != nil {
 		s.respondAgentRunError(w, err)
 		return
@@ -117,12 +120,12 @@ func (s *Server) handleGetRunbookExecutionAudit(w http.ResponseWriter, r *http.R
 		s.respondError(w, http.StatusNotImplemented, err.Error())
 		return
 	}
-	auditStore, ok := s.store.(runtime.RunbookExecutionAuditStore)
+	auditStore, ok := s.store.(models.RunbookExecutionAuditStore)
 	if !ok {
 		s.respondError(w, http.StatusNotImplemented, "Runbook execution audit is unavailable")
 		return
 	}
-	value, err := runtime.NewRunbookExecutionAuditService(auditStore, registry).Get(r.Context(), scope, strings.TrimSpace(r.PathValue("id")))
+	value, err := routine.NewRunbookExecutionAuditService(auditStore, registry).Get(r.Context(), scope, strings.TrimSpace(r.PathValue("id")))
 	if err != nil {
 		s.respondAgentRunError(w, err)
 		return
@@ -141,7 +144,7 @@ func (s *Server) handleCommandAgentRun(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	result, err := runtime.NewRunCommandService(s.store).CommandAgentRun(r.Context(), runtime.AgentRunCommandRequest{
+	result, err := agentrun.NewRunCommandService(s.store).CommandAgentRun(r.Context(), agentrun.AgentRunCommandRequest{
 		Scope: scope, RunID: strings.TrimSpace(r.PathValue("id")), ExpectedRevision: payload.ExpectedRevision,
 		Kind: payload.Kind, Actor: payload.Actor, Summary: payload.Summary, Instruction: payload.Instruction, InterventionID: payload.InterventionID,
 		HumanInterventionID: payload.HumanInterventionID, Visibility: payload.Visibility,
@@ -153,58 +156,58 @@ func (s *Server) handleCommandAgentRun(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, result)
 }
 
-func agentRunFilterFromQuery(r *http.Request) (runtime.AgentRunFilter, error) {
+func agentRunFilterFromQuery(r *http.Request) (models.AgentRunFilter, error) {
 	scope, err := scopeFromQuery(r)
 	if err != nil {
-		return runtime.AgentRunFilter{}, err
+		return models.AgentRunFilter{}, err
 	}
 	limit, err := boundedIntQuery(r, "limit", 50, 1, 100)
 	if err != nil {
-		return runtime.AgentRunFilter{}, err
+		return models.AgentRunFilter{}, err
 	}
 	offset, err := boundedIntQuery(r, "offset", 0, 0, 1_000_000)
 	if err != nil {
-		return runtime.AgentRunFilter{}, err
+		return models.AgentRunFilter{}, err
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	if len(query) > 1000 {
-		return runtime.AgentRunFilter{}, fmt.Errorf("q must be at most 1000 bytes")
+		return models.AgentRunFilter{}, fmt.Errorf("q must be at most 1000 bytes")
 	}
-	order := runtime.AgentRunOrder(strings.TrimSpace(r.URL.Query().Get("order")))
-	if order != "" && order != runtime.AgentRunOrderScheduler && order != runtime.AgentRunOrderCreatedDesc {
-		return runtime.AgentRunFilter{}, fmt.Errorf("invalid run order %q", order)
+	order := models.AgentRunOrder(strings.TrimSpace(r.URL.Query().Get("order")))
+	if order != "" && order != models.AgentRunOrderScheduler && order != models.AgentRunOrderCreatedDesc {
+		return models.AgentRunFilter{}, fmt.Errorf("invalid run order %q", order)
 	}
-	filter := runtime.AgentRunFilter{
+	filter := models.AgentRunFilter{
 		Query: query, Order: order,
-		Scope: scope, Kind: runtime.RunKind(strings.TrimSpace(r.URL.Query().Get("kind"))), ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), ParentRunID: strings.TrimSpace(r.URL.Query().Get("parentRunId")),
+		Scope: scope, Kind: models.RunKind(strings.TrimSpace(r.URL.Query().Get("kind"))), ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), ParentRunID: strings.TrimSpace(r.URL.Query().Get("parentRunId")),
 		RootRunID: strings.TrimSpace(r.URL.Query().Get("rootRunId")), AssignedAgentID: strings.TrimSpace(r.URL.Query().Get("assignedAgentId")),
 		Limit: limit, Offset: offset,
 	}
-	if filter.Kind != "" && filter.Kind != runtime.RunKindAgentWork && filter.Kind != runtime.RunKindConversation {
-		return runtime.AgentRunFilter{}, fmt.Errorf("invalid run kind %q", filter.Kind)
+	if filter.Kind != "" && filter.Kind != models.RunKindAgentWork && filter.Kind != models.RunKindConversation {
+		return models.AgentRunFilter{}, fmt.Errorf("invalid run kind %q", filter.Kind)
 	}
 	ownerType, ownerID := strings.TrimSpace(r.URL.Query().Get("ownerType")), strings.TrimSpace(r.URL.Query().Get("ownerId"))
 	if ownerType != "" || ownerID != "" {
-		owner := runtime.ObjectiveOwner{Type: runtime.OwnerType(ownerType), ID: ownerID}
+		owner := models.ObjectiveOwner{Type: models.OwnerType(ownerType), ID: ownerID}
 		if err := owner.Validate(); err != nil {
-			return runtime.AgentRunFilter{}, err
+			return models.AgentRunFilter{}, err
 		}
 		filter.Owner = &owner
 	}
 	for _, value := range queryValues(r, "status") {
-		status := runtime.AgentRunStatus(value)
+		status := models.AgentRunStatus(value)
 		if !validAgentRunStatus(status) {
-			return runtime.AgentRunFilter{}, fmt.Errorf("invalid run status %q", value)
+			return models.AgentRunFilter{}, fmt.Errorf("invalid run status %q", value)
 		}
 		filter.Statuses = append(filter.Statuses, status)
 	}
 	return filter, nil
 }
 
-func scopeFromQuery(r *http.Request) (runtime.Scope, error) {
-	scope := runtime.Scope{Kind: strings.TrimSpace(r.URL.Query().Get("scopeKind")), ID: strings.TrimSpace(r.URL.Query().Get("scopeId"))}
+func scopeFromQuery(r *http.Request) (models.Scope, error) {
+	scope := models.Scope{Kind: strings.TrimSpace(r.URL.Query().Get("scopeKind")), ID: strings.TrimSpace(r.URL.Query().Get("scopeId"))}
 	if err := scope.Validate(); err != nil {
-		return runtime.Scope{}, err
+		return models.Scope{}, err
 	}
 	return scope, nil
 }
@@ -233,12 +236,12 @@ func boundedIntQuery(r *http.Request, key string, fallback, min, max int) (int, 
 	return value, nil
 }
 
-func validAgentRunStatus(status runtime.AgentRunStatus) bool {
+func validAgentRunStatus(status models.AgentRunStatus) bool {
 	switch status {
-	case runtime.AgentRunStatusQueued, runtime.AgentRunStatusPlanning, runtime.AgentRunStatusRunning, runtime.AgentRunStatusPaused,
-		runtime.AgentRunStatusSleeping, runtime.AgentRunStatusWaitingForDependency, runtime.AgentRunStatusWaitingForAgent,
-		runtime.AgentRunStatusWaitingForApproval, runtime.AgentRunStatusWaitingForEvent, runtime.AgentRunStatusCompleted,
-		runtime.AgentRunStatusFailed, runtime.AgentRunStatusCanceled:
+	case models.AgentRunStatusQueued, models.AgentRunStatusPlanning, models.AgentRunStatusRunning, models.AgentRunStatusPaused,
+		models.AgentRunStatusSleeping, models.AgentRunStatusWaitingForDependency, models.AgentRunStatusWaitingForAgent,
+		models.AgentRunStatusWaitingForApproval, models.AgentRunStatusWaitingForEvent, models.AgentRunStatusCompleted,
+		models.AgentRunStatusFailed, models.AgentRunStatusCanceled:
 		return true
 	default:
 		return false
@@ -263,13 +266,13 @@ func decodeStrictJSON(r *http.Request, target interface{}) error {
 
 func (s *Server) respondAgentRunError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, runtime.ErrRunNotFound):
+	case errors.Is(err, models.ErrRunNotFound):
 		s.respondError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, runtime.ErrRevisionConflict), errors.Is(err, runtime.ErrRunIdempotency), errors.Is(err, runtime.ErrInvalidRunTransition):
+	case errors.Is(err, models.ErrRevisionConflict), errors.Is(err, models.ErrRunIdempotency), errors.Is(err, models.ErrInvalidRunTransition):
 		s.respondError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, runtime.ErrInvalidScope), errors.Is(err, runtime.ErrInvalidOwner), errors.Is(err, runtime.ErrObjectiveNotFound):
+	case errors.Is(err, models.ErrInvalidScope), errors.Is(err, models.ErrInvalidOwner), errors.Is(err, models.ErrObjectiveNotFound):
 		s.respondError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, runtime.ErrInvalidAgentRun), errors.Is(err, runtime.ErrInvalidRunCommand):
+	case errors.Is(err, models.ErrInvalidAgentRun), errors.Is(err, portfolio.ErrInvalidRunCommand):
 		s.respondError(w, http.StatusBadRequest, err.Error())
 	default:
 		s.logger.Errorw("agent run API failed", "error", err)

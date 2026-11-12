@@ -7,7 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 func TestDesktopConversationRouterForcesRouteMessageThroughSharedClient(t *testing.T) {
@@ -26,10 +27,10 @@ func TestDesktopConversationRouterForcesRouteMessageThroughSharedClient(t *testi
 	if router.client != host.client {
 		t.Fatal("router does not share the step host's client")
 	}
-	decision, err := router.Route(context.Background(), runtime.ConversationRouteRequest{
+	decision, err := router.Route(context.Background(), conversation.ConversationRouteRequest{
 		Lead:    "lead",
-		Members: []runtime.RouteMember{{AgentID: "lead", Name: "Lead"}, {AgentID: "press", Name: "Press"}},
-		Trigger: runtime.ChannelMessage{ID: "m1", Content: strings.Repeat("a", 2500)},
+		Members: []conversation.RouteMember{{AgentID: "lead", Name: "Lead"}, {AgentID: "press", Name: "Press"}},
+		Trigger: models.ChannelMessage{ID: "m1", Content: strings.Repeat("a", 2500)},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +60,7 @@ func TestDesktopConversationRouterForcesRouteMessageThroughSharedClient(t *testi
 
 	failing := newFakeProvider(t, func(_ int, w http.ResponseWriter, _ map[string]interface{}) { w.WriteHeader(502) })
 	router, _ = NewDesktopConversationRouter(failing.host(t, 0))
-	if _, err := router.Route(context.Background(), runtime.ConversationRouteRequest{Members: []runtime.RouteMember{{AgentID: "a"}}}); err == nil || err.Error() != "the routing provider returned HTTP 502" {
+	if _, err := router.Route(context.Background(), conversation.ConversationRouteRequest{Members: []conversation.RouteMember{{AgentID: "a"}}}); err == nil || err.Error() != "the routing provider returned HTTP 502" {
 		t.Fatalf("http error: %v", err)
 	}
 	if _, err := NewDesktopConversationRouter(nil); err == nil {

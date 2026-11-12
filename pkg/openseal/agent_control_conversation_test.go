@@ -6,24 +6,25 @@ import (
 	"testing"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 // conversationWriteCountingStore counts conversation creation attempts.
 type conversationWriteCountingStore struct {
-	*runtime.SQLiteStore
+	*sqlite.Store
 	creates atomic.Int64
 }
 
-func (s *conversationWriteCountingStore) CreateConversation(ctx context.Context, conversation *runtime.Conversation, key string) (*runtime.Conversation, bool, error) {
+func (s *conversationWriteCountingStore) CreateConversation(ctx context.Context, conversation *models.Conversation, key string) (*models.Conversation, bool, error) {
 	s.creates.Add(1)
-	return s.SQLiteStore.CreateConversation(ctx, conversation, key)
+	return s.Store.CreateConversation(ctx, conversation, key)
 }
 
 func controlConversationFixture(t *testing.T) (*Engine, *conversationWriteCountingStore, SkillScope, *AgentDefinition) {
 	t.Helper()
-	store := &conversationWriteCountingStore{SQLiteStore: runtimetest.NewKernelStore(t)}
+	store := &conversationWriteCountingStore{Store: runtimetest.NewKernelStore(t)}
 	engine, err := New(WithStore(store))
 	if err != nil {
 		t.Fatal(err)
@@ -39,14 +40,14 @@ func controlConversationFixture(t *testing.T) (*Engine, *conversationWriteCounti
 	// The fixture's writes have no person behind them; the empty owner's
 	// default space is where their control conversations go.
 	scope := SkillScope{Kind: "tenant", ID: "7"}
-	seedSpace(t, engine, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, "")
+	seedSpace(t, engine, models.Scope{Kind: scope.Kind, ID: scope.ID}, "")
 	return engine, store, scope, definition
 }
 
-func controlConversation(t *testing.T, engine *Engine, scope SkillScope, deploymentID string) *runtime.Conversation {
+func controlConversation(t *testing.T, engine *Engine, scope SkillScope, deploymentID string) *models.Conversation {
 	t.Helper()
-	conversation, err := engine.store.(runtime.ConversationStore).FindConversationByIdempotencyKey(context.Background(),
-		runtime.Scope{Kind: scope.Kind, ID: scope.ID}, "agent-control:"+deploymentID)
+	conversation, err := engine.store.(models.ConversationStore).FindConversationByIdempotencyKey(context.Background(),
+		models.Scope{Kind: scope.Kind, ID: scope.ID}, "agent-control:"+deploymentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +115,7 @@ func TestAgentDeploymentWritesEnsureControlConversation(t *testing.T) {
 	if _, _, err := engine.UpdateAgentDeployment(ctx, &update, updated.Revision, "test", "fixture", "update again"); err != nil {
 		t.Fatal(err)
 	}
-	conversations, err := engine.store.(runtime.ConversationStore).ListConversations(ctx, runtime.ConversationFilter{Scope: runtime.Scope{Kind: scope.Kind, ID: scope.ID}})
+	conversations, err := engine.store.(models.ConversationStore).ListConversations(ctx, models.ConversationFilter{Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}

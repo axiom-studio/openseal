@@ -8,22 +8,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"go.uber.org/zap"
 )
 
 func TestChannelListReadPositionsAreScopedOptionalAndReadOnly(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	service := runtime.NewConversationService(store)
-	local := runtime.Scope{Kind: "local", ID: "default"}
-	reader := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "local-operator"}
+	service := conversation.NewConversationService(store)
+	local := models.Scope{Kind: "local", ID: "default"}
+	reader := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "local-operator"}
 	seedSpace(t, store, local, "")
-	channel, _, err := service.CreateConversation(context.Background(), runtime.CreateConversationRequest{Scope: local, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research"}, Title: "Evidence", IdempotencyKey: "channel"})
+	channel, _, err := service.CreateConversation(context.Background(), conversation.CreateConversationRequest{Scope: local, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, Title: "Evidence", IdempotencyKey: "channel"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.PostChannelMessage(context.Background(), runtime.PostChannelMessageRequest{Scope: local, ConversationID: channel.ID, ExpectedRevision: 1, Sender: reader, Intent: runtime.MessageIntentUpdate, Content: "New evidence", IdempotencyKey: "message", Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}})
+	_, err = service.PostChannelMessage(context.Background(), conversation.PostChannelMessageRequest{Scope: local, ConversationID: channel.ID, ExpectedRevision: 1, Sender: reader, Intent: models.MessageIntentUpdate, Content: "New evidence", IdempotencyKey: "message", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +43,7 @@ func TestChannelListReadPositionsAreScopedOptionalAndReadOnly(t *testing.T) {
 	if cursor, err := service.GetCursor(context.Background(), local, channel.ID, reader); err != nil || cursor != nil {
 		t.Fatalf("listing wrote a receipt: %#v %v", cursor, err)
 	}
-	if _, _, err := service.AdvanceCursor(context.Background(), runtime.AdvanceConversationCursorRequest{Scope: local, ConversationID: channel.ID, Participant: reader, DeliveredSequence: 1, ReadSequence: 1}); err != nil {
+	if _, _, err := service.AdvanceCursor(context.Background(), conversation.AdvanceConversationCursorRequest{Scope: local, ConversationID: channel.ID, Participant: reader, DeliveredSequence: 1, ReadSequence: 1}); err != nil {
 		t.Fatal(err)
 	}
 	read := performAgentRunRequest(t, server.Handler(), http.MethodGet, projection, "", "")
@@ -63,7 +65,7 @@ func TestChannelListReadPositionsAreScopedOptionalAndReadOnly(t *testing.T) {
 		}
 	}
 	for _, title := range []string{"Second", "Third"} {
-		if _, _, err := service.CreateConversation(context.Background(), runtime.CreateConversationRequest{Scope: local, Owner: channel.Owner, Title: title, IdempotencyKey: title}); err != nil {
+		if _, _, err := service.CreateConversation(context.Background(), conversation.CreateConversationRequest{Scope: local, Owner: channel.Owner, Title: title, IdempotencyKey: title}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -74,16 +76,16 @@ func TestChannelListReadPositionsAreScopedOptionalAndReadOnly(t *testing.T) {
 	}
 }
 
-type failingReadSummaryStore struct{ *runtime.SQLiteStore }
+type failingReadSummaryStore struct{ *sqlite.Store }
 
-func (s failingReadSummaryStore) GetConversationCursor(context.Context, runtime.Scope, string, runtime.ConversationParticipant) (*runtime.ConversationCursor, error) {
+func (s failingReadSummaryStore) GetConversationCursor(context.Context, models.Scope, string, models.ConversationParticipant) (*models.ConversationCursor, error) {
 	return nil, errors.New("read storage unavailable")
 }
 func TestChannelListDoesNotInventUnreadCountsOnCursorFailure(t *testing.T) {
 	store := failingReadSummaryStore{runtimetest.NewKernelStore(t)}
-	service := runtime.NewConversationService(store)
-	seedSpace(t, store, runtime.Scope{Kind: "local", ID: "default"}, "")
-	if _, _, err := service.CreateConversation(context.Background(), runtime.CreateConversationRequest{Scope: runtime.Scope{Kind: "local", ID: "default"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research"}, Title: "Evidence", IdempotencyKey: "channel"}); err != nil {
+	service := conversation.NewConversationService(store)
+	seedSpace(t, store, models.Scope{Kind: "local", ID: "default"}, "")
+	if _, _, err := service.CreateConversation(context.Background(), conversation.CreateConversationRequest{Scope: models.Scope{Kind: "local", ID: "default"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, Title: "Evidence", IdempotencyKey: "channel"}); err != nil {
 		t.Fatal(err)
 	}
 	server := NewServer(store, zap.NewNop().Sugar())

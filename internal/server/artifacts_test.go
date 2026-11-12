@@ -13,7 +13,8 @@ import (
 
 	artifactstore "github.com/axiom-studio/openseal/pkg/artifact"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
@@ -37,7 +38,7 @@ func TestArtifactRoutesAreStrictScopedVersionedAndCapabilityAdvertised(t *testin
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, body = %s", created.Code, created.Body.String())
 	}
-	var createResult runtime.ArtifactRegistrationResult
+	var createResult artifactcatalog.ArtifactRegistrationResult
 	if err := json.Unmarshal(created.Body.Bytes(), &createResult); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +104,7 @@ func TestArtifactContentRoutesStreamOnlyConfiguredOperations(t *testing.T) {
 	if !strings.Contains(upload.Body.String(), `"contentRef"`) || strings.Contains(upload.Body.String(), `"ContentRef"`) {
 		t.Fatalf("upload response is not camelCase: %s", upload.Body.String())
 	}
-	var stored runtime.ArtifactStoredContent
+	var stored models.ArtifactStoredContent
 	if err := json.Unmarshal(upload.Body.Bytes(), &stored); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestArtifactContentRoutesStreamOnlyConfiguredOperations(t *testing.T) {
 	if resolved.Code != http.StatusOK || !strings.Contains(resolved.Body.String(), "https://delivery.example/") {
 		t.Fatalf("resolve status = %d, body = %s", resolved.Code, resolved.Body.String())
 	}
-	loaded, err := runtime.NewArtifactCatalog(server.store.(runtime.ArtifactStore)).Get(context.Background(), runtime.Scope{Kind: "local", ID: "game"}, "game-log", 1)
+	loaded, err := artifactcatalog.NewArtifactCatalog(server.store.(models.ArtifactStore)).Get(context.Background(), models.Scope{Kind: "local", ID: "game"}, "game-log", 1)
 	if err != nil || loaded.ContentRef != stored.ContentRef || strings.Contains(loaded.ContentRef, "https://") {
 		t.Fatalf("resolution leaked into catalog: %#v, %v", loaded, err)
 	}
@@ -148,8 +149,8 @@ func TestArtifactContentRoutesStreamOnlyConfiguredOperations(t *testing.T) {
 
 type testArtifactResolver struct{ now time.Time }
 
-func (r *testArtifactResolver) Resolve(_ context.Context, request runtime.ArtifactContentResolutionRequest) (runtime.ArtifactContentResolution, error) {
-	return runtime.ArtifactContentResolution{
+func (r *testArtifactResolver) Resolve(_ context.Context, request artifactcatalog.ArtifactContentResolutionRequest) (artifactcatalog.ArtifactContentResolution, error) {
+	return artifactcatalog.ArtifactContentResolution{
 		URL: "https://delivery.example/ephemeral", ExpiresAt: r.now.Add(request.TTL),
 	}, nil
 }
@@ -178,7 +179,7 @@ func TestArtifactListFiltersBySpaceAndChat(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("list %q status = %d, body = %s", query, response.Code, response.Body.String())
 		}
-		var artifacts []runtime.Artifact
+		var artifacts []models.Artifact
 		if err := json.Unmarshal(response.Body.Bytes(), &artifacts); err != nil {
 			t.Fatal(err)
 		}

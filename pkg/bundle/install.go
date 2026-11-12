@@ -13,7 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -60,19 +60,19 @@ type InstallationRequest struct {
 // InstallationPlan is the complete desired state submitted to one atomic
 // target transaction. Implementations must never apply only a prefix.
 type InstallationPlan struct {
-	BundleID       string                       `json:"bundleId"`
-	BundleVersion  string                       `json:"bundleVersion"`
-	BundleDigest   string                       `json:"bundleDigest"`
-	Scope          capability.ScopeReference    `json:"scope"`
-	Agents         []AgentInstallation          `json:"agents,omitempty"`
-	Teams          []TeamInstallation           `json:"teams,omitempty"`
-	Objectives     []*runtime.Objective         `json:"objectives,omitempty"`
-	Runbooks       []*runtime.RunbookActivation `json:"runbooks,omitempty"`
-	ActorType      string                       `json:"actorType"`
-	ActorID        string                       `json:"actorId"`
-	Reason         string                       `json:"reason"`
-	IdempotencyKey string                       `json:"idempotencyKey"`
-	PlanDigest     string                       `json:"planDigest"`
+	BundleID       string                      `json:"bundleId"`
+	BundleVersion  string                      `json:"bundleVersion"`
+	BundleDigest   string                      `json:"bundleDigest"`
+	Scope          capability.ScopeReference   `json:"scope"`
+	Agents         []AgentInstallation         `json:"agents,omitempty"`
+	Teams          []TeamInstallation          `json:"teams,omitempty"`
+	Objectives     []*models.Objective         `json:"objectives,omitempty"`
+	Runbooks       []*models.RunbookActivation `json:"runbooks,omitempty"`
+	ActorType      string                      `json:"actorType"`
+	ActorID        string                      `json:"actorId"`
+	Reason         string                      `json:"reason"`
+	IdempotencyKey string                      `json:"idempotencyKey"`
+	PlanDigest     string                      `json:"planDigest"`
 }
 
 type AgentInstallation struct {
@@ -194,7 +194,7 @@ func CompileInstallation(request InstallationRequest) (*InstallationPlan, error)
 	}
 	for _, item := range request.Bundle.Objectives {
 		ownerID := targetOwnerID(item.Owner, request.Placement)
-		objective := &runtime.Objective{ID: request.Placement.Objectives[item.Key], Scope: runtime.Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerType(item.Owner.Kind), ID: ownerID}, Title: item.Title, Goal: item.Goal, Status: item.Status, Priority: item.Priority, ExecutionPolicy: item.ExecutionPolicy, Budget: item.Budget, BudgetAllocations: item.BudgetAllocations, Constraints: item.Constraints, SuccessCriteria: item.SuccessCriteria, Revision: 1, CreatedAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
+		objective := &models.Objective{ID: request.Placement.Objectives[item.Key], Scope: models.Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}, Owner: models.ObjectiveOwner{Type: models.OwnerType(item.Owner.Kind), ID: ownerID}, Title: item.Title, Goal: item.Goal, Status: item.Status, Priority: item.Priority, ExecutionPolicy: item.ExecutionPolicy, Budget: item.Budget, BudgetAllocations: item.BudgetAllocations, Constraints: item.Constraints, SuccessCriteria: item.SuccessCriteria, Revision: 1, CreatedAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
 		if err := objective.Validate(); err != nil {
 			return nil, fmt.Errorf("compile workforce bundle Objective %s: %w", item.Key, err)
 		}
@@ -205,7 +205,7 @@ func CompileInstallation(request InstallationRequest) (*InstallationPlan, error)
 		plan.Objectives = append(plan.Objectives, objective)
 	}
 	for _, item := range request.Bundle.Runbooks {
-		activation := &runtime.RunbookActivation{ID: request.Placement.Runbooks[item.Key], Scope: runtime.Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerType(item.Owner.Kind), ID: targetOwnerID(item.Owner, request.Placement)}, ObjectiveID: request.Placement.Objectives[item.ObjectiveKey], AssignedAgentID: request.Placement.Agents[item.AssignedAgentKey].DeploymentID, DefinitionID: item.DefinitionID, DefinitionVersion: item.DefinitionVersion, TriggerID: item.TriggerID, Trigger: item.Trigger, Input: item.Input, Policy: item.Policy, Budget: item.Budget, MaximumConcurrent: item.MaximumConcurrent, Status: item.Status, Revision: 1, CreatedAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
+		activation := &models.RunbookActivation{ID: request.Placement.Runbooks[item.Key], Scope: models.Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}, Owner: models.ObjectiveOwner{Type: models.OwnerType(item.Owner.Kind), ID: targetOwnerID(item.Owner, request.Placement)}, ObjectiveID: request.Placement.Objectives[item.ObjectiveKey], AssignedAgentID: request.Placement.Agents[item.AssignedAgentKey].DeploymentID, DefinitionID: item.DefinitionID, DefinitionVersion: item.DefinitionVersion, TriggerID: item.TriggerID, Trigger: item.Trigger, Input: item.Input, Policy: item.Policy, Budget: item.Budget, MaximumConcurrent: item.MaximumConcurrent, Status: item.Status, Revision: 1, CreatedAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC()}
 		if err := activation.Validate(); err != nil {
 			return nil, fmt.Errorf("compile workforce bundle Runbook %s: %w", item.Key, err)
 		}

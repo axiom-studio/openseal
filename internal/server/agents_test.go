@@ -12,12 +12,12 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"go.uber.org/zap"
 )
 
 func TestAgentDeploymentCatalogIsScopeIsolatedAndIncludesActiveDefinition(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "agents.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "agents.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestAgentDeploymentCatalogIsScopeIsolatedAndIncludesActiveDefinition(t *tes
 }
 
 func TestAgentDeploymentCatalogExcludesStatusesOnlyWhenRequested(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "deployment-filters.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "deployment-filters.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestAgentDeploymentCatalogExcludesStatusesOnlyWhenRequested(t *testing.T) {
 }
 
 func TestPortableAgentManifestInstallationCreatesReplaysAndRejectsDrift(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-install.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-install.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestPortableAgentManifestInstallationCreatesReplaysAndRejectsDrift(t *testi
 }
 
 func TestAgentDefinitionLifecycleIsCASGuardedScopedAndAudited(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-lifecycle.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-lifecycle.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

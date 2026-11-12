@@ -9,7 +9,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type manifestInstallationRegistry struct{ registry *kernelagent.Registry }
@@ -152,9 +152,9 @@ func (s *Server) handleUpdateAgentDeployment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if payload.Deployment.ProfileImage != nil {
-		store, _ := s.store.(runtime.ArtifactStore)
-		scope := runtime.Scope{Kind: payload.Deployment.Scope.Kind, ID: payload.Deployment.Scope.ID}
-		if err := runtime.ValidateAgentProfileImage(r.Context(), store, s.artifactContent, scope, payload.Deployment.ProfileImage); err != nil {
+		store, _ := s.store.(models.ArtifactStore)
+		scope := models.Scope{Kind: payload.Deployment.Scope.Kind, ID: payload.Deployment.Scope.ID}
+		if err := models.ValidateAgentProfileImage(r.Context(), store, s.artifactContent, scope, payload.Deployment.ProfileImage); err != nil {
 			s.respondError(w, http.StatusBadRequest, "profile image is unavailable or invalid")
 			return
 		}

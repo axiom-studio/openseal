@@ -14,7 +14,8 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 const stepModel = "deepseek-chat"
@@ -71,24 +72,24 @@ func chatCall(id, name, arguments string) map[string]interface{} {
 	return map[string]interface{}{"id": id, "type": "function", "function": map[string]string{"name": name, "arguments": arguments}}
 }
 
-func stepTool(name string) runtime.ModelStepTool {
-	return runtime.ModelStepTool{Name: name, Description: "Look something up", Group: runtime.ModelStepToolHarness,
+func stepTool(name string) models.ModelStepTool {
+	return models.ModelStepTool{Name: name, Description: "Look something up", Group: models.ModelStepToolHarness,
 		InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"q": map[string]interface{}{"type": "string"}}}}
 }
 
-func stepRequest(tools ...runtime.ModelStepTool) runtime.ModelStepRequest {
-	return runtime.ModelStepRequest{
-		APIVersion: runtime.ModelStepAPIVersion, Purpose: runtime.ModelStepPurposeStep,
-		Scope: runtime.Scope{Kind: "local", ID: "default"}, RunID: "run-1", StepID: "step-1", SessionID: "session-1", AgentID: "agent-1",
-		System:  runtime.ModelStepSystem{AgentInstructions: []string{"Be brief."}},
+func stepRequest(tools ...models.ModelStepTool) models.ModelStepRequest {
+	return models.ModelStepRequest{
+		APIVersion: models.ModelStepAPIVersion, Purpose: models.ModelStepPurposeStep,
+		Scope: models.Scope{Kind: "local", ID: "default"}, RunID: "run-1", StepID: "step-1", SessionID: "session-1", AgentID: "agent-1",
+		System:  models.ModelStepSystem{AgentInstructions: []string{"Be brief."}},
 		Tools:   tools,
-		Entries: []runtime.SessionEntryView{userView("u1", 1, "What is two plus two?")},
+		Entries: []models.SessionEntryView{userView("u1", 1, "What is two plus two?")},
 	}
 }
 
-func failureOf(t *testing.T, err error) *runtime.TurnHostFailure {
+func failureOf(t *testing.T, err error) *modelstep.TurnHostFailure {
 	t.Helper()
-	var failure *runtime.TurnHostFailure
+	var failure *modelstep.TurnHostFailure
 	if !errors.As(err, &failure) {
 		t.Fatalf("want *TurnHostFailure, got %T %v", err, err)
 	}
@@ -138,11 +139,11 @@ func TestStepHostSendsRenderedRequestAndReturnsOneAssistantEntry(t *testing.T) {
 		t.Fatal("credential leaked into the request body")
 	}
 
-	if result.APIVersion != runtime.ModelStepAPIVersion || result.StepID != "step-1" {
+	if result.APIVersion != models.ModelStepAPIVersion || result.StepID != "step-1" {
 		t.Fatalf("identity: %+v", result)
 	}
 	assistant := result.Assistant
-	if assistant.Provider != runtime.ModelStepProviderChat || assistant.Model != stepModel || assistant.StopReason != runtime.ModelStopToolCalls ||
+	if assistant.Provider != models.ModelStepProviderChat || assistant.Model != stepModel || assistant.StopReason != models.ModelStopToolCalls ||
 		assistant.Text != "Looking it  up\nnow." || assistant.SystemDigest == "" || assistant.ToolsDigest == "" || assistant.Limits != nil {
 		t.Fatalf("assistant: %+v", assistant)
 	}
@@ -156,13 +157,13 @@ func TestStepHostSendsRenderedRequestAndReturnsOneAssistantEntry(t *testing.T) {
 	if assistant.Usage.InputTokens != 120 || assistant.Usage.OutputTokens != 7 || assistant.Usage.Attempts != 1 {
 		t.Fatalf("usage: %+v", assistant.Usage)
 	}
-	if result.Model.Provider != runtime.ModelStepProviderChat || result.Model.Model != stepModel || result.Model.ContextTokens != defaultContextWindowTokens {
+	if result.Model.Provider != models.ModelStepProviderChat || result.Model.Model != stepModel || result.Model.ContextTokens != defaultContextWindowTokens {
 		t.Fatalf("model info: %+v", result.Model)
 	}
 	if result.Render.EstimatedInputTokens != int64(len(provider.bodies[0])+3)/4 {
 		t.Fatalf("estimate %d for %d bytes", result.Render.EstimatedInputTokens, len(provider.bodies[0]))
 	}
-	if err := runtime.ValidateModelStepResult(req, result); err != nil {
+	if err := modelstep.ValidateModelStepResult(req, result); err != nil {
 		t.Fatal(err)
 	}
 
@@ -183,7 +184,7 @@ func TestStepHostToolFreeStepOmitsToolsAndToolChoice(t *testing.T) {
 		chatReply(w, "stop", map[string]interface{}{"content": "Four.", "tool_calls": []interface{}{chatCall("x", "lookup", `{}`)}}, nil)
 	})
 	req := stepRequest()
-	req.Purpose = runtime.ModelStepPurposeExplanation
+	req.Purpose = models.ModelStepPurposeExplanation
 	result, err := provider.host(t, 0).ExecuteModelStep(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +194,7 @@ func TestStepHostToolFreeStepOmitsToolsAndToolChoice(t *testing.T) {
 	if got, want := keysOf(body), []string{"messages", "model", "stream"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("body keys %v, want %v", got, want)
 	}
-	if result.Assistant.Text != "Four." || len(result.Assistant.ToolCalls) != 0 || result.Assistant.StopReason != runtime.ModelStopEnd || result.Narration != "" {
+	if result.Assistant.Text != "Four." || len(result.Assistant.ToolCalls) != 0 || result.Assistant.StopReason != models.ModelStopEnd || result.Narration != "" {
 		t.Fatalf("result: %+v", result)
 	}
 }
@@ -202,15 +203,15 @@ func TestStepHostMapsFinishReasonsToStopReasons(t *testing.T) {
 	for _, tc := range []struct {
 		finish string
 		calls  bool
-		want   runtime.ModelStopReason
+		want   models.ModelStopReason
 	}{
-		{"stop", false, runtime.ModelStopEnd},
-		{"", false, runtime.ModelStopEnd},
-		{"something_else", false, runtime.ModelStopEnd},
-		{"length", false, runtime.ModelStopMaxTokens},
-		{"content_filter", false, runtime.ModelStopRefusal},
-		{"tool_calls", true, runtime.ModelStopToolCalls},
-		{"stop", true, runtime.ModelStopToolCalls},
+		{"stop", false, models.ModelStopEnd},
+		{"", false, models.ModelStopEnd},
+		{"something_else", false, models.ModelStopEnd},
+		{"length", false, models.ModelStopMaxTokens},
+		{"content_filter", false, models.ModelStopRefusal},
+		{"tool_calls", true, models.ModelStopToolCalls},
+		{"stop", true, models.ModelStopToolCalls},
 	} {
 		t.Run(tc.finish+map[bool]string{true: "+calls"}[tc.calls], func(t *testing.T) {
 			provider := newFakeProvider(t, func(_ int, w http.ResponseWriter, _ map[string]interface{}) {
@@ -309,7 +310,7 @@ func TestStepHostRetriesMalformedArgumentsTwiceThenFlagsThem(t *testing.T) {
 	if u := result.Assistant.Usage; u.Attempts != 3 || u.InputTokens != 300 || u.OutputTokens != 30 {
 		t.Fatalf("usage of all attempts: %+v", u)
 	}
-	if err := runtime.ValidateModelStepResult(req, result); err != nil {
+	if err := modelstep.ValidateModelStepResult(req, result); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -347,9 +348,9 @@ func TestStepHostClassifiesProviderFailures(t *testing.T) {
 	}{
 		{"rate-limited", 429, `{"error":{"message":"slow down"}}`, stepHostHTTP, true},
 		{"unavailable", 503, `private-key upstream`, stepHostHTTP, true},
-		{"context-code", 400, `{"error":{"code":"context_length_exceeded","message":"x"}}`, runtime.TurnHostContextExceeded, false},
-		{"context-text", 400, `{"error":{"message":"This model's maximum context length is 8192 tokens"}}`, runtime.TurnHostContextExceeded, false},
-		{"context-413", 413, `Prompt is too long`, runtime.TurnHostContextExceeded, false},
+		{"context-code", 400, `{"error":{"code":"context_length_exceeded","message":"x"}}`, modelstep.TurnHostContextExceeded, false},
+		{"context-text", 400, `{"error":{"message":"This model's maximum context length is 8192 tokens"}}`, modelstep.TurnHostContextExceeded, false},
+		{"context-413", 413, `Prompt is too long`, modelstep.TurnHostContextExceeded, false},
 		{"bad-request", 400, `{"error":{"message":"unknown parameter"}}`, stepHostHTTP, false},
 		{"unauthorized", 401, `private-key rejected`, stepHostHTTP, false},
 		{"not-json", 200, `not json`, stepHostInvalidResponse, false},
@@ -362,13 +363,13 @@ func TestStepHostClassifiesProviderFailures(t *testing.T) {
 			})
 			_, err := provider.host(t, 9000).ExecuteModelStep(context.Background(), stepRequest())
 			failure := failureOf(t, err)
-			if failure.Code != tc.code || failure.Retryable != tc.retryable || errors.Is(err, runtime.ErrTurnHostUnavailable) != tc.retryable {
+			if failure.Code != tc.code || failure.Retryable != tc.retryable || errors.Is(err, modelstep.ErrTurnHostUnavailable) != tc.retryable {
 				t.Fatalf("failure %+v, want %s retryable=%v", failure, tc.code, tc.retryable)
 			}
 			if strings.Contains(failure.Message, "private-key") {
 				t.Fatalf("provider body leaked: %q", failure.Message)
 			}
-			if tc.code == runtime.TurnHostContextExceeded {
+			if tc.code == modelstep.TurnHostContextExceeded {
 				if failure.ContextPressure == nil || failure.ContextPressure.LimitTokens != 9000 || failure.ContextPressure.EstimatedTokens <= 0 {
 					t.Fatalf("context pressure: %+v", failure.ContextPressure)
 				}
@@ -432,8 +433,8 @@ func TestStepHostCapturesReasoningContent(t *testing.T) {
 	}
 
 	// The captured entry replays its reasoning on the next step of the same loop.
-	entry := runtime.SessionEntryView{ID: "a1", Sequence: 2, Type: runtime.SessionEntryAssistant, Assistant: &result.Assistant}
-	tool := toolView("t1", 3, "c1", runtime.ToolEntryCompleted, textPart("4"))
+	entry := models.SessionEntryView{ID: "a1", Sequence: 2, Type: models.SessionEntryAssistant, Assistant: &result.Assistant}
+	tool := toolView("t1", 3, "c1", models.ToolEntryCompleted, textPart("4"))
 	next := stepRequest(stepTool("lookup"))
 	next.StepID = "step-2"
 	next.Entries = append(next.Entries, entry, tool)
@@ -459,9 +460,9 @@ func TestStepHostRejectsMediaAndDeploymentCredentials(t *testing.T) {
 	}
 
 	media := stepRequest()
-	media.Entries = []runtime.SessionEntryView{{ID: "u1", Sequence: 1, Type: runtime.SessionEntryUser, User: &runtime.UserEntryView{Content: []runtime.ContentPart{
-		{Type: runtime.ContentPartText, Text: "What is this?"},
-		{Type: runtime.ContentPartImage, MediaType: "image/png", DataBase64: base64.StdEncoding.EncodeToString([]byte("png"))},
+	media.Entries = []models.SessionEntryView{{ID: "u1", Sequence: 1, Type: models.SessionEntryUser, User: &models.UserEntryView{Content: []models.ContentPart{
+		{Type: models.ContentPartText, Text: "What is this?"},
+		{Type: models.ContentPartImage, MediaType: "image/png", DataBase64: base64.StdEncoding.EncodeToString([]byte("png"))},
 	}}}}
 	_, err = host.ExecuteModelStep(context.Background(), media)
 	if failure := failureOf(t, err); failure.Code != openAIRenderUnsupportedMedia || failure.Retryable {
@@ -504,8 +505,8 @@ func TestStepHostHasNoHostTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := host.ExecuteHostTool(context.Background(), runtime.HostToolRequest{Operation: "workspace.read_file"})
-	if !errors.Is(err, runtime.ErrHostToolUnsupported) || !reflect.DeepEqual(result, runtime.HostToolResult{}) {
+	result, err := host.ExecuteHostTool(context.Background(), models.HostToolRequest{Operation: "workspace.read_file"})
+	if !errors.Is(err, models.ErrHostToolUnsupported) || !reflect.DeepEqual(result, models.HostToolResult{}) {
 		t.Fatalf("host tool: %+v %v", result, err)
 	}
 }

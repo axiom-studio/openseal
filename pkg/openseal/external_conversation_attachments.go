@@ -1,10 +1,13 @@
 package openseal
 
-import "github.com/axiom-studio/openseal/pkg/runtime"
+import (
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+)
 
-type ExternalConversationAttachment = runtime.ExternalConversationAttachment
-type ExternalConversationAttachmentContent = runtime.ExternalConversationAttachmentContent
-type ExternalConversationAttachmentHost = runtime.ExternalConversationAttachmentHost
-type ExternalConversationAttachmentHostRequest = runtime.ExternalConversationAttachmentHostRequest
+type ExternalConversationAttachment = models.ExternalConversationAttachment
+type ExternalConversationAttachmentContent = externalconversation.ExternalConversationAttachmentContent
+type ExternalConversationAttachmentHost = externalconversation.ExternalConversationAttachmentHost
+type ExternalConversationAttachmentHostRequest = externalconversation.ExternalConversationAttachmentHostRequest
 
-const MaximumExternalConversationAttachmentBytes = runtime.MaximumExternalConversationAttachmentBytes
+const MaximumExternalConversationAttachmentBytes = externalconversation.MaximumExternalConversationAttachmentBytes

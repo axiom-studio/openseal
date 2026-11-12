@@ -7,27 +7,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestActivityAPIIsCapabilityAdvertisedSelectorBoundedAndDetailedOnRequest(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	scope := runtime.Scope{Kind: "tenant", ID: "one"}
-	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
-	run, err := runtime.NewPortfolioService(store).CreateAgentRun(context.Background(), runtime.CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Monitor governed sources", Source: runtime.RunSourceSchedule,
+	scope := models.Scope{Kind: "tenant", ID: "one"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Monitor governed sources", Source: models.RunSourceSchedule,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = runtime.NewRunActivityService(store, store).AppendActivity(context.Background(), &runtime.ActivityEvent{
+	_, err = activity.NewRunActivityService(store, store).AppendActivity(context.Background(), &models.ActivityEvent{
 		ID: "source-policy-call-1", Scope: scope, RunID: run.ID,
-		EventType: "source_policy.authorized", Severity: runtime.ActivitySeverityInfo,
-		Actor: runtime.ActivityActor{Type: "system", ID: "source-policy"}, Summary: "Source access authorized by policy",
+		EventType: "source_policy.authorized", Severity: models.ActivitySeverityInfo,
+		Actor: models.ActivityActor{Type: "system", ID: "source-policy"}, Summary: "Source access authorized by policy",
 		Payload:    map[string]interface{}{"monitorId": "monitor-1", "policyId": "public", "policyVersion": "1", "sourceHost": "www.reddit.com", "pathPrefix": "/r/kubernetes", "maximumItems": 5},
-		Visibility: runtime.ActivityVisibilityScope, CreatedAt: time.Now().UTC(),
+		Visibility: models.ActivityVisibilityScope, CreatedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatal(err)

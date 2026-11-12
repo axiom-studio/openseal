@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestLocalStoreIsContentAddressedScopedAndRestartSafe(t *testing.T) {
@@ -18,10 +18,10 @@ func TestLocalStoreIsContentAddressedScopedAndRestartSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := runtime.Scope{Kind: "local", ID: "research"}
+	scope := models.Scope{Kind: "local", ID: "research"}
 	content := []byte("cited report")
 	digest := sha256.Sum256(content)
-	written, err := store.Put(context.Background(), runtime.ArtifactContentWrite{
+	written, err := store.Put(context.Background(), models.ArtifactContentWrite{
 		Scope: scope, Reader: bytes.NewReader(content), SizeBytes: int64(len(content)),
 		Digest: "sha256:" + hex.EncodeToString(digest[:]), MediaType: "text/plain",
 	})
@@ -35,7 +35,7 @@ func TestLocalStoreIsContentAddressedScopedAndRestartSafe(t *testing.T) {
 	if err != nil || !available {
 		t.Fatalf("stored content availability = %v, %v", available, err)
 	}
-	available, err = store.Available(context.Background(), runtime.Scope{Kind: "local", ID: "other"}, written.ContentRef)
+	available, err = store.Available(context.Background(), models.Scope{Kind: "local", ID: "other"}, written.ContentRef)
 	if err != nil || available {
 		t.Fatalf("cross-scope content availability = %v, %v", available, err)
 	}
@@ -68,7 +68,7 @@ func TestLocalStoreIsContentAddressedScopedAndRestartSafe(t *testing.T) {
 	if deleted, err := restarted.Delete(context.Background(), scope, written.ContentRef); err != nil || deleted {
 		t.Fatalf("idempotent delete = %v, %v", deleted, err)
 	}
-	if _, err := restarted.Open(context.Background(), runtime.Scope{Kind: "local", ID: "other"}, written.ContentRef); err == nil {
+	if _, err := restarted.Open(context.Background(), models.Scope{Kind: "local", ID: "other"}, written.ContentRef); err == nil {
 		t.Fatal("cross-scope content lookup succeeded")
 	}
 }
@@ -78,13 +78,13 @@ func TestLocalStoreRejectsIntegrityFailuresAndUnsafeReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	if _, err := store.Put(context.Background(), runtime.ArtifactContentWrite{
+	scope := models.Scope{Kind: "local", ID: "default"}
+	if _, err := store.Put(context.Background(), models.ArtifactContentWrite{
 		Scope: scope, Reader: strings.NewReader("content"), SizeBytes: 2,
 	}); err == nil {
 		t.Fatal("size mismatch was accepted")
 	}
-	if _, err := store.Put(context.Background(), runtime.ArtifactContentWrite{
+	if _, err := store.Put(context.Background(), models.ArtifactContentWrite{
 		Scope: scope, Reader: strings.NewReader("content"), SizeBytes: -1,
 		Digest: "sha256:" + strings.Repeat("0", 64),
 	}); err == nil {
@@ -107,12 +107,12 @@ func TestLocalStoreIgnoresSpacePlacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	plain, err := store.Put(context.Background(), runtime.ArtifactContentWrite{Scope: scope, MediaType: "image/png", Reader: strings.NewReader("icon"), SizeBytes: 4})
+	scope := models.Scope{Kind: "local", ID: "default"}
+	plain, err := store.Put(context.Background(), models.ArtifactContentWrite{Scope: scope, MediaType: "image/png", Reader: strings.NewReader("icon"), SizeBytes: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
-	placed, err := store.Put(context.Background(), runtime.ArtifactContentWrite{Scope: scope, MediaType: "image/png", Reader: strings.NewReader("icon"), SizeBytes: 4, Space: "space-1"})
+	placed, err := store.Put(context.Background(), models.ArtifactContentWrite{Scope: scope, MediaType: "image/png", Reader: strings.NewReader("icon"), SizeBytes: 4, Space: "space-1"})
 	if err != nil {
 		t.Fatal(err)
 	}

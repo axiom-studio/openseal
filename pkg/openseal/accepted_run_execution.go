@@ -6,25 +6,25 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // PrepareAcceptedRunExecution replaces any request-supplied continuation pin
 // with the immutable method resolved through this tenant's active deployment.
 // Scheduled and manual Run creators use the same authoritative boundary.
-func (e *Engine) PrepareAcceptedRunExecution(ctx context.Context, req *runtime.CreateAgentRunRequest) error {
+func (e *Engine) PrepareAcceptedRunExecution(ctx context.Context, req *models.CreateAgentRunRequest) error {
 	if e == nil || req == nil {
-		return runtime.ErrAcceptedRunExecution
+		return models.ErrAcceptedRunExecution
 	}
 	req.Context = maps.Clone(req.Context)
-	delete(req.Context, runtime.AcceptedRunExecutionContextKey)
+	delete(req.Context, models.AcceptedRunExecutionContextKey)
 	entrypoint := strings.TrimSpace(req.Entrypoint)
 	if entrypoint == "" {
 		return nil
 	}
 	if req.Scope.Validate() != nil || req.Owner.Validate() != nil {
-		return runtime.ErrAcceptedRunExecution
+		return models.ErrAcceptedRunExecution
 	}
 	deployment, err := e.GetAgentDeployment(ctx, skill.ScopeReference(req.Scope), strings.TrimSpace(req.AssignedAgentID))
 	if err != nil || deployment == nil {
@@ -39,21 +39,21 @@ func (e *Engine) PrepareAcceptedRunExecution(ctx context.Context, req *runtime.C
 	_, idSupplied := req.Context["runbookDefinitionId"]
 	_, versionSupplied := req.Context["runbookDefinitionVersion"]
 	if idSupplied != versionSupplied {
-		return runtime.ErrAcceptedRunExecution
+		return models.ErrAcceptedRunExecution
 	}
 	if id, present := req.Context["runbookDefinitionId"]; present && id != definition.Runbook.ID {
-		return runtime.ErrAcceptedRunExecution
+		return models.ErrAcceptedRunExecution
 	}
 	if version, present := req.Context["runbookDefinitionVersion"]; present && version != definition.Runbook.Version {
-		return runtime.ErrAcceptedRunExecution
+		return models.ErrAcceptedRunExecution
 	}
 	if raw, present := req.Plan["runbook"]; present {
 		plan, ok := raw.(map[string]interface{})
 		if !ok || plan["id"] != definition.Runbook.ID || plan["version"] != definition.Runbook.Version {
-			return runtime.ErrAcceptedRunExecution
+			return models.ErrAcceptedRunExecution
 		}
 	}
-	pin, err := runtime.NewAcceptedRunExecution(req.Scope, deployment, definition, entrypoint)
+	pin, err := models.NewAcceptedRunExecution(req.Scope, deployment, definition, entrypoint)
 	if err != nil {
 		return err
 	}
@@ -62,9 +62,9 @@ func (e *Engine) PrepareAcceptedRunExecution(ctx context.Context, req *runtime.C
 		req.Context = make(map[string]interface{})
 	}
 	req.Entrypoint = entrypoint
-	req.Context[runtime.AcceptedRunExecutionContextKey] = pin
+	req.Context[models.AcceptedRunExecutionContextKey] = pin
 	req.Context["runbookDefinitionId"], req.Context["runbookDefinitionVersion"] = pin.RunbookID, pin.RunbookVersion
 	return nil
 }
 
-var _ runtime.AcceptedRunExecutionPreparer = (*Engine)(nil)
+var _ models.AcceptedRunExecutionPreparer = (*Engine)(nil)

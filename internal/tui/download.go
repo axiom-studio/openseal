@@ -13,10 +13,10 @@ import (
 	"unicode"
 
 	"github.com/axiom-studio/openseal/pkg/client"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-func downloadArtifact(ctx context.Context, artifactClient client.ArtifactClient, scope runtime.Scope, artifact *runtime.Artifact, directory string) (path string, err error) {
+func downloadArtifact(ctx context.Context, artifactClient client.ArtifactClient, scope models.Scope, artifact *models.Artifact, directory string) (path string, err error) {
 	if artifact == nil {
 		return "", errors.New("artifact is required")
 	}
@@ -69,7 +69,7 @@ func downloadArtifact(ctx context.Context, artifactClient client.ArtifactClient,
 	return destination, nil
 }
 
-func artifactDownloadName(artifact *runtime.Artifact) string {
+func artifactDownloadName(artifact *models.Artifact) string {
 	name := sanitizeFileComponent(filepath.Base(strings.TrimSpace(artifact.Name)))
 	if name == "" || name == "." {
 		name = "artifact"

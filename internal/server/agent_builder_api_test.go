@@ -13,13 +13,16 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"go.uber.org/zap"
 )
 
-func newAgentBuilderTestServer(t *testing.T, withBuilder bool) (*Server, *runtime.SQLiteStore) {
+func newAgentBuilderTestServer(t *testing.T, withBuilder bool) (*Server, *sqlite.Store) {
 	t.Helper()
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "builder.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "builder.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,16 +38,16 @@ func newAgentBuilderTestServer(t *testing.T, withBuilder bool) (*Server, *runtim
 			t.Fatal(err)
 		}
 		if _, _, err := registry.CreateDeployment(ctx, &kernelagent.AgentDeployment{
-			ID: runtime.AgentBuilderDeploymentID, Scope: capability.ScopeReference{Kind: "local", ID: "default"},
+			ID: conversationrun.AgentBuilderDeploymentID, Scope: capability.ScopeReference{Kind: "local", ID: "default"},
 			DefinitionID: definition.ID, ActiveVersion: definition.Version, RolloutStatus: kernelagent.RolloutActive,
 			Environment: "default", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
 		}, "user", "local-operator", "test"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	seedSpace(t, store, runtime.Scope{Kind: "local", ID: "default"}, localOperatorID)
+	seedSpace(t, store, models.Scope{Kind: "local", ID: "default"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
-	server.SetDesktopConversationScope(runtime.Scope{Kind: "local", ID: "default"})
+	server.SetDesktopConversationScope(models.Scope{Kind: "local", ID: "default"})
 	return server, store
 }
 
@@ -69,7 +72,7 @@ func TestAgentBuilderCapabilityOnlyWithBuilderDeployment(t *testing.T) {
 	found := false
 	for _, entry := range document.Capabilities {
 		if entry.ID == kernelapi.AgentBuilderCapabilityID {
-			found = entry.Version == "1" && entry.Context != nil && entry.Context.BuilderAgentID == runtime.AgentBuilderDeploymentID &&
+			found = entry.Version == "1" && entry.Context != nil && entry.Context.BuilderAgentID == conversationrun.AgentBuilderDeploymentID &&
 				strings.Join(entry.Operations, ",") == kernelapi.OperationCreate+","+kernelapi.OperationList
 		}
 	}
@@ -84,17 +87,17 @@ func TestAgentBuilderRoutesStartAndListThroughClient(t *testing.T) {
 	defer httpServer.Close()
 	kernel := client.NewKernelHTTPClient(httpServer.URL, nil)
 	ctx := context.Background()
-	scope := runtime.Scope{Kind: "local", ID: "default"}
+	scope := models.Scope{Kind: "local", ID: "default"}
 	request := kernelapi.StartAgentBuilderConversationRequest{
 		Scope: scope, Prompt: "An agent that triages my inbox",
-		Parameters: runtime.AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent, Name: "Triage", Model: "openai/gpt-5"}, IdempotencyKey: "start-1",
+		Parameters: models.AgentBuilderParameters{Kind: models.AgentBuilderKindAgent, Name: "Triage", Model: "openai/gpt-5"}, IdempotencyKey: "start-1",
 	}
 	started, err := kernel.StartAgentBuilderConversation(ctx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if started.Replayed || started.Conversation == nil || started.Conversation.Origin == nil ||
-		started.Conversation.Origin.Kind != runtime.ConversationReferenceAgentBuilder || started.Conversation.Owner.ID != runtime.AgentBuilderDeploymentID ||
+		started.Conversation.Origin.Kind != models.ConversationReferenceAgentBuilder || started.Conversation.Owner.ID != conversationrun.AgentBuilderDeploymentID ||
 		started.Message == nil || started.Message.Content != request.Prompt || started.Message.Sender != localBuilderRequester ||
 		started.Message.BuilderParameters == nil || started.Message.BuilderParameters.Name != "Triage" || started.Message.BuilderParameters.Model != "openai/gpt-5" {
 		t.Fatalf("started = %#v", started)
@@ -105,7 +108,7 @@ func TestAgentBuilderRoutesStartAndListThroughClient(t *testing.T) {
 	}
 	drafts, err := kernel.ListAgentBuilderDrafts(ctx, scope, 10, 0)
 	if err != nil || len(drafts.Drafts) != 1 || drafts.Drafts[0].ConversationID != started.Conversation.ID ||
-		drafts.Drafts[0].Status != runtime.AgentBuilderDraftIdle || drafts.Drafts[0].Title != "Triage" {
+		drafts.Drafts[0].Status != agentbuilder.AgentBuilderDraftIdle || drafts.Drafts[0].Title != "Triage" {
 		t.Fatalf("drafts = %#v, %v", drafts, err)
 	}
 	if page, err := kernel.ListAgentBuilderDrafts(ctx, scope, 10, 1); err != nil || len(page.Drafts) != 0 {

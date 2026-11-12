@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing.T) {
@@ -15,12 +16,12 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			var store interface {
-				runtime.KernelStore
-				runtime.SkillSetupRequestStore
+				models.KernelStore
+				models.SkillSetupRequestStore
 			}
 			path := filepath.Join(t.TempDir(), "setup.db")
 			if kind == "sqlite" {
-				sqlite, err := runtime.NewSQLiteStore(path)
+				sqlite, err := sqlite.NewSQLiteStore(path)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -84,7 +85,7 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 			}
 			if kind == "sqlite" {
 				// A restarted catalog must load the persisted canonical provenance.
-				reopened, err := runtime.NewSQLiteStore(path)
+				reopened, err := sqlite.NewSQLiteStore(path)
 				if err != nil {
 					t.Fatal(err)
 				}

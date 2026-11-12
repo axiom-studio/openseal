@@ -12,8 +12,8 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -289,8 +289,8 @@ type memoryInstallationStore struct {
 	receipt    *InstallationReceipt
 	agents     []AgentInstallation
 	teams      []TeamInstallation
-	objectives []*runtime.Objective
-	runbooks   []*runtime.RunbookActivation
+	objectives []*models.Objective
+	runbooks   []*models.RunbookActivation
 }
 
 func (s *memoryInstallationStore) ApplyWorkforceBundle(_ context.Context, plan *InstallationPlan) (*InstallationReceipt, error) {
@@ -306,7 +306,7 @@ func (s *memoryInstallationStore) ApplyWorkforceBundle(_ context.Context, plan *
 	}
 	receipt := &InstallationReceipt{BundleID: plan.BundleID, BundleVersion: plan.BundleVersion, BundleDigest: plan.BundleDigest, PlanDigest: plan.PlanDigest, IdempotencyKey: plan.IdempotencyKey, AppliedAt: time.Unix(2, 0).UTC()}
 	// One assignment models the commit point of a transactional target store.
-	s.agents, s.teams, s.objectives, s.runbooks = append([]AgentInstallation(nil), plan.Agents...), append([]TeamInstallation(nil), plan.Teams...), append([]*runtime.Objective(nil), plan.Objectives...), append([]*runtime.RunbookActivation(nil), plan.Runbooks...)
+	s.agents, s.teams, s.objectives, s.runbooks = append([]AgentInstallation(nil), plan.Agents...), append([]TeamInstallation(nil), plan.Teams...), append([]*models.Objective(nil), plan.Objectives...), append([]*models.RunbookActivation(nil), plan.Runbooks...)
 	s.receipt, s.applies = receipt, s.applies+1
 	copy := *receipt
 	return &copy, nil
@@ -342,15 +342,15 @@ func representativeBundle(t *testing.T) *Bundle {
 		}},
 		Status: team.DeploymentActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	objective := &runtime.Objective{
-		ID: "objective:source-research", Scope: runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: teamDeployment.ID},
-		Title: "Daily research", Goal: "Publish reviewed research", Status: runtime.ObjectiveStatusActive, Priority: 10,
-		ExecutionPolicy: &runtime.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1}, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	objective := &models.Objective{
+		ID: "objective:source-research", Scope: models.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: teamDeployment.ID},
+		Title: "Daily research", Goal: "Publish reviewed research", Status: models.ObjectiveStatusActive, Priority: 10,
+		ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1}, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	activation := &runtime.RunbookActivation{
+	activation := &models.RunbookActivation{
 		ID: "activation:source-daily-research", Scope: objective.Scope, Owner: objective.Owner, ObjectiveID: objective.ID, AssignedAgentID: deployment.ID,
 		DefinitionID: "daily-research", DefinitionVersion: "1.0.0", TriggerID: "daily", Trigger: schedule,
-		MaximumConcurrent: 1, Status: runtime.RunbookActivationActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		MaximumConcurrent: 1, Status: models.RunbookActivationActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	result, err := Export(ExportRequest{
 		Metadata:      Metadata{ID: "research-workforce", Version: "1.0.0", DisplayName: "Research Workforce"},

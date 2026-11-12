@@ -6,7 +6,8 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 // ownerSpaceFixture is an engine with one Agent definition and one Team
@@ -15,7 +16,7 @@ type ownerSpaceFixture struct {
 	t          *testing.T
 	engine     *Engine
 	scope      capability.ScopeReference
-	spaceScope runtime.Scope
+	spaceScope models.Scope
 }
 
 func newOwnerSpaceFixture(t *testing.T) *ownerSpaceFixture {
@@ -25,7 +26,7 @@ func newOwnerSpaceFixture(t *testing.T) *ownerSpaceFixture {
 		t.Fatal(err)
 	}
 	f := &ownerSpaceFixture{t: t, engine: engine, scope: capability.ScopeReference{Kind: "tenant", ID: "owners"}}
-	f.spaceScope = runtime.Scope{Kind: f.scope.Kind, ID: f.scope.ID}
+	f.spaceScope = models.Scope{Kind: f.scope.Kind, ID: f.scope.ID}
 	if _, err := engine.RegisterAgentDefinition(t.Context(), &AgentDefinition{
 		ID: "helper", Version: "1", DisplayName: "Helper", Purpose: "Help", SystemPrompt: "Help.",
 		Authority: AgentAuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
@@ -41,9 +42,9 @@ func newOwnerSpaceFixture(t *testing.T) *ownerSpaceFixture {
 	return f
 }
 
-func (f *ownerSpaceFixture) space(name, ownerID string) *runtime.Space {
+func (f *ownerSpaceFixture) space(name, ownerID string) *models.Space {
 	f.t.Helper()
-	space, err := f.engine.CreateSpace(f.t.Context(), runtime.CreateSpaceRequest{Scope: f.spaceScope, Name: name, Look: runtime.DefaultSpaceLook, OwnerID: ownerID})
+	space, err := f.engine.CreateSpace(f.t.Context(), portfolio.CreateSpaceRequest{Scope: f.spaceScope, Name: name, Look: models.DefaultSpaceLook, OwnerID: ownerID})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func (f *ownerSpaceFixture) team(id string, agents ...string) *TeamDeployment {
 }
 
 // spacesOf returns the ids of every space the deployment is a member of.
-func (f *ownerSpaceFixture) spacesOf(memberType runtime.SpaceMemberType, id string) []string {
+func (f *ownerSpaceFixture) spacesOf(memberType models.SpaceMemberType, id string) []string {
 	f.t.Helper()
 	members, err := f.engine.ListScopeSpaceMembers(f.t.Context(), f.spaceScope)
 	if err != nil {
@@ -99,7 +100,7 @@ func (f *ownerSpaceFixture) members(spaceID string) []string {
 // controlSpaces returns the space of each control conversation of the Agent.
 func (f *ownerSpaceFixture) controlSpaces(agentID string) []string {
 	f.t.Helper()
-	conversations, err := f.engine.ListConversations(f.t.Context(), runtime.ConversationFilter{
+	conversations, err := f.engine.ListConversations(f.t.Context(), models.ConversationFilter{
 		Scope: f.spaceScope, Owner: &ObjectiveOwner{Type: OwnerTypeAgent, ID: agentID},
 	})
 	if err != nil {
@@ -107,7 +108,7 @@ func (f *ownerSpaceFixture) controlSpaces(agentID string) []string {
 	}
 	spaces := []string{}
 	for _, conversation := range conversations {
-		if conversation.Origin == nil || conversation.Origin.Kind != runtime.ConversationReferenceAgentControl {
+		if conversation.Origin == nil || conversation.Origin.Kind != models.ConversationReferenceAgentControl {
 			f.t.Fatalf("conversation of %s = %+v", agentID, conversation)
 		}
 		spaces = append(spaces, conversation.SpaceID)
@@ -139,7 +140,7 @@ func TestEngineCreatesNoSpaceOnItsOwn(t *testing.T) {
 
 	// The first space an owner creates is their default, and only theirs.
 	home, side, other := f.space("Home", "ana"), f.space("Side", "ana"), f.space("Den", "bo")
-	if !home.IsDefault || side.IsDefault || !other.IsDefault || home.Access != runtime.SpaceAccessOwner {
+	if !home.IsDefault || side.IsDefault || !other.IsDefault || home.Access != models.SpaceAccessOwner {
 		t.Fatalf("home = %+v, side = %+v, other = %+v", home, side, other)
 	}
 	if found, err := f.engine.DefaultSpace(ctx, f.spaceScope, "ana"); err != nil || found.ID != home.ID {
@@ -157,7 +158,7 @@ func TestEngineCreateAgentDeploymentJoinsItsCreatorsDefaultSpace(t *testing.T) {
 	if _, _, err := f.engine.CreateAgentDeployment(t.Context(), f.agent("scout"), "user", "ana", "create"); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.spacesOf(runtime.SpaceMemberAgent, "scout"); !slices.Equal(got, []string{home.ID}) {
+	if got := f.spacesOf(models.SpaceMemberAgent, "scout"); !slices.Equal(got, []string{home.ID}) {
 		t.Fatalf("scout is in %v, want only %s", got, home.ID)
 	}
 	if got := f.controlSpaces("scout"); !slices.Equal(got, []string{home.ID}) {
@@ -185,7 +186,7 @@ func TestEngineCreateAgentDeploymentWithoutADefaultSpaceStaysInNoSpace(t *testin
 			if _, err := f.engine.GetAgentDeployment(ctx, f.scope, "scout"); err != nil {
 				t.Fatal(err)
 			}
-			if got := f.spacesOf(runtime.SpaceMemberAgent, "scout"); len(got) != 0 {
+			if got := f.spacesOf(models.SpaceMemberAgent, "scout"); len(got) != 0 {
 				t.Fatalf("scout is in %v, want no space", got)
 			}
 			if got := f.controlSpaces("scout"); len(got) != 0 {
@@ -193,7 +194,7 @@ func TestEngineCreateAgentDeploymentWithoutADefaultSpaceStaysInNoSpace(t *testin
 			}
 			// Its first space gives it the control conversation, once.
 			for range 2 {
-				if _, _, err := f.engine.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: f.spaceScope, SpaceID: home.ID, Type: runtime.SpaceMemberAgent, MemberID: "scout"}); err != nil {
+				if _, _, err := f.engine.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: f.spaceScope, SpaceID: home.ID, Type: models.SpaceMemberAgent, MemberID: "scout"}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -211,7 +212,7 @@ func TestEngineCreateAgentDeploymentInSpace(t *testing.T) {
 	if _, _, err := f.engine.CreateAgentDeploymentInSpace(ctx, work.ID, f.agent("scout"), "user", "ana", "create"); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.spacesOf(runtime.SpaceMemberAgent, "scout"); !slices.Equal(got, []string{work.ID}) {
+	if got := f.spacesOf(models.SpaceMemberAgent, "scout"); !slices.Equal(got, []string{work.ID}) {
 		t.Fatalf("scout is in %v, want only %s", got, work.ID)
 	}
 	if got := f.members(home.ID); len(got) != 0 {
@@ -228,7 +229,7 @@ func TestEngineCreateAgentDeploymentInSpace(t *testing.T) {
 	if deployment, err := f.engine.GetAgentDeployment(ctx, f.scope, "ghost"); err == nil {
 		t.Fatalf("a deployment was created in no space: %+v", deployment)
 	}
-	if got := f.spacesOf(runtime.SpaceMemberAgent, "ghost"); len(got) != 0 {
+	if got := f.spacesOf(models.SpaceMemberAgent, "ghost"); len(got) != 0 {
 		t.Fatalf("ghost is in %v", got)
 	}
 	if got := f.controlSpaces("ghost"); len(got) != 0 {
@@ -269,7 +270,7 @@ func TestEngineCreateTeamDeploymentJoinsItsCreatorsDefaultSpace(t *testing.T) {
 		if team, err := f.engine.GetTeamDeployment(ctx, f.scope, "stray"); err == nil {
 			t.Fatalf("%s: a Team was created: %+v", name, team)
 		}
-		if got := f.spacesOf(runtime.SpaceMemberTeam, "stray"); len(got) != 0 {
+		if got := f.spacesOf(models.SpaceMemberTeam, "stray"); len(got) != 0 {
 			t.Fatalf("%s: stray is in %v", name, got)
 		}
 	}

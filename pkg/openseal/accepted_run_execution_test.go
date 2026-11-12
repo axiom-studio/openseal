@@ -6,7 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestEngineAcceptedRunExecutionPinsDefinitionAndReplaysOriginalIntent(t *testing.T) {
@@ -17,9 +18,9 @@ func TestEngineAcceptedRunExecutionPinsDefinitionAndReplaysOriginalIntent(t *tes
 				name = backend + "/explicit"
 			}
 			t.Run(name, func(t *testing.T) {
-				var store runtime.KernelStore
+				var store models.KernelStore
 				if backend == "sqlite" {
-					sqlite, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "accepted-engine.db"))
+					sqlite, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "accepted-engine.db"))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -46,11 +47,11 @@ func TestEngineAcceptedRunExecutionPinsDefinitionAndReplaysOriginalIntent(t *tes
 				}
 				for _, partial := range []map[string]interface{}{{"runbookDefinitionId": "operator-method"}, {"runbookDefinitionVersion": "1"}} {
 					request := CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator", Entrypoint: "manual", Goal: "Incomplete method identity", Source: RunSourceManual, Context: partial}
-					if _, err := engine.CreateAgentRunCommand(t.Context(), request); !errors.Is(err, runtime.ErrAcceptedRunExecution) {
+					if _, err := engine.CreateAgentRunCommand(t.Context(), request); !errors.Is(err, models.ErrAcceptedRunExecution) {
 						t.Fatalf("partial caller method identity was accepted with a non-replayable intent: %v", err)
 					}
 				}
-				request := CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator", Entrypoint: "manual", Goal: "Original requested work", Source: RunSourceManual, IdempotencyKey: "exact-delivery", Context: map[string]interface{}{"input": "preserved", runtime.AcceptedRunExecutionContextKey: "forged server snapshot"}}
+				request := CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator", Entrypoint: "manual", Goal: "Original requested work", Source: RunSourceManual, IdempotencyKey: "exact-delivery", Context: map[string]interface{}{"input": "preserved", models.AcceptedRunExecutionContextKey: "forged server snapshot"}}
 				if explicit {
 					request.Context["runbookDefinitionId"], request.Context["runbookDefinitionVersion"] = "operator-method", "1"
 					request.Plan = map[string]interface{}{"runbook": map[string]interface{}{"id": "operator-method", "version": "1"}}
@@ -59,11 +60,11 @@ func TestEngineAcceptedRunExecutionPinsDefinitionAndReplaysOriginalIntent(t *tes
 				if err != nil {
 					t.Fatal(err)
 				}
-				pin, err := runtime.AcceptedRunExecutionForRun(created.Run)
+				pin, err := models.AcceptedRunExecutionForRun(created.Run)
 				if err != nil || pin == nil || pin.DefinitionID != "operator" || pin.DefinitionVersion != "1" || pin.RunbookVersion != "1" || pin.DerivedRunbookIdentity == explicit {
 					t.Fatalf("request did not receive authoritative immutable identity: %#v %v", pin, err)
 				}
-				if request.Context[runtime.AcceptedRunExecutionContextKey] != "forged server snapshot" || created.Run.Context["input"] != "preserved" {
+				if request.Context[models.AcceptedRunExecutionContextKey] != "forged server snapshot" || created.Run.Context["input"] != "preserved" {
 					t.Fatal("preparation mutated caller inputs or retained forged identity")
 				}
 				before, err := engine.GetAgentRun(t.Context(), scope, created.Run.ID)

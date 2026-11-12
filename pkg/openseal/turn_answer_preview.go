@@ -2,16 +2,16 @@ package openseal
 
 import (
 	"context"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-type TurnAnswerPreview = runtime.TurnAnswerPreview
-type TurnAnswerPreviewObserver = runtime.TurnAnswerPreviewObserver
+type TurnAnswerPreview = models.TurnAnswerPreview
+type TurnAnswerPreviewObserver = models.TurnAnswerPreviewObserver
 
 func WithTurnAnswerPreview(ctx context.Context, observer TurnAnswerPreviewObserver) context.Context {
-	return runtime.WithTurnAnswerPreview(ctx, observer)
+	return models.WithTurnAnswerPreview(ctx, observer)
 }
-func HasTurnAnswerPreview(ctx context.Context) bool { return runtime.HasTurnAnswerPreview(ctx) }
+func HasTurnAnswerPreview(ctx context.Context) bool { return models.HasTurnAnswerPreview(ctx) }
 func ReportTurnAnswerPreview(ctx context.Context, preview TurnAnswerPreview) error {
-	return runtime.ReportTurnAnswerPreview(ctx, preview)
+	return models.ReportTurnAnswerPreview(ctx, preview)
 }

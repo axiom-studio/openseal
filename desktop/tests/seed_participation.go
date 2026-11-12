@@ -8,7 +8,7 @@ import (
 	"flag"
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -18,7 +18,7 @@ func main() {
 	if *path == "" {
 		panic("-db required")
 	}
-	store, err := runtime.NewSQLiteStore(*path)
+	store, err := sqlite.NewSQLiteStore(*path)
 	check(err)
 	defer store.Close()
 	ctx := context.Background()

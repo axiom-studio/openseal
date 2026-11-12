@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
 const maxStandaloneArtifactUpload = 100 << 20
@@ -22,7 +23,7 @@ func (s *Server) handleRegisterArtifact(w http.ResponseWriter, r *http.Request) 
 		s.respondError(w, http.StatusNotImplemented, "artifact catalog is not available")
 		return
 	}
-	var request runtime.RegisterArtifactRequest
+	var request artifactcatalog.RegisterArtifactRequest
 	if err := decodeStrictJSON(r, &request); err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
@@ -92,7 +93,7 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	filter := runtime.ArtifactFilter{
+	filter := models.ArtifactFilter{
 		Scope: scope, ID: strings.TrimSpace(r.URL.Query().Get("id")),
 		Types: queryValues(r, "type"), MediaTypes: queryValues(r, "mediaType"),
 		ProducerRunID:     strings.TrimSpace(r.URL.Query().Get("producerRunId")),
@@ -100,7 +101,7 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 		ConversationID:    strings.TrimSpace(r.URL.Query().Get("conversationId")),
 		SpaceID:           strings.TrimSpace(r.URL.Query().Get("spaceId")),
 		EvidenceTarget:    strings.TrimSpace(r.URL.Query().Get("evidenceTarget")),
-		Files:             runtime.ArtifactFiles(strings.TrimSpace(r.URL.Query().Get("files"))),
+		Files:             models.ArtifactFiles(strings.TrimSpace(r.URL.Query().Get("files"))),
 		LatestOnly:        latestOnly, Limit: limit, Offset: offset,
 	}
 	if !filter.Files.Valid() {
@@ -110,7 +111,7 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	ownerType := strings.TrimSpace(r.URL.Query().Get("ownerType"))
 	ownerID := strings.TrimSpace(r.URL.Query().Get("ownerId"))
 	if ownerType != "" || ownerID != "" {
-		owner := runtime.ObjectiveOwner{Type: runtime.OwnerType(ownerType), ID: ownerID}
+		owner := models.ObjectiveOwner{Type: models.OwnerType(ownerType), ID: ownerID}
 		if err := owner.Validate(); err != nil {
 			s.respondError(w, http.StatusBadRequest, "ownerType and ownerId must identify an Agent or Team")
 			return
@@ -118,10 +119,10 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 		filter.Owner = &owner
 	}
 	for _, value := range queryValues(r, "classification") {
-		classification := runtime.ArtifactClassification(value)
+		classification := models.ArtifactClassification(value)
 		switch classification {
-		case runtime.ArtifactClassificationPublic, runtime.ArtifactClassificationInternal,
-			runtime.ArtifactClassificationConfidential, runtime.ArtifactClassificationRestricted:
+		case models.ArtifactClassificationPublic, models.ArtifactClassificationInternal,
+			models.ArtifactClassificationConfidential, models.ArtifactClassificationRestricted:
 			filter.Classifications = append(filter.Classifications, classification)
 		default:
 			s.respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid artifact classification %q", value))
@@ -147,7 +148,7 @@ func (s *Server) handleUploadArtifactContent(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxStandaloneArtifactUpload)
-	stored, err := s.artifactContent.Put(r.Context(), runtime.ArtifactContentWrite{
+	stored, err := s.artifactContent.Put(r.Context(), models.ArtifactContentWrite{
 		Scope: scope, Reader: r.Body, SizeBytes: r.ContentLength,
 		Digest: strings.TrimSpace(r.Header.Get("X-Content-SHA256")), MediaType: strings.TrimSpace(r.Header.Get("Content-Type")),
 	})
@@ -246,7 +247,7 @@ func (s *Server) handleResolveArtifactContent(w http.ResponseWriter, r *http.Req
 		s.respondArtifactError(w, err)
 		return
 	}
-	resolution, err := s.artifactResolver.Resolve(r.Context(), runtime.ArtifactContentResolutionRequest{
+	resolution, err := s.artifactResolver.Resolve(r.Context(), artifactcatalog.ArtifactContentResolutionRequest{
 		Scope: scope, ContentRef: artifact.ContentRef, Actor: payload.Actor,
 		Purpose: strings.TrimSpace(payload.Purpose), TTL: time.Duration(payload.TTLSeconds) * time.Second,
 	})
@@ -261,21 +262,21 @@ func (s *Server) handleResolveArtifactContent(w http.ResponseWriter, r *http.Req
 	s.respondJSON(w, http.StatusOK, resolution)
 }
 
-func (s *Server) artifactCatalog() (*runtime.ArtifactCatalog, bool) {
-	store, ok := s.store.(runtime.ArtifactStore)
+func (s *Server) artifactCatalog() (*artifactcatalog.ArtifactCatalog, bool) {
+	store, ok := s.store.(models.ArtifactStore)
 	if !ok {
 		return nil, false
 	}
-	return runtime.NewArtifactCatalog(store).WithPlacement(runtime.NewStoreArtifactPlacement(s.store)), true
+	return artifactcatalog.NewArtifactCatalog(store).WithPlacement(artifactcatalog.NewStoreArtifactPlacement(s.store)), true
 }
 
 func (s *Server) respondArtifactError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, runtime.ErrArtifactNotFound):
+	case errors.Is(err, artifactcatalog.ErrArtifactNotFound):
 		s.respondError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, runtime.ErrArtifactImmutable), errors.Is(err, runtime.ErrArtifactVersionConflict):
+	case errors.Is(err, models.ErrArtifactImmutable), errors.Is(err, models.ErrArtifactVersionConflict):
 		s.respondError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, runtime.ErrInvalidArtifactRecord), errors.Is(err, runtime.ErrInvalidScope):
+	case errors.Is(err, models.ErrInvalidArtifactRecord), errors.Is(err, models.ErrInvalidScope):
 		s.respondError(w, http.StatusBadRequest, err.Error())
 	default:
 		s.logger.Errorw("artifact API failed", "error", err)

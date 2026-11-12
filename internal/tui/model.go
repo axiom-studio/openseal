@@ -22,8 +22,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -34,9 +39,9 @@ import (
 
 type Config struct {
 	Endpoint     string
-	Scope        runtime.Scope
-	Owner        runtime.ObjectiveOwner
-	Actor        runtime.ActivityActor
+	Scope        models.Scope
+	Owner        models.ObjectiveOwner
+	Actor        models.ActivityActor
 	DownloadDir  string
 	PollInterval time.Duration
 }
@@ -58,9 +63,9 @@ type runbookOperationRow struct {
 func DefaultConfig() Config {
 	return Config{
 		Endpoint:     client.DefaultKernelBaseURL,
-		Scope:        runtime.Scope{Kind: "local", ID: "default"},
-		Owner:        runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
-		Actor:        runtime.ActivityActor{Type: "user", ID: "local"},
+		Scope:        models.Scope{Kind: "local", ID: "default"},
+		Owner:        models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"},
+		Actor:        models.ActivityActor{Type: "user", ID: "local"},
 		DownloadDir:  "artifacts",
 		PollInterval: 5 * time.Second,
 	}
@@ -190,22 +195,22 @@ type Model struct {
 	agentDefinitionCapability          kernelapi.Capability
 	teamDefinitionCapability           kernelapi.Capability
 	activeRunbookSelected              int
-	runs                               []*runtime.AgentRun
+	runs                               []*models.AgentRun
 	agentTurns                         []*kernelapi.AgentTurnRecord
 	agentTurnsRunID                    string
 	agentTurnsErr                      error
 	loadingAgentTurns                  bool
-	actionCalls                        []*runtime.ActionCall
+	actionCalls                        []*models.ActionCall
 	actionCallsRunID                   string
 	actionCallsErr                     error
 	loadingActionCalls                 bool
-	agentRequests                      []*runtime.AgentRequest
+	agentRequests                      []*models.AgentRequest
 	agentRequestSelected               int
 	selectedAgentRequest               string
-	actionApprovals                    []*runtime.ApprovalCheckpoint
+	actionApprovals                    []*models.ApprovalCheckpoint
 	actionApprovalSelected             int
 	selectedActionApproval             string
-	activity                           []runtime.ActivityProjection
+	activity                           []models.ActivityProjection
 	activitySelected                   int
 	selectedActivity                   string
 	activityExpanded                   bool
@@ -222,35 +227,35 @@ type Model struct {
 	teamAmendments                     []*kernelteam.DefinitionAmendment
 	teamAmendmentSelected              int
 	selectedTeamAmendment              string
-	objectives                         []*runtime.Objective
-	runbooks                           []*runtime.RunbookActivation
+	objectives                         []*models.Objective
+	runbooks                           []*models.RunbookActivation
 	objectiveSelected                  int
 	selectedObjective                  string
 	runbookSelected                    int
 	selectedRunbook                    string
-	runbookDetail                      *runtime.RunbookDetail
+	runbookDetail                      *routine.RunbookDetail
 	runbookDetailExpanded              bool
-	conversationGateways               []*runtime.ExternalConversationGatewayRegistration
+	conversationGateways               []*models.ExternalConversationGatewayRegistration
 	conversationGatewaySelected        int
 	selectedConversationGateway        string
 	conversationGatewayAdapterSelected int
 	skillActions                       []capability.ModelAction
 	skillBindings                      []*capability.Binding
-	skillBindingUpgradePlan            *runtime.SkillReferenceUpgradePlan
+	skillBindingUpgradePlan            *models.SkillReferenceUpgradePlan
 	skillBindingSelected               int
 	selectedSkillBinding               string
 	selected                           int
 	selectedID                         string
-	artifacts                          []*runtime.Artifact
+	artifacts                          []*models.Artifact
 	artifactSelected                   int
 	selectedArtifact                   string
 	artifactExpanded                   bool
-	conversations                      []*runtime.Conversation
+	conversations                      []*models.Conversation
 	conversationSelected               int
 	selectedConversation               string
-	channelMessages                    []*runtime.ChannelMessage
-	channelRounds                      []*runtime.ParticipationRoundResult
-	channelPresence                    []*runtime.ConversationPresence
+	channelMessages                    []*models.ChannelMessage
+	channelRounds                      []*models.ParticipationRoundResult
+	channelPresence                    []*models.ConversationPresence
 	channelAuditExpanded               bool
 	pendingKey                         string
 	pendingGoal                        string
@@ -265,7 +270,7 @@ type Model struct {
 	// builderConversation is the builder chat opened from "New agent". It is
 	// owned by the builder Agent, so the owner-scoped channel and approval
 	// lists add it (and its cards) explicitly.
-	builderConversation         *runtime.Conversation
+	builderConversation         *models.Conversation
 	pendingMessageKey           string
 	pendingMessageContent       string
 	pendingMessageChannelID     string
@@ -313,13 +318,13 @@ type teamAmendmentChanged struct {
 }
 
 type runsLoaded struct {
-	runs []*runtime.AgentRun
+	runs []*models.AgentRun
 	err  error
 }
 
 type actionCallsLoaded struct {
 	runID string
-	calls []*runtime.ActionCall
+	calls []*models.ActionCall
 	err   error
 }
 
@@ -330,45 +335,45 @@ type agentTurnsLoaded struct {
 }
 
 type agentRequestsLoaded struct {
-	requests []*runtime.AgentRequest
+	requests []*models.AgentRequest
 	err      error
 }
 
 type agentRequestCreated struct {
-	result *runtime.AgentRequestResult
+	result *collaboration.AgentRequestResult
 	err    error
 }
 
 type agentRequestResponded struct {
-	result *runtime.AgentRequestResult
+	result *collaboration.AgentRequestResult
 	action string
 	err    error
 }
 
 type agentRequestCompleted struct {
-	result *runtime.AgentRequestResult
+	result *collaboration.AgentRequestResult
 	err    error
 }
 
 type actionApprovalsLoaded struct {
-	approvals []*runtime.ApprovalCheckpoint
+	approvals []*models.ApprovalCheckpoint
 	err       error
 }
 
 type actionApprovalResolved struct {
-	result *runtime.ApprovalResolutionResult
+	result *models.ApprovalResolutionResult
 	action string
 	err    error
 }
 
 type activityLoaded struct {
-	page   *runtime.ActivityFeedPage
+	page   *activity.ActivityFeedPage
 	append bool
 	err    error
 }
 
 type activityDetailLoaded struct {
-	activity *runtime.ActivityProjection
+	activity *models.ActivityProjection
 	err      error
 }
 
@@ -392,35 +397,35 @@ type agentAmendmentChanged struct {
 }
 
 type objectivesLoaded struct {
-	objectives []*runtime.Objective
-	runbooks   []*runtime.RunbookActivation
+	objectives []*models.Objective
+	runbooks   []*models.RunbookActivation
 	err        error
 }
 
 type runbookDetailLoaded struct {
 	id     string
-	detail *runtime.RunbookDetail
+	detail *routine.RunbookDetail
 	err    error
 }
 
 type runbookChanged struct {
-	activation *runtime.RunbookActivation
+	activation *models.RunbookActivation
 	action     string
 	err        error
 }
 
 type runbookStarted struct {
-	result *runtime.AgentRunCommandResult
+	result *agentrun.AgentRunCommandResult
 	err    error
 }
 
 type objectiveCreated struct {
-	objective *runtime.Objective
+	objective *models.Objective
 	err       error
 }
 
 type objectiveUpdated struct {
-	objective *runtime.Objective
+	objective *models.Objective
 	err       error
 }
 
@@ -444,29 +449,29 @@ type skillBindingChanged struct {
 	err     error
 }
 type skillBindingUpgradePlanned struct {
-	plan *runtime.SkillReferenceUpgradePlan
+	plan *models.SkillReferenceUpgradePlan
 	err  error
 }
 type skillBindingUpgradeApplied struct {
-	receipt *runtime.SkillReferenceUpgradeReceipt
+	receipt *models.SkillReferenceUpgradeReceipt
 	err     error
 }
 
 type artifactsLoaded struct {
-	artifacts []*runtime.Artifact
+	artifacts []*models.Artifact
 	err       error
 }
 
 type conversationsLoaded struct {
-	conversations []*runtime.Conversation
+	conversations []*models.Conversation
 	err           error
 }
 
 type channelDetailLoaded struct {
 	conversationID string
-	messages       []*runtime.ChannelMessage
-	rounds         []*runtime.ParticipationRoundResult
-	presence       []*runtime.ConversationPresence
+	messages       []*models.ChannelMessage
+	rounds         []*models.ParticipationRoundResult
+	presence       []*models.ConversationPresence
 	err            error
 }
 
@@ -484,12 +489,12 @@ type agentBuilderConversationStarted struct {
 }
 
 type conversationCreated struct {
-	conversation *runtime.Conversation
+	conversation *models.Conversation
 	err          error
 }
 
 type channelMessagePosted struct {
-	result *runtime.ChannelMessageCommitResult
+	result *models.ChannelMessageCommitResult
 	err    error
 }
 
@@ -504,13 +509,13 @@ type artifactDownloaded struct {
 }
 
 type runCreated struct {
-	result *runtime.AgentRunCommandResult
+	result *agentrun.AgentRunCommandResult
 	err    error
 }
 
 type runCommanded struct {
-	result *runtime.AgentRunCommandResult
-	kind   runtime.AgentRunCommandKind
+	result *agentrun.AgentRunCommandResult
+	kind   agentrun.AgentRunCommandKind
 	err    error
 }
 
@@ -652,7 +657,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasSkillActions || !skillActionCapability.Available {
 			m.skillActionCapability = kernelapi.Capability{}
 		}
-		if !hasSkillBindings || !skillBindingCapability.Available || m.skillBindingClient == nil || (m.config.Owner.Type != runtime.OwnerTypeAgent && m.config.Owner.Type != runtime.OwnerTypeTeam) {
+		if !hasSkillBindings || !skillBindingCapability.Available || m.skillBindingClient == nil || (m.config.Owner.Type != models.OwnerTypeAgent && m.config.Owner.Type != models.OwnerTypeTeam) {
 			m.skillBindingCapability = kernelapi.Capability{}
 		}
 		if !hasArtifacts || !artifactCapability.Available {
@@ -669,7 +674,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.workforceBundleInspection = nil
 			m.workforceBundlePath = ""
 		}
-		if !hasAgentDefinitions || !agentDefinitionCapability.Available || m.config.Owner.Type != runtime.OwnerTypeAgent {
+		if !hasAgentDefinitions || !agentDefinitionCapability.Available || m.config.Owner.Type != models.OwnerTypeAgent {
 			m.agentDefinitionCapability = kernelapi.Capability{}
 		}
 		if !hasTeamDefinitions || !teamDefinitionCapability.Available {
@@ -1338,7 +1343,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.selectedID = msg.result.Run.ID
 		m.status = commandSuccessMessage(msg.kind)
-		if msg.kind == runtime.AgentRunCommandIntervene {
+		if msg.kind == agentrun.AgentRunCommandIntervene {
 			m.mode = modeCreate
 			m.editor.Reset()
 			m.editor.Placeholder = "Describe the outcome you want…"
@@ -1419,11 +1424,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case modeIntegrationCreate:
 				return m, m.submitConversationGatewayCreation()
 			case modeIntegrationActivate:
-				return m, m.submitConversationGatewayLifecycle(runtime.ExternalConversationGatewayActive, "activated")
+				return m, m.submitConversationGatewayLifecycle(models.ExternalConversationGatewayActive, "activated")
 			case modeIntegrationPause:
-				return m, m.submitConversationGatewayLifecycle(runtime.ExternalConversationGatewayPaused, "paused")
+				return m, m.submitConversationGatewayLifecycle(models.ExternalConversationGatewayPaused, "paused")
 			case modeIntegrationRetire:
-				return m, m.submitConversationGatewayLifecycle(runtime.ExternalConversationGatewayRetired, "retired")
+				return m, m.submitConversationGatewayLifecycle(models.ExternalConversationGatewayRetired, "retired")
 			case modeSkillBindingUpsert:
 				return m, m.submitSkillBindingUpsert()
 			case modeSkillBindingDisable:
@@ -1439,13 +1444,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case modeRequestCreate:
 				return m, m.submitAgentRequestCreation()
 			case modeRequestAccept:
-				return m, m.submitAgentRequestResponse(runtime.AgentRequestDecisionAccept)
+				return m, m.submitAgentRequestResponse(collaboration.AgentRequestDecisionAccept)
 			case modeRequestReject:
-				return m, m.submitAgentRequestResponse(runtime.AgentRequestDecisionReject)
+				return m, m.submitAgentRequestResponse(collaboration.AgentRequestDecisionReject)
 			case modeRequestClarify:
-				return m, m.submitAgentRequestResponse(runtime.AgentRequestDecisionRequestClarification)
+				return m, m.submitAgentRequestResponse(collaboration.AgentRequestDecisionRequestClarification)
 			case modeRequestProvideClarification:
-				return m, m.submitAgentRequestResponse(runtime.AgentRequestDecisionProvideClarification)
+				return m, m.submitAgentRequestResponse(collaboration.AgentRequestDecisionProvideClarification)
 			case modeRequestComplete:
 				return m, m.submitAgentRequestCompletion()
 			case modeApprovalApprove:
@@ -1663,17 +1668,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.pauseOrResumeTeamDeployment()
 			} else if m.section == sectionIntegrations {
 				if item := m.selectedConversationGatewayRecord(); item != nil {
-					if item.Status == runtime.ExternalConversationGatewayActive {
+					if item.Status == models.ExternalConversationGatewayActive {
 						m.prepareConversationGatewayLifecycle(modeIntegrationPause)
-					} else if item.Status == runtime.ExternalConversationGatewayPaused {
+					} else if item.Status == models.ExternalConversationGatewayPaused {
 						m.prepareConversationGatewayLifecycle(modeIntegrationActivate)
 					}
 				}
 			}
 		case "x":
 			if m.section == sectionRuns {
-				return m, m.commandSelected(runtime.AgentRunCommandCancel, "")
-			} else if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionReject) {
+				return m, m.commandSelected(agentrun.AgentRunCommandCancel, "")
+			} else if m.section == sectionRequests && m.canRespondToSelectedRequest(collaboration.AgentRequestDecisionReject) {
 				m.prepareRequestComposer(modeRequestReject, "Explain why this request cannot be accepted…")
 			} else if m.section == sectionApprovals && m.canResolveSelectedActionApproval() {
 				m.prepareRequestComposer(modeApprovalReject, "Explain why this action must not proceed…")
@@ -1690,9 +1695,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.focusComposerEditor()
 			}
 		case "y":
-			if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionAccept) {
+			if m.section == sectionRequests && m.canRespondToSelectedRequest(collaboration.AgentRequestDecisionAccept) {
 				placeholder := "Optionally record a concise acceptance note…"
-				if request := m.selectedAgentRequestRecord(); request != nil && request.Recipient.Type == runtime.OwnerTypeTeam {
+				if request := m.selectedAgentRequestRecord(); request != nil && request.Recipient.Type == models.OwnerTypeTeam {
 					placeholder = "First line: assigned Agent ID\nOptional remaining lines: acceptance note"
 				}
 				m.prepareRequestComposer(modeRequestAccept, placeholder)
@@ -1704,11 +1709,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentApprove, "Record why this exact Team amendment is approved…")
 			}
 		case "q":
-			if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionRequestClarification) {
+			if m.section == sectionRequests && m.canRespondToSelectedRequest(collaboration.AgentRequestDecisionRequestClarification) {
 				m.prepareRequestComposer(modeRequestClarify, "Ask the requester for the missing information…")
 			}
 		case "M":
-			if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionProvideClarification) {
+			if m.section == sectionRequests && m.canRespondToSelectedRequest(collaboration.AgentRequestDecisionProvideClarification) {
 				m.prepareRequestComposer(modeRequestProvideClarification, "Provide the clarification requested by the recipient…")
 			}
 		case "g":
@@ -1781,7 +1786,7 @@ func (m *Model) loadCapabilities() tea.Cmd {
 	return func() tea.Msg {
 		var document kernelapi.CapabilityDocument
 		var err error
-		if m.config.Owner.Type == runtime.OwnerTypeAgent && m.agentCapabilityClient != nil {
+		if m.config.Owner.Type == models.OwnerTypeAgent && m.agentCapabilityClient != nil {
 			document, err = m.agentCapabilityClient.AgentDefinitionCapabilities(m.ctx, capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}, m.config.Owner.ID)
 		} else {
 			document, err = m.client.Capabilities(m.ctx)
@@ -1806,7 +1811,7 @@ func (m *Model) submitAgentBuilderPrompt() tea.Cmd {
 	}
 	request := kernelapi.StartAgentBuilderConversationRequest{
 		Scope: m.config.Scope, Prompt: prompt,
-		Parameters:     runtime.AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent},
+		Parameters:     models.AgentBuilderParameters{Kind: models.AgentBuilderKindAgent},
 		IdempotencyKey: m.pendingAgentBuilderKey,
 	}
 	m.busy, m.err = true, nil
@@ -1845,28 +1850,28 @@ func (m *Model) loadRuns() tea.Cmd {
 	m.loading = true
 	owner := m.config.Owner
 	return func() tea.Msg {
-		owned, err := m.client.ListAgentRuns(m.ctx, runtime.AgentRunFilter{
+		owned, err := m.client.ListAgentRuns(m.ctx, models.AgentRunFilter{
 			Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100,
 		})
 		if err != nil {
 			return runsLoaded{err: err}
 		}
-		if owner.Type != runtime.OwnerTypeAgent {
+		if owner.Type != models.OwnerTypeAgent {
 			return runsLoaded{runs: owned}
 		}
-		assigned, err := m.client.ListAgentRuns(m.ctx, runtime.AgentRunFilter{
+		assigned, err := m.client.ListAgentRuns(m.ctx, models.AgentRunFilter{
 			Scope: m.config.Scope, AssignedAgentID: owner.ID, Limit: 100,
 		})
 		if err != nil {
 			return runsLoaded{err: err}
 		}
-		byID := make(map[string]*runtime.AgentRun, len(owned)+len(assigned))
+		byID := make(map[string]*models.AgentRun, len(owned)+len(assigned))
 		for _, run := range append(owned, assigned...) {
 			if run != nil {
 				byID[run.ID] = run
 			}
 		}
-		runs := make([]*runtime.AgentRun, 0, len(byID))
+		runs := make([]*models.AgentRun, 0, len(byID))
 		for _, run := range byID {
 			runs = append(runs, run)
 		}
@@ -1894,7 +1899,7 @@ func (m *Model) loadSelectedAgentTurns() tea.Cmd {
 	runID := run.ID
 	m.loadingAgentTurns = true
 	return func() tea.Msg {
-		turns, err := m.client.ListAgentTurns(m.ctx, runtime.AgentTurnFilter{
+		turns, err := m.client.ListAgentTurns(m.ctx, models.AgentTurnFilter{
 			Scope: m.config.Scope, RunID: runID, Limit: 100,
 		})
 		return agentTurnsLoaded{runID: runID, turns: turns, err: err}
@@ -1911,18 +1916,18 @@ func (m *Model) loadSelectedActionCalls() tea.Cmd {
 	runID := run.ID
 	m.loadingActionCalls = true
 	return func() tea.Msg {
-		calls, err := m.client.ListActionCalls(m.ctx, runtime.ActionFilter{
+		calls, err := m.client.ListActionCalls(m.ctx, models.ActionFilter{
 			Scope: m.config.Scope, RunID: runID, Limit: 100,
 		})
 		return actionCallsLoaded{runID: runID, calls: calls, err: err}
 	}
 }
 
-func (m *Model) activityFeedRequest(cursor string, includeDetails bool, limit int) runtime.ActivityFeedRequest {
-	request := runtime.ActivityFeedRequest{
+func (m *Model) activityFeedRequest(cursor string, includeDetails bool, limit int) activity.ActivityFeedRequest {
+	request := activity.ActivityFeedRequest{
 		Scope: m.config.Scope, Cursor: cursor, IncludeDetails: includeDetails, Limit: limit,
 	}
-	if m.config.Owner.Type == runtime.OwnerTypeTeam {
+	if m.config.Owner.Type == models.OwnerTypeTeam {
 		request.TeamID = m.config.Owner.ID
 	} else {
 		request.AgentID = m.config.Owner.ID
@@ -1984,12 +1989,12 @@ func (m *Model) loadSelectedActivityDetail() tea.Cmd {
 	}
 }
 
-func (m *Model) mergeActivityPage(page *runtime.ActivityFeedPage, appendPage bool) {
+func (m *Model) mergeActivityPage(page *activity.ActivityFeedPage, appendPage bool) {
 	if page == nil {
 		return
 	}
 	wasEmpty := len(m.activity) == 0
-	byID := make(map[string]runtime.ActivityProjection, len(m.activity)+len(page.Items))
+	byID := make(map[string]models.ActivityProjection, len(m.activity)+len(page.Items))
 	for _, item := range m.activity {
 		byID[item.ID] = item
 	}
@@ -2015,7 +2020,7 @@ func (m *Model) mergeActivityPage(page *runtime.ActivityFeedPage, appendPage boo
 	}
 }
 
-func activityProjectionHasDetails(item runtime.ActivityProjection) bool {
+func activityProjectionHasDetails(item models.ActivityProjection) bool {
 	return item.Payload != nil || len(item.ConversationRefs) > 0 || item.CorrelationID != "" || item.CausationID != ""
 }
 
@@ -2026,25 +2031,25 @@ func (m *Model) loadAgentRequests() tea.Cmd {
 	m.loading = true
 	party := m.localCollaborationParty()
 	return func() tea.Msg {
-		outgoing, err := m.client.ListAgentRequests(m.ctx, runtime.AgentRequestFilter{
+		outgoing, err := m.client.ListAgentRequests(m.ctx, models.AgentRequestFilter{
 			Scope: m.config.Scope, Requester: &party, Limit: 100,
 		})
 		if err != nil {
 			return agentRequestsLoaded{err: err}
 		}
-		incoming, err := m.client.ListAgentRequests(m.ctx, runtime.AgentRequestFilter{
+		incoming, err := m.client.ListAgentRequests(m.ctx, models.AgentRequestFilter{
 			Scope: m.config.Scope, Recipient: &party, Limit: 100,
 		})
 		if err != nil {
 			return agentRequestsLoaded{err: err}
 		}
-		byID := make(map[string]*runtime.AgentRequest, len(outgoing)+len(incoming))
+		byID := make(map[string]*models.AgentRequest, len(outgoing)+len(incoming))
 		for _, request := range append(outgoing, incoming...) {
 			if request != nil {
 				byID[request.ID] = request
 			}
 		}
-		requests := make([]*runtime.AgentRequest, 0, len(byID))
+		requests := make([]*models.AgentRequest, 0, len(byID))
 		for _, request := range byID {
 			requests = append(requests, request)
 		}
@@ -2066,7 +2071,7 @@ func (m *Model) loadActionApprovals() tea.Cmd {
 	owner := m.config.Owner
 	builder := m.builderConversation
 	return func() tea.Msg {
-		approvals, err := m.client.ListActionApprovals(m.ctx, runtime.ApprovalFilter{
+		approvals, err := m.client.ListActionApprovals(m.ctx, models.ApprovalFilter{
 			Scope: m.config.Scope, Owner: &owner, Limit: 100,
 		})
 		if err != nil || builder == nil || builder.Owner == owner {
@@ -2075,7 +2080,7 @@ func (m *Model) loadActionApprovals() tea.Cmd {
 		// Builder cards belong to the builder Agent, not to this TUI's
 		// owner; the person who asked for the agent approves them here.
 		builderOwner := builder.Owner
-		cards, err := m.client.ListActionApprovals(m.ctx, runtime.ApprovalFilter{
+		cards, err := m.client.ListActionApprovals(m.ctx, models.ApprovalFilter{
 			Scope: builder.Scope, Owner: &builderOwner, Limit: 100,
 		})
 		if err != nil {
@@ -2086,7 +2091,7 @@ func (m *Model) loadActionApprovals() tea.Cmd {
 }
 
 func (m *Model) loadCompilations() tea.Cmd {
-	if !m.supportsAgentDefinition(kernelapi.OperationGet) || m.config.Owner.Type != runtime.OwnerTypeAgent {
+	if !m.supportsAgentDefinition(kernelapi.OperationGet) || m.config.Owner.Type != models.OwnerTypeAgent {
 		return nil
 	}
 	m.loading = true
@@ -2160,13 +2165,13 @@ func (m *Model) loadObjectives() tea.Cmd {
 	}
 	m.loading = true
 	return func() tea.Msg {
-		objectives, err := m.client.ListObjectives(m.ctx, runtime.ObjectiveFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100})
+		objectives, err := m.client.ListObjectives(m.ctx, models.ObjectiveFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100})
 		if err != nil {
 			return objectivesLoaded{err: err}
 		}
-		var runbooks []*runtime.RunbookActivation
+		var runbooks []*models.RunbookActivation
 		if m.supportsRunbook(kernelapi.OperationList) {
-			runbooks, err = m.client.ListRunbooks(m.ctx, runtime.RunbookActivationFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 500})
+			runbooks, err = m.client.ListRunbooks(m.ctx, models.RunbookActivationFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 500})
 		}
 		return objectivesLoaded{objectives: objectives, runbooks: runbooks, err: err}
 	}
@@ -2195,14 +2200,14 @@ func (m *Model) toggleSelectedRunbookDetail() tea.Cmd {
 
 func (m *Model) startSelectedRunbook() tea.Cmd {
 	selected := m.selectedRunbookRecord()
-	if selected == nil || selected.Status != runtime.RunbookActivationActive || !m.supportsRunbook(kernelapi.OperationExecute) || m.busy {
+	if selected == nil || selected.Status != models.RunbookActivationActive || !m.supportsRunbook(kernelapi.OperationExecute) || m.busy {
 		return nil
 	}
 	m.busy, m.err = true, nil
 	m.status = "Starting the exact reviewed Runbook…"
 	id := selected.ID
 	return func() tea.Msg {
-		result, err := m.client.StartRunbook(m.ctx, m.config.Scope, id, runtime.StartRunbookActivationRequest{
+		result, err := m.client.StartRunbook(m.ctx, m.config.Scope, id, routine.StartRunbookActivationRequest{
 			IdempotencyKey: uuid.NewString(),
 			Actor:          m.config.Actor,
 		})
@@ -2212,18 +2217,18 @@ func (m *Model) startSelectedRunbook() tea.Cmd {
 
 func (m *Model) pauseOrResumeSelectedRunbook() tea.Cmd {
 	selected := m.selectedRunbookRecord()
-	if selected == nil || selected.Status == runtime.RunbookActivationRetired || !m.supportsRunbook(kernelapi.OperationUpdate) || m.busy {
+	if selected == nil || selected.Status == models.RunbookActivationRetired || !m.supportsRunbook(kernelapi.OperationUpdate) || m.busy {
 		return nil
 	}
-	status, action := runtime.RunbookActivationActive, "resumed"
-	if selected.Status == runtime.RunbookActivationActive {
-		status, action = runtime.RunbookActivationPaused, "paused"
+	status, action := models.RunbookActivationActive, "resumed"
+	if selected.Status == models.RunbookActivationActive {
+		status, action = models.RunbookActivationPaused, "paused"
 	}
 	m.busy, m.err = true, nil
 	m.status = "Updating Runbook lifecycle…"
 	id, revision := selected.ID, selected.Revision
 	return func() tea.Msg {
-		activation, err := m.client.UpdateRunbook(m.ctx, m.config.Scope, id, runtime.UpdateRunbookActivationRequest{ExpectedRevision: revision, Status: status})
+		activation, err := m.client.UpdateRunbook(m.ctx, m.config.Scope, id, routine.UpdateRunbookActivationRequest{ExpectedRevision: revision, Status: status})
 		return runbookChanged{activation: activation, action: action, err: err}
 	}
 }
@@ -2241,7 +2246,7 @@ func (m *Model) reconcileRunbookSchedules() tea.Cmd {
 }
 
 func (m *Model) loadSkillActions() tea.Cmd {
-	if !m.supportsSkillAction(kernelapi.OperationList) || m.config.Owner.Type != runtime.OwnerTypeAgent {
+	if !m.supportsSkillAction(kernelapi.OperationList) || m.config.Owner.Type != models.OwnerTypeAgent {
 		return nil
 	}
 	m.loading = true
@@ -2284,7 +2289,7 @@ func (m *Model) loadArtifacts() tea.Cmd {
 	}
 	m.loading = true
 	return func() tea.Msg {
-		artifacts, err := m.client.ListArtifacts(m.ctx, runtime.ArtifactFilter{
+		artifacts, err := m.client.ListArtifacts(m.ctx, models.ArtifactFilter{
 			Scope: m.config.Scope, Owner: &m.config.Owner, LatestOnly: true, Limit: 100,
 		})
 		return artifactsLoaded{artifacts: artifacts, err: err}
@@ -2298,7 +2303,7 @@ func (m *Model) loadConversations() tea.Cmd {
 	m.loading = true
 	builder := m.builderConversation
 	return func() tea.Msg {
-		conversations, err := m.conversationClient.ListConversations(m.ctx, runtime.ConversationFilter{
+		conversations, err := m.conversationClient.ListConversations(m.ctx, models.ConversationFilter{
 			Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100,
 		})
 		if err != nil || builder == nil || builder.Owner == m.config.Owner {
@@ -2308,7 +2313,7 @@ func (m *Model) loadConversations() tea.Cmd {
 		if err != nil {
 			return conversationsLoaded{err: err}
 		}
-		return conversationsLoaded{conversations: append([]*runtime.Conversation{current}, conversations...)}
+		return conversationsLoaded{conversations: append([]*models.Conversation{current}, conversations...)}
 	}
 }
 
@@ -2325,22 +2330,22 @@ func (m *Model) loadSelectedConversation() tea.Cmd {
 	includeAudit := m.supportsChannel(kernelapi.OperationAudit)
 	includePresence := m.supportsChannel(kernelapi.OperationPresence)
 	return func() tea.Msg {
-		messages, err := conversationClient.ListChannelMessages(ctx, runtime.ChannelMessageFilter{
+		messages, err := conversationClient.ListChannelMessages(ctx, models.ChannelMessageFilter{
 			Scope: scope, ConversationID: conversationID, Limit: 50, Descending: true,
 		})
 		if err != nil {
 			return channelDetailLoaded{conversationID: conversationID, err: err}
 		}
-		var rounds []*runtime.ParticipationRoundResult
+		var rounds []*models.ParticipationRoundResult
 		if includeAudit {
-			rounds, err = conversationClient.ListParticipationRounds(ctx, runtime.ParticipationRoundFilter{
+			rounds, err = conversationClient.ListParticipationRounds(ctx, models.ParticipationRoundFilter{
 				Scope: scope, ConversationID: conversationID, Limit: 20,
 			})
 			if err != nil {
 				return channelDetailLoaded{conversationID: conversationID, err: err}
 			}
 		}
-		var presence []*runtime.ConversationPresence
+		var presence []*models.ConversationPresence
 		if includePresence {
 			presence, err = conversationClient.ListConversationPresence(ctx, scope, conversationID)
 		}
@@ -2382,14 +2387,14 @@ func (m *Model) loadPanel() tea.Cmd {
 	return m.loadRuns()
 }
 
-func (m *Model) submitAgentRequestResponse(decision runtime.AgentRequestDecision) tea.Cmd {
+func (m *Model) submitAgentRequestResponse(decision collaboration.AgentRequestDecision) tea.Cmd {
 	request := m.selectedAgentRequestRecord()
 	if request == nil || m.busy || !m.canRespondToSelectedRequest(decision) {
 		return nil
 	}
 	message := strings.TrimSpace(m.editor.Value())
 	assignedAgentID := ""
-	if decision == runtime.AgentRequestDecisionAccept && request.Recipient.Type == runtime.OwnerTypeTeam {
+	if decision == collaboration.AgentRequestDecisionAccept && request.Recipient.Type == models.OwnerTypeTeam {
 		lines := strings.Split(message, "\n")
 		assignedAgentID = strings.TrimSpace(lines[0])
 		if assignedAgentID == "" {
@@ -2398,12 +2403,12 @@ func (m *Model) submitAgentRequestResponse(decision runtime.AgentRequestDecision
 		}
 		message = strings.TrimSpace(strings.Join(lines[1:], "\n"))
 	}
-	if (decision == runtime.AgentRequestDecisionReject || decision == runtime.AgentRequestDecisionRequestClarification || decision == runtime.AgentRequestDecisionProvideClarification) && message == "" {
+	if (decision == collaboration.AgentRequestDecisionReject || decision == collaboration.AgentRequestDecisionRequestClarification || decision == collaboration.AgentRequestDecisionProvideClarification) && message == "" {
 		m.status = "Record a concise reason or clarification before submitting."
 		return nil
 	}
 	principal := request.Recipient
-	if decision == runtime.AgentRequestDecisionProvideClarification {
+	if decision == collaboration.AgentRequestDecisionProvideClarification {
 		principal = request.Requester
 	}
 	m.busy, m.err = true, nil
@@ -2425,7 +2430,7 @@ func (m *Model) submitAgentRequestCreation() tea.Cmd {
 	if source == nil || m.busy || !m.supportsAgentRequest(kernelapi.OperationCreate) {
 		return nil
 	}
-	if !runtime.CanStartAgentRequestFromRun(source) {
+	if !collaboration.CanStartAgentRequestFromRun(source) {
 		m.status = "Start or resume active work before requesting collaboration from it."
 		return nil
 	}
@@ -2449,37 +2454,37 @@ func (m *Model) submitAgentRequestCreation() tea.Cmd {
 	}
 }
 
-func parseAgentRequestPrompt(prompt string) (runtime.AgentRequestKind, runtime.CollaborationParty, string, error) {
+func parseAgentRequestPrompt(prompt string) (models.AgentRequestKind, models.CollaborationParty, string, error) {
 	lines := strings.Split(strings.TrimSpace(prompt), "\n")
 	if len(lines) < 2 {
-		return "", runtime.CollaborationParty{}, "", errors.New("Put the recipient on the first line and the requested outcome below it.")
+		return "", models.CollaborationParty{}, "", errors.New("Put the recipient on the first line and the requested outcome below it.")
 	}
 	directive := strings.Fields(strings.TrimSpace(lines[0]))
-	kind := runtime.AgentRequestKindRequest
+	kind := models.AgentRequestKindRequest
 	if len(directive) == 2 {
-		switch runtime.AgentRequestKind(strings.ToLower(directive[0])) {
-		case runtime.AgentRequestKindHandoff:
-			kind = runtime.AgentRequestKindHandoff
+		switch models.AgentRequestKind(strings.ToLower(directive[0])) {
+		case models.AgentRequestKindHandoff:
+			kind = models.AgentRequestKindHandoff
 			directive = directive[1:]
-		case runtime.AgentRequestKindEscalation:
-			kind = runtime.AgentRequestKindEscalation
+		case models.AgentRequestKindEscalation:
+			kind = models.AgentRequestKindEscalation
 			directive = directive[1:]
 		}
 	}
 	if len(directive) != 1 {
-		return "", runtime.CollaborationParty{}, "", errors.New("Use agent:<id>, team:<id>, handoff agent:<id>, or escalation team:<id> on the first line.")
+		return "", models.CollaborationParty{}, "", errors.New("Use agent:<id>, team:<id>, handoff agent:<id>, or escalation team:<id> on the first line.")
 	}
 	identity := strings.SplitN(strings.TrimSpace(directive[0]), ":", 2)
 	if len(identity) != 2 {
-		return "", runtime.CollaborationParty{}, "", errors.New("Use agent:<id> or team:<id> for the recipient.")
+		return "", models.CollaborationParty{}, "", errors.New("Use agent:<id> or team:<id> for the recipient.")
 	}
-	recipient := runtime.CollaborationParty{Type: runtime.OwnerType(strings.ToLower(strings.TrimSpace(identity[0]))), ID: strings.TrimSpace(identity[1])}
+	recipient := models.CollaborationParty{Type: models.OwnerType(strings.ToLower(strings.TrimSpace(identity[0]))), ID: strings.TrimSpace(identity[1])}
 	if err := recipient.Validate(); err != nil {
-		return "", runtime.CollaborationParty{}, "", fmt.Errorf("recipient: %w", err)
+		return "", models.CollaborationParty{}, "", fmt.Errorf("recipient: %w", err)
 	}
 	goal := strings.TrimSpace(strings.Join(lines[1:], "\n"))
 	if goal == "" {
-		return "", runtime.CollaborationParty{}, "", errors.New("Describe the requested outcome below the recipient.")
+		return "", models.CollaborationParty{}, "", errors.New("Describe the requested outcome below the recipient.")
 	}
 	return kind, recipient, goal, nil
 }
@@ -2535,7 +2540,7 @@ func (m *Model) submitActionApproval(approve bool) tea.Cmd {
 	key := m.pendingApprovalKey
 	payload := kernelapi.ResolveActionApprovalRequest{
 		ExpectedRevision: approval.Revision, DecisionID: key,
-		Decision:  map[bool]runtime.ApprovalDecision{true: runtime.ApprovalDecisionApprove, false: runtime.ApprovalDecisionReject}[approve],
+		Decision:  map[bool]models.ApprovalDecision{true: models.ApprovalDecisionApprove, false: models.ApprovalDecisionReject}[approve],
 		Principal: m.localApprovalPrincipal(), Reason: reason,
 	}
 	return func() tea.Msg {
@@ -2560,7 +2565,7 @@ func (m *Model) submitObjective() tea.Cmd {
 	m.err = nil
 	m.status = "Adding objective to the durable portfolio…"
 	request := kernelapi.CreateObjectiveRequest{
-		Scope: m.config.Scope, Owner: m.config.Owner, Title: objectiveTitle(prompt), Goal: prompt, Status: runtime.ObjectiveStatusActive,
+		Scope: m.config.Scope, Owner: m.config.Owner, Title: objectiveTitle(prompt), Goal: prompt, Status: models.ObjectiveStatusActive,
 	}
 	return func() tea.Msg {
 		objective, err := m.client.CreateObjective(m.ctx, request, key)
@@ -2725,8 +2730,8 @@ func (m *Model) submitSkillBindingUpgradePlan() tea.Cmd {
 		m.status = "Enter a different exact installed target version."
 		return nil
 	}
-	request := runtime.PlanSkillReferenceUpgradeRequest{
-		Scope: runtime.Scope{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}, DeploymentID: m.config.Owner.ID,
+	request := skillbinding.PlanSkillReferenceUpgradeRequest{
+		Scope: models.Scope{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}, DeploymentID: m.config.Owner.ID,
 		BindingID: binding.ID, ToVersion: version, ToSourceIdentity: strings.TrimSpace(fields["source"]),
 	}
 	m.busy, m.err, m.status = true, nil, "Calculating the atomic Skill update impact…"
@@ -2748,13 +2753,13 @@ func (m *Model) submitSkillBindingUpgradeApply() tea.Cmd {
 		m.status = "Record why this reviewed update should be applied."
 		return nil
 	}
-	request := runtime.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: m.config.Actor, Reason: reason}
+	request := skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: m.config.Actor, Reason: reason}
 	if plan.ApprovalRequired {
 		if approvalReason == "" {
 			m.status = "This update widens authority. Record the explicit approval reason."
 			return nil
 		}
-		request.Approval = &runtime.SkillReferenceUpgradeApproval{Principal: m.config.Actor, Reason: approvalReason}
+		request.Approval = &models.SkillReferenceUpgradeApproval{Principal: m.config.Actor, Reason: approvalReason}
 	}
 	m.busy, m.err, m.status = true, nil, "Applying every reviewed Skill reference atomically…"
 	return func() tea.Msg {
@@ -2834,16 +2839,16 @@ func (m *Model) submitChannelMessage() tea.Cmd {
 		m.pendingMessageContent = content
 		m.pendingMessageChannelID = conversation.ID
 	}
-	intent := runtime.MessageIntentUpdate
+	intent := models.MessageIntentUpdate
 	requiresResponse := false
 	if strings.HasSuffix(content, "?") {
-		intent = runtime.MessageIntentQuestion
+		intent = models.MessageIntentQuestion
 		requiresResponse = true
 	}
 	request := kernelapi.PostChannelMessageRequest{
 		Scope: m.config.Scope, ExpectedRevision: conversation.Revision,
 		Sender: m.operatorParticipant(), Intent: intent, Content: content,
-		Audience:         runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel},
+		Audience:         models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		RequiresResponse: requiresResponse,
 	}
 	key := m.pendingMessageKey
@@ -2903,9 +2908,9 @@ func (m *Model) submitRun() tea.Cmd {
 	m.status = "Creating durable work…"
 	request := kernelapi.CreateAgentRunRequest{
 		Scope: m.config.Scope, Owner: m.config.Owner, Goal: goal,
-		Source: runtime.RunSourceManual, Actor: m.config.Actor,
+		Source: models.RunSourceManual, Actor: m.config.Actor,
 	}
-	if m.config.Owner.Type == runtime.OwnerTypeAgent {
+	if m.config.Owner.Type == models.OwnerTypeAgent {
 		request.AssignedAgentID = m.config.Owner.ID
 	}
 	return func() tea.Msg {
@@ -2959,10 +2964,10 @@ func (m *Model) submitRunbookOperation() tea.Cmd {
 	m.status = "Starting the exact deterministic operation…"
 	deploymentID := entry.Deployment.ID
 	request := kernelapi.CreateAgentRunRequest{
-		Scope: m.config.Scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: deploymentID},
+		Scope: m.config.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID},
 		AssignedAgentID: deploymentID, Entrypoint: row.Focus.Entrypoint,
 		Goal:   fmt.Sprintf("Run %s · %s", row.Focus.AgentName, row.Focus.Entrypoint),
-		Source: runtime.RunSourceManual, Context: inputs, Actor: m.config.Actor,
+		Source: models.RunSourceManual, Context: inputs, Actor: m.config.Actor,
 	}
 	idempotencyKey := m.pendingKey
 	return func() tea.Msg {
@@ -2977,7 +2982,7 @@ func (m *Model) submitGuidance() tea.Cmd {
 		m.status = "Write the guidance you want the worker to receive."
 		return nil
 	}
-	return m.commandSelected(runtime.AgentRunCommandIntervene, instruction)
+	return m.commandSelected(agentrun.AgentRunCommandIntervene, instruction)
 }
 
 func (m *Model) pauseOrResume() tea.Cmd {
@@ -2985,13 +2990,13 @@ func (m *Model) pauseOrResume() tea.Cmd {
 	if run == nil {
 		return nil
 	}
-	if run.Status == runtime.AgentRunStatusPaused {
-		return m.commandSelected(runtime.AgentRunCommandResume, "")
+	if run.Status == models.AgentRunStatusPaused {
+		return m.commandSelected(agentrun.AgentRunCommandResume, "")
 	}
-	return m.commandSelected(runtime.AgentRunCommandPause, "")
+	return m.commandSelected(agentrun.AgentRunCommandPause, "")
 }
 
-func (m *Model) commandSelected(kind runtime.AgentRunCommandKind, instruction string) tea.Cmd {
+func (m *Model) commandSelected(kind agentrun.AgentRunCommandKind, instruction string) tea.Cmd {
 	run := m.selectedRun()
 	if run == nil || m.busy || !m.commandAllowed(run, kind) {
 		return nil
@@ -3132,18 +3137,18 @@ func (m *Model) supportsAgentBuilder() bool {
 	return m.ready && m.agentBuilderClient != nil && m.agentBuilderCapability.Supports(kernelapi.OperationCreate)
 }
 
-func (m *Model) commandAllowed(run *runtime.AgentRun, kind runtime.AgentRunCommandKind) bool {
+func (m *Model) commandAllowed(run *models.AgentRun, kind agentrun.AgentRunCommandKind) bool {
 	if run == nil || isTerminal(run.Status) {
 		return false
 	}
 	switch kind {
-	case runtime.AgentRunCommandPause:
-		return run.Status != runtime.AgentRunStatusPaused && m.supportsRun(kernelapi.OperationPause)
-	case runtime.AgentRunCommandResume:
-		return run.Status == runtime.AgentRunStatusPaused && m.supportsRun(kernelapi.OperationResume)
-	case runtime.AgentRunCommandCancel:
+	case agentrun.AgentRunCommandPause:
+		return run.Status != models.AgentRunStatusPaused && m.supportsRun(kernelapi.OperationPause)
+	case agentrun.AgentRunCommandResume:
+		return run.Status == models.AgentRunStatusPaused && m.supportsRun(kernelapi.OperationResume)
+	case agentrun.AgentRunCommandCancel:
 		return m.supportsRun(kernelapi.OperationCancel)
-	case runtime.AgentRunCommandIntervene:
+	case agentrun.AgentRunCommandIntervene:
 		return m.supportsRun(kernelapi.OperationIntervene)
 	default:
 		return false
@@ -3177,14 +3182,14 @@ func (m *Model) pauseOrResumeAgentDeployment() tea.Cmd {
 	}
 }
 
-func (m *Model) selectedRun() *runtime.AgentRun {
+func (m *Model) selectedRun() *models.AgentRun {
 	if m.selected < 0 || m.selected >= len(m.runs) {
 		return nil
 	}
 	return m.runs[m.selected]
 }
 
-func (m *Model) selectedAgentRequestRecord() *runtime.AgentRequest {
+func (m *Model) selectedAgentRequestRecord() *models.AgentRequest {
 	if m.agentRequestSelected < 0 || m.agentRequestSelected >= len(m.agentRequests) {
 		return nil
 	}
@@ -3214,7 +3219,7 @@ func (m *Model) moveAgentRequestSelection(delta int) {
 	m.selectedAgentRequest = m.agentRequests[m.agentRequestSelected].ID
 }
 
-func (m *Model) selectedActionApprovalRecord() *runtime.ApprovalCheckpoint {
+func (m *Model) selectedActionApprovalRecord() *models.ApprovalCheckpoint {
 	if m.actionApprovalSelected < 0 || m.actionApprovalSelected >= len(m.actionApprovals) {
 		return nil
 	}
@@ -3244,17 +3249,17 @@ func (m *Model) moveActionApprovalSelection(delta int) {
 	m.selectedActionApproval = m.actionApprovals[m.actionApprovalSelected].ID
 }
 
-func (m *Model) canRespondToSelectedRequest(decision runtime.AgentRequestDecision) bool {
+func (m *Model) canRespondToSelectedRequest(decision collaboration.AgentRequestDecision) bool {
 	request := m.selectedAgentRequestRecord()
 	if request == nil || !m.supportsAgentRequest(kernelapi.OperationRespond) {
 		return false
 	}
 	local := m.localCollaborationParty()
 	switch decision {
-	case runtime.AgentRequestDecisionProvideClarification:
-		return request.Status == runtime.AgentRequestStatusClarificationRequested && request.Requester == local
-	case runtime.AgentRequestDecisionAccept, runtime.AgentRequestDecisionReject, runtime.AgentRequestDecisionRequestClarification:
-		return request.Status == runtime.AgentRequestStatusPending && request.Recipient == local
+	case collaboration.AgentRequestDecisionProvideClarification:
+		return request.Status == models.AgentRequestStatusClarificationRequested && request.Requester == local
+	case collaboration.AgentRequestDecisionAccept, collaboration.AgentRequestDecisionReject, collaboration.AgentRequestDecisionRequestClarification:
+		return request.Status == models.AgentRequestStatusPending && request.Recipient == local
 	default:
 		return false
 	}
@@ -3262,7 +3267,7 @@ func (m *Model) canRespondToSelectedRequest(decision runtime.AgentRequestDecisio
 
 func (m *Model) canCompleteSelectedAgentRequest() bool {
 	request := m.selectedAgentRequestRecord()
-	if request == nil || !m.supportsAgentRequest(kernelapi.OperationComplete) || request.Status != runtime.AgentRequestStatusAccepted || request.Recipient != m.localCollaborationParty() || request.ChildRunID == "" {
+	if request == nil || !m.supportsAgentRequest(kernelapi.OperationComplete) || request.Status != models.AgentRequestStatusAccepted || request.Recipient != m.localCollaborationParty() || request.ChildRunID == "" {
 		return false
 	}
 	if len(request.AcceptanceCriteria) > 0 {
@@ -3278,7 +3283,7 @@ func (m *Model) canCompleteSelectedAgentRequest() bool {
 
 func (m *Model) canResolveSelectedActionApproval() bool {
 	approval := m.selectedActionApprovalRecord()
-	if approval == nil || approval.Status != runtime.ApprovalStatusPending || !m.supportsActionApproval(kernelapi.OperationResolve) {
+	if approval == nil || approval.Status != models.ApprovalStatusPending || !m.supportsActionApproval(kernelapi.OperationResolve) {
 		return false
 	}
 	principal := m.localApprovalPrincipal()
@@ -3290,27 +3295,27 @@ func (m *Model) canResolveSelectedActionApproval() bool {
 	return false
 }
 
-func (m *Model) localCollaborationParty() runtime.CollaborationParty {
-	return runtime.CollaborationParty{Type: m.config.Owner.Type, ID: m.config.Owner.ID}
+func (m *Model) localCollaborationParty() models.CollaborationParty {
+	return models.CollaborationParty{Type: m.config.Owner.Type, ID: m.config.Owner.ID}
 }
 
-func (m *Model) localApprovalPrincipal() runtime.ApprovalPrincipal {
-	principal := runtime.ApprovalPrincipal{Type: strings.TrimSpace(m.config.Actor.Type), ID: strings.TrimSpace(m.config.Actor.ID)}
+func (m *Model) localApprovalPrincipal() models.ApprovalPrincipal {
+	principal := models.ApprovalPrincipal{Type: strings.TrimSpace(m.config.Actor.Type), ID: strings.TrimSpace(m.config.Actor.ID)}
 	if principal.Type == "" || principal.ID == "" {
-		principal = runtime.ApprovalPrincipal{Type: string(m.config.Owner.Type), ID: m.config.Owner.ID}
+		principal = models.ApprovalPrincipal{Type: string(m.config.Owner.Type), ID: m.config.Owner.ID}
 	}
 	return principal
 }
 
-func (m *Model) selectedObjectiveRecord() *runtime.Objective {
+func (m *Model) selectedObjectiveRecord() *models.Objective {
 	if m.objectiveSelected < 0 || m.objectiveSelected >= len(m.objectives) {
 		return nil
 	}
 	return m.objectives[m.objectiveSelected]
 }
 
-func (m *Model) selectedObjectiveRunbooks() []*runtime.RunbookActivation {
-	values := make([]*runtime.RunbookActivation, 0)
+func (m *Model) selectedObjectiveRunbooks() []*models.RunbookActivation {
+	values := make([]*models.RunbookActivation, 0)
 	objective := m.selectedObjectiveRecord()
 	if objective == nil {
 		return values
@@ -3329,7 +3334,7 @@ func (m *Model) selectedObjectiveRunbooks() []*runtime.RunbookActivation {
 	return values
 }
 
-func (m *Model) selectedRunbookRecord() *runtime.RunbookActivation {
+func (m *Model) selectedRunbookRecord() *models.RunbookActivation {
 	values := m.selectedObjectiveRunbooks()
 	if m.runbookSelected < 0 || m.runbookSelected >= len(values) {
 		return nil
@@ -3367,7 +3372,7 @@ func (m *Model) moveRunbookSelection(delta int) {
 	m.runbookDetailExpanded = false
 }
 
-func (m *Model) objectiveRecord(objectiveID string) *runtime.Objective {
+func (m *Model) objectiveRecord(objectiveID string) *models.Objective {
 	for _, objective := range m.objectives {
 		if objective != nil && objective.ID == objectiveID {
 			return objective
@@ -3432,7 +3437,7 @@ func (m *Model) moveSelection(delta int) {
 	m.selectedID = m.runs[m.selected].ID
 }
 
-func (m *Model) selectedArtifactRecord() *runtime.Artifact {
+func (m *Model) selectedArtifactRecord() *models.Artifact {
 	if m.artifactSelected < 0 || m.artifactSelected >= len(m.artifacts) {
 		return nil
 	}
@@ -3468,7 +3473,7 @@ func (m *Model) moveArtifactSelection(delta int) {
 	m.artifactExpanded = false
 }
 
-func (m *Model) selectedActivityRecord() *runtime.ActivityProjection {
+func (m *Model) selectedActivityRecord() *models.ActivityProjection {
 	if m.activitySelected < 0 || m.activitySelected >= len(m.activity) {
 		return nil
 	}
@@ -4087,7 +4092,7 @@ func (m *Model) moveSkillBindingSelection(delta int) {
 	m.skillBindingSelected = max(0, min(len(m.skillBindings)-1, m.skillBindingSelected+delta))
 	m.selectedSkillBinding = m.skillBindings[m.skillBindingSelected].ID
 }
-func (m *Model) selectedConversationRecord() *runtime.Conversation {
+func (m *Model) selectedConversationRecord() *models.Conversation {
 	if m.conversationSelected < 0 || m.conversationSelected >= len(m.conversations) {
 		return nil
 	}
@@ -4127,7 +4132,7 @@ func (m *Model) moveConversationSelection(delta int) {
 
 func (m *Model) downloadSelectedArtifact() tea.Cmd {
 	artifact := m.selectedArtifactRecord()
-	if artifact == nil || artifact.ContentAvailability != runtime.ArtifactContentAvailable || m.busy || !m.supportsArtifact(kernelapi.OperationDownload) {
+	if artifact == nil || artifact.ContentAvailability != models.ArtifactContentAvailable || m.busy || !m.supportsArtifact(kernelapi.OperationDownload) {
 		return nil
 	}
 	m.busy = true
@@ -4139,7 +4144,7 @@ func (m *Model) downloadSelectedArtifact() tea.Cmd {
 	}
 }
 
-func artifactSelectionKey(artifact *runtime.Artifact) string {
+func artifactSelectionKey(artifact *models.Artifact) string {
 	if artifact == nil {
 		return ""
 	}
@@ -4335,7 +4340,7 @@ func (m *Model) prepareComposerForSection() {
 		m.mode = modeChannelCreate
 		m.editor.Placeholder = "Name the Team channel…"
 		m.focusComposerEditor()
-	case m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionProvideClarification):
+	case m.section == sectionRequests && m.canRespondToSelectedRequest(collaboration.AgentRequestDecisionProvideClarification):
 		m.mode = modeRequestProvideClarification
 		m.editor.Placeholder = "Provide the clarification requested by the recipient…"
 		m.focusComposerEditor()
@@ -4431,18 +4436,18 @@ func (m *Model) resetComposerMode() {
 }
 
 func (m *Model) canCreateAgentRequestFromSelectedRun() bool {
-	return m.supportsAgentRequest(kernelapi.OperationCreate) && runtime.CanStartAgentRequestFromRun(m.selectedRun())
+	return m.supportsAgentRequest(kernelapi.OperationCreate) && collaboration.CanStartAgentRequestFromRun(m.selectedRun())
 }
 
-func agentRequestDecisionLabel(decision runtime.AgentRequestDecision) string {
+func agentRequestDecisionLabel(decision collaboration.AgentRequestDecision) string {
 	switch decision {
-	case runtime.AgentRequestDecisionAccept:
+	case collaboration.AgentRequestDecisionAccept:
 		return "Accepting request"
-	case runtime.AgentRequestDecisionReject:
+	case collaboration.AgentRequestDecisionReject:
 		return "Rejecting request"
-	case runtime.AgentRequestDecisionRequestClarification:
+	case collaboration.AgentRequestDecisionRequestClarification:
 		return "Requesting clarification"
-	case runtime.AgentRequestDecisionProvideClarification:
+	case collaboration.AgentRequestDecisionProvideClarification:
 		return "Providing clarification"
 	default:
 		return "Updating request"
@@ -4457,21 +4462,21 @@ func objectiveTitle(prompt string) string {
 	return title
 }
 
-func (m *Model) operatorParticipant() runtime.ConversationParticipant {
-	participantType := runtime.ConversationParticipantUser
+func (m *Model) operatorParticipant() models.ConversationParticipant {
+	participantType := models.ConversationParticipantUser
 	switch strings.ToLower(strings.TrimSpace(m.config.Actor.Type)) {
 	case "agent":
-		participantType = runtime.ConversationParticipantAgent
+		participantType = models.ConversationParticipantAgent
 	case "team":
-		participantType = runtime.ConversationParticipantTeam
+		participantType = models.ConversationParticipantTeam
 	case "service", "system":
-		participantType = runtime.ConversationParticipantService
+		participantType = models.ConversationParticipantService
 	}
 	id := strings.TrimSpace(m.config.Actor.ID)
 	if id == "" {
 		id = "local"
 	}
-	return runtime.ConversationParticipant{Type: participantType, ID: id}
+	return models.ConversationParticipant{Type: participantType, ID: id}
 }
 
 func conversationClient(kernelClient client.KernelClient) client.ConversationClient {
@@ -4513,19 +4518,19 @@ func isCursorRefreshConflict(err error) bool {
 	return isHTTPStatus(err, http.StatusConflict)
 }
 
-func isTerminal(status runtime.AgentRunStatus) bool {
-	return status == runtime.AgentRunStatusCompleted || status == runtime.AgentRunStatusFailed || status == runtime.AgentRunStatusCanceled
+func isTerminal(status models.AgentRunStatus) bool {
+	return status == models.AgentRunStatusCompleted || status == models.AgentRunStatusFailed || status == models.AgentRunStatusCanceled
 }
 
-func commandSuccessMessage(kind runtime.AgentRunCommandKind) string {
+func commandSuccessMessage(kind agentrun.AgentRunCommandKind) string {
 	switch kind {
-	case runtime.AgentRunCommandPause:
+	case agentrun.AgentRunCommandPause:
 		return "Work paused safely."
-	case runtime.AgentRunCommandResume:
+	case agentrun.AgentRunCommandResume:
 		return "Work resumed."
-	case runtime.AgentRunCommandCancel:
+	case agentrun.AgentRunCommandCancel:
 		return "Work stopped."
-	case runtime.AgentRunCommandIntervene:
+	case agentrun.AgentRunCommandIntervene:
 		return "Guidance delivered and recorded in the audit trail."
 	default:
 		return "Work updated."

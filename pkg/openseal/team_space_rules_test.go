@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestDefaultStoreTeamRostersFollowSpaces(t *testing.T) {
@@ -21,7 +22,7 @@ func TestDefaultStoreTeamRostersFollowSpaces(t *testing.T) {
 }
 
 func TestSQLiteTeamRostersFollowSpaces(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "team-spaces.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "team-spaces.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +41,7 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 	t.Helper()
 	ctx := t.Context()
 	scope := capability.ScopeReference{Kind: "tenant", ID: "rules"}
-	spaceScope := runtime.Scope{Kind: scope.Kind, ID: scope.ID}
+	spaceScope := models.Scope{Kind: scope.Kind, ID: scope.ID}
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
 		ID: "rules-helper", Version: "1", DisplayName: "Helper", Purpose: "Help", SystemPrompt: "Help.",
 		Authority: AgentAuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
@@ -61,12 +62,12 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 	}
 	newSpace := func(name string, agents ...string) string {
 		t.Helper()
-		space, err := engine.CreateSpace(ctx, CreateSpaceRequest{Scope: spaceScope, Name: name, Look: runtime.DefaultSpaceLook, OwnerID: "7"})
+		space, err := engine.CreateSpace(ctx, CreateSpaceRequest{Scope: spaceScope, Name: name, Look: models.DefaultSpaceLook, OwnerID: "7"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, id := range agents {
-			if _, _, err := engine.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: spaceScope, SpaceID: space.ID, Type: runtime.SpaceMemberAgent, MemberID: id}); err != nil {
+			if _, _, err := engine.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: spaceScope, SpaceID: space.ID, Type: models.SpaceMemberAgent, MemberID: id}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -142,7 +143,7 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 	// Rule 3: a Team added to a space brings its Agents, once.
 	lab := newSpace("Lab", "cy")
 	for range 2 {
-		if _, _, err := engine.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: spaceScope, SpaceID: lab, Type: runtime.SpaceMemberTeam, MemberID: "crew"}); err != nil {
+		if _, _, err := engine.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: spaceScope, SpaceID: lab, Type: models.SpaceMemberTeam, MemberID: "crew"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -156,7 +157,7 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 	}, "user", "7", "create"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := engine.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: spaceScope, SpaceID: work, Type: runtime.SpaceMemberAgent, MemberID: "dee"}); err != nil {
+	if _, _, err := engine.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: spaceScope, SpaceID: work, Type: models.SpaceMemberAgent, MemberID: "dee"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := join("crew", "4", "dee"); !errors.Is(err, ErrTeamAgentOutsideSpace) || !strings.Contains(err.Error(), `not in space "Lab"`) {
@@ -175,7 +176,7 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 	}
 	remove := func(spaceID, agentID string, confirm bool) error {
 		return engine.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{
-			Scope: spaceScope, SpaceID: spaceID, Type: runtime.SpaceMemberAgent, MemberID: agentID, ActorType: "user", ActorID: "7", ConfirmTeams: confirm,
+			Scope: spaceScope, SpaceID: spaceID, Type: models.SpaceMemberAgent, MemberID: agentID, ActorType: "user", ActorID: "7", ConfirmTeams: confirm,
 		})
 	}
 	// needsConfirmation is the Teams an unconfirmed removal reported.
@@ -269,8 +270,8 @@ func exerciseTeamSpaceRules(t *testing.T, engine *Engine) {
 
 	// A Team that already breaks the rule keeps working: here "elsewhere" is
 	// in Work without ben and cy, as data from before the rule can be.
-	if _, _, err := engine.Store().(runtime.SpaceStore).PutSpaceMember(ctx, spaceScope, &runtime.SpaceMember{
-		SpaceID: work, Type: runtime.SpaceMemberTeam, ID: "elsewhere", AddedAt: crew.UpdatedAt,
+	if _, _, err := engine.Store().(models.SpaceStore).PutSpaceMember(ctx, spaceScope, &models.SpaceMember{
+		SpaceID: work, Type: models.SpaceMemberTeam, ID: "elsewhere", AddedAt: crew.UpdatedAt,
 	}); err != nil {
 		t.Fatal(err)
 	}

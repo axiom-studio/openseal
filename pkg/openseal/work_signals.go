@@ -4,28 +4,30 @@ import (
 	"context"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 )
 
 // WorkSignalHealth reports the work queue consumer's state.
-type WorkSignalHealth = runtime.WorkSignalHealth
+type WorkSignalHealth = workqueue.WorkSignalHealth
 
 // WorkItem asks for one pass over a family's durable work in a scope.
-type WorkItem = runtime.WorkItem
+type WorkItem = models.WorkItem
 
 // WorkQueue is the shared schedule of scope passes. See runtime.WorkQueue.
-type WorkQueue = runtime.WorkQueue
+type WorkQueue = workqueue.WorkQueue
 
 // WorkSignal is one delivery or lifecycle event from a WorkQueue.
-type WorkSignal = runtime.WorkSignal
+type WorkSignal = workqueue.WorkSignal
 
 // WorkFamily names the worker loops a WorkItem wakes.
-type WorkFamily = runtime.WorkFamily
+type WorkFamily = models.WorkFamily
 
 const (
-	WorkSignalChanged      = runtime.WorkSignalChanged
-	WorkSignalConnected    = runtime.WorkSignalConnected
-	WorkSignalDisconnected = runtime.WorkSignalDisconnected
+	WorkSignalChanged      = workqueue.WorkSignalChanged
+	WorkSignalConnected    = workqueue.WorkSignalConnected
+	WorkSignalDisconnected = workqueue.WorkSignalDisconnected
 )
 
 const (
@@ -49,7 +51,7 @@ const (
 // replica, for example Valkey streams. Without it a PostgreSQL store uses a
 // process-local queue: each replica then handles the work its own commits
 // create, plus the pending work sweeps. Other stores keep polling.
-func WithWorkQueue(queue runtime.WorkQueue) Option {
+func WithWorkQueue(queue workqueue.WorkQueue) Option {
 	return func(e *Engine) error {
 		e.workQueue = queue
 		return nil
@@ -59,14 +61,14 @@ func WithWorkQueue(queue runtime.WorkQueue) Option {
 // HandleWork calls handle with the scope of every delivered item of family,
 // for workers the host owns. Handlers must not
 // block; a delivery is a hint to look at durable state in that scope.
-func (e *Engine) HandleWork(family runtime.WorkFamily, handle func(runtime.Scope)) {
+func (e *Engine) HandleWork(family models.WorkFamily, handle func(models.Scope)) {
 	if e == nil || handle == nil {
 		return
 	}
 	e.workHandlersMu.Lock()
 	defer e.workHandlersMu.Unlock()
 	if e.workHandlers == nil {
-		e.workHandlers = make(map[runtime.WorkFamily][]func(runtime.Scope))
+		e.workHandlers = make(map[models.WorkFamily][]func(models.Scope))
 	}
 	e.workHandlers[family] = append(e.workHandlers[family], handle)
 }
@@ -80,8 +82,8 @@ func (e *Engine) WorkSignalHealth() WorkSignalHealth {
 	return e.workSignals.Snapshot()
 }
 
-func (e *Engine) workOutbox() runtime.WorkOutboxStore {
-	outbox, _ := e.store.(runtime.WorkOutboxStore)
+func (e *Engine) workOutbox() workqueue.WorkOutboxStore {
+	outbox, _ := e.store.(workqueue.WorkOutboxStore)
 	return outbox
 }
 
@@ -92,7 +94,7 @@ func (e *Engine) applyWorkSignals() {
 	status := e.workSignals
 	if e.workOutbox() != nil && e.workPublish == nil {
 		if e.workQueue == nil {
-			e.workQueue = runtime.NewMemoryWorkQueue()
+			e.workQueue = workqueue.NewMemoryWorkQueue()
 		}
 		e.workPublish = status.BindQueue(e.workQueue, e.logger)
 	}
@@ -163,7 +165,7 @@ func (e *Engine) requestWorkRelay() {
 
 // relayWorkOutbox moves committed outbox rows into the queue right after
 // this process commits, and rarely otherwise.
-func (e *Engine) relayWorkOutbox(ctx context.Context, outbox runtime.WorkOutboxStore) {
+func (e *Engine) relayWorkOutbox(ctx context.Context, outbox workqueue.WorkOutboxStore) {
 	orphans := time.NewTicker(workOutboxOrphanInterval)
 	defer orphans.Stop()
 	failures := 0
@@ -211,7 +213,7 @@ func (e *Engine) consumeWork(ctx context.Context) {
 	for {
 		err := e.workQueue.ConsumeWork(ctx, e.handleWorkSignal)
 		// Whatever ended the consumer, stop relying on it.
-		e.handleWorkSignal(runtime.WorkSignal{Kind: runtime.WorkSignalDisconnected})
+		e.handleWorkSignal(workqueue.WorkSignal{Kind: workqueue.WorkSignalDisconnected})
 		if ctx.Err() != nil {
 			return
 		}
@@ -226,7 +228,7 @@ func (e *Engine) consumeWork(ctx context.Context) {
 
 // backstopWork republishes pending durable work periodically, and in full
 // whenever the queue reports that it lost its schedule.
-func (e *Engine) backstopWork(ctx context.Context, outbox runtime.WorkOutboxStore) {
+func (e *Engine) backstopWork(ctx context.Context, outbox workqueue.WorkOutboxStore) {
 	ticker := time.NewTicker(workBackstopInterval)
 	defer ticker.Stop()
 	for {
@@ -260,16 +262,16 @@ func (e *Engine) requestWorkRebuild() {
 
 // handleWorkSignal records queue health and wakes the loops that claim or
 // reconcile the delivered family in its scope.
-func (e *Engine) handleWorkSignal(signal runtime.WorkSignal) {
+func (e *Engine) handleWorkSignal(signal workqueue.WorkSignal) {
 	e.workSignals.Observe(signal)
 	switch signal.Kind {
-	case runtime.WorkSignalConnected:
+	case workqueue.WorkSignalConnected:
 		if signal.Rebuild {
 			e.requestWorkRebuild()
 		}
 		e.requestWorkRelay()
 		return
-	case runtime.WorkSignalDisconnected:
+	case workqueue.WorkSignalDisconnected:
 		// Loops observe the health change and resume polling on their own.
 		return
 	}
@@ -281,23 +283,23 @@ func (e *Engine) handleWorkSignal(signal runtime.WorkSignal) {
 		handle(scope)
 	}
 	switch signal.Family {
-	case runtime.WorkFamilyAction:
+	case models.WorkFamilyAction:
 		e.wakeActionWorkersForScope(scope)
-	case runtime.WorkFamilyRun, runtime.WorkFamilyRunDue:
+	case models.WorkFamilyRun, models.WorkFamilyRunDue:
 		e.wakeAgentWorkersForScope(scope)
-	case runtime.WorkFamilyMaintenance:
+	case models.WorkFamilyMaintenance:
 		e.wakeActionWorkersForScope(scope)
 		e.wakeAgentWorkersForScope(scope)
 	}
 	switch signal.Family {
-	case runtime.WorkFamilyRun, runtime.WorkFamilyConversation, runtime.WorkFamilyApproval, runtime.WorkFamilyExternal, runtime.WorkFamilyConversationDue:
+	case models.WorkFamilyRun, models.WorkFamilyConversation, models.WorkFamilyApproval, models.WorkFamilyExternal, models.WorkFamilyConversationDue:
 		if e.conversationRunReconciler != nil {
 			e.conversationRunReconciler.WakeScope(scope)
 		}
 	}
 	switch signal.Family {
-	case runtime.WorkFamilyRun, runtime.WorkFamilyConversation, runtime.WorkFamilyApproval, runtime.WorkFamilyExternal,
-		runtime.WorkFamilyActivity, runtime.WorkFamilyExternalDue:
+	case models.WorkFamilyRun, models.WorkFamilyConversation, models.WorkFamilyApproval, models.WorkFamilyExternal,
+		models.WorkFamilyActivity, models.WorkFamilyExternalDue:
 		if e.externalConversations.supervisor != nil {
 			e.externalConversations.supervisor.WakeScope(scope)
 		}
@@ -306,7 +308,7 @@ func (e *Engine) handleWorkSignal(signal runtime.WorkSignal) {
 
 // wakeExternalConversationsForReceived reconciles only the scopes that just
 // received ingress instead of every listed scope.
-func (e *Engine) wakeExternalConversationsForReceived(received []*runtime.ReceiveExternalConversationEventResult) {
+func (e *Engine) wakeExternalConversationsForReceived(received []*externalconversation.ReceiveExternalConversationEventResult) {
 	supervisor := e.externalConversations.supervisor
 	if supervisor == nil {
 		return

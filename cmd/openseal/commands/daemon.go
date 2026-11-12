@@ -18,8 +18,16 @@ import (
 
 	"github.com/axiom-studio/openseal/internal/daemon"
 	"github.com/axiom-studio/openseal/internal/server"
+	"github.com/axiom-studio/openseal/pkg/models"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
+	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
 )
 
@@ -137,8 +145,8 @@ Options:
 	}
 	if *standaloneOperator {
 		engineOptions = append(engineOptions,
-			opensealkernel.WithActionPolicy(&runtime.DefaultActionPolicy{Approvers: []runtime.ApprovalPrincipal{{Type: "user", ID: "local"}}}),
-			opensealkernel.WithApprovalAuthorizer(runtime.EligibleApprovalAuthorizer{}),
+			opensealkernel.WithActionPolicy(&action.DefaultActionPolicy{Approvers: []models.ApprovalPrincipal{{Type: "user", ID: "local"}}}),
+			opensealkernel.WithApprovalAuthorizer(action.EligibleApprovalAuthorizer{}),
 		)
 	}
 	endpoint := strings.TrimSpace(os.Getenv("OPENSEAL_LLM_BASE_URL"))
@@ -164,7 +172,7 @@ Options:
 	if err != nil {
 		sugar.Fatalf("failed to open artifact content store: %v", err)
 	}
-	artifactPublisher := &daemon.TaskArtifactPublisher{Scope: scope, Content: contentStore, Catalog: runtime.NewArtifactCatalog(store)}
+	artifactPublisher := &daemon.TaskArtifactPublisher{Scope: scope, Content: contentStore, Catalog: artifactcatalog.NewArtifactCatalog(store)}
 	contextTokens, err := standaloneContext.ContextTokens(os.Getenv("OPENSEAL_LLM_CONTEXT_TOKENS"))
 	if err != nil {
 		sugar.Fatal(err)
@@ -181,24 +189,24 @@ Options:
 		sugar.Fatalf("resolve standalone context worker scopes: %v", err)
 	}
 	if stepHost != nil {
-		workerScopes = mergeDaemonWorkerScopes(workerScopes, []runtime.Scope{scope})
+		workerScopes = mergeDaemonWorkerScopes(workerScopes, []models.Scope{scope})
 	}
-	workerScopeSource := runtime.WorkerScopeSourceFunc(func(context.Context) ([]runtime.Scope, error) {
-		return append([]runtime.Scope(nil), workerScopes...), nil
+	workerScopeSource := workqueue.WorkerScopeSourceFunc(func(context.Context) ([]models.Scope, error) {
+		return append([]models.Scope(nil), workerScopes...), nil
 	})
 	var kernel *opensealkernel.Engine
 	resolver := &daemon.DesktopTurnResolver{Scope: scope, Host: stepHost, Publisher: artifactPublisher}
-	var turnResolver runtime.TurnRunnerResolver
+	var turnResolver conversation.TurnRunnerResolver
 	if len(workerScopes) > 0 {
 		turnResolver = resolver
 		engineOptions = append(engineOptions,
-			opensealkernel.WithDynamicAgentRunWorkers(runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindAgentWork, Concurrency: 2, WorkerIDPrefix: "standalone-agent"}, workerScopeSource, turnResolver),
+			opensealkernel.WithDynamicAgentRunWorkers(runworker.DynamicAgentRunWorkerConfig{Kind: models.RunKindAgentWork, Concurrency: 2, WorkerIDPrefix: "standalone-agent"}, workerScopeSource, turnResolver),
 		)
 	}
 	if stepHost != nil {
-		participants := runtime.ConversationParticipantSourceFunc(func(ctx context.Context, query runtime.ConversationParticipantQuery) ([]runtime.ConversationParticipantBinding, error) {
+		participants := conversation.ConversationParticipantSourceFunc(func(ctx context.Context, query conversation.ConversationParticipantQuery) ([]conversation.ConversationParticipantBinding, error) {
 			if kernel == nil {
-				return nil, runtime.ErrConversationCoordinationUnavailable
+				return nil, conversation.ErrConversationCoordinationUnavailable
 			}
 			source, err := daemon.NewDesktopConversationParticipants(kernel, scope, 8)
 			if err != nil {
@@ -210,18 +218,18 @@ Options:
 		if err != nil {
 			sugar.Fatalf("configure desktop channel routing: %v", err)
 		}
-		config := runtime.DefaultConversationCoordinatorConfig()
+		config := conversation.DefaultConversationCoordinatorConfig()
 		config.MaximumParticipants = 8
-		localScopes := runtime.WorkerScopeSourceFunc(func(context.Context) ([]runtime.Scope, error) { return []runtime.Scope{scope}, nil })
+		localScopes := workqueue.WorkerScopeSourceFunc(func(context.Context) ([]models.Scope, error) { return []models.Scope{scope}, nil })
 		engineOptions = append(engineOptions,
 			opensealkernel.WithConversationCoordinator(participants, router, config),
 			opensealkernel.WithDynamicConversationRuns(opensealkernel.ConversationRunConfig{
-				Scheduler: runtime.ConversationRunSchedulerConfig{RequireParticipationOptIn: true, Budget: daemon.DesktopConversationBudget()},
+				Scheduler: conversationrun.ConversationRunSchedulerConfig{RequireParticipationOptIn: true, Budget: daemon.DesktopConversationBudget()},
 				// Each routed member answers in its own agent_work Run through
 				// the same Agent turn as a 1:1 chat.
-				Runner:     runtime.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true, AgentTurns: turnResolver},
-				Workers:    runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindConversation, Concurrency: 2, WorkerIDPrefix: "desktop-channel"},
-				Reconciler: runtime.ConversationRunReconcilerConfig{Interval: 5 * time.Second},
+				Runner:     conversationrun.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true, AgentTurns: turnResolver},
+				Workers:    runworker.DynamicAgentRunWorkerConfig{Kind: models.RunKindConversation, Concurrency: 2, WorkerIDPrefix: "desktop-channel"},
+				Reconciler: conversationrun.ConversationRunReconcilerConfig{Interval: 5 * time.Second},
 			}, localScopes),
 		)
 	}
@@ -238,8 +246,8 @@ Options:
 	// The kernel creates no space and the daemon has no space API, so the
 	// local operator's first space, their default, is created here, before the
 	// kernel starts work that opens chats for them.
-	if _, err := kernel.DefaultSpace(ctx, scope, "local-operator"); errors.Is(err, runtime.ErrNoDefaultSpace) {
-		_, err = kernel.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: scope, Name: "Home", Look: runtime.DefaultSpaceLook, OwnerID: "local-operator"})
+	if _, err := kernel.DefaultSpace(ctx, scope, "local-operator"); errors.Is(err, models.ErrNoDefaultSpace) {
+		_, err = kernel.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: "Home", Look: models.DefaultSpaceLook, OwnerID: "local-operator"})
 		if err != nil {
 			sugar.Fatalf("create the local operator's space: %v", err)
 		}
@@ -260,12 +268,12 @@ Options:
 	apiServer.SetBearerToken(os.Getenv("OPENSEAL_API_TOKEN"))
 	if stepHost != nil {
 		apiServer.SetTeamWorkEnabled(true)
-		apiServer.SetAgentRunCreationDispatcher(func(ctx context.Context, request runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error) {
+		apiServer.SetAgentRunCreationDispatcher(func(ctx context.Context, request models.CreateAgentRunRequest) (*agentrun.AgentRunCommandResult, error) {
 			canonical, err := daemon.DesktopWorkRequest(scope, request)
 			if err != nil {
 				return nil, err
 			}
-			if saved, err := runtime.NewRunCommandService(store).FindCreatedAgentRun(ctx, canonical); err != nil || saved != nil {
+			if saved, err := agentrun.NewRunCommandService(store).FindCreatedAgentRun(ctx, canonical); err != nil || saved != nil {
 				return saved, err
 			}
 			canonical, err = daemon.ResolveDesktopWork(ctx, kernel, scope, request)
@@ -283,7 +291,7 @@ Options:
 	if *desktopOperator {
 		apiServer.SetActionApprovalAuthorizer(server.DesktopApprovalAuthorizer{Scope: scope})
 		apiServer.SetDesktopConversationScope(scope)
-		authorize := func(ctx context.Context, channel *runtime.Conversation) error {
+		authorize := func(ctx context.Context, channel *models.Conversation) error {
 			if stepHost == nil {
 				return fmt.Errorf("configure a model provider in Settings before enabling team replies")
 			}
@@ -291,10 +299,10 @@ Options:
 			if err != nil {
 				return err
 			}
-			_, err = source.ResolveConversationParticipants(ctx, runtime.ConversationParticipantQuery{Conversation: channel})
+			_, err = source.ResolveConversationParticipants(ctx, conversation.ConversationParticipantQuery{Conversation: channel})
 			return err
 		}
-		var post func(context.Context, runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error)
+		var post func(context.Context, conversation.PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error)
 		if stepHost != nil {
 			post = kernel.PostChannelMessage
 		}
@@ -303,7 +311,7 @@ Options:
 	apiServer.SetReactionProjector(kernel.ReactionProjector())
 	if *standaloneOperator {
 		if !*desktopOperator {
-			apiServer.SetActionApprovalAuthorizer(runtime.EligibleApprovalAuthorizer{})
+			apiServer.SetActionApprovalAuthorizer(action.EligibleApprovalAuthorizer{})
 		}
 	}
 	apiServer.SetArtifactContentStore(contentStore)
@@ -338,14 +346,14 @@ Options:
 	apiServer.Shutdown(ctx)
 }
 
-func mergeDaemonWorkerScopes(groups ...[]runtime.Scope) []runtime.Scope {
-	seen := map[string]runtime.Scope{}
+func mergeDaemonWorkerScopes(groups ...[]models.Scope) []models.Scope {
+	seen := map[string]models.Scope{}
 	for _, group := range groups {
 		for _, scope := range group {
 			seen[scope.Kind+"\x00"+scope.ID] = scope
 		}
 	}
-	result := make([]runtime.Scope, 0, len(seen))
+	result := make([]models.Scope, 0, len(seen))
 	for _, scope := range seen {
 		result = append(result, scope)
 	}
@@ -355,14 +363,14 @@ func mergeDaemonWorkerScopes(groups ...[]runtime.Scope) []runtime.Scope {
 	return result
 }
 
-func parseDaemonScope(value string) (runtime.Scope, error) {
+func parseDaemonScope(value string) (models.Scope, error) {
 	parts := strings.SplitN(strings.TrimSpace(value), ":", 2)
 	if len(parts) != 2 {
-		return runtime.Scope{}, fmt.Errorf("--scope must use kind:id format")
+		return models.Scope{}, fmt.Errorf("--scope must use kind:id format")
 	}
-	scope := runtime.Scope{Kind: strings.TrimSpace(parts[0]), ID: strings.TrimSpace(parts[1])}
+	scope := models.Scope{Kind: strings.TrimSpace(parts[0]), ID: strings.TrimSpace(parts[1])}
 	if err := scope.Validate(); err != nil {
-		return runtime.Scope{}, fmt.Errorf("--scope: %w", err)
+		return models.Scope{}, fmt.Errorf("--scope: %w", err)
 	}
 	return scope, nil
 }
@@ -378,7 +386,7 @@ func isLoopbackListenAddress(addr string) bool {
 
 // Desktop lifecycle authority is an explicit local-owner mode, never a fallback
 // for a publicly reachable or unauthenticated API.
-func validateDesktopOperator(listen, token string, scope runtime.Scope) error {
+func validateDesktopOperator(listen, token string, scope models.Scope) error {
 	if !isLoopbackListenAddress(listen) {
 		return fmt.Errorf("--desktop-operator requires a loopback API listen address")
 	}

@@ -7,8 +7,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -69,21 +73,21 @@ func builderDefinition() *opensealkernel.AgentDefinition {
 func builderBindings(scope skill.ScopeReference) []*skill.Binding {
 	return []*skill.Binding{
 		{
-			ID: "bundled:agents", Scope: scope, DeploymentID: runtime.AgentBuilderDeploymentID,
-			SkillID: runtime.AgentManagementSkillID, SkillVersion: runtime.AgentManagementSkillVersion,
-			AllowedActions: []string{runtime.AgentActionCreateAgent, runtime.AgentActionUpdateAgent, runtime.AgentActionTryAgent, runtime.AgentActionListAgents},
+			ID: "bundled:agents", Scope: scope, DeploymentID: conversationrun.AgentBuilderDeploymentID,
+			SkillID: models.AgentManagementSkillID, SkillVersion: models.AgentManagementSkillVersion,
+			AllowedActions: []string{models.AgentActionCreateAgent, models.AgentActionUpdateAgent, models.AgentActionTryAgent, models.AgentActionListAgents},
 			MaximumRisk:    skill.RiskLevelWrite,
 		},
 		{
-			ID: "bundled:teams", Scope: scope, DeploymentID: runtime.AgentBuilderDeploymentID,
-			SkillID: runtime.TeamManagementSkillID, SkillVersion: runtime.TeamManagementSkillVersion,
-			AllowedActions: []string{runtime.TeamActionCreateTeam},
+			ID: "bundled:teams", Scope: scope, DeploymentID: conversationrun.AgentBuilderDeploymentID,
+			SkillID: models.TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion,
+			AllowedActions: []string{action.TeamActionCreateTeam},
 			MaximumRisk:    skill.RiskLevelWrite,
 		},
 		{
-			ID: builderSkillsBindingPrefix + runtime.SkillManagementSkillVersion, Scope: scope, DeploymentID: runtime.AgentBuilderDeploymentID,
-			SkillID: runtime.SkillManagementSkillID, SkillVersion: runtime.SkillManagementSkillVersion,
-			AllowedActions: []string{runtime.SkillActionDiscoverBinding, runtime.SkillActionUpsertBinding, runtime.SkillActionDisableBinding, runtime.SkillActionRequestSetup, runtime.SkillActionRequestConnection},
+			ID: builderSkillsBindingPrefix + skillbinding.SkillManagementSkillVersion, Scope: scope, DeploymentID: conversationrun.AgentBuilderDeploymentID,
+			SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion,
+			AllowedActions: []string{skillbinding.SkillActionDiscoverBinding, skillbinding.SkillActionUpsertBinding, skillbinding.SkillActionDisableBinding, agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestConnection},
 			MaximumRisk:    skill.RiskLevelWrite,
 		},
 	}
@@ -94,7 +98,7 @@ func builderBindings(scope skill.ScopeReference) []*skill.Binding {
 // start: an existing builder is kept (its conversations stay), moved to a new
 // definition version in place, and its bindings follow the bundled Skill
 // versions.
-func SeedBuilderAgent(ctx context.Context, engine builderAgentEngine, scope runtime.Scope) error {
+func SeedBuilderAgent(ctx context.Context, engine builderAgentEngine, scope models.Scope) error {
 	if engine == nil || strings.TrimSpace(scope.Kind) == "" || strings.TrimSpace(scope.ID) == "" {
 		return errors.New("the builder seed requires an engine and a scope")
 	}
@@ -126,10 +130,10 @@ func registerBuilderDefinition(ctx context.Context, engine builderAgentEngine) e
 }
 
 func ensureBuilderDeployment(ctx context.Context, engine builderAgentEngine, scope skill.ScopeReference) error {
-	deployment, err := engine.GetAgentDeployment(ctx, scope, runtime.AgentBuilderDeploymentID)
+	deployment, err := engine.GetAgentDeployment(ctx, scope, conversationrun.AgentBuilderDeploymentID)
 	if errors.Is(err, opensealkernel.ErrAgentDeploymentNotFound) {
 		_, _, err = engine.CreateAgentDeployment(ctx, &opensealkernel.AgentDeployment{
-			ID: runtime.AgentBuilderDeploymentID, DisplayName: BuilderDisplayName, Scope: scope,
+			ID: conversationrun.AgentBuilderDeploymentID, DisplayName: BuilderDisplayName, Scope: scope,
 			DefinitionID: BuilderDefinitionID, ActiveVersion: BuilderDefinitionVersion, Environment: "default",
 			RolloutStatus: opensealkernel.AgentRolloutActive, Revision: 1,
 			Capacity: opensealkernel.AgentDeploymentCapacity{MaxConcurrentRuns: 4, MaxQueuedRuns: 32},
@@ -143,7 +147,7 @@ func ensureBuilderDeployment(ctx context.Context, engine builderAgentEngine, sco
 		return fmt.Errorf("read the builder: %w", err)
 	}
 	if deployment.DefinitionID != BuilderDefinitionID {
-		return fmt.Errorf("deployment %s already exists with definition %s, not the builder", runtime.AgentBuilderDeploymentID, deployment.DefinitionID)
+		return fmt.Errorf("deployment %s already exists with definition %s, not the builder", conversationrun.AgentBuilderDeploymentID, deployment.DefinitionID)
 	}
 	if deployment.ActiveVersion == BuilderDefinitionVersion {
 		return nil
@@ -160,7 +164,7 @@ func ensureBuilderDeployment(ctx context.Context, engine builderAgentEngine, sco
 // Skill identity can't change through an upsert, and a reference upgrade
 // keeps the old allowed actions, while the new version adds actions.
 func reconcileBuilderBindings(ctx context.Context, engine builderAgentEngine, scope skill.ScopeReference) error {
-	owner := opensealkernel.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: runtime.AgentBuilderDeploymentID}
+	owner := opensealkernel.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: conversationrun.AgentBuilderDeploymentID}
 	existing, err := engine.ListUmbrellaBindings(ctx, scope, owner)
 	if err != nil {
 		return fmt.Errorf("list the builder's bindings: %w", err)
@@ -247,7 +251,7 @@ func (h *BuilderCutoverHost) Bind(engine builderAgentEngine) {
 
 // EnsureBuilderAgent seeds the builder in scope. The requester does not
 // matter: the daemon's builder is the same for everyone in a scope.
-func (h *BuilderCutoverHost) EnsureBuilderAgent(ctx context.Context, scope runtime.Scope, _ string) error {
+func (h *BuilderCutoverHost) EnsureBuilderAgent(ctx context.Context, scope models.Scope, _ string) error {
 	if h == nil || h.engine == nil {
 		return errors.New("the builder cutover host is not bound to an engine")
 	}
@@ -256,7 +260,7 @@ func (h *BuilderCutoverHost) EnsureBuilderAgent(ctx context.Context, scope runti
 
 // DraftModel is always the default model: the daemon records no billing
 // model for a draft.
-func (*BuilderCutoverHost) DraftModel(context.Context, runtime.Scope, string) (string, error) {
+func (*BuilderCutoverHost) DraftModel(context.Context, models.Scope, string) (string, error) {
 	return "", nil
 }
 

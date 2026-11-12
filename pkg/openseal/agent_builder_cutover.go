@@ -9,12 +9,13 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 )
 
 type (
-	AgentBuilderCutoverHost  = runtime.AgentBuilderCutoverHost
-	AgentBuilderCutoverDraft = runtime.AgentBuilderCutoverDraft
+	AgentBuilderCutoverHost  = agentbuilder.AgentBuilderCutoverHost
+	AgentBuilderCutoverDraft = models.AgentBuilderCutoverDraft
 )
 
 // AgentBuilderCutoverReport counts what one cutover pass did.
@@ -58,7 +59,7 @@ func (e *Engine) AgentBuilderCutover(ctx context.Context) (AgentBuilderCutoverRe
 	if e == nil || e.store == nil {
 		return report, errors.New("agent builder cutover: engine store is not configured")
 	}
-	store, ok := e.store.(runtime.AgentBuilderCutoverStore)
+	store, ok := e.store.(models.AgentBuilderCutoverStore)
 	if !ok {
 		return report, nil
 	}
@@ -178,7 +179,7 @@ func (e *Engine) agentBuilderCutoverSpace(ctx context.Context, draft AgentBuilde
 	}
 	sort.Strings(ids)
 	scopeRef := capability.ScopeReference{Kind: draft.Scope.Kind, ID: draft.Scope.ID}
-	var spaces []*runtime.Space
+	var spaces []*models.Space
 	for _, id := range ids {
 		if _, err := e.agents.GetDeployment(ctx, scopeRef, id); errors.Is(err, kernelagent.ErrDeploymentNotFound) {
 			continue
@@ -198,7 +199,7 @@ func (e *Engine) agentBuilderCutoverSpace(ctx context.Context, draft AgentBuilde
 				return "", err
 			}
 			for _, member := range members {
-				if member.Type == runtime.SpaceMemberAgent && member.ID == id {
+				if member.Type == models.SpaceMemberAgent && member.ID == id {
 					return space.ID, nil
 				}
 			}

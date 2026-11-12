@@ -4,17 +4,18 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestChannelTimelineQueryRejectsAmbiguousValues(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	service := runtime.NewConversationService(store)
-	seedSpace(t, store, runtime.Scope{Kind: "tenant", ID: "one"}, "")
-	conversation, _, err := service.CreateConversation(t.Context(), runtime.CreateConversationRequest{
-		Scope: runtime.Scope{Kind: "tenant", ID: "one"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"},
+	service := conversation.NewConversationService(store)
+	seedSpace(t, store, models.Scope{Kind: "tenant", ID: "one"}, "")
+	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
+		Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"},
 		Title: "Timeline", IdempotencyKey: "timeline",
 	})
 	if err != nil {

@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/artifact"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func main() {
@@ -20,15 +22,15 @@ func main() {
 	if *db == "" {
 		panic("-db required")
 	}
-	store, err := runtime.NewSQLiteStore(*db)
+	store, err := sqlite.NewSQLiteStore(*db)
 	check(err)
 	defer store.Close()
 	content, err := artifact.NewLocalStore(filepath.Join(filepath.Dir(*db), "artifacts"))
 	check(err)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	run := &runtime.AgentRun{ID: "ui-artifact-run", RootRunID: "ui-artifact-run", Kind: runtime.RunKindAgentWork, Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "synthetic-analyst"}, AssignedAgentID: "synthetic-analyst", Goal: "Inspect synthetic task artifacts", Source: runtime.RunSourceManual, Status: runtime.AgentRunStatusCompleted, Revision: 1, AvailableAt: now, CreatedAt: now, UpdatedAt: now}
+	scope := models.Scope{Kind: "local", ID: "default"}
+	run := &models.AgentRun{ID: "ui-artifact-run", RootRunID: "ui-artifact-run", Kind: models.RunKindAgentWork, Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "synthetic-analyst"}, AssignedAgentID: "synthetic-analyst", Goal: "Inspect synthetic task artifacts", Source: models.RunSourceManual, Status: models.AgentRunStatusCompleted, Revision: 1, AvailableAt: now, CreatedAt: now, UpdatedAt: now}
 	check(store.CreateAgentRun(ctx, run))
 	for _, fixture := range []struct {
 		id, name, mime string
@@ -39,9 +41,9 @@ func main() {
 		{"ui:résumé", "report.txt", "text/plain", 2, []byte("Verified task artifact.\nUncertainty remains explicit.\n")},
 		{"ui-binary", "evidence.bin", "application/octet-stream", 1, []byte{0, 255, 128, 13, 10, 1, 254}},
 	} {
-		saved, err := content.Put(ctx, runtime.ArtifactContentWrite{Scope: scope, MediaType: fixture.mime, Reader: bytes.NewReader(fixture.body), SizeBytes: int64(len(fixture.body))})
+		saved, err := content.Put(ctx, models.ArtifactContentWrite{Scope: scope, MediaType: fixture.mime, Reader: bytes.NewReader(fixture.body), SizeBytes: int64(len(fixture.body))})
 		check(err)
-		_, err = runtime.NewArtifactCatalog(store).Register(ctx, runtime.RegisterArtifactRequest{ExpectedLatestVersion: fixture.version - 1, Artifact: &runtime.Artifact{ID: fixture.id, Version: fixture.version, Scope: scope, Name: fixture.name, MediaType: fixture.mime, ContentRef: saved.ContentRef, Digest: saved.Digest, SizeBytes: saved.SizeBytes, Classification: "internal", Provenance: runtime.ArtifactProvenance{Producer: runtime.ActivityActor{Type: "agent", ID: "synthetic-analyst"}, RunID: run.ID}}})
+		_, err = artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{ExpectedLatestVersion: fixture.version - 1, Artifact: &models.Artifact{ID: fixture.id, Version: fixture.version, Scope: scope, Name: fixture.name, MediaType: fixture.mime, ContentRef: saved.ContentRef, Digest: saved.Digest, SizeBytes: saved.SizeBytes, Classification: "internal", Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "synthetic-analyst"}, RunID: run.ID}}})
 		check(err)
 	}
 }

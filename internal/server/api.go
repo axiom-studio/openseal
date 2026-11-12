@@ -5,7 +5,8 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -118,7 +119,7 @@ func (s *Server) registerRoutes() {
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	runOperations := []string{kernelapi.OperationGet, kernelapi.OperationList, kernelapi.OperationPause, kernelapi.OperationResume, kernelapi.OperationCancel, kernelapi.OperationIntervene, kernelapi.OperationInspectAdmission}
-	if _, ok := s.store.(runtime.RunbookExecutionAuditStore); ok {
+	if _, ok := s.store.(models.RunbookExecutionAuditStore); ok {
 		if _, err := s.agentRegistry(); err == nil {
 			runOperations = append(runOperations, kernelapi.OperationAudit)
 		}
@@ -130,13 +131,13 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.AgentTurnsCapability(), kernelapi.ActionCallsCapability(), kernelapi.ActivityCapability(), kernelapi.WorkforceBundlesCapability(s.workforceBundles != nil && s.workforceBundleActor != "")}
-	if _, ok := s.store.(runtime.CollaborationKernelStore); ok {
+	if _, ok := s.store.(models.CollaborationKernelStore); ok {
 		capabilities = append(capabilities, kernelapi.AgentRequestsCapability())
 	}
 	capabilities = append(capabilities, kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{
 		Resolution: s.actionApprovalAuth != nil,
 	}))
-	if _, ok := s.store.(runtime.ArtifactStore); ok {
+	if _, ok := s.store.(models.ArtifactStore); ok {
 		contentOperations := make([]string, 0, 3)
 		if s.artifactContent != nil {
 			contentOperations = append(contentOperations, kernelapi.OperationUpload, kernelapi.OperationDownload)
@@ -146,7 +147,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		}
 		capabilities = append(capabilities, kernelapi.ArtifactCapability(contentOperations...))
 	}
-	if _, ok := s.store.(runtime.ConversationStore); ok {
+	if _, ok := s.store.(models.ConversationStore); ok {
 		capabilities = append(capabilities, kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Runs: true, Coordination: s.desktopConversationScope == nil, Changes: true, Receipts: true, ParticipationSettings: s.channelParticipationAuthorizer != nil, AutomaticCoordination: s.channelMessageDispatcher != nil, ApprovalMode: s.conversationApprovalModeSupported()}))
 	}
 	if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
@@ -159,7 +160,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		capabilities = append(capabilities, kernelapi.SkillActionsCapability())
 		if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
 			bindings := kernelapi.SkillBindingsCapability(true)
-			if _, upgradesOK := s.store.(runtime.SkillReferenceUpgradeStore); !upgradesOK {
+			if _, upgradesOK := s.store.(models.SkillReferenceUpgradeStore); !upgradesOK {
 				operations := bindings.Operations[:0]
 				for _, operation := range bindings.Operations {
 					if operation != kernelapi.OperationPlanUpgrade && operation != kernelapi.OperationApplyUpgrade {
@@ -172,7 +173,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if scope, ok := s.agentBuilderCapabilityScope(r); ok && s.agentBuilderAvailable(r.Context(), scope) {
-		capabilities = append(capabilities, kernelapi.AgentBuilderCapability(runtime.AgentBuilderDeploymentID))
+		capabilities = append(capabilities, kernelapi.AgentBuilderCapability(conversationrun.AgentBuilderDeploymentID))
 	}
 	s.respondJSON(w, http.StatusOK, kernelapi.NewCapabilityDocument(capabilities...))
 }

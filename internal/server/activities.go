@@ -6,7 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 )
 
 // handleListActivity exposes only the canonical selector-bounded projection.
@@ -33,7 +34,7 @@ func (s *Server) handleListActivity(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	request := runtime.ActivityFeedRequest{
+	request := activity.ActivityFeedRequest{
 		Scope: scope, RunID: strings.TrimSpace(r.URL.Query().Get("runId")), AgentID: strings.TrimSpace(r.URL.Query().Get("agentId")),
 		ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), TeamID: strings.TrimSpace(r.URL.Query().Get("teamId")),
 		EventTypes: cleanQueryValues(r.URL.Query()["eventType"]), Cursor: strings.TrimSpace(r.URL.Query().Get("cursor")),
@@ -47,7 +48,7 @@ func (s *Server) handleListActivity(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	page, err := runtime.NewRunActivityService(s.store, s.store).ListActivityFeed(r.Context(), request)
+	page, err := activity.NewRunActivityService(s.store, s.store).ListActivityFeed(r.Context(), request)
 	if err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
@@ -55,12 +56,12 @@ func (s *Server) handleListActivity(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, page)
 }
 
-func activitySeverities(values []string) ([]runtime.ActivitySeverity, error) {
-	result := make([]runtime.ActivitySeverity, 0, len(values))
+func activitySeverities(values []string) ([]models.ActivitySeverity, error) {
+	result := make([]models.ActivitySeverity, 0, len(values))
 	for _, value := range cleanQueryValues(values) {
-		severity := runtime.ActivitySeverity(value)
+		severity := models.ActivitySeverity(value)
 		switch severity {
-		case runtime.ActivitySeverityDebug, runtime.ActivitySeverityInfo, runtime.ActivitySeverityWarning, runtime.ActivitySeverityError:
+		case models.ActivitySeverityDebug, models.ActivitySeverityInfo, models.ActivitySeverityWarning, models.ActivitySeverityError:
 			result = append(result, severity)
 		default:
 			return nil, errors.New("activity severity is invalid")
@@ -69,12 +70,12 @@ func activitySeverities(values []string) ([]runtime.ActivitySeverity, error) {
 	return result, nil
 }
 
-func activityVisibilities(values []string) ([]runtime.ActivityVisibility, error) {
-	result := make([]runtime.ActivityVisibility, 0, len(values))
+func activityVisibilities(values []string) ([]models.ActivityVisibility, error) {
+	result := make([]models.ActivityVisibility, 0, len(values))
 	for _, value := range cleanQueryValues(values) {
-		visibility := runtime.ActivityVisibility(value)
+		visibility := models.ActivityVisibility(value)
 		switch visibility {
-		case runtime.ActivityVisibilityPrivate, runtime.ActivityVisibilityTeam, runtime.ActivityVisibilityScope:
+		case models.ActivityVisibilityPrivate, models.ActivityVisibilityTeam, models.ActivityVisibilityScope:
 			result = append(result, visibility)
 		default:
 			return nil, errors.New("activity visibility is invalid")

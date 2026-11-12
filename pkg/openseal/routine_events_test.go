@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
@@ -35,8 +35,8 @@ func newRoutineEventFixture(t *testing.T, ctx context.Context, engine *Engine, s
 	}
 	posted, err := engine.PostChannelMessage(ctx, PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: runtime.ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,
-		Content: "Tell me when an invoice email comes in", Audience: runtime.ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,
+		Content: "Tell me when an invoice email comes in", Audience: models.ConversationAudience{Kind: ConversationAudienceChannel},
 		IdempotencyKey: "request:inbox",
 	})
 	if err != nil {
@@ -50,7 +50,7 @@ func newRoutineEventFixture(t *testing.T, ctx context.Context, engine *Engine, s
 func (f *routineEventFixture) gmailRoutine(name string) *RunbookActivation {
 	f.t.Helper()
 	objective, err := f.engine.CreateObjective(f.ctx, CreateObjectiveRequest{
-		Scope: f.scope, Owner: f.owner, Title: name, Goal: "Summarize invoice email for " + name, Status: runtime.ObjectiveStatusActive,
+		Scope: f.scope, Owner: f.owner, Title: name, Goal: "Summarize invoice email for " + name, Status: models.ObjectiveStatusActive,
 		ExecutionPolicy: &ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
 	})
 	if err != nil {
@@ -74,7 +74,7 @@ func (f *routineEventFixture) listening(activation *RunbookActivation) bool {
 	return f.engine.RoutineEventListening(f.scope, activation.Task.Event.Kind, activation.Task.Event.SourceRef)
 }
 
-func (f *routineEventFixture) setStatus(activation *RunbookActivation, status runtime.RunbookActivationStatus) *RunbookActivation {
+func (f *routineEventFixture) setStatus(activation *RunbookActivation, status models.RunbookActivationStatus) *RunbookActivation {
 	f.t.Helper()
 	current, err := f.engine.GetRunbookActivation(f.ctx, f.scope, activation.ID)
 	if err != nil {
@@ -124,7 +124,7 @@ func TestEngineRoutineEventEndToEnd(t *testing.T) {
 	if err != nil || result.Started != 1 {
 		t.Fatalf("dispatch = %#v err=%v", result, err)
 	}
-	runs, err := engine.ListAgentRuns(ctx, runtime.AgentRunFilter{Scope: scope, ObjectiveID: activation.ObjectiveID})
+	runs, err := engine.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, ObjectiveID: activation.ObjectiveID})
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("runs = %#v err=%v", runs, err)
 	}

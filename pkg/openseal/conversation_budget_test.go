@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 // Bounded conversation Runs reserve every model step before it runs (D12):
@@ -120,7 +121,7 @@ func TestPublicAgentConversationPausesBeforeAnUnfundedStep(t *testing.T) {
 		t.Fatalf("paused run budget: admission=%+v usage=%+v reservations=%+v", paused.BudgetAdmission, paused.BudgetUsage, paused.BudgetReservations)
 	}
 	steps, err := engine.ListAgentTurns(ctx, AgentTurnFilter{Scope: scope, RunID: paused.ID})
-	if err != nil || len(steps) != 1 || steps[0].Status != AgentTurnStatusCanceled || steps[0].FailureCode != runtime.StepFailureBudgetExhausted {
+	if err != nil || len(steps) != 1 || steps[0].Status != AgentTurnStatusCanceled || steps[0].FailureCode != runloop.StepFailureBudgetExhausted {
 		t.Fatalf("refused step rows = %+v, %v", steps, err)
 	}
 	messages, err := engine.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
@@ -129,7 +130,7 @@ func TestPublicAgentConversationPausesBeforeAnUnfundedStep(t *testing.T) {
 	}
 }
 
-func conversationBudgetEngine(t *testing.T, store *runtime.SQLiteStore, scope Scope, budget *BudgetPolicy, resolver TurnRunnerResolver) *Engine {
+func conversationBudgetEngine(t *testing.T, store *sqlite.Store, scope Scope, budget *BudgetPolicy, resolver TurnRunnerResolver) *Engine {
 	t.Helper()
 	engine, err := New(WithStore(store), WithConversationCoordinator(
 		ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {

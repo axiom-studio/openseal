@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestParseScope(t *testing.T) {
@@ -47,7 +47,7 @@ func TestParseOwnerAcceptsOnlyAgentOrTeam(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parseOwner(%q): %v", value, err)
 		}
-		if owner.ID == "" || (owner.Type != runtime.OwnerTypeAgent && owner.Type != runtime.OwnerTypeTeam) {
+		if owner.ID == "" || (owner.Type != models.OwnerTypeAgent && owner.Type != models.OwnerTypeTeam) {
 			t.Fatalf("owner = %#v", owner)
 		}
 	}

@@ -7,7 +7,8 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
@@ -15,17 +16,17 @@ import (
 func TestObjectiveAPIExposesIdempotentPortfolioLifecycleAndRuns(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
-	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
+	server.SetAgentRunCreationDispatcher(agentrun.NewRunCommandService(store).CreateAgentRun)
 	body := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"team","id":"gtm"},"title":"Launch","goal":"Create demand","status":"active","budget":{"maxAttempts":5,"maxTurns":10,"maxTotalTokens":1000,"maxDurationMs":120000}}`
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/objectives", body, "launch-objective")
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create = %d %s", created.Code, created.Body.String())
 	}
-	var objective runtime.Objective
+	var objective models.Objective
 	if err := json.NewDecoder(created.Body).Decode(&objective); err != nil {
 		t.Fatal(err)
 	}
-	if objective.Budget == nil || objective.Budget.MaxAttempts != 5 || objective.Budget.MaxTurns != 10 || objective.Budget.MaxDurationMS != 120000 || objective.Status != runtime.ObjectiveStatusActive {
+	if objective.Budget == nil || objective.Budget.MaxAttempts != 5 || objective.Budget.MaxTurns != 10 || objective.Budget.MaxDurationMS != 120000 || objective.Status != models.ObjectiveStatusActive {
 		t.Fatalf("objective = %#v", objective)
 	}
 	replayed := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/objectives", body, "launch-objective")
@@ -74,7 +75,7 @@ func TestObjectiveAPIRejectsInvalidLifecycleTransition(t *testing.T) {
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create = %d %s", created.Code, created.Body.String())
 	}
-	var objective runtime.Objective
+	var objective models.Objective
 	_ = json.NewDecoder(created.Body).Decode(&objective)
 	updated := performAgentRunRequest(t, server.Handler(), http.MethodPut, "/api/v1/objectives/"+objective.ID+"?scopeKind=local&scopeId=default", `{"expectedRevision":1,"status":"active"}`, "")
 	if updated.Code != http.StatusConflict {

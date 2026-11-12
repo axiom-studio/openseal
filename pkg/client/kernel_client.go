@@ -17,7 +17,12 @@ import (
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -31,33 +36,33 @@ type KernelClient interface {
 	ArtifactClient
 	TeamClient
 	Capabilities(context.Context) (kernelapi.CapabilityDocument, error)
-	CreateObjective(context.Context, kernelapi.CreateObjectiveRequest, string) (*runtime.Objective, error)
-	ListObjectives(context.Context, runtime.ObjectiveFilter) ([]*runtime.Objective, error)
-	GetObjective(context.Context, runtime.Scope, string) (*kernelapi.ObjectiveDetail, error)
-	UpdateObjective(context.Context, runtime.Scope, string, kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error)
-	ListRunbooks(context.Context, runtime.RunbookActivationFilter) ([]*runtime.RunbookActivation, error)
-	GetRunbook(context.Context, runtime.Scope, string) (*runtime.RunbookDetail, error)
-	UpdateRunbook(context.Context, runtime.Scope, string, runtime.UpdateRunbookActivationRequest) (*runtime.RunbookActivation, error)
-	StartRunbook(context.Context, runtime.Scope, string, runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error)
+	CreateObjective(context.Context, kernelapi.CreateObjectiveRequest, string) (*models.Objective, error)
+	ListObjectives(context.Context, models.ObjectiveFilter) ([]*models.Objective, error)
+	GetObjective(context.Context, models.Scope, string) (*kernelapi.ObjectiveDetail, error)
+	UpdateObjective(context.Context, models.Scope, string, kernelapi.UpdateObjectiveRequest) (*models.Objective, error)
+	ListRunbooks(context.Context, models.RunbookActivationFilter) ([]*models.RunbookActivation, error)
+	GetRunbook(context.Context, models.Scope, string) (*routine.RunbookDetail, error)
+	UpdateRunbook(context.Context, models.Scope, string, routine.UpdateRunbookActivationRequest) (*models.RunbookActivation, error)
+	StartRunbook(context.Context, models.Scope, string, routine.StartRunbookActivationRequest) (*agentrun.AgentRunCommandResult, error)
 	ReconcileRunbookSchedules(context.Context, kernelapi.ReconcileRunbookSchedulesRequest) (*kernelapi.RunbookScheduleReconciliation, error)
-	ListActivity(context.Context, runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error)
-	CreateAgentRun(context.Context, kernelapi.CreateAgentRunRequest, string) (*runtime.AgentRunCommandResult, error)
-	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)
-	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
-	CommandAgentRun(context.Context, runtime.Scope, string, kernelapi.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error)
-	ListAgentTurns(context.Context, runtime.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error)
-	GetAgentTurn(context.Context, runtime.Scope, string) (*kernelapi.AgentTurnRecord, error)
-	CreateAgentRequest(context.Context, kernelapi.CreateAgentRequestRequest, string) (*runtime.AgentRequestResult, error)
-	ListAgentRequests(context.Context, runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error)
-	GetAgentRequest(context.Context, runtime.Scope, string) (*runtime.AgentRequest, error)
-	RespondAgentRequest(context.Context, runtime.Scope, string, kernelapi.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error)
-	CompleteAgentRequest(context.Context, runtime.Scope, string, kernelapi.CompleteAgentRequestRequest, string) (*runtime.AgentRequestResult, error)
-	ReviewAgentRequestCompletion(context.Context, runtime.Scope, string, kernelapi.ReviewAgentRequestCompletionRequest, string) (*runtime.AgentRequestResult, error)
-	ListActionCalls(context.Context, runtime.ActionFilter) ([]*runtime.ActionCall, error)
-	GetActionCall(context.Context, runtime.Scope, string) (*runtime.ActionCall, error)
-	ListActionApprovals(context.Context, runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error)
-	GetActionApproval(context.Context, runtime.Scope, string) (*runtime.ApprovalCheckpoint, error)
-	ResolveActionApproval(context.Context, runtime.Scope, string, kernelapi.ResolveActionApprovalRequest, string) (*runtime.ApprovalResolutionResult, error)
+	ListActivity(context.Context, activity.ActivityFeedRequest) (*activity.ActivityFeedPage, error)
+	CreateAgentRun(context.Context, kernelapi.CreateAgentRunRequest, string) (*agentrun.AgentRunCommandResult, error)
+	ListAgentRuns(context.Context, models.AgentRunFilter) ([]*models.AgentRun, error)
+	GetAgentRun(context.Context, models.Scope, string) (*models.AgentRun, error)
+	CommandAgentRun(context.Context, models.Scope, string, kernelapi.AgentRunCommandRequest) (*agentrun.AgentRunCommandResult, error)
+	ListAgentTurns(context.Context, models.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error)
+	GetAgentTurn(context.Context, models.Scope, string) (*kernelapi.AgentTurnRecord, error)
+	CreateAgentRequest(context.Context, kernelapi.CreateAgentRequestRequest, string) (*collaboration.AgentRequestResult, error)
+	ListAgentRequests(context.Context, models.AgentRequestFilter) ([]*models.AgentRequest, error)
+	GetAgentRequest(context.Context, models.Scope, string) (*models.AgentRequest, error)
+	RespondAgentRequest(context.Context, models.Scope, string, kernelapi.RespondAgentRequestRequest) (*collaboration.AgentRequestResult, error)
+	CompleteAgentRequest(context.Context, models.Scope, string, kernelapi.CompleteAgentRequestRequest, string) (*collaboration.AgentRequestResult, error)
+	ReviewAgentRequestCompletion(context.Context, models.Scope, string, kernelapi.ReviewAgentRequestCompletionRequest, string) (*collaboration.AgentRequestResult, error)
+	ListActionCalls(context.Context, models.ActionFilter) ([]*models.ActionCall, error)
+	GetActionCall(context.Context, models.Scope, string) (*models.ActionCall, error)
+	ListActionApprovals(context.Context, models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error)
+	GetActionApproval(context.Context, models.Scope, string) (*models.ApprovalCheckpoint, error)
+	ResolveActionApproval(context.Context, models.Scope, string, kernelapi.ResolveActionApprovalRequest, string) (*models.ApprovalResolutionResult, error)
 	ListAgentDefinitionCompilations(context.Context, capability.ScopeReference, string) ([]*kernelagent.DefinitionCompilation, error)
 	InstallAgentManifest(context.Context, kernelagent.ManifestInstallationRequest, string) (*kernelagent.ManifestInstallationResult, error)
 	GetAgentDeployment(context.Context, capability.ScopeReference, string) (*kernelapi.AgentDeploymentCatalogEntry, error)
@@ -70,8 +75,8 @@ type KernelClient interface {
 // Interactive surfaces capability-gate it with agent-runs.audit so clients
 // connected to an older or deliberately minimal kernel remain valid.
 type RunbookExecutionAuditClient interface {
-	GetRunbookExecutionAudit(context.Context, runtime.Scope, string) (*runtime.RunbookExecutionAudit, error)
-	GetRunExecutionAudit(context.Context, runtime.Scope, string) (*runtime.RunExecutionAudit, error)
+	GetRunbookExecutionAudit(context.Context, models.Scope, string) (*routine.RunbookExecutionAudit, error)
+	GetRunExecutionAudit(context.Context, models.Scope, string) (*routine.RunExecutionAudit, error)
 }
 
 var _ RunbookExecutionAuditClient = (*KernelHTTPClient)(nil)
@@ -93,10 +98,10 @@ var _ WorkforceBundleClient = (*KernelHTTPClient)(nil)
 // hosts that advertise conversation-gateways/v2. Keeping it separate from the
 // base KernelClient lets older or read-only embedding surfaces remain honest.
 type ExternalConversationGatewayClient interface {
-	CreateExternalConversationGateway(context.Context, kernelapi.CreateExternalConversationGatewayRequest) (*runtime.ExternalConversationGatewayRegistration, error)
-	ListExternalConversationGateways(context.Context, runtime.ExternalConversationGatewayFilter) ([]*runtime.ExternalConversationGatewayRegistration, error)
-	GetExternalConversationGateway(context.Context, runtime.Scope, string) (*runtime.ExternalConversationGatewayRegistration, error)
-	UpdateExternalConversationGateway(context.Context, runtime.Scope, string, kernelapi.UpdateExternalConversationGatewayRequest) (*runtime.ExternalConversationGatewayRegistration, error)
+	CreateExternalConversationGateway(context.Context, kernelapi.CreateExternalConversationGatewayRequest) (*models.ExternalConversationGatewayRegistration, error)
+	ListExternalConversationGateways(context.Context, models.ExternalConversationGatewayFilter) ([]*models.ExternalConversationGatewayRegistration, error)
+	GetExternalConversationGateway(context.Context, models.Scope, string) (*models.ExternalConversationGatewayRegistration, error)
+	UpdateExternalConversationGateway(context.Context, models.Scope, string, kernelapi.UpdateExternalConversationGatewayRequest) (*models.ExternalConversationGatewayRegistration, error)
 }
 
 // AgentDefinitionCapabilityClient discovers the operations authorized for one
@@ -221,14 +226,14 @@ type TeamSkillClient interface {
 	ListTeamSkillBindings(context.Context, capability.ScopeReference, string) (*kernelapi.SkillBindingList, error)
 	UpsertTeamSkillBinding(context.Context, string, skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
 	DisableTeamSkillBinding(context.Context, string, skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
-	PlanTeamSkillReferenceUpgrade(context.Context, string, runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error)
-	ApplyTeamSkillReferenceUpgrade(context.Context, string, runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error)
+	PlanTeamSkillReferenceUpgrade(context.Context, string, skillbinding.PlanSkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradePlan, error)
+	ApplyTeamSkillReferenceUpgrade(context.Context, string, skillbinding.ApplySkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradeReceipt, error)
 }
 
 // SkillBindingOwner identifies the canonical deployment resource that owns a
 // Skill portfolio. The binding representation is identical for both kinds.
 type SkillBindingOwner struct {
-	Type         runtime.OwnerType
+	Type         models.OwnerType
 	DeploymentID string
 }
 
@@ -238,8 +243,8 @@ type SkillBindingClient interface {
 	ListSkillBindings(context.Context, capability.ScopeReference, SkillBindingOwner) (*kernelapi.SkillBindingList, error)
 	UpsertSkillBinding(context.Context, SkillBindingOwner, skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
 	DisableSkillBinding(context.Context, SkillBindingOwner, skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error)
-	PlanSkillReferenceUpgrade(context.Context, SkillBindingOwner, runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error)
-	ApplySkillReferenceUpgrade(context.Context, SkillBindingOwner, runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error)
+	PlanSkillReferenceUpgrade(context.Context, SkillBindingOwner, skillbinding.PlanSkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradePlan, error)
+	ApplySkillReferenceUpgrade(context.Context, SkillBindingOwner, skillbinding.ApplySkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradeReceipt, error)
 }
 
 var _ TeamSkillClient = (*KernelHTTPClient)(nil)
@@ -508,7 +513,7 @@ func (c *KernelHTTPClient) StartAgentBuilderConversation(ctx context.Context, re
 
 // ListAgentBuilderDrafts lists the local operator's builder conversations that
 // have not produced their Agent or Team yet.
-func (c *KernelHTTPClient) ListAgentBuilderDrafts(ctx context.Context, scope runtime.Scope, limit, offset int) (*kernelapi.ListAgentBuilderDraftsResponse, error) {
+func (c *KernelHTTPClient) ListAgentBuilderDrafts(ctx context.Context, scope models.Scope, limit, offset int) (*kernelapi.ListAgentBuilderDraftsResponse, error) {
 	query := scopeQuery(scope)
 	if limit > 0 {
 		query.Set("limit", strconv.Itoa(limit))
@@ -523,15 +528,15 @@ func (c *KernelHTTPClient) ListAgentBuilderDrafts(ctx context.Context, scope run
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) CreateObjective(ctx context.Context, request kernelapi.CreateObjectiveRequest, idempotencyKey string) (*runtime.Objective, error) {
-	var objective runtime.Objective
+func (c *KernelHTTPClient) CreateObjective(ctx context.Context, request kernelapi.CreateObjectiveRequest, idempotencyKey string) (*models.Objective, error) {
+	var objective models.Objective
 	if err := c.do(ctx, http.MethodPost, "/api/v1/objectives", request, idempotencyKey, &objective); err != nil {
 		return nil, err
 	}
 	return &objective, nil
 }
 
-func (c *KernelHTTPClient) ListObjectives(ctx context.Context, filter runtime.ObjectiveFilter) ([]*runtime.Objective, error) {
+func (c *KernelHTTPClient) ListObjectives(ctx context.Context, filter models.ObjectiveFilter) ([]*models.Objective, error) {
 	query := scopeQuery(filter.Scope)
 	if filter.Owner != nil {
 		query.Set("ownerType", string(filter.Owner.Type))
@@ -546,14 +551,14 @@ func (c *KernelHTTPClient) ListObjectives(ctx context.Context, filter runtime.Ob
 	if filter.Offset > 0 {
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
-	var objectives []*runtime.Objective
+	var objectives []*models.Objective
 	if err := c.do(ctx, http.MethodGet, "/api/v1/objectives?"+query.Encode(), nil, "", &objectives); err != nil {
 		return nil, err
 	}
 	return objectives, nil
 }
 
-func (c *KernelHTTPClient) GetObjective(ctx context.Context, scope runtime.Scope, objectiveID string) (*kernelapi.ObjectiveDetail, error) {
+func (c *KernelHTTPClient) GetObjective(ctx context.Context, scope models.Scope, objectiveID string) (*kernelapi.ObjectiveDetail, error) {
 	query := scopeQuery(scope)
 	var detail kernelapi.ObjectiveDetail
 	path := "/api/v1/objectives/" + url.PathEscape(strings.TrimSpace(objectiveID)) + "?" + query.Encode()
@@ -563,9 +568,9 @@ func (c *KernelHTTPClient) GetObjective(ctx context.Context, scope runtime.Scope
 	return &detail, nil
 }
 
-func (c *KernelHTTPClient) UpdateObjective(ctx context.Context, scope runtime.Scope, objectiveID string, request kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error) {
+func (c *KernelHTTPClient) UpdateObjective(ctx context.Context, scope models.Scope, objectiveID string, request kernelapi.UpdateObjectiveRequest) (*models.Objective, error) {
 	query := scopeQuery(scope)
-	var objective runtime.Objective
+	var objective models.Objective
 	path := "/api/v1/objectives/" + url.PathEscape(strings.TrimSpace(objectiveID)) + "?" + query.Encode()
 	if err := c.do(ctx, http.MethodPut, path, request, "", &objective); err != nil {
 		return nil, err
@@ -573,7 +578,7 @@ func (c *KernelHTTPClient) UpdateObjective(ctx context.Context, scope runtime.Sc
 	return &objective, nil
 }
 
-func (c *KernelHTTPClient) ListRunbooks(ctx context.Context, filter runtime.RunbookActivationFilter) ([]*runtime.RunbookActivation, error) {
+func (c *KernelHTTPClient) ListRunbooks(ctx context.Context, filter models.RunbookActivationFilter) ([]*models.RunbookActivation, error) {
 	query := scopeQuery(filter.Scope)
 	if filter.Owner != nil {
 		query.Set("ownerType", string(filter.Owner.Type))
@@ -594,16 +599,16 @@ func (c *KernelHTTPClient) ListRunbooks(ctx context.Context, filter runtime.Runb
 	if filter.Offset > 0 {
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
-	var values []*runtime.RunbookActivation
+	var values []*models.RunbookActivation
 	if err := c.do(ctx, http.MethodGet, "/api/v1/runbooks?"+query.Encode(), nil, "", &values); err != nil {
 		return nil, err
 	}
 	return values, nil
 }
 
-func (c *KernelHTTPClient) GetRunbook(ctx context.Context, scope runtime.Scope, activationID string) (*runtime.RunbookDetail, error) {
+func (c *KernelHTTPClient) GetRunbook(ctx context.Context, scope models.Scope, activationID string) (*routine.RunbookDetail, error) {
 	query := scopeQuery(scope)
-	var value runtime.RunbookDetail
+	var value routine.RunbookDetail
 	path := "/api/v1/runbooks/" + url.PathEscape(strings.TrimSpace(activationID)) + "?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
 		return nil, err
@@ -611,9 +616,9 @@ func (c *KernelHTTPClient) GetRunbook(ctx context.Context, scope runtime.Scope, 
 	return &value, nil
 }
 
-func (c *KernelHTTPClient) UpdateRunbook(ctx context.Context, scope runtime.Scope, activationID string, request runtime.UpdateRunbookActivationRequest) (*runtime.RunbookActivation, error) {
+func (c *KernelHTTPClient) UpdateRunbook(ctx context.Context, scope models.Scope, activationID string, request routine.UpdateRunbookActivationRequest) (*models.RunbookActivation, error) {
 	query := scopeQuery(scope)
-	var value runtime.RunbookActivation
+	var value models.RunbookActivation
 	path := "/api/v1/runbooks/" + url.PathEscape(strings.TrimSpace(activationID)) + "?" + query.Encode()
 	if err := c.do(ctx, http.MethodPatch, path, request, "", &value); err != nil {
 		return nil, err
@@ -621,9 +626,9 @@ func (c *KernelHTTPClient) UpdateRunbook(ctx context.Context, scope runtime.Scop
 	return &value, nil
 }
 
-func (c *KernelHTTPClient) StartRunbook(ctx context.Context, scope runtime.Scope, activationID string, request runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error) {
+func (c *KernelHTTPClient) StartRunbook(ctx context.Context, scope models.Scope, activationID string, request routine.StartRunbookActivationRequest) (*agentrun.AgentRunCommandResult, error) {
 	query := scopeQuery(scope)
-	var value runtime.AgentRunCommandResult
+	var value agentrun.AgentRunCommandResult
 	path := "/api/v1/runbooks/" + url.PathEscape(strings.TrimSpace(activationID)) + "/runs?" + query.Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, "", &value); err != nil {
 		return nil, err
@@ -642,8 +647,8 @@ func (c *KernelHTTPClient) ReconcileRunbookSchedules(ctx context.Context, reques
 func (c *KernelHTTPClient) CreateExternalConversationGateway(
 	ctx context.Context,
 	request kernelapi.CreateExternalConversationGatewayRequest,
-) (*runtime.ExternalConversationGatewayRegistration, error) {
-	var value runtime.ExternalConversationGatewayRegistration
+) (*models.ExternalConversationGatewayRegistration, error) {
+	var value models.ExternalConversationGatewayRegistration
 	if err := c.do(ctx, http.MethodPost, "/api/v1/conversation-gateways", request, "", &value); err != nil {
 		return nil, err
 	}
@@ -652,8 +657,8 @@ func (c *KernelHTTPClient) CreateExternalConversationGateway(
 
 func (c *KernelHTTPClient) ListExternalConversationGateways(
 	ctx context.Context,
-	filter runtime.ExternalConversationGatewayFilter,
-) ([]*runtime.ExternalConversationGatewayRegistration, error) {
+	filter models.ExternalConversationGatewayFilter,
+) ([]*models.ExternalConversationGatewayRegistration, error) {
 	query := scopeQuery(filter.Scope)
 	if filter.Provider != "" {
 		query.Set("provider", filter.Provider)
@@ -667,7 +672,7 @@ func (c *KernelHTTPClient) ListExternalConversationGateways(
 	if filter.Offset > 0 {
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
-	var values []*runtime.ExternalConversationGatewayRegistration
+	var values []*models.ExternalConversationGatewayRegistration
 	if err := c.do(ctx, http.MethodGet, "/api/v1/conversation-gateways?"+query.Encode(), nil, "", &values); err != nil {
 		return nil, err
 	}
@@ -676,10 +681,10 @@ func (c *KernelHTTPClient) ListExternalConversationGateways(
 
 func (c *KernelHTTPClient) GetExternalConversationGateway(
 	ctx context.Context,
-	scope runtime.Scope,
+	scope models.Scope,
 	id string,
-) (*runtime.ExternalConversationGatewayRegistration, error) {
-	var value runtime.ExternalConversationGatewayRegistration
+) (*models.ExternalConversationGatewayRegistration, error) {
+	var value models.ExternalConversationGatewayRegistration
 	path := "/api/v1/conversation-gateways/" + url.PathEscape(strings.TrimSpace(id)) + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
 		return nil, err
@@ -689,11 +694,11 @@ func (c *KernelHTTPClient) GetExternalConversationGateway(
 
 func (c *KernelHTTPClient) UpdateExternalConversationGateway(
 	ctx context.Context,
-	scope runtime.Scope,
+	scope models.Scope,
 	id string,
 	request kernelapi.UpdateExternalConversationGatewayRequest,
-) (*runtime.ExternalConversationGatewayRegistration, error) {
-	var value runtime.ExternalConversationGatewayRegistration
+) (*models.ExternalConversationGatewayRegistration, error) {
+	var value models.ExternalConversationGatewayRegistration
 	path := "/api/v1/conversation-gateways/" + url.PathEscape(strings.TrimSpace(id)) + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodPatch, path, request, "", &value); err != nil {
 		return nil, err
@@ -701,7 +706,7 @@ func (c *KernelHTTPClient) UpdateExternalConversationGateway(
 	return &value, nil
 }
 
-func (c *KernelHTTPClient) ListActivity(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
+func (c *KernelHTTPClient) ListActivity(ctx context.Context, request activity.ActivityFeedRequest) (*activity.ActivityFeedPage, error) {
 	query := scopeQuery(request.Scope)
 	for _, item := range []struct{ key, value string }{
 		{"runId", request.RunID}, {"agentId", request.AgentID}, {"objectiveId", request.ObjectiveID}, {"teamId", request.TeamID}, {"cursor", request.Cursor},
@@ -727,22 +732,22 @@ func (c *KernelHTTPClient) ListActivity(ctx context.Context, request runtime.Act
 	if request.IncludeDetails {
 		query.Set("includeDetails", "true")
 	}
-	var page runtime.ActivityFeedPage
+	var page activity.ActivityFeedPage
 	if err := c.do(ctx, http.MethodGet, "/api/v1/activity?"+query.Encode(), nil, "", &page); err != nil {
 		return nil, err
 	}
 	return &page, nil
 }
 
-func (c *KernelHTTPClient) CreateAgentRun(ctx context.Context, request kernelapi.CreateAgentRunRequest, idempotencyKey string) (*runtime.AgentRunCommandResult, error) {
-	var result runtime.AgentRunCommandResult
+func (c *KernelHTTPClient) CreateAgentRun(ctx context.Context, request kernelapi.CreateAgentRunRequest, idempotencyKey string) (*agentrun.AgentRunCommandResult, error) {
+	var result agentrun.AgentRunCommandResult
 	if err := c.do(ctx, http.MethodPost, "/api/v1/agent-runs", request, idempotencyKey, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) ListAgentRuns(ctx context.Context, filter runtime.AgentRunFilter) ([]*runtime.AgentRun, error) {
+func (c *KernelHTTPClient) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	query := scopeQuery(filter.Scope)
 	setIfPresent(query, "kind", string(filter.Kind))
 	setIfPresent(query, "objectiveId", filter.ObjectiveID)
@@ -762,14 +767,14 @@ func (c *KernelHTTPClient) ListAgentRuns(ctx context.Context, filter runtime.Age
 	if filter.Offset > 0 {
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
-	var runs []*runtime.AgentRun
+	var runs []*models.AgentRun
 	if err := c.do(ctx, http.MethodGet, "/api/v1/agent-runs?"+query.Encode(), nil, "", &runs); err != nil {
 		return nil, err
 	}
 	return runs, nil
 }
 
-func (c *KernelHTTPClient) InspectAgentRunAdmission(ctx context.Context, request runtime.AgentRunClaimRequest) (*runtime.AgentRunAdmissionDecision, error) {
+func (c *KernelHTTPClient) InspectAgentRunAdmission(ctx context.Context, request agentrun.AgentRunClaimRequest) (*models.AgentRunAdmissionDecision, error) {
 	query := scopeQuery(request.Scope)
 	setIfPresent(query, "kind", string(request.Kind))
 	setIfPresent(query, "assignedAgentId", request.AssignedAgentID)
@@ -781,16 +786,16 @@ func (c *KernelHTTPClient) InspectAgentRunAdmission(ctx context.Context, request
 			query.Set(key, strconv.Itoa(value))
 		}
 	}
-	var decision runtime.AgentRunAdmissionDecision
+	var decision models.AgentRunAdmissionDecision
 	if err := c.do(ctx, http.MethodGet, "/api/v1/agent-runs/admission?"+query.Encode(), nil, "", &decision); err != nil {
 		return nil, err
 	}
 	return &decision, nil
 }
 
-func (c *KernelHTTPClient) GetAgentRun(ctx context.Context, scope runtime.Scope, runID string) (*runtime.AgentRun, error) {
+func (c *KernelHTTPClient) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
 	query := scopeQuery(scope)
-	var run runtime.AgentRun
+	var run models.AgentRun
 	path := "/api/v1/agent-runs/" + url.PathEscape(strings.TrimSpace(runID)) + "?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &run); err != nil {
 		return nil, err
@@ -798,9 +803,9 @@ func (c *KernelHTTPClient) GetAgentRun(ctx context.Context, scope runtime.Scope,
 	return &run, nil
 }
 
-func (c *KernelHTTPClient) GetRunbookExecutionAudit(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunbookExecutionAudit, error) {
+func (c *KernelHTTPClient) GetRunbookExecutionAudit(ctx context.Context, scope models.Scope, runID string) (*routine.RunbookExecutionAudit, error) {
 	query := scopeQuery(scope)
-	var value runtime.RunbookExecutionAudit
+	var value routine.RunbookExecutionAudit
 	path := "/api/v1/agent-runs/" + url.PathEscape(strings.TrimSpace(runID)) + "/runbook-audit?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
 		return nil, err
@@ -808,9 +813,9 @@ func (c *KernelHTTPClient) GetRunbookExecutionAudit(ctx context.Context, scope r
 	return &value, nil
 }
 
-func (c *KernelHTTPClient) GetRunExecutionAudit(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunExecutionAudit, error) {
+func (c *KernelHTTPClient) GetRunExecutionAudit(ctx context.Context, scope models.Scope, runID string) (*routine.RunExecutionAudit, error) {
 	query := scopeQuery(scope)
-	var value runtime.RunExecutionAudit
+	var value routine.RunExecutionAudit
 	path := "/api/v1/agent-runs/" + url.PathEscape(strings.TrimSpace(runID)) + "/execution-audit?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
 		return nil, err
@@ -818,9 +823,9 @@ func (c *KernelHTTPClient) GetRunExecutionAudit(ctx context.Context, scope runti
 	return &value, nil
 }
 
-func (c *KernelHTTPClient) CommandAgentRun(ctx context.Context, scope runtime.Scope, runID string, request kernelapi.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error) {
+func (c *KernelHTTPClient) CommandAgentRun(ctx context.Context, scope models.Scope, runID string, request kernelapi.AgentRunCommandRequest) (*agentrun.AgentRunCommandResult, error) {
 	query := scopeQuery(scope)
-	var result runtime.AgentRunCommandResult
+	var result agentrun.AgentRunCommandResult
 	path := "/api/v1/agent-runs/" + url.PathEscape(strings.TrimSpace(runID)) + "/commands?" + query.Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
 		return nil, err
@@ -828,15 +833,15 @@ func (c *KernelHTTPClient) CommandAgentRun(ctx context.Context, scope runtime.Sc
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) CreateAgentRequest(ctx context.Context, request kernelapi.CreateAgentRequestRequest, idempotencyKey string) (*runtime.AgentRequestResult, error) {
-	var result runtime.AgentRequestResult
+func (c *KernelHTTPClient) CreateAgentRequest(ctx context.Context, request kernelapi.CreateAgentRequestRequest, idempotencyKey string) (*collaboration.AgentRequestResult, error) {
+	var result collaboration.AgentRequestResult
 	if err := c.do(ctx, http.MethodPost, "/api/v1/agent-requests", request, idempotencyKey, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) ListAgentRequests(ctx context.Context, filter runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error) {
+func (c *KernelHTTPClient) ListAgentRequests(ctx context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
 	query := scopeQuery(filter.Scope)
 	setIfPresent(query, "sourceRunId", filter.SourceRunID)
 	if filter.Requester != nil {
@@ -859,15 +864,15 @@ func (c *KernelHTTPClient) ListAgentRequests(ctx context.Context, filter runtime
 	if filter.Offset > 0 {
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
-	var requests []*runtime.AgentRequest
+	var requests []*models.AgentRequest
 	if err := c.do(ctx, http.MethodGet, "/api/v1/agent-requests?"+query.Encode(), nil, "", &requests); err != nil {
 		return nil, err
 	}
 	return requests, nil
 }
 
-func (c *KernelHTTPClient) GetAgentRequest(ctx context.Context, scope runtime.Scope, requestID string) (*runtime.AgentRequest, error) {
-	var request runtime.AgentRequest
+func (c *KernelHTTPClient) GetAgentRequest(ctx context.Context, scope models.Scope, requestID string) (*models.AgentRequest, error) {
+	var request models.AgentRequest
 	path := "/api/v1/agent-requests/" + url.PathEscape(strings.TrimSpace(requestID)) + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &request); err != nil {
 		return nil, err
@@ -875,8 +880,8 @@ func (c *KernelHTTPClient) GetAgentRequest(ctx context.Context, scope runtime.Sc
 	return &request, nil
 }
 
-func (c *KernelHTTPClient) RespondAgentRequest(ctx context.Context, scope runtime.Scope, requestID string, request kernelapi.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error) {
-	var result runtime.AgentRequestResult
+func (c *KernelHTTPClient) RespondAgentRequest(ctx context.Context, scope models.Scope, requestID string, request kernelapi.RespondAgentRequestRequest) (*collaboration.AgentRequestResult, error) {
+	var result collaboration.AgentRequestResult
 	path := "/api/v1/agent-requests/" + url.PathEscape(strings.TrimSpace(requestID)) + "/responses?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, "", &result); err != nil {
 		return nil, err
@@ -884,8 +889,8 @@ func (c *KernelHTTPClient) RespondAgentRequest(ctx context.Context, scope runtim
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) CompleteAgentRequest(ctx context.Context, scope runtime.Scope, requestID string, request kernelapi.CompleteAgentRequestRequest, idempotencyKey string) (*runtime.AgentRequestResult, error) {
-	var result runtime.AgentRequestResult
+func (c *KernelHTTPClient) CompleteAgentRequest(ctx context.Context, scope models.Scope, requestID string, request kernelapi.CompleteAgentRequestRequest, idempotencyKey string) (*collaboration.AgentRequestResult, error) {
+	var result collaboration.AgentRequestResult
 	path := "/api/v1/agent-requests/" + url.PathEscape(strings.TrimSpace(requestID)) + "/completions?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &result); err != nil {
 		return nil, err
@@ -893,8 +898,8 @@ func (c *KernelHTTPClient) CompleteAgentRequest(ctx context.Context, scope runti
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) ReviewAgentRequestCompletion(ctx context.Context, scope runtime.Scope, requestID string, request kernelapi.ReviewAgentRequestCompletionRequest, idempotencyKey string) (*runtime.AgentRequestResult, error) {
-	var result runtime.AgentRequestResult
+func (c *KernelHTTPClient) ReviewAgentRequestCompletion(ctx context.Context, scope models.Scope, requestID string, request kernelapi.ReviewAgentRequestCompletionRequest, idempotencyKey string) (*collaboration.AgentRequestResult, error) {
+	var result collaboration.AgentRequestResult
 	path := "/api/v1/agent-requests/" + url.PathEscape(strings.TrimSpace(requestID)) + "/completion-review?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &result); err != nil {
 		return nil, err
@@ -902,7 +907,7 @@ func (c *KernelHTTPClient) ReviewAgentRequestCompletion(ctx context.Context, sco
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) ListActionCalls(ctx context.Context, filter runtime.ActionFilter) ([]*runtime.ActionCall, error) {
+func (c *KernelHTTPClient) ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
 	query := scopeQuery(filter.Scope)
 	setIfPresent(query, "runId", filter.RunID)
 	for _, status := range filter.Status {
@@ -914,15 +919,15 @@ func (c *KernelHTTPClient) ListActionCalls(ctx context.Context, filter runtime.A
 	if filter.Offset > 0 {
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
-	var calls []*runtime.ActionCall
+	var calls []*models.ActionCall
 	if err := c.do(ctx, http.MethodGet, "/api/v1/action-calls?"+query.Encode(), nil, "", &calls); err != nil {
 		return nil, err
 	}
 	return calls, nil
 }
 
-func (c *KernelHTTPClient) GetActionCall(ctx context.Context, scope runtime.Scope, actionID string) (*runtime.ActionCall, error) {
-	var call runtime.ActionCall
+func (c *KernelHTTPClient) GetActionCall(ctx context.Context, scope models.Scope, actionID string) (*models.ActionCall, error) {
+	var call models.ActionCall
 	path := "/api/v1/action-calls/" + url.PathEscape(strings.TrimSpace(actionID)) + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &call); err != nil {
 		return nil, err
@@ -931,7 +936,7 @@ func (c *KernelHTTPClient) GetActionCall(ctx context.Context, scope runtime.Scop
 }
 
 // ListAgentTurns lists the model steps of one Run, agent-turns v2.
-func (c *KernelHTTPClient) ListAgentTurns(ctx context.Context, filter runtime.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error) {
+func (c *KernelHTTPClient) ListAgentTurns(ctx context.Context, filter models.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error) {
 	query := scopeQuery(filter.Scope)
 	setIfPresent(query, "runId", filter.RunID)
 	for _, status := range filter.Statuses {
@@ -951,7 +956,7 @@ func (c *KernelHTTPClient) ListAgentTurns(ctx context.Context, filter runtime.Ag
 }
 
 // GetAgentTurn reads one model step, agent-turns v2.
-func (c *KernelHTTPClient) GetAgentTurn(ctx context.Context, scope runtime.Scope, turnID string) (*kernelapi.AgentTurnRecord, error) {
+func (c *KernelHTTPClient) GetAgentTurn(ctx context.Context, scope models.Scope, turnID string) (*kernelapi.AgentTurnRecord, error) {
 	var turn kernelapi.AgentTurnRecord
 	path := "/api/v1/agent-turns/" + url.PathEscape(strings.TrimSpace(turnID)) + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &turn); err != nil {
@@ -960,7 +965,7 @@ func (c *KernelHTTPClient) GetAgentTurn(ctx context.Context, scope runtime.Scope
 	return &turn, nil
 }
 
-func (c *KernelHTTPClient) ListActionApprovals(ctx context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
+func (c *KernelHTTPClient) ListActionApprovals(ctx context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
 	query := scopeQuery(filter.Scope)
 	setIfPresent(query, "runId", filter.RunID)
 	if filter.Owner != nil {
@@ -976,15 +981,15 @@ func (c *KernelHTTPClient) ListActionApprovals(ctx context.Context, filter runti
 	if filter.Offset > 0 {
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
-	var approvals []*runtime.ApprovalCheckpoint
+	var approvals []*models.ApprovalCheckpoint
 	if err := c.do(ctx, http.MethodGet, "/api/v1/action-approvals?"+query.Encode(), nil, "", &approvals); err != nil {
 		return nil, err
 	}
 	return approvals, nil
 }
 
-func (c *KernelHTTPClient) GetActionApproval(ctx context.Context, scope runtime.Scope, approvalID string) (*runtime.ApprovalCheckpoint, error) {
-	var approval runtime.ApprovalCheckpoint
+func (c *KernelHTTPClient) GetActionApproval(ctx context.Context, scope models.Scope, approvalID string) (*models.ApprovalCheckpoint, error) {
+	var approval models.ApprovalCheckpoint
 	path := "/api/v1/action-approvals/" + url.PathEscape(strings.TrimSpace(approvalID)) + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &approval); err != nil {
 		return nil, err
@@ -992,8 +997,8 @@ func (c *KernelHTTPClient) GetActionApproval(ctx context.Context, scope runtime.
 	return &approval, nil
 }
 
-func (c *KernelHTTPClient) ResolveActionApproval(ctx context.Context, scope runtime.Scope, approvalID string, request kernelapi.ResolveActionApprovalRequest, idempotencyKey string) (*runtime.ApprovalResolutionResult, error) {
-	var result runtime.ApprovalResolutionResult
+func (c *KernelHTTPClient) ResolveActionApproval(ctx context.Context, scope models.Scope, approvalID string, request kernelapi.ResolveActionApprovalRequest, idempotencyKey string) (*models.ApprovalResolutionResult, error) {
+	var result models.ApprovalResolutionResult
 	path := "/api/v1/action-approvals/" + url.PathEscape(strings.TrimSpace(approvalID)) + "/decisions?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &result); err != nil {
 		return nil, err
@@ -1057,7 +1062,7 @@ func (c *KernelHTTPClient) ListTeamDeployments(ctx context.Context, scope capabi
 }
 
 func (c *KernelHTTPClient) ListTeamSkillBindings(ctx context.Context, scope capability.ScopeReference, deploymentID string) (*kernelapi.SkillBindingList, error) {
-	return c.ListSkillBindings(ctx, scope, SkillBindingOwner{Type: runtime.OwnerTypeTeam, DeploymentID: deploymentID})
+	return c.ListSkillBindings(ctx, scope, SkillBindingOwner{Type: models.OwnerTypeTeam, DeploymentID: deploymentID})
 }
 
 func skillBindingOwnerPath(owner SkillBindingOwner) (string, error) {
@@ -1066,9 +1071,9 @@ func skillBindingOwnerPath(owner SkillBindingOwner) (string, error) {
 		return "", errors.New("deployment id is required")
 	}
 	switch owner.Type {
-	case runtime.OwnerTypeAgent:
+	case models.OwnerTypeAgent:
 		return "/api/v1/agent-deployments/" + url.PathEscape(id), nil
-	case runtime.OwnerTypeTeam:
+	case models.OwnerTypeTeam:
 		return "/api/v1/team-deployments/" + url.PathEscape(id), nil
 	default:
 		return "", fmt.Errorf("Skill bindings are not supported for owner type %q", owner.Type)
@@ -1089,7 +1094,7 @@ func (c *KernelHTTPClient) ListSkillBindings(ctx context.Context, scope capabili
 }
 
 func (c *KernelHTTPClient) UpsertTeamSkillBinding(ctx context.Context, deploymentID string, request skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
-	return c.UpsertSkillBinding(ctx, SkillBindingOwner{Type: runtime.OwnerTypeTeam, DeploymentID: deploymentID}, request)
+	return c.UpsertSkillBinding(ctx, SkillBindingOwner{Type: models.OwnerTypeTeam, DeploymentID: deploymentID}, request)
 }
 
 func (c *KernelHTTPClient) UpsertSkillBinding(ctx context.Context, owner SkillBindingOwner, request skill.UpsertBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
@@ -1109,7 +1114,7 @@ func (c *KernelHTTPClient) UpsertSkillBinding(ctx context.Context, owner SkillBi
 }
 
 func (c *KernelHTTPClient) DisableTeamSkillBinding(ctx context.Context, deploymentID string, request skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
-	return c.DisableSkillBinding(ctx, SkillBindingOwner{Type: runtime.OwnerTypeTeam, DeploymentID: deploymentID}, request)
+	return c.DisableSkillBinding(ctx, SkillBindingOwner{Type: models.OwnerTypeTeam, DeploymentID: deploymentID}, request)
 }
 
 func (c *KernelHTTPClient) DisableSkillBinding(ctx context.Context, owner SkillBindingOwner, request skill.DisableBindingRequest) (*kernelapi.SkillBindingMutationResult, error) {
@@ -1125,12 +1130,12 @@ func (c *KernelHTTPClient) DisableSkillBinding(ctx context.Context, owner SkillB
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) PlanTeamSkillReferenceUpgrade(ctx context.Context, deploymentID string, request runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error) {
-	return c.PlanSkillReferenceUpgrade(ctx, SkillBindingOwner{Type: runtime.OwnerTypeTeam, DeploymentID: deploymentID}, request)
+func (c *KernelHTTPClient) PlanTeamSkillReferenceUpgrade(ctx context.Context, deploymentID string, request skillbinding.PlanSkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradePlan, error) {
+	return c.PlanSkillReferenceUpgrade(ctx, SkillBindingOwner{Type: models.OwnerTypeTeam, DeploymentID: deploymentID}, request)
 }
 
-func (c *KernelHTTPClient) PlanSkillReferenceUpgrade(ctx context.Context, owner SkillBindingOwner, request runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error) {
-	var result runtime.SkillReferenceUpgradePlan
+func (c *KernelHTTPClient) PlanSkillReferenceUpgrade(ctx context.Context, owner SkillBindingOwner, request skillbinding.PlanSkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradePlan, error) {
+	var result models.SkillReferenceUpgradePlan
 	root, err := skillBindingOwnerPath(owner)
 	if err != nil {
 		return nil, err
@@ -1143,15 +1148,15 @@ func (c *KernelHTTPClient) PlanSkillReferenceUpgrade(ctx context.Context, owner 
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) ApplyTeamSkillReferenceUpgrade(ctx context.Context, deploymentID string, request runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error) {
-	return c.ApplySkillReferenceUpgrade(ctx, SkillBindingOwner{Type: runtime.OwnerTypeTeam, DeploymentID: deploymentID}, request)
+func (c *KernelHTTPClient) ApplyTeamSkillReferenceUpgrade(ctx context.Context, deploymentID string, request skillbinding.ApplySkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradeReceipt, error) {
+	return c.ApplySkillReferenceUpgrade(ctx, SkillBindingOwner{Type: models.OwnerTypeTeam, DeploymentID: deploymentID}, request)
 }
 
-func (c *KernelHTTPClient) ApplySkillReferenceUpgrade(ctx context.Context, owner SkillBindingOwner, request runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error) {
+func (c *KernelHTTPClient) ApplySkillReferenceUpgrade(ctx context.Context, owner SkillBindingOwner, request skillbinding.ApplySkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradeReceipt, error) {
 	if request.Plan == nil {
 		return nil, errors.New("reviewed Skill reference upgrade plan is required")
 	}
-	var result runtime.SkillReferenceUpgradeReceipt
+	var result models.SkillReferenceUpgradeReceipt
 	root, err := skillBindingOwnerPath(owner)
 	if err != nil {
 		return nil, err
@@ -1317,7 +1322,7 @@ func decodeAPIError(statusCode int, decoder *json.Decoder) error {
 	return &APIError{StatusCode: statusCode, Message: strings.TrimSpace(payload.Error)}
 }
 
-func scopeQuery(scope runtime.Scope) url.Values {
+func scopeQuery(scope models.Scope) url.Values {
 	query := make(url.Values)
 	query.Set("scopeKind", strings.TrimSpace(scope.Kind))
 	query.Set("scopeId", strings.TrimSpace(scope.ID))

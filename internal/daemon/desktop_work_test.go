@@ -4,7 +4,7 @@ import (
 	"context"
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/team"
 	"testing"
 )
@@ -27,8 +27,8 @@ func (c workCatalog) GetAgentDeployment(_ context.Context, scope capability.Scop
 	return c.agents[id], nil
 }
 func TestDesktopTeamWorkUsesCurrentRosterAndHostAuthority(t *testing.T) {
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	request := runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindAgentWork, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"}, AssignedAgentID: "lead", Goal: "Review evidence", IdempotencyKey: "task"}
+	scope := models.Scope{Kind: "local", ID: "default"}
+	request := models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, AssignedAgentID: "lead", Goal: "Review evidence", IdempotencyKey: "task"}
 	for _, tc := range []struct {
 		name         string
 		status       team.DeploymentStatus
@@ -61,8 +61,8 @@ func TestDesktopTeamWorkUsesCurrentRosterAndHostAuthority(t *testing.T) {
 }
 
 func TestDesktopWorkRequestOwnsAuthority(t *testing.T) {
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	request := runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindAgentWork, Owner: runtime.ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "Analyze", IdempotencyKey: "request", Actor: runtime.ActivityActor{Type: "user", ID: "spoofed"}}
+	scope := models.Scope{Kind: "local", ID: "default"}
+	request := models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "Analyze", IdempotencyKey: "request", Actor: models.ActivityActor{Type: "user", ID: "spoofed"}}
 	canonical, err := DesktopWorkRequest(scope, request)
 	if err != nil {
 		t.Fatal(err)

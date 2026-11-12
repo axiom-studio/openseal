@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 )
 
 func (s *Server) handleListAgentTurns(w http.ResponseWriter, r *http.Request) {
@@ -16,7 +17,7 @@ func (s *Server) handleListAgentTurns(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	turns, err := runtime.NewAgentTurnService(s.store, s.store).ListTurns(r.Context(), filter)
+	turns, err := activity.NewAgentTurnService(s.store, s.store).ListTurns(r.Context(), filter)
 	if err != nil {
 		s.respondAgentTurnError(w, err)
 		return
@@ -34,7 +35,7 @@ func (s *Server) handleGetAgentTurn(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	turn, err := runtime.NewAgentTurnService(s.store, s.store).GetTurn(
+	turn, err := activity.NewAgentTurnService(s.store, s.store).GetTurn(
 		r.Context(), scope, strings.TrimSpace(r.PathValue("id")),
 	)
 	if err != nil {
@@ -44,40 +45,40 @@ func (s *Server) handleGetAgentTurn(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, kernelapi.ProjectAgentTurn(turn))
 }
 
-func agentTurnFilterFromQuery(r *http.Request) (runtime.AgentTurnFilter, error) {
+func agentTurnFilterFromQuery(r *http.Request) (models.AgentTurnFilter, error) {
 	scope, err := scopeFromQuery(r)
 	if err != nil {
-		return runtime.AgentTurnFilter{}, err
+		return models.AgentTurnFilter{}, err
 	}
 	runID := strings.TrimSpace(r.URL.Query().Get("runId"))
 	if runID == "" {
-		return runtime.AgentTurnFilter{}, errors.New("runId is required")
+		return models.AgentTurnFilter{}, errors.New("runId is required")
 	}
 	limit, err := boundedIntQuery(r, "limit", 50, 1, 100)
 	if err != nil {
-		return runtime.AgentTurnFilter{}, err
+		return models.AgentTurnFilter{}, err
 	}
 	afterSequence, err := boundedIntQuery(r, "afterSequence", 0, 0, 1_000_000_000)
 	if err != nil {
-		return runtime.AgentTurnFilter{}, err
+		return models.AgentTurnFilter{}, err
 	}
-	filter := runtime.AgentTurnFilter{
+	filter := models.AgentTurnFilter{
 		Scope: scope, RunID: runID, AfterSequence: int64(afterSequence), Limit: limit,
 	}
 	for _, value := range queryValues(r, "status") {
-		status := runtime.AgentTurnStatus(value)
+		status := models.AgentTurnStatus(value)
 		if !validAgentTurnStatus(status) {
-			return runtime.AgentTurnFilter{}, fmt.Errorf("invalid agent turn status %q", value)
+			return models.AgentTurnFilter{}, fmt.Errorf("invalid agent turn status %q", value)
 		}
 		filter.Statuses = append(filter.Statuses, status)
 	}
 	return filter, nil
 }
 
-func validAgentTurnStatus(status runtime.AgentTurnStatus) bool {
+func validAgentTurnStatus(status models.AgentTurnStatus) bool {
 	switch status {
-	case runtime.AgentTurnStatusRunning, runtime.AgentTurnStatusCompleted,
-		runtime.AgentTurnStatusFailed, runtime.AgentTurnStatusCanceled:
+	case models.AgentTurnStatusRunning, models.AgentTurnStatusCompleted,
+		models.AgentTurnStatusFailed, models.AgentTurnStatusCanceled:
 		return true
 	default:
 		return false
@@ -86,9 +87,9 @@ func validAgentTurnStatus(status runtime.AgentTurnStatus) bool {
 
 func (s *Server) respondAgentTurnError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, runtime.ErrTurnNotFound), errors.Is(err, runtime.ErrRunNotFound):
+	case errors.Is(err, models.ErrTurnNotFound), errors.Is(err, models.ErrRunNotFound):
 		s.respondError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, runtime.ErrInvalidScope):
+	case errors.Is(err, models.ErrInvalidScope):
 		s.respondError(w, http.StatusBadRequest, err.Error())
 	default:
 		s.logger.Errorw("agent turn API failed", "error", err)

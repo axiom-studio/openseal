@@ -9,7 +9,9 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
@@ -17,10 +19,10 @@ import (
 func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 	t.Parallel()
 	store := runtimetest.NewKernelStore(t)
-	scope := runtime.Scope{Kind: "local", ID: "workspace"}
-	source, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
-		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
-		Goal: "Ship a durable feature", Source: runtime.RunSourceManual,
+	scope := models.Scope{Kind: "local", ID: "workspace"}
+	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "Ship a durable feature", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -40,17 +42,17 @@ func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 		t.Fatalf("agent request capability = %#v", capability)
 	}
 
-	requester := runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "developer"}
-	recipient := runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "marketing"}
+	requester := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"}
+	recipient := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"}
 	create := kernelapi.CreateAgentRequestRequest{
-		Scope: scope, Kind: runtime.AgentRequestKindRequest, Requester: requester, Recipient: recipient,
+		Scope: scope, Kind: models.AgentRequestKindRequest, Requester: requester, Recipient: recipient,
 		SourceRunID: source.ID, Goal: "Turn the release into a launch brief", SharedContext: map[string]interface{}{"release": "2026.07"},
 	}
 	created, err := kernel.CreateAgentRequest(t.Context(), create, "launch-brief-request")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Request == nil || created.Request.Status != runtime.AgentRequestStatusPending || created.Request.IdempotencyKey != "launch-brief-request" {
+	if created.Request == nil || created.Request.Status != models.AgentRequestStatusPending || created.Request.IdempotencyKey != "launch-brief-request" {
 		t.Fatalf("created request = %#v", created)
 	}
 	replayed, err := kernel.CreateAgentRequest(t.Context(), create, "launch-brief-request")
@@ -58,7 +60,7 @@ func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 		t.Fatalf("replayed request = %#v, %v", replayed, err)
 	}
 
-	listed, err := kernel.ListAgentRequests(t.Context(), runtime.AgentRequestFilter{Scope: scope, Recipient: &recipient, Statuses: []runtime.AgentRequestStatus{runtime.AgentRequestStatusPending}, Limit: 25})
+	listed, err := kernel.ListAgentRequests(t.Context(), models.AgentRequestFilter{Scope: scope, Recipient: &recipient, Statuses: []models.AgentRequestStatus{models.AgentRequestStatusPending}, Limit: 25})
 	if err != nil || len(listed) != 1 || listed[0].ID != created.Request.ID {
 		t.Fatalf("listed requests = %#v, %v", listed, err)
 	}
@@ -68,13 +70,13 @@ func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 	}
 
 	accepted, err := kernel.RespondAgentRequest(t.Context(), scope, created.Request.ID, kernelapi.RespondAgentRequestRequest{
-		ExpectedRevision: restored.Revision, Decision: runtime.AgentRequestDecisionAccept, Principal: recipient,
+		ExpectedRevision: restored.Revision, Decision: collaboration.AgentRequestDecisionAccept, Principal: recipient,
 		Message: "I will return a reviewed brief.",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.Request.Status != runtime.AgentRequestStatusAccepted || accepted.Child == nil || accepted.Child.ParentRunID != source.ID {
+	if accepted.Request.Status != models.AgentRequestStatusAccepted || accepted.Child == nil || accepted.Child.ParentRunID != source.ID {
 		t.Fatalf("accepted request = %#v", accepted)
 	}
 
@@ -85,7 +87,7 @@ func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Request.Status != runtime.AgentRequestStatusCompleted || completed.Source.Status != runtime.AgentRunStatusQueued || completed.Child.Status != runtime.AgentRunStatusCompleted {
+	if completed.Request.Status != models.AgentRequestStatusCompleted || completed.Source.Status != models.AgentRunStatusQueued || completed.Child.Status != models.AgentRunStatusCompleted {
 		t.Fatalf("completed request = %#v", completed)
 	}
 }
@@ -93,10 +95,10 @@ func TestAgentRequestAPIAndClientCompletePortableLifecycle(t *testing.T) {
 func TestAgentRequestAPIRejectsUnsafeSharedContext(t *testing.T) {
 	t.Parallel()
 	store := runtimetest.NewKernelStore(t)
-	scope := runtime.Scope{Kind: "local", ID: "workspace"}
-	source, err := runtime.NewPortfolioService(store).CreateAgentRun(context.Background(), runtime.CreateAgentRunRequest{
-		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
-		Goal: "Ship", Source: runtime.RunSourceManual,
+	scope := models.Scope{Kind: "local", ID: "workspace"}
+	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "Ship", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -107,9 +109,9 @@ func TestAgentRequestAPIRejectsUnsafeSharedContext(t *testing.T) {
 	kernel := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
 
 	_, err = kernel.CreateAgentRequest(t.Context(), kernelapi.CreateAgentRequestRequest{
-		Scope: scope, Kind: runtime.AgentRequestKindRequest,
-		Requester:   runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "developer"},
-		Recipient:   runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "marketing"},
+		Scope: scope, Kind: models.AgentRequestKindRequest,
+		Requester:   models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient:   models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 		SourceRunID: source.ID, Goal: "Draft", SharedContext: map[string]interface{}{"apiKey": "must-not-cross"},
 	}, "unsafe-request")
 	var apiError *client.APIError

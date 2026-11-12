@@ -4,14 +4,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // engineReactionProjector mirrors reactions through the engine's current
 // external conversation transport, which is rebuilt when Skills change.
 type engineReactionProjector struct{ engine *Engine }
 
-func (p engineReactionProjector) ProjectMessageReaction(ctx context.Context, event *runtime.ConversationReactionEvent) error {
+func (p engineReactionProjector) ProjectMessageReaction(ctx context.Context, event *models.ConversationReactionEvent) error {
 	if p.engine == nil || p.engine.externalConversations.transport == nil {
 		return nil
 	}
@@ -20,13 +21,13 @@ func (p engineReactionProjector) ProjectMessageReaction(ctx context.Context, eve
 
 // ReactionProjector mirrors reactions made in OpenSeal to the external
 // conversations their messages came from or were delivered to.
-func (e *Engine) ReactionProjector() runtime.MessageReactionProjector {
+func (e *Engine) ReactionProjector() conversation.MessageReactionProjector {
 	return engineReactionProjector{engine: e}
 }
 
 // AddMessageReaction adds the actor's emoji to a message the actor can see.
 // It is idempotent and never schedules a Run.
-func (e *Engine) AddMessageReaction(ctx context.Context, request runtime.MessageReactionRequest) (*runtime.MessageReactionResult, error) {
+func (e *Engine) AddMessageReaction(ctx context.Context, request conversation.MessageReactionRequest) (*conversation.MessageReactionResult, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
@@ -35,7 +36,7 @@ func (e *Engine) AddMessageReaction(ctx context.Context, request runtime.Message
 
 // RemoveMessageReaction removes the actor's emoji from a message the actor
 // can see. Removing an absent reaction is not an error.
-func (e *Engine) RemoveMessageReaction(ctx context.Context, request runtime.MessageReactionRequest) (*runtime.MessageReactionResult, error) {
+func (e *Engine) RemoveMessageReaction(ctx context.Context, request conversation.MessageReactionRequest) (*conversation.MessageReactionResult, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}

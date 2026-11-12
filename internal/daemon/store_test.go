@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func TestOpenKernelStorePersistsCanonicalRunsAcrossRestart(t *testing.T) {
@@ -20,10 +22,10 @@ func TestOpenKernelStorePersistsCanonicalRunsAcrossRestart(t *testing.T) {
 	if resolved != wantPath {
 		t.Fatalf("resolved path = %q, want %q", resolved, wantPath)
 	}
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	created, err := runtime.NewRunCommandService(store).CreateAgentRun(context.Background(), runtime.CreateAgentRunRequest{
-		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
-		AssignedAgentID: "operator", Goal: "Keep working after restart", Source: runtime.RunSourceManual,
+	scope := models.Scope{Kind: "local", ID: "default"}
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"},
+		AssignedAgentID: "operator", Goal: "Keep working after restart", Source: models.RunSourceManual,
 		IdempotencyKey: "restart-test",
 	})
 	if err != nil {
@@ -38,7 +40,7 @@ func TestOpenKernelStorePersistsCanonicalRunsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	loaded, err := runtime.NewPortfolioService(reopened).GetAgentRun(context.Background(), scope, created.Run.ID)
+	loaded, err := portfolio.NewPortfolioService(reopened).GetAgentRun(context.Background(), scope, created.Run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

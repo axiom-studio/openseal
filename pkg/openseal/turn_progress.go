@@ -2,32 +2,32 @@ package openseal
 
 import (
 	"context"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-type TurnProgressObserver = runtime.TurnProgressObserver
+type TurnProgressObserver = models.TurnProgressObserver
 
 func WithTurnProgress(ctx context.Context, observer TurnProgressObserver) context.Context {
-	return runtime.WithTurnProgress(ctx, observer)
+	return models.WithTurnProgress(ctx, observer)
 }
-func HasTurnProgress(ctx context.Context) bool { return runtime.HasTurnProgress(ctx) }
+func HasTurnProgress(ctx context.Context) bool { return models.HasTurnProgress(ctx) }
 func ReportTurnProgress(ctx context.Context, summary string) error {
-	return runtime.ReportTurnProgress(ctx, summary)
+	return models.ReportTurnProgress(ctx, summary)
 }
 
 // WithTurnProgressOrigin marks the progress reported with ctx as the step
 // that ref's nested calls (ActionCall.OriginRef) ran under.
 func WithTurnProgressOrigin(ctx context.Context, ref string) context.Context {
-	return runtime.WithTurnProgressOrigin(ctx, ref)
+	return models.WithTurnProgressOrigin(ctx, ref)
 }
 
-func IsTurnCommentary(ctx context.Context) bool { return runtime.IsTurnCommentary(ctx) }
+func IsTurnCommentary(ctx context.Context) bool { return models.IsTurnCommentary(ctx) }
 func ReportTurnCommentary(ctx context.Context, summary string) error {
-	return runtime.ReportTurnCommentary(ctx, summary)
+	return models.ReportTurnCommentary(ctx, summary)
 }
 
 // IsSupportedAgentManagementSkillVersion reports the agent management contracts
 // the Agent action dispatcher still executes.
 func IsSupportedAgentManagementSkillVersion(version string) bool {
-	return runtime.IsSupportedAgentManagementSkillVersion(version)
+	return models.IsSupportedAgentManagementSkillVersion(version)
 }

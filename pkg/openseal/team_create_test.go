@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -23,7 +23,7 @@ func TestTeamCreateEngineWiring(t *testing.T) {
 	t.Cleanup(func() { engine.Close() })
 	validators := 0
 	for _, validator := range engine.actionValidators {
-		if _, ok := validator.(*runtime.TeamCreateActionValidator); ok {
+		if _, ok := validator.(*agentbuilder.TeamCreateActionValidator); ok {
 			validators++
 		}
 	}

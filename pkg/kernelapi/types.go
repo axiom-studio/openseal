@@ -7,7 +7,11 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -282,21 +286,21 @@ func AgentBuilderCapability(builderAgentID string) Capability {
 // requester is the authenticated principal, never a body field. Prompt is the
 // request as typed; name and model go only in Parameters.
 type StartAgentBuilderConversationRequest struct {
-	Scope          runtime.Scope                  `json:"scope"`
-	Prompt         string                         `json:"prompt"`
-	Parameters     runtime.AgentBuilderParameters `json:"parameters"`
-	SpaceID        string                         `json:"spaceId,omitempty"`
-	IdempotencyKey string                         `json:"idempotencyKey"`
+	Scope          models.Scope                  `json:"scope"`
+	Prompt         string                        `json:"prompt"`
+	Parameters     models.AgentBuilderParameters `json:"parameters"`
+	SpaceID        string                        `json:"spaceId,omitempty"`
+	IdempotencyKey string                        `json:"idempotencyKey"`
 }
 
 type StartAgentBuilderConversationResponse struct {
-	Conversation *runtime.Conversation   `json:"conversation"`
-	Message      *runtime.ChannelMessage `json:"message"`
-	Replayed     bool                    `json:"replayed"`
+	Conversation *models.Conversation   `json:"conversation"`
+	Message      *models.ChannelMessage `json:"message"`
+	Replayed     bool                   `json:"replayed"`
 }
 
 type ListAgentBuilderDraftsResponse struct {
-	Drafts []runtime.AgentBuilderDraft `json:"drafts"`
+	Drafts []agentbuilder.AgentBuilderDraft `json:"drafts"`
 }
 
 type CreateTeamDeploymentRequest struct {
@@ -699,246 +703,246 @@ func NewCapabilityDocument(capabilities ...Capability) CapabilityDocument {
 // Scope is explicit because standalone OpenSeal can host more than one local
 // workspace even though the TUI defaults to local/default.
 type CreateAgentRunRequest struct {
-	Scope                runtime.Scope              `json:"scope"`
-	Kind                 runtime.RunKind            `json:"kind,omitempty"`
-	ObjectiveID          string                     `json:"objectiveId,omitempty"`
-	ParentRunID          string                     `json:"parentRunId,omitempty"`
-	Owner                runtime.ObjectiveOwner     `json:"owner"`
-	AssignedAgentID      string                     `json:"assignedAgentId,omitempty"`
-	Entrypoint           string                     `json:"entrypoint,omitempty"`
-	ConcurrencyKey       string                     `json:"concurrencyKey,omitempty"`
-	ResourceRequirements map[string]int             `json:"resourceRequirements,omitempty"`
-	Goal                 string                     `json:"goal"`
-	Source               runtime.RunSource          `json:"source"`
-	Priority             int                        `json:"priority,omitempty"`
-	Deadline             *time.Time                 `json:"deadline,omitempty"`
-	AvailableAt          *time.Time                 `json:"availableAt,omitempty"`
-	Context              map[string]interface{}     `json:"context,omitempty"`
-	Plan                 map[string]interface{}     `json:"plan,omitempty"`
-	Checkpoint           map[string]interface{}     `json:"checkpoint,omitempty"`
-	WakeCondition        *runtime.WakeCondition     `json:"wakeCondition,omitempty"`
-	Budget               *runtime.BudgetPolicy      `json:"budget,omitempty"`
-	Policy               map[string]interface{}     `json:"policy,omitempty"`
-	IdempotencyKey       string                     `json:"idempotencyKey,omitempty"`
-	Actor                runtime.ActivityActor      `json:"actor,omitempty"`
-	Visibility           runtime.ActivityVisibility `json:"visibility,omitempty"`
+	Scope                models.Scope              `json:"scope"`
+	Kind                 models.RunKind            `json:"kind,omitempty"`
+	ObjectiveID          string                    `json:"objectiveId,omitempty"`
+	ParentRunID          string                    `json:"parentRunId,omitempty"`
+	Owner                models.ObjectiveOwner     `json:"owner"`
+	AssignedAgentID      string                    `json:"assignedAgentId,omitempty"`
+	Entrypoint           string                    `json:"entrypoint,omitempty"`
+	ConcurrencyKey       string                    `json:"concurrencyKey,omitempty"`
+	ResourceRequirements map[string]int            `json:"resourceRequirements,omitempty"`
+	Goal                 string                    `json:"goal"`
+	Source               models.RunSource          `json:"source"`
+	Priority             int                       `json:"priority,omitempty"`
+	Deadline             *time.Time                `json:"deadline,omitempty"`
+	AvailableAt          *time.Time                `json:"availableAt,omitempty"`
+	Context              map[string]interface{}    `json:"context,omitempty"`
+	Plan                 map[string]interface{}    `json:"plan,omitempty"`
+	Checkpoint           map[string]interface{}    `json:"checkpoint,omitempty"`
+	WakeCondition        *models.WakeCondition     `json:"wakeCondition,omitempty"`
+	Budget               *models.BudgetPolicy      `json:"budget,omitempty"`
+	Policy               map[string]interface{}    `json:"policy,omitempty"`
+	IdempotencyKey       string                    `json:"idempotencyKey,omitempty"`
+	Actor                models.ActivityActor      `json:"actor,omitempty"`
+	Visibility           models.ActivityVisibility `json:"visibility,omitempty"`
 }
 
 // CreateAgentRequestRequest is the public request body for a durable request or
 // handoff between Agents and Teams. Only explicitly shared, credential-free
 // context crosses the collaboration boundary.
 type CreateAgentRequestRequest struct {
-	ID                   string                        `json:"id,omitempty"`
-	Scope                runtime.Scope                 `json:"scope"`
-	Kind                 runtime.AgentRequestKind      `json:"kind"`
-	Requester            runtime.CollaborationParty    `json:"requester"`
-	Recipient            runtime.CollaborationParty    `json:"recipient"`
-	SourceRunID          string                        `json:"sourceRunId"`
-	Goal                 string                        `json:"goal"`
-	Instructions         string                        `json:"instructions,omitempty"`
-	SemanticRole         string                        `json:"semanticRole,omitempty"`
-	AcceptanceCriteria   map[string]interface{}        `json:"acceptanceCriteria,omitempty"`
-	ArtifactRequirements []runtime.ArtifactRequirement `json:"artifactRequirements,omitempty"`
-	SharedContext        map[string]interface{}        `json:"sharedContext,omitempty"`
-	ChildCheckpoint      map[string]interface{}        `json:"childCheckpoint,omitempty"`
-	ConversationRefs     []string                      `json:"conversationRefs,omitempty"`
-	BudgetAllocation     *runtime.BudgetPolicy         `json:"budgetAllocation,omitempty"`
-	IdempotencyKey       string                        `json:"idempotencyKey,omitempty"`
+	ID                   string                       `json:"id,omitempty"`
+	Scope                models.Scope                 `json:"scope"`
+	Kind                 models.AgentRequestKind      `json:"kind"`
+	Requester            models.CollaborationParty    `json:"requester"`
+	Recipient            models.CollaborationParty    `json:"recipient"`
+	SourceRunID          string                       `json:"sourceRunId"`
+	Goal                 string                       `json:"goal"`
+	Instructions         string                       `json:"instructions,omitempty"`
+	SemanticRole         string                       `json:"semanticRole,omitempty"`
+	AcceptanceCriteria   map[string]interface{}       `json:"acceptanceCriteria,omitempty"`
+	ArtifactRequirements []models.ArtifactRequirement `json:"artifactRequirements,omitempty"`
+	SharedContext        map[string]interface{}       `json:"sharedContext,omitempty"`
+	ChildCheckpoint      map[string]interface{}       `json:"childCheckpoint,omitempty"`
+	ConversationRefs     []string                     `json:"conversationRefs,omitempty"`
+	BudgetAllocation     *models.BudgetPolicy         `json:"budgetAllocation,omitempty"`
+	IdempotencyKey       string                       `json:"idempotencyKey,omitempty"`
 }
 
 type RespondAgentRequestRequest struct {
-	ExpectedRevision int64                        `json:"expectedRevision"`
-	Decision         runtime.AgentRequestDecision `json:"decision"`
-	Principal        runtime.CollaborationParty   `json:"principal"`
-	Actor            runtime.CollaborationParty   `json:"actor,omitempty"`
-	AssignedAgentID  string                       `json:"assignedAgentId,omitempty"`
-	Message          string                       `json:"message,omitempty"`
-	DecisionRunID    string                       `json:"decisionRunId,omitempty"`
+	ExpectedRevision int64                              `json:"expectedRevision"`
+	Decision         collaboration.AgentRequestDecision `json:"decision"`
+	Principal        models.CollaborationParty          `json:"principal"`
+	Actor            models.CollaborationParty          `json:"actor,omitempty"`
+	AssignedAgentID  string                             `json:"assignedAgentId,omitempty"`
+	Message          string                             `json:"message,omitempty"`
+	DecisionRunID    string                             `json:"decisionRunId,omitempty"`
 }
 
 type CompleteAgentRequestRequest struct {
-	ExpectedRevision      int64                       `json:"expectedRevision"`
-	ExpectedChildRevision int64                       `json:"expectedChildRevision"`
-	Principal             runtime.CollaborationParty  `json:"principal"`
-	Actor                 runtime.CollaborationParty  `json:"actor,omitempty"`
-	Summary               string                      `json:"summary"`
-	AcceptanceEvidence    map[string]interface{}      `json:"acceptanceEvidence,omitempty"`
-	Artifacts             []runtime.ArtifactReference `json:"artifacts,omitempty"`
-	IdempotencyKey        string                      `json:"idempotencyKey,omitempty"`
-}
-
-type ReviewAgentRequestCompletionRequest struct {
 	ExpectedRevision      int64                      `json:"expectedRevision"`
 	ExpectedChildRevision int64                      `json:"expectedChildRevision"`
-	Principal             runtime.CollaborationParty `json:"principal"`
-	Actor                 runtime.CollaborationParty `json:"actor,omitempty"`
-	Approve               bool                       `json:"approve"`
+	Principal             models.CollaborationParty  `json:"principal"`
+	Actor                 models.CollaborationParty  `json:"actor,omitempty"`
 	Summary               string                     `json:"summary"`
+	AcceptanceEvidence    map[string]interface{}     `json:"acceptanceEvidence,omitempty"`
+	Artifacts             []models.ArtifactReference `json:"artifacts,omitempty"`
 	IdempotencyKey        string                     `json:"idempotencyKey,omitempty"`
 }
 
+type ReviewAgentRequestCompletionRequest struct {
+	ExpectedRevision      int64                     `json:"expectedRevision"`
+	ExpectedChildRevision int64                     `json:"expectedChildRevision"`
+	Principal             models.CollaborationParty `json:"principal"`
+	Actor                 models.CollaborationParty `json:"actor,omitempty"`
+	Approve               bool                      `json:"approve"`
+	Summary               string                    `json:"summary"`
+	IdempotencyKey        string                    `json:"idempotencyKey,omitempty"`
+}
+
 type ResolveActionApprovalRequest struct {
-	ExpectedRevision int64                     `json:"expectedRevision"`
-	DecisionID       string                    `json:"decisionId,omitempty"`
-	Decision         runtime.ApprovalDecision  `json:"decision"`
-	Principal        runtime.ApprovalPrincipal `json:"principal"`
-	Reason           string                    `json:"reason,omitempty"`
+	ExpectedRevision int64                    `json:"expectedRevision"`
+	DecisionID       string                   `json:"decisionId,omitempty"`
+	Decision         models.ApprovalDecision  `json:"decision"`
+	Principal        models.ApprovalPrincipal `json:"principal"`
+	Reason           string                   `json:"reason,omitempty"`
 }
 
 type CreateObjectiveRequest struct {
-	Scope           runtime.Scope           `json:"scope"`
-	Owner           runtime.ObjectiveOwner  `json:"owner"`
-	Title           string                  `json:"title"`
-	Goal            string                  `json:"goal"`
-	Status          runtime.ObjectiveStatus `json:"status,omitempty"`
-	Priority        int                     `json:"priority,omitempty"`
-	Budget          *runtime.BudgetPolicy   `json:"budget,omitempty"`
-	Constraints     map[string]interface{}  `json:"constraints,omitempty"`
-	SuccessCriteria map[string]interface{}  `json:"successCriteria,omitempty"`
-	IdempotencyKey  string                  `json:"idempotencyKey,omitempty"`
+	Scope           models.Scope           `json:"scope"`
+	Owner           models.ObjectiveOwner  `json:"owner"`
+	Title           string                 `json:"title"`
+	Goal            string                 `json:"goal"`
+	Status          models.ObjectiveStatus `json:"status,omitempty"`
+	Priority        int                    `json:"priority,omitempty"`
+	Budget          *models.BudgetPolicy   `json:"budget,omitempty"`
+	Constraints     map[string]interface{} `json:"constraints,omitempty"`
+	SuccessCriteria map[string]interface{} `json:"successCriteria,omitempty"`
+	IdempotencyKey  string                 `json:"idempotencyKey,omitempty"`
 }
 
 type UpdateObjectiveRequest struct {
-	ExpectedRevision int64                    `json:"expectedRevision"`
-	Title            *string                  `json:"title,omitempty"`
-	Goal             *string                  `json:"goal,omitempty"`
-	Status           *runtime.ObjectiveStatus `json:"status,omitempty"`
-	Priority         *int                     `json:"priority,omitempty"`
-	Budget           *runtime.BudgetPolicy    `json:"budget,omitempty"`
-	Constraints      map[string]interface{}   `json:"constraints,omitempty"`
-	SuccessCriteria  map[string]interface{}   `json:"successCriteria,omitempty"`
-	ProgressSummary  *string                  `json:"progressSummary,omitempty"`
+	ExpectedRevision int64                   `json:"expectedRevision"`
+	Title            *string                 `json:"title,omitempty"`
+	Goal             *string                 `json:"goal,omitempty"`
+	Status           *models.ObjectiveStatus `json:"status,omitempty"`
+	Priority         *int                    `json:"priority,omitempty"`
+	Budget           *models.BudgetPolicy    `json:"budget,omitempty"`
+	Constraints      map[string]interface{}  `json:"constraints,omitempty"`
+	SuccessCriteria  map[string]interface{}  `json:"successCriteria,omitempty"`
+	ProgressSummary  *string                 `json:"progressSummary,omitempty"`
 }
 
 type ObjectiveDetail struct {
-	Objective *runtime.Objective           `json:"objective"`
-	Runbooks  []*runtime.RunbookActivation `json:"runbooks"`
-	Runs      []*runtime.AgentRun          `json:"runs"`
+	Objective *models.Objective           `json:"objective"`
+	Runbooks  []*models.RunbookActivation `json:"runbooks"`
+	Runs      []*models.AgentRun          `json:"runs"`
 }
 
 type ReconcileRunbookSchedulesRequest struct {
-	Scope runtime.Scope `json:"scope"`
-	Limit int           `json:"limit,omitempty"`
+	Scope models.Scope `json:"scope"`
+	Limit int          `json:"limit,omitempty"`
 }
 
 type RunbookScheduleReconciliation struct {
-	Scope        runtime.Scope                  `json:"scope"`
+	Scope        models.Scope                   `json:"scope"`
 	ReconciledAt time.Time                      `json:"reconciledAt"`
-	Result       *runtime.RunbookScheduleResult `json:"result"`
+	Result       *routine.RunbookScheduleResult `json:"result"`
 }
 
 type CreateExternalConversationGatewayRequest struct {
-	ID      string                                     `json:"id,omitempty"`
-	Name    string                                     `json:"name"`
-	Gateway runtime.ExternalConversationIngressGateway `json:"gateway"`
-	Status  runtime.ExternalConversationGatewayStatus  `json:"status,omitempty"`
-	Reason  string                                     `json:"reason"`
+	ID      string                                    `json:"id,omitempty"`
+	Name    string                                    `json:"name"`
+	Gateway models.ExternalConversationIngressGateway `json:"gateway"`
+	Status  models.ExternalConversationGatewayStatus  `json:"status,omitempty"`
+	Reason  string                                    `json:"reason"`
 }
 
 type UpdateExternalConversationGatewayRequest struct {
-	ExpectedRevision int64                                       `json:"expectedRevision"`
-	Name             *string                                     `json:"name,omitempty"`
-	Gateway          *runtime.ExternalConversationIngressGateway `json:"gateway,omitempty"`
-	Status           *runtime.ExternalConversationGatewayStatus  `json:"status,omitempty"`
-	Reason           string                                      `json:"reason"`
+	ExpectedRevision int64                                      `json:"expectedRevision"`
+	Name             *string                                    `json:"name,omitempty"`
+	Gateway          *models.ExternalConversationIngressGateway `json:"gateway,omitempty"`
+	Status           *models.ExternalConversationGatewayStatus  `json:"status,omitempty"`
+	Reason           string                                     `json:"reason"`
 }
 
 type AgentRunCommandRequest struct {
-	ExpectedRevision    int64                       `json:"expectedRevision"`
-	Kind                runtime.AgentRunCommandKind `json:"kind"`
-	Actor               runtime.ActivityActor       `json:"actor,omitempty"`
-	Summary             string                      `json:"summary,omitempty"`
-	Instruction         string                      `json:"instruction,omitempty"`
-	InterventionID      string                      `json:"interventionId,omitempty"`
-	HumanInterventionID string                      `json:"humanInterventionId,omitempty"`
-	Visibility          runtime.ActivityVisibility  `json:"visibility,omitempty"`
+	ExpectedRevision    int64                        `json:"expectedRevision"`
+	Kind                agentrun.AgentRunCommandKind `json:"kind"`
+	Actor               models.ActivityActor         `json:"actor,omitempty"`
+	Summary             string                       `json:"summary,omitempty"`
+	Instruction         string                       `json:"instruction,omitempty"`
+	InterventionID      string                       `json:"interventionId,omitempty"`
+	HumanInterventionID string                       `json:"humanInterventionId,omitempty"`
+	Visibility          models.ActivityVisibility    `json:"visibility,omitempty"`
 }
 
 type ResolveArtifactContentRequest struct {
-	Actor      runtime.ActivityActor `json:"actor"`
-	Purpose    string                `json:"purpose"`
-	TTLSeconds int64                 `json:"ttlSeconds"`
+	Actor      models.ActivityActor `json:"actor"`
+	Purpose    string               `json:"purpose"`
+	TTLSeconds int64                `json:"ttlSeconds"`
 }
 
 type CreateConversationRequest struct {
-	ID             string                         `json:"id,omitempty"`
-	Scope          runtime.Scope                  `json:"scope"`
-	Owner          runtime.ObjectiveOwner         `json:"owner"`
-	Title          string                         `json:"title"`
-	Origin         *runtime.ConversationReference `json:"origin,omitempty"`
-	SpaceID        string                         `json:"spaceId,omitempty"`
-	IdempotencyKey string                         `json:"idempotencyKey,omitempty"`
+	ID             string                        `json:"id,omitempty"`
+	Scope          models.Scope                  `json:"scope"`
+	Owner          models.ObjectiveOwner         `json:"owner"`
+	Title          string                        `json:"title"`
+	Origin         *models.ConversationReference `json:"origin,omitempty"`
+	SpaceID        string                        `json:"spaceId,omitempty"`
+	IdempotencyKey string                        `json:"idempotencyKey,omitempty"`
 }
 
 type UpdateConversationRequest struct {
-	ParticipationEnabled *bool                       `json:"participationEnabled,omitempty"`
-	Scope                runtime.Scope               `json:"scope"`
-	ExpectedRevision     int64                       `json:"expectedRevision"`
-	Title                *string                     `json:"title,omitempty"`
-	Status               *runtime.ConversationStatus `json:"status,omitempty"`
+	ParticipationEnabled *bool                      `json:"participationEnabled,omitempty"`
+	Scope                models.Scope               `json:"scope"`
+	ExpectedRevision     int64                      `json:"expectedRevision"`
+	Title                *string                    `json:"title,omitempty"`
+	Status               *models.ConversationStatus `json:"status,omitempty"`
 }
 
 // SetConversationApprovalModeRequest changes a conversation's approval mode.
 // Mode is manual, auto, or skip; ExpectedRevision is the conversation revision
 // the caller last read. Actor is the authorized principal making the change.
 type SetConversationApprovalModeRequest struct {
-	Scope            runtime.Scope                    `json:"scope"`
-	ExpectedRevision int64                            `json:"expectedRevision"`
-	Mode             runtime.ConversationApprovalMode `json:"mode"`
-	Actor            runtime.ActivityActor            `json:"actor"`
+	Scope            models.Scope                    `json:"scope"`
+	ExpectedRevision int64                           `json:"expectedRevision"`
+	Mode             models.ConversationApprovalMode `json:"mode"`
+	Actor            models.ActivityActor            `json:"actor"`
 }
 
 type PostChannelMessageRequest struct {
-	ID                  string                            `json:"id,omitempty"`
-	Scope               runtime.Scope                     `json:"scope"`
-	ExpectedRevision    int64                             `json:"expectedRevision"`
-	Sender              runtime.ConversationParticipant   `json:"sender"`
-	Intent              runtime.ConversationMessageIntent `json:"intent"`
-	Content             string                            `json:"content"`
-	Audience            runtime.ConversationAudience      `json:"audience"`
-	ReplyToMessageID    string                            `json:"replyToMessageId,omitempty"`
-	QuotedMessageID     string                            `json:"quotedMessageId,omitempty"`
-	BroadcastToChannel  bool                              `json:"broadcastToChannel,omitempty"`
-	Mentions            []runtime.ConversationParticipant `json:"mentions,omitempty"`
-	References          []runtime.ConversationReference   `json:"references,omitempty"`
-	RequiresResponse    bool                              `json:"requiresResponse,omitempty"`
-	ResolvesMessageID   string                            `json:"resolvesMessageId,omitempty"`
-	SupersedesMessageID string                            `json:"supersedesMessageId,omitempty"`
-	IdempotencyKey      string                            `json:"idempotencyKey,omitempty"`
+	ID                  string                           `json:"id,omitempty"`
+	Scope               models.Scope                     `json:"scope"`
+	ExpectedRevision    int64                            `json:"expectedRevision"`
+	Sender              models.ConversationParticipant   `json:"sender"`
+	Intent              models.ConversationMessageIntent `json:"intent"`
+	Content             string                           `json:"content"`
+	Audience            models.ConversationAudience      `json:"audience"`
+	ReplyToMessageID    string                           `json:"replyToMessageId,omitempty"`
+	QuotedMessageID     string                           `json:"quotedMessageId,omitempty"`
+	BroadcastToChannel  bool                             `json:"broadcastToChannel,omitempty"`
+	Mentions            []models.ConversationParticipant `json:"mentions,omitempty"`
+	References          []models.ConversationReference   `json:"references,omitempty"`
+	RequiresResponse    bool                             `json:"requiresResponse,omitempty"`
+	ResolvesMessageID   string                           `json:"resolvesMessageId,omitempty"`
+	SupersedesMessageID string                           `json:"supersedesMessageId,omitempty"`
+	IdempotencyKey      string                           `json:"idempotencyKey,omitempty"`
 }
 
 type AdvanceConversationCursorRequest struct {
-	Scope             runtime.Scope                   `json:"scope"`
-	Participant       runtime.ConversationParticipant `json:"participant"`
-	ExpectedRevision  int64                           `json:"expectedRevision,omitempty"`
-	DeliveredSequence int64                           `json:"deliveredSequence"`
-	ReadSequence      int64                           `json:"readSequence"`
+	Scope             models.Scope                   `json:"scope"`
+	Participant       models.ConversationParticipant `json:"participant"`
+	ExpectedRevision  int64                          `json:"expectedRevision,omitempty"`
+	DeliveredSequence int64                          `json:"deliveredSequence"`
+	ReadSequence      int64                          `json:"readSequence"`
 }
 
 type SetConversationPresenceRequest struct {
-	Scope            runtime.Scope                     `json:"scope"`
-	Participant      runtime.ConversationParticipant   `json:"participant"`
-	State            runtime.ConversationPresenceState `json:"state"`
-	Summary          string                            `json:"summary,omitempty"`
-	RunID            string                            `json:"runId,omitempty"`
-	LeaseID          string                            `json:"leaseId,omitempty"`
-	ExpectedRevision int64                             `json:"expectedRevision,omitempty"`
-	TTLSeconds       int64                             `json:"ttlSeconds,omitempty"`
+	Scope            models.Scope                     `json:"scope"`
+	Participant      models.ConversationParticipant   `json:"participant"`
+	State            models.ConversationPresenceState `json:"state"`
+	Summary          string                           `json:"summary,omitempty"`
+	RunID            string                           `json:"runId,omitempty"`
+	LeaseID          string                           `json:"leaseId,omitempty"`
+	ExpectedRevision int64                            `json:"expectedRevision,omitempty"`
+	TTLSeconds       int64                            `json:"ttlSeconds,omitempty"`
 }
 
 // MessageReactionRequest adds (PUT) or removes (DELETE) the actor's emoji on
 // a channel message at /api/v1/conversations/{id}/reactions. The host
 // authenticates the actor; roles are the actor's audience roles.
 type MessageReactionRequest struct {
-	Scope     runtime.Scope                   `json:"scope"`
-	Actor     runtime.ConversationParticipant `json:"actor"`
-	Roles     []string                        `json:"roles,omitempty"`
-	MessageID string                          `json:"messageId"`
-	Emoji     string                          `json:"emoji"`
+	Scope     models.Scope                   `json:"scope"`
+	Actor     models.ConversationParticipant `json:"actor"`
+	Roles     []string                       `json:"roles,omitempty"`
+	MessageID string                         `json:"messageId"`
+	Emoji     string                         `json:"emoji"`
 }
 
 type ReleaseConversationPresenceRequest struct {
-	Scope       runtime.Scope                   `json:"scope"`
-	Participant runtime.ConversationParticipant `json:"participant"`
-	LeaseID     string                          `json:"leaseId"`
+	Scope       models.Scope                   `json:"scope"`
+	Participant models.ConversationParticipant `json:"participant"`
+	LeaseID     string                         `json:"leaseId"`
 }

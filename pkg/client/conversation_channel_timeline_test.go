@@ -6,35 +6,37 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/internal/server"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestKernelHTTPClientChannelTimelineRoundTrip(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	service := runtime.NewConversationService(store)
-	scope := runtime.Scope{Kind: "tenant", ID: "timeline"}
+	service := runtimeconversation.NewConversationService(store)
+	scope := models.Scope{Kind: "tenant", ID: "timeline"}
 	// The kernel creates no space: a conversation made with no person goes
 	// to the empty owner's default space, so the test seeds it.
-	if _, err := runtime.NewSpaceService(store).CreateSpace(t.Context(), runtime.CreateSpaceRequest{
-		Scope: scope, Name: "Home", Look: runtime.DefaultSpaceLook,
+	if _, err := portfolio.NewSpaceService(store).CreateSpace(t.Context(), portfolio.CreateSpaceRequest{
+		Scope: scope, Name: "Home", Look: models.DefaultSpaceLook,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	conversation, _, err := service.CreateConversation(t.Context(), runtime.CreateConversationRequest{
-		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"}, Title: "Timeline", IdempotencyKey: "timeline",
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Title: "Timeline", IdempotencyKey: "timeline",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	post := func(content, reply string, broadcast bool) *runtime.ChannelMessage {
+	post := func(content, reply string, broadcast bool) *models.ChannelMessage {
 		t.Helper()
-		result, err := service.PostChannelMessage(t.Context(), runtime.PostChannelMessageRequest{
+		result, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 			Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-			Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "sender"},
-			Intent: runtime.MessageIntentUpdate, Content: content, IdempotencyKey: content,
-			Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, ReplyToMessageID: reply, BroadcastToChannel: broadcast,
+			Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "sender"},
+			Intent: models.MessageIntentUpdate, Content: content, IdempotencyKey: content,
+			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: reply, BroadcastToChannel: broadcast,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -49,7 +51,7 @@ func TestKernelHTTPClientChannelTimelineRoundTrip(t *testing.T) {
 	httpServer := httptest.NewServer(api.Handler())
 	t.Cleanup(httpServer.Close)
 	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
-	filter := runtime.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, ChannelTimeline: true, Limit: 1, Descending: true}
+	filter := models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, ChannelTimeline: true, Limit: 1, Descending: true}
 	page, err := client.ListChannelMessages(t.Context(), filter)
 	if err != nil || len(page) != 1 || page[0].ID != broadcast.ID {
 		t.Fatalf("timeline page = %#v, err = %v", page, err)

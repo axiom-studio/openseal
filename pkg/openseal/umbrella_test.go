@@ -9,8 +9,11 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -54,7 +57,7 @@ func assertDeploymentIDNamespace(t *testing.T, engine *Engine) {
 	ctx := context.Background()
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	umbrellaFixture(t, engine)
-	seedSpace(t, engine, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
+	seedSpace(t, engine, models.Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
 	if err := createUmbrellaAgent(engine, scope, "shared"); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +95,7 @@ func TestDeploymentIDsShareOneNamespaceInDefaultStore(t *testing.T) {
 }
 
 func TestDeploymentIDsShareOneNamespaceInSQLite(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "ids.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "ids.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +110,7 @@ func TestDeploymentIDsShareOneNamespaceInSQLite(t *testing.T) {
 
 func TestDeploymentIdentityBackfillFailsOnCollision(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "collision.db")
-	store, err := runtime.NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +132,7 @@ func TestDeploymentIdentityBackfillFailsOnCollision(t *testing.T) {
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if reopened, err := runtime.NewSQLiteStore(path); !errors.Is(err, ErrDeploymentIDTaken) {
+	if reopened, err := sqlite.NewSQLiteStore(path); !errors.Is(err, ErrDeploymentIDTaken) {
 		if reopened != nil {
 			_ = reopened.Close()
 		}
@@ -147,7 +150,7 @@ func ensureTestAgent(t *testing.T, engine *Engine, scope capability.ScopeReferen
 	if owner, err := engine.ResolveUmbrella(ctx, scope, id); err == nil {
 		return owner
 	}
-	seedSpace(t, engine, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
+	seedSpace(t, engine, models.Scope{Kind: scope.Kind, ID: scope.ID}, "operator")
 	definition := "test-agent-" + id
 	if _, err := engine.GetAgentDefinition(ctx, definition, "1"); err != nil {
 		if _, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
@@ -168,7 +171,7 @@ func ensureTestAgent(t *testing.T, engine *Engine, scope capability.ScopeReferen
 
 // teamRequestFixture parks a Team member's run on a credential request saved
 // to the Team.
-func teamRequestFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *Engine, *runtime.AgentRun, *CredentialRequest, ObjectiveOwner) {
+func teamRequestFixture(t *testing.T) (context.Context, *sqlite.Store, *Engine, *models.AgentRun, *CredentialRequest, ObjectiveOwner) {
 	t.Helper()
 	ctx := context.Background()
 	store := runtimetest.NewKernelStore(t)
@@ -190,8 +193,8 @@ func teamRequestFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *E
 		t.Fatal(err)
 	}
 	crew := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
-	run, err := runtime.NewPortfolioService(store).CreateAgentRun(ctx, runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindConversation,
-		Owner: crew, AssignedAgentID: "member", Goal: "Order a cable", Source: runtime.RunSourceChat,
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
+		Owner: crew, AssignedAgentID: "member", Goal: "Order a cable", Source: models.RunSourceChat,
 		Context: map[string]interface{}{"conversationId": "team-chat", "triggerMessageId": "message"}})
 	if err != nil {
 		t.Fatal(err)
@@ -203,13 +206,13 @@ func teamRequestFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *E
 	if err := store.SaveCredentialRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
 	}
-	run, err = store.ClaimNextAgentRun(ctx, runtime.AgentRunClaim{Scope: scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	run, err = store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || run == nil {
 		t.Fatal(err)
 	}
-	waiting, _, err := runtime.NewRunActivityService(store, store).TransitionRun(ctx, scope, run.ID, runtime.RunTransitionRequest{
-		ExpectedRevision: run.Revision, LeaseOwner: "worker", Status: runtime.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
-		Actor: runtime.ActivityActor{Type: "worker", ID: "worker"}, WakeCondition: &runtime.WakeCondition{Type: CredentialRequestWakeType, Reference: request.ID},
+	waiting, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, scope, run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, LeaseOwner: "worker", Status: models.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
+		Actor: models.ActivityActor{Type: "worker", ID: "worker"}, WakeCondition: &models.WakeCondition{Type: CredentialRequestWakeType, Reference: request.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -226,7 +229,7 @@ func TestTeamRequestResumesTheExactMemberRun(t *testing.T) {
 	if err != nil || !result.Continued {
 		t.Fatalf("resolution = %#v, %v", result, err)
 	}
-	if resumed, _ := store.GetAgentRun(ctx, run.Scope, run.ID); resumed.Status != runtime.AgentRunStatusQueued {
+	if resumed, _ := store.GetAgentRun(ctx, run.Scope, run.ID); resumed.Status != models.AgentRunStatusQueued {
 		t.Fatalf("member run status = %s", resumed.Status)
 	}
 }
@@ -246,7 +249,7 @@ func TestTeamRequestDoesNotResumeAfterTheMemberLeft(t *testing.T) {
 	if err != nil || result.Continued || result.Request.Status != CredentialRequestStatusResolved {
 		t.Fatalf("resolution = %#v, %v", result, err)
 	}
-	if parked, _ := store.GetAgentRun(ctx, run.Scope, run.ID); parked.Status != runtime.AgentRunStatusWaitingForEvent {
+	if parked, _ := store.GetAgentRun(ctx, run.Scope, run.ID); parked.Status != models.AgentRunStatusWaitingForEvent {
 		t.Fatalf("a removed member's run resumed: %s", parked.Status)
 	}
 }

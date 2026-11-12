@@ -1,14 +1,16 @@
 package openseal
 
 import (
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 )
 
 type (
-	GovernedToolExecutor       = runtime.GovernedToolExecutor
-	GovernedToolExecutorConfig = runtime.GovernedToolExecutorConfig
-	GovernedToolCall           = runtime.GovernedToolCall
-	GovernedToolOutcome        = runtime.GovernedToolOutcome
+	GovernedToolExecutor       = runloop.GovernedToolExecutor
+	GovernedToolExecutorConfig = runloop.GovernedToolExecutorConfig
+	GovernedToolCall           = runloop.GovernedToolCall
+	GovernedToolOutcome        = runloop.GovernedToolOutcome
 )
 
 // buildGovernedToolExecutor builds the inline executor from the first
@@ -18,7 +20,7 @@ type (
 func (e *Engine) buildGovernedToolExecutor() error {
 	e.governedWorker = nil
 	e.governedTools = nil
-	var worker *runtime.ActionWorker
+	var worker *action.ActionWorker
 	switch {
 	case len(e.actionSupervisorSpecs) > 0:
 		spec := e.actionSupervisorSpecs[0]
@@ -30,7 +32,7 @@ func (e *Engine) buildGovernedToolExecutor() error {
 		return nil
 	}
 	worker.SetCredentialAvailabilityChecker(e.credentialAvailability)
-	executor, err := runtime.NewGovernedToolExecutor(runtime.GovernedToolExecutorConfig{
+	executor, err := runloop.NewGovernedToolExecutor(runloop.GovernedToolExecutorConfig{
 		Actions: e.actions, Approvals: e.approvals, Worker: worker, Store: e.store,
 		Logger: e.logger,
 	})
@@ -44,17 +46,17 @@ func (e *Engine) buildGovernedToolExecutor() error {
 
 // newInlineActionWorker is the action worker the claiming replica runs loop
 // calls with; it holds the same credentials and dispatcher as the pools.
-func newInlineActionWorker(e *Engine, credentials runtime.CredentialResolver, issuer runtime.ActionCredentialLeaseIssuer, dispatcher runtime.ActionDispatcher) *runtime.ActionWorker {
+func newInlineActionWorker(e *Engine, credentials action.CredentialResolver, issuer action.ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher) *action.ActionWorker {
 	if issuer != nil {
-		return runtime.NewActionWorkerWithCredentialLeaseIssuer(e.store, e.skills, issuer, dispatcher)
+		return action.NewActionWorkerWithCredentialLeaseIssuer(e.store, e.skills, issuer, dispatcher)
 	}
-	return runtime.NewActionWorker(e.store, e.skills, credentials, dispatcher)
+	return action.NewActionWorker(e.store, e.skills, credentials, dispatcher)
 }
 
 // GovernedTools returns the executor the RunLoop's tool executor uses, or nil
 // when the engine has no action workers (governed calls are then refused as
 // capability_unavailable).
-func (e *Engine) GovernedTools() *runtime.GovernedToolExecutor {
+func (e *Engine) GovernedTools() *runloop.GovernedToolExecutor {
 	if e == nil {
 		return nil
 	}

@@ -11,7 +11,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // ProviderStepHost runs single model steps against one OpenAI-compatible
@@ -22,7 +24,7 @@ import (
 // frames (DI-4).
 type ProviderStepHost struct{ client *openAIClient }
 
-var _ runtime.StepHost = (*ProviderStepHost)(nil)
+var _ agentrun.StepHost = (*ProviderStepHost)(nil)
 
 func NewProviderStepHost(cfg OpenAIProviderConfig) (*ProviderStepHost, error) {
 	client, err := newOpenAIClient(cfg)
@@ -82,11 +84,11 @@ type openAIChatResponse struct {
 type parsedStep struct {
 	text       string
 	reasoning  string
-	calls      []runtime.ModelToolCall
+	calls      []models.ModelToolCall
 	malformed  []string // per call: decoder error, "" when the arguments are an object
-	stop       runtime.ModelStopReason
+	stop       models.ModelStopReason
 	truncated  bool // finish_reason "length"
-	usage      runtime.ModelStepUsage
+	usage      models.ModelStepUsage
 	providerMS int64
 }
 
@@ -100,19 +102,19 @@ func (p parsedStep) hasMalformed() bool {
 }
 
 func stepFailure(code, message string, retryable bool) error {
-	return runtime.NewTurnHostFailure(code, message, retryable)
+	return modelstep.NewTurnHostFailure(code, message, retryable)
 }
 
-func (h *ProviderStepHost) ExecuteModelStep(ctx context.Context, req runtime.ModelStepRequest) (runtime.ModelStepResult, error) {
+func (h *ProviderStepHost) ExecuteModelStep(ctx context.Context, req models.ModelStepRequest) (models.ModelStepResult, error) {
 	if err := req.Validate(); err != nil {
-		return runtime.ModelStepResult{}, stepFailure(stepHostInvalidRequest, "The kernel sent an invalid model step: "+err.Error(), false)
+		return models.ModelStepResult{}, stepFailure(stepHostInvalidRequest, "The kernel sent an invalid model step: "+err.Error(), false)
 	}
 	if req.ModelCredential != nil {
-		return runtime.ModelStepResult{}, stepFailure(stepHostUnsupportedBinding, "This agent requires a deployment-specific model credential. The desktop task provider currently uses the workspace provider.", false)
+		return models.ModelStepResult{}, stepFailure(stepHostUnsupportedBinding, "This agent requires a deployment-specific model credential. The desktop task provider currently uses the workspace provider.", false)
 	}
 	render, err := renderOpenAIStep(req, h.client.model)
 	if err != nil {
-		return runtime.ModelStepResult{}, err
+		return models.ModelStepResult{}, err
 	}
 	chat := openAIChatRequest{Model: h.client.model, Messages: render.Messages, MaxCompletionTokens: req.MaxOutputTokens}
 	if len(render.Tools) > 0 {
@@ -120,30 +122,30 @@ func (h *ProviderStepHost) ExecuteModelStep(ctx context.Context, req runtime.Mod
 	}
 	body, err := json.Marshal(chat)
 	if err != nil {
-		return runtime.ModelStepResult{}, stepFailure(stepHostInvalidRequest, "The model step could not be prepared.", false)
+		return models.ModelStepResult{}, stepFailure(stepHostInvalidRequest, "The model step could not be prepared.", false)
 	}
 	estimate := int64(len(body)+3) / 4
 	if len(body) > maxProviderRequestBytes {
-		return runtime.ModelStepResult{}, h.contextExceeded(estimate, maxProviderRequestBytes/4)
+		return models.ModelStepResult{}, h.contextExceeded(estimate, maxProviderRequestBytes/4)
 	}
 	// A summary step offers tools only to keep the prompt prefix (tool_choice
 	// none); tool-free purposes offer none. Calls returned anyway are dropped.
-	acceptCalls := len(chat.Tools) > 0 && req.Purpose != runtime.ModelStepPurposeSummary
+	acceptCalls := len(chat.Tools) > 0 && req.Purpose != models.ModelStepPurposeSummary
 
 	started := time.Now()
-	var total runtime.ModelStepUsage
+	var total models.ModelStepUsage
 	var step parsedStep
 	malformedLeft, emptyLeft := stepHostMalformedRetries, stepHostEmptyRetries
 	for {
 		step, err = h.attempt(ctx, req, body, estimate, acceptCalls)
 		if err != nil {
-			return runtime.ModelStepResult{}, err
+			return models.ModelStepResult{}, err
 		}
 		total = addStepUsage(total, step.usage)
 		if step.hasMalformed() {
 			if step.truncated {
 				// Cut off mid-arguments: a re-send produces the same cut.
-				return runtime.ModelStepResult{}, stepFailure(stepHostOutputTruncated, "The model's answer was cut off by its output limit before its tool call was complete.", false)
+				return models.ModelStepResult{}, stepFailure(stepHostOutputTruncated, "The model's answer was cut off by its output limit before its tool call was complete.", false)
 			}
 			if malformedLeft > 0 {
 				malformedLeft--
@@ -156,7 +158,7 @@ func (h *ProviderStepHost) ExecuteModelStep(ctx context.Context, req runtime.Mod
 				emptyLeft--
 				continue
 			}
-			return runtime.ModelStepResult{}, stepFailure(stepHostEmptyResponse, "The task provider returned an empty answer.", false)
+			return models.ModelStepResult{}, stepFailure(stepHostEmptyResponse, "The task provider returned an empty answer.", false)
 		}
 		break
 	}
@@ -170,8 +172,8 @@ func (h *ProviderStepHost) ExecuteModelStep(ctx context.Context, req runtime.Mod
 	total.DurationMS = time.Since(started).Milliseconds()
 
 	tools, _ := json.Marshal(render.Tools)
-	assistant := runtime.AssistantEntry{
-		Provider:     runtime.ModelStepProviderChat,
+	assistant := models.AssistantEntry{
+		Provider:     models.ModelStepProviderChat,
 		Model:        h.client.model,
 		SystemDigest: digest([]byte(*render.Messages[0].Content)),
 		ToolsDigest:  digest(tools),
@@ -181,17 +183,17 @@ func (h *ProviderStepHost) ExecuteModelStep(ctx context.Context, req runtime.Mod
 		Usage:        total,
 	}
 	if step.reasoning != "" {
-		assistant.Native = &runtime.AssistantNative{ChatReasoningField: defaultChatReasoningField, ChatReasoning: step.reasoning}
+		assistant.Native = &models.AssistantNative{ChatReasoningField: defaultChatReasoningField, ChatReasoning: step.reasoning}
 	}
-	result := runtime.ModelStepResult{
-		APIVersion: runtime.ModelStepAPIVersion,
+	result := models.ModelStepResult{
+		APIVersion: models.ModelStepAPIVersion,
 		StepID:     req.StepID,
 		Assistant:  assistant,
-		Model: runtime.ModelStepModelInfo{
-			Provider: runtime.ModelStepProviderChat, Model: h.client.model,
+		Model: models.ModelStepModelInfo{
+			Provider: models.ModelStepProviderChat, Model: h.client.model,
 			ContextTokens: h.client.window, MaxOutputTokens: req.MaxOutputTokens,
 		},
-		Render: runtime.ModelStepRenderInfo{
+		Render: models.ModelStepRenderInfo{
 			EstimatedInputTokens:    estimate,
 			ReasoningCutoffSequence: render.Info.ReasoningCutoffSequence,
 			ImagesOmitted:           render.Info.ImagesOmitted,
@@ -200,14 +202,14 @@ func (h *ProviderStepHost) ExecuteModelStep(ctx context.Context, req runtime.Mod
 	if len(step.calls) > 0 {
 		result.Narration = stepNarration(step.text)
 	}
-	if err := runtime.ValidateModelStepResult(req, result); err != nil {
-		return runtime.ModelStepResult{}, stepFailure(stepHostInvalidResponse, "The task provider returned an answer the kernel cannot record.", false)
+	if err := modelstep.ValidateModelStepResult(req, result); err != nil {
+		return models.ModelStepResult{}, stepFailure(stepHostInvalidResponse, "The task provider returned an answer the kernel cannot record.", false)
 	}
 	return result, nil
 }
 
 // attempt makes one provider call and parses it.
-func (h *ProviderStepHost) attempt(ctx context.Context, req runtime.ModelStepRequest, body []byte, estimate int64, acceptCalls bool) (parsedStep, error) {
+func (h *ProviderStepHost) attempt(ctx context.Context, req models.ModelStepRequest, body []byte, estimate int64, acceptCalls bool) (parsedStep, error) {
 	started := time.Now()
 	raw, err := h.client.post(ctx, body)
 	if err != nil {
@@ -240,22 +242,22 @@ func (h *ProviderStepHost) attempt(ctx context.Context, req runtime.ModelStepReq
 			}
 			seen[id] = true
 			arguments, reason := toolArguments(call.Function.Arguments)
-			step.calls = append(step.calls, runtime.ModelToolCall{ID: id, Name: strings.TrimSpace(call.Function.Name), Arguments: arguments})
+			step.calls = append(step.calls, models.ModelToolCall{ID: id, Name: strings.TrimSpace(call.Function.Name), Arguments: arguments})
 			step.malformed = append(step.malformed, reason)
 		}
 	}
 	switch {
 	case len(step.calls) > 0:
 		// Some servers finish with "stop" even when they called tools.
-		step.stop = runtime.ModelStopToolCalls
+		step.stop = models.ModelStopToolCalls
 	case choice.FinishReason == "length":
-		step.stop = runtime.ModelStopMaxTokens
+		step.stop = models.ModelStopMaxTokens
 	case choice.FinishReason == "content_filter":
-		step.stop = runtime.ModelStopRefusal
+		step.stop = models.ModelStopRefusal
 	default:
-		step.stop = runtime.ModelStopEnd
+		step.stop = models.ModelStopEnd
 	}
-	step.usage = runtime.ModelStepUsage{InputTokens: response.Usage.PromptTokens, OutputTokens: response.Usage.CompletionTokens, Attempts: 1}
+	step.usage = models.ModelStepUsage{InputTokens: response.Usage.PromptTokens, OutputTokens: response.Usage.CompletionTokens, Attempts: 1}
 	// Compatible providers may omit usage. Charge a conservative estimate
 	// rather than treating a call as free.
 	if step.usage.InputTokens == 0 {
@@ -298,10 +300,10 @@ func (h *ProviderStepHost) contextExceeded(estimate, limit int64) error {
 	if limit < 1 {
 		limit = 1
 	}
-	return &runtime.TurnHostFailure{
-		Code:            runtime.TurnHostContextExceeded,
+	return &modelstep.TurnHostFailure{
+		Code:            modelstep.TurnHostContextExceeded,
 		Message:         "This conversation is too long for " + h.client.model + " to read at once.",
-		ContextPressure: &runtime.HostedContextPressure{EstimatedTokens: estimate, LimitTokens: limit},
+		ContextPressure: &modelstep.HostedContextPressure{EstimatedTokens: estimate, LimitTokens: limit},
 	}
 }
 
@@ -370,7 +372,7 @@ func toolArguments(text string) (json.RawMessage, string) {
 	return compact, ""
 }
 
-func addStepUsage(total, u runtime.ModelStepUsage) runtime.ModelStepUsage {
+func addStepUsage(total, u models.ModelStepUsage) models.ModelStepUsage {
 	total.InputTokens += u.InputTokens
 	total.OutputTokens += u.OutputTokens
 	total.Attempts += u.Attempts
@@ -398,6 +400,6 @@ func digest(data []byte) string {
 
 // ExecuteHostTool always refuses: the desktop runtime has no host tools, so
 // the kernel never offers any.
-func (h *ProviderStepHost) ExecuteHostTool(context.Context, runtime.HostToolRequest) (runtime.HostToolResult, error) {
-	return runtime.HostToolResult{}, runtime.ErrHostToolUnsupported
+func (h *ProviderStepHost) ExecuteHostTool(context.Context, models.HostToolRequest) (models.HostToolResult, error) {
+	return models.HostToolResult{}, models.ErrHostToolUnsupported
 }

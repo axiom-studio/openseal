@@ -11,7 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/internal/tui"
 	"github.com/axiom-studio/openseal/pkg/client"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func tuiCmd(args []string) {
@@ -67,7 +67,7 @@ OPENSEAL_API_URL can set the default endpoint.`)
 	}
 	config := tui.Config{
 		Endpoint: strings.TrimSpace(*endpoint), Scope: scopeValue, Owner: ownerValue,
-		Actor: runtime.ActivityActor{Type: "user", ID: "local"}, DownloadDir: strings.TrimSpace(*downloadDir),
+		Actor: models.ActivityActor{Type: "user", ID: "local"}, DownloadDir: strings.TrimSpace(*downloadDir),
 		PollInterval: pollInterval,
 	}
 	kernelClient := client.NewKernelHTTPClient(config.Endpoint, nil, client.WithRequestHeaders(http.Header(requestHeaders)))
@@ -102,20 +102,20 @@ func (headers *requestHeaderFlags) Set(value string) error {
 	return nil
 }
 
-func parseScope(value string) (runtime.Scope, error) {
+func parseScope(value string) (models.Scope, error) {
 	kind, id, ok := strings.Cut(strings.TrimSpace(value), ":")
-	scope := runtime.Scope{Kind: strings.TrimSpace(kind), ID: strings.TrimSpace(id)}
+	scope := models.Scope{Kind: strings.TrimSpace(kind), ID: strings.TrimSpace(id)}
 	if !ok || scope.Validate() != nil {
-		return runtime.Scope{}, fmt.Errorf("expected kind:id")
+		return models.Scope{}, fmt.Errorf("expected kind:id")
 	}
 	return scope, nil
 }
 
-func parseOwner(value string) (runtime.ObjectiveOwner, error) {
+func parseOwner(value string) (models.ObjectiveOwner, error) {
 	kind, id, ok := strings.Cut(strings.TrimSpace(value), ":")
-	owner := runtime.ObjectiveOwner{Type: runtime.OwnerType(strings.TrimSpace(kind)), ID: strings.TrimSpace(id)}
+	owner := models.ObjectiveOwner{Type: models.OwnerType(strings.TrimSpace(kind)), ID: strings.TrimSpace(id)}
 	if !ok || owner.Validate() != nil {
-		return runtime.ObjectiveOwner{}, fmt.Errorf("expected agent:id or team:id")
+		return models.ObjectiveOwner{}, fmt.Errorf("expected agent:id or team:id")
 	}
 	return owner, nil
 }

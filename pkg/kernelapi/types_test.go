@@ -9,7 +9,7 @@ import (
 	"time"
 
 	kernelcapability "github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
@@ -329,16 +329,16 @@ func TestProjectAgentTurnV2EmitsOnlyPublicStepFields(t *testing.T) {
 	started := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	completed := started.Add(2 * time.Second)
 	leaseExpires := started.Add(time.Minute)
-	turn := &runtime.AgentTurn{
-		ID: "turn-1", Scope: runtime.Scope{Kind: "local", ID: "default"}, RunID: "run-1", SessionID: "ses-3",
-		Sequence: 2, Status: runtime.AgentTurnStatusFailed, Producer: runtime.StepProducerModel,
+	turn := &models.AgentTurn{
+		ID: "turn-1", Scope: models.Scope{Kind: "local", ID: "default"}, RunID: "run-1", SessionID: "ses-3",
+		Sequence: 2, Status: models.AgentTurnStatusFailed, Producer: models.StepProducerModel,
 		AssistantEntryID: "private-assistant-entry", DefinitionID: "reviewer", DefinitionVersion: "4",
 		ModelProvider: "openai-compatible", Model: "deepseek-v4-flash",
 		InputContextRefs: []string{"private-context-ref"},
 		OutputSummary:    "Asking the reviewer to check the evidence.", ToolCallCount: 1,
-		StopReason: string(runtime.ModelStopToolCalls), Final: true,
-		Usage:           runtime.TurnUsage{InputTokens: 1840, OutputTokens: 64, ProviderDurationMS: 910},
-		SkillSelections: []runtime.HostedSkillSelection{{}},
+		StopReason: string(models.ModelStopToolCalls), Final: true,
+		Usage:           models.TurnUsage{InputTokens: 1840, OutputTokens: 64, ProviderDurationMS: 910},
+		SkillSelections: []models.HostedSkillSelection{{}},
 		FailureCode:     "host_unavailable", Error: "provider unreachable",
 		LeaseOwner: "private-worker", LeaseExpiresAt: &leaseExpires,
 		Revision: 3, CreatedAt: started, UpdatedAt: completed, StartedAt: started, CompletedAt: &completed,
@@ -368,7 +368,7 @@ func TestProjectAgentTurnV2EmitsOnlyPublicStepFields(t *testing.T) {
 	if strings.Contains(string(encoded), "private") || strings.Contains(string(encoded), "planRevision") {
 		t.Fatalf("agent turn v2 leaked a private field: %s", encoded)
 	}
-	if record.Producer != runtime.StepProducerModel || record.FailureCode != "host_unavailable" || !record.Final ||
+	if record.Producer != models.StepProducerModel || record.FailureCode != "host_unavailable" || !record.Final ||
 		record.ToolCallCount != 1 || record.StopReason != "tool_calls" || record.SessionID != "ses-3" {
 		t.Fatalf("agent turn v2 record = %#v", record)
 	}
@@ -376,7 +376,7 @@ func TestProjectAgentTurnV2EmitsOnlyPublicStepFields(t *testing.T) {
 		t.Fatal("completedAt aliases the stored turn")
 	}
 
-	minimal, err := json.Marshal(ProjectAgentTurn(&runtime.AgentTurn{ID: "turn-2", RunID: "run-1", Sequence: 1, Status: runtime.AgentTurnStatusRunning}))
+	minimal, err := json.Marshal(ProjectAgentTurn(&models.AgentTurn{ID: "turn-2", RunID: "run-1", Sequence: 1, Status: models.AgentTurnStatusRunning}))
 	if err != nil {
 		t.Fatal(err)
 	}

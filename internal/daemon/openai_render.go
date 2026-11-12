@@ -8,7 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Renderer from a kernel ModelStepRequest to an OpenAI-compatible Chat
@@ -131,20 +132,20 @@ type openAIStepRender struct {
 }
 
 func renderFailure(code, format string, args ...interface{}) error {
-	return runtime.NewTurnHostFailure(code, fmt.Sprintf(format, args...), false)
+	return modelstep.NewTurnHostFailure(code, fmt.Sprintf(format, args...), false)
 }
 
 // renderOpenAIStep renders a whole request: the system text, the session
 // path, the summary instruction of a compaction step, and the tool list.
 // model is the configured provider model (reasoning is replayed only for
 // entries the same model wrote).
-func renderOpenAIStep(req runtime.ModelStepRequest, model string) (openAIStepRender, error) {
+func renderOpenAIStep(req models.ModelStepRequest, model string) (openAIStepRender, error) {
 	system := renderOpenAISystem(req.System, req.Stream.FinalAnswerTool)
 	messages, info, err := renderOpenAIMessages(system, req.Entries, model)
 	if err != nil {
 		return openAIStepRender{}, err
 	}
-	if req.Purpose == runtime.ModelStepPurposeSummary {
+	if req.Purpose == models.ModelStepPurposeSummary {
 		messages = append(messages, textMessage("user", req.SummaryInstruction))
 	}
 	tools, err := renderOpenAITools(req.Tools)
@@ -154,7 +155,7 @@ func renderOpenAIStep(req runtime.ModelStepRequest, model string) (openAIStepRen
 	out := openAIStepRender{Messages: messages, Tools: tools, Info: info}
 	if len(tools) > 0 {
 		choice := ""
-		if req.Purpose == runtime.ModelStepPurposeSummary {
+		if req.Purpose == models.ModelStepPurposeSummary {
 			choice = "none"
 		}
 		if out.ToolChoice, err = renderOpenAIToolChoice(choice, req.Tools); err != nil {
@@ -168,7 +169,7 @@ func renderOpenAIStep(req runtime.ModelStepRequest, model string) (openAIStepRen
 // system spec. Parts are joined with a blank line, empty parts skipped: the
 // harness, the final-answer tool line, the agent instructions, each skill
 // prompt, then each kernel section in order.
-func renderOpenAISystem(spec runtime.ModelStepSystem, finalAnswerTool string) string {
+func renderOpenAISystem(spec models.ModelStepSystem, finalAnswerTool string) string {
 	parts := []string{openAIStepHarnessPrompt}
 	if finalAnswerTool != "" {
 		parts = append(parts, fmt.Sprintf(openAIFinalAnswerToolLine, finalAnswerTool))
@@ -218,7 +219,7 @@ func textMessage(role, text string) openAIMessage {
 // Tool messages must directly follow their assistant message, so user and
 // note entries the kernel appended while an assistant's calls were still
 // open are emitted after the last of those tool messages.
-func renderOpenAIMessages(system string, entries []runtime.SessionEntryView, model string) ([]openAIMessage, openAIRenderInfo, error) {
+func renderOpenAIMessages(system string, entries []models.SessionEntryView, model string) ([]openAIMessage, openAIRenderInfo, error) {
 	var info openAIRenderInfo
 	cutoff, dropped := chatReasoningCutoff(entries, model)
 	if dropped {
@@ -256,12 +257,12 @@ func renderOpenAIMessages(system string, entries []runtime.SessionEntryView, mod
 	for i := range entries {
 		entry := &entries[i]
 		switch entry.Type {
-		case runtime.SessionEntryCompaction:
+		case models.SessionEntryCompaction:
 			if i != 0 || entry.Compaction == nil {
 				return nil, info, renderFailure(openAIRenderInvalidSession, "The session has a compaction entry (%s) that is not the start of the path.", entry.ID)
 			}
 			emitUserRole(textMessage("user", entry.Compaction.Summary))
-		case runtime.SessionEntryUser:
+		case models.SessionEntryUser:
 			if entry.User == nil {
 				return nil, info, renderFailure(openAIRenderInvalidSession, "The session has a user entry (%s) without content.", entry.ID)
 			}
@@ -270,12 +271,12 @@ func renderOpenAIMessages(system string, entries []runtime.SessionEntryView, mod
 				return nil, info, err
 			}
 			emitUserRole(textMessage("user", text))
-		case runtime.SessionEntryNote:
+		case models.SessionEntryNote:
 			if entry.Note == nil {
 				return nil, info, renderFailure(openAIRenderInvalidSession, "The session has a note entry (%s) without text.", entry.ID)
 			}
 			emitUserRole(textMessage("user", openAINotePrefix+entry.Note.Text))
-		case runtime.SessionEntryAssistant:
+		case models.SessionEntryAssistant:
 			if err := closeAssistant("next assistant message"); err != nil {
 				return nil, info, err
 			}
@@ -293,7 +294,7 @@ func renderOpenAIMessages(system string, entries []runtime.SessionEntryView, mod
 				}
 				open[call.ID] = true
 			}
-		case runtime.SessionEntryTool:
+		case models.SessionEntryTool:
 			if entry.Tool == nil {
 				return nil, info, renderFailure(openAIRenderInvalidSession, "The session has a tool entry (%s) without a result.", entry.ID)
 			}
@@ -310,7 +311,7 @@ func renderOpenAIMessages(system string, entries []runtime.SessionEntryView, mod
 			if len(open) == 0 {
 				flushDeferred()
 			}
-		case runtime.SessionEntryModelChange:
+		case models.SessionEntryModelChange:
 			// Nothing to render; chatReasoningCutoff already drops the
 			// reasoning written before the change.
 		default:
@@ -330,15 +331,15 @@ func renderOpenAIMessages(system string, entries []runtime.SessionEntryView, mod
 // it comes before the last user entry (DeepSeek-style providers want
 // reasoning only within the current tool loop). A model_change entry forces
 // the cutoff past itself. What is replayed is therefore always a suffix.
-func chatReasoningCutoff(entries []runtime.SessionEntryView, model string) (int64, bool) {
+func chatReasoningCutoff(entries []models.SessionEntryView, model string) (int64, bool) {
 	var compactionSequence, lastUserSequence, cutoff int64
 	for i := range entries {
 		switch entries[i].Type {
-		case runtime.SessionEntryCompaction:
+		case models.SessionEntryCompaction:
 			if i == 0 {
 				compactionSequence = entries[i].Sequence
 			}
-		case runtime.SessionEntryUser:
+		case models.SessionEntryUser:
 			lastUserSequence = entries[i].Sequence
 		}
 	}
@@ -350,14 +351,14 @@ func chatReasoningCutoff(entries []runtime.SessionEntryView, model string) (int6
 	for i := range entries {
 		entry := &entries[i]
 		switch entry.Type {
-		case runtime.SessionEntryModelChange:
+		case models.SessionEntryModelChange:
 			force(entry.Sequence)
-		case runtime.SessionEntryAssistant:
+		case models.SessionEntryAssistant:
 			a := entry.Assistant
 			if a == nil {
 				continue
 			}
-			if a.Provider != runtime.ModelStepProviderChat || !strings.EqualFold(strings.TrimSpace(a.Model), strings.TrimSpace(model)) ||
+			if a.Provider != models.ModelStepProviderChat || !strings.EqualFold(strings.TrimSpace(a.Model), strings.TrimSpace(model)) ||
 				entry.Sequence < compactionSequence || entry.Sequence < lastUserSequence {
 				force(entry.Sequence)
 			}
@@ -366,7 +367,7 @@ func chatReasoningCutoff(entries []runtime.SessionEntryView, model string) (int6
 	dropped := false
 	for i := range entries {
 		entry := &entries[i]
-		if entry.Type == runtime.SessionEntryAssistant && entry.Sequence <= cutoff && chatReasoning(entry.Assistant) != "" {
+		if entry.Type == models.SessionEntryAssistant && entry.Sequence <= cutoff && chatReasoning(entry.Assistant) != "" {
 			dropped = true
 			break
 		}
@@ -374,7 +375,7 @@ func chatReasoningCutoff(entries []runtime.SessionEntryView, model string) (int6
 	return cutoff, dropped
 }
 
-func chatReasoning(a *runtime.AssistantEntry) string {
+func chatReasoning(a *models.AssistantEntry) string {
 	if a == nil || a.Native == nil {
 		return ""
 	}
@@ -382,7 +383,7 @@ func chatReasoning(a *runtime.AssistantEntry) string {
 }
 
 // renderAssistant returns false for an entry with no text and no tool calls.
-func renderAssistant(entry *runtime.SessionEntryView, cutoff int64) (openAIMessage, bool) {
+func renderAssistant(entry *models.SessionEntryView, cutoff int64) (openAIMessage, bool) {
 	a := entry.Assistant
 	if strings.TrimSpace(a.Text) == "" && len(a.ToolCalls) == 0 {
 		return openAIMessage{}, false
@@ -413,11 +414,11 @@ func renderAssistant(entry *runtime.SessionEntryView, cutoff int64) (openAIMessa
 
 // renderUserContent flattens a user entry to text. The desktop provider
 // sends no media, so an image part is refused instead of silently dropped.
-func renderUserContent(user *runtime.UserEntryView) (string, error) {
+func renderUserContent(user *models.UserEntryView) (string, error) {
 	lines := make([]string, 0, len(user.Content))
 	for _, part := range user.Content {
-		if part.Type == runtime.ContentPartImage {
-			return "", runtime.NewTurnHostFailure(openAIRenderUnsupportedMedia, "The desktop task provider does not support media input yet.", false)
+		if part.Type == models.ContentPartImage {
+			return "", modelstep.NewTurnHostFailure(openAIRenderUnsupportedMedia, "The desktop task provider does not support media input yet.", false)
 		}
 		if text, ok := renderTextPart(part); ok {
 			lines = append(lines, text)
@@ -431,17 +432,17 @@ func renderUserContent(user *runtime.UserEntryView) (string, error) {
 }
 
 // renderTextPart renders a text, json or file part; false for anything else.
-func renderTextPart(part runtime.ContentPart) (string, bool) {
+func renderTextPart(part models.ContentPart) (string, bool) {
 	switch part.Type {
-	case runtime.ContentPartText:
+	case models.ContentPartText:
 		return part.Text, true
-	case runtime.ContentPartJSON:
+	case models.ContentPartJSON:
 		var compact bytes.Buffer
 		if json.Compact(&compact, part.Value) == nil {
 			return compact.String(), true
 		}
 		return string(part.Value), true
-	case runtime.ContentPartFile:
+	case models.ContentPartFile:
 		if part.MimeType != "" {
 			return fmt.Sprintf("Output saved to %s (%s, %d bytes).", part.Path, part.MimeType, part.SizeBytes), true
 		}
@@ -453,12 +454,12 @@ func renderTextPart(part runtime.ContentPart) (string, bool) {
 // renderToolContent joins a tool result's parts with "\n". Images become
 // "[image omitted]": the provider takes no media, and a whole step must not
 // fail because a governed action returned a screenshot.
-func renderToolContent(entry *runtime.SessionEntryView) (string, bool, error) {
+func renderToolContent(entry *models.SessionEntryView) (string, bool, error) {
 	tool := entry.Tool
 	failed := tool.Result.IsError
 	switch tool.State {
-	case runtime.ToolEntryCompleted:
-	case runtime.ToolEntryError, runtime.ToolEntryInterrupted:
+	case models.ToolEntryCompleted:
+	case models.ToolEntryError, models.ToolEntryInterrupted:
 		failed = true
 	default:
 		return "", false, renderFailure(openAIRenderInvalidSession, "The session has a tool call (%s) that has not finished (%s).", tool.CallID, tool.State)
@@ -466,7 +467,7 @@ func renderToolContent(entry *runtime.SessionEntryView) (string, bool, error) {
 	omitted := false
 	lines := make([]string, 0, len(tool.Result.Content))
 	for _, part := range tool.Result.Content {
-		if part.Type == runtime.ContentPartImage {
+		if part.Type == models.ContentPartImage {
 			lines = append(lines, openAIImageOmittedText)
 			omitted = true
 			continue
@@ -492,7 +493,7 @@ func renderToolContent(entry *runtime.SessionEntryView) (string, bool, error) {
 // renderOpenAITools converts the kernel's tool list. Names must match
 // ^[a-zA-Z0-9_-]{1,64}$ and be unique, and every input schema must be a JSON
 // Schema object. Empty input renders nil (the caller omits tools).
-func renderOpenAITools(tools []runtime.ModelStepTool) ([]openAITool, error) {
+func renderOpenAITools(tools []models.ModelStepTool) ([]openAITool, error) {
 	if len(tools) == 0 {
 		return nil, nil
 	}
@@ -520,7 +521,7 @@ func renderOpenAITools(tools []runtime.ModelStepTool) ([]openAITool, error) {
 // "auto" give "auto"; "required" and "none" pass through; any other value
 // must name an offered tool and forces it. Callers omit the field when no
 // tools are offered.
-func renderOpenAIToolChoice(choice string, tools []runtime.ModelStepTool) (interface{}, error) {
+func renderOpenAIToolChoice(choice string, tools []models.ModelStepTool) (interface{}, error) {
 	switch choice {
 	case "", "auto":
 		return "auto", nil

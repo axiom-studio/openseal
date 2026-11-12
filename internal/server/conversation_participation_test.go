@@ -9,17 +9,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	service := runtime.NewConversationService(store)
-	scope := runtime.Scope{Kind: "local", ID: "default"}
+	service := conversation.NewConversationService(store)
+	scope := models.Scope{Kind: "local", ID: "default"}
 	seedSpace(t, store, scope, "")
-	channel, _, err := service.CreateConversation(t.Context(), runtime.CreateConversationRequest{Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"}, Title: "Research", IdempotencyKey: "channel"})
+	channel, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Title: "Research", IdempotencyKey: "channel"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +35,7 @@ func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.
 	}
 	allowed := true
 	checks := 0
-	server.SetChannelParticipation(func(_ context.Context, current *runtime.Conversation) error {
+	server.SetChannelParticipation(func(_ context.Context, current *models.Conversation) error {
 		checks++
 		if current.ID != channel.ID || current.Scope != scope {
 			t.Fatal("wrong canonical channel")
@@ -72,22 +73,22 @@ func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.
 
 func TestChannelPostDispatchRunsAfterDesktopAuth(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	service := runtime.NewConversationService(store)
-	scope := runtime.Scope{Kind: "local", ID: "default"}
+	service := conversation.NewConversationService(store)
+	scope := models.Scope{Kind: "local", ID: "default"}
 	seedSpace(t, store, scope, "")
-	channel, _, err := service.CreateConversation(t.Context(), runtime.CreateConversationRequest{Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"}, Title: "Research", IdempotencyKey: "channel"})
+	channel, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Title: "Research", IdempotencyKey: "channel"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(scope)
 	calls := 0
-	server.SetChannelParticipation(func(context.Context, *runtime.Conversation) error { return nil }, func(ctx context.Context, req runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error) {
+	server.SetChannelParticipation(func(context.Context, *models.Conversation) error { return nil }, func(ctx context.Context, req conversation.PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error) {
 		calls++
 		return service.PostChannelMessage(ctx, req)
 	})
 	for _, sender := range []string{"forged", "local-operator"} {
-		payload := map[string]interface{}{"scope": scope, "expectedRevision": 1, "sender": runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: sender}, "intent": "question", "content": "Review this", "audience": map[string]string{"kind": "channel"}, "idempotencyKey": sender}
+		payload := map[string]interface{}{"scope": scope, "expectedRevision": 1, "sender": models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: sender}, "intent": "question", "content": "Review this", "audience": map[string]string{"kind": "channel"}, "idempotencyKey": sender}
 		body, _ := json.Marshal(payload)
 		response := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations/"+channel.ID+"/messages", string(body), sender)
 		if sender == "forged" && (response.Code != http.StatusForbidden || calls != 0) || sender == "local-operator" && (response.Code != http.StatusCreated || calls != 1) {

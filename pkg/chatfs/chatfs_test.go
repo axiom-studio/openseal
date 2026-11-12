@@ -9,25 +9,28 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/artifact"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 type catalog struct {
-	*runtime.ArtifactCatalog
-	store *runtime.SQLiteStore
+	*artifactcatalog.ArtifactCatalog
+	store *sqlite.Store
 }
 
-func (c catalog) RegisterArtifact(ctx context.Context, request runtime.RegisterArtifactRequest) (*runtime.ArtifactRegistrationResult, error) {
+func (c catalog) RegisterArtifact(ctx context.Context, request artifactcatalog.RegisterArtifactRequest) (*artifactcatalog.ArtifactRegistrationResult, error) {
 	return c.Register(ctx, request)
 }
 
-func (c catalog) GetArtifact(ctx context.Context, scope runtime.Scope, id string, version int64) (*runtime.Artifact, error) {
+func (c catalog) GetArtifact(ctx context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
 	return c.store.GetArtifact(ctx, scope, id, version)
 }
 
-func (c catalog) ListArtifacts(ctx context.Context, filter runtime.ArtifactFilter) ([]*runtime.Artifact, error) {
+func (c catalog) ListArtifacts(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
 	return c.store.ListArtifacts(ctx, filter)
 }
 
@@ -38,9 +41,9 @@ func newTestStore(t *testing.T) (*Store, Chat, Author) {
 		t.Fatal(err)
 	}
 	kernel := runtimetest.NewKernelStore(t)
-	chat := Chat{Scope: runtime.Scope{Kind: "tenant", ID: "1"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "finn"}, ConversationID: "c1"}
-	author := Author{Producer: runtime.ActivityActor{Type: "agent", ID: "finn"}, RunID: "run-1"}
-	return NewStore(catalog{runtime.NewArtifactCatalog(kernel), kernel}, content), chat, author
+	chat := Chat{Scope: models.Scope{Kind: "tenant", ID: "1"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}, ConversationID: "c1"}
+	author := Author{Producer: models.ActivityActor{Type: "agent", ID: "finn"}, RunID: "run-1"}
+	return NewStore(catalog{artifactcatalog.NewArtifactCatalog(kernel), kernel}, content), chat, author
 }
 
 func run(t *testing.T, store *Store, chat Chat, author Author, operation string, args map[string]interface{}) map[string]interface{} {
@@ -239,19 +242,19 @@ func TestANewChatIsOnboardedEmpty(t *testing.T) {
 	}
 }
 
-type conversations []*runtime.Conversation
+type conversations []*models.Conversation
 
-func (c conversations) GetConversation(_ context.Context, scope runtime.Scope, id string) (*runtime.Conversation, error) {
+func (c conversations) GetConversation(_ context.Context, scope models.Scope, id string) (*models.Conversation, error) {
 	for _, conversation := range c {
 		if conversation.Scope == scope && conversation.ID == id {
 			return conversation, nil
 		}
 	}
-	return nil, runtime.ErrConversationNotFound
+	return nil, models.ErrConversationNotFound
 }
 
-func (c conversations) ListConversations(_ context.Context, filter runtime.ConversationFilter) ([]*runtime.Conversation, error) {
-	var found []*runtime.Conversation
+func (c conversations) ListConversations(_ context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
+	var found []*models.Conversation
 	for _, conversation := range c {
 		if conversation.Scope == filter.Scope && (filter.Owner == nil || conversation.Owner == *filter.Owner) {
 			found = append(found, conversation)
@@ -263,7 +266,7 @@ func (c conversations) ListConversations(_ context.Context, filter runtime.Conve
 func TestAnAgentReadsAndCopiesFromItsOtherChatsOnly(t *testing.T) {
 	store, chat, author := newTestStore(t)
 	earlier := Chat{Scope: chat.Scope, Owner: chat.Owner, ConversationID: "c0"}
-	foreign := Chat{Scope: chat.Scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "other-agent"}, ConversationID: "x1"}
+	foreign := Chat{Scope: chat.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other-agent"}, ConversationID: "x1"}
 	now := time.Now().UTC()
 	store.Conversations = conversations{
 		{ID: "c1", Scope: chat.Scope, Owner: chat.Owner, Title: "Today", UpdatedAt: now},
@@ -326,10 +329,10 @@ func TestResolveChatFileReadsLatestAndPinnedVersions(t *testing.T) {
 	if err != nil || pinned.Digest != first.Digest {
 		t.Fatalf("pinned = %#v %v", pinned, err)
 	}
-	if _, err := store.ResolveChatFile(ctx, chat.Scope, chat.Owner, chat.ConversationID, "scripts/missing.py", 0); !errors.Is(err, runtime.ErrChatFileNotFound) {
+	if _, err := store.ResolveChatFile(ctx, chat.Scope, chat.Owner, chat.ConversationID, "scripts/missing.py", 0); !errors.Is(err, routine.ErrChatFileNotFound) {
 		t.Fatalf("missing = %v", err)
 	}
-	other := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "someone-else"}
+	other := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "someone-else"}
 	if _, err := store.ResolveChatFile(ctx, chat.Scope, other, chat.ConversationID, "scripts/weekly.py", 0); err == nil {
 		t.Fatal("another owner read the chat's files")
 	}

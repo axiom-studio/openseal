@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const (
@@ -90,7 +90,7 @@ func executeLoopStatusCall(t *testing.T, engine *Engine, scope Scope) GovernedTo
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outcome.State != runtime.ToolEntryCompleted || outcome.ActionCallID == "" {
+	if outcome.State != models.ToolEntryCompleted || outcome.ActionCallID == "" {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 	call, err := engine.GetActionCall(ctx, scope, outcome.ActionCallID)

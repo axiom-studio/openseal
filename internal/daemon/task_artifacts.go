@@ -11,7 +11,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
 const maxGeneratedFileBytes = 256 * 1024
@@ -75,25 +77,25 @@ func generatedFilesSchema() map[string]interface{} {
 // TaskArtifactPublisher stores the desktop's generated files as task
 // artifacts. It extends turn_final_answer on local agent work.
 type TaskArtifactPublisher struct {
-	Scope   runtime.Scope
-	Content runtime.ArtifactContentStore
-	Catalog *runtime.ArtifactCatalog
+	Scope   models.Scope
+	Content models.ArtifactContentStore
+	Catalog *artifactcatalog.ArtifactCatalog
 }
 
-var _ runtime.FinalOutputPublisher = (*TaskArtifactPublisher)(nil)
+var _ agentrun.FinalOutputPublisher = (*TaskArtifactPublisher)(nil)
 
-func (p *TaskArtifactPublisher) offers(run *runtime.AgentRun) bool {
-	return p != nil && run != nil && run.Scope == p.Scope && run.Kind == runtime.RunKindAgentWork
+func (p *TaskArtifactPublisher) offers(run *models.AgentRun) bool {
+	return p != nil && run != nil && run.Scope == p.Scope && run.Kind == models.RunKindAgentWork
 }
 
-func (p *TaskArtifactPublisher) FinalAnswerProperties(run *runtime.AgentRun) map[string]interface{} {
+func (p *TaskArtifactPublisher) FinalAnswerProperties(run *models.AgentRun) map[string]interface{} {
 	if !p.offers(run) {
 		return nil
 	}
 	return map[string]interface{}{generatedFilesProperty: generatedFilesSchema()}
 }
 
-func (p *TaskArtifactPublisher) ValidateFinalAnswer(run *runtime.AgentRun, fields map[string]json.RawMessage) error {
+func (p *TaskArtifactPublisher) ValidateFinalAnswer(run *models.AgentRun, fields map[string]json.RawMessage) error {
 	if _, forged := fields["artifactRefs"]; forged {
 		return errors.New("Artifact references are assigned by the kernel, not the model.")
 	}
@@ -110,7 +112,7 @@ func (p *TaskArtifactPublisher) ValidateFinalAnswer(run *runtime.AgentRun, field
 	return err
 }
 
-func (p *TaskArtifactPublisher) PublishFinalOutput(ctx context.Context, pub runtime.FinalOutputPublication) (map[string]interface{}, error) {
+func (p *TaskArtifactPublisher) PublishFinalOutput(ctx context.Context, pub agentrun.FinalOutputPublication) (map[string]interface{}, error) {
 	run := pub.Run
 	if p == nil || run == nil || run.Scope != p.Scope || pub.StepID == "" || pub.ToolCallID == "" {
 		return nil, errors.New("artifact output does not match the accepted final answer")
@@ -131,18 +133,18 @@ func (p *TaskArtifactPublisher) PublishFinalOutput(ctx context.Context, pub runt
 	}
 	refs := make([]map[string]interface{}, 0, len(files))
 	for index, file := range files {
-		saved, err := p.Content.Put(ctx, runtime.ArtifactContentWrite{Scope: run.Scope, MediaType: file.MediaType, Reader: strings.NewReader(file.Text), SizeBytes: int64(len(file.Text))})
+		saved, err := p.Content.Put(ctx, models.ArtifactContentWrite{Scope: run.Scope, MediaType: file.MediaType, Reader: strings.NewReader(file.Text), SizeBytes: int64(len(file.Text))})
 		if err != nil {
 			return nil, errors.New("could not store generated file content")
 		}
 		identity, _ := json.Marshal([]interface{}{run.Scope, run.ID, pub.StepID, pub.ToolCallID, index})
 		owner := run.Owner
-		result, err := p.Catalog.Register(ctx, runtime.RegisterArtifactRequest{Artifact: &runtime.Artifact{
+		result, err := p.Catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
 			ID: fmt.Sprintf("step-file-%x", sha256.Sum256(identity)), Version: 1, Scope: run.Scope,
 			Name: file.Name, MediaType: file.MediaType, ContentRef: saved.ContentRef, Digest: saved.Digest, SizeBytes: saved.SizeBytes,
-			Classification: runtime.ArtifactClassificationInternal,
-			Provenance:     runtime.ArtifactProvenance{Producer: runtime.ActivityActor{Type: "agent", ID: run.AssignedAgentID}, Owner: &owner, RunID: run.ID, TurnID: pub.StepID},
-			Evidence:       []runtime.EvidenceLink{{Relation: runtime.EvidenceRelationOutputOf, TargetKind: runtime.EvidenceTargetTurn, TargetRef: pub.StepID}},
+			Classification: models.ArtifactClassificationInternal,
+			Provenance:     models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}, Owner: &owner, RunID: run.ID, TurnID: pub.StepID},
+			Evidence:       []models.EvidenceLink{{Relation: models.EvidenceRelationOutputOf, TargetKind: models.EvidenceTargetTurn, TargetRef: pub.StepID}},
 		}})
 		if err != nil {
 			return nil, fmt.Errorf("could not register generated file: %w", err)

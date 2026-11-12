@@ -11,7 +11,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 	"go.uber.org/zap"
@@ -19,7 +19,7 @@ import (
 
 func TestTeamDefinitionAPIUsesVersionedScopedControlPlane(t *testing.T) {
 	ctx := context.Background()
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "teams.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "teams.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

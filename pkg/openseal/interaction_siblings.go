@@ -5,7 +5,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
 
 // Cards are never reused across runs, so two runs in one conversation can
@@ -16,21 +17,21 @@ import (
 
 // sameSkillSetupTarget reports whether two setup-store requests ask the same
 // person for the same thing.
-func sameSkillSetupTarget(left, right *runtime.SkillSetupRequest) bool {
+func sameSkillSetupTarget(left, right *models.SkillSetupRequest) bool {
 	if left.Kind != right.Kind || left.RequestedFor != right.RequestedFor || left.Scope != right.Scope ||
 		left.DeploymentID != right.DeploymentID || left.ConversationID != right.ConversationID {
 		return false
 	}
 	switch left.Kind {
-	case runtime.SkillSetupKindConnectAccount:
+	case models.SkillSetupKindConnectAccount:
 		return left.BindingID == right.BindingID && slices.Equal(connectAccountSlotNames(left), connectAccountSlotNames(right))
-	case runtime.SkillSetupKindConnectApp:
-		return left.App != nil && right.App != nil && runtime.ConnectAppKey(*left.App) == runtime.ConnectAppKey(*right.App)
+	case models.SkillSetupKindConnectApp:
+		return left.App != nil && right.App != nil && skillbinding.ConnectAppKey(*left.App) == skillbinding.ConnectAppKey(*right.App)
 	}
 	return false
 }
 
-func connectAccountSlotNames(r *runtime.SkillSetupRequest) []string {
+func connectAccountSlotNames(r *models.SkillSetupRequest) []string {
 	names := make([]string, 0, len(r.Slots))
 	for _, slot := range r.Slots {
 		names = append(names, slot.Name)
@@ -42,7 +43,7 @@ func connectAccountSlotNames(r *runtime.SkillSetupRequest) []string {
 // settleSkillSetupSiblings settles the pending siblings of a settled
 // connect_account or connect_app request and resumes their runs with
 // resume.
-func (e *Engine) settleSkillSetupSiblings(ctx context.Context, settled *runtime.SkillSetupRequest, resume func(context.Context, *runtime.SkillSetupRequest) (bool, error)) {
+func (e *Engine) settleSkillSetupSiblings(ctx context.Context, settled *models.SkillSetupRequest, resume func(context.Context, *models.SkillSetupRequest) (bool, error)) {
 	if settled == nil || settled.Status == "pending" {
 		return
 	}
@@ -68,8 +69,8 @@ func (e *Engine) settleSkillSetupSiblings(ctx context.Context, settled *runtime.
 
 // settleCredentialRequestSiblings settles the pending credential requests of
 // the same conversation, kind and website as settled and resumes their runs.
-func (e *Engine) settleCredentialRequestSiblings(ctx context.Context, settled *runtime.CredentialRequest) {
-	if settled == nil || settled.Status == runtime.CredentialRequestStatusPending {
+func (e *Engine) settleCredentialRequestSiblings(ctx context.Context, settled *models.CredentialRequest) {
+	if settled == nil || settled.Status == models.CredentialRequestStatusPending {
 		return
 	}
 	requests, err := e.store.ListCredentialRequests(ctx, settled.Scope, settled.DeploymentID, settled.ConversationID)
@@ -77,7 +78,7 @@ func (e *Engine) settleCredentialRequestSiblings(ctx context.Context, settled *r
 		return
 	}
 	for _, sibling := range requests {
-		if sibling == nil || sibling.ID == settled.ID || sibling.Status != runtime.CredentialRequestStatusPending ||
+		if sibling == nil || sibling.ID == settled.ID || sibling.Status != models.CredentialRequestStatusPending ||
 			sibling.Kind != settled.Kind || sibling.Website != settled.Website {
 			continue
 		}

@@ -8,46 +8,49 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"go.uber.org/zap"
 )
 
 func TestConversationRunsAreScopedFilteredBeforePaging(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store runtime.KernelStore
+			var store models.KernelStore
 			if backend == "sqlite" {
-				db, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "runs.db"))
+				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "runs.db"))
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer db.Close()
 				store = db
 			}
-			scope := runtime.Scope{Kind: "local", ID: "default"}
-			owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research"}
-			channels := runtime.NewConversationService(store.(runtime.ConversationStore))
-			seedSpace(t, store.(runtime.SpaceStore), scope, "")
-			channel, _, err := channels.CreateConversation(t.Context(), runtime.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Evidence", IdempotencyKey: "evidence"})
+			scope := models.Scope{Kind: "local", ID: "default"}
+			owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}
+			channels := conversation.NewConversationService(store.(models.ConversationStore))
+			seedSpace(t, store.(models.SpaceStore), scope, "")
+			channel, _, err := channels.CreateConversation(t.Context(), conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Evidence", IdempotencyKey: "evidence"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			portfolio := runtime.NewPortfolioService(store)
+			portfolio := portfolio.NewPortfolioService(store)
 			ids := []string{}
 			for _, sample := range []struct {
 				channel string
-				owner   runtime.ObjectiveOwner
-				kind    runtime.RunKind
-				scope   runtime.Scope
+				owner   models.ObjectiveOwner
+				kind    models.RunKind
+				scope   models.Scope
 			}{
-				{channel.ID, owner, runtime.RunKindConversation, scope},
-				{channel.ID, owner, runtime.RunKindConversation, scope},
-				{"another-channel", owner, runtime.RunKindConversation, scope},
-				{channel.ID, runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "other"}, runtime.RunKindConversation, scope},
-				{channel.ID, owner, runtime.RunKindAgentWork, scope},
-				{channel.ID, owner, runtime.RunKindConversation, runtime.Scope{Kind: "local", ID: "other"}},
+				{channel.ID, owner, models.RunKindConversation, scope},
+				{channel.ID, owner, models.RunKindConversation, scope},
+				{"another-channel", owner, models.RunKindConversation, scope},
+				{channel.ID, models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "other"}, models.RunKindConversation, scope},
+				{channel.ID, owner, models.RunKindAgentWork, scope},
+				{channel.ID, owner, models.RunKindConversation, models.Scope{Kind: "local", ID: "other"}},
 			} {
-				run, err := portfolio.CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{Scope: sample.scope, Owner: sample.owner, Kind: sample.kind, Goal: "Reply", Source: runtime.RunSourceChat, Context: map[string]interface{}{"conversationId": sample.channel}})
+				run, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: sample.scope, Owner: sample.owner, Kind: sample.kind, Goal: "Reply", Source: models.RunSourceChat, Context: map[string]interface{}{"conversationId": sample.channel}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -62,7 +65,7 @@ func TestConversationRunsAreScopedFilteredBeforePaging(t *testing.T) {
 				if result.Code != http.StatusOK {
 					t.Fatal(result.Body.String())
 				}
-				var runs []*runtime.AgentRun
+				var runs []*models.AgentRun
 				if err := json.Unmarshal(result.Body.Bytes(), &runs); err != nil {
 					t.Fatal(err)
 				}

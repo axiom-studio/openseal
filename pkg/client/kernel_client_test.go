@@ -19,9 +19,16 @@ import (
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -29,13 +36,13 @@ import (
 )
 
 func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel-client.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel-client.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	api := server.NewServer(store, zap.NewNop().Sugar())
-	api.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
+	api.SetAgentRunCreationDispatcher(agentrun.NewRunCommandService(store).CreateAgentRun)
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 
@@ -64,8 +71,8 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if !ok || !scheduleCapability.Supports(kernelapi.OperationReconcile) || !scheduleCapability.Supports(kernelapi.OperationExecute) || !scheduleCapability.Supports(kernelapi.OperationList) || !scheduleCapability.Supports(kernelapi.OperationGet) {
 		t.Fatalf("Runbook schedule capabilities: %#v", document)
 	}
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
+	scope := models.Scope{Kind: "local", ID: "default"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}
 	registry := kernelagent.NewRegistryWithStore(store)
 	definition, err := registry.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
 		ID: "researcher", Version: "1", DisplayName: "Researcher", Purpose: "Monitor feedback", SystemPrompt: "Research carefully.",
@@ -86,8 +93,8 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	objective, err := client.CreateObjective(ctx, kernelapi.CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Research", Goal: "Monitor product feedback", Status: runtime.ObjectiveStatusActive,
-		Budget: &runtime.BudgetPolicy{MaxTurns: 40},
+		Scope: scope, Owner: owner, Title: "Research", Goal: "Monitor product feedback", Status: models.ObjectiveStatusActive,
+		Budget: &models.BudgetPolicy{MaxTurns: 40},
 	}, "research-objective")
 	if err != nil {
 		t.Fatal(err)
@@ -96,12 +103,12 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 		t.Fatalf("objective = %#v", objective)
 	}
 	scheduledObjective, err := client.CreateObjective(ctx, kernelapi.CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Recurring research", Goal: "Monitor feedback periodically", Status: runtime.ObjectiveStatusActive,
+		Scope: scope, Owner: owner, Title: "Recurring research", Goal: "Monitor feedback periodically", Status: models.ObjectiveStatusActive,
 	}, "recurring-research-objective")
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduledActivation, err := runtime.NewRunbookActivationService(store).Create(ctx, runtime.CreateRunbookActivationRequest{
+	scheduledActivation, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
 		ID: "recurring-research", Scope: scope, Owner: owner, ObjectiveID: scheduledObjective.ID, AssignedAgentID: owner.ID,
 		DefinitionID: "research", DefinitionVersion: "1", TriggerID: "recurring",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "monitor", Schedule: &runbook.Schedule{Cron: "*/1 * * * * *", Timezone: "UTC"}},
@@ -116,11 +123,11 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if err := store.UpdateRunbookActivation(ctx, scheduledActivation, scheduledActivation.Revision-1); err != nil {
 		t.Fatal(err)
 	}
-	runbooks, err := client.ListRunbooks(ctx, runtime.RunbookActivationFilter{Scope: scope, ObjectiveID: scheduledObjective.ID, Statuses: []runtime.RunbookActivationStatus{runtime.RunbookActivationActive}, TriggerKinds: []runbook.TriggerKind{runbook.TriggerSchedule}, Limit: 10})
+	runbooks, err := client.ListRunbooks(ctx, models.RunbookActivationFilter{Scope: scope, ObjectiveID: scheduledObjective.ID, Statuses: []models.RunbookActivationStatus{models.RunbookActivationActive}, TriggerKinds: []runbook.TriggerKind{runbook.TriggerSchedule}, Limit: 10})
 	if err != nil || len(runbooks) != 1 || runbooks[0].ID != scheduledActivation.ID {
 		t.Fatalf("Runbooks=%#v err=%v", runbooks, err)
 	}
-	nextRunbooks, err := client.ListRunbooks(ctx, runtime.RunbookActivationFilter{Scope: scope, ObjectiveID: scheduledObjective.ID, Limit: 10, Offset: 1})
+	nextRunbooks, err := client.ListRunbooks(ctx, models.RunbookActivationFilter{Scope: scope, ObjectiveID: scheduledObjective.ID, Limit: 10, Offset: 1})
 	if err != nil || len(nextRunbooks) != 0 {
 		t.Fatalf("Runbook next page=%#v err=%v", nextRunbooks, err)
 	}
@@ -136,16 +143,16 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if err != nil || reconciliation.Result == nil || reconciliation.Result.Scheduled != 1 {
 		t.Fatalf("schedule reconciliation = %#v, %v", reconciliation, err)
 	}
-	scheduledRuns, err := client.ListAgentRuns(ctx, runtime.AgentRunFilter{Scope: scope, ObjectiveID: scheduledObjective.ID})
-	if err != nil || len(scheduledRuns) != 1 || scheduledRuns[0].Source != runtime.RunSourceSchedule {
+	scheduledRuns, err := client.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, ObjectiveID: scheduledObjective.ID})
+	if err != nil || len(scheduledRuns) != 1 || scheduledRuns[0].Source != models.RunSourceSchedule {
 		t.Fatalf("scheduled runs = %#v, %v", scheduledRuns, err)
 	}
 	executionAudit, err := client.GetRunbookExecutionAudit(ctx, scope, scheduledRuns[0].ID)
 	if err != nil || executionAudit.Run.ActivationID != scheduledActivation.ID || executionAudit.Runbook.Definition.ID != "research" || len(executionAudit.Nodes) != 1 || executionAudit.Nodes[0].StepID != "done" {
 		t.Fatalf("Runbook execution audit=%#v err=%v", executionAudit, err)
 	}
-	manual, err := client.StartRunbook(ctx, scope, scheduledActivation.ID, runtime.StartRunbookActivationRequest{IdempotencyKey: "manual-run"})
-	if err != nil || manual.Run == nil || manual.Run.Source != runtime.RunSourceManual {
+	manual, err := client.StartRunbook(ctx, scope, scheduledActivation.ID, routine.StartRunbookActivationRequest{IdempotencyKey: "manual-run"})
+	if err != nil || manual.Run == nil || manual.Run.Source != models.RunSourceManual {
 		t.Fatalf("manual Runbook Run=%#v err=%v", manual, err)
 	}
 	if pin, ok := manual.Run.Plan["runbook"].(map[string]interface{}); !ok || pin["id"] != "research" || pin["version"] != "1" || pin["trigger"] != "recurring" {
@@ -155,13 +162,13 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pausedRunbook, err := client.UpdateRunbook(ctx, scope, scheduledActivation.ID, runtime.UpdateRunbookActivationRequest{ExpectedRevision: loadedRunbook.Activation.Revision, Status: runtime.RunbookActivationPaused})
-	if err != nil || pausedRunbook.Status != runtime.RunbookActivationPaused || pausedRunbook.Revision != loadedRunbook.Activation.Revision+1 {
+	pausedRunbook, err := client.UpdateRunbook(ctx, scope, scheduledActivation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: loadedRunbook.Activation.Revision, Status: models.RunbookActivationPaused})
+	if err != nil || pausedRunbook.Status != models.RunbookActivationPaused || pausedRunbook.Revision != loadedRunbook.Activation.Revision+1 {
 		t.Fatalf("paused Runbook=%#v err=%v", pausedRunbook, err)
 	}
 	created, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{
-		Scope: scope, Kind: runtime.RunKindAgentWork, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID,
-		Goal: "Monitor product feedback", Source: runtime.RunSourceManual, Budget: &runtime.BudgetPolicy{MaxTurns: 24},
+		Scope: scope, Kind: models.RunKindAgentWork, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID,
+		Goal: "Monitor product feedback", Source: models.RunSourceManual, Budget: &models.BudgetPolicy{MaxTurns: 24},
 	}, "stable-request")
 	if err != nil {
 		t.Fatal(err)
@@ -169,26 +176,26 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if created.Run == nil || created.Run.Revision != 1 || created.Run.Budget == nil || created.Run.Budget.MaxTurns != 24 {
 		t.Fatalf("unexpected create result: %#v", created)
 	}
-	if _, err := runtime.NewRunActivityService(store, store).AppendActivity(ctx, &runtime.ActivityEvent{
+	if _, err := activity.NewRunActivityService(store, store).AppendActivity(ctx, &models.ActivityEvent{
 		ID: "source-policy-client", Scope: scope, RunID: created.Run.ID,
-		EventType: "source_policy.authorized", Severity: runtime.ActivitySeverityInfo,
-		Actor: runtime.ActivityActor{Type: "system", ID: "source-policy"}, Summary: "Source access authorized by policy",
+		EventType: "source_policy.authorized", Severity: models.ActivitySeverityInfo,
+		Actor: models.ActivityActor{Type: "system", ID: "source-policy"}, Summary: "Source access authorized by policy",
 		Payload:    map[string]interface{}{"monitorId": "monitor-client", "sourceHost": "www.reddit.com", "maximumItems": 5},
-		Visibility: runtime.ActivityVisibilityScope, CreatedAt: time.Now().UTC(),
+		Visibility: models.ActivityVisibilityScope, CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	activity, err := client.ListActivity(ctx, runtime.ActivityFeedRequest{
+	activity, err := client.ListActivity(ctx, activity.ActivityFeedRequest{
 		Scope: scope, RunID: created.Run.ID, EventTypes: []string{"source_policy.authorized"},
-		Severities: []runtime.ActivitySeverity{runtime.ActivitySeverityInfo}, Visibilities: []runtime.ActivityVisibility{runtime.ActivityVisibilityScope},
+		Severities: []models.ActivitySeverity{models.ActivitySeverityInfo}, Visibilities: []models.ActivityVisibility{models.ActivityVisibilityScope},
 		Limit: 5, IncludeDetails: true,
 	})
 	if err != nil || len(activity.Items) == 0 || activity.Items[0].Payload["sourceHost"] != "www.reddit.com" {
 		t.Fatalf("activity = %#v, %v", activity, err)
 	}
 	replayed, err := client.CreateAgentRun(ctx, kernelapi.CreateAgentRunRequest{
-		Scope: scope, Kind: runtime.RunKindAgentWork, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID,
-		Goal: "Monitor product feedback", Source: runtime.RunSourceManual, Budget: &runtime.BudgetPolicy{MaxTurns: 24},
+		Scope: scope, Kind: models.RunKindAgentWork, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID,
+		Goal: "Monitor product feedback", Source: models.RunSourceManual, Budget: &models.BudgetPolicy{MaxTurns: 24},
 	}, "stable-request")
 	if err != nil {
 		t.Fatal(err)
@@ -200,36 +207,36 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if err != nil || detail.Objective == nil || len(detail.Runs) != 1 {
 		t.Fatalf("objective detail = %#v, %v", detail, err)
 	}
-	pausedStatus := runtime.ObjectiveStatusPaused
+	pausedStatus := models.ObjectiveStatusPaused
 	updatedObjective, err := client.UpdateObjective(ctx, scope, objective.ID, kernelapi.UpdateObjectiveRequest{
 		ExpectedRevision: detail.Objective.Revision, Status: &pausedStatus,
 	})
-	if err != nil || updatedObjective.Status != runtime.ObjectiveStatusPaused {
+	if err != nil || updatedObjective.Status != models.ObjectiveStatusPaused {
 		t.Fatalf("updated objective = %#v, %v", updatedObjective, err)
 	}
-	objectives, err := client.ListObjectives(ctx, runtime.ObjectiveFilter{Scope: scope, Owner: &owner, Statuses: []runtime.ObjectiveStatus{runtime.ObjectiveStatusPaused}})
+	objectives, err := client.ListObjectives(ctx, models.ObjectiveFilter{Scope: scope, Owner: &owner, Statuses: []models.ObjectiveStatus{models.ObjectiveStatusPaused}})
 	if err != nil || len(objectives) != 1 || objectives[0].ID != objective.ID {
 		t.Fatalf("objectives = %#v, %v", objectives, err)
 	}
-	runs, err := client.ListAgentRuns(ctx, runtime.AgentRunFilter{Scope: scope, Kind: runtime.RunKindAgentWork, Owner: &owner, Limit: 20})
+	runs, err := client.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, Kind: models.RunKindAgentWork, Owner: &owner, Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runIDs := map[string]bool{}
 	for _, run := range runs {
-		runIDs[run.ID] = run.Kind == runtime.RunKindAgentWork
+		runIDs[run.ID] = run.Kind == models.RunKindAgentWork
 	}
 	if len(runs) != 3 || !runIDs[created.Run.ID] || !runIDs[scheduledRuns[0].ID] || !runIDs[manual.Run.ID] {
 		t.Fatalf("runs = %#v", runs)
 	}
 
 	paused, err := client.CommandAgentRun(ctx, scope, created.Run.ID, kernelapi.AgentRunCommandRequest{
-		ExpectedRevision: created.Run.Revision, Kind: runtime.AgentRunCommandPause,
+		ExpectedRevision: created.Run.Revision, Kind: agentrun.AgentRunCommandPause,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if paused.Run.Status != runtime.AgentRunStatusPaused {
+	if paused.Run.Status != models.AgentRunStatusPaused {
 		t.Fatalf("status = %s", paused.Run.Status)
 	}
 
@@ -243,10 +250,10 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 }
 
 func TestKernelHTTPClientUsesConversationGatewayLifecyclePaths(t *testing.T) {
-	scope := runtime.Scope{Kind: "tenant", ID: "operations"}
-	gateway := runtime.ExternalConversationIngressGateway{
+	scope := models.Scope{Kind: "tenant", ID: "operations"}
+	gateway := models.ExternalConversationIngressGateway{
 		Scope: scope, DeploymentID: "research-agent", Provider: "synthetic",
-		Adapter: runtime.ExternalConversationAdapterReference{
+		Adapter: models.ExternalConversationAdapterReference{
 			SkillID: "synthetic-conversations", SkillVersion: "1.0.0",
 			BindingID: "binding-1", BindingRevision: 1, AdapterID: "conversations",
 		},
@@ -291,8 +298,8 @@ func TestKernelHTTPClientUsesConversationGatewayLifecyclePaths(t *testing.T) {
 	if err != nil || created.ID != "gateway-1" {
 		t.Fatalf("create = %#v, %v", created, err)
 	}
-	listed, err := client.ListExternalConversationGateways(t.Context(), runtime.ExternalConversationGatewayFilter{
-		Scope: scope, Provider: "synthetic", Statuses: []runtime.ExternalConversationGatewayStatus{runtime.ExternalConversationGatewayPaused},
+	listed, err := client.ListExternalConversationGateways(t.Context(), models.ExternalConversationGatewayFilter{
+		Scope: scope, Provider: "synthetic", Statuses: []models.ExternalConversationGatewayStatus{models.ExternalConversationGatewayPaused},
 	})
 	if err != nil || len(listed) != 0 {
 		t.Fatalf("list = %#v, %v", listed, err)
@@ -309,7 +316,7 @@ func TestKernelHTTPClientUsesConversationGatewayLifecyclePaths(t *testing.T) {
 }
 
 func TestKernelHTTPClientUpdatesAgentDeploymentThroughCanonicalAPI(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-update.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-update.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +355,7 @@ func TestKernelHTTPClientUpdatesAgentDeploymentThroughCanonicalAPI(t *testing.T)
 }
 
 func TestKernelHTTPClientConsumesHostedRootAndEnvelope(t *testing.T) {
-	scope := runtime.Scope{Kind: "tenant", ID: "7"}
+	scope := models.Scope{Kind: "tenant", ID: "7"}
 	document := kernelapi.NewCapabilityDocument(kernelapi.AgentBuilderCapability("openseal-assistant"))
 	var started kernelapi.StartAgentBuilderConversationRequest
 	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -368,7 +375,7 @@ func TestKernelHTTPClientConsumesHostedRootAndEnvelope(t *testing.T) {
 			}
 			writer.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(writer).Encode(map[string]interface{}{"code": http.StatusCreated, "status": "Created", "result": kernelapi.StartAgentBuilderConversationResponse{
-				Conversation: &runtime.Conversation{ID: "conversation-hosted", Scope: scope},
+				Conversation: &models.Conversation{ID: "conversation-hosted", Scope: scope},
 			}})
 		default:
 			http.NotFound(writer, request)
@@ -391,20 +398,20 @@ func TestKernelHTTPClientConsumesHostedRootAndEnvelope(t *testing.T) {
 	}
 	response, err := client.StartAgentBuilderConversation(t.Context(), kernelapi.StartAgentBuilderConversationRequest{
 		Scope: scope, Prompt: "Track my invoices",
-		Parameters:     runtime.AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent},
+		Parameters:     models.AgentBuilderParameters{Kind: models.AgentBuilderKindAgent},
 		IdempotencyKey: " builder-hosted ",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if response.Conversation == nil || response.Conversation.ID != "conversation-hosted" ||
-		started.Prompt != "Track my invoices" || started.Parameters.Kind != runtime.AgentBuilderKindAgent || started.Scope != scope {
+		started.Prompt != "Track my invoices" || started.Parameters.Kind != models.AgentBuilderKindAgent || started.Scope != scope {
 		t.Fatalf("response=%#v request=%#v", response, started)
 	}
 }
 
 func TestKernelHTTPClientStreamsArtifactsThroughHostedRoot(t *testing.T) {
-	scope := runtime.Scope{Kind: "tenant", ID: "7"}
+	scope := models.Scope{Kind: "tenant", ID: "7"}
 	content := []byte("cited findings")
 	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("X-Workspace-Scope") != "tenant:7" {
@@ -424,7 +431,7 @@ func TestKernelHTTPClientStreamsArtifactsThroughHostedRoot(t *testing.T) {
 			}
 			writer.Header().Set("Content-Type", "application/json")
 			writer.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(writer).Encode(map[string]interface{}{"code": http.StatusCreated, "result": runtime.ArtifactStoredContent{ContentRef: "content:report", Digest: "sha256:report", SizeBytes: int64(len(content))}})
+			_ = json.NewEncoder(writer).Encode(map[string]interface{}{"code": http.StatusCreated, "result": models.ArtifactStoredContent{ContentRef: "content:report", Digest: "sha256:report", SizeBytes: int64(len(content))}})
 		case request.Method == http.MethodGet && request.URL.Path == "/host/kernel/v1/artifacts/report/content":
 			if request.URL.Query().Get("scopeKind") != scope.Kind || request.URL.Query().Get("scopeId") != scope.ID || request.URL.Query().Get("version") != "2" {
 				t.Errorf("download query = %s", request.URL.RawQuery)
@@ -456,7 +463,7 @@ func TestKernelHTTPClientStreamsArtifactsThroughHostedRoot(t *testing.T) {
 }
 
 func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "compilations.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "compilations.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +526,7 @@ func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
 }
 
 func TestKernelHTTPClientGovernsAgentDefinitionLifecycle(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-lifecycle.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-lifecycle.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +600,7 @@ func TestKernelHTTPClientGovernsAgentDefinitionLifecycle(t *testing.T) {
 }
 
 func TestKernelHTTPClientListsExactAgentSkillActions(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "skills.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "skills.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +649,7 @@ func TestKernelHTTPClientReturnsTypedAPIErrors(t *testing.T) {
 	defer httpServer.Close()
 
 	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
-	_, err := client.GetAgentRun(context.Background(), runtime.Scope{Kind: "local", ID: "default"}, "missing")
+	_, err := client.GetAgentRun(context.Background(), models.Scope{Kind: "local", ID: "default"}, "missing")
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != 404 {
 		t.Fatalf("error = %#v", err)
@@ -650,22 +657,22 @@ func TestKernelHTTPClientReturnsTypedAPIErrors(t *testing.T) {
 }
 
 func TestKernelHTTPClientUsesAgentBuilderContract(t *testing.T) {
-	scope := runtime.Scope{Kind: "local", ID: "default"}
+	scope := models.Scope{Kind: "local", ID: "default"}
 	requests := make([]string, 0, 2)
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.RequestURI()+" key="+r.Header.Get("Idempotency-Key"))
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/api/v1/agent-builder/drafts" {
-			_ = json.NewEncoder(w).Encode(kernelapi.ListAgentBuilderDraftsResponse{Drafts: []runtime.AgentBuilderDraft{{ConversationID: "conversation-one", Title: "Invoices"}}})
+			_ = json.NewEncoder(w).Encode(kernelapi.ListAgentBuilderDraftsResponse{Drafts: []agentbuilder.AgentBuilderDraft{{ConversationID: "conversation-one", Title: "Invoices"}}})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(kernelapi.StartAgentBuilderConversationResponse{Conversation: &runtime.Conversation{ID: "conversation-one", Scope: scope}})
+		_ = json.NewEncoder(w).Encode(kernelapi.StartAgentBuilderConversationResponse{Conversation: &models.Conversation{ID: "conversation-one", Scope: scope}})
 	}))
 	defer httpServer.Close()
 	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
 	ctx := context.Background()
 	if _, err := client.StartAgentBuilderConversation(ctx, kernelapi.StartAgentBuilderConversationRequest{
-		Scope: scope, Prompt: "Track my invoices", Parameters: runtime.AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent}, IdempotencyKey: "start-1",
+		Scope: scope, Prompt: "Track my invoices", Parameters: models.AgentBuilderParameters{Kind: models.AgentBuilderKindAgent}, IdempotencyKey: "start-1",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -716,7 +723,7 @@ func TestKernelHTTPClientDiscoversAgentDeploymentCapabilitiesThroughHostedRoot(t
 }
 
 func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "teams.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "teams.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -784,7 +791,7 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	agentOwner := SkillBindingOwner{Type: runtime.OwnerTypeAgent, DeploymentID: agentDeployment.ID}
+	agentOwner := SkillBindingOwner{Type: models.OwnerTypeAgent, DeploymentID: agentDeployment.ID}
 	agentBinding, err := client.UpsertSkillBinding(ctx, agentOwner, skill.UpsertBindingRequest{
 		Binding: &skill.Binding{ID: "reader", Scope: scope, DeploymentID: agentDeployment.ID, SkillID: "reader", SkillVersion: "1", AllowedActions: []string{"read"}, MaximumRisk: capability.RiskLevelRead},
 		Actor:   skill.BindingActor{Type: "user", ID: "operator"}, Reason: "attach exact reader to Agent",
@@ -796,14 +803,14 @@ func TestKernelHTTPClientUsesFirstClassTeamAPI(t *testing.T) {
 	if err != nil || len(agentBindings.Items) != 1 {
 		t.Fatalf("listed Agent Skill bindings = %#v, err = %v", agentBindings, err)
 	}
-	agentUpgradePlan, err := client.PlanSkillReferenceUpgrade(ctx, agentOwner, runtime.PlanSkillReferenceUpgradeRequest{
-		Scope: runtime.Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: agentDeployment.ID, BindingID: "reader", ToVersion: "2",
+	agentUpgradePlan, err := client.PlanSkillReferenceUpgrade(ctx, agentOwner, skillbinding.PlanSkillReferenceUpgradeRequest{
+		Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: agentDeployment.ID, BindingID: "reader", ToVersion: "2",
 	})
 	if err != nil || agentUpgradePlan.To.Version != "2" || agentUpgradePlan.ExpectedBindingRevision != 1 {
 		t.Fatalf("Agent Skill upgrade plan = %#v, err = %v", agentUpgradePlan, err)
 	}
-	agentUpgrade, err := client.ApplySkillReferenceUpgrade(ctx, agentOwner, runtime.ApplySkillReferenceUpgradeRequest{
-		Plan: agentUpgradePlan, Actor: runtime.ActivityActor{Type: "user", ID: "operator"}, Reason: "reviewed exact Reader upgrade",
+	agentUpgrade, err := client.ApplySkillReferenceUpgrade(ctx, agentOwner, skillbinding.ApplySkillReferenceUpgradeRequest{
+		Plan: agentUpgradePlan, Actor: models.ActivityActor{Type: "user", ID: "operator"}, Reason: "reviewed exact Reader upgrade",
 	})
 	if err != nil || agentUpgrade.BindingRevision != 2 || agentUpgrade.To.Version != "2" || agentUpgrade.Actor.ID != "operator" {
 		t.Fatalf("Agent Skill upgrade = %#v, err = %v", agentUpgrade, err)
@@ -900,18 +907,18 @@ func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
 	httpServer := httptest.NewServer(api.Handler())
 	defer httpServer.Close()
 	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
-	scope := runtime.Scope{Kind: "local", ID: "artifacts"}
-	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research"}
+	scope := models.Scope{Kind: "local", ID: "artifacts"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}
 	content := []byte("report")
 	stored, err := client.UploadArtifactContent(context.Background(), scope, "application/pdf", "", int64(len(content)), bytes.NewReader(content))
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := client.RegisterArtifact(context.Background(), runtime.RegisterArtifactRequest{Artifact: &runtime.Artifact{
+	created, err := client.RegisterArtifact(context.Background(), artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
 		ID: "report", Version: 1, Scope: scope, Name: "report.pdf", Type: "report",
 		MediaType: "application/pdf", ContentRef: stored.ContentRef, SizeBytes: stored.SizeBytes,
-		Digest: stored.Digest, Classification: runtime.ArtifactClassificationConfidential,
-		Provenance: runtime.ArtifactProvenance{Producer: runtime.ActivityActor{Type: "agent", ID: "analyst"}, Owner: &owner, RunID: "run-1"},
+		Digest: stored.Digest, Classification: models.ArtifactClassificationConfidential,
+		Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "analyst"}, Owner: &owner, RunID: "run-1"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -920,7 +927,7 @@ func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
 	if err != nil || loaded.Fingerprint != created.Artifact.Fingerprint {
 		t.Fatalf("loaded = %#v, %v", loaded, err)
 	}
-	listed, err := client.ListArtifacts(context.Background(), runtime.ArtifactFilter{
+	listed, err := client.ListArtifacts(context.Background(), models.ArtifactFilter{
 		Scope: scope, Owner: &owner, Types: []string{"report"}, ProducerRunID: "run-1", LatestOnly: true,
 	})
 	if err != nil || len(listed) != 1 || listed[0].ID != created.Artifact.ID {
@@ -936,7 +943,7 @@ func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
 		t.Fatalf("download = %q / %#v / %v", loadedContent, download, err)
 	}
 	resolution, err := client.ResolveArtifactContent(context.Background(), scope, created.Artifact.ID, 1, kernelapi.ResolveArtifactContentRequest{
-		Actor: runtime.ActivityActor{Type: "user", ID: "operator"}, Purpose: "preview", TTLSeconds: 30,
+		Actor: models.ActivityActor{Type: "user", ID: "operator"}, Purpose: "preview", TTLSeconds: 30,
 	})
 	if err != nil || resolution.URL != "https://delivery.example/ephemeral" {
 		t.Fatalf("resolution = %#v, %v", resolution, err)
@@ -945,8 +952,8 @@ func TestKernelHTTPClientUsesArtifactCatalogAPI(t *testing.T) {
 
 type clientTestResolver struct{}
 
-func (clientTestResolver) Resolve(_ context.Context, request runtime.ArtifactContentResolutionRequest) (runtime.ArtifactContentResolution, error) {
-	return runtime.ArtifactContentResolution{URL: "https://delivery.example/ephemeral", ExpiresAt: time.Now().Add(request.TTL)}, nil
+func (clientTestResolver) Resolve(_ context.Context, request artifactcatalog.ArtifactContentResolutionRequest) (artifactcatalog.ArtifactContentResolution, error) {
+	return artifactcatalog.ArtifactContentResolution{URL: "https://delivery.example/ephemeral", ExpiresAt: time.Now().Add(request.TTL)}, nil
 }
 
 func TestKernelHTTPClientMapsWorkforceBundleContract(t *testing.T) {
@@ -1014,10 +1021,10 @@ func TestKernelHTTPClientDecodesAgentTurnsV2(t *testing.T) {
 	}))
 	defer httpServer.Close()
 	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
-	scope := runtime.Scope{Kind: "local", ID: "default"}
+	scope := models.Scope{Kind: "local", ID: "default"}
 
-	listed, err := client.ListAgentTurns(t.Context(), runtime.AgentTurnFilter{
-		Scope: scope, RunID: "run-1", Statuses: []runtime.AgentTurnStatus{runtime.AgentTurnStatusFailed}, AfterSequence: 1, Limit: 5,
+	listed, err := client.ListAgentTurns(t.Context(), models.AgentTurnFilter{
+		Scope: scope, RunID: "run-1", Statuses: []models.AgentTurnStatus{models.AgentTurnStatusFailed}, AfterSequence: 1, Limit: 5,
 	})
 	if err != nil || len(listed) != 1 {
 		t.Fatalf("listed = %#v, %v", listed, err)
@@ -1027,8 +1034,8 @@ func TestKernelHTTPClientDecodesAgentTurnsV2(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, step := range []*kernelapi.AgentTurnRecord{listed[0], got} {
-		if step.ID != "turn-7" || step.SessionID != "ses-3" || step.Sequence != 2 || step.Producer != runtime.StepProducerModel ||
-			step.ToolCallCount != 1 || step.StopReason != string(runtime.ModelStopToolCalls) || step.Final ||
+		if step.ID != "turn-7" || step.SessionID != "ses-3" || step.Sequence != 2 || step.Producer != models.StepProducerModel ||
+			step.ToolCallCount != 1 || step.StopReason != string(models.ModelStopToolCalls) || step.Final ||
 			step.FailureCode != "host_unavailable" || step.Usage.ProviderDurationMS != 910 || step.CompletedAt == nil {
 			t.Fatalf("agent turn v2 record = %#v", step)
 		}

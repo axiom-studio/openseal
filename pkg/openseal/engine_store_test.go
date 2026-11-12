@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -28,7 +28,7 @@ func TestNewOpensAndClosesStoreOnlyWithoutStoreOption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if engine.ownedStore == nil || engine.Store() != runtime.KernelStore(engine.ownedStore) {
+	if engine.ownedStore == nil || engine.Store() != models.KernelStore(engine.ownedStore) {
 		t.Fatal("engine without a store option does not run on its own in-memory store")
 	}
 	if err := engine.Close(); err != nil {
@@ -49,7 +49,7 @@ func TestNewOpensAndClosesStoreOnlyWithoutStoreOption(t *testing.T) {
 	if err := engine.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ListAgentRuns(context.Background(), runtime.AgentRunFilter{Scope: Scope{Kind: "local", ID: "test"}}); err != nil {
+	if _, err := store.ListAgentRuns(context.Background(), models.AgentRunFilter{Scope: Scope{Kind: "local", ID: "test"}}); err != nil {
 		t.Fatalf("Close closed the caller's store: %v", err)
 	}
 }
@@ -62,7 +62,7 @@ func TestWithStoreRejectsNil(t *testing.T) {
 
 // kernelOnlyStore hides every interface beyond runtime.KernelStore, as a
 // runtime-only embedding's store would.
-type kernelOnlyStore struct{ runtime.KernelStore }
+type kernelOnlyStore struct{ models.KernelStore }
 
 func TestPartialStoreKeepsRegistriesInMemory(t *testing.T) {
 	store := kernelOnlyStore{runtimetest.NewKernelStore(t)}
@@ -72,7 +72,7 @@ func TestPartialStoreKeepsRegistriesInMemory(t *testing.T) {
 	}
 	t.Cleanup(func() { engine.Close() })
 
-	if engine.Store() != runtime.KernelStore(store) {
+	if engine.Store() != models.KernelStore(store) {
 		t.Fatal("engine does not run on the given store")
 	}
 	if engine.ownedStore == nil {

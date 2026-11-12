@@ -1,7 +1,8 @@
 package openseal
 
 import (
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -30,21 +31,21 @@ func SkillPersonCredentialAllowed(definition *SkillDefinition, b *SkillBinding, 
 // MessageActingUser returns the human a conversation message acts for, or ""
 // when no person sent it.
 func MessageActingUser(conversation *Conversation, message *ChannelMessage) string {
-	return runtime.MessageActingUser(conversation, message)
+	return models.MessageActingUser(conversation, message)
 }
 
 type (
-	CredentialAvailabilityChecker = runtime.CredentialAvailabilityChecker
-	CredentialAvailabilityRequest = runtime.CredentialAvailabilityRequest
-	CredentialAvailability        = runtime.CredentialAvailability
-	CredentialGap                 = runtime.CredentialGap
-	ConnectAccountSlot            = runtime.ConnectAccountSlot
+	CredentialAvailabilityChecker = action.CredentialAvailabilityChecker
+	CredentialAvailabilityRequest = action.CredentialAvailabilityRequest
+	CredentialAvailability        = action.CredentialAvailability
+	CredentialGap                 = action.CredentialGap
+	ConnectAccountSlot            = models.ConnectAccountSlot
 )
 
 const (
-	CredentialGapPersonSignIn    = runtime.CredentialGapPersonSignIn
-	CredentialGapSharedSignIn    = runtime.CredentialGapSharedSignIn
-	CredentialGapNoPerson        = runtime.CredentialGapNoPerson
-	SkillSetupKindConnectAccount = runtime.SkillSetupKindConnectAccount
-	ConnectAccountWakeType       = runtime.ConnectAccountWakeType
+	CredentialGapPersonSignIn    = action.CredentialGapPersonSignIn
+	CredentialGapSharedSignIn    = action.CredentialGapSharedSignIn
+	CredentialGapNoPerson        = action.CredentialGapNoPerson
+	SkillSetupKindConnectAccount = models.SkillSetupKindConnectAccount
+	ConnectAccountWakeType       = models.ConnectAccountWakeType
 )

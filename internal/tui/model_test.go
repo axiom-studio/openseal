@@ -21,9 +21,18 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -52,20 +61,20 @@ type fakeKernelClient struct {
 	teamEvaluations            []kernelteam.SubmitAmendmentEvaluationRequest
 	teamDecisions              []kernelteam.ResolveAmendmentRequest
 	teamActivations            []kernelapi.ActivateTeamDefinitionAmendmentRequest
-	runs                       []*runtime.AgentRun
-	agentRequests              []*runtime.AgentRequest
-	agentRequestFilters        []runtime.AgentRequestFilter
+	runs                       []*models.AgentRun
+	agentRequests              []*models.AgentRequest
+	agentRequestFilters        []models.AgentRequestFilter
 	agentRequestCreates        []kernelapi.CreateAgentRequestRequest
 	agentRequestKeys           []string
 	agentResponses             []kernelapi.RespondAgentRequestRequest
 	agentCompletions           []kernelapi.CompleteAgentRequestRequest
 	agentCompletionKeys        []string
-	actionApprovals            []*runtime.ApprovalCheckpoint
-	approvalFilters            []runtime.ApprovalFilter
+	actionApprovals            []*models.ApprovalCheckpoint
+	approvalFilters            []models.ApprovalFilter
 	agentTurns                 []*kernelapi.AgentTurnRecord
-	agentTurnFilters           []runtime.AgentTurnFilter
-	actionCalls                []*runtime.ActionCall
-	actionCallFilters          []runtime.ActionFilter
+	agentTurnFilters           []models.AgentTurnFilter
+	actionCalls                []*models.ActionCall
+	actionCallFilters          []models.ActionFilter
 	actionDecisions            []kernelapi.ResolveActionApprovalRequest
 	actionDecisionKeys         []string
 	compilations               []*kernelagent.DefinitionCompilation
@@ -73,22 +82,22 @@ type fakeKernelClient struct {
 	createErrors               []error
 	createKeys                 []string
 	createRequests             []kernelapi.CreateAgentRunRequest
-	objectives                 []*runtime.Objective
-	runbooks                   []*runtime.RunbookActivation
+	objectives                 []*models.Objective
+	runbooks                   []*models.RunbookActivation
 	runbookDefinitions         map[string]*runbook.Definition
 	runbookVerifications       map[string]*runbook.VerificationReport
-	runbookUpdates             []runtime.UpdateRunbookActivationRequest
-	runbookStarts              []runtime.StartRunbookActivationRequest
-	runbookStartResult         *runtime.AgentRunCommandResult
+	runbookUpdates             []routine.UpdateRunbookActivationRequest
+	runbookStarts              []routine.StartRunbookActivationRequest
+	runbookStartResult         *agentrun.AgentRunCommandResult
 	objectiveKeys              []string
 	objectiveCreates           []kernelapi.CreateObjectiveRequest
 	objectiveUpdates           []kernelapi.UpdateObjectiveRequest
 	scheduleRequests           []kernelapi.ReconcileRunbookSchedulesRequest
 	scheduleResult             *kernelapi.RunbookScheduleReconciliation
-	activityPages              map[string]*runtime.ActivityFeedPage
-	activityRequests           []runtime.ActivityFeedRequest
+	activityPages              map[string]*activity.ActivityFeedPage
+	activityRequests           []activity.ActivityFeedRequest
 	commands                   []kernelapi.AgentRunCommandRequest
-	artifacts                  []*runtime.Artifact
+	artifacts                  []*models.Artifact
 	downloadBody               string
 	downloadCalls              int
 	skillActions               []capability.ModelAction
@@ -96,11 +105,11 @@ type fakeKernelClient struct {
 	skillBindings              []*capability.Binding
 	skillBindingUpserts        []skill.UpsertBindingRequest
 	skillBindingDisables       []skill.DisableBindingRequest
-	skillUpgradePlans          []runtime.PlanSkillReferenceUpgradeRequest
-	skillUpgradeApplies        []runtime.ApplySkillReferenceUpgradeRequest
-	skillUpgradePlan           *runtime.SkillReferenceUpgradePlan
+	skillUpgradePlans          []skillbinding.PlanSkillReferenceUpgradeRequest
+	skillUpgradeApplies        []skillbinding.ApplySkillReferenceUpgradeRequest
+	skillUpgradePlan           *models.SkillReferenceUpgradePlan
 	skillBindingError          error
-	conversationGateways       []*runtime.ExternalConversationGatewayRegistration
+	conversationGateways       []*models.ExternalConversationGatewayRegistration
 	conversationGatewayCreates []kernelapi.CreateExternalConversationGatewayRequest
 	conversationGatewayUpdates []kernelapi.UpdateExternalConversationGatewayRequest
 }
@@ -148,36 +157,36 @@ func (f *fakeKernelClient) InstallAgentManifest(context.Context, kernelagent.Man
 	return nil, errors.New("agent manifest installation is not configured in this TUI test")
 }
 
-func (f *fakeKernelClient) CreateExternalConversationGateway(_ context.Context, request kernelapi.CreateExternalConversationGatewayRequest) (*runtime.ExternalConversationGatewayRegistration, error) {
+func (f *fakeKernelClient) CreateExternalConversationGateway(_ context.Context, request kernelapi.CreateExternalConversationGatewayRequest) (*models.ExternalConversationGatewayRegistration, error) {
 	f.conversationGatewayCreates = append(f.conversationGatewayCreates, request)
 	now := time.Now().UTC()
-	value := &runtime.ExternalConversationGatewayRegistration{
+	value := &models.ExternalConversationGatewayRegistration{
 		ID: "gateway-created", IngressRoute: "route-created", Name: request.Name, Gateway: request.Gateway,
-		Status: runtime.ExternalConversationGatewayPaused, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Status: models.ExternalConversationGatewayPaused, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	f.conversationGateways = append(f.conversationGateways, value)
 	return value, nil
 }
 
-func (f *fakeKernelClient) ListExternalConversationGateways(context.Context, runtime.ExternalConversationGatewayFilter) ([]*runtime.ExternalConversationGatewayRegistration, error) {
+func (f *fakeKernelClient) ListExternalConversationGateways(context.Context, models.ExternalConversationGatewayFilter) ([]*models.ExternalConversationGatewayRegistration, error) {
 	return f.conversationGateways, nil
 }
 
-func (f *fakeKernelClient) GetExternalConversationGateway(_ context.Context, _ runtime.Scope, id string) (*runtime.ExternalConversationGatewayRegistration, error) {
+func (f *fakeKernelClient) GetExternalConversationGateway(_ context.Context, _ models.Scope, id string) (*models.ExternalConversationGatewayRegistration, error) {
 	for _, item := range f.conversationGateways {
 		if item.ID == id {
 			return item, nil
 		}
 	}
-	return nil, runtime.ErrExternalConversationGatewayNotFound
+	return nil, models.ErrExternalConversationGatewayNotFound
 }
 
-func (f *fakeKernelClient) UpdateExternalConversationGateway(_ context.Context, _ runtime.Scope, id string, request kernelapi.UpdateExternalConversationGatewayRequest) (*runtime.ExternalConversationGatewayRegistration, error) {
+func (f *fakeKernelClient) UpdateExternalConversationGateway(_ context.Context, _ models.Scope, id string, request kernelapi.UpdateExternalConversationGatewayRequest) (*models.ExternalConversationGatewayRegistration, error) {
 	f.conversationGatewayUpdates = append(f.conversationGatewayUpdates, request)
 	for _, item := range f.conversationGateways {
 		if item.ID == id {
 			if request.ExpectedRevision != item.Revision {
-				return nil, runtime.ErrExternalConversationConflict
+				return nil, models.ErrExternalConversationConflict
 			}
 			if request.Status != nil {
 				item.Status = *request.Status
@@ -187,7 +196,7 @@ func (f *fakeKernelClient) UpdateExternalConversationGateway(_ context.Context, 
 			return item, nil
 		}
 	}
-	return nil, runtime.ErrExternalConversationGatewayNotFound
+	return nil, models.ErrExternalConversationGatewayNotFound
 }
 
 func (f *fakeKernelClient) ListSkillBindings(context.Context, capability.ScopeReference, client.SkillBindingOwner) (*kernelapi.SkillBindingList, error) {
@@ -213,7 +222,7 @@ func (f *fakeKernelClient) DisableSkillBinding(_ context.Context, _ client.Skill
 	value.Revision++
 	return &kernelapi.SkillBindingMutationResult{Binding: &value}, nil
 }
-func (f *fakeKernelClient) PlanSkillReferenceUpgrade(_ context.Context, _ client.SkillBindingOwner, request runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error) {
+func (f *fakeKernelClient) PlanSkillReferenceUpgrade(_ context.Context, _ client.SkillBindingOwner, request skillbinding.PlanSkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradePlan, error) {
 	f.skillUpgradePlans = append(f.skillUpgradePlans, request)
 	if f.skillBindingError != nil {
 		return nil, f.skillBindingError
@@ -221,15 +230,15 @@ func (f *fakeKernelClient) PlanSkillReferenceUpgrade(_ context.Context, _ client
 	if f.skillUpgradePlan != nil {
 		return f.skillUpgradePlan, nil
 	}
-	return &runtime.SkillReferenceUpgradePlan{
-		APIVersion: runtime.SkillReferenceUpgradeAPIVersion, Scope: request.Scope, DeploymentID: request.DeploymentID,
+	return &models.SkillReferenceUpgradePlan{
+		APIVersion: skillbinding.SkillReferenceUpgradeAPIVersion, Scope: request.Scope, DeploymentID: request.DeploymentID,
 		BindingID: request.BindingID, ExpectedBindingRevision: 1,
-		From:   runtime.SkillReferenceIdentity{ID: "reader", Version: "1"},
-		To:     runtime.SkillReferenceIdentity{ID: "reader", Version: request.ToVersion, SourceIdentity: request.ToSourceIdentity},
+		From:   models.SkillReferenceIdentity{ID: "reader", Version: "1"},
+		To:     models.SkillReferenceIdentity{ID: "reader", Version: request.ToVersion, SourceIdentity: request.ToSourceIdentity},
 		Digest: "sha256:reviewed",
 	}, nil
 }
-func (f *fakeKernelClient) ApplySkillReferenceUpgrade(_ context.Context, _ client.SkillBindingOwner, request runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error) {
+func (f *fakeKernelClient) ApplySkillReferenceUpgrade(_ context.Context, _ client.SkillBindingOwner, request skillbinding.ApplySkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradeReceipt, error) {
 	f.skillUpgradeApplies = append(f.skillUpgradeApplies, request)
 	if f.skillBindingError != nil {
 		return nil, f.skillBindingError
@@ -239,8 +248,8 @@ func (f *fakeKernelClient) ApplySkillReferenceUpgrade(_ context.Context, _ clien
 	value.SourceIdentity = request.Plan.To.SourceIdentity
 	value.Revision++
 	f.skillBindings = []*capability.Binding{&value}
-	return &runtime.SkillReferenceUpgradeReceipt{
-		APIVersion: runtime.SkillReferenceUpgradeAPIVersion, PlanDigest: request.Plan.Digest,
+	return &models.SkillReferenceUpgradeReceipt{
+		APIVersion: skillbinding.SkillReferenceUpgradeAPIVersion, PlanDigest: request.Plan.Digest,
 		Scope: request.Plan.Scope, DeploymentID: request.Plan.DeploymentID, BindingID: request.Plan.BindingID,
 		BindingRevision: value.Revision, From: request.Plan.From, To: request.Plan.To, Actor: request.Actor, Reason: request.Reason,
 	}, nil
@@ -251,28 +260,28 @@ func (f *fakeKernelClient) ReconcileRunbookSchedules(_ context.Context, request 
 	if f.scheduleResult != nil {
 		return f.scheduleResult, nil
 	}
-	return &kernelapi.RunbookScheduleReconciliation{Scope: request.Scope, Result: &runtime.RunbookScheduleResult{}}, nil
+	return &kernelapi.RunbookScheduleReconciliation{Scope: request.Scope, Result: &routine.RunbookScheduleResult{}}, nil
 }
 
 var _ client.ConversationClient = (*fakeChannelKernelClient)(nil)
 
 type fakeChannelKernelClient struct {
 	*fakeKernelClient
-	conversations              []*runtime.Conversation
-	messages                   []*runtime.ChannelMessage
-	rounds                     []*runtime.ParticipationRoundResult
-	presence                   []*runtime.ConversationPresence
+	conversations              []*models.Conversation
+	messages                   []*models.ChannelMessage
+	rounds                     []*models.ParticipationRoundResult
+	presence                   []*models.ConversationPresence
 	createConversationErrors   []error
 	createConversationKeys     []string
 	createConversationRequests []kernelapi.CreateConversationRequest
 	postErrors                 []error
 	postKeys                   []string
 	postRequests               []kernelapi.PostChannelMessageRequest
-	cursor                     *runtime.ConversationCursor
+	cursor                     *models.ConversationCursor
 	cursorAdvances             []kernelapi.AdvanceConversationCursorRequest
 }
 
-func (f *fakeChannelKernelClient) CreateConversation(_ context.Context, request kernelapi.CreateConversationRequest, key string) (*runtime.Conversation, error) {
+func (f *fakeChannelKernelClient) CreateConversation(_ context.Context, request kernelapi.CreateConversationRequest, key string) (*models.Conversation, error) {
 	f.createConversationKeys = append(f.createConversationKeys, key)
 	f.createConversationRequests = append(f.createConversationRequests, request)
 	if len(f.createConversationErrors) > 0 {
@@ -283,28 +292,28 @@ func (f *fakeChannelKernelClient) CreateConversation(_ context.Context, request 
 		}
 	}
 	conversation := testConversation("created-channel", request.Title, 0, 1)
-	f.conversations = append([]*runtime.Conversation{conversation}, f.conversations...)
+	f.conversations = append([]*models.Conversation{conversation}, f.conversations...)
 	return conversation, nil
 }
 
-func (f *fakeChannelKernelClient) ListConversations(context.Context, runtime.ConversationFilter) ([]*runtime.Conversation, error) {
+func (f *fakeChannelKernelClient) ListConversations(context.Context, models.ConversationFilter) ([]*models.Conversation, error) {
 	return f.conversations, nil
 }
 
-func (f *fakeChannelKernelClient) GetConversation(_ context.Context, _ runtime.Scope, id string) (*runtime.Conversation, error) {
+func (f *fakeChannelKernelClient) GetConversation(_ context.Context, _ models.Scope, id string) (*models.Conversation, error) {
 	for _, conversation := range f.conversations {
 		if conversation.ID == id {
 			return conversation, nil
 		}
 	}
-	return nil, runtime.ErrConversationNotFound
+	return nil, models.ErrConversationNotFound
 }
 
-func (f *fakeChannelKernelClient) UpdateConversation(context.Context, string, kernelapi.UpdateConversationRequest) (*runtime.Conversation, error) {
+func (f *fakeChannelKernelClient) UpdateConversation(context.Context, string, kernelapi.UpdateConversationRequest) (*models.Conversation, error) {
 	return nil, errors.New("not implemented by test client")
 }
 
-func (f *fakeChannelKernelClient) PostChannelMessage(_ context.Context, conversationID string, request kernelapi.PostChannelMessageRequest, key string) (*runtime.ChannelMessageCommitResult, error) {
+func (f *fakeChannelKernelClient) PostChannelMessage(_ context.Context, conversationID string, request kernelapi.PostChannelMessageRequest, key string) (*models.ChannelMessageCommitResult, error) {
 	f.postKeys = append(f.postKeys, key)
 	f.postRequests = append(f.postRequests, request)
 	if len(f.postErrors) > 0 {
@@ -320,35 +329,35 @@ func (f *fakeChannelKernelClient) PostChannelMessage(_ context.Context, conversa
 	}
 	conversation.Revision++
 	conversation.LastSequence++
-	message := &runtime.ChannelMessage{
+	message := &models.ChannelMessage{
 		ID: "posted-message", Scope: request.Scope, ConversationID: conversationID,
 		Sequence: conversation.LastSequence, Sender: request.Sender, Intent: request.Intent,
 		Content: request.Content, Audience: request.Audience, RequiresResponse: request.RequiresResponse,
 		CreatedAt: time.Now(),
 	}
-	f.messages = append([]*runtime.ChannelMessage{message}, f.messages...)
-	return &runtime.ChannelMessageCommitResult{Conversation: conversation, Message: message}, nil
+	f.messages = append([]*models.ChannelMessage{message}, f.messages...)
+	return &models.ChannelMessageCommitResult{Conversation: conversation, Message: message}, nil
 }
 
-func (f *fakeChannelKernelClient) ListChannelMessages(context.Context, runtime.ChannelMessageFilter) ([]*runtime.ChannelMessage, error) {
+func (f *fakeChannelKernelClient) ListChannelMessages(context.Context, models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
 	return f.messages, nil
 }
 
-func (f *fakeChannelKernelClient) GetChannelMessage(context.Context, runtime.Scope, string, string) (*runtime.ChannelMessage, error) {
-	return nil, runtime.ErrChannelMessageNotFound
+func (f *fakeChannelKernelClient) GetChannelMessage(context.Context, models.Scope, string, string) (*models.ChannelMessage, error) {
+	return nil, models.ErrChannelMessageNotFound
 }
 
-func (f *fakeChannelKernelClient) GetParticipationRound(context.Context, runtime.Scope, string, string) (*runtime.ParticipationRoundResult, error) {
-	return nil, runtime.ErrParticipationRoundNotFound
+func (f *fakeChannelKernelClient) GetParticipationRound(context.Context, models.Scope, string, string) (*models.ParticipationRoundResult, error) {
+	return nil, models.ErrParticipationRoundNotFound
 }
 
-func (f *fakeChannelKernelClient) ListParticipationRounds(context.Context, runtime.ParticipationRoundFilter) ([]*runtime.ParticipationRoundResult, error) {
+func (f *fakeChannelKernelClient) ListParticipationRounds(context.Context, models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error) {
 	return f.rounds, nil
 }
 
-func (f *fakeChannelKernelClient) AdvanceConversationCursor(_ context.Context, conversationID string, request kernelapi.AdvanceConversationCursorRequest) (*runtime.ConversationCursor, bool, error) {
+func (f *fakeChannelKernelClient) AdvanceConversationCursor(_ context.Context, conversationID string, request kernelapi.AdvanceConversationCursorRequest) (*models.ConversationCursor, bool, error) {
 	f.cursorAdvances = append(f.cursorAdvances, request)
-	f.cursor = &runtime.ConversationCursor{
+	f.cursor = &models.ConversationCursor{
 		Scope: request.Scope, ConversationID: conversationID, Participant: request.Participant,
 		DeliveredSequence: request.DeliveredSequence, ReadSequence: request.ReadSequence,
 		Revision: request.ExpectedRevision + 1, UpdatedAt: time.Now(),
@@ -356,14 +365,14 @@ func (f *fakeChannelKernelClient) AdvanceConversationCursor(_ context.Context, c
 	return f.cursor, false, nil
 }
 
-func (f *fakeChannelKernelClient) GetConversationCursor(context.Context, runtime.Scope, string, runtime.ConversationParticipant) (*runtime.ConversationCursor, error) {
+func (f *fakeChannelKernelClient) GetConversationCursor(context.Context, models.Scope, string, models.ConversationParticipant) (*models.ConversationCursor, error) {
 	if f.cursor == nil {
 		return nil, &client.APIError{StatusCode: 404, Message: "conversation cursor not found"}
 	}
 	return f.cursor, nil
 }
 
-func (f *fakeChannelKernelClient) SetConversationPresence(context.Context, string, kernelapi.SetConversationPresenceRequest) (*runtime.ConversationPresence, error) {
+func (f *fakeChannelKernelClient) SetConversationPresence(context.Context, string, kernelapi.SetConversationPresenceRequest) (*models.ConversationPresence, error) {
 	return nil, errors.New("not implemented by test client")
 }
 
@@ -371,7 +380,7 @@ func (f *fakeChannelKernelClient) ReleaseConversationPresence(context.Context, s
 	return errors.New("not implemented by test client")
 }
 
-func (f *fakeChannelKernelClient) ListConversationPresence(context.Context, runtime.Scope, string) ([]*runtime.ConversationPresence, error) {
+func (f *fakeChannelKernelClient) ListConversationPresence(context.Context, models.Scope, string) ([]*models.ConversationPresence, error) {
 	return f.presence, nil
 }
 
@@ -395,21 +404,21 @@ func (f *fakeKernelClient) ListAgentSkillActions(context.Context, capability.Sco
 	return &kernelapi.SkillActionList{DeploymentID: "researcher", Actions: f.skillActions}, nil
 }
 
-func (f *fakeKernelClient) CreateAgentRequest(_ context.Context, request kernelapi.CreateAgentRequestRequest, key string) (*runtime.AgentRequestResult, error) {
+func (f *fakeKernelClient) CreateAgentRequest(_ context.Context, request kernelapi.CreateAgentRequestRequest, key string) (*collaboration.AgentRequestResult, error) {
 	f.agentRequestCreates = append(f.agentRequestCreates, request)
 	f.agentRequestKeys = append(f.agentRequestKeys, key)
-	created := &runtime.AgentRequest{
-		ID: "created-request", Scope: request.Scope, Kind: request.Kind, Status: runtime.AgentRequestStatusPending,
+	created := &models.AgentRequest{
+		ID: "created-request", Scope: request.Scope, Kind: request.Kind, Status: models.AgentRequestStatusPending,
 		Requester: request.Requester, Recipient: request.Recipient, SourceRunID: request.SourceRunID, Goal: request.Goal,
 		IdempotencyKey: key, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
-	f.agentRequests = append([]*runtime.AgentRequest{created}, f.agentRequests...)
-	return &runtime.AgentRequestResult{Request: created}, nil
+	f.agentRequests = append([]*models.AgentRequest{created}, f.agentRequests...)
+	return &collaboration.AgentRequestResult{Request: created}, nil
 }
 
-func (f *fakeKernelClient) ListAgentRequests(_ context.Context, filter runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error) {
+func (f *fakeKernelClient) ListAgentRequests(_ context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
 	f.agentRequestFilters = append(f.agentRequestFilters, filter)
-	result := make([]*runtime.AgentRequest, 0, len(f.agentRequests))
+	result := make([]*models.AgentRequest, 0, len(f.agentRequests))
 	for _, request := range f.agentRequests {
 		if filter.Requester != nil && request.Requester != *filter.Requester {
 			continue
@@ -422,69 +431,69 @@ func (f *fakeKernelClient) ListAgentRequests(_ context.Context, filter runtime.A
 	return result, nil
 }
 
-func (f *fakeKernelClient) GetAgentRequest(_ context.Context, _ runtime.Scope, id string) (*runtime.AgentRequest, error) {
+func (f *fakeKernelClient) GetAgentRequest(_ context.Context, _ models.Scope, id string) (*models.AgentRequest, error) {
 	for _, request := range f.agentRequests {
 		if request.ID == id {
 			return request, nil
 		}
 	}
-	return nil, runtime.ErrAgentRequestNotFound
+	return nil, models.ErrAgentRequestNotFound
 }
 
-func (f *fakeKernelClient) RespondAgentRequest(_ context.Context, _ runtime.Scope, id string, response kernelapi.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error) {
+func (f *fakeKernelClient) RespondAgentRequest(_ context.Context, _ models.Scope, id string, response kernelapi.RespondAgentRequestRequest) (*collaboration.AgentRequestResult, error) {
 	f.agentResponses = append(f.agentResponses, response)
-	request, err := f.GetAgentRequest(context.Background(), runtime.Scope{}, id)
+	request, err := f.GetAgentRequest(context.Background(), models.Scope{}, id)
 	if err != nil {
 		return nil, err
 	}
 	request.Revision++
 	request.Response = response.Message
 	switch response.Decision {
-	case runtime.AgentRequestDecisionAccept:
-		request.Status = runtime.AgentRequestStatusAccepted
+	case collaboration.AgentRequestDecisionAccept:
+		request.Status = models.AgentRequestStatusAccepted
 		request.AssignedAgentID = response.AssignedAgentID
 		request.ChildRunID = "child-run"
-	case runtime.AgentRequestDecisionReject:
-		request.Status = runtime.AgentRequestStatusRejected
-	case runtime.AgentRequestDecisionRequestClarification:
-		request.Status = runtime.AgentRequestStatusClarificationRequested
+	case collaboration.AgentRequestDecisionReject:
+		request.Status = models.AgentRequestStatusRejected
+	case collaboration.AgentRequestDecisionRequestClarification:
+		request.Status = models.AgentRequestStatusClarificationRequested
 		request.Clarification = response.Message
-	case runtime.AgentRequestDecisionProvideClarification:
-		request.Status = runtime.AgentRequestStatusPending
+	case collaboration.AgentRequestDecisionProvideClarification:
+		request.Status = models.AgentRequestStatusPending
 	}
-	return &runtime.AgentRequestResult{Request: request}, nil
+	return &collaboration.AgentRequestResult{Request: request}, nil
 }
 
-func (f *fakeKernelClient) CompleteAgentRequest(_ context.Context, _ runtime.Scope, id string, completion kernelapi.CompleteAgentRequestRequest, key string) (*runtime.AgentRequestResult, error) {
+func (f *fakeKernelClient) CompleteAgentRequest(_ context.Context, _ models.Scope, id string, completion kernelapi.CompleteAgentRequestRequest, key string) (*collaboration.AgentRequestResult, error) {
 	f.agentCompletions = append(f.agentCompletions, completion)
 	f.agentCompletionKeys = append(f.agentCompletionKeys, key)
-	request, err := f.GetAgentRequest(context.Background(), runtime.Scope{}, id)
+	request, err := f.GetAgentRequest(context.Background(), models.Scope{}, id)
 	if err != nil {
 		return nil, err
 	}
 	request.Revision++
-	request.Status = runtime.AgentRequestStatusCompleted
+	request.Status = models.AgentRequestStatusCompleted
 	request.CompletionSummary = completion.Summary
-	return &runtime.AgentRequestResult{Request: request}, nil
+	return &collaboration.AgentRequestResult{Request: request}, nil
 }
 
-func (f *fakeKernelClient) ReviewAgentRequestCompletion(_ context.Context, _ runtime.Scope, id string, review kernelapi.ReviewAgentRequestCompletionRequest, _ string) (*runtime.AgentRequestResult, error) {
-	request, err := f.GetAgentRequest(context.Background(), runtime.Scope{}, id)
+func (f *fakeKernelClient) ReviewAgentRequestCompletion(_ context.Context, _ models.Scope, id string, review kernelapi.ReviewAgentRequestCompletionRequest, _ string) (*collaboration.AgentRequestResult, error) {
+	request, err := f.GetAgentRequest(context.Background(), models.Scope{}, id)
 	if err != nil {
 		return nil, err
 	}
 	request.Revision++
 	request.CompletionReviewSummary = review.Summary
-	request.Status = runtime.AgentRequestStatusFailed
+	request.Status = models.AgentRequestStatusFailed
 	if review.Approve {
-		request.Status = runtime.AgentRequestStatusCompleted
+		request.Status = models.AgentRequestStatusCompleted
 	}
-	return &runtime.AgentRequestResult{Request: request}, nil
+	return &collaboration.AgentRequestResult{Request: request}, nil
 }
 
-func (f *fakeKernelClient) ListActionCalls(_ context.Context, filter runtime.ActionFilter) ([]*runtime.ActionCall, error) {
+func (f *fakeKernelClient) ListActionCalls(_ context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
 	f.actionCallFilters = append(f.actionCallFilters, filter)
-	calls := make([]*runtime.ActionCall, 0, len(f.actionCalls))
+	calls := make([]*models.ActionCall, 0, len(f.actionCalls))
 	for _, call := range f.actionCalls {
 		if call != nil && (filter.RunID == "" || call.RunID == filter.RunID) {
 			calls = append(calls, call)
@@ -493,11 +502,11 @@ func (f *fakeKernelClient) ListActionCalls(_ context.Context, filter runtime.Act
 	return calls, nil
 }
 
-func (f *fakeKernelClient) GetActionCall(context.Context, runtime.Scope, string) (*runtime.ActionCall, error) {
-	return nil, runtime.ErrActionNotFound
+func (f *fakeKernelClient) GetActionCall(context.Context, models.Scope, string) (*models.ActionCall, error) {
+	return nil, models.ErrActionNotFound
 }
 
-func (f *fakeKernelClient) ListAgentTurns(_ context.Context, filter runtime.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error) {
+func (f *fakeKernelClient) ListAgentTurns(_ context.Context, filter models.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error) {
 	f.agentTurnFilters = append(f.agentTurnFilters, filter)
 	turns := make([]*kernelapi.AgentTurnRecord, 0, len(f.agentTurns))
 	for _, turn := range f.agentTurns {
@@ -508,81 +517,81 @@ func (f *fakeKernelClient) ListAgentTurns(_ context.Context, filter runtime.Agen
 	return turns, nil
 }
 
-func (f *fakeKernelClient) GetAgentTurn(context.Context, runtime.Scope, string) (*kernelapi.AgentTurnRecord, error) {
-	return nil, runtime.ErrTurnNotFound
+func (f *fakeKernelClient) GetAgentTurn(context.Context, models.Scope, string) (*kernelapi.AgentTurnRecord, error) {
+	return nil, models.ErrTurnNotFound
 }
 
-func (f *fakeKernelClient) ListActionApprovals(_ context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
+func (f *fakeKernelClient) ListActionApprovals(_ context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
 	f.approvalFilters = append(f.approvalFilters, filter)
 	return f.actionApprovals, nil
 }
 
-func (f *fakeKernelClient) GetActionApproval(_ context.Context, _ runtime.Scope, id string) (*runtime.ApprovalCheckpoint, error) {
+func (f *fakeKernelClient) GetActionApproval(_ context.Context, _ models.Scope, id string) (*models.ApprovalCheckpoint, error) {
 	for _, approval := range f.actionApprovals {
 		if approval.ID == id {
 			return approval, nil
 		}
 	}
-	return nil, runtime.ErrApprovalNotFound
+	return nil, models.ErrApprovalNotFound
 }
 
-func (f *fakeKernelClient) ResolveActionApproval(_ context.Context, _ runtime.Scope, id string, decision kernelapi.ResolveActionApprovalRequest, key string) (*runtime.ApprovalResolutionResult, error) {
+func (f *fakeKernelClient) ResolveActionApproval(_ context.Context, _ models.Scope, id string, decision kernelapi.ResolveActionApprovalRequest, key string) (*models.ApprovalResolutionResult, error) {
 	f.actionDecisions = append(f.actionDecisions, decision)
 	f.actionDecisionKeys = append(f.actionDecisionKeys, key)
-	approval, err := f.GetActionApproval(context.Background(), runtime.Scope{}, id)
+	approval, err := f.GetActionApproval(context.Background(), models.Scope{}, id)
 	if err != nil {
 		return nil, err
 	}
 	approval.Revision++
 	approval.DecisionReason = decision.Reason
 	approval.DecisionBy = &decision.Principal
-	approval.Status = runtime.ApprovalStatusRejected
-	if decision.Decision == runtime.ApprovalDecisionApprove {
-		approval.Status = runtime.ApprovalStatusApproved
-	} else if decision.Decision == runtime.ApprovalDecisionRequestChanges {
-		approval.Status = runtime.ApprovalStatusChangesRequested
+	approval.Status = models.ApprovalStatusRejected
+	if decision.Decision == models.ApprovalDecisionApprove {
+		approval.Status = models.ApprovalStatusApproved
+	} else if decision.Decision == models.ApprovalDecisionRequestChanges {
+		approval.Status = models.ApprovalStatusChangesRequested
 	}
-	return &runtime.ApprovalResolutionResult{Approval: approval, Resolved: true}, nil
+	return &models.ApprovalResolutionResult{Approval: approval, Resolved: true}, nil
 }
 
-func (f *fakeKernelClient) CreateObjective(_ context.Context, request kernelapi.CreateObjectiveRequest, key string) (*runtime.Objective, error) {
+func (f *fakeKernelClient) CreateObjective(_ context.Context, request kernelapi.CreateObjectiveRequest, key string) (*models.Objective, error) {
 	f.objectiveKeys = append(f.objectiveKeys, key)
 	f.objectiveCreates = append(f.objectiveCreates, request)
-	objective := &runtime.Objective{
+	objective := &models.Objective{
 		ID: "objective-created", Scope: request.Scope, Owner: request.Owner, Title: request.Title, Goal: request.Goal,
 		Status: request.Status, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
-	f.objectives = append([]*runtime.Objective{objective}, f.objectives...)
+	f.objectives = append([]*models.Objective{objective}, f.objectives...)
 	return objective, nil
 }
 
-func (f *fakeKernelClient) ListObjectives(context.Context, runtime.ObjectiveFilter) ([]*runtime.Objective, error) {
+func (f *fakeKernelClient) ListObjectives(context.Context, models.ObjectiveFilter) ([]*models.Objective, error) {
 	return f.objectives, nil
 }
 
-func (f *fakeKernelClient) GetObjective(_ context.Context, _ runtime.Scope, id string) (*kernelapi.ObjectiveDetail, error) {
+func (f *fakeKernelClient) GetObjective(_ context.Context, _ models.Scope, id string) (*kernelapi.ObjectiveDetail, error) {
 	for _, objective := range f.objectives {
 		if objective.ID == id {
 			return &kernelapi.ObjectiveDetail{Objective: objective, Runbooks: f.runbooks, Runs: f.runs}, nil
 		}
 	}
-	return nil, runtime.ErrObjectiveNotFound
+	return nil, models.ErrObjectiveNotFound
 }
 
-func (f *fakeKernelClient) ListRunbooks(context.Context, runtime.RunbookActivationFilter) ([]*runtime.RunbookActivation, error) {
+func (f *fakeKernelClient) ListRunbooks(context.Context, models.RunbookActivationFilter) ([]*models.RunbookActivation, error) {
 	return f.runbooks, nil
 }
 
-func (f *fakeKernelClient) GetRunbook(_ context.Context, _ runtime.Scope, id string) (*runtime.RunbookDetail, error) {
+func (f *fakeKernelClient) GetRunbook(_ context.Context, _ models.Scope, id string) (*routine.RunbookDetail, error) {
 	for _, value := range f.runbooks {
 		if value.ID == id {
-			return &runtime.RunbookDetail{Activation: value, Definition: f.runbookDefinitions[id], Verification: f.runbookVerifications[id]}, nil
+			return &routine.RunbookDetail{Activation: value, Definition: f.runbookDefinitions[id], Verification: f.runbookVerifications[id]}, nil
 		}
 	}
-	return nil, runtime.ErrRunbookActivationNotFound
+	return nil, models.ErrRunbookActivationNotFound
 }
 
-func (f *fakeKernelClient) UpdateRunbook(_ context.Context, _ runtime.Scope, id string, request runtime.UpdateRunbookActivationRequest) (*runtime.RunbookActivation, error) {
+func (f *fakeKernelClient) UpdateRunbook(_ context.Context, _ models.Scope, id string, request routine.UpdateRunbookActivationRequest) (*models.RunbookActivation, error) {
 	f.runbookUpdates = append(f.runbookUpdates, request)
 	for _, value := range f.runbooks {
 		if value.ID == id {
@@ -591,10 +600,10 @@ func (f *fakeKernelClient) UpdateRunbook(_ context.Context, _ runtime.Scope, id 
 			return value, nil
 		}
 	}
-	return nil, runtime.ErrRunbookActivationNotFound
+	return nil, models.ErrRunbookActivationNotFound
 }
 
-func (f *fakeKernelClient) StartRunbook(_ context.Context, _ runtime.Scope, _ string, request runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error) {
+func (f *fakeKernelClient) StartRunbook(_ context.Context, _ models.Scope, _ string, request routine.StartRunbookActivationRequest) (*agentrun.AgentRunCommandResult, error) {
 	f.runbookStarts = append(f.runbookStarts, request)
 	if f.runbookStartResult != nil {
 		return f.runbookStartResult, nil
@@ -602,7 +611,7 @@ func (f *fakeKernelClient) StartRunbook(_ context.Context, _ runtime.Scope, _ st
 	return nil, errors.New("starting Runbooks is not configured in this TUI test")
 }
 
-func (f *fakeKernelClient) UpdateObjective(_ context.Context, _ runtime.Scope, id string, request kernelapi.UpdateObjectiveRequest) (*runtime.Objective, error) {
+func (f *fakeKernelClient) UpdateObjective(_ context.Context, _ models.Scope, id string, request kernelapi.UpdateObjectiveRequest) (*models.Objective, error) {
 	f.objectiveUpdates = append(f.objectiveUpdates, request)
 	for _, objective := range f.objectives {
 		if objective.ID == id {
@@ -613,10 +622,10 @@ func (f *fakeKernelClient) UpdateObjective(_ context.Context, _ runtime.Scope, i
 			return objective, nil
 		}
 	}
-	return nil, runtime.ErrObjectiveNotFound
+	return nil, models.ErrObjectiveNotFound
 }
 
-func (f *fakeKernelClient) ListActivity(_ context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
+func (f *fakeKernelClient) ListActivity(_ context.Context, request activity.ActivityFeedRequest) (*activity.ActivityFeedPage, error) {
 	f.activityRequests = append(f.activityRequests, request)
 	keys := []string{activityTestRequestKey(request), request.RunID, request.AgentID, request.TeamID}
 	for _, key := range keys {
@@ -627,10 +636,10 @@ func (f *fakeKernelClient) ListActivity(_ context.Context, request runtime.Activ
 	if page := f.activityPages[request.RunID]; page != nil {
 		return page, nil
 	}
-	return &runtime.ActivityFeedPage{}, nil
+	return &activity.ActivityFeedPage{}, nil
 }
 
-func activityTestRequestKey(request runtime.ActivityFeedRequest) string {
+func activityTestRequestKey(request activity.ActivityFeedRequest) string {
 	selector := "agent:" + request.AgentID
 	if request.TeamID != "" {
 		selector = "team:" + request.TeamID
@@ -647,7 +656,7 @@ func activityTestRequestKey(request runtime.ActivityFeedRequest) string {
 	}
 	return selector
 }
-func (f *fakeKernelClient) CreateAgentRun(_ context.Context, request kernelapi.CreateAgentRunRequest, key string) (*runtime.AgentRunCommandResult, error) {
+func (f *fakeKernelClient) CreateAgentRun(_ context.Context, request kernelapi.CreateAgentRunRequest, key string) (*agentrun.AgentRunCommandResult, error) {
 	f.createKeys = append(f.createKeys, key)
 	f.createRequests = append(f.createRequests, request)
 	if len(f.createErrors) > 0 {
@@ -657,12 +666,12 @@ func (f *fakeKernelClient) CreateAgentRun(_ context.Context, request kernelapi.C
 			return nil, err
 		}
 	}
-	run := testRun("created", runtime.AgentRunStatusQueued, 1)
-	f.runs = append([]*runtime.AgentRun{run}, f.runs...)
-	return &runtime.AgentRunCommandResult{Run: run}, nil
+	run := testRun("created", models.AgentRunStatusQueued, 1)
+	f.runs = append([]*models.AgentRun{run}, f.runs...)
+	return &agentrun.AgentRunCommandResult{Run: run}, nil
 }
 
-func (f *fakeKernelClient) ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error) {
+func (f *fakeKernelClient) ListAgentRuns(context.Context, models.AgentRunFilter) ([]*models.AgentRun, error) {
 	return f.runs, nil
 }
 
@@ -782,25 +791,25 @@ func (f *fakeKernelClient) ActivateAgentDefinitionAmendment(_ context.Context, _
 	return &kernelapi.AgentDefinitionAmendmentActivationResult{Amendment: amendment, Deployment: &deployment, Activation: &workforce.DefinitionActivation{ID: amendment.ActivationID}}, nil
 }
 
-func (f *fakeKernelClient) GetAgentRun(_ context.Context, _ runtime.Scope, id string) (*runtime.AgentRun, error) {
+func (f *fakeKernelClient) GetAgentRun(_ context.Context, _ models.Scope, id string) (*models.AgentRun, error) {
 	for _, run := range f.runs {
 		if run != nil && run.ID == id {
 			return run, nil
 		}
 	}
-	return nil, runtime.ErrRunNotFound
+	return nil, models.ErrRunNotFound
 }
 
-func (f *fakeKernelClient) CommandAgentRun(_ context.Context, _ runtime.Scope, id string, request kernelapi.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error) {
+func (f *fakeKernelClient) CommandAgentRun(_ context.Context, _ models.Scope, id string, request kernelapi.AgentRunCommandRequest) (*agentrun.AgentRunCommandResult, error) {
 	f.commands = append(f.commands, request)
-	status := runtime.AgentRunStatusPaused
-	if request.Kind == runtime.AgentRunCommandResume {
-		status = runtime.AgentRunStatusQueued
-	} else if request.Kind == runtime.AgentRunCommandCancel {
-		status = runtime.AgentRunStatusCanceled
+	status := models.AgentRunStatusPaused
+	if request.Kind == agentrun.AgentRunCommandResume {
+		status = models.AgentRunStatusQueued
+	} else if request.Kind == agentrun.AgentRunCommandCancel {
+		status = models.AgentRunStatusCanceled
 	}
 	run := testRun(id, status, request.ExpectedRevision+1)
-	return &runtime.AgentRunCommandResult{Run: run}, nil
+	return &agentrun.AgentRunCommandResult{Run: run}, nil
 }
 
 func (f *fakeKernelClient) RegisterTeamDefinition(context.Context, *kernelteam.Definition) (*kernelteam.Definition, error) {
@@ -917,28 +926,28 @@ func (f *fakeKernelClient) ActivateTeamDefinitionAmendment(_ context.Context, _ 
 	return &kernelapi.TeamDefinitionAmendmentActivationResult{Amendment: amendment, Deployment: &deployment, Activation: &workforce.DefinitionActivation{ID: amendment.ActivationID}}, nil
 }
 
-func (f *fakeKernelClient) RegisterArtifact(context.Context, runtime.RegisterArtifactRequest) (*runtime.ArtifactRegistrationResult, error) {
+func (f *fakeKernelClient) RegisterArtifact(context.Context, artifactcatalog.RegisterArtifactRequest) (*artifactcatalog.ArtifactRegistrationResult, error) {
 	return nil, errors.New("not implemented by test client")
 }
 
-func (f *fakeKernelClient) GetArtifact(_ context.Context, _ runtime.Scope, id string, version int64) (*runtime.Artifact, error) {
+func (f *fakeKernelClient) GetArtifact(_ context.Context, _ models.Scope, id string, version int64) (*models.Artifact, error) {
 	for _, artifact := range f.artifacts {
 		if artifact.ID == id && (version == 0 || artifact.Version == version) {
 			return artifact, nil
 		}
 	}
-	return nil, runtime.ErrArtifactNotFound
+	return nil, artifactcatalog.ErrArtifactNotFound
 }
 
-func (f *fakeKernelClient) ListArtifacts(context.Context, runtime.ArtifactFilter) ([]*runtime.Artifact, error) {
+func (f *fakeKernelClient) ListArtifacts(context.Context, models.ArtifactFilter) ([]*models.Artifact, error) {
 	return f.artifacts, nil
 }
 
-func (f *fakeKernelClient) UploadArtifactContent(context.Context, runtime.Scope, string, string, int64, io.Reader) (*runtime.ArtifactStoredContent, error) {
+func (f *fakeKernelClient) UploadArtifactContent(context.Context, models.Scope, string, string, int64, io.Reader) (*models.ArtifactStoredContent, error) {
 	return nil, errors.New("not implemented by test client")
 }
 
-func (f *fakeKernelClient) DownloadArtifactContent(context.Context, runtime.Scope, string, int64) (*client.ArtifactDownload, error) {
+func (f *fakeKernelClient) DownloadArtifactContent(context.Context, models.Scope, string, int64) (*client.ArtifactDownload, error) {
 	f.downloadCalls++
 	return &client.ArtifactDownload{
 		Body:   io.NopCloser(strings.NewReader(f.downloadBody)),
@@ -946,7 +955,7 @@ func (f *fakeKernelClient) DownloadArtifactContent(context.Context, runtime.Scop
 	}, nil
 }
 
-func (f *fakeKernelClient) ResolveArtifactContent(context.Context, runtime.Scope, string, int64, kernelapi.ResolveArtifactContentRequest) (*runtime.ArtifactContentResolution, error) {
+func (f *fakeKernelClient) ResolveArtifactContent(context.Context, models.Scope, string, int64, kernelapi.ResolveArtifactContentRequest) (*artifactcatalog.ArtifactContentResolution, error) {
 	return nil, errors.New("not implemented by test client")
 }
 
@@ -978,7 +987,7 @@ func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
 	}
 	fake := &fakeKernelClient{
 		document: kernelapi.CapabilityDocument{APIVersion: kernelapi.APIVersion, Capabilities: []kernelapi.Capability{limited}},
-		runs:     []*runtime.AgentRun{testRun("run-1", runtime.AgentRunStatusQueued, 1)},
+		runs:     []*models.AgentRun{testRun("run-1", models.AgentRunStatusQueued, 1)},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
@@ -1047,7 +1056,7 @@ func TestTUIInspectsPortableWorkforceBundleThroughAdvertisedKernelCapability(t *
 func TestFullStandaloneWorkspaceStartsAtGuidedHomeWithDiscoverableNavigationAndHelp(t *testing.T) {
 	fake := newAgentBuilderTestClient()
 	fake.document = kernelapi.NewCapabilityDocument(
-		kernelapi.AgentBuilderCapability(runtime.AgentBuilderDeploymentID),
+		kernelapi.AgentBuilderCapability(conversationrun.AgentBuilderDeploymentID),
 		kernelapi.AgentDefinitionsCapability(),
 		kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}),
 		kernelapi.AgentRunsCapability(kernelapi.OperationList),
@@ -1089,7 +1098,7 @@ func TestFullStandaloneWorkspaceStartsAtGuidedHomeWithDiscoverableNavigationAndH
 func TestHomeEnterOpensNewAgentAndStartsBuilderChat(t *testing.T) {
 	fake := newAgentBuilderTestClient()
 	fake.document = kernelapi.NewCapabilityDocument(
-		kernelapi.AgentBuilderCapability(runtime.AgentBuilderDeploymentID),
+		kernelapi.AgentBuilderCapability(conversationrun.AgentBuilderDeploymentID),
 		kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{}),
 		kernelapi.AgentDefinitionsCapability(),
 		kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}),
@@ -1109,7 +1118,7 @@ func TestHomeEnterOpensNewAgentAndStartsBuilderChat(t *testing.T) {
 	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	applyCommand(t, model, command)
 	if len(fake.builderStarts) != 1 || fake.builderStarts[0].Prompt != "An agent that books my travel" ||
-		fake.builderStarts[0].Parameters.Kind != runtime.AgentBuilderKindAgent {
+		fake.builderStarts[0].Parameters.Kind != models.AgentBuilderKindAgent {
 		t.Fatalf("builder starts = %#v", fake.builderStarts)
 	}
 	if model.section != sectionChannels || model.mode != modeChannelPost || model.selectedConversation != "builder-chat" {
@@ -1118,10 +1127,10 @@ func TestHomeEnterOpensNewAgentAndStartsBuilderChat(t *testing.T) {
 }
 
 func TestTUIRunbookScheduleReconciliationIsCapabilityGated(t *testing.T) {
-	scope := runtime.Scope{Kind: "local", ID: "default"}
+	scope := models.Scope{Kind: "local", ID: "default"}
 	fake := &fakeKernelClient{
 		document:       kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability()),
-		scheduleResult: &kernelapi.RunbookScheduleReconciliation{Scope: scope, Result: &runtime.RunbookScheduleResult{Examined: 3, Scheduled: 2}},
+		scheduleResult: &kernelapi.RunbookScheduleReconciliation{Scope: scope, Result: &routine.RunbookScheduleResult{Examined: 3, Scheduled: 2}},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
@@ -1358,14 +1367,14 @@ func TestTeamAmendmentGovernanceIsInspectableRevisionSafeAndCapabilityGated(t *t
 
 func TestAgentRequestsAreAFirstClassCapabilityGatedProjection(t *testing.T) {
 	now := time.Now()
-	local := runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "operator"}
-	peer := runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "researcher"}
+	local := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "operator"}
+	peer := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "researcher"}
 	fake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(kernelapi.AgentRequestsCapability()),
-		agentRequests: []*runtime.AgentRequest{
-			{ID: "incoming", Scope: runtime.Scope{Kind: "local", ID: "default"}, Kind: runtime.AgentRequestKindRequest, Status: runtime.AgentRequestStatusPending, Requester: peer, Recipient: local, SourceRunID: "source-in", Goal: "Review the cited report", Revision: 1, CreatedAt: now, UpdatedAt: now},
-			{ID: "outgoing", Scope: runtime.Scope{Kind: "local", ID: "default"}, Kind: runtime.AgentRequestKindHandoff, Status: runtime.AgentRequestStatusClarificationRequested, Requester: local, Recipient: peer, SourceRunID: "source-out", Goal: "Publish the release brief", Clarification: "Which audience?", Revision: 2, CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute)},
-			{ID: "unrelated", Scope: runtime.Scope{Kind: "local", ID: "default"}, Kind: runtime.AgentRequestKindRequest, Status: runtime.AgentRequestStatusPending, Requester: peer, Recipient: runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "other"}, SourceRunID: "source-other", Goal: "Not visible", Revision: 1, CreatedAt: now, UpdatedAt: now},
+		agentRequests: []*models.AgentRequest{
+			{ID: "incoming", Scope: models.Scope{Kind: "local", ID: "default"}, Kind: models.AgentRequestKindRequest, Status: models.AgentRequestStatusPending, Requester: peer, Recipient: local, SourceRunID: "source-in", Goal: "Review the cited report", Revision: 1, CreatedAt: now, UpdatedAt: now},
+			{ID: "outgoing", Scope: models.Scope{Kind: "local", ID: "default"}, Kind: models.AgentRequestKindHandoff, Status: models.AgentRequestStatusClarificationRequested, Requester: local, Recipient: peer, SourceRunID: "source-out", Goal: "Publish the release brief", Clarification: "Which audience?", Revision: 2, CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute)},
+			{ID: "unrelated", Scope: models.Scope{Kind: "local", ID: "default"}, Kind: models.AgentRequestKindRequest, Status: models.AgentRequestStatusPending, Requester: peer, Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "other"}, SourceRunID: "source-other", Goal: "Not visible", Revision: 1, CreatedAt: now, UpdatedAt: now},
 		},
 	}
 	model := newTestModel(t, fake)
@@ -1384,7 +1393,7 @@ func TestAgentRequestsAreAFirstClassCapabilityGatedProjection(t *testing.T) {
 func TestPromptFirstAgentRequestCreationUsesSelectedRunAndIdempotency(t *testing.T) {
 	fake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(kernelapi.AgentRunsCapability(), kernelapi.AgentRequestsCapability()),
-		runs:     []*runtime.AgentRun{testRun("source-run", runtime.AgentRunStatusRunning, 4)},
+		runs:     []*models.AgentRun{testRun("source-run", models.AgentRunStatusRunning, 4)},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
@@ -1400,7 +1409,7 @@ func TestPromptFirstAgentRequestCreationUsesSelectedRunAndIdempotency(t *testing
 		t.Fatalf("creates=%#v keys=%#v", fake.agentRequestCreates, fake.agentRequestKeys)
 	}
 	created := fake.agentRequestCreates[0]
-	if created.Kind != runtime.AgentRequestKindHandoff || created.SourceRunID != "source-run" || created.Requester != (runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "operator"}) || created.Recipient != (runtime.CollaborationParty{Type: runtime.OwnerTypeTeam, ID: "marketing"}) || created.IdempotencyKey != fake.agentRequestKeys[0] || !strings.Contains(created.Goal, "cited release brief") {
+	if created.Kind != models.AgentRequestKindHandoff || created.SourceRunID != "source-run" || created.Requester != (models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "operator"}) || created.Recipient != (models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "marketing"}) || created.IdempotencyKey != fake.agentRequestKeys[0] || !strings.Contains(created.Goal, "cited release brief") {
 		t.Fatalf("create request=%#v", created)
 	}
 	if model.selectedAgentRequest != "created-request" || !strings.Contains(model.View(), "Publish a cited release brief") {
@@ -1413,8 +1422,8 @@ func TestAgentRequestPromptParsesEscalation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != runtime.AgentRequestKindEscalation ||
-		recipient != (runtime.CollaborationParty{Type: runtime.OwnerTypeTeam, ID: "incident-command"}) ||
+	if kind != models.AgentRequestKindEscalation ||
+		recipient != (models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "incident-command"}) ||
 		goal != "Resolve the production blocker" {
 		t.Fatalf("parsed escalation = %q / %#v / %q", kind, recipient, goal)
 	}
@@ -1423,7 +1432,7 @@ func TestAgentRequestPromptParsesEscalation(t *testing.T) {
 func TestAgentRequestComposerRejectsTerminalSourceWork(t *testing.T) {
 	fake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(kernelapi.AgentRunsCapability(), kernelapi.AgentRequestsCapability()),
-		runs:     []*runtime.AgentRun{testRun("finished-source", runtime.AgentRunStatusCompleted, 5)},
+		runs:     []*models.AgentRun{testRun("finished-source", models.AgentRunStatusCompleted, 5)},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
@@ -1453,10 +1462,10 @@ func TestAgentRequestPromptRejectsAmbiguousRecipients(t *testing.T) {
 
 func TestAgentRequestResponsesAndCompletionUseExactDurableRevisions(t *testing.T) {
 	now := time.Now()
-	local := runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "operator"}
-	peer := runtime.CollaborationParty{Type: runtime.OwnerTypeAgent, ID: "developer"}
-	request := &runtime.AgentRequest{ID: "request-1", Scope: runtime.Scope{Kind: "local", ID: "default"}, Kind: runtime.AgentRequestKindRequest, Status: runtime.AgentRequestStatusPending, Requester: peer, Recipient: local, SourceRunID: "source", Goal: "Review release evidence", Revision: 4, CreatedAt: now, UpdatedAt: now}
-	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.AgentRequestsCapability()), agentRequests: []*runtime.AgentRequest{request}, runs: []*runtime.AgentRun{testRun("child-run", runtime.AgentRunStatusRunning, 7)}}
+	local := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "operator"}
+	peer := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"}
+	request := &models.AgentRequest{ID: "request-1", Scope: models.Scope{Kind: "local", ID: "default"}, Kind: models.AgentRequestKindRequest, Status: models.AgentRequestStatusPending, Requester: peer, Recipient: local, SourceRunID: "source", Goal: "Review release evidence", Revision: 4, CreatedAt: now, UpdatedAt: now}
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.AgentRequestsCapability()), agentRequests: []*models.AgentRequest{request}, runs: []*models.AgentRun{testRun("child-run", models.AgentRunStatusRunning, 7)}}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
 	model.section, model.focus = sectionRequests, focusPanel
@@ -1467,10 +1476,10 @@ func TestAgentRequestResponsesAndCompletionUseExactDurableRevisions(t *testing.T
 	model.editor.SetValue("Ready to review")
 	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
 	applyCommand(t, model, command)
-	if len(fake.agentResponses) != 1 || fake.agentResponses[0].ExpectedRevision != 4 || fake.agentResponses[0].Principal != local || fake.agentResponses[0].Decision != runtime.AgentRequestDecisionAccept {
+	if len(fake.agentResponses) != 1 || fake.agentResponses[0].ExpectedRevision != 4 || fake.agentResponses[0].Principal != local || fake.agentResponses[0].Decision != collaboration.AgentRequestDecisionAccept {
 		t.Fatalf("response=%#v", fake.agentResponses)
 	}
-	if request.Status != runtime.AgentRequestStatusAccepted || request.ChildRunID == "" {
+	if request.Status != models.AgentRequestStatusAccepted || request.ChildRunID == "" {
 		t.Fatalf("accepted request=%#v", request)
 	}
 	model.section, model.focus = sectionRequests, focusPanel
@@ -1488,13 +1497,13 @@ func TestAgentRequestResponsesAndCompletionUseExactDurableRevisions(t *testing.T
 
 func TestActionApprovalResolutionRequiresAdvertisedOperationAndEligiblePrincipal(t *testing.T) {
 	now := time.Now()
-	approval := &runtime.ApprovalCheckpoint{
-		ID: "approval-1", Scope: runtime.Scope{Kind: "local", ID: "default"}, RunID: "run-1", ActionCallID: "call-1",
-		Status: runtime.ApprovalStatusPending, Risk: "production", Summary: "Publish the release announcement", PolicyReason: "External side effect",
+	approval := &models.ApprovalCheckpoint{
+		ID: "approval-1", Scope: models.Scope{Kind: "local", ID: "default"}, RunID: "run-1", ActionCallID: "call-1",
+		Status: models.ApprovalStatusPending, Risk: "production", Summary: "Publish the release announcement", PolicyReason: "External side effect",
 		ProposedAction: map[string]interface{}{"skillId": "publisher", "skillVersion": "1.0.0", "action": "publish"}, EvidenceRefs: []string{"artifact:brief@1"},
-		EligibleApprovers: []runtime.ApprovalPrincipal{{Type: "user", ID: "local"}}, ExpiresAt: now.Add(time.Hour), Revision: 3, CreatedAt: now, UpdatedAt: now,
+		EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "local"}}, ExpiresAt: now.Add(time.Hour), Revision: 3, CreatedAt: now, UpdatedAt: now,
 	}
-	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{Resolution: true})), actionApprovals: []*runtime.ApprovalCheckpoint{approval}}
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{Resolution: true})), actionApprovals: []*models.ApprovalCheckpoint{approval}}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
 	if model.section != sectionApprovals || len(fake.approvalFilters) != 1 || fake.approvalFilters[0].Owner == nil || *fake.approvalFilters[0].Owner != model.config.Owner {
@@ -1511,11 +1520,11 @@ func TestActionApprovalResolutionRequiresAdvertisedOperationAndEligiblePrincipal
 	model.editor.SetValue("Evidence confirms the authorized release window")
 	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
 	applyCommand(t, model, command)
-	if len(fake.actionDecisions) != 1 || fake.actionDecisions[0].Decision != runtime.ApprovalDecisionApprove || fake.actionDecisions[0].ExpectedRevision != 3 || fake.actionDecisions[0].Principal != (runtime.ApprovalPrincipal{Type: "user", ID: "local"}) || fake.actionDecisionKeys[0] == "" || fake.actionDecisions[0].DecisionID != fake.actionDecisionKeys[0] {
+	if len(fake.actionDecisions) != 1 || fake.actionDecisions[0].Decision != models.ApprovalDecisionApprove || fake.actionDecisions[0].ExpectedRevision != 3 || fake.actionDecisions[0].Principal != (models.ApprovalPrincipal{Type: "user", ID: "local"}) || fake.actionDecisionKeys[0] == "" || fake.actionDecisions[0].DecisionID != fake.actionDecisionKeys[0] {
 		t.Fatalf("decision=%#v keys=%#v", fake.actionDecisions, fake.actionDecisionKeys)
 	}
 
-	readOnly := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{})), actionApprovals: []*runtime.ApprovalCheckpoint{approval}}
+	readOnly := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{})), actionApprovals: []*models.ApprovalCheckpoint{approval}}
 	readOnlyModel := newTestModel(t, readOnly)
 	applyCommand(t, readOnlyModel, readOnlyModel.loadCapabilities())
 	if strings.Contains(readOnlyModel.View(), "y approve") || strings.Contains(readOnlyModel.View(), "x reject") {
@@ -1525,32 +1534,32 @@ func TestActionApprovalResolutionRequiresAdvertisedOperationAndEligiblePrincipal
 
 func TestActivityWorkspacePollsPaginatesAndExpandsWithoutLosingSelection(t *testing.T) {
 	now := time.Now().UTC()
-	summary := runtime.ActivityProjection{
-		ID: "event-2", EventType: "approval.resolved", Category: "approval", Severity: runtime.ActivitySeverityInfo,
-		Visibility: runtime.ActivityVisibilityScope, AgentID: "operator", RunID: "run-2",
-		Actor: runtime.ActivityActor{Type: "user", ID: "alice"}, Summary: "Production restart approved", CreatedAt: now,
+	summary := models.ActivityProjection{
+		ID: "event-2", EventType: "approval.resolved", Category: "approval", Severity: models.ActivitySeverityInfo,
+		Visibility: models.ActivityVisibilityScope, AgentID: "operator", RunID: "run-2",
+		Actor: models.ActivityActor{Type: "user", ID: "alice"}, Summary: "Production restart approved", CreatedAt: now,
 		DetailAvailable: true,
 	}
-	older := runtime.ActivityProjection{
-		ID: "event-1", EventType: "run.created", Category: "run", Severity: runtime.ActivitySeverityInfo,
-		Visibility: runtime.ActivityVisibilityScope, AgentID: "operator", RunID: "run-1",
-		Actor: runtime.ActivityActor{Type: "system", ID: "scheduler"}, Summary: "Investigation started", CreatedAt: now.Add(-time.Minute),
+	older := models.ActivityProjection{
+		ID: "event-1", EventType: "run.created", Category: "run", Severity: models.ActivitySeverityInfo,
+		Visibility: models.ActivityVisibilityScope, AgentID: "operator", RunID: "run-1",
+		Actor: models.ActivityActor{Type: "system", ID: "scheduler"}, Summary: "Investigation started", CreatedAt: now.Add(-time.Minute),
 	}
 	detail := summary
 	detail.ParentRunID = "root-run"
 	detail.CorrelationID = "incident-42"
 	detail.ConversationRefs = []string{"conversation:sre"}
-	detail.UsageDelta = &runtime.BudgetUsage{Turns: 1, InputTokens: 120, OutputTokens: 30, CostMicros: 125_000, DurationMS: 500}
+	detail.UsageDelta = &models.BudgetUsage{Turns: 1, InputTokens: 120, OutputTokens: 30, CostMicros: 125_000, DurationMS: 500}
 	if got := activityUsageLine(detail.UsageDelta); got != "Usage · 1 turn · 150 tokens (120 in, 30 out) · $0.125 · 500ms" {
 		t.Fatalf("usage line = %q", got)
 	}
 	detail.Payload = map[string]interface{}{"approvalId": "approval-7", "decisionReason": "Exact workload and namespace reviewed"}
 	fake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(kernelapi.ActivityCapability()),
-		activityPages: map[string]*runtime.ActivityFeedPage{
-			"agent:operator":                 {Items: []runtime.ActivityProjection{summary}, HasMore: true, NextCursor: "cursor-1"},
-			"agent:operator|cursor:cursor-1": {Items: []runtime.ActivityProjection{summary, older}},
-			"run:run-2|details":              {Items: []runtime.ActivityProjection{detail}},
+		activityPages: map[string]*activity.ActivityFeedPage{
+			"agent:operator":                 {Items: []models.ActivityProjection{summary}, HasMore: true, NextCursor: "cursor-1"},
+			"agent:operator|cursor:cursor-1": {Items: []models.ActivityProjection{summary, older}},
+			"run:run-2|details":              {Items: []models.ActivityProjection{detail}},
 		},
 	}
 	model := newTestModel(t, fake)
@@ -1574,12 +1583,12 @@ func TestActivityWorkspacePollsPaginatesAndExpandsWithoutLosingSelection(t *test
 	if len(model.activity) != 2 || model.selectedActivity != "event-2" || !model.activityExpanded {
 		t.Fatalf("pagination lost context: count=%d selected=%q expanded=%t", len(model.activity), model.selectedActivity, model.activityExpanded)
 	}
-	newest := runtime.ActivityProjection{
-		ID: "event-3", EventType: "action.completed", Category: "action", Severity: runtime.ActivitySeverityInfo,
-		Visibility: runtime.ActivityVisibilityScope, AgentID: "operator", RunID: "run-2",
-		Actor: runtime.ActivityActor{Type: "system", ID: "worker"}, Summary: "Restart completed", CreatedAt: now.Add(time.Second),
+	newest := models.ActivityProjection{
+		ID: "event-3", EventType: "action.completed", Category: "action", Severity: models.ActivitySeverityInfo,
+		Visibility: models.ActivityVisibilityScope, AgentID: "operator", RunID: "run-2",
+		Actor: models.ActivityActor{Type: "system", ID: "worker"}, Summary: "Restart completed", CreatedAt: now.Add(time.Second),
 	}
-	fake.activityPages["agent:operator"] = &runtime.ActivityFeedPage{Items: []runtime.ActivityProjection{newest, summary}, HasMore: true, NextCursor: "new-first-page-cursor"}
+	fake.activityPages["agent:operator"] = &activity.ActivityFeedPage{Items: []models.ActivityProjection{newest, summary}, HasMore: true, NextCursor: "new-first-page-cursor"}
 	applyCommand(t, model, model.loadActivity(false))
 	if len(model.activity) != 3 || model.selectedActivity != "event-2" || !model.activityExpanded || model.activityNextCursor != "" {
 		t.Fatalf("poll reconciliation count=%d selected=%q expanded=%t cursor=%q", len(model.activity), model.selectedActivity, model.activityExpanded, model.activityNextCursor)
@@ -1596,12 +1605,12 @@ func TestActivityWorkspacePollsPaginatesAndExpandsWithoutLosingSelection(t *test
 func TestActivityWorkspaceUsesExactTeamSelectorAndFailsClosedOnVersionMismatch(t *testing.T) {
 	teamFake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(kernelapi.ActivityCapability()),
-		activityPages: map[string]*runtime.ActivityFeedPage{"team:marketing": {Items: []runtime.ActivityProjection{{
+		activityPages: map[string]*activity.ActivityFeedPage{"team:marketing": {Items: []models.ActivityProjection{{
 			ID: "team-event", EventType: "handoff.completed", TeamID: "marketing", Summary: "Launch brief returned", CreatedAt: time.Now().UTC(),
 		}}}},
 	}
 	config := DefaultConfig()
-	config.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "marketing"}
+	config.Owner = models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "marketing"}
 	config.PollInterval = -1
 	model, err := NewModel(t.Context(), teamFake, config)
 	if err != nil {
@@ -1624,7 +1633,7 @@ func TestActivityWorkspaceUsesExactTeamSelectorAndFailsClosedOnVersionMismatch(t
 	missingDeployment := &fakeKernelClient{
 		document:       kernelapi.NewCapabilityDocument(kernelapi.ActivityCapability(), kernelapi.AgentDefinitionsCapability()),
 		compilationErr: &client.APIError{StatusCode: 404, Message: "Agent deployment was not found in this scope"},
-		activityPages: map[string]*runtime.ActivityFeedPage{"agent:operator": {Items: []runtime.ActivityProjection{{
+		activityPages: map[string]*activity.ActivityFeedPage{"agent:operator": {Items: []models.ActivityProjection{{
 			ID: "available-activity", EventType: "run.created", AgentID: "operator", Summary: "Standalone work remains observable", CreatedAt: time.Now().UTC(),
 		}}}},
 	}
@@ -1668,7 +1677,7 @@ func TestCreateRetryPreservesIdempotencyAndPrompt(t *testing.T) {
 	if model.editor.Value() != "" || model.pendingKey != "" {
 		t.Fatal("successful creation did not clear composer state")
 	}
-	if fake.createRequests[0].AssignedAgentID != "operator" || fake.createRequests[0].Source != runtime.RunSourceManual {
+	if fake.createRequests[0].AssignedAgentID != "operator" || fake.createRequests[0].Source != models.RunSourceManual {
 		t.Fatalf("create request = %#v", fake.createRequests[0])
 	}
 }
@@ -1696,12 +1705,12 @@ func assertSemanticTextContains(t *testing.T, rendered string, expected ...strin
 func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {
 	fake := &fakeKernelClient{
 		document: kernelapi.Capabilities(),
-		runbooks: []*runtime.RunbookActivation{{
-			ID: "daily-scan", Scope: runtime.Scope{Kind: "local", ID: "default"},
-			Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}, ObjectiveID: "objective-created",
+		runbooks: []*models.RunbookActivation{{
+			ID: "daily-scan", Scope: models.Scope{Kind: "local", ID: "default"},
+			Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}, ObjectiveID: "objective-created",
 			DefinitionID: "community-scan", DefinitionVersion: "1.0.0", AssignedAgentID: "researcher",
 			TriggerID: "daily", Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "scan", Schedule: &runbook.Schedule{Cron: "0 0 9 * * *", Timezone: "UTC"}},
-			Status: runtime.RunbookActivationActive, Revision: 1,
+			Status: models.RunbookActivationActive, Revision: 1,
 		}},
 	}
 	model := newTestModel(t, fake)
@@ -1719,7 +1728,7 @@ func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {
 	model.editor.SetValue("Monitor competitor pain points\nContinuously synthesize cited findings.")
 	applyCommand(t, model, model.submitObjective())
 	if len(fake.objectiveCreates) != 1 || fake.objectiveKeys[0] == "" || fake.objectiveCreates[0].Title != "Monitor competitor pain points" ||
-		fake.objectiveCreates[0].Status != runtime.ObjectiveStatusActive {
+		fake.objectiveCreates[0].Status != models.ObjectiveStatusActive {
 		t.Fatalf("objective create = %#v keys=%#v", fake.objectiveCreates, fake.objectiveKeys)
 	}
 	if model.selectedObjectiveRecord() == nil || model.selectedObjectiveRecord().ID != "objective-created" {
@@ -1741,18 +1750,18 @@ func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {
 }
 
 func TestObjectiveRunbookInspectionAndLifecycleUseExactPublicCapability(t *testing.T) {
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	scope := models.Scope{Kind: "local", ID: "default"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}
 	now := time.Now().UTC()
-	objective := &runtime.Objective{
+	objective := &models.Objective{
 		ID: "objective:research", Scope: scope, Owner: owner, Title: "Research communities", Goal: "Find cited pain points",
-		Status: runtime.ObjectiveStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Status: models.ObjectiveStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	activation := &runtime.RunbookActivation{
+	activation := &models.RunbookActivation{
 		ID: "runbook:daily-scan", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "researcher",
 		DefinitionID: "community-scan", DefinitionVersion: "1.0.0", TriggerID: "daily",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "scan", Schedule: &runbook.Schedule{Cron: "0 0 9 * * *", Timezone: "UTC"}},
-		Status:  runtime.RunbookActivationActive, Revision: 3, CreatedAt: now, UpdatedAt: now,
+		Status:  models.RunbookActivationActive, Revision: 3, CreatedAt: now, UpdatedAt: now,
 	}
 	definition := &runbook.Definition{
 		APIVersion: runbook.APIVersion, ID: activation.DefinitionID, Version: activation.DefinitionVersion,
@@ -1765,10 +1774,10 @@ func TestObjectiveRunbookInspectionAndLifecycleUseExactPublicCapability(t *testi
 	}
 	fake := &fakeKernelClient{
 		document:   kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability()),
-		objectives: []*runtime.Objective{objective}, runbooks: []*runtime.RunbookActivation{activation},
+		objectives: []*models.Objective{objective}, runbooks: []*models.RunbookActivation{activation},
 		runbookDefinitions:   map[string]*runbook.Definition{activation.ID: definition},
 		runbookVerifications: map[string]*runbook.VerificationReport{activation.ID: {Valid: true}},
-		runbookStartResult:   &runtime.AgentRunCommandResult{Run: &runtime.AgentRun{ID: "run:manual"}},
+		runbookStartResult:   &agentrun.AgentRunCommandResult{Run: &models.AgentRun{ID: "run:manual"}},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
@@ -1791,21 +1800,21 @@ func TestObjectiveRunbookInspectionAndLifecycleUseExactPublicCapability(t *testi
 
 	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
 	applyCommand(t, model, command)
-	if len(fake.runbookUpdates) != 1 || fake.runbookUpdates[0].ExpectedRevision != 3 || fake.runbookUpdates[0].Status != runtime.RunbookActivationPaused {
+	if len(fake.runbookUpdates) != 1 || fake.runbookUpdates[0].ExpectedRevision != 3 || fake.runbookUpdates[0].Status != models.RunbookActivationPaused {
 		t.Fatalf("Runbook lifecycle update = %#v", fake.runbookUpdates)
 	}
 }
 
 func TestObjectiveAndRunViewsProjectAttemptAndDurationBudgets(t *testing.T) {
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
-	policy := &runtime.BudgetPolicy{MaxAttempts: 3, MaxTurns: 8, MaxDurationMS: 60000}
-	fake := &fakeKernelClient{document: kernelapi.Capabilities(), objectives: []*runtime.Objective{{
+	scope := models.Scope{Kind: "local", ID: "default"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}
+	policy := &models.BudgetPolicy{MaxAttempts: 3, MaxTurns: 8, MaxDurationMS: 60000}
+	fake := &fakeKernelClient{document: kernelapi.Capabilities(), objectives: []*models.Objective{{
 		ID: "objective-budget", Scope: scope, Owner: owner, Title: "Bounded research", Goal: "Finish safely",
-		Status: runtime.ObjectiveStatusActive, Budget: policy, Revision: 1,
-	}}, runs: []*runtime.AgentRun{{
-		ID: "run-budget", Scope: scope, Owner: owner, Goal: "Research within policy", Status: runtime.AgentRunStatusPaused,
-		Budget: policy, BudgetUsage: runtime.BudgetUsage{Attempts: 2, Turns: 4, DurationMS: 30000}, BudgetState: runtime.BudgetStateWarning, Revision: 2,
+		Status: models.ObjectiveStatusActive, Budget: policy, Revision: 1,
+	}}, runs: []*models.AgentRun{{
+		ID: "run-budget", Scope: scope, Owner: owner, Goal: "Research within policy", Status: models.AgentRunStatusPaused,
+		Budget: policy, BudgetUsage: models.BudgetUsage{Attempts: 2, Turns: 4, DurationMS: 30000}, BudgetState: models.BudgetStateWarning, Revision: 2,
 	}}}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
@@ -1856,7 +1865,7 @@ func TestLifecycleCommandUsesSelectedRevisionAndAdvertisedOperation(t *testing.T
 	model := newTestModel(t, fake)
 	model.ready = true
 	model.runCapability = kernelapi.AgentRunsCapability()
-	model.runs = []*runtime.AgentRun{testRun("run-7", runtime.AgentRunStatusRunning, 7)}
+	model.runs = []*models.AgentRun{testRun("run-7", models.AgentRunStatusRunning, 7)}
 	model.selectedID = "run-7"
 
 	applyCommand(t, model, model.pauseOrResume())
@@ -1864,12 +1873,12 @@ func TestLifecycleCommandUsesSelectedRevisionAndAdvertisedOperation(t *testing.T
 		t.Fatalf("commands = %#v", fake.commands)
 	}
 	command := fake.commands[0]
-	if command.Kind != runtime.AgentRunCommandPause || command.ExpectedRevision != 7 {
+	if command.Kind != agentrun.AgentRunCommandPause || command.ExpectedRevision != 7 {
 		t.Fatalf("command = %#v", command)
 	}
 
 	model.runCapability.Operations = []string{kernelapi.OperationList}
-	if command := model.commandSelected(runtime.AgentRunCommandCancel, ""); command != nil {
+	if command := model.commandSelected(agentrun.AgentRunCommandCancel, ""); command != nil {
 		t.Fatal("TUI dispatched an unadvertised cancel operation")
 	}
 }
@@ -1878,14 +1887,14 @@ func TestRunViewProjectsCanonicalDeliveryReceipt(t *testing.T) {
 	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
 	model.ready = true
 	model.runCapability = kernelapi.AgentRunsCapability()
-	run := testRun("delivery-run", runtime.AgentRunStatusCompleted, 4)
+	run := testRun("delivery-run", models.AgentRunStatusCompleted, 4)
 	run.Output = map[string]interface{}{
 		"receiptId": "smtp:action-1", "status": "accepted", "recipientCount": float64(1),
 		"deliveredAt":  "2026-07-13T00:19:22Z",
 		"artifactRefs": []interface{}{map[string]interface{}{"id": "pdf-report", "version": float64(3)}},
 	}
 	run.Context = map[string]interface{}{"capabilityInvocation": map[string]interface{}{"inputs": map[string]interface{}{"to": []interface{}{"reviewer@example.com", "operator@example.com"}}}}
-	model.runs = []*runtime.AgentRun{run}
+	model.runs = []*models.AgentRun{run}
 	model.section = sectionRuns
 
 	view := model.renderRunsContent(100)
@@ -1897,13 +1906,13 @@ func TestRunViewProjectsCanonicalDeliveryReceipt(t *testing.T) {
 }
 
 func TestRunViewLoadsAndProjectsCanonicalActionCalls(t *testing.T) {
-	run := testRun("run-actions", runtime.AgentRunStatusCompleted, 4)
+	run := testRun("run-actions", models.AgentRunStatusCompleted, 4)
 	fake := &fakeKernelClient{
 		document: kernelapi.Capabilities(),
-		runs:     []*runtime.AgentRun{run},
-		actionCalls: []*runtime.ActionCall{{
+		runs:     []*models.AgentRun{run},
+		actionCalls: []*models.ActionCall{{
 			ID: "call-1", RunID: run.ID, SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed",
-			BindingID: "source-prod", BindingRevision: 9, Status: runtime.ActionCallStatusSucceeded,
+			BindingID: "source-prod", BindingRevision: 9, Status: models.ActionCallStatusSucceeded,
 			Attempt: 1, MaxAttempts: 3, Risk: "read", SideEffect: "none",
 			Arguments:      map[string]interface{}{"token": "must-not-render"},
 			CredentialRefs: map[string]skill.CredentialReference{"token": {Kind: "opaque", ID: "must-not-render"}},
@@ -1934,27 +1943,27 @@ func TestRunViewLoadsAndProjectsCanonicalActionCalls(t *testing.T) {
 }
 
 func TestRunViewLoadsAndProjectsAgentSteps(t *testing.T) {
-	run := testRun("run-steps", runtime.AgentRunStatusCompleted, 4)
+	run := testRun("run-steps", models.AgentRunStatusCompleted, 4)
 	fake := &fakeKernelClient{
 		document: kernelapi.Capabilities(),
-		runs:     []*runtime.AgentRun{run},
+		runs:     []*models.AgentRun{run},
 		agentTurns: []*kernelapi.AgentTurnRecord{
 			{
-				ID: "step-1", RunID: run.ID, Sequence: 1, Status: runtime.AgentTurnStatusCompleted,
+				ID: "step-1", RunID: run.ID, Sequence: 1, Status: models.AgentTurnStatusCompleted,
 				ModelProvider: "openai-compatible", Model: "deepseek-v4-flash",
 				OutputSummary: "Asking the reviewer to check the evidence.",
 				ToolCallCount: 1, StopReason: "tool_calls",
-				Usage: runtime.TurnUsage{InputTokens: 1840, OutputTokens: 64, DurationMS: 910},
+				Usage: models.TurnUsage{InputTokens: 1840, OutputTokens: 64, DurationMS: 910},
 			},
 			{
-				ID: "step-2", RunID: run.ID, Sequence: 2, Status: runtime.AgentTurnStatusFailed,
+				ID: "step-2", RunID: run.ID, Sequence: 2, Status: models.AgentTurnStatusFailed,
 				ModelProvider: "openai-compatible", Model: "deepseek-v4-flash",
 				FailureCode: "model_context_exceeded", Error: "the conversation no longer fits the model",
 			},
 		},
-		actionCalls: []*runtime.ActionCall{
-			{ID: "call-1", RunID: run.ID, TurnID: "step-1", SkillID: "openseal.source", SkillVersion: "3", Action: "observe_feed", Status: runtime.ActionCallStatusSucceeded},
-			{ID: "call-other", RunID: run.ID, TurnID: "step-other", SkillID: "openseal.source", SkillVersion: "3", Action: "must_not_join", Status: runtime.ActionCallStatusSucceeded},
+		actionCalls: []*models.ActionCall{
+			{ID: "call-1", RunID: run.ID, TurnID: "step-1", SkillID: "openseal.source", SkillVersion: "3", Action: "observe_feed", Status: models.ActionCallStatusSucceeded},
+			{ID: "call-other", RunID: run.ID, TurnID: "step-other", SkillID: "openseal.source", SkillVersion: "3", Action: "must_not_join", Status: models.ActionCallStatusSucceeded},
 		},
 	}
 	model := newTestModel(t, fake)
@@ -2005,8 +2014,8 @@ func TestRunViewLoadsAndProjectsAgentSteps(t *testing.T) {
 }
 
 func TestBudgetLinesLabelModelSteps(t *testing.T) {
-	policy := &runtime.BudgetPolicy{MaxTurns: 64, MaxActions: 10}
-	lines := strings.Join(renderBudgetLines(policy, &runtime.BudgetUsage{Turns: 3, Actions: 1}, 120), "\n")
+	policy := &models.BudgetPolicy{MaxTurns: 64, MaxActions: 10}
+	lines := strings.Join(renderBudgetLines(policy, &models.BudgetUsage{Turns: 3, Actions: 1}, 120), "\n")
 	if !strings.Contains(lines, "steps 3/64") || strings.Contains(lines, "turns") {
 		t.Fatalf("budget lines do not label model steps: %s", lines)
 	}
@@ -2016,7 +2025,7 @@ func TestBudgetLinesLabelModelSteps(t *testing.T) {
 }
 
 func TestRunViewDoesNotLoadAgentTurnsWithoutCapability(t *testing.T) {
-	fake := &fakeKernelClient{runs: []*runtime.AgentRun{testRun("run-no-turns", runtime.AgentRunStatusRunning, 1)}}
+	fake := &fakeKernelClient{runs: []*models.AgentRun{testRun("run-no-turns", models.AgentRunStatusRunning, 1)}}
 	model := newTestModel(t, fake)
 	model.ready = true
 	model.runCapability = kernelapi.AgentRunsCapability()
@@ -2031,7 +2040,7 @@ func TestRunViewDoesNotLoadAgentTurnsWithoutCapability(t *testing.T) {
 }
 
 func TestRunViewDoesNotLoadActionCallsWithoutCapability(t *testing.T) {
-	fake := &fakeKernelClient{runs: []*runtime.AgentRun{testRun("run-no-actions", runtime.AgentRunStatusRunning, 1)}}
+	fake := &fakeKernelClient{runs: []*models.AgentRun{testRun("run-no-actions", models.AgentRunStatusRunning, 1)}}
 	model := newTestModel(t, fake)
 	model.ready = true
 	model.runCapability = kernelapi.AgentRunsCapability()
@@ -2049,9 +2058,9 @@ func TestRunViewProjectsCanonicalParentLineage(t *testing.T) {
 	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
 	model.ready = true
 	model.runCapability = kernelapi.AgentRunsCapability()
-	child := testRun("child-run", runtime.AgentRunStatusCompleted, 4)
+	child := testRun("child-run", models.AgentRunStatusCompleted, 4)
 	child.ParentRunID = "parent-run"
-	model.runs = []*runtime.AgentRun{child}
+	model.runs = []*models.AgentRun{child}
 	model.section = sectionRuns
 
 	view := model.renderRunsContent(100)
@@ -2086,15 +2095,15 @@ func TestContractMismatchFailsClosed(t *testing.T) {
 func TestArtifactEvidenceAndVerifiedDownloadAreCapabilityGated(t *testing.T) {
 	body := "cited market research"
 	confidence := 0.91
-	artifact := &runtime.Artifact{
+	artifact := &models.Artifact{
 		ID: "research-report", Version: 2, Name: "OpenClaw research.pdf", Type: "report",
 		MediaType: "application/pdf", Digest: testDigest(body), SizeBytes: int64(len(body)),
-		Classification: runtime.ArtifactClassificationInternal, ContentAvailability: runtime.ArtifactContentAvailable, CreatedAt: time.Now(),
-		Provenance: runtime.ArtifactProvenance{
-			Producer: runtime.ActivityActor{Type: "agent", ID: "researcher"}, RunID: "run-research",
+		Classification: models.ArtifactClassificationInternal, ContentAvailability: models.ArtifactContentAvailable, CreatedAt: time.Now(),
+		Provenance: models.ArtifactProvenance{
+			Producer: models.ActivityActor{Type: "agent", ID: "researcher"}, RunID: "run-research",
 		},
-		Evidence: []runtime.EvidenceLink{{
-			Relation: runtime.EvidenceRelationCites, TargetKind: runtime.EvidenceTargetExternalSource,
+		Evidence: []models.EvidenceLink{{
+			Relation: models.EvidenceRelationCites, TargetKind: models.EvidenceTargetExternalSource,
 			TargetRef: "https://example.com/source", Summary: "Primary source", Confidence: &confidence,
 		}},
 	}
@@ -2102,7 +2111,7 @@ func TestArtifactEvidenceAndVerifiedDownloadAreCapabilityGated(t *testing.T) {
 		document: kernelapi.NewCapabilityDocument(
 			kernelapi.AgentRunsCapability(), kernelapi.ArtifactCapability(kernelapi.OperationDownload),
 		),
-		artifacts: []*runtime.Artifact{artifact}, downloadBody: body,
+		artifacts: []*models.Artifact{artifact}, downloadBody: body,
 	}
 	model := newTestModel(t, fake)
 	model.config.DownloadDir = t.TempDir()
@@ -2141,13 +2150,13 @@ func TestArtifactEvidenceAndVerifiedDownloadAreCapabilityGated(t *testing.T) {
 }
 
 func TestUnavailableArtifactContentCannotRenderOrDispatchDownload(t *testing.T) {
-	artifact := &runtime.Artifact{
+	artifact := &models.Artifact{
 		ID: "pending-report", Version: 1, Name: "pending-report.pdf", Type: "report",
-		ContentAvailability: runtime.ArtifactContentUnavailable,
+		ContentAvailability: models.ArtifactContentUnavailable,
 	}
 	fake := &fakeKernelClient{
 		document:  kernelapi.NewCapabilityDocument(kernelapi.AgentRunsCapability(), kernelapi.ArtifactCapability(kernelapi.OperationDownload)),
-		artifacts: []*runtime.Artifact{artifact},
+		artifacts: []*models.Artifact{artifact},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
@@ -2173,31 +2182,31 @@ func TestTeamChannelsRequireAdvertisedCapabilityAndConcreteClient(t *testing.T) 
 
 func TestTeamChannelProjectionShowsMessagesPresenceAndRoutingAudit(t *testing.T) {
 	conversation := testConversation("release", "release-coordination", 2, 3)
-	question := &runtime.ChannelMessage{
+	question := &models.ChannelMessage{
 		ID: "question", Scope: conversation.Scope, ConversationID: conversation.ID, Sequence: 1,
-		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "local"},
-		Intent: runtime.MessageIntentQuestion, Content: "Is the release ready?",
-		Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, CreatedAt: time.Now().Add(-time.Minute),
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "local"},
+		Intent: models.MessageIntentQuestion, Content: "Is the release ready?",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, CreatedAt: time.Now().Add(-time.Minute),
 	}
-	answer := &runtime.ChannelMessage{
+	answer := &models.ChannelMessage{
 		ID: "answer", Scope: conversation.Scope, ConversationID: conversation.ID, Sequence: 2,
-		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "developer"},
-		Intent: runtime.MessageIntentAnswer, Content: "The canary is healthy.",
-		Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, CreatedAt: time.Now(),
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "developer"},
+		Intent: models.MessageIntentAnswer, Content: "The canary is healthy.",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, CreatedAt: time.Now(),
 	}
-	round := &runtime.ParticipationRoundResult{Round: &runtime.ParticipationRound{
-		ID: "round-1", CommittedAt: time.Now(), Responders: []runtime.ConversationResponder{{
-			Participant: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "developer"},
-			Addressed:   runtime.ConversationAddressedRouted, Reason: "owns the canary",
+	round := &models.ParticipationRoundResult{Round: &models.ParticipationRound{
+		ID: "round-1", CommittedAt: time.Now(), Responders: []models.ConversationResponder{{
+			Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "developer"},
+			Addressed:   models.ConversationAddressedRouted, Reason: "owns the canary",
 		}},
 	}}
 	fake := &fakeChannelKernelClient{
 		fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}))},
-		conversations:    []*runtime.Conversation{conversation}, messages: []*runtime.ChannelMessage{answer, question},
-		rounds: []*runtime.ParticipationRoundResult{round},
-		presence: []*runtime.ConversationPresence{{
-			Participant: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "sre"},
-			State:       runtime.ConversationPresenceWorking, Summary: "checking rollout", ExpiresAt: time.Now().Add(time.Minute),
+		conversations:    []*models.Conversation{conversation}, messages: []*models.ChannelMessage{answer, question},
+		rounds: []*models.ParticipationRoundResult{round},
+		presence: []*models.ConversationPresence{{
+			Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "sre"},
+			State:       models.ConversationPresenceWorking, Summary: "checking rollout", ExpiresAt: time.Now().Add(time.Minute),
 		}},
 	}
 	model := newModelWithClient(t, fake)
@@ -2226,12 +2235,12 @@ func TestBackgroundChannelRefreshDoesNotInventReadReceipt(t *testing.T) {
 		fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(
 			kernelapi.AgentRunsCapability(), kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}),
 		)},
-		conversations: []*runtime.Conversation{conversation},
-		messages: []*runtime.ChannelMessage{{
+		conversations: []*models.Conversation{conversation},
+		messages: []*models.ChannelMessage{{
 			ID: "unread", Scope: conversation.Scope, ConversationID: conversation.ID, Sequence: 1,
-			Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "developer"},
-			Intent: runtime.MessageIntentUpdate, Content: "Canary is ready.",
-			Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, CreatedAt: time.Now(),
+			Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "developer"},
+			Intent: models.MessageIntentUpdate, Content: "Canary is ready.",
+			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, CreatedAt: time.Now(),
 		}},
 	}
 	model := newModelWithClient(t, fake)
@@ -2250,7 +2259,7 @@ func TestTeamChannelCreateAndQuestionPostPreserveIdempotency(t *testing.T) {
 	conversation := testConversation("research", "market-research", 0, 4)
 	fake := &fakeChannelKernelClient{
 		fakeKernelClient:         &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}))},
-		conversations:            []*runtime.Conversation{conversation},
+		conversations:            []*models.Conversation{conversation},
 		createConversationErrors: []error{errors.New("temporary disconnect"), nil},
 		postErrors:               []error{errors.New("revision conflict"), nil},
 	}
@@ -2280,7 +2289,7 @@ func TestTeamChannelCreateAndQuestionPostPreserveIdempotency(t *testing.T) {
 		t.Fatalf("message keys = %#v", fake.postKeys)
 	}
 	request := fake.postRequests[0]
-	if request.ExpectedRevision != 4 || request.Intent != runtime.MessageIntentQuestion || !request.RequiresResponse || request.Sender.Type != runtime.ConversationParticipantUser {
+	if request.ExpectedRevision != 4 || request.Intent != models.MessageIntentQuestion || !request.RequiresResponse || request.Sender.Type != models.ConversationParticipantUser {
 		t.Fatalf("post request = %#v", request)
 	}
 }
@@ -2289,8 +2298,8 @@ func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
 	// The daemon creates the local operator's space at start; the server
 	// puts a channel made with no space there.
-	if _, err := runtime.NewSpaceService(store).CreateSpace(t.Context(), runtime.CreateSpaceRequest{
-		Scope: runtime.Scope{Kind: "tenant", ID: "one"}, Name: "Home", Look: runtime.DefaultSpaceLook, OwnerID: "local-operator",
+	if _, err := portfolio.NewSpaceService(store).CreateSpace(t.Context(), portfolio.CreateSpaceRequest{
+		Scope: models.Scope{Kind: "tenant", ID: "one"}, Name: "Home", Look: models.DefaultSpaceLook, OwnerID: "local-operator",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2300,8 +2309,8 @@ func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
 
 	config := DefaultConfig()
 	config.Endpoint = httpServer.URL
-	config.Scope = runtime.Scope{Kind: "tenant", ID: "one"}
-	config.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "engineering"}
+	config.Scope = models.Scope{Kind: "tenant", ID: "one"}
+	config.Owner = models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "engineering"}
 	config.PollInterval = -1
 	httpClient := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
 	model, err := NewModel(context.Background(), httpClient, config)
@@ -2328,20 +2337,20 @@ func TestTeamChannelTUIUsesPublicHTTPKernelBoundary(t *testing.T) {
 		t.Fatalf("HTTP-backed channel not rendered:\n%s", view)
 	}
 	conversation := model.selectedConversationRecord()
-	messages, err := httpClient.ListChannelMessages(context.Background(), runtime.ChannelMessageFilter{
+	messages, err := httpClient.ListChannelMessages(context.Background(), models.ChannelMessageFilter{
 		Scope: config.Scope, ConversationID: conversation.ID,
 	})
-	if err != nil || len(messages) != 1 || messages[0].Intent != runtime.MessageIntentQuestion || !messages[0].RequiresResponse {
+	if err != nil || len(messages) != 1 || messages[0].Intent != models.MessageIntentQuestion || !messages[0].RequiresResponse {
 		t.Fatalf("durable HTTP messages = %#v, err = %v", messages, err)
 	}
 }
 
 func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	scope := runtime.Scope{Kind: "tenant", ID: "one"}
-	source, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
-		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
-		Goal: "Ship the release", Source: runtime.RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "one"}
+	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "Ship the release", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2353,7 +2362,7 @@ func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *tes
 
 	developerConfig := DefaultConfig()
 	developerConfig.Endpoint, developerConfig.Scope = httpServer.URL, scope
-	developerConfig.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "developer"}
+	developerConfig.Owner = models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}
 	developerConfig.PollInterval = -1
 	developer, err := NewModel(t.Context(), httpClient, developerConfig)
 	if err != nil {
@@ -2368,13 +2377,13 @@ func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *tes
 	developer.focusComposerEditor()
 	developer.editor.SetValue("agent:marketing\nTurn the release into a reviewed launch brief")
 	applyCommand(t, developer, developer.submitAgentRequestCreation())
-	if developer.selectedAgentRequestRecord() == nil || developer.selectedAgentRequestRecord().Status != runtime.AgentRequestStatusPending {
+	if developer.selectedAgentRequestRecord() == nil || developer.selectedAgentRequestRecord().Status != models.AgentRequestStatusPending {
 		t.Fatalf("HTTP request was not created: %#v", developer.agentRequests)
 	}
 	requestID := developer.selectedAgentRequestRecord().ID
 
 	marketingConfig := developerConfig
-	marketingConfig.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "marketing"}
+	marketingConfig.Owner = models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "marketing"}
 	marketing, err := NewModel(t.Context(), httpClient, marketingConfig)
 	if err != nil {
 		t.Fatal(err)
@@ -2388,9 +2397,9 @@ func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *tes
 	marketing.mode = modeRequestAccept
 	marketing.focusComposerEditor()
 	marketing.editor.SetValue("I will produce the brief")
-	applyCommand(t, marketing, marketing.submitAgentRequestResponse(runtime.AgentRequestDecisionAccept))
+	applyCommand(t, marketing, marketing.submitAgentRequestResponse(collaboration.AgentRequestDecisionAccept))
 	accepted := marketing.selectedAgentRequestRecord()
-	if accepted == nil || accepted.Status != runtime.AgentRequestStatusAccepted || accepted.ChildRunID == "" || marketing.selectedRun() == nil || marketing.selectedRun().ID != accepted.ChildRunID {
+	if accepted == nil || accepted.Status != models.AgentRequestStatusAccepted || accepted.ChildRunID == "" || marketing.selectedRun() == nil || marketing.selectedRun().ID != accepted.ChildRunID {
 		t.Fatalf("HTTP request was not accepted with child work: request=%#v runs=%#v", accepted, marketing.runs)
 	}
 	marketing.mode = modeRequestComplete
@@ -2398,22 +2407,22 @@ func TestAgentRequestTUICompletesLifecycleThroughPublicHTTPKernelBoundary(t *tes
 	marketing.editor.SetValue("Reviewed launch brief delivered")
 	applyCommand(t, marketing, marketing.submitAgentRequestCompletion())
 	completed := marketing.selectedAgentRequestRecord()
-	if completed == nil || completed.Status != runtime.AgentRequestStatusCompleted || completed.CompletionSummary != "Reviewed launch brief delivered" {
+	if completed == nil || completed.Status != models.AgentRequestStatusCompleted || completed.CompletionSummary != "Reviewed launch brief delivered" {
 		t.Fatalf("HTTP request was not completed: %#v", completed)
 	}
 	restoredSource, err := httpClient.GetAgentRun(t.Context(), scope, source.ID)
-	if err != nil || restoredSource.Status != runtime.AgentRunStatusQueued || restoredSource.WakeCondition != nil {
+	if err != nil || restoredSource.Status != models.AgentRunStatusQueued || restoredSource.WakeCondition != nil {
 		t.Fatalf("source Run did not wake: %#v, %v", restoredSource, err)
 	}
 }
 
 func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	scope := runtime.Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
-	run, err := runtime.NewPortfolioService(store).CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
-		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator",
-		Goal: "Publish the release", Source: runtime.RunSourceManual,
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator",
+		Goal: "Publish the release", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2421,50 +2430,50 @@ func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T
 	// The run loop proposes the governed call from a leased, running step and
 	// parks the Run on its approval at step end.
 	const worker = "loop-worker"
-	runEvent := func(id string) *runtime.ActivityEvent {
-		return &runtime.ActivityEvent{
-			ID: id, Scope: scope, RunID: run.ID, EventType: "run.updated", Severity: runtime.ActivitySeverityInfo,
-			Actor: runtime.ActivityActor{Type: "worker", ID: worker}, Summary: "Run loop step", Visibility: runtime.ActivityVisibilityScope, CreatedAt: now,
+	runEvent := func(id string) *models.ActivityEvent {
+		return &models.ActivityEvent{
+			ID: id, Scope: scope, RunID: run.ID, EventType: "run.updated", Severity: models.ActivitySeverityInfo,
+			Actor: models.ActivityActor{Type: "worker", ID: worker}, Summary: "Run loop step", Visibility: models.ActivityVisibilityScope, CreatedAt: now,
 		}
 	}
 	leased := *run
 	expires := now.Add(time.Hour)
-	leased.Status, leased.LeaseOwner, leased.LeaseExpiresAt = runtime.AgentRunStatusRunning, worker, &expires
+	leased.Status, leased.LeaseOwner, leased.LeaseExpiresAt = models.AgentRunStatusRunning, worker, &expires
 	leased.Revision++
 	leased.UpdatedAt = now
 	if _, err := store.UpdateAgentRunWithEvent(t.Context(), &leased, run.Revision, runEvent("event-lease"), nil); err != nil {
 		t.Fatal(err)
 	}
-	approval := &runtime.ApprovalCheckpoint{
-		ID: "approval-publish", Scope: scope, RunID: run.ID, ActionCallID: "call-publish", Status: runtime.ApprovalStatusPending,
+	approval := &models.ApprovalCheckpoint{
+		ID: "approval-publish", Scope: scope, RunID: run.ID, ActionCallID: "call-publish", Status: models.ApprovalStatusPending,
 		Risk: "production", Summary: "Publish release announcement", PolicyReason: "External publication requires review",
 		ProposedAction:    map[string]interface{}{"skillId": "publisher", "skillVersion": "1", "action": "publish"},
-		EligibleApprovers: []runtime.ApprovalPrincipal{{Type: "user", ID: "local"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "local"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	call := &runtime.ActionCall{
+	call := &models.ActionCall{
 		ID: "call-publish", Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: "operator", SkillID: "publisher", SkillVersion: "1", Action: "publish",
-		Origin: runtime.ActionOriginLoop, Execution: runtime.ActionExecutionLoop,
-		Status: runtime.ActionCallStatusWaitingApproval, Risk: "production", SideEffect: "external", IdempotencyKey: "publish-release",
+		Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
+		Status: models.ActionCallStatusWaitingApproval, Risk: "production", SideEffect: "external", IdempotencyKey: "publish-release",
 		ApprovalID: approval.ID, MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	call.InvocationDigest = runtime.ComputeActionInvocationDigest(call)
-	if _, err := store.CreateActionProposal(t.Context(), runtime.ActionProposalRecord{
-		Call: call, Approval: approval, ExpectedRunRevision: leased.Revision, Lease: &runtime.AgentRunLeaseGuard{WorkerID: worker, Now: now},
-		Event: &runtime.ActivityEvent{ID: "event-approval", Scope: scope, RunID: run.ID, EventType: "action.approval_requested", Summary: "Approval requested", CreatedAt: now},
+	call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+	if _, err := store.CreateActionProposal(t.Context(), models.ActionProposalRecord{
+		Call: call, Approval: approval, ExpectedRunRevision: leased.Revision, Lease: &models.AgentRunLeaseGuard{WorkerID: worker, Now: now},
+		Event: &models.ActivityEvent{ID: "event-approval", Scope: scope, RunID: run.ID, EventType: "action.approval_requested", Summary: "Approval requested", CreatedAt: now},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	parked := leased
-	parked.Status = runtime.AgentRunStatusWaitingForApproval
-	parked.WakeCondition = &runtime.WakeCondition{Type: "approval", Reference: approval.ID}
+	parked.Status = models.AgentRunStatusWaitingForApproval
+	parked.WakeCondition = &models.WakeCondition{Type: "approval", Reference: approval.ID}
 	parked.LeaseOwner, parked.LeaseExpiresAt = "", nil
 	parked.Revision++
 	if _, err := store.UpdateAgentRunWithEvent(t.Context(), &parked, leased.Revision, runEvent("event-park"), nil); err != nil {
 		t.Fatal(err)
 	}
 	api := server.NewServer(store, zap.NewNop().Sugar())
-	api.SetActionApprovalAuthorizer(runtime.ApprovalAuthorizerFunc(func(_ context.Context, principal runtime.ApprovalPrincipal, checkpoint *runtime.ApprovalCheckpoint) error {
-		if principal != (runtime.ApprovalPrincipal{Type: "user", ID: "local"}) || checkpoint.ID != approval.ID {
+	api.SetActionApprovalAuthorizer(action.ApprovalAuthorizerFunc(func(_ context.Context, principal models.ApprovalPrincipal, checkpoint *models.ApprovalCheckpoint) error {
+		if principal != (models.ApprovalPrincipal{Type: "user", ID: "local"}) || checkpoint.ID != approval.ID {
 			return errors.New("not authorized")
 		}
 		return nil
@@ -2490,31 +2499,31 @@ func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T
 	model.editor.SetValue("Release evidence and publication window reviewed")
 	applyCommand(t, model, model.submitActionApproval(true))
 	resolved := model.selectedActionApprovalRecord()
-	if resolved == nil || resolved.Status != runtime.ApprovalStatusApproved || resolved.DecisionBy == nil || resolved.DecisionBy.ID != "local" {
+	if resolved == nil || resolved.Status != models.ApprovalStatusApproved || resolved.DecisionBy == nil || resolved.DecisionBy.ID != "local" {
 		t.Fatalf("HTTP approval was not resolved: %#v", resolved)
 	}
 	restoredRun, err := httpClient.GetAgentRun(t.Context(), scope, run.ID)
 	// The approved loop call is ready; the Run is queued to resume its step's tool entry.
-	if err != nil || restoredRun.Status != runtime.AgentRunStatusQueued || restoredRun.WakeCondition != nil {
+	if err != nil || restoredRun.Status != models.AgentRunStatusQueued || restoredRun.WakeCondition != nil {
 		t.Fatalf("approved Run was not queued to resume its loop: %#v, %v", restoredRun, err)
 	}
 }
 
 func TestActivityWorkspaceFlowsThroughPublicHTTPKernelBoundary(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	scope := runtime.Scope{Kind: "local", ID: "activity-http"}
-	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
-	portfolio := runtime.NewPortfolioService(store)
-	run, err := portfolio.CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Verify durable Activity", Source: runtime.RunSourceManual,
+	scope := models.Scope{Kind: "local", ID: "activity-http"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}
+	portfolio := portfolio.NewPortfolioService(store)
+	run, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Verify durable Activity", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = runtime.NewRunActivityService(store, store).AppendActivity(t.Context(), &runtime.ActivityEvent{
+	_, err = activity.NewRunActivityService(store, store).AppendActivity(t.Context(), &models.ActivityEvent{
 		ID: "activity-http-evidence", Scope: scope, RunID: run.ID, AgentID: owner.ID,
-		EventType: "action.completed", Severity: runtime.ActivitySeverityInfo, Visibility: runtime.ActivityVisibilityScope,
-		Actor: runtime.ActivityActor{Type: "system", ID: "worker"}, Summary: "Evidence persisted through the public boundary",
+		EventType: "action.completed", Severity: models.ActivitySeverityInfo, Visibility: models.ActivityVisibilityScope,
+		Actor: models.ActivityActor{Type: "system", ID: "worker"}, Summary: "Evidence persisted through the public boundary",
 		Payload: map[string]interface{}{"artifactId": "report-pdf", "outcome": "verified"}, CreatedAt: time.Now().UTC(),
 	})
 	if err != nil {
@@ -2606,9 +2615,9 @@ func TestRuntimeReadinessStartsExactTypedActiveRunbookOperation(t *testing.T) {
 		t.Fatalf("run creates=%#v keys=%#v", fake.createRequests, fake.createKeys)
 	}
 	request := fake.createRequests[0]
-	if request.Owner != (runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}) ||
+	if request.Owner != (models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}) ||
 		request.AssignedAgentID != "operator" || request.Entrypoint != "collect_findings" ||
-		request.Source != runtime.RunSourceManual || request.Context["subreddit"] != "vibecoding" ||
+		request.Source != models.RunSourceManual || request.Context["subreddit"] != "vibecoding" ||
 		fmt.Sprint(request.Context["limit"]) != "25" {
 		t.Fatalf("created exact operation request = %#v", request)
 	}
@@ -2836,24 +2845,24 @@ func TestSkillBindingTUIUsesCASForAgentAndRecoversFromConflict(t *testing.T) {
 }
 
 func TestSkillBindingTUIReviewsAndAppliesAtomicReferenceUpgrade(t *testing.T) {
-	scope := runtime.Scope{Kind: "local", ID: "default"}
+	scope := models.Scope{Kind: "local", ID: "default"}
 	existing := &capability.Binding{
 		ID: "research", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research-team",
 		SkillID: "source", SkillVersion: "1", SourceIdentity: "registry:source", AllowedActions: []string{"search"},
 		MaximumRisk: capability.RiskLevelRead, Revision: 4,
 	}
-	plan := &runtime.SkillReferenceUpgradePlan{
-		APIVersion: runtime.SkillReferenceUpgradeAPIVersion, Scope: scope, DeploymentID: "research-team", BindingID: existing.ID,
+	plan := &models.SkillReferenceUpgradePlan{
+		APIVersion: skillbinding.SkillReferenceUpgradeAPIVersion, Scope: scope, DeploymentID: "research-team", BindingID: existing.ID,
 		ExpectedBindingRevision: existing.Revision,
-		From:                    runtime.SkillReferenceIdentity{ID: "source", Version: "1", SourceIdentity: "registry:source"},
-		To:                      runtime.SkillReferenceIdentity{ID: "source", Version: "2", SourceIdentity: "registry:source"},
-		Objectives:              []runtime.SkillReferenceObjectiveImpact{{ID: "monitor-hourly", ExpectedRevision: 3}},
-		Findings:                []runtime.SkillReferenceUpgradeFinding{{Code: "action_added", Message: "Target exposes one additional governed action."}},
+		From:                    models.SkillReferenceIdentity{ID: "source", Version: "1", SourceIdentity: "registry:source"},
+		To:                      models.SkillReferenceIdentity{ID: "source", Version: "2", SourceIdentity: "registry:source"},
+		Objectives:              []models.SkillReferenceObjectiveImpact{{ID: "monitor-hourly", ExpectedRevision: 3}},
+		Findings:                []models.SkillReferenceUpgradeFinding{{Code: "action_added", Message: "Target exposes one additional governed action."}},
 		ApprovalRequired:        true, Digest: "sha256:reviewed",
 	}
 	fake := &fakeKernelClient{skillBindings: []*capability.Binding{existing}, skillUpgradePlan: plan}
 	config := DefaultConfig()
-	config.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research-team"}
+	config.Owner = models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research-team"}
 	config.PollInterval = -1
 	model, err := NewModel(context.Background(), fake, config)
 	if err != nil {
@@ -2888,11 +2897,11 @@ func TestSkillBindingTUIReviewsAndAppliesAtomicReferenceUpgrade(t *testing.T) {
 	}
 }
 
-func testConversation(id, title string, lastSequence, revision int64) *runtime.Conversation {
-	return &runtime.Conversation{
-		ID: id, Scope: runtime.Scope{Kind: "local", ID: "default"},
-		Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
-		Title: title, Status: runtime.ConversationStatusActive, LastSequence: lastSequence,
+func testConversation(id, title string, lastSequence, revision int64) *models.Conversation {
+	return &models.Conversation{
+		ID: id, Scope: models.Scope{Kind: "local", ID: "default"},
+		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"},
+		Title: title, Status: models.ConversationStatusActive, LastSequence: lastSequence,
 		Revision: revision, CreatedAt: time.Now(), UpdatedAt: time.Now(),
 	}
 }
@@ -2925,11 +2934,11 @@ func applyCommandRecursive(t *testing.T, model *Model, command tea.Cmd) {
 	}
 }
 
-func testRun(id string, status runtime.AgentRunStatus, revision int64) *runtime.AgentRun {
-	return &runtime.AgentRun{
-		ID: id, Scope: runtime.Scope{Kind: "local", ID: "default"},
-		Owner:           runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
-		AssignedAgentID: "operator", Goal: "First durable outcome", Source: runtime.RunSourceManual,
+func testRun(id string, status models.AgentRunStatus, revision int64) *models.AgentRun {
+	return &models.AgentRun{
+		ID: id, Scope: models.Scope{Kind: "local", ID: "default"},
+		Owner:           models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"},
+		AssignedAgentID: "operator", Goal: "First durable outcome", Source: models.RunSourceManual,
 		Status: status, Revision: revision, UpdatedAt: time.Now(),
 	}
 }
@@ -2943,7 +2952,7 @@ type fakeAgentBuilderKernelClient struct {
 	*fakeChannelKernelClient
 	builderStarts    []kernelapi.StartAgentBuilderConversationRequest
 	builderErrors    []error
-	builderApprovals []*runtime.ApprovalCheckpoint
+	builderApprovals []*models.ApprovalCheckpoint
 }
 
 func (f *fakeAgentBuilderKernelClient) StartAgentBuilderConversation(_ context.Context, request kernelapi.StartAgentBuilderConversationRequest) (*kernelapi.StartAgentBuilderConversationResponse, error) {
@@ -2956,23 +2965,23 @@ func (f *fakeAgentBuilderKernelClient) StartAgentBuilderConversation(_ context.C
 		}
 	}
 	conversation := testConversation("builder-chat", "New agent", 1, 2)
-	conversation.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: runtime.AgentBuilderDeploymentID}
-	conversation.Origin = &runtime.ConversationReference{Kind: runtime.ConversationReferenceAgentBuilder, ID: request.IdempotencyKey}
-	message := &runtime.ChannelMessage{
+	conversation.Owner = models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: conversationrun.AgentBuilderDeploymentID}
+	conversation.Origin = &models.ConversationReference{Kind: models.ConversationReferenceAgentBuilder, ID: request.IdempotencyKey}
+	message := &models.ChannelMessage{
 		ID: "builder-prompt", Scope: request.Scope, ConversationID: conversation.ID, Sequence: 1,
-		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "local-operator"},
-		Intent: runtime.MessageIntentUpdate, Content: request.Prompt, BuilderParameters: &request.Parameters,
-		Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, CreatedAt: time.Now(),
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "local-operator"},
+		Intent: models.MessageIntentUpdate, Content: request.Prompt, BuilderParameters: &request.Parameters,
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, CreatedAt: time.Now(),
 	}
 	f.conversations = append(f.conversations, conversation)
-	f.messages = []*runtime.ChannelMessage{message}
+	f.messages = []*models.ChannelMessage{message}
 	return &kernelapi.StartAgentBuilderConversationResponse{Conversation: conversation, Message: message}, nil
 }
 
 // ListConversations and ListActionApprovals honour the owner filter, like the
 // daemon: the builder chat and its cards belong to the builder Agent.
-func (f *fakeAgentBuilderKernelClient) ListConversations(_ context.Context, filter runtime.ConversationFilter) ([]*runtime.Conversation, error) {
-	var conversations []*runtime.Conversation
+func (f *fakeAgentBuilderKernelClient) ListConversations(_ context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
+	var conversations []*models.Conversation
 	for _, conversation := range f.conversations {
 		if filter.Owner == nil || conversation.Owner == *filter.Owner {
 			conversations = append(conversations, conversation)
@@ -2981,15 +2990,15 @@ func (f *fakeAgentBuilderKernelClient) ListConversations(_ context.Context, filt
 	return conversations, nil
 }
 
-func (f *fakeAgentBuilderKernelClient) ListActionApprovals(ctx context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
-	if filter.Owner != nil && filter.Owner.ID == runtime.AgentBuilderDeploymentID {
+func (f *fakeAgentBuilderKernelClient) ListActionApprovals(ctx context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
+	if filter.Owner != nil && filter.Owner.ID == conversationrun.AgentBuilderDeploymentID {
 		f.approvalFilters = append(f.approvalFilters, filter)
 		return f.builderApprovals, nil
 	}
 	return f.fakeKernelClient.ListActionApprovals(ctx, filter)
 }
 
-func (f *fakeAgentBuilderKernelClient) GetActionApproval(ctx context.Context, scope runtime.Scope, id string) (*runtime.ApprovalCheckpoint, error) {
+func (f *fakeAgentBuilderKernelClient) GetActionApproval(ctx context.Context, scope models.Scope, id string) (*models.ApprovalCheckpoint, error) {
 	for _, approval := range f.builderApprovals {
 		if approval.ID == id {
 			return approval, nil
@@ -2998,44 +3007,44 @@ func (f *fakeAgentBuilderKernelClient) GetActionApproval(ctx context.Context, sc
 	return f.fakeKernelClient.GetActionApproval(ctx, scope, id)
 }
 
-func (f *fakeAgentBuilderKernelClient) ResolveActionApproval(_ context.Context, _ runtime.Scope, id string, decision kernelapi.ResolveActionApprovalRequest, key string) (*runtime.ApprovalResolutionResult, error) {
+func (f *fakeAgentBuilderKernelClient) ResolveActionApproval(_ context.Context, _ models.Scope, id string, decision kernelapi.ResolveActionApprovalRequest, key string) (*models.ApprovalResolutionResult, error) {
 	f.actionDecisions = append(f.actionDecisions, decision)
 	f.actionDecisionKeys = append(f.actionDecisionKeys, key)
-	approval, err := f.GetActionApproval(context.Background(), runtime.Scope{}, id)
+	approval, err := f.GetActionApproval(context.Background(), models.Scope{}, id)
 	if err != nil {
 		return nil, err
 	}
 	approval.Revision++
-	approval.Status = runtime.ApprovalStatusRejected
-	if decision.Decision == runtime.ApprovalDecisionApprove {
-		approval.Status = runtime.ApprovalStatusApproved
+	approval.Status = models.ApprovalStatusRejected
+	if decision.Decision == models.ApprovalDecisionApprove {
+		approval.Status = models.ApprovalStatusApproved
 	}
-	return &runtime.ApprovalResolutionResult{Approval: approval, Resolved: true}, nil
+	return &models.ApprovalResolutionResult{Approval: approval, Resolved: true}, nil
 }
 
 func newAgentBuilderTestClient() *fakeAgentBuilderKernelClient {
 	return &fakeAgentBuilderKernelClient{fakeChannelKernelClient: &fakeChannelKernelClient{
 		fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(
-			kernelapi.AgentBuilderCapability(runtime.AgentBuilderDeploymentID),
+			kernelapi.AgentBuilderCapability(conversationrun.AgentBuilderDeploymentID),
 			kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{}),
 			kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{Resolution: true}),
 		)},
-		conversations: []*runtime.Conversation{testConversation("team-room", "team-room", 0, 1)},
+		conversations: []*models.Conversation{testConversation("team-room", "team-room", 0, 1)},
 	}}
 }
 
-func builderCard(id string, scope runtime.Scope) *runtime.ApprovalCheckpoint {
+func builderCard(id string, scope models.Scope) *models.ApprovalCheckpoint {
 	now := time.Now()
-	return &runtime.ApprovalCheckpoint{
+	return &models.ApprovalCheckpoint{
 		ID: id, Scope: scope, RunID: "builder-run", ActionCallID: "call-" + id,
-		Status: runtime.ApprovalStatusPending, Risk: skill.RiskLevelWrite, Summary: "Create the agent Support triage",
+		Status: models.ApprovalStatusPending, Risk: skill.RiskLevelWrite, Summary: "Create the agent Support triage",
 		ProposedAction: map[string]interface{}{
 			"skillId": "openseal.agents", "skillVersion": "1.5.0", "action": "create_agent",
 			"resourceType": "agent_profile", "operation": "create_agent",
 			"agent": map[string]interface{}{"displayName": "Support triage"},
 		},
-		ConversationContext: &runtime.ApprovalConversationContext{ConversationID: "builder-chat"},
-		EligibleApprovers:   []runtime.ApprovalPrincipal{{Type: "user", ID: "local"}},
+		ConversationContext: &models.ApprovalConversationContext{ConversationID: "builder-chat"},
+		EligibleApprovers:   []models.ApprovalPrincipal{{Type: "user", ID: "local"}},
 		ExpiresAt:           now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 }
@@ -3062,7 +3071,7 @@ func TestAgentBuilderNewAgentOpensBuilderChat(t *testing.T) {
 		t.Fatalf("starts = %#v", fake.builderStarts)
 	}
 	first, retry := fake.builderStarts[0], fake.builderStarts[1]
-	if retry.Prompt != "An agent that triages support email" || retry.Parameters != (runtime.AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent}) ||
+	if retry.Prompt != "An agent that triages support email" || retry.Parameters != (models.AgentBuilderParameters{Kind: models.AgentBuilderKindAgent}) ||
 		retry.Scope != model.config.Scope || retry.SpaceID != "" || retry.IdempotencyKey == "" || retry.IdempotencyKey != first.IdempotencyKey {
 		t.Fatalf("builder start first=%#v retry=%#v", first, retry)
 	}
@@ -3101,11 +3110,11 @@ func TestAgentBuilderCardIsApprovedThroughActionApproval(t *testing.T) {
 	create := builderCard("card-create", model.config.Scope)
 	reject := builderCard("card-update", model.config.Scope)
 	reject.ProposedAction["action"], reject.ProposedAction["operation"] = "update_agent", "update_agent"
-	fake.builderApprovals = []*runtime.ApprovalCheckpoint{create, reject}
+	fake.builderApprovals = []*models.ApprovalCheckpoint{create, reject}
 	applyCommand(t, model, model.loadActionApprovals())
 	builderFilters := 0
 	for _, filter := range fake.approvalFilters {
-		if filter.Owner != nil && *filter.Owner == (runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: runtime.AgentBuilderDeploymentID}) {
+		if filter.Owner != nil && *filter.Owner == (models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: conversationrun.AgentBuilderDeploymentID}) {
 			builderFilters++
 		}
 	}
@@ -3136,9 +3145,9 @@ func TestAgentBuilderCardIsApprovedThroughActionApproval(t *testing.T) {
 	applyCommand(t, model, command)
 
 	if len(fake.actionDecisions) != 2 ||
-		fake.actionDecisions[0].Decision != runtime.ApprovalDecisionApprove || fake.actionDecisions[0].Principal != (runtime.ApprovalPrincipal{Type: "user", ID: "local"}) ||
-		fake.actionDecisions[1].Decision != runtime.ApprovalDecisionReject ||
-		create.Status != runtime.ApprovalStatusApproved || reject.Status != runtime.ApprovalStatusRejected {
+		fake.actionDecisions[0].Decision != models.ApprovalDecisionApprove || fake.actionDecisions[0].Principal != (models.ApprovalPrincipal{Type: "user", ID: "local"}) ||
+		fake.actionDecisions[1].Decision != models.ApprovalDecisionReject ||
+		create.Status != models.ApprovalStatusApproved || reject.Status != models.ApprovalStatusRejected {
 		t.Fatalf("decisions=%#v create=%s reject=%s", fake.actionDecisions, create.Status, reject.Status)
 	}
 }

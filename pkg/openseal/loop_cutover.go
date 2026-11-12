@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 )
 
 // RunLoopCutoverReport counts what one cutover pass did.
-type RunLoopCutoverReport = runtime.RunLoopCutoverReport
+type RunLoopCutoverReport = runloop.RunLoopCutoverReport
 
 // RunLoopCutover moves the Engine's store onto the run loop (D16, A16): Runs
 // created before the loop are adopted when they never started and canceled
@@ -18,13 +19,13 @@ func (e *Engine) RunLoopCutover(ctx context.Context) (RunLoopCutoverReport, erro
 	if e == nil || e.store == nil {
 		return RunLoopCutoverReport{}, errors.New("run loop cutover: engine store is not configured")
 	}
-	store, ok := e.store.(runtime.RunLoopCutoverStore)
+	store, ok := e.store.(models.RunLoopCutoverStore)
 	if !ok {
 		return RunLoopCutoverReport{}, errors.New("run loop cutover: the kernel store does not support the cutover")
 	}
-	var conversations runtime.RunLoopCutoverConversations
+	var conversations runloop.RunLoopCutoverConversations
 	if e.conversations != nil {
 		conversations = e.conversations
 	}
-	return runtime.RunLoopCutover(ctx, store, conversations)
+	return runloop.RunLoopCutover(ctx, store, conversations)
 }

@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
@@ -19,7 +21,7 @@ import (
 func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
-	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
+	server.SetAgentRunCreationDispatcher(agentrun.NewRunCommandService(store).CreateAgentRun)
 	createBody := `{
 		"scope":{"kind":"tenant","id":"one"},
 		"kind":"conversation",
@@ -34,12 +36,12 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, body = %s", created.Code, created.Body.String())
 	}
-	var createResult runtime.AgentRunCommandResult
+	var createResult agentrun.AgentRunCommandResult
 	if err := json.NewDecoder(created.Body).Decode(&createResult); err != nil {
 		t.Fatal(err)
 	}
-	if createResult.Run == nil || createResult.Run.Kind != runtime.RunKindConversation || createResult.Run.ConcurrencyKey != "channel:engineering" ||
-		createResult.Run.Budget == nil || createResult.Run.Budget.MaxAttempts != 3 || createResult.Run.Budget.MaxTurns != 12 || createResult.Run.Budget.MaxDurationMS != 60000 || createResult.Run.BudgetState != runtime.BudgetStateActive ||
+	if createResult.Run == nil || createResult.Run.Kind != models.RunKindConversation || createResult.Run.ConcurrencyKey != "channel:engineering" ||
+		createResult.Run.Budget == nil || createResult.Run.Budget.MaxAttempts != 3 || createResult.Run.Budget.MaxTurns != 12 || createResult.Run.Budget.MaxDurationMS != 60000 || createResult.Run.BudgetState != models.BudgetStateActive ||
 		createResult.Event == nil || createResult.Event.EventType != "run.created" {
 		t.Fatalf("create result = %#v", createResult)
 	}
@@ -48,7 +50,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	if replayed.Code != http.StatusOK {
 		t.Fatalf("replay status = %d, body = %s", replayed.Code, replayed.Body.String())
 	}
-	var replayResult runtime.AgentRunCommandResult
+	var replayResult agentrun.AgentRunCommandResult
 	if err := json.NewDecoder(replayed.Body).Decode(&replayResult); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +68,7 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	if list.Code != http.StatusOK {
 		t.Fatalf("list status = %d, body = %s", list.Code, list.Body.String())
 	}
-	var runs []*runtime.AgentRun
+	var runs []*models.AgentRun
 	if err := json.NewDecoder(list.Body).Decode(&runs); err != nil {
 		t.Fatal(err)
 	}
@@ -84,11 +86,11 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	if paused.Code != http.StatusOK {
 		t.Fatalf("pause status = %d, body = %s", paused.Code, paused.Body.String())
 	}
-	var pauseResult runtime.AgentRunCommandResult
+	var pauseResult agentrun.AgentRunCommandResult
 	if err := json.NewDecoder(paused.Body).Decode(&pauseResult); err != nil {
 		t.Fatal(err)
 	}
-	if pauseResult.Run.Status != runtime.AgentRunStatusPaused || pauseResult.Event.EventType != "run.paused" {
+	if pauseResult.Run.Status != models.AgentRunStatusPaused || pauseResult.Event.EventType != "run.paused" {
 		t.Fatalf("pause result = %#v", pauseResult)
 	}
 
@@ -102,25 +104,25 @@ func TestAgentRunAdmissionAPIExplainsObjectiveBackpressureWithoutClaiming(t *tes
 	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
 	ctx := t.Context()
-	scope := runtime.Scope{Kind: "tenant", ID: "admission"}
-	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "agent"}
-	portfolio := runtime.NewPortfolioService(store)
-	objective, err := portfolio.CreateObjective(ctx, runtime.CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Serial", Goal: "Run serially", Status: runtime.ObjectiveStatusActive,
-		ExecutionPolicy: &runtime.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
+	scope := models.Scope{Kind: "tenant", ID: "admission"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
+	portfolio := runtimeportfolio.NewPortfolioService(store)
+	objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Serial", Goal: "Run serially", Status: models.ObjectiveStatusActive,
+		ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if _, err := portfolio.CreateAgentRun(ctx, runtime.CreateAgentRunRequest{
+		if _, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 			Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID,
-			Goal: "Process work", Source: runtime.RunSourceObjective,
+			Goal: "Process work", Source: models.RunSourceObjective,
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	claimed, err := store.ClaimNextAgentRun(ctx, runtime.AgentRunClaim{
+	claimed, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{
 		Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil {
@@ -130,11 +132,11 @@ func TestAgentRunAdmissionAPIExplainsObjectiveBackpressureWithoutClaiming(t *tes
 	if response.Code != http.StatusOK {
 		t.Fatalf("admission status = %d, body = %s", response.Code, response.Body.String())
 	}
-	var decision runtime.AgentRunAdmissionDecision
+	var decision models.AgentRunAdmissionDecision
 	if err := json.NewDecoder(response.Body).Decode(&decision); err != nil {
 		t.Fatal(err)
 	}
-	if decision.Outcome != runtime.AgentRunAdmissionBackpressured || decision.Run != nil || len(decision.Blocks) < 2 {
+	if decision.Outcome != models.AgentRunAdmissionBackpressured || decision.Run != nil || len(decision.Blocks) < 2 {
 		t.Fatalf("admission decision = %#v", decision)
 	}
 	loaded, err := portfolio.GetAgentRun(ctx, scope, claimed.ID)
@@ -146,7 +148,7 @@ func TestAgentRunAdmissionAPIExplainsObjectiveBackpressureWithoutClaiming(t *tes
 func TestAgentRunAPIRejectsExplicitZeroBudgetLimitButAcceptsOmission(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
 	server := NewServer(store, zap.NewNop().Sugar())
-	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
+	server.SetAgentRunCreationDispatcher(agentrun.NewRunCommandService(store).CreateAgentRun)
 	base := `{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"agent","id":"agent"},"assignedAgentId":"agent","goal":"Read one source","source":"manual","budget":%s}`
 
 	accepted := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-runs", fmt.Sprintf(base, `{"maxAttempts":3,"maxTurns":3,"maxInputTokens":50000,"maxOutputTokens":10000,"maxTotalTokens":60000,"maxDurationMs":120000}`), "")
@@ -176,7 +178,7 @@ func TestCapabilitiesAdvertiseAgentRunOperations(t *testing.T) {
 	if unavailable.Code != http.StatusServiceUnavailable {
 		t.Fatalf("unavailable create = %d %s", unavailable.Code, unavailable.Body.String())
 	}
-	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
+	server.SetAgentRunCreationDispatcher(agentrun.NewRunCommandService(store).CreateAgentRun)
 	recorder = performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
 	document = kernelapi.CapabilityDocument{}
 	if json.NewDecoder(recorder.Body).Decode(&document) != nil {
@@ -202,7 +204,7 @@ func performAgentRunRequest(t *testing.T, handler http.Handler, method, path, bo
 func TestAgentRunSearchQueryValidation(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/?scopeKind=local&scopeId=default&q=Evidence&order=created_desc&offset=25&limit=26&status=completed", nil)
 	filter, err := agentRunFilterFromQuery(req)
-	if err != nil || filter.Query != "Evidence" || filter.Order != runtime.AgentRunOrderCreatedDesc || filter.Offset != 25 || filter.Limit != 26 || len(filter.Statuses) != 1 {
+	if err != nil || filter.Query != "Evidence" || filter.Order != models.AgentRunOrderCreatedDesc || filter.Offset != 25 || filter.Limit != 26 || len(filter.Statuses) != 1 {
 		t.Fatalf("filter = %#v, %v", filter, err)
 	}
 	for _, query := range []string{"order=unknown", "q=" + strings.Repeat("x", 1001)} {
@@ -238,7 +240,7 @@ func TestTeamWorkCapabilityRequiresExplicitCapableHost(t *testing.T) {
 		t.Fatal("advertised team work without a worker")
 	}
 	server.SetTeamWorkEnabled(false)
-	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
+	server.SetAgentRunCreationDispatcher(agentrun.NewRunCommandService(store).CreateAgentRun)
 	if hasTeamWork() {
 		t.Fatal("advertised unsupported team ownership")
 	}

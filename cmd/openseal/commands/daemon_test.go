@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"go.uber.org/zap"
 )
 
@@ -25,7 +25,7 @@ func TestStandaloneOperatorRequiresExplicitLoopbackAddress(t *testing.T) {
 
 func TestDaemonScopeRequiresExactPortableScope(t *testing.T) {
 	scope, err := parseDaemonScope(" local:default ")
-	if err != nil || scope != (runtime.Scope{Kind: "local", ID: "default"}) {
+	if err != nil || scope != (models.Scope{Kind: "local", ID: "default"}) {
 		t.Fatalf("scope=%#v err=%v", scope, err)
 	}
 	for _, invalid := range []string{"", "local", ":default", "local:"} {
@@ -77,7 +77,7 @@ func TestDesktopOperatorRequiresAuthenticatedLocalWorkspace(t *testing.T) {
 		{"missing workspace", "127.0.0.1:0", "synthetic-token", "local", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateDesktopOperator(tc.listen, tc.token, runtime.Scope{Kind: tc.kind, ID: tc.id})
+			err := validateDesktopOperator(tc.listen, tc.token, models.Scope{Kind: tc.kind, ID: tc.id})
 			if (err == nil) != tc.valid {
 				t.Fatalf("validation=%v, valid=%v", err, tc.valid)
 			}

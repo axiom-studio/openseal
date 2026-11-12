@@ -9,7 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -19,7 +19,7 @@ func main() {
 	if *db == "" {
 		panic("-db required")
 	}
-	store, err := runtime.NewSQLiteStore(*db)
+	store, err := sqlite.NewSQLiteStore(*db)
 	check(err)
 	defer store.Close()
 	registry := team.NewRegistryWithStore(store, agent.NewRegistryWithStore(store))

@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 func (s *Server) handleListActionApprovals(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +55,7 @@ func (s *Server) handleResolveActionApproval(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if host, ok := s.actionApprovalAuth.(interface {
-		ValidateApprovalRequest(runtime.Scope, runtime.ApprovalPrincipal) error
+		ValidateApprovalRequest(models.Scope, models.ApprovalPrincipal) error
 	}); ok {
 		if err := host.ValidateApprovalRequest(scope, payload.Principal); err != nil {
 			s.respondError(w, http.StatusForbidden, err.Error())
@@ -65,7 +66,7 @@ func (s *Server) handleResolveActionApproval(w http.ResponseWriter, r *http.Requ
 	if decisionID == "" {
 		decisionID = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	}
-	result, err := runtime.NewApprovalCoordinator(s.store, s.store, s.actionApprovalAuth).Resolve(r.Context(), runtime.ResolveApprovalRequest{
+	result, err := action.NewApprovalCoordinator(s.store, s.store, s.actionApprovalAuth).Resolve(r.Context(), action.ResolveApprovalRequest{
 		Scope: scope, ApprovalID: strings.TrimSpace(r.PathValue("id")), ExpectedRevision: payload.ExpectedRevision,
 		DecisionID: decisionID, Decision: payload.Decision, Principal: payload.Principal,
 		Reason: strings.TrimSpace(payload.Reason), CorrelationID: strings.TrimSpace(r.Header.Get("X-Correlation-ID")),
@@ -77,48 +78,48 @@ func (s *Server) handleResolveActionApproval(w http.ResponseWriter, r *http.Requ
 	s.respondJSON(w, http.StatusOK, result)
 }
 
-func actionApprovalFilterFromQuery(r *http.Request) (runtime.ApprovalFilter, error) {
+func actionApprovalFilterFromQuery(r *http.Request) (models.ApprovalFilter, error) {
 	scope, err := scopeFromQuery(r)
 	if err != nil {
-		return runtime.ApprovalFilter{}, err
+		return models.ApprovalFilter{}, err
 	}
 	limit, err := boundedIntQuery(r, "limit", 50, 1, 100)
 	if err != nil {
-		return runtime.ApprovalFilter{}, err
+		return models.ApprovalFilter{}, err
 	}
 	offset, err := boundedIntQuery(r, "offset", 0, 0, 1_000_000)
 	if err != nil {
-		return runtime.ApprovalFilter{}, err
+		return models.ApprovalFilter{}, err
 	}
 	order := strings.TrimSpace(r.URL.Query().Get("order"))
 	if order != "" && order != "created_asc" && order != "created_desc" {
-		return runtime.ApprovalFilter{}, fmt.Errorf("invalid approval order %q", order)
+		return models.ApprovalFilter{}, fmt.Errorf("invalid approval order %q", order)
 	}
-	filter := runtime.ApprovalFilter{Scope: scope, RunID: strings.TrimSpace(r.URL.Query().Get("runId")), Limit: limit, Offset: offset}
+	filter := models.ApprovalFilter{Scope: scope, RunID: strings.TrimSpace(r.URL.Query().Get("runId")), Limit: limit, Offset: offset}
 	filter.NewestFirst = order == "created_desc"
 
 	ownerType, ownerID := strings.TrimSpace(r.URL.Query().Get("ownerType")), strings.TrimSpace(r.URL.Query().Get("ownerId"))
 	if ownerType != "" || ownerID != "" {
-		owner := runtime.ObjectiveOwner{Type: runtime.OwnerType(ownerType), ID: ownerID}
+		owner := models.ObjectiveOwner{Type: models.OwnerType(ownerType), ID: ownerID}
 		if err := owner.Validate(); err != nil {
-			return runtime.ApprovalFilter{}, err
+			return models.ApprovalFilter{}, err
 		}
 		filter.Owner = &owner
 	}
 	for _, value := range queryValues(r, "status") {
-		status := runtime.ApprovalStatus(value)
+		status := models.ApprovalStatus(value)
 		if !validActionApprovalStatus(status) {
-			return runtime.ApprovalFilter{}, fmt.Errorf("invalid action approval status %q", value)
+			return models.ApprovalFilter{}, fmt.Errorf("invalid action approval status %q", value)
 		}
 		filter.Status = append(filter.Status, status)
 	}
 	return filter, nil
 }
 
-func validActionApprovalStatus(status runtime.ApprovalStatus) bool {
+func validActionApprovalStatus(status models.ApprovalStatus) bool {
 	switch status {
-	case runtime.ApprovalStatusPending, runtime.ApprovalStatusApproved, runtime.ApprovalStatusRejected,
-		runtime.ApprovalStatusExpired, runtime.ApprovalStatusCanceled, runtime.ApprovalStatusChangesRequested:
+	case models.ApprovalStatusPending, models.ApprovalStatusApproved, models.ApprovalStatusRejected,
+		models.ApprovalStatusExpired, models.ApprovalStatusCanceled, models.ApprovalStatusChangesRequested:
 		return true
 	default:
 		return false
@@ -127,13 +128,13 @@ func validActionApprovalStatus(status runtime.ApprovalStatus) bool {
 
 func (s *Server) respondActionApprovalError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, runtime.ErrApprovalNotFound), errors.Is(err, runtime.ErrRunNotFound), errors.Is(err, runtime.ErrActionNotFound):
+	case errors.Is(err, models.ErrApprovalNotFound), errors.Is(err, models.ErrRunNotFound), errors.Is(err, models.ErrActionNotFound):
 		s.respondError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, runtime.ErrRevisionConflict), errors.Is(err, runtime.ErrApprovalResolved), errors.Is(err, runtime.ErrInvalidRunTransition):
+	case errors.Is(err, models.ErrRevisionConflict), errors.Is(err, models.ErrApprovalResolved), errors.Is(err, models.ErrInvalidRunTransition):
 		s.respondError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, runtime.ErrInvalidScope), errors.Is(err, runtime.ErrInvalidOwner):
+	case errors.Is(err, models.ErrInvalidScope), errors.Is(err, models.ErrInvalidOwner):
 		s.respondError(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, runtime.ErrAgentBuilderApprovalForbidden), strings.Contains(err.Error(), "authorize approval"):
+	case errors.Is(err, action.ErrAgentBuilderApprovalForbidden), strings.Contains(err.Error(), "authorize approval"):
 		s.respondError(w, http.StatusForbidden, err.Error())
 	case strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "invalid"):
 		s.respondError(w, http.StatusBadRequest, err.Error())

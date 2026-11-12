@@ -9,7 +9,8 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -24,11 +25,11 @@ type DesktopConversationCatalog interface {
 
 type DesktopConversationParticipants struct {
 	catalog DesktopConversationCatalog
-	scope   runtime.Scope
+	scope   models.Scope
 	maximum int
 }
 
-func NewDesktopConversationParticipants(catalog DesktopConversationCatalog, scope runtime.Scope, maximum int) (*DesktopConversationParticipants, error) {
+func NewDesktopConversationParticipants(catalog DesktopConversationCatalog, scope models.Scope, maximum int) (*DesktopConversationParticipants, error) {
 	if catalog == nil || scope.Kind != "local" || scope.Validate() != nil || maximum < 1 || maximum > 256 {
 		return nil, errors.New("desktop participation requires a local catalog, scope, and participant limit")
 	}
@@ -39,12 +40,12 @@ func NewDesktopConversationParticipants(catalog DesktopConversationCatalog, scop
 // and exact active definitions on every round. Observe-only and disabled members
 // never invoke a model. Inactive Agents are excluded; broken canonical identities
 // or unsatisfied member requirements fail closed instead of inventing a roster.
-func (s *DesktopConversationParticipants) ResolveConversationParticipants(ctx context.Context, query runtime.ConversationParticipantQuery) ([]runtime.ConversationParticipantBinding, error) {
+func (s *DesktopConversationParticipants) ResolveConversationParticipants(ctx context.Context, query conversation.ConversationParticipantQuery) ([]conversation.ConversationParticipantBinding, error) {
 	members, err := s.resolve(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	bindings := make([]runtime.ConversationParticipantBinding, 0, len(members))
+	bindings := make([]conversation.ConversationParticipantBinding, 0, len(members))
 	for _, member := range members {
 		bindings = append(bindings, member.binding)
 	}
@@ -52,14 +53,14 @@ func (s *DesktopConversationParticipants) ResolveConversationParticipants(ctx co
 }
 
 type desktopConversationMember struct {
-	binding        runtime.ConversationParticipantBinding
+	binding        conversation.ConversationParticipantBinding
 	definition     *agent.AgentDefinition
 	teamDefinition *team.Definition
 }
 
-func (s *DesktopConversationParticipants) resolve(ctx context.Context, query runtime.ConversationParticipantQuery) ([]desktopConversationMember, error) {
+func (s *DesktopConversationParticipants) resolve(ctx context.Context, query conversation.ConversationParticipantQuery) ([]desktopConversationMember, error) {
 	channel := query.Conversation
-	if channel == nil || channel.Scope != s.scope || channel.Owner.Type != runtime.OwnerTypeTeam || channel.Owner.ID == "" || channel.Status != runtime.ConversationStatusActive {
+	if channel == nil || channel.Scope != s.scope || channel.Owner.Type != models.OwnerTypeTeam || channel.Owner.ID == "" || channel.Status != models.ConversationStatusActive {
 		return nil, errors.New("desktop participation requires an active team channel in this workspace")
 	}
 	if query.Trigger != nil && (query.Trigger.Scope != s.scope || query.Trigger.ConversationID != channel.ID) {
@@ -110,7 +111,7 @@ func (s *DesktopConversationParticipants) resolve(ctx context.Context, query run
 				return nil, errors.New("a participation agent no longer satisfies its member skill requirement")
 			}
 		}
-		binding := runtime.ConversationParticipantBinding{Participant: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: member.ID}, SemanticRoles: []string{assignment.ID}}
+		binding := conversation.ConversationParticipantBinding{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: member.ID}, SemanticRoles: []string{assignment.ID}}
 		if err := binding.Validate(); err != nil {
 			return nil, err
 		}
@@ -120,7 +121,7 @@ func (s *DesktopConversationParticipants) resolve(ctx context.Context, query run
 		}
 	}
 	if len(members) == 0 {
-		return nil, runtime.ErrNoConversationParticipants
+		return nil, conversation.ErrNoConversationParticipants
 	}
 	sort.Slice(members, func(i, j int) bool { return members[i].binding.Participant.ID < members[j].binding.Participant.ID })
 	return members, nil

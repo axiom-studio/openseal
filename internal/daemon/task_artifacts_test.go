@@ -9,11 +9,13 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/artifact"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
-var localScope = runtime.Scope{Kind: "local", ID: "default"}
+var localScope = models.Scope{Kind: "local", ID: "default"}
 
 func filesField(t *testing.T, files ...interface{}) json.RawMessage {
 	t.Helper()
@@ -24,17 +26,17 @@ func filesField(t *testing.T, files ...interface{}) json.RawMessage {
 	return raw
 }
 
-func localWorkRun() *runtime.AgentRun {
-	return &runtime.AgentRun{ID: "run-1", Scope: localScope, Kind: runtime.RunKindAgentWork, Owner: runtime.ObjectiveOwner{Type: "agent", ID: "analyst"}, AssignedAgentID: "analyst"}
+func localWorkRun() *models.AgentRun {
+	return &models.AgentRun{ID: "run-1", Scope: localScope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: "agent", ID: "analyst"}, AssignedAgentID: "analyst"}
 }
 
-func newTestPublisher(t *testing.T) (*TaskArtifactPublisher, runtime.ArtifactContentStore) {
+func newTestPublisher(t *testing.T) (*TaskArtifactPublisher, models.ArtifactContentStore) {
 	t.Helper()
 	content, err := artifact.NewLocalStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: runtime.NewArtifactCatalog(runtimetest.NewKernelStore(t))}, content
+	return &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: artifactcatalog.NewArtifactCatalog(runtimetest.NewKernelStore(t))}, content
 }
 
 func twoFiles(t *testing.T) map[string]json.RawMessage {
@@ -96,8 +98,8 @@ func TestFinalAnswerPropertiesOfferedOnlyForLocalAgentWork(t *testing.T) {
 	foreign := localWorkRun()
 	foreign.Scope.ID = "other"
 	conversation := localWorkRun()
-	conversation.Kind = runtime.RunKindConversation
-	for _, run := range []*runtime.AgentRun{nil, foreign, conversation} {
+	conversation.Kind = models.RunKindConversation
+	for _, run := range []*models.AgentRun{nil, foreign, conversation} {
 		if props := publisher.FinalAnswerProperties(run); props != nil {
 			t.Fatalf("offered on %+v: %+v", run, props)
 		}
@@ -121,7 +123,7 @@ func TestValidateFinalAnswerRejectsForgedArtifactRefsAndUnknownFields(t *testing
 		t.Fatalf("unknown field: %v", err)
 	}
 	conversation := localWorkRun()
-	conversation.Kind = runtime.RunKindConversation
+	conversation.Kind = models.RunKindConversation
 	if err = publisher.ValidateFinalAnswer(conversation, twoFiles(t)); err == nil {
 		t.Fatal("generatedFiles accepted on a run that was not offered them")
 	}
@@ -131,7 +133,7 @@ func TestPublishFinalOutputRecordsStepProvenance(t *testing.T) {
 	ctx := context.Background()
 	publisher, content := newTestPublisher(t)
 	run := localWorkRun()
-	output, err := publisher.PublishFinalOutput(ctx, runtime.FinalOutputPublication{Run: run, StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)})
+	output, err := publisher.PublishFinalOutput(ctx, agentrun.FinalOutputPublication{Run: run, StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,15 +144,15 @@ func TestPublishFinalOutputRecordsStepProvenance(t *testing.T) {
 	if !strings.HasPrefix(refs[0]["id"].(string), "step-file-") || refs[0]["id"] == refs[1]["id"] {
 		t.Fatalf("ids: %+v", refs)
 	}
-	records, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: localScope, ProducerRunID: run.ID})
+	records, err := publisher.Catalog.List(ctx, models.ArtifactFilter{Scope: localScope, ProducerRunID: run.ID})
 	if err != nil || len(records) != 2 {
 		t.Fatalf("records: %d %v", len(records), err)
 	}
 	for _, record := range records {
-		if record.Provenance.Producer.ID != "analyst" || record.Provenance.Producer.Type != "agent" || record.Provenance.TurnID != "step-2" || record.Provenance.RunID != run.ID || record.Provenance.Owner == nil || record.Provenance.Owner.ID != "analyst" || record.Classification != runtime.ArtifactClassificationInternal || record.Version != 1 {
+		if record.Provenance.Producer.ID != "analyst" || record.Provenance.Producer.Type != "agent" || record.Provenance.TurnID != "step-2" || record.Provenance.RunID != run.ID || record.Provenance.Owner == nil || record.Provenance.Owner.ID != "analyst" || record.Classification != models.ArtifactClassificationInternal || record.Version != 1 {
 			t.Fatalf("provenance: %+v", record)
 		}
-		if len(record.Evidence) != 1 || record.Evidence[0].Relation != runtime.EvidenceRelationOutputOf || record.Evidence[0].TargetKind != runtime.EvidenceTargetTurn || record.Evidence[0].TargetRef != "step-2" {
+		if len(record.Evidence) != 1 || record.Evidence[0].Relation != models.EvidenceRelationOutputOf || record.Evidence[0].TargetKind != models.EvidenceTargetTurn || record.Evidence[0].TargetRef != "step-2" {
 			t.Fatalf("evidence: %+v", record.Evidence)
 		}
 		reader, err := content.Open(ctx, localScope, record.ContentRef)
@@ -163,7 +165,7 @@ func TestPublishFinalOutputRecordsStepProvenance(t *testing.T) {
 			t.Fatal("missing content", err)
 		}
 	}
-	none, err := publisher.PublishFinalOutput(ctx, runtime.FinalOutputPublication{Run: run, StepID: "step-2", ToolCallID: "call-1"})
+	none, err := publisher.PublishFinalOutput(ctx, agentrun.FinalOutputPublication{Run: run, StepID: "step-2", ToolCallID: "call-1"})
 	if err != nil || none != nil {
 		t.Fatalf("no fields: %+v %v", none, err)
 	}
@@ -172,7 +174,7 @@ func TestPublishFinalOutputRecordsStepProvenance(t *testing.T) {
 func TestPublishFinalOutputIsIdempotentPerStepCall(t *testing.T) {
 	ctx := context.Background()
 	publisher, _ := newTestPublisher(t)
-	pub := runtime.FinalOutputPublication{Run: localWorkRun(), StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)}
+	pub := agentrun.FinalOutputPublication{Run: localWorkRun(), StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)}
 	first, err := publisher.PublishFinalOutput(ctx, pub)
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +188,7 @@ func TestPublishFinalOutputIsIdempotentPerStepCall(t *testing.T) {
 	if string(a) != string(b) {
 		t.Fatalf("replay refs differ:\n%s\n%s", a, b)
 	}
-	records, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: localScope, ProducerRunID: pub.Run.ID})
+	records, err := publisher.Catalog.List(ctx, models.ArtifactFilter{Scope: localScope, ProducerRunID: pub.Run.ID})
 	if err != nil || len(records) != 2 {
 		t.Fatalf("records: %d %v", len(records), err)
 	}
@@ -201,14 +203,14 @@ func TestPublishFinalOutputIsIdempotentPerStepCall(t *testing.T) {
 }
 
 type failSecondWrite struct {
-	runtime.ArtifactContentStore
+	models.ArtifactContentStore
 	writes int
 }
 
-func (s *failSecondWrite) Put(ctx context.Context, write runtime.ArtifactContentWrite) (runtime.ArtifactStoredContent, error) {
+func (s *failSecondWrite) Put(ctx context.Context, write models.ArtifactContentWrite) (models.ArtifactStoredContent, error) {
 	s.writes++
 	if s.writes == 2 {
-		return runtime.ArtifactStoredContent{}, errors.New("simulated disk interruption")
+		return models.ArtifactStoredContent{}, errors.New("simulated disk interruption")
 	}
 	return s.ArtifactContentStore.Put(ctx, write)
 }
@@ -217,11 +219,11 @@ func TestPublishFinalOutputResumesAfterPartialContentFailure(t *testing.T) {
 	ctx := context.Background()
 	publisher, content := newTestPublisher(t)
 	publisher.Content = &failSecondWrite{ArtifactContentStore: content}
-	pub := runtime.FinalOutputPublication{Run: localWorkRun(), StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)}
+	pub := agentrun.FinalOutputPublication{Run: localWorkRun(), StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)}
 	if _, err := publisher.PublishFinalOutput(ctx, pub); err == nil {
 		t.Fatal("expected interrupted publication")
 	}
-	partial, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: localScope, ProducerRunID: pub.Run.ID})
+	partial, err := publisher.Catalog.List(ctx, models.ArtifactFilter{Scope: localScope, ProducerRunID: pub.Run.ID})
 	if err != nil || len(partial) != 1 {
 		t.Fatalf("partial publication: %d %v", len(partial), err)
 	}
@@ -232,7 +234,7 @@ func TestPublishFinalOutputResumesAfterPartialContentFailure(t *testing.T) {
 	if refs := output["artifactRefs"].([]map[string]interface{}); len(refs) != 2 || refs[0]["id"] != partial[0].ID {
 		t.Fatalf("resumed refs: %+v", refs)
 	}
-	records, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: localScope, ProducerRunID: pub.Run.ID})
+	records, err := publisher.Catalog.List(ctx, models.ArtifactFilter{Scope: localScope, ProducerRunID: pub.Run.ID})
 	if err != nil || len(records) != 2 {
 		t.Fatalf("records after resume: %d %v", len(records), err)
 	}
@@ -243,7 +245,7 @@ func TestPublishFinalOutputRejectsForeignScope(t *testing.T) {
 	publisher, _ := newTestPublisher(t)
 	foreign := localWorkRun()
 	foreign.Scope.ID = "other"
-	for _, pub := range []runtime.FinalOutputPublication{
+	for _, pub := range []agentrun.FinalOutputPublication{
 		{Run: foreign, StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)},
 		{Run: localWorkRun(), ToolCallID: "call-1", Fields: twoFiles(t)},
 		{Run: localWorkRun(), StepID: "step-2", Fields: twoFiles(t)},
@@ -253,7 +255,7 @@ func TestPublishFinalOutputRejectsForeignScope(t *testing.T) {
 			t.Fatalf("publication accepted: %+v", pub)
 		}
 	}
-	records, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: foreign.Scope})
+	records, err := publisher.Catalog.List(ctx, models.ArtifactFilter{Scope: foreign.Scope})
 	if err != nil || len(records) != 0 {
 		t.Fatalf("foreign records: %d %v", len(records), err)
 	}

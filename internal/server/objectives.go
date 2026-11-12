@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func (s *Server) handleCreateObjective(w http.ResponseWriter, r *http.Request) {
@@ -19,7 +20,7 @@ func (s *Server) handleCreateObjective(w http.ResponseWriter, r *http.Request) {
 	if key == "" {
 		key = strings.TrimSpace(payload.IdempotencyKey)
 	}
-	result, err := runtime.NewPortfolioService(s.store).CreateObjectiveIdempotent(r.Context(), runtime.CreateObjectiveRequest{
+	result, err := portfolio.NewPortfolioService(s.store).CreateObjectiveIdempotent(r.Context(), portfolio.CreateObjectiveRequest{
 		Scope: payload.Scope, Owner: payload.Owner, Title: strings.TrimSpace(payload.Title), Goal: strings.TrimSpace(payload.Goal),
 		Status: payload.Status, Priority: payload.Priority, Budget: payload.Budget,
 		Constraints: payload.Constraints, SuccessCriteria: payload.SuccessCriteria, IdempotencyKey: key,
@@ -41,7 +42,7 @@ func (s *Server) handleListObjectives(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	objectives, err := runtime.NewPortfolioService(s.store).ListObjectives(r.Context(), filter)
+	objectives, err := portfolio.NewPortfolioService(s.store).ListObjectives(r.Context(), filter)
 	if err != nil {
 		s.respondObjectiveError(w, err)
 		return
@@ -55,18 +56,18 @@ func (s *Server) handleGetObjective(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	service := runtime.NewPortfolioService(s.store)
+	service := portfolio.NewPortfolioService(s.store)
 	objective, err := service.GetObjective(r.Context(), scope, strings.TrimSpace(r.PathValue("id")))
 	if err != nil {
 		s.respondObjectiveError(w, err)
 		return
 	}
-	runs, err := service.ListAgentRuns(r.Context(), runtime.AgentRunFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 100})
+	runs, err := service.ListAgentRuns(r.Context(), models.AgentRunFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 100})
 	if err != nil {
 		s.respondObjectiveError(w, err)
 		return
 	}
-	runbooks, err := s.store.ListRunbookActivations(r.Context(), runtime.RunbookActivationFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 100})
+	runbooks, err := s.store.ListRunbookActivations(r.Context(), models.RunbookActivationFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 100})
 	if err != nil {
 		s.respondObjectiveError(w, err)
 		return
@@ -85,7 +86,7 @@ func (s *Server) handleUpdateObjective(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	objective, err := runtime.NewPortfolioService(s.store).UpdateObjective(r.Context(), scope, strings.TrimSpace(r.PathValue("id")), runtime.UpdateObjectiveRequest{
+	objective, err := portfolio.NewPortfolioService(s.store).UpdateObjective(r.Context(), scope, strings.TrimSpace(r.PathValue("id")), portfolio.UpdateObjectiveRequest{
 		ExpectedRevision: payload.ExpectedRevision, Title: payload.Title, Goal: payload.Goal, Status: payload.Status,
 		Priority: payload.Priority, Budget: payload.Budget,
 		Constraints: payload.Constraints, SuccessCriteria: payload.SuccessCriteria, ProgressSummary: payload.ProgressSummary,
@@ -97,42 +98,42 @@ func (s *Server) handleUpdateObjective(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, objective)
 }
 
-func objectiveFilterFromQuery(r *http.Request) (runtime.ObjectiveFilter, error) {
+func objectiveFilterFromQuery(r *http.Request) (models.ObjectiveFilter, error) {
 	scope, err := scopeFromQuery(r)
 	if err != nil {
-		return runtime.ObjectiveFilter{}, err
+		return models.ObjectiveFilter{}, err
 	}
 	limit, err := boundedIntQuery(r, "limit", 50, 1, 100)
 	if err != nil {
-		return runtime.ObjectiveFilter{}, err
+		return models.ObjectiveFilter{}, err
 	}
 	offset, err := boundedIntQuery(r, "offset", 0, 0, 1_000_000)
 	if err != nil {
-		return runtime.ObjectiveFilter{}, err
+		return models.ObjectiveFilter{}, err
 	}
-	filter := runtime.ObjectiveFilter{Scope: scope, Limit: limit, Offset: offset}
+	filter := models.ObjectiveFilter{Scope: scope, Limit: limit, Offset: offset}
 	ownerType, ownerID := strings.TrimSpace(r.URL.Query().Get("ownerType")), strings.TrimSpace(r.URL.Query().Get("ownerId"))
 	if ownerType != "" || ownerID != "" {
-		owner := runtime.ObjectiveOwner{Type: runtime.OwnerType(ownerType), ID: ownerID}
+		owner := models.ObjectiveOwner{Type: models.OwnerType(ownerType), ID: ownerID}
 		if err := owner.Validate(); err != nil {
-			return runtime.ObjectiveFilter{}, err
+			return models.ObjectiveFilter{}, err
 		}
 		filter.Owner = &owner
 	}
 	for _, value := range queryValues(r, "status") {
-		status := runtime.ObjectiveStatus(value)
+		status := models.ObjectiveStatus(value)
 		if !isPublicObjectiveStatus(status) {
-			return runtime.ObjectiveFilter{}, errors.New("invalid objective status")
+			return models.ObjectiveFilter{}, errors.New("invalid objective status")
 		}
 		filter.Statuses = append(filter.Statuses, status)
 	}
 	return filter, nil
 }
 
-func isPublicObjectiveStatus(status runtime.ObjectiveStatus) bool {
+func isPublicObjectiveStatus(status models.ObjectiveStatus) bool {
 	switch status {
-	case runtime.ObjectiveStatusDraft, runtime.ObjectiveStatusActive, runtime.ObjectiveStatusPaused,
-		runtime.ObjectiveStatusSatisfied, runtime.ObjectiveStatusFailed, runtime.ObjectiveStatusRetired:
+	case models.ObjectiveStatusDraft, models.ObjectiveStatusActive, models.ObjectiveStatusPaused,
+		models.ObjectiveStatusSatisfied, models.ObjectiveStatusFailed, models.ObjectiveStatusRetired:
 		return true
 	default:
 		return false
@@ -141,11 +142,11 @@ func isPublicObjectiveStatus(status runtime.ObjectiveStatus) bool {
 
 func (s *Server) respondObjectiveError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, runtime.ErrObjectiveNotFound):
+	case errors.Is(err, models.ErrObjectiveNotFound):
 		s.respondError(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, runtime.ErrRevisionConflict), errors.Is(err, runtime.ErrObjectiveIdempotency), errors.Is(err, runtime.ErrBudgetExhausted):
+	case errors.Is(err, models.ErrRevisionConflict), errors.Is(err, models.ErrObjectiveIdempotency), errors.Is(err, models.ErrBudgetExhausted):
 		s.respondError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, runtime.ErrInvalidObjectiveTransition):
+	case errors.Is(err, portfolio.ErrInvalidObjectiveTransition):
 		s.respondError(w, http.StatusConflict, err.Error())
 	default:
 		s.respondError(w, http.StatusBadRequest, err.Error())

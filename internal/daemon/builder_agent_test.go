@@ -9,14 +9,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func newBuilderSeedEngine(t *testing.T) *opensealkernel.Engine {
 	t.Helper()
-	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +41,7 @@ func newBuilderSeedEngine(t *testing.T) *opensealkernel.Engine {
 
 func builderBindingsByID(t *testing.T, engine *opensealkernel.Engine) map[string]*skill.Binding {
 	t.Helper()
-	bindings, err := engine.ListSkillBindings(t.Context(), skill.ScopeReference{Kind: localScope.Kind, ID: localScope.ID}, runtime.AgentBuilderDeploymentID)
+	bindings, err := engine.ListSkillBindings(t.Context(), skill.ScopeReference{Kind: localScope.Kind, ID: localScope.ID}, conversationrun.AgentBuilderDeploymentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,8 +59,8 @@ func assertBuilderBindings(t *testing.T, engine *opensealkernel.Engine) map[stri
 		version string
 		actions []string
 	}{
-		"bundled:agents":       {runtime.AgentManagementSkillVersion, []string{"create_agent", "list_agents", "try_agent", "update_agent"}},
-		"bundled:teams":        {runtime.TeamManagementSkillVersion, []string{"create_team"}},
+		"bundled:agents":       {models.AgentManagementSkillVersion, []string{"create_agent", "list_agents", "try_agent", "update_agent"}},
+		"bundled:teams":        {action.TeamManagementSkillVersion, []string{"create_team"}},
 		"bundled:skills@1.7.0": {"1.7.0", []string{"disable_binding", "discover", "request_connection", "request_setup", "upsert_binding"}},
 	}
 	if len(byID) != len(want) {
@@ -89,7 +94,7 @@ func TestBuilderAgentSeededOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	reference := skill.ScopeReference{Kind: localScope.Kind, ID: localScope.ID}
-	deployment, err := engine.GetAgentDeployment(ctx, reference, runtime.AgentBuilderDeploymentID)
+	deployment, err := engine.GetAgentDeployment(ctx, reference, conversationrun.AgentBuilderDeploymentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +116,7 @@ func TestBuilderAgentSeededOnce(t *testing.T) {
 	if err := SeedBuilderAgent(ctx, engine, localScope); err != nil {
 		t.Fatalf("second seed: %v", err)
 	}
-	again, err := engine.GetAgentDeployment(ctx, reference, runtime.AgentBuilderDeploymentID)
+	again, err := engine.GetAgentDeployment(ctx, reference, conversationrun.AgentBuilderDeploymentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +134,7 @@ func TestBuilderAgentBindingsUpgradedOnVersionChange(t *testing.T) {
 	engine := newBuilderSeedEngine(t)
 	ctx := t.Context()
 	reference := skill.ScopeReference{Kind: localScope.Kind, ID: localScope.ID}
-	owner := opensealkernel.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: runtime.AgentBuilderDeploymentID}
+	owner := opensealkernel.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: conversationrun.AgentBuilderDeploymentID}
 
 	// A builder seeded by an earlier release: an older definition version and
 	// bindings to older bundled Skill versions.
@@ -139,19 +144,19 @@ func TestBuilderAgentBindingsUpgradedOnVersionChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := engine.CreateAgentDeployment(ctx, &opensealkernel.AgentDeployment{
-		ID: runtime.AgentBuilderDeploymentID, DisplayName: BuilderDisplayName, Scope: reference,
+		ID: conversationrun.AgentBuilderDeploymentID, DisplayName: BuilderDisplayName, Scope: reference,
 		DefinitionID: BuilderDefinitionID, ActiveVersion: old.Version, Environment: "default",
 		RolloutStatus: opensealkernel.AgentRolloutActive, Revision: 1,
 		Capacity: opensealkernel.AgentDeploymentCapacity{MaxConcurrentRuns: 4, MaxQueuedRuns: 32},
 	}, "system", "test", "earlier release"); err != nil {
 		t.Fatal(err)
 	}
-	agents := runtime.AgentManagementSkill()
+	agents := models.AgentManagementSkill()
 	agents.Version = "1.4.0"
-	for _, name := range []string{runtime.AgentActionCreateAgent, runtime.AgentActionUpdateAgent, runtime.AgentActionTryAgent, runtime.AgentActionListAgents} {
+	for _, name := range []string{models.AgentActionCreateAgent, models.AgentActionUpdateAgent, models.AgentActionTryAgent, models.AgentActionListAgents} {
 		delete(agents.Actions, name)
 	}
-	skills := runtime.SkillManagementSkill()
+	skills := skillbinding.SkillManagementSkill()
 	skills.Version = "1.6.1"
 	for _, definition := range []*skill.Definition{agents, skills} {
 		if err := engine.RegisterSkill(ctx, definition); err != nil {
@@ -160,9 +165,9 @@ func TestBuilderAgentBindingsUpgradedOnVersionChange(t *testing.T) {
 	}
 	for _, binding := range []*skill.Binding{
 		{ID: "bundled:agents", Scope: reference, DeploymentID: owner.ID, SkillID: agents.ID, SkillVersion: agents.Version,
-			AllowedActions: []string{runtime.AgentActionAmendBehavior}, MaximumRisk: skill.RiskLevelWrite},
+			AllowedActions: []string{models.AgentActionAmendBehavior}, MaximumRisk: skill.RiskLevelWrite},
 		{ID: "bundled:skills@1.6.1", Scope: reference, DeploymentID: owner.ID, SkillID: skills.ID, SkillVersion: skills.Version,
-			AllowedActions: []string{runtime.SkillActionDiscoverBinding}, MaximumRisk: skill.RiskLevelRead},
+			AllowedActions: []string{skillbinding.SkillActionDiscoverBinding}, MaximumRisk: skill.RiskLevelRead},
 	} {
 		if _, err := engine.UpsertOwnerSkillBinding(ctx, owner, skill.UpsertBindingRequest{
 			Binding: binding, Actor: skill.BindingActor{Type: "system", ID: "test"}, Reason: "earlier release",
@@ -174,7 +179,7 @@ func TestBuilderAgentBindingsUpgradedOnVersionChange(t *testing.T) {
 	if err := SeedBuilderAgent(ctx, engine, localScope); err != nil {
 		t.Fatal(err)
 	}
-	deployment, err := engine.GetAgentDeployment(ctx, reference, runtime.AgentBuilderDeploymentID)
+	deployment, err := engine.GetAgentDeployment(ctx, reference, conversationrun.AgentBuilderDeploymentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +211,7 @@ func TestBuilderAgentBindingsUpgradedOnVersionChange(t *testing.T) {
 func writeV75DaemonStore(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	fresh, err := runtime.NewSQLiteStore(path)
+	fresh, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,10 +257,10 @@ func writeV75DaemonStore(t *testing.T) string {
 // seedLocalOperatorSpace creates the local operator's first space, their
 // default space. The kernel creates none; the daemon command creates this
 // one at start.
-func seedLocalOperatorSpace(t *testing.T, store runtime.SpaceStore) *runtime.Space {
+func seedLocalOperatorSpace(t *testing.T, store models.SpaceStore) *models.Space {
 	t.Helper()
-	space, err := runtime.NewSpaceService(store).CreateSpace(t.Context(), runtime.CreateSpaceRequest{
-		Scope: localScope, Name: "Home", Look: runtime.DefaultSpaceLook, OwnerID: "local-operator",
+	space, err := portfolio.NewSpaceService(store).CreateSpace(t.Context(), portfolio.CreateSpaceRequest{
+		Scope: localScope, Name: "Home", Look: models.DefaultSpaceLook, OwnerID: "local-operator",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -265,9 +270,9 @@ func seedLocalOperatorSpace(t *testing.T, store runtime.SpaceStore) *runtime.Spa
 
 // startDaemonEngine opens path the way the daemon does, with its cutover
 // host, and runs one Engine.Start.
-func startDaemonEngine(t *testing.T, path string) (*opensealkernel.Engine, *runtime.SQLiteStore) {
+func startDaemonEngine(t *testing.T, path string) (*opensealkernel.Engine, *sqlite.Store) {
 	t.Helper()
-	store, err := runtime.NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,19 +301,19 @@ func startDaemonEngine(t *testing.T, path string) (*opensealkernel.Engine, *runt
 	return engine, store
 }
 
-func builderConversationMessages(t *testing.T, engine *opensealkernel.Engine) []*runtime.ChannelMessage {
+func builderConversationMessages(t *testing.T, engine *opensealkernel.Engine) []*models.ChannelMessage {
 	t.Helper()
 	ctx := context.Background()
-	conversations, err := engine.ListConversations(ctx, runtime.ConversationFilter{Scope: localScope, OriginKind: runtime.ConversationReferenceAgentBuilder})
+	conversations, err := engine.ListConversations(ctx, models.ConversationFilter{Scope: localScope, OriginKind: models.ConversationReferenceAgentBuilder})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var messages []*runtime.ChannelMessage
+	var messages []*models.ChannelMessage
 	for _, conversation := range conversations {
-		if conversation.Owner.ID != runtime.AgentBuilderDeploymentID {
+		if conversation.Owner.ID != conversationrun.AgentBuilderDeploymentID {
 			t.Fatalf("builder conversation %s is owned by %+v", conversation.ID, conversation.Owner)
 		}
-		listed, err := engine.ListChannelMessages(ctx, runtime.ChannelMessageFilter{Scope: localScope, ConversationID: conversation.ID})
+		listed, err := engine.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: localScope, ConversationID: conversation.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -322,7 +327,7 @@ func TestBuilderCutoverHostConvertsAV75DraftAtFirstStart(t *testing.T) {
 
 	engine, store := startDaemonEngine(t, path)
 	// The draft needed the builder, so the host seeded it in full.
-	if _, err := engine.GetAgentDeployment(t.Context(), skill.ScopeReference{Kind: localScope.Kind, ID: localScope.ID}, runtime.AgentBuilderDeploymentID); err != nil {
+	if _, err := engine.GetAgentDeployment(t.Context(), skill.ScopeReference{Kind: localScope.Kind, ID: localScope.ID}, conversationrun.AgentBuilderDeploymentID); err != nil {
 		t.Fatalf("builder after the first start: %v", err)
 	}
 	assertBuilderBindings(t, engine)
@@ -332,7 +337,7 @@ func TestBuilderCutoverHostConvertsAV75DraftAtFirstStart(t *testing.T) {
 	}
 	message := messages[0]
 	if message.Content != "Help me plan trips" || message.BuilderParameters == nil ||
-		message.BuilderParameters.Kind != runtime.AgentBuilderKindAgent || message.BuilderParameters.Name != "Trip planner" ||
+		message.BuilderParameters.Kind != models.AgentBuilderKindAgent || message.BuilderParameters.Name != "Trip planner" ||
 		message.BuilderParameters.Model != "" || message.BuilderParameters.Draft == nil || message.BuilderParameters.Draft.Purpose != "Plans trips" {
 		t.Fatalf("builder message = %#v parameters %#v", message, message.BuilderParameters)
 	}

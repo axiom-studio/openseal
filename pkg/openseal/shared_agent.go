@@ -4,67 +4,67 @@ import (
 	"context"
 	"errors"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // Shared agents: a whitelisted snapshot of an Agent that others add as their
 // own copy. See pkg/runtime/agentbuilder/shared_agent_types.go.
 type (
-	SharedAgentProfile        = runtime.SharedAgentProfile
-	SharedAgentSlot           = runtime.SharedAgentSlot
-	SharedAgentSkill          = runtime.SharedAgentSkill
-	SharedAgentExportSkill    = runtime.SharedAgentExportSkill
-	SharedAgentExcluded       = runtime.SharedAgentExcluded
-	SharedAgentRefusal        = runtime.SharedAgentRefusal
-	SharedAgentExport         = runtime.SharedAgentExport
-	SharedAgentSource         = runtime.SharedAgentSource
-	SharedAgentSpec           = runtime.SharedAgentSpec
-	SharedAgentInstallRequest = runtime.SharedAgentInstallRequest
-	SharedAgentPlannedSkill   = runtime.SharedAgentPlannedSkill
-	SharedAgentPlannedSlot    = runtime.SharedAgentPlannedSlot
-	SharedAgentInstallPlan    = runtime.SharedAgentInstallPlan
-	SharedAgentInstalled      = runtime.SharedAgentInstalled
-	SharedAgentUpdateRequest  = runtime.SharedAgentUpdateRequest
-	SharedAgentChange         = runtime.SharedAgentChange
-	SharedAgentRiskChange     = runtime.SharedAgentRiskChange
-	SharedAgentUpdatePreview  = runtime.SharedAgentUpdatePreview
-	SharedAgentUpdated        = runtime.SharedAgentUpdated
+	SharedAgentProfile        = agentbuilder.SharedAgentProfile
+	SharedAgentSlot           = agentbuilder.SharedAgentSlot
+	SharedAgentSkill          = agentbuilder.SharedAgentSkill
+	SharedAgentExportSkill    = agentbuilder.SharedAgentExportSkill
+	SharedAgentExcluded       = agentbuilder.SharedAgentExcluded
+	SharedAgentRefusal        = agentbuilder.SharedAgentRefusal
+	SharedAgentExport         = agentbuilder.SharedAgentExport
+	SharedAgentSource         = agentbuilder.SharedAgentSource
+	SharedAgentSpec           = agentbuilder.SharedAgentSpec
+	SharedAgentInstallRequest = agentbuilder.SharedAgentInstallRequest
+	SharedAgentPlannedSkill   = agentbuilder.SharedAgentPlannedSkill
+	SharedAgentPlannedSlot    = agentbuilder.SharedAgentPlannedSlot
+	SharedAgentInstallPlan    = agentbuilder.SharedAgentInstallPlan
+	SharedAgentInstalled      = agentbuilder.SharedAgentInstalled
+	SharedAgentUpdateRequest  = agentbuilder.SharedAgentUpdateRequest
+	SharedAgentChange         = agentbuilder.SharedAgentChange
+	SharedAgentRiskChange     = agentbuilder.SharedAgentRiskChange
+	SharedAgentUpdatePreview  = agentbuilder.SharedAgentUpdatePreview
+	SharedAgentUpdated        = agentbuilder.SharedAgentUpdated
 
-	SharedAgentSkillUnavailableError = runtime.SharedAgentSkillUnavailableError
+	SharedAgentSkillUnavailableError = agentbuilder.SharedAgentSkillUnavailableError
 )
 
 const (
-	SharedAgentProvenanceSource       = runtime.SharedAgentProvenanceSource
-	SharedAgentRefusalVaultCredential = runtime.SharedAgentRefusalVaultCredential
-	SharedAgentRefusalChannelAdapter  = runtime.SharedAgentRefusalChannelAdapter
-	SharedAgentRefusalNotInCatalog    = runtime.SharedAgentRefusalNotInCatalog
-	SharedAgentSkillUnavailable       = runtime.SharedAgentSkillUnavailable
-	SharedAgentChangeProfile          = runtime.SharedAgentChangeProfile
-	SharedAgentChangeSkillAdded       = runtime.SharedAgentChangeSkillAdded
-	SharedAgentChangeSkillRemoved     = runtime.SharedAgentChangeSkillRemoved
-	SharedAgentChangeSkillChanged     = runtime.SharedAgentChangeSkillChanged
-	SharedAgentFieldName              = runtime.SharedAgentFieldName
-	SharedAgentFieldPurpose           = runtime.SharedAgentFieldPurpose
-	SharedAgentFieldInstructions      = runtime.SharedAgentFieldInstructions
-	SharedAgentFieldPersonality       = runtime.SharedAgentFieldPersonality
-	SharedAgentFieldPrinciples        = runtime.SharedAgentFieldPrinciples
-	SharedAgentFieldSkills            = runtime.SharedAgentFieldSkills
+	SharedAgentProvenanceSource       = agentbuilder.SharedAgentProvenanceSource
+	SharedAgentRefusalVaultCredential = agentbuilder.SharedAgentRefusalVaultCredential
+	SharedAgentRefusalChannelAdapter  = agentbuilder.SharedAgentRefusalChannelAdapter
+	SharedAgentRefusalNotInCatalog    = agentbuilder.SharedAgentRefusalNotInCatalog
+	SharedAgentSkillUnavailable       = agentbuilder.SharedAgentSkillUnavailable
+	SharedAgentChangeProfile          = agentbuilder.SharedAgentChangeProfile
+	SharedAgentChangeSkillAdded       = agentbuilder.SharedAgentChangeSkillAdded
+	SharedAgentChangeSkillRemoved     = agentbuilder.SharedAgentChangeSkillRemoved
+	SharedAgentChangeSkillChanged     = agentbuilder.SharedAgentChangeSkillChanged
+	SharedAgentFieldName              = agentbuilder.SharedAgentFieldName
+	SharedAgentFieldPurpose           = agentbuilder.SharedAgentFieldPurpose
+	SharedAgentFieldInstructions      = agentbuilder.SharedAgentFieldInstructions
+	SharedAgentFieldPersonality       = agentbuilder.SharedAgentFieldPersonality
+	SharedAgentFieldPrinciples        = agentbuilder.SharedAgentFieldPrinciples
+	SharedAgentFieldSkills            = agentbuilder.SharedAgentFieldSkills
 )
 
 var (
-	ErrAgentNameTaken           = runtime.ErrAgentNameTaken
-	ErrSharedAgentReviewChanged = runtime.ErrSharedAgentReviewChanged
-	ErrSharedAgentNotShareable  = runtime.ErrSharedAgentNotShareable
-	ErrSharedAgentIsCopy        = runtime.ErrSharedAgentIsCopy
-	ErrSharedAgentNotCopy       = runtime.ErrSharedAgentNotCopy
+	ErrAgentNameTaken           = agentbuilder.ErrAgentNameTaken
+	ErrSharedAgentReviewChanged = agentbuilder.ErrSharedAgentReviewChanged
+	ErrSharedAgentNotShareable  = agentbuilder.ErrSharedAgentNotShareable
+	ErrSharedAgentIsCopy        = agentbuilder.ErrSharedAgentIsCopy
+	ErrSharedAgentNotCopy       = agentbuilder.ErrSharedAgentNotCopy
 
-	ErrSharedAgentSkillUnavailable = runtime.ErrSharedAgentSkillUnavailable
+	ErrSharedAgentSkillUnavailable = agentbuilder.ErrSharedAgentSkillUnavailable
 )
 
 var errSharedAgentsUnavailable = errors.New("shared agents need the agent builder actions")
 
-func (e *Engine) sharedAgentInstaller() (*runtime.AgentInstaller, error) {
+func (e *Engine) sharedAgentInstaller() (*agentbuilder.AgentInstaller, error) {
 	if e == nil || e.agentInstaller == nil {
 		return nil, errSharedAgentsUnavailable
 	}

@@ -7,17 +7,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-func waitingCredentialRequestFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *Engine, *runtime.AgentRun, *CredentialRequest) {
+func waitingCredentialRequestFixture(t *testing.T) (context.Context, *sqlite.Store, *Engine, *models.AgentRun, *CredentialRequest) {
 	t.Helper()
 	ctx, store, e, run, request := runningCredentialRequestFixture(t)
-	waiting, _, err := runtime.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, runtime.RunTransitionRequest{
-		ExpectedRevision: run.Revision, LeaseOwner: "worker", Status: runtime.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
-		Actor:         runtime.ActivityActor{Type: "worker", ID: "worker"},
-		WakeCondition: &runtime.WakeCondition{Type: CredentialRequestWakeType, Reference: request.ID},
+	waiting, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, LeaseOwner: "worker", Status: models.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
+		Actor:         models.ActivityActor{Type: "worker", ID: "worker"},
+		WakeCondition: &models.WakeCondition{Type: CredentialRequestWakeType, Reference: request.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -27,7 +30,7 @@ func waitingCredentialRequestFixture(t *testing.T) (context.Context, *runtime.SQ
 
 // runningCredentialRequestFixture is a Run claimed by "worker" whose step
 // opened a credential card and has not parked yet.
-func runningCredentialRequestFixture(t *testing.T) (context.Context, *runtime.SQLiteStore, *Engine, *runtime.AgentRun, *CredentialRequest) {
+func runningCredentialRequestFixture(t *testing.T) (context.Context, *sqlite.Store, *Engine, *models.AgentRun, *CredentialRequest) {
 	t.Helper()
 	ctx := context.Background()
 	store := runtimetest.NewKernelStore(t)
@@ -37,8 +40,8 @@ func runningCredentialRequestFixture(t *testing.T) (context.Context, *runtime.SQ
 	}
 	t.Cleanup(func() { e.Close() })
 	scope := Scope{Kind: "tenant", ID: "one"}
-	run, err := runtime.NewPortfolioService(store).CreateAgentRun(ctx, runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindConversation,
-		Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "Order a cable", Source: runtime.RunSourceChat,
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Kind: models.RunKindConversation,
+		Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "Order a cable", Source: models.RunSourceChat,
 		Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}})
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +53,7 @@ func runningCredentialRequestFixture(t *testing.T) (context.Context, *runtime.SQ
 	if err := store.SaveCredentialRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
 	}
-	run, err = store.ClaimNextAgentRun(ctx, runtime.AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	run, err = store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || run == nil {
 		t.Fatal(err)
 	}
@@ -73,7 +76,7 @@ func TestSavedCredentialResumesTheWaitingRunWithGuidance(t *testing.T) {
 		t.Fatalf("resolution: %#v %v", result, err)
 	}
 	resumed, err := store.GetAgentRun(ctx, run.Scope, run.ID)
-	if err != nil || resumed.Status != runtime.AgentRunStatusQueued || resumed.WakeCondition != nil || len(resumed.PendingInterventions) != 1 {
+	if err != nil || resumed.Status != models.AgentRunStatusQueued || resumed.WakeCondition != nil || len(resumed.PendingInterventions) != 1 {
 		t.Fatalf("run not resumed: %#v %v", resumed, err)
 	}
 	if instruction := resumed.PendingInterventions[0].Instruction; instruction == "" || !contains(instruction, "live-browser-sign-in") {
@@ -94,9 +97,9 @@ func TestSavedCredentialResumesTheWaitingRunWithGuidance(t *testing.T) {
 
 func TestCredentialRequestForAnEndedRunAsksTheHostToReply(t *testing.T) {
 	ctx, store, e, run, request := waitingCredentialRequestFixture(t)
-	if _, _, err := runtime.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, runtime.RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: runtime.AgentRunStatusCanceled, EventType: "run.canceled", Summary: "Canceled",
-		Actor: runtime.ActivityActor{Type: "user", ID: "5"},
+	if _, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusCanceled, EventType: "run.canceled", Summary: "Canceled",
+		Actor: models.ActivityActor{Type: "user", ID: "5"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -108,10 +111,10 @@ func TestCredentialRequestForAnEndedRunAsksTheHostToReply(t *testing.T) {
 
 func TestInteractionSettleCarriesActionCallID(t *testing.T) {
 	resolver := InteractionResolver{UserID: "5", CanManage: true}
-	assertCarried := func(t *testing.T, store *runtime.SQLiteStore, run *runtime.AgentRun, prefix string) {
+	assertCarried := func(t *testing.T, store *sqlite.Store, run *models.AgentRun, prefix string) {
 		t.Helper()
 		resumed, err := store.GetAgentRun(context.Background(), run.Scope, run.ID)
-		if err != nil || resumed.Status != runtime.AgentRunStatusQueued || len(resumed.PendingInterventions) != 1 {
+		if err != nil || resumed.Status != models.AgentRunStatusQueued || len(resumed.PendingInterventions) != 1 {
 			t.Fatalf("run not resumed: %#v %v", resumed, err)
 		}
 		intervention := resumed.PendingInterventions[0]
@@ -137,12 +140,12 @@ func TestInteractionSettleCarriesActionCallID(t *testing.T) {
 	t.Run("connect account", func(t *testing.T) {
 		ctx, store, e, running, _ := runningCredentialRequestFixture(t)
 		now := time.Now().UTC()
-		request := &runtime.SkillSetupRequest{ID: "connect-account:call", Scope: running.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent",
-			ConversationID: "chat", TriggerMessageID: "message", RunID: running.ID, ActionCallID: "call", Kind: runtime.SkillSetupKindConnectAccount,
+		request := &models.SkillSetupRequest{ID: "connect-account:call", Scope: running.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent",
+			ConversationID: "chat", TriggerMessageID: "message", RunID: running.ID, ActionCallID: "call", Kind: models.SkillSetupKindConnectAccount,
 			SkillName: "Gmail", Reason: "Sign in to Gmail", Status: "resolved", Revision: 2, CreatedAt: now, UpdatedAt: now}
-		run, _, err := runtime.NewRunActivityService(store, store).TransitionRun(ctx, running.Scope, running.ID, runtime.RunTransitionRequest{
-			ExpectedRevision: running.Revision, LeaseOwner: "worker", Status: runtime.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
-			Actor: runtime.ActivityActor{Type: "worker", ID: "worker"}, WakeCondition: &runtime.WakeCondition{Type: runtime.ConnectAccountWakeType, Reference: request.ID},
+		run, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, running.Scope, running.ID, activity.RunTransitionRequest{
+			ExpectedRevision: running.Revision, LeaseOwner: "worker", Status: models.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
+			Actor: models.ActivityActor{Type: "worker", ID: "worker"}, WakeCondition: &models.WakeCondition{Type: models.ConnectAccountWakeType, Reference: request.ID},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -167,16 +170,16 @@ func TestCardSettleWhileRunningBumpsRevision(t *testing.T) {
 	}
 	// The step still holds the Run: status and lease stay, the revision
 	// moves so the step-end park CAS fails and re-plans.
-	if held.Status != runtime.AgentRunStatusRunning || held.LeaseOwner != "worker" || held.Revision != run.Revision+1 {
+	if held.Status != models.AgentRunStatusRunning || held.LeaseOwner != "worker" || held.Revision != run.Revision+1 {
 		t.Fatalf("held run: status %s lease %q revision %d (was %d)", held.Status, held.LeaseOwner, held.Revision, run.Revision)
 	}
 	if len(held.PendingInterventions) != 1 || held.PendingInterventions[0].ActionCallID != "call" {
 		t.Fatalf("settled result: %#v", held.PendingInterventions)
 	}
-	if _, _, err := runtime.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, runtime.RunTransitionRequest{
-		ExpectedRevision: run.Revision, LeaseOwner: "worker", Status: runtime.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
-		Actor: runtime.ActivityActor{Type: "worker", ID: "worker"}, WakeCondition: &runtime.WakeCondition{Type: CredentialRequestWakeType, Reference: request.ID},
-	}); !errors.Is(err, runtime.ErrRevisionConflict) {
+	if _, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, LeaseOwner: "worker", Status: models.AgentRunStatusWaitingForEvent, EventType: "run.waiting", Summary: "Waiting",
+		Actor: models.ActivityActor{Type: "worker", ID: "worker"}, WakeCondition: &models.WakeCondition{Type: CredentialRequestWakeType, Reference: request.ID},
+	}); !errors.Is(err, models.ErrRevisionConflict) {
 		t.Fatalf("stale park on a settled card: %v", err)
 	}
 	// A repeated confirmation neither appends the result again nor bumps.

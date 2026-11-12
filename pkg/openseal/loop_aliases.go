@@ -1,93 +1,98 @@
 package openseal
 
-import "github.com/axiom-studio/openseal/pkg/runtime"
+import (
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
+)
 
 // Run loop types: the step host contract (one model step, one host tool), the
 // step producer contract the model loop and deterministic runners implement,
 // and the typed failure a Run ends with.
 type (
-	StepHost               = runtime.StepHost
-	ModelStepRequest       = runtime.ModelStepRequest
-	ModelStepResult        = runtime.ModelStepResult
-	ModelStepPurpose       = runtime.ModelStepPurpose
-	ModelStepSystem        = runtime.ModelStepSystem
-	ModelStepSystemSection = runtime.ModelStepSystemSection
-	ModelStepTool          = runtime.ModelStepTool
-	ModelStepToolGroup     = runtime.ModelStepToolGroup
-	ModelStepStream        = runtime.ModelStepStream
-	ModelStepModelInfo     = runtime.ModelStepModelInfo
-	ModelStepRenderInfo    = runtime.ModelStepRenderInfo
-	ModelStepUsage         = runtime.ModelStepUsage
-	ModelStepProvider      = runtime.ModelStepProvider
-	ModelStopReason        = runtime.ModelStopReason
-	ModelToolCall          = runtime.ModelToolCall
-	SessionEntryView       = runtime.SessionEntryView
-	UserEntryView          = runtime.UserEntryView
-	ToolEntryView          = runtime.ToolEntryView
-	ToolResultView         = runtime.ToolResultView
-	CompactionEntryView    = runtime.CompactionEntryView
-	NoteEntryView          = runtime.NoteEntryView
-	EntryAuthor            = runtime.EntryAuthor
+	StepHost               = agentrun.StepHost
+	ModelStepRequest       = models.ModelStepRequest
+	ModelStepResult        = models.ModelStepResult
+	ModelStepPurpose       = models.ModelStepPurpose
+	ModelStepSystem        = models.ModelStepSystem
+	ModelStepSystemSection = models.ModelStepSystemSection
+	ModelStepTool          = models.ModelStepTool
+	ModelStepToolGroup     = models.ModelStepToolGroup
+	ModelStepStream        = models.ModelStepStream
+	ModelStepModelInfo     = models.ModelStepModelInfo
+	ModelStepRenderInfo    = models.ModelStepRenderInfo
+	ModelStepUsage         = models.ModelStepUsage
+	ModelStepProvider      = models.ModelStepProvider
+	ModelStopReason        = models.ModelStopReason
+	ModelToolCall          = models.ModelToolCall
+	SessionEntryView       = models.SessionEntryView
+	UserEntryView          = models.UserEntryView
+	ToolEntryView          = models.ToolEntryView
+	ToolResultView         = models.ToolResultView
+	CompactionEntryView    = models.CompactionEntryView
+	NoteEntryView          = models.NoteEntryView
+	EntryAuthor            = models.EntryAuthor
 
-	StepProducer      = runtime.StepProducer
-	StepBudgetPlanner = runtime.StepBudgetPlanner
-	StepInput         = runtime.StepInput
-	StepMode          = runtime.StepMode
-	StepOutput        = runtime.StepOutput
-	LoopToolCall      = runtime.LoopToolCall
-	ToolCallDirective = runtime.ToolCallDirective
-	LoopToolResult    = runtime.LoopToolResult
-	LoopFinal         = runtime.LoopFinal
-	LoopPark          = runtime.LoopPark
-	LoopFailure       = runtime.LoopFailure
-	ModelStepProducer = runtime.ModelStepProducer
-	ModelStepPreparer = runtime.ModelStepPreparer
-	ModelStepMedia    = runtime.ModelStepMedia
+	StepProducer      = agentrun.StepProducer
+	StepBudgetPlanner = modelstep.StepBudgetPlanner
+	StepInput         = agentrun.StepInput
+	StepMode          = agentrun.StepMode
+	StepOutput        = agentrun.StepOutput
+	LoopToolCall      = agentrun.LoopToolCall
+	ToolCallDirective = agentrun.ToolCallDirective
+	LoopToolResult    = modelstep.LoopToolResult
+	LoopFinal         = agentrun.LoopFinal
+	LoopPark          = agentrun.LoopPark
+	LoopFailure       = agentrun.LoopFailure
+	ModelStepProducer = modelstep.ModelStepProducer
+	ModelStepPreparer = agentrun.ModelStepPreparer
+	ModelStepMedia    = modelstep.ModelStepMedia
 
-	RunFailureExplanation = runtime.RunFailureExplanation
+	RunFailureExplanation = models.RunFailureExplanation
 )
 
 const (
-	ModelStepAPIVersion = runtime.ModelStepAPIVersion
+	ModelStepAPIVersion = models.ModelStepAPIVersion
 
-	ModelStepPurposeStep            = runtime.ModelStepPurposeStep
-	ModelStepPurposeSummary         = runtime.ModelStepPurposeSummary
-	ModelStepPurposeExplanation     = runtime.ModelStepPurposeExplanation
-	ModelStepPurposeAcknowledgement = runtime.ModelStepPurposeAcknowledgement
+	ModelStepPurposeStep            = models.ModelStepPurposeStep
+	ModelStepPurposeSummary         = models.ModelStepPurposeSummary
+	ModelStepPurposeExplanation     = models.ModelStepPurposeExplanation
+	ModelStepPurposeAcknowledgement = models.ModelStepPurposeAcknowledgement
 
-	ModelStepToolHarness = runtime.ModelStepToolHarness
-	ModelStepToolCore    = runtime.ModelStepToolCore
-	ModelStepToolLoaded  = runtime.ModelStepToolLoaded
+	ModelStepToolHarness = models.ModelStepToolHarness
+	ModelStepToolCore    = models.ModelStepToolCore
+	ModelStepToolLoaded  = models.ModelStepToolLoaded
 
-	ModelStepProviderAnthropic = runtime.ModelStepProviderAnthropic
-	ModelStepProviderResponses = runtime.ModelStepProviderResponses
-	ModelStepProviderChat      = runtime.ModelStepProviderChat
+	ModelStepProviderAnthropic = models.ModelStepProviderAnthropic
+	ModelStepProviderResponses = models.ModelStepProviderResponses
+	ModelStepProviderChat      = models.ModelStepProviderChat
 
-	ModelStopToolCalls = runtime.ModelStopToolCalls
-	ModelStopEnd       = runtime.ModelStopEnd
-	ModelStopRefusal   = runtime.ModelStopRefusal
-	ModelStopMaxTokens = runtime.ModelStopMaxTokens
+	ModelStopToolCalls = models.ModelStopToolCalls
+	ModelStopEnd       = models.ModelStopEnd
+	ModelStopRefusal   = models.ModelStopRefusal
+	ModelStopMaxTokens = models.ModelStopMaxTokens
 
-	StepModeNormal         = runtime.StepModeNormal
-	StepModeExplainFailure = runtime.StepModeExplainFailure
+	StepModeNormal         = agentrun.StepModeNormal
+	StepModeExplainFailure = agentrun.StepModeExplainFailure
 
-	StepFailureHostUnavailable   = runtime.StepFailureHostUnavailable
-	StepFailureHostConfiguration = runtime.StepFailureHostConfiguration
-	StepFailureContextExceeded   = runtime.StepFailureContextExceeded
-	StepFailureProducerFailed    = runtime.StepFailureProducerFailed
-	StepFailurePreparationFailed = runtime.StepFailurePreparationFailed
+	StepFailureHostUnavailable   = runloop.StepFailureHostUnavailable
+	StepFailureHostConfiguration = runloop.StepFailureHostConfiguration
+	StepFailureContextExceeded   = runloop.StepFailureContextExceeded
+	StepFailureProducerFailed    = runloop.StepFailureProducerFailed
+	StepFailurePreparationFailed = runloop.StepFailurePreparationFailed
 
-	StepHostFailureUnreachable    = runtime.StepHostFailureUnreachable
-	StepHostFailureConnectionLost = runtime.StepHostFailureConnectionLost
-	StepHostFailureDraining       = runtime.StepHostFailureDraining
-	StepHostFailureProtocol       = runtime.StepHostFailureProtocol
-	StepHostFailureAccessDenied   = runtime.StepHostFailureAccessDenied
+	StepHostFailureUnreachable    = modelstep.StepHostFailureUnreachable
+	StepHostFailureConnectionLost = modelstep.StepHostFailureConnectionLost
+	StepHostFailureDraining       = modelstep.StepHostFailureDraining
+	StepHostFailureProtocol       = modelstep.StepHostFailureProtocol
+	StepHostFailureAccessDenied   = modelstep.StepHostFailureAccessDenied
 )
 
 var (
-	ErrInvalidModelStepRequest = runtime.ErrInvalidModelStepRequest
-	ErrInvalidStepOutput       = runtime.ErrInvalidStepOutput
+	ErrInvalidModelStepRequest = models.ErrInvalidModelStepRequest
+	ErrInvalidStepOutput       = agentrun.ErrInvalidStepOutput
 
-	NewModelStepProducer    = runtime.NewModelStepProducer
-	ValidateModelStepResult = runtime.ValidateModelStepResult
+	NewModelStepProducer    = modelstep.NewModelStepProducer
+	ValidateModelStepResult = modelstep.ValidateModelStepResult
 )

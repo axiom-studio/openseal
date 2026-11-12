@@ -11,7 +11,9 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"gopkg.in/yaml.v3"
 )
 
@@ -45,13 +47,13 @@ type StandaloneAuthoringContext struct {
 }
 
 type StandaloneCredential struct {
-	Scope       runtime.Scope `yaml:"scope"`
-	Kind        string        `yaml:"kind"`
-	ID          string        `yaml:"id"`
-	DisplayName string        `yaml:"displayName"`
-	BindingKeys []string      `yaml:"bindingKeys,omitempty"`
-	Env         string        `yaml:"env,omitempty"`
-	File        string        `yaml:"file,omitempty"`
+	Scope       models.Scope `yaml:"scope"`
+	Kind        string       `yaml:"kind"`
+	ID          string       `yaml:"id"`
+	DisplayName string       `yaml:"displayName"`
+	BindingKeys []string     `yaml:"bindingKeys,omitempty"`
+	Env         string       `yaml:"env,omitempty"`
+	File        string       `yaml:"file,omitempty"`
 }
 
 // LoadStandaloneContext loads an optional local context file. A missing file
@@ -137,7 +139,7 @@ func (c *StandaloneContext) Validate() error {
 	return nil
 }
 
-func (c *StandaloneContext) ResolveCredentials(_ context.Context, request runtime.CredentialResolutionRequest) (map[string]string, error) {
+func (c *StandaloneContext) ResolveCredentials(_ context.Context, request action.CredentialResolutionRequest) (map[string]string, error) {
 	result := make(map[string]string, len(request.References))
 	for name, reference := range request.References {
 		value, err := c.ResolveReference(request.Scope, reference)
@@ -149,7 +151,7 @@ func (c *StandaloneContext) ResolveCredentials(_ context.Context, request runtim
 	return result, nil
 }
 
-func (c *StandaloneContext) ResolveReference(scope runtime.Scope, reference capability.CredentialReference) (string, error) {
+func (c *StandaloneContext) ResolveReference(scope models.Scope, reference capability.CredentialReference) (string, error) {
 	if c == nil {
 		return "", errors.New("standalone context is unavailable")
 	}
@@ -185,7 +187,7 @@ func (c *StandaloneContext) ResolveReference(scope runtime.Scope, reference capa
 	return value, nil
 }
 
-func (c *StandaloneContext) CredentialChoices(scope runtime.Scope) []capability.CredentialBindingChoice {
+func (c *StandaloneContext) CredentialChoices(scope models.Scope) []capability.CredentialBindingChoice {
 	if c == nil {
 		return nil
 	}
@@ -206,12 +208,12 @@ func (c *StandaloneContext) CredentialChoices(scope runtime.Scope) []capability.
 	return result
 }
 
-func (c *StandaloneContext) ListWorkerScopes(context.Context) ([]runtime.Scope, error) {
-	seen := map[string]runtime.Scope{}
+func (c *StandaloneContext) ListWorkerScopes(context.Context) ([]models.Scope, error) {
+	seen := map[string]models.Scope{}
 	for _, entry := range c.entries {
 		seen[workerScopeKey(entry.Scope)] = entry.Scope
 	}
-	result := make([]runtime.Scope, 0, len(seen))
+	result := make([]models.Scope, 0, len(seen))
 	for _, scope := range seen {
 		result = append(result, scope)
 	}
@@ -221,7 +223,7 @@ func (c *StandaloneContext) ListWorkerScopes(context.Context) ([]runtime.Scope, 
 	return result, nil
 }
 
-func standaloneCredentialKey(scope runtime.Scope, reference capability.CredentialReference) string {
+func standaloneCredentialKey(scope models.Scope, reference capability.CredentialReference) string {
 	return workerScopeKey(scope) + "\x00" + strings.TrimSpace(reference.Kind) + "\x00" + strings.TrimSpace(reference.ID)
 }
 
@@ -239,8 +241,8 @@ func normalizedContextStrings(values []string) []string {
 	return result
 }
 
-var _ runtime.CredentialResolver = (*StandaloneContext)(nil)
-var _ runtime.WorkerScopeSource = (*StandaloneContext)(nil)
+var _ action.CredentialResolver = (*StandaloneContext)(nil)
+var _ workqueue.WorkerScopeSource = (*StandaloneContext)(nil)
 
 // ContextTokens is the model context window of the desktop provider: the
 // authoring block's contextTokens when that block is set, else env (the
@@ -261,6 +263,6 @@ func (c *StandaloneContext) ContextTokens(env string) (int64, error) {
 	return tokens, nil
 }
 
-func workerScopeKey(scope runtime.Scope) string {
+func workerScopeKey(scope models.Scope) string {
 	return strings.TrimSpace(scope.Kind) + "\x00" + strings.TrimSpace(scope.ID)
 }

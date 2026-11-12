@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 // Conversations finds the chats an Agent's other chats' files belong to.
 type Conversations interface {
-	GetConversation(context.Context, runtime.Scope, string) (*runtime.Conversation, error)
-	ListConversations(context.Context, runtime.ConversationFilter) ([]*runtime.Conversation, error)
+	GetConversation(context.Context, models.Scope, string) (*models.Conversation, error)
+	ListConversations(context.Context, models.ConversationFilter) ([]*models.Conversation, error)
 }
 
 const (
@@ -47,7 +47,7 @@ func (s *Store) otherChat(ctx context.Context, from Chat, conversationID string)
 // latest is a chat's latest tree without bringing in an older chat's files,
 // which list_chats would otherwise do for every chat it looks at.
 func (s *Store) latest(ctx context.Context, chat Chat) (Tree, bool) {
-	artifacts, err := s.Artifacts.ListArtifacts(ctx, runtime.ArtifactFilter{Scope: chat.Scope, ID: ArtifactID(chat.ConversationID), LatestOnly: true, Limit: 1})
+	artifacts, err := s.Artifacts.ListArtifacts(ctx, models.ArtifactFilter{Scope: chat.Scope, ID: ArtifactID(chat.ConversationID), LatestOnly: true, Limit: 1})
 	if err != nil || len(artifacts) == 0 || artifacts[0] == nil {
 		return Tree{}, false
 	}
@@ -63,7 +63,7 @@ func (s *Store) listChats(ctx context.Context, from Chat, args map[string]interf
 		return nil, errors.New("other chats are unavailable")
 	}
 	owner := from.Owner
-	conversations, err := s.Conversations.ListConversations(ctx, runtime.ConversationFilter{Scope: from.Scope, Owner: &owner, Limit: listedChats})
+	conversations, err := s.Conversations.ListConversations(ctx, models.ConversationFilter{Scope: from.Scope, Owner: &owner, Limit: listedChats})
 	if err != nil {
 		return nil, fmt.Errorf("list chats: %w", err)
 	}

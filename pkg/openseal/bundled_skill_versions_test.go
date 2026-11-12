@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -21,12 +23,12 @@ func TestBundledSkillVersionsForAgentBuilder(t *testing.T) {
 		version    string
 		actions    []string
 	}{
-		{runtime.AgentManagementSkill(), AgentManagementSkillVersion, "1.6.0",
+		{models.AgentManagementSkill(), AgentManagementSkillVersion, "1.6.0",
 			[]string{AgentActionAmendBehavior, AgentActionListChannels, AgentActionConfigureChannel,
-				runtime.AgentActionListAgents, runtime.AgentActionCreateAgent, runtime.AgentActionUpdateAgent, runtime.AgentActionTryAgent}},
-		{runtime.TeamManagementSkill(), TeamManagementSkillVersion, "2.2.0",
+				models.AgentActionListAgents, models.AgentActionCreateAgent, models.AgentActionUpdateAgent, models.AgentActionTryAgent}},
+		{collaboration.TeamManagementSkill(), TeamManagementSkillVersion, "2.2.0",
 			[]string{TeamActionUpdateMember, TeamActionUpdateProfile, TeamActionCreateTeam}},
-		{runtime.SkillManagementSkill(), SkillManagementSkillVersion, "1.7.0",
+		{skillbinding.SkillManagementSkill(), SkillManagementSkillVersion, "1.7.0",
 			[]string{SkillActionDiscover, SkillActionUpsertBinding, SkillActionDisableBinding, SkillActionRequestSetup, SkillActionRequestConnection}},
 	} {
 		if tc.definition.Version != tc.version || tc.alias != tc.version {
@@ -39,21 +41,21 @@ func TestBundledSkillVersionsForAgentBuilder(t *testing.T) {
 		}
 	}
 
-	skills := runtime.SkillManagementSkill()
+	skills := skillbinding.SkillManagementSkill()
 	for _, name := range []string{SkillActionDiscover, SkillActionUpsertBinding, SkillActionDisableBinding, SkillActionRequestSetup, SkillActionRequestConnection} {
 		properties, _ := skills.Actions[name].InputSchema["properties"].(map[string]interface{})
-		if _, ok := properties[runtime.SkillActionTargetAgentArgument]; !ok {
-			t.Fatalf("%s@%s %s has no %s", skills.ID, skills.Version, name, runtime.SkillActionTargetAgentArgument)
+		if _, ok := properties[skillbinding.SkillActionTargetAgentArgument]; !ok {
+			t.Fatalf("%s@%s %s has no %s", skills.ID, skills.Version, name, skillbinding.SkillActionTargetAgentArgument)
 		}
 	}
 
 	if !IsSupportedAgentManagementSkillVersion("1.4.0") || !IsSupportedAgentManagementSkillVersion("1.5.0") || !IsSupportedAgentManagementSkillVersion("1.6.0") {
 		t.Fatal("openseal.agents 1.4.0, 1.5.0 and 1.6.0 must all run")
 	}
-	if !runtime.IsSupportedTeamManagementSkillVersion("2.0.0") || !runtime.IsSupportedTeamManagementSkillVersion("2.1.0") || !runtime.IsSupportedTeamManagementSkillVersion("2.2.0") {
+	if !collaboration.IsSupportedTeamManagementSkillVersion("2.0.0") || !collaboration.IsSupportedTeamManagementSkillVersion("2.1.0") || !collaboration.IsSupportedTeamManagementSkillVersion("2.2.0") {
 		t.Fatal("openseal.teams 2.0.0, 2.1.0 and 2.2.0 must all run")
 	}
-	if IsSupportedAgentManagementSkillVersion("1.7.0") || runtime.IsSupportedTeamManagementSkillVersion("2.3.0") {
+	if IsSupportedAgentManagementSkillVersion("1.7.0") || collaboration.IsSupportedTeamManagementSkillVersion("2.3.0") {
 		t.Fatal("an unreleased version must not be supported")
 	}
 }
@@ -62,7 +64,7 @@ func TestBundledSkillVersionsForAgentBuilder(t *testing.T) {
 // A published definition never changes under its version: any edit needs a
 // new version, or hosts refuse to register it.
 func TestBundledAgentManagementSkill160IsFrozen(t *testing.T) {
-	definition := runtime.AgentManagementSkill()
+	definition := models.AgentManagementSkill()
 	if definition.Version != "1.6.0" {
 		t.Fatalf("version = %s", definition.Version)
 	}

@@ -6,14 +6,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	home := seedSpace(t, store, runtime.Scope{Kind: "tenant", ID: "one"}, localOperatorID)
+	home := seedSpace(t, store, models.Scope{Kind: "tenant", ID: "one"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
 	createBody := `{
 		"scope":{"kind":"tenant","id":"one"},
@@ -24,7 +26,7 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, body = %s", created.Code, created.Body.String())
 	}
-	var conversation runtime.Conversation
+	var conversation models.Conversation
 	if err := json.NewDecoder(created.Body).Decode(&conversation); err != nil {
 		t.Fatal(err)
 	}
@@ -56,16 +58,16 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	if questionResponse.Code != http.StatusCreated {
 		t.Fatalf("question status = %d, body = %s", questionResponse.Code, questionResponse.Body.String())
 	}
-	var question runtime.ChannelMessageCommitResult
+	var question models.ChannelMessageCommitResult
 	if err := json.NewDecoder(questionResponse.Body).Decode(&question); err != nil {
 		t.Fatal(err)
 	}
-	round, err := runtime.NewConversationService(store).CommitConversationRouting(t.Context(), runtime.CommitConversationRoutingRequest{
-		Scope: runtime.Scope{Kind: "tenant", ID: "one"}, ConversationID: conversation.ID, ExpectedRevision: 2,
+	round, err := runtimeconversation.NewConversationService(store).CommitConversationRouting(t.Context(), runtimeconversation.CommitConversationRoutingRequest{
+		Scope: models.Scope{Kind: "tenant", ID: "one"}, ConversationID: conversation.ID, ExpectedRevision: 2,
 		TriggerMessageID: question.Message.ID, IdempotencyKey: "round-v1",
-		Responders: []runtime.ConversationResponder{{
-			Participant: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "developer"},
-			Addressed:   runtime.ConversationAddressedRouted, Reason: "owns the release",
+		Responders: []models.ConversationResponder{{
+			Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "developer"},
+			Addressed:   models.ConversationAddressedRouted, Reason: "owns the release",
 		}},
 	})
 	if err != nil {
@@ -100,7 +102,7 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	if changesResponse.Code != http.StatusOK {
 		t.Fatalf("changes status = %d, body = %s", changesResponse.Code, changesResponse.Body.String())
 	}
-	var changes runtime.ConversationChangeSet
+	var changes runtimeconversation.ConversationChangeSet
 	if err := json.NewDecoder(changesResponse.Body).Decode(&changes); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +128,7 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	if presence.Code != http.StatusOK {
 		t.Fatalf("presence status = %d, body = %s", presence.Code, presence.Body.String())
 	}
-	var lease runtime.ConversationPresence
+	var lease models.ConversationPresence
 	if err := json.NewDecoder(presence.Body).Decode(&lease); err != nil {
 		t.Fatal(err)
 	}
@@ -162,9 +164,9 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 
 func TestDesktopChannelAuthorshipAndHistoryWindow(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	seedSpace(t, store, runtime.Scope{Kind: "local", ID: "default"}, localOperatorID)
+	seedSpace(t, store, models.Scope{Kind: "local", ID: "default"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
-	server.SetDesktopConversationScope(runtime.Scope{Kind: "local", ID: "default"})
+	server.SetDesktopConversationScope(models.Scope{Kind: "local", ID: "default"})
 	body := `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"Evidence"}`
 	foreign := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations", strings.Replace(body, `"default"`, `"other"`, 1), "foreign")
 	if foreign.Code != http.StatusForbidden {
@@ -174,7 +176,7 @@ func TestDesktopChannelAuthorshipAndHistoryWindow(t *testing.T) {
 	if created.Code != http.StatusCreated {
 		t.Fatal(created.Body.String())
 	}
-	var conversation runtime.Conversation
+	var conversation models.Conversation
 	if err := json.NewDecoder(created.Body).Decode(&conversation); err != nil {
 		t.Fatal(err)
 	}
@@ -213,11 +215,11 @@ func TestDesktopChannelAuthorshipAndHistoryWindow(t *testing.T) {
 
 func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	seedSpace(t, store, runtime.Scope{Kind: "local", ID: "default"}, localOperatorID)
+	seedSpace(t, store, models.Scope{Kind: "local", ID: "default"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
-	server.SetDesktopConversationScope(runtime.Scope{Kind: "local", ID: "default"})
+	server.SetDesktopConversationScope(models.Scope{Kind: "local", ID: "default"})
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations", `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"Evidence"}`, "lifecycle")
-	var conversation runtime.Conversation
+	var conversation models.Conversation
 	if err := json.NewDecoder(created.Body).Decode(&conversation); err != nil {
 		t.Fatal(err)
 	}
@@ -277,11 +279,11 @@ func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) 
 
 func TestDesktopReadPositionsBindLocalReaderAndPreserveMonotonicHistory(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	seedSpace(t, store, runtime.Scope{Kind: "local", ID: "default"}, localOperatorID)
+	seedSpace(t, store, models.Scope{Kind: "local", ID: "default"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
-	server.SetDesktopConversationScope(runtime.Scope{Kind: "local", ID: "default"})
+	server.SetDesktopConversationScope(models.Scope{Kind: "local", ID: "default"})
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations", `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"Reading evidence"}`, "read-channel")
-	var channel runtime.Conversation
+	var channel models.Conversation
 	if err := json.NewDecoder(created.Body).Decode(&channel); err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +325,7 @@ func TestDesktopReadPositionsBindLocalReaderAndPreserveMonotonicHistory(t *testi
 // The server creates no space: a conversation made with no space goes to the
 // local operator's default space, and with no such space it is refused.
 func TestConversationWithNoSpaceUsesTheLocalOperatorsDefaultSpace(t *testing.T) {
-	scope := runtime.Scope{Kind: "local", ID: "default"}
+	scope := models.Scope{Kind: "local", ID: "default"}
 	body := func(title string) string {
 		return `{"scope":{"kind":"local","id":"default"},"owner":{"type":"team","id":"research"},"title":"` + title + `"}`
 	}
@@ -338,7 +340,7 @@ func TestConversationWithNoSpaceUsesTheLocalOperatorsDefaultSpace(t *testing.T) 
 	server := NewServer(store, zap.NewNop().Sugar())
 	for _, title := range []string{"First", "Second"} {
 		created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations", body(title), "create-"+title)
-		var conversation runtime.Conversation
+		var conversation models.Conversation
 		if err := json.NewDecoder(created.Body).Decode(&conversation); err != nil || created.Code != http.StatusCreated {
 			t.Fatalf("create %s: %d, %v", title, created.Code, err)
 		}
@@ -346,7 +348,7 @@ func TestConversationWithNoSpaceUsesTheLocalOperatorsDefaultSpace(t *testing.T) 
 			t.Fatalf("%s is in space %q, want the local operator's %q", title, conversation.SpaceID, home.ID)
 		}
 	}
-	if spaces, err := runtime.NewSpaceService(store).ListSpaces(t.Context(), scope); err != nil || len(spaces) != 2 {
+	if spaces, err := portfolio.NewSpaceService(store).ListSpaces(t.Context(), scope); err != nil || len(spaces) != 2 {
 		t.Fatalf("spaces after the creates = %+v, err = %v", spaces, err)
 	}
 
@@ -354,14 +356,14 @@ func TestConversationWithNoSpaceUsesTheLocalOperatorsDefaultSpace(t *testing.T) 
 	bare := runtimetest.NewKernelStore(t)
 	seedSpace(t, bare, scope, "someone-else")
 	refused := performAgentRunRequest(t, NewServer(bare, zap.NewNop().Sugar()).Handler(), http.MethodPost, "/api/v1/conversations", body("Nowhere"), "create-nowhere")
-	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), runtime.ErrNoDefaultSpace.Error()) {
+	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), models.ErrNoDefaultSpace.Error()) {
 		t.Fatalf("create with no space: %d %s", refused.Code, refused.Body.String())
 	}
-	conversations, err := runtime.NewConversationService(bare).ListConversations(t.Context(), runtime.ConversationFilter{Scope: scope})
+	conversations, err := runtimeconversation.NewConversationService(bare).ListConversations(t.Context(), models.ConversationFilter{Scope: scope})
 	if err != nil || len(conversations) != 0 {
 		t.Fatalf("conversations after a refused create = %+v, err = %v", conversations, err)
 	}
-	if spaces, err := runtime.NewSpaceService(bare).ListSpaces(t.Context(), scope); err != nil || len(spaces) != 1 {
+	if spaces, err := portfolio.NewSpaceService(bare).ListSpaces(t.Context(), scope); err != nil || len(spaces) != 1 {
 		t.Fatalf("spaces after a refused create = %+v, err = %v", spaces, err)
 	}
 }

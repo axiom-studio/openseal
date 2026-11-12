@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 )
 
@@ -21,7 +21,7 @@ func TestRequestsAreListedByTheConversationUmbrella(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { engine.Close() })
-	scope := runtime.Scope{Kind: "tenant", ID: "roster"}
+	scope := models.Scope{Kind: "tenant", ID: "roster"}
 	seedSpace(t, engine, scope, "operator")
 	catalogScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
@@ -54,7 +54,7 @@ func TestRequestsAreListedByTheConversationUmbrella(t *testing.T) {
 	}
 	for _, chat := range []struct {
 		id        string
-		ownerType runtime.OwnerType
+		ownerType models.OwnerType
 		ownerID   string
 	}{{"team-chat", OwnerTypeTeam, "crew-one"}, {"own-chat", OwnerTypeAgent, "member"}} {
 		if _, _, err := engine.CreateConversation(ctx, CreateConversationRequest{ID: chat.id, Scope: scope, Owner: ObjectiveOwner{Type: chat.ownerType, ID: chat.ownerID}, Title: chat.id, IdempotencyKey: chat.id}); err != nil {
@@ -69,9 +69,9 @@ func TestRequestsAreListedByTheConversationUmbrella(t *testing.T) {
 			SkillID: "vercel.reader", SkillVersion: "1.0.0", SkillName: "Vercel", Reason: "Connect Vercel", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.SaveCredentialRequest(ctx, &runtime.CredentialRequest{ID: "credential-" + chat, Scope: scope, Owner: owner, DeploymentID: owner.ID, AgentID: "member",
-			ConversationID: chat, TriggerMessageID: "ask", RunID: "run", ActionCallID: "secret-" + chat, Kind: runtime.CredentialRequestKindPaymentCard, Reason: "Pay",
-			Status: runtime.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
+		if err := store.SaveCredentialRequest(ctx, &models.CredentialRequest{ID: "credential-" + chat, Scope: scope, Owner: owner, DeploymentID: owner.ID, AgentID: "member",
+			ConversationID: chat, TriggerMessageID: "ask", RunID: "run", ActionCallID: "secret-" + chat, Kind: models.CredentialRequestKindPaymentCard, Reason: "Pay",
+			Status: models.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -89,10 +89,10 @@ func TestRequestsAreListedByTheConversationUmbrella(t *testing.T) {
 		}
 	}
 	for chat, outsider := range map[string]ObjectiveOwner{"team-chat": agentOwner("member"), "own-chat": crew} {
-		if _, err := engine.ListSkillSetupRequests(ctx, scope, outsider, chat); !errors.Is(err, runtime.ErrConversationNotFound) {
+		if _, err := engine.ListSkillSetupRequests(ctx, scope, outsider, chat); !errors.Is(err, models.ErrConversationNotFound) {
 			t.Fatalf("%s outsider setups err = %v", chat, err)
 		}
-		if _, err := engine.ListCredentialRequests(ctx, scope, outsider, chat); !errors.Is(err, runtime.ErrConversationNotFound) {
+		if _, err := engine.ListCredentialRequests(ctx, scope, outsider, chat); !errors.Is(err, models.ErrConversationNotFound) {
 			t.Fatalf("%s outsider credentials err = %v", chat, err)
 		}
 		if _, err := engine.GetSkillSetupRequest(ctx, scope, outsider, "setup-"+chat); err == nil {

@@ -7,7 +7,8 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -50,7 +51,7 @@ func (c *participationCatalog) GetAgentDefinition(_ context.Context, id, version
 	}
 	return c.definitions[id], nil
 }
-func participationFixture() (*participationCatalog, runtime.ConversationParticipantQuery) {
+func participationFixture() (*participationCatalog, conversation.ConversationParticipantQuery) {
 	scope := capability.ScopeReference{Kind: "local", ID: "default"}
 	c := &participationCatalog{
 		deployment: &team.Deployment{ID: "team", Scope: scope, DefinitionID: "team-definition", ActiveVersion: "1", Status: team.DeploymentActive, Revision: 1},
@@ -69,7 +70,7 @@ func participationFixture() (*participationCatalog, runtime.ConversationParticip
 		c.agents[id] = &agent.AgentDeployment{ID: id, Scope: scope, DefinitionID: "definition-" + id, ActiveVersion: "1", RolloutStatus: agent.RolloutActive, Environment: "local", Revision: 1, Capacity: agent.DeploymentCapacity{MaxConcurrentRuns: 1}}
 		c.definitions["definition-"+id] = &agent.AgentDefinition{ID: "definition-" + id, Version: "1", DisplayName: id, Purpose: "Review evidence", SystemPrompt: "Report uncertainty", Authority: agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1}}
 	}
-	query := runtime.ConversationParticipantQuery{Conversation: &runtime.Conversation{ID: "channel", Scope: runtime.Scope{Kind: "local", ID: "default"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "team"}, Status: runtime.ConversationStatusActive}}
+	query := conversation.ConversationParticipantQuery{Conversation: &models.Conversation{ID: "channel", Scope: models.Scope{Kind: "local", ID: "default"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Status: models.ConversationStatusActive}}
 	return c, query
 }
 func TestDesktopParticipationUsesCanonicalActiveRoster(t *testing.T) {
@@ -101,42 +102,46 @@ func TestDesktopParticipationUsesCanonicalActiveRoster(t *testing.T) {
 	}
 }
 func TestDesktopParticipationRejectsBrokenAuthority(t *testing.T) {
-	tests := map[string]func(*participationCatalog, *runtime.ConversationParticipantQuery){
-		"foreign-channel": func(_ *participationCatalog, q *runtime.ConversationParticipantQuery) {
+	tests := map[string]func(*participationCatalog, *conversation.ConversationParticipantQuery){
+		"foreign-channel": func(_ *participationCatalog, q *conversation.ConversationParticipantQuery) {
 			q.Conversation.Scope.ID = "other"
 		},
-		"archived-channel": func(_ *participationCatalog, q *runtime.ConversationParticipantQuery) {
-			q.Conversation.Status = runtime.ConversationStatusArchived
+		"archived-channel": func(_ *participationCatalog, q *conversation.ConversationParticipantQuery) {
+			q.Conversation.Status = models.ConversationStatusArchived
 		},
-		"foreign-trigger": func(_ *participationCatalog, q *runtime.ConversationParticipantQuery) {
-			q.Trigger = &runtime.ChannelMessage{Scope: q.Conversation.Scope, ConversationID: "other"}
+		"foreign-trigger": func(_ *participationCatalog, q *conversation.ConversationParticipantQuery) {
+			q.Trigger = &models.ChannelMessage{Scope: q.Conversation.Scope, ConversationID: "other"}
 		},
-		"wrong-team-id": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) { c.deployment.ID = "other" },
-		"foreign-team": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
+		"wrong-team-id": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) { c.deployment.ID = "other" },
+		"foreign-team": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
 			c.deployment.Scope.ID = "other"
 		},
-		"team-version": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) { c.definition.Version = "2" },
-		"unknown-participation": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
+		"team-version": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+			c.definition.Version = "2"
+		},
+		"unknown-participation": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
 			c.deployment.Roster[0].ChannelParticipation = "unknown"
 		},
-		"duplicate-member": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
+		"duplicate-member": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
 			c.deployment.Roster[1].AgentDeploymentID = "z"
 		},
-		"foreign-agent": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
+		"foreign-agent": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
 			c.agents["a"].Scope.ID = "other"
 		},
-		"wrong-agent-id": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) { c.agents["a"].ID = "other" },
-		"missing-agent":  func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) { delete(c.agents, "a") },
-		"agent-version": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
+		"wrong-agent-id": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
+			c.agents["a"].ID = "other"
+		},
+		"missing-agent": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) { delete(c.agents, "a") },
+		"agent-version": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
 			c.definitions["definition-a"].Version = "2"
 		},
-		"agent-definition": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
+		"agent-definition": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
 			c.definitions["definition-a"].ID = "other"
 		},
-		"member-skill-requirement": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
+		"member-skill-requirement": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
 			c.deployment.Roster[1].RequiredSkillIDs = []string{"missing"}
 		},
-		"model-credential": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
+		"model-credential": func(c *participationCatalog, _ *conversation.ConversationParticipantQuery) {
 			c.agents["a"].Credentials = map[string]capability.CredentialReference{agent.ModelProviderCredentialBinding: {Kind: "vault", ID: "private"}}
 		},
 	}
@@ -165,7 +170,7 @@ func TestDesktopParticipationEnforcesLimitAndEmptyRoster(t *testing.T) {
 	}
 	catalog.agents["a"].RolloutStatus = agent.RolloutRetired
 	catalog.agents["z"].RolloutStatus = agent.RolloutPending
-	if _, err := source.ResolveConversationParticipants(t.Context(), query); !errors.Is(err, runtime.ErrNoConversationParticipants) {
+	if _, err := source.ResolveConversationParticipants(t.Context(), query); !errors.Is(err, conversation.ErrNoConversationParticipants) {
 		t.Fatalf("no eligible members: %v", err)
 	}
 }

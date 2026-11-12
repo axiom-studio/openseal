@@ -13,7 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
 const localReferencePrefix = "local-sha256:"
@@ -37,29 +38,29 @@ func NewLocalStore(root string) (*LocalStore, error) {
 	return &LocalStore{root: absolute}, nil
 }
 
-func (s *LocalStore) Put(ctx context.Context, write runtime.ArtifactContentWrite) (runtime.ArtifactStoredContent, error) {
+func (s *LocalStore) Put(ctx context.Context, write models.ArtifactContentWrite) (models.ArtifactStoredContent, error) {
 	if s == nil || s.root == "" {
-		return runtime.ArtifactStoredContent{}, errors.New("local artifact store is not configured")
+		return models.ArtifactStoredContent{}, errors.New("local artifact store is not configured")
 	}
 	if err := write.Scope.Validate(); err != nil {
-		return runtime.ArtifactStoredContent{}, err
+		return models.ArtifactStoredContent{}, err
 	}
 	if write.Reader == nil {
-		return runtime.ArtifactStoredContent{}, errors.New("artifact content reader is required")
+		return models.ArtifactStoredContent{}, errors.New("artifact content reader is required")
 	}
 	if write.SizeBytes < -1 {
-		return runtime.ArtifactStoredContent{}, errors.New("artifact content size cannot be less than -1")
+		return models.ArtifactStoredContent{}, errors.New("artifact content size cannot be less than -1")
 	}
 	if write.Digest != "" && !validDigest(write.Digest) {
-		return runtime.ArtifactStoredContent{}, errors.New("artifact content digest must be sha256:<64 hex characters>")
+		return models.ArtifactStoredContent{}, errors.New("artifact content digest must be sha256:<64 hex characters>")
 	}
 	directory := s.scopeDirectory(write.Scope)
 	if err := os.MkdirAll(directory, 0o750); err != nil {
-		return runtime.ArtifactStoredContent{}, err
+		return models.ArtifactStoredContent{}, err
 	}
 	temporary, err := os.CreateTemp(directory, ".upload-*")
 	if err != nil {
-		return runtime.ArtifactStoredContent{}, err
+		return models.ArtifactStoredContent{}, err
 	}
 	temporaryPath := temporary.Name()
 	committed := false
@@ -70,47 +71,47 @@ func (s *LocalStore) Put(ctx context.Context, write runtime.ArtifactContentWrite
 		}
 	}()
 	if err := temporary.Chmod(0o600); err != nil {
-		return runtime.ArtifactStoredContent{}, err
+		return models.ArtifactStoredContent{}, err
 	}
 	hasher := sha256.New()
 	written, err := io.Copy(io.MultiWriter(temporary, hasher), &contextReader{ctx: ctx, reader: write.Reader})
 	if err != nil {
-		return runtime.ArtifactStoredContent{}, err
+		return models.ArtifactStoredContent{}, err
 	}
 	if write.SizeBytes >= 0 && written != write.SizeBytes {
-		return runtime.ArtifactStoredContent{}, fmt.Errorf("artifact content size mismatch: wrote %d bytes, expected %d", written, write.SizeBytes)
+		return models.ArtifactStoredContent{}, fmt.Errorf("artifact content size mismatch: wrote %d bytes, expected %d", written, write.SizeBytes)
 	}
 	digest := "sha256:" + hex.EncodeToString(hasher.Sum(nil))
 	if write.Digest != "" && !strings.EqualFold(strings.TrimSpace(write.Digest), digest) {
-		return runtime.ArtifactStoredContent{}, errors.New("artifact content digest mismatch")
+		return models.ArtifactStoredContent{}, errors.New("artifact content digest mismatch")
 	}
 	if err := temporary.Sync(); err != nil {
-		return runtime.ArtifactStoredContent{}, err
+		return models.ArtifactStoredContent{}, err
 	}
 	if err := temporary.Close(); err != nil {
-		return runtime.ArtifactStoredContent{}, err
+		return models.ArtifactStoredContent{}, err
 	}
 	finalPath := filepath.Join(directory, strings.TrimPrefix(digest, "sha256:"))
 	if _, err := os.Stat(finalPath); err == nil {
 		committed = true
 		_ = os.Remove(temporaryPath)
 	} else if !os.IsNotExist(err) {
-		return runtime.ArtifactStoredContent{}, err
+		return models.ArtifactStoredContent{}, err
 	} else if err := os.Rename(temporaryPath, finalPath); err != nil {
 		if _, statErr := os.Stat(finalPath); statErr != nil {
-			return runtime.ArtifactStoredContent{}, err
+			return models.ArtifactStoredContent{}, err
 		}
 		committed = true
 	} else {
 		committed = true
 	}
-	return runtime.ArtifactStoredContent{
+	return models.ArtifactStoredContent{
 		ContentRef: localReferencePrefix + strings.TrimPrefix(digest, "sha256:"),
 		Digest:     digest, SizeBytes: written,
 	}, nil
 }
 
-func (s *LocalStore) Open(_ context.Context, scope runtime.Scope, contentRef string) (io.ReadCloser, error) {
+func (s *LocalStore) Open(_ context.Context, scope models.Scope, contentRef string) (io.ReadCloser, error) {
 	if s == nil || s.root == "" {
 		return nil, errors.New("local artifact store is not configured")
 	}
@@ -123,12 +124,12 @@ func (s *LocalStore) Open(_ context.Context, scope runtime.Scope, contentRef str
 	}
 	file, err := os.Open(filepath.Join(s.scopeDirectory(scope), hexDigest))
 	if os.IsNotExist(err) {
-		return nil, runtime.ErrArtifactNotFound
+		return nil, artifactcatalog.ErrArtifactNotFound
 	}
 	return file, err
 }
 
-func (s *LocalStore) Available(_ context.Context, scope runtime.Scope, contentRef string) (bool, error) {
+func (s *LocalStore) Available(_ context.Context, scope models.Scope, contentRef string) (bool, error) {
 	if s == nil || s.root == "" {
 		return false, errors.New("local artifact store is not configured")
 	}
@@ -146,7 +147,7 @@ func (s *LocalStore) Available(_ context.Context, scope runtime.Scope, contentRe
 	return err == nil, err
 }
 
-func (s *LocalStore) Delete(_ context.Context, scope runtime.Scope, contentRef string) (bool, error) {
+func (s *LocalStore) Delete(_ context.Context, scope models.Scope, contentRef string) (bool, error) {
 	if s == nil || s.root == "" {
 		return false, errors.New("local artifact store is not configured")
 	}
@@ -164,7 +165,7 @@ func (s *LocalStore) Delete(_ context.Context, scope runtime.Scope, contentRef s
 	return err == nil, err
 }
 
-func (s *LocalStore) scopeDirectory(scope runtime.Scope) string {
+func (s *LocalStore) scopeDirectory(scope models.Scope) string {
 	digest := sha256.Sum256([]byte(scope.Kind + "\x00" + scope.ID))
 	return filepath.Join(s.root, hex.EncodeToString(digest[:]))
 }
@@ -207,6 +208,6 @@ func (r *contextReader) Read(buffer []byte) (int, error) {
 	}
 }
 
-var _ runtime.ArtifactContentStore = (*LocalStore)(nil)
-var _ runtime.ArtifactContentInspector = (*LocalStore)(nil)
-var _ runtime.ArtifactContentDeleter = (*LocalStore)(nil)
+var _ models.ArtifactContentStore = (*LocalStore)(nil)
+var _ artifactcatalog.ArtifactContentInspector = (*LocalStore)(nil)
+var _ artifactcatalog.ArtifactContentDeleter = (*LocalStore)(nil)

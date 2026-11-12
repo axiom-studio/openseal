@@ -5,39 +5,40 @@ import (
 	"errors"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
 
 type (
-	ActionOrigin            = runtime.ActionOrigin
-	NestedActionRequest     = runtime.NestedActionRequest
-	NestedActionResult      = runtime.NestedActionResult
-	ActionExecution         = runtime.ActionExecution
-	NestedHostActionRequest = runtime.NestedHostActionRequest
-	NestedHostActionGrant   = runtime.NestedHostActionGrant
-	NestedHostActionOutcome = runtime.NestedHostActionOutcome
+	ActionOrigin            = models.ActionOrigin
+	NestedActionRequest     = action.NestedActionRequest
+	NestedActionResult      = action.NestedActionResult
+	ActionExecution         = models.ActionExecution
+	NestedHostActionRequest = action.NestedHostActionRequest
+	NestedHostActionGrant   = action.NestedHostActionGrant
+	NestedHostActionOutcome = action.NestedHostActionOutcome
 )
 
 const (
-	ActionOriginVM                 = runtime.ActionOriginVM
-	ActionOriginLoop               = runtime.ActionOriginLoop
-	ActionExecutionHost            = runtime.ActionExecutionHost
-	ActionExecutionLoop            = runtime.ActionExecutionLoop
-	NestedHostActionLease          = runtime.NestedHostActionLease
-	NestedHostActionReadyGrace     = runtime.NestedHostActionReadyGrace
-	MaxNestedActionCallsPerTurn    = runtime.MaxNestedActionCallsPerTurn
-	MaxConcurrentNestedActionCalls = runtime.MaxConcurrentNestedActionCalls
+	ActionOriginVM                 = models.ActionOriginVM
+	ActionOriginLoop               = models.ActionOriginLoop
+	ActionExecutionHost            = models.ActionExecutionHost
+	ActionExecutionLoop            = models.ActionExecutionLoop
+	NestedHostActionLease          = action.NestedHostActionLease
+	NestedHostActionReadyGrace     = models.NestedHostActionReadyGrace
+	MaxNestedActionCallsPerTurn    = action.MaxNestedActionCallsPerTurn
+	MaxConcurrentNestedActionCalls = action.MaxConcurrentNestedActionCalls
 	// NestedActionWait bounds how long RunNestedAction waits for a call to
 	// settle before returning its current state.
 	NestedActionWait = 30 * time.Second
 )
 
 var (
-	ErrNestedTurnNotActive       = runtime.ErrNestedTurnNotActive
-	ErrNestedActionNotAuthorized = runtime.ErrNestedActionNotAuthorized
-	ErrNestedActionLimit         = runtime.ErrNestedActionLimit
-	ErrNestedHostActionNotReady  = runtime.ErrNestedHostActionNotReady
-	ErrNestedHostActionClosed    = runtime.ErrNestedHostActionClosed
+	ErrNestedTurnNotActive       = models.ErrNestedTurnNotActive
+	ErrNestedActionNotAuthorized = action.ErrNestedActionNotAuthorized
+	ErrNestedActionLimit         = models.ErrNestedActionLimit
+	ErrNestedHostActionNotReady  = action.ErrNestedHostActionNotReady
+	ErrNestedHostActionClosed    = action.ErrNestedHostActionClosed
 )
 
 // RunNestedAction polls a call's state from nestedActionPollFirst, doubling

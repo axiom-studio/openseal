@@ -11,35 +11,39 @@ import (
 	"time"
 
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"go.uber.org/zap"
 )
 
 // Server exposes the versioned OpenSeal kernel API. Interactive clients
 // discover its exact capabilities rather than depending on hidden routes.
 type Server struct {
-	channelParticipationAuthorizer func(context.Context, *runtime.Conversation) error
-	channelMessageDispatcher       func(context.Context, runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error)
-	reactionProjector              runtime.MessageReactionProjector
+	channelParticipationAuthorizer func(context.Context, *models.Conversation) error
+	channelMessageDispatcher       func(context.Context, conversation.PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error)
+	reactionProjector              conversation.MessageReactionProjector
 
-	store                    runtime.KernelStore
-	artifactContent          runtime.ArtifactContentStore
-	artifactResolver         runtime.ArtifactContentResolver
-	actionApprovalAuth       runtime.ApprovalAuthorizer
+	store                    models.KernelStore
+	artifactContent          models.ArtifactContentStore
+	artifactResolver         artifactcatalog.ArtifactContentResolver
+	actionApprovalAuth       action.ApprovalAuthorizer
 	logger                   *zap.SugaredLogger
 	mux                      *http.ServeMux
 	httpServer               *http.Server
 	bearerToken              string
 	teamWorkEnabled          bool
-	desktopConversationScope *runtime.Scope
-	agentRunCreation         func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
+	desktopConversationScope *models.Scope
+	agentRunCreation         func(context.Context, models.CreateAgentRunRequest) (*agentrun.AgentRunCommandResult, error)
 	workforceBundles         kernelbundle.InstallationStore
 	workforceBundleActor     string
 	workforceBundleTrust     kernelbundle.TrustPolicy
 }
 
 // NewServer creates a new API server.
-func NewServer(store runtime.KernelStore, logger *zap.SugaredLogger) *Server {
+func NewServer(store models.KernelStore, logger *zap.SugaredLogger) *Server {
 	s := &Server{
 		store:  store,
 		logger: logger,
@@ -102,26 +106,26 @@ func (s *Server) authenticatedHandler() http.Handler {
 
 // SetArtifactContentStore enables streamed artifact upload/download routes.
 // Configure it before serving requests.
-func (s *Server) SetArtifactContentStore(store runtime.ArtifactContentStore) {
+func (s *Server) SetArtifactContentStore(store models.ArtifactContentStore) {
 	s.artifactContent = store
 }
 
 // SetArtifactContentResolver enables ephemeral authorized content resolution.
 // Resolved URLs are returned to the caller and never persisted by Server.
-func (s *Server) SetArtifactContentResolver(resolver runtime.ArtifactContentResolver) {
+func (s *Server) SetArtifactContentResolver(resolver artifactcatalog.ArtifactContentResolver) {
 	s.artifactResolver = resolver
 }
 
 // SetActionApprovalAuthorizer enables resolution of durable action approval
 // checkpoints. Read-only approval inspection remains available without it.
-func (s *Server) SetActionApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) {
+func (s *Server) SetActionApprovalAuthorizer(authorizer action.ApprovalAuthorizer) {
 	s.actionApprovalAuth = authorizer
 }
 
 // SetAgentRunCreationDispatcher enables Run creation only after the host has
 // installed a worker capable of claiming the created work. Inspection and
 // lifecycle intervention remain available without a worker.
-func (s *Server) SetAgentRunCreationDispatcher(dispatch func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)) {
+func (s *Server) SetAgentRunCreationDispatcher(dispatch func(context.Context, models.CreateAgentRunRequest) (*agentrun.AgentRunCommandResult, error)) {
 	s.agentRunCreation = dispatch
 }
 
@@ -180,20 +184,20 @@ var _ = time.Now
 // SetDesktopConversationScope binds interactive channel creation, updates, and message
 // authorship to the authenticated operator of one local desktop workspace.
 // Configure before serving requests; standalone channel behavior is unchanged.
-func (s *Server) SetDesktopConversationScope(scope runtime.Scope) {
+func (s *Server) SetDesktopConversationScope(scope models.Scope) {
 	s.desktopConversationScope = &scope
 }
 
 // SetReactionProjector mirrors reactions made through the API to external
 // conversations. Configure before serving.
-func (s *Server) SetReactionProjector(projector runtime.MessageReactionProjector) {
+func (s *Server) SetReactionProjector(projector conversation.MessageReactionProjector) {
 	s.reactionProjector = projector
 }
 
 // SetChannelParticipation enables explicit participation settings and optionally
 // connects posting to immediate durable scheduling. Configure before serving.
 // The authorizer validates enabling; disabling remains available during outages.
-func (s *Server) SetChannelParticipation(authorize func(context.Context, *runtime.Conversation) error, post func(context.Context, runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error)) {
+func (s *Server) SetChannelParticipation(authorize func(context.Context, *models.Conversation) error, post func(context.Context, conversation.PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error)) {
 	s.channelParticipationAuthorizer = authorize
 	s.channelMessageDispatcher = post
 }

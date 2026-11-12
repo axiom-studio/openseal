@@ -7,29 +7,30 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/runtimetest"
 	"go.uber.org/zap"
 )
 
 func TestConversationApprovalModeAPI(t *testing.T) {
 	store := runtimetest.NewKernelStore(t)
-	seedSpace(t, store, runtime.Scope{Kind: "tenant", ID: "one"}, localOperatorID)
+	seedSpace(t, store, models.Scope{Kind: "tenant", ID: "one"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
 	created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations",
 		`{"scope":{"kind":"tenant","id":"one"},"owner":{"type":"agent","id":"assistant"},"title":"Chat"}`, "chat")
-	var conversation runtime.Conversation
+	var conversation models.Conversation
 	if err := json.NewDecoder(created.Body).Decode(&conversation); err != nil {
 		t.Fatal(err)
 	}
-	if conversation.ApprovalMode != runtime.ConversationApprovalAuto {
+	if conversation.ApprovalMode != models.ConversationApprovalAuto {
 		t.Fatalf("created approval mode = %q", conversation.ApprovalMode)
 	}
 	path := "/api/v1/conversations/" + conversation.ID + "/approval-mode"
 	body := func(mode string, revision int64) string {
 		value, _ := json.Marshal(kernelapi.SetConversationApprovalModeRequest{
-			Scope: conversation.Scope, ExpectedRevision: revision, Mode: runtime.ConversationApprovalMode(mode),
-			Actor: runtime.ActivityActor{Type: "user", ID: "operator"},
+			Scope: conversation.Scope, ExpectedRevision: revision, Mode: models.ConversationApprovalMode(mode),
+			Actor: models.ActivityActor{Type: "user", ID: "operator"},
 		})
 		return string(value)
 	}
@@ -43,12 +44,12 @@ func TestConversationApprovalModeAPI(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("update status = %d, body = %s", response.Code, response.Body.String())
 	}
-	var result runtime.SetConversationApprovalModeResult
+	var result runtimeconversation.SetConversationApprovalModeResult
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if !result.Changed || result.Conversation.ApprovalMode != runtime.ConversationApprovalManual || result.Event == nil ||
-		result.Event.EventType != runtime.ConversationApprovalModeChangedEvent {
+	if !result.Changed || result.Conversation.ApprovalMode != models.ConversationApprovalManual || result.Event == nil ||
+		result.Event.EventType != runtimeconversation.ConversationApprovalModeChangedEvent {
 		t.Fatalf("update result = %#v", result)
 	}
 	read := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/conversations/"+conversation.ID+"?scopeKind=tenant&scopeId=one", "", "")

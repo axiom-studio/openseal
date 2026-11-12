@@ -11,16 +11,17 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
 type ArtifactClient interface {
-	RegisterArtifact(context.Context, runtime.RegisterArtifactRequest) (*runtime.ArtifactRegistrationResult, error)
-	GetArtifact(context.Context, runtime.Scope, string, int64) (*runtime.Artifact, error)
-	ListArtifacts(context.Context, runtime.ArtifactFilter) ([]*runtime.Artifact, error)
-	UploadArtifactContent(context.Context, runtime.Scope, string, string, int64, io.Reader) (*runtime.ArtifactStoredContent, error)
-	DownloadArtifactContent(context.Context, runtime.Scope, string, int64) (*ArtifactDownload, error)
-	ResolveArtifactContent(context.Context, runtime.Scope, string, int64, kernelapi.ResolveArtifactContentRequest) (*runtime.ArtifactContentResolution, error)
+	RegisterArtifact(context.Context, artifactcatalog.RegisterArtifactRequest) (*artifactcatalog.ArtifactRegistrationResult, error)
+	GetArtifact(context.Context, models.Scope, string, int64) (*models.Artifact, error)
+	ListArtifacts(context.Context, models.ArtifactFilter) ([]*models.Artifact, error)
+	UploadArtifactContent(context.Context, models.Scope, string, string, int64, io.Reader) (*models.ArtifactStoredContent, error)
+	DownloadArtifactContent(context.Context, models.Scope, string, int64) (*ArtifactDownload, error)
+	ResolveArtifactContent(context.Context, models.Scope, string, int64, kernelapi.ResolveArtifactContentRequest) (*artifactcatalog.ArtifactContentResolution, error)
 }
 
 type ArtifactDownload struct {
@@ -31,20 +32,20 @@ type ArtifactDownload struct {
 	SizeBytes   int64
 }
 
-func (c *KernelHTTPClient) RegisterArtifact(ctx context.Context, request runtime.RegisterArtifactRequest) (*runtime.ArtifactRegistrationResult, error) {
-	var result runtime.ArtifactRegistrationResult
+func (c *KernelHTTPClient) RegisterArtifact(ctx context.Context, request artifactcatalog.RegisterArtifactRequest) (*artifactcatalog.ArtifactRegistrationResult, error) {
+	var result artifactcatalog.ArtifactRegistrationResult
 	if err := c.do(ctx, http.MethodPost, "/api/v1/artifacts", request, "", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) GetArtifact(ctx context.Context, scope runtime.Scope, artifactID string, version int64) (*runtime.Artifact, error) {
+func (c *KernelHTTPClient) GetArtifact(ctx context.Context, scope models.Scope, artifactID string, version int64) (*models.Artifact, error) {
 	query := scopeQuery(scope)
 	if version > 0 {
 		query.Set("version", strconv.FormatInt(version, 10))
 	}
-	var artifact runtime.Artifact
+	var artifact models.Artifact
 	path := "/api/v1/artifacts/" + url.PathEscape(strings.TrimSpace(artifactID)) + "?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &artifact); err != nil {
 		return nil, err
@@ -52,7 +53,7 @@ func (c *KernelHTTPClient) GetArtifact(ctx context.Context, scope runtime.Scope,
 	return &artifact, nil
 }
 
-func (c *KernelHTTPClient) ListArtifacts(ctx context.Context, filter runtime.ArtifactFilter) ([]*runtime.Artifact, error) {
+func (c *KernelHTTPClient) ListArtifacts(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
 	query := scopeQuery(filter.Scope)
 	setIfPresent(query, "id", filter.ID)
 	if filter.Owner != nil {
@@ -81,14 +82,14 @@ func (c *KernelHTTPClient) ListArtifacts(ctx context.Context, filter runtime.Art
 	if filter.Offset > 0 {
 		query.Set("offset", strconv.Itoa(filter.Offset))
 	}
-	var artifacts []*runtime.Artifact
+	var artifacts []*models.Artifact
 	if err := c.do(ctx, http.MethodGet, "/api/v1/artifacts?"+query.Encode(), nil, "", &artifacts); err != nil {
 		return nil, err
 	}
 	return artifacts, nil
 }
 
-func (c *KernelHTTPClient) UploadArtifactContent(ctx context.Context, scope runtime.Scope, mediaType, digest string, sizeBytes int64, reader io.Reader) (*runtime.ArtifactStoredContent, error) {
+func (c *KernelHTTPClient) UploadArtifactContent(ctx context.Context, scope models.Scope, mediaType, digest string, sizeBytes int64, reader io.Reader) (*models.ArtifactStoredContent, error) {
 	query := scopeQuery(scope)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiRoot+"/artifact-content?"+query.Encode(), reader)
 	if err != nil {
@@ -123,14 +124,14 @@ func (c *KernelHTTPClient) UploadArtifactContent(ctx context.Context, scope runt
 	if len(payload) > 8<<20 {
 		return nil, fmt.Errorf("decode artifact upload response: payload exceeds 8 MiB")
 	}
-	var stored runtime.ArtifactStoredContent
+	var stored models.ArtifactStoredContent
 	if err := decodeKernelResult(payload, &stored); err != nil {
 		return nil, fmt.Errorf("decode artifact upload response: %w", err)
 	}
 	return &stored, nil
 }
 
-func (c *KernelHTTPClient) DownloadArtifactContent(ctx context.Context, scope runtime.Scope, artifactID string, version int64) (*ArtifactDownload, error) {
+func (c *KernelHTTPClient) DownloadArtifactContent(ctx context.Context, scope models.Scope, artifactID string, version int64) (*ArtifactDownload, error) {
 	query := scopeQuery(scope)
 	if version > 0 {
 		query.Set("version", strconv.FormatInt(version, 10))
@@ -160,13 +161,13 @@ func (c *KernelHTTPClient) DownloadArtifactContent(ctx context.Context, scope ru
 	}, nil
 }
 
-func (c *KernelHTTPClient) ResolveArtifactContent(ctx context.Context, scope runtime.Scope, artifactID string, version int64, request kernelapi.ResolveArtifactContentRequest) (*runtime.ArtifactContentResolution, error) {
+func (c *KernelHTTPClient) ResolveArtifactContent(ctx context.Context, scope models.Scope, artifactID string, version int64, request kernelapi.ResolveArtifactContentRequest) (*artifactcatalog.ArtifactContentResolution, error) {
 	query := scopeQuery(scope)
 	if version > 0 {
 		query.Set("version", strconv.FormatInt(version, 10))
 	}
 	path := "/api/v1/artifacts/" + url.PathEscape(strings.TrimSpace(artifactID)) + "/resolve?" + query.Encode()
-	var resolution runtime.ArtifactContentResolution
+	var resolution artifactcatalog.ArtifactContentResolution
 	if err := c.do(ctx, http.MethodPost, path, request, "", &resolution); err != nil {
 		return nil, err
 	}

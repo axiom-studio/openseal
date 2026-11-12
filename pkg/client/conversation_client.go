@@ -8,35 +8,36 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 type ConversationClient interface {
-	CreateConversation(context.Context, kernelapi.CreateConversationRequest, string) (*runtime.Conversation, error)
-	ListConversations(context.Context, runtime.ConversationFilter) ([]*runtime.Conversation, error)
-	GetConversation(context.Context, runtime.Scope, string) (*runtime.Conversation, error)
-	UpdateConversation(context.Context, string, kernelapi.UpdateConversationRequest) (*runtime.Conversation, error)
-	PostChannelMessage(context.Context, string, kernelapi.PostChannelMessageRequest, string) (*runtime.ChannelMessageCommitResult, error)
-	ListChannelMessages(context.Context, runtime.ChannelMessageFilter) ([]*runtime.ChannelMessage, error)
-	GetChannelMessage(context.Context, runtime.Scope, string, string) (*runtime.ChannelMessage, error)
-	GetParticipationRound(context.Context, runtime.Scope, string, string) (*runtime.ParticipationRoundResult, error)
-	ListParticipationRounds(context.Context, runtime.ParticipationRoundFilter) ([]*runtime.ParticipationRoundResult, error)
-	AdvanceConversationCursor(context.Context, string, kernelapi.AdvanceConversationCursorRequest) (*runtime.ConversationCursor, bool, error)
-	GetConversationCursor(context.Context, runtime.Scope, string, runtime.ConversationParticipant) (*runtime.ConversationCursor, error)
-	SetConversationPresence(context.Context, string, kernelapi.SetConversationPresenceRequest) (*runtime.ConversationPresence, error)
+	CreateConversation(context.Context, kernelapi.CreateConversationRequest, string) (*models.Conversation, error)
+	ListConversations(context.Context, models.ConversationFilter) ([]*models.Conversation, error)
+	GetConversation(context.Context, models.Scope, string) (*models.Conversation, error)
+	UpdateConversation(context.Context, string, kernelapi.UpdateConversationRequest) (*models.Conversation, error)
+	PostChannelMessage(context.Context, string, kernelapi.PostChannelMessageRequest, string) (*models.ChannelMessageCommitResult, error)
+	ListChannelMessages(context.Context, models.ChannelMessageFilter) ([]*models.ChannelMessage, error)
+	GetChannelMessage(context.Context, models.Scope, string, string) (*models.ChannelMessage, error)
+	GetParticipationRound(context.Context, models.Scope, string, string) (*models.ParticipationRoundResult, error)
+	ListParticipationRounds(context.Context, models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error)
+	AdvanceConversationCursor(context.Context, string, kernelapi.AdvanceConversationCursorRequest) (*models.ConversationCursor, bool, error)
+	GetConversationCursor(context.Context, models.Scope, string, models.ConversationParticipant) (*models.ConversationCursor, error)
+	SetConversationPresence(context.Context, string, kernelapi.SetConversationPresenceRequest) (*models.ConversationPresence, error)
 	ReleaseConversationPresence(context.Context, string, kernelapi.ReleaseConversationPresenceRequest) error
-	ListConversationPresence(context.Context, runtime.Scope, string) ([]*runtime.ConversationPresence, error)
+	ListConversationPresence(context.Context, models.Scope, string) ([]*models.ConversationPresence, error)
 }
 
-func (c *KernelHTTPClient) CreateConversation(ctx context.Context, request kernelapi.CreateConversationRequest, idempotencyKey string) (*runtime.Conversation, error) {
-	var result runtime.Conversation
+func (c *KernelHTTPClient) CreateConversation(ctx context.Context, request kernelapi.CreateConversationRequest, idempotencyKey string) (*models.Conversation, error) {
+	var result models.Conversation
 	if err := c.do(ctx, http.MethodPost, "/api/v1/conversations", request, idempotencyKey, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) ListConversations(ctx context.Context, filter runtime.ConversationFilter) ([]*runtime.Conversation, error) {
+func (c *KernelHTTPClient) ListConversations(ctx context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
 	query := scopeQuery(filter.Scope)
 	if filter.Owner != nil {
 		query.Set("ownerType", string(filter.Owner.Type))
@@ -46,15 +47,15 @@ func (c *KernelHTTPClient) ListConversations(ctx context.Context, filter runtime
 		query.Add("status", string(status))
 	}
 	setPage(query, filter.Limit, filter.Offset)
-	var result []*runtime.Conversation
+	var result []*models.Conversation
 	if err := c.do(ctx, http.MethodGet, "/api/v1/conversations?"+query.Encode(), nil, "", &result); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func (c *KernelHTTPClient) GetConversation(ctx context.Context, scope runtime.Scope, conversationID string) (*runtime.Conversation, error) {
-	var result runtime.Conversation
+func (c *KernelHTTPClient) GetConversation(ctx context.Context, scope models.Scope, conversationID string) (*models.Conversation, error) {
+	var result models.Conversation
 	path := conversationPath(conversationID) + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
 		return nil, err
@@ -62,31 +63,31 @@ func (c *KernelHTTPClient) GetConversation(ctx context.Context, scope runtime.Sc
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) UpdateConversation(ctx context.Context, conversationID string, request kernelapi.UpdateConversationRequest) (*runtime.Conversation, error) {
-	var result runtime.Conversation
+func (c *KernelHTTPClient) UpdateConversation(ctx context.Context, conversationID string, request kernelapi.UpdateConversationRequest) (*models.Conversation, error) {
+	var result models.Conversation
 	if err := c.do(ctx, http.MethodPatch, conversationPath(conversationID), request, "", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) SetConversationApprovalMode(ctx context.Context, conversationID string, request kernelapi.SetConversationApprovalModeRequest) (*runtime.SetConversationApprovalModeResult, error) {
-	var result runtime.SetConversationApprovalModeResult
+func (c *KernelHTTPClient) SetConversationApprovalMode(ctx context.Context, conversationID string, request kernelapi.SetConversationApprovalModeRequest) (*conversation.SetConversationApprovalModeResult, error) {
+	var result conversation.SetConversationApprovalModeResult
 	if err := c.do(ctx, http.MethodPatch, conversationPath(conversationID)+"/approval-mode", request, "", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) PostChannelMessage(ctx context.Context, conversationID string, request kernelapi.PostChannelMessageRequest, idempotencyKey string) (*runtime.ChannelMessageCommitResult, error) {
-	var result runtime.ChannelMessageCommitResult
+func (c *KernelHTTPClient) PostChannelMessage(ctx context.Context, conversationID string, request kernelapi.PostChannelMessageRequest, idempotencyKey string) (*models.ChannelMessageCommitResult, error) {
+	var result models.ChannelMessageCommitResult
 	if err := c.do(ctx, http.MethodPost, conversationPath(conversationID)+"/messages", request, idempotencyKey, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) ListChannelMessages(ctx context.Context, filter runtime.ChannelMessageFilter) ([]*runtime.ChannelMessage, error) {
+func (c *KernelHTTPClient) ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
 	query := scopeQuery(filter.Scope)
 	setIfPresent(query, "threadRootId", filter.ThreadRootID)
 	if filter.ChannelTimeline {
@@ -107,7 +108,7 @@ func (c *KernelHTTPClient) ListChannelMessages(ctx context.Context, filter runti
 	if filter.Descending {
 		query.Set("order", "desc")
 	}
-	var result []*runtime.ChannelMessage
+	var result []*models.ChannelMessage
 	path := conversationPath(filter.ConversationID) + "/messages?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
 		return nil, err
@@ -115,8 +116,8 @@ func (c *KernelHTTPClient) ListChannelMessages(ctx context.Context, filter runti
 	return result, nil
 }
 
-func (c *KernelHTTPClient) GetChannelMessage(ctx context.Context, scope runtime.Scope, conversationID, messageID string) (*runtime.ChannelMessage, error) {
-	var result runtime.ChannelMessage
+func (c *KernelHTTPClient) GetChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string) (*models.ChannelMessage, error) {
+	var result models.ChannelMessage
 	path := conversationPath(conversationID) + "/messages/" + url.PathEscape(strings.TrimSpace(messageID)) + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
 		return nil, err
@@ -124,8 +125,8 @@ func (c *KernelHTTPClient) GetChannelMessage(ctx context.Context, scope runtime.
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) GetParticipationRound(ctx context.Context, scope runtime.Scope, conversationID, roundID string) (*runtime.ParticipationRoundResult, error) {
-	var result runtime.ParticipationRoundResult
+func (c *KernelHTTPClient) GetParticipationRound(ctx context.Context, scope models.Scope, conversationID, roundID string) (*models.ParticipationRoundResult, error) {
+	var result models.ParticipationRoundResult
 	path := conversationPath(conversationID) + "/participation-rounds/" + url.PathEscape(strings.TrimSpace(roundID)) + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
 		return nil, err
@@ -133,10 +134,10 @@ func (c *KernelHTTPClient) GetParticipationRound(ctx context.Context, scope runt
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) ListParticipationRounds(ctx context.Context, filter runtime.ParticipationRoundFilter) ([]*runtime.ParticipationRoundResult, error) {
+func (c *KernelHTTPClient) ListParticipationRounds(ctx context.Context, filter models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error) {
 	query := scopeQuery(filter.Scope)
 	setPage(query, filter.Limit, filter.Offset)
-	var result []*runtime.ParticipationRoundResult
+	var result []*models.ParticipationRoundResult
 	path := conversationPath(filter.ConversationID) + "/participation-rounds?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
 		return nil, err
@@ -144,10 +145,10 @@ func (c *KernelHTTPClient) ListParticipationRounds(ctx context.Context, filter r
 	return result, nil
 }
 
-func (c *KernelHTTPClient) AdvanceConversationCursor(ctx context.Context, conversationID string, request kernelapi.AdvanceConversationCursorRequest) (*runtime.ConversationCursor, bool, error) {
+func (c *KernelHTTPClient) AdvanceConversationCursor(ctx context.Context, conversationID string, request kernelapi.AdvanceConversationCursorRequest) (*models.ConversationCursor, bool, error) {
 	var result struct {
-		Cursor   *runtime.ConversationCursor `json:"cursor"`
-		Replayed bool                        `json:"replayed"`
+		Cursor   *models.ConversationCursor `json:"cursor"`
+		Replayed bool                       `json:"replayed"`
 	}
 	if err := c.do(ctx, http.MethodPut, conversationPath(conversationID)+"/cursor", request, "", &result); err != nil {
 		return nil, false, err
@@ -155,19 +156,19 @@ func (c *KernelHTTPClient) AdvanceConversationCursor(ctx context.Context, conver
 	return result.Cursor, result.Replayed, nil
 }
 
-func (c *KernelHTTPClient) GetConversationCursor(ctx context.Context, scope runtime.Scope, conversationID string, participant runtime.ConversationParticipant) (*runtime.ConversationCursor, error) {
+func (c *KernelHTTPClient) GetConversationCursor(ctx context.Context, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
 	query := scopeQuery(scope)
 	query.Set("participantType", string(participant.Type))
 	query.Set("participantId", participant.ID)
-	var result runtime.ConversationCursor
+	var result models.ConversationCursor
 	if err := c.do(ctx, http.MethodGet, conversationPath(conversationID)+"/cursor?"+query.Encode(), nil, "", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) SetConversationPresence(ctx context.Context, conversationID string, request kernelapi.SetConversationPresenceRequest) (*runtime.ConversationPresence, error) {
-	var result runtime.ConversationPresence
+func (c *KernelHTTPClient) SetConversationPresence(ctx context.Context, conversationID string, request kernelapi.SetConversationPresenceRequest) (*models.ConversationPresence, error) {
+	var result models.ConversationPresence
 	if err := c.do(ctx, http.MethodPut, conversationPath(conversationID)+"/presence", request, "", &result); err != nil {
 		return nil, err
 	}
@@ -178,8 +179,8 @@ func (c *KernelHTTPClient) ReleaseConversationPresence(ctx context.Context, conv
 	return c.do(ctx, http.MethodDelete, conversationPath(conversationID)+"/presence", request, "", nil)
 }
 
-func (c *KernelHTTPClient) ListConversationPresence(ctx context.Context, scope runtime.Scope, conversationID string) ([]*runtime.ConversationPresence, error) {
-	var result []*runtime.ConversationPresence
+func (c *KernelHTTPClient) ListConversationPresence(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationPresence, error) {
+	var result []*models.ConversationPresence
 	if err := c.do(ctx, http.MethodGet, conversationPath(conversationID)+"/presence?"+scopeQuery(scope).Encode(), nil, "", &result); err != nil {
 		return nil, err
 	}
@@ -187,8 +188,8 @@ func (c *KernelHTTPClient) ListConversationPresence(ctx context.Context, scope r
 }
 
 // AddMessageReaction adds the actor's emoji to a channel message.
-func (c *KernelHTTPClient) AddMessageReaction(ctx context.Context, conversationID string, request kernelapi.MessageReactionRequest) (*runtime.MessageReactionResult, error) {
-	var result runtime.MessageReactionResult
+func (c *KernelHTTPClient) AddMessageReaction(ctx context.Context, conversationID string, request kernelapi.MessageReactionRequest) (*conversation.MessageReactionResult, error) {
+	var result conversation.MessageReactionResult
 	if err := c.do(ctx, http.MethodPut, conversationPath(conversationID)+"/reactions", request, "", &result); err != nil {
 		return nil, err
 	}
@@ -196,8 +197,8 @@ func (c *KernelHTTPClient) AddMessageReaction(ctx context.Context, conversationI
 }
 
 // RemoveMessageReaction removes the actor's emoji from a channel message.
-func (c *KernelHTTPClient) RemoveMessageReaction(ctx context.Context, conversationID string, request kernelapi.MessageReactionRequest) (*runtime.MessageReactionResult, error) {
-	var result runtime.MessageReactionResult
+func (c *KernelHTTPClient) RemoveMessageReaction(ctx context.Context, conversationID string, request kernelapi.MessageReactionRequest) (*conversation.MessageReactionResult, error) {
+	var result conversation.MessageReactionResult
 	if err := c.do(ctx, http.MethodDelete, conversationPath(conversationID)+"/reactions", request, "", &result); err != nil {
 		return nil, err
 	}

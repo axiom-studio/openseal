@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -36,12 +36,12 @@ type TeamExport struct {
 
 type ObjectiveExport struct {
 	Key       string
-	Objective *runtime.Objective
+	Objective *models.Objective
 }
 
 type RunbookExport struct {
 	Key        string
-	Activation *runtime.RunbookActivation
+	Activation *models.RunbookActivation
 }
 
 // Export creates a deterministic, secret-free workforce artifact from exact
@@ -98,13 +98,13 @@ func Export(request ExportRequest) (*Bundle, error) {
 		result.Teams = append(result.Teams, portable)
 		teamKeys[selected.Deployment.ID] = key
 	}
-	resolveOwner := func(owner runtime.ObjectiveOwner) (OwnerReference, error) {
+	resolveOwner := func(owner models.ObjectiveOwner) (OwnerReference, error) {
 		switch owner.Type {
-		case runtime.OwnerTypeAgent:
+		case models.OwnerTypeAgent:
 			if key := agentKeys[owner.ID]; key != "" {
 				return OwnerReference{Kind: OwnerAgent, Key: key}, nil
 			}
-		case runtime.OwnerTypeTeam:
+		case models.OwnerTypeTeam:
 			if key := teamKeys[owner.ID]; key != "" {
 				return OwnerReference{Kind: OwnerTeam, Key: key}, nil
 			}

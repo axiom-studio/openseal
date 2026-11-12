@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -94,7 +96,7 @@ type cutoverTestRow struct {
 func seedCutoverDraftStore(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kernel.db")
-	fresh, err := runtime.NewSQLiteStore(path)
+	fresh, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,9 +152,9 @@ func seedCutoverDraftStore(t *testing.T) string {
 	return path
 }
 
-func openCutoverEngine(t *testing.T, path string, options ...Option) (*Engine, *runtime.SQLiteStore) {
+func openCutoverEngine(t *testing.T, path string, options ...Option) (*Engine, *sqlite.Store) {
 	t.Helper()
-	store, err := runtime.NewSQLiteStore(path)
+	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,18 +183,18 @@ func startCutoverEngine(t *testing.T, engine *Engine) {
 	engine.Stop()
 }
 
-func builderCutoverConversations(t *testing.T, engine *Engine) map[string]*runtime.ChannelMessage {
+func builderCutoverConversations(t *testing.T, engine *Engine) map[string]*models.ChannelMessage {
 	t.Helper()
 	ctx := context.Background()
-	conversations, err := engine.ListConversations(ctx, runtime.ConversationFilter{
-		Scope: builderCutoverTestScope, OriginKind: runtime.ConversationReferenceAgentBuilder,
+	conversations, err := engine.ListConversations(ctx, models.ConversationFilter{
+		Scope: builderCutoverTestScope, OriginKind: models.ConversationReferenceAgentBuilder,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := map[string]*runtime.ChannelMessage{}
+	first := map[string]*models.ChannelMessage{}
 	for _, conversation := range conversations {
-		messages, err := engine.ListChannelMessages(ctx, runtime.ChannelMessageFilter{Scope: builderCutoverTestScope, ConversationID: conversation.ID})
+		messages, err := engine.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: builderCutoverTestScope, ConversationID: conversation.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -204,7 +206,7 @@ func builderCutoverConversations(t *testing.T, engine *Engine) map[string]*runti
 	return first
 }
 
-func cutoverDraftIDs(t *testing.T, store *runtime.SQLiteStore) []string {
+func cutoverDraftIDs(t *testing.T, store *sqlite.Store) []string {
 	t.Helper()
 	drafts, err := store.ListAgentBuilderCutoverDrafts(context.Background())
 	if err != nil {
@@ -229,11 +231,11 @@ func TestAgentBuilderCutoverConvertsEachDraftAtStart(t *testing.T) {
 	if err := createCutoverAgent(ctx, engine, builderCutoverTestScope, "inbox-agent"); err != nil {
 		t.Fatal(err)
 	}
-	inbox, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: builderCutoverTestScope, Name: "Inbox", Look: runtime.DefaultSpaceLook, OwnerID: "ana"})
+	inbox, err := engine.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: builderCutoverTestScope, Name: "Inbox", Look: models.DefaultSpaceLook, OwnerID: "ana"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := engine.PutSpaceMember(ctx, runtime.PutSpaceMemberRequest{Scope: builderCutoverTestScope, SpaceID: inbox.ID, Type: runtime.SpaceMemberAgent, MemberID: "inbox-agent"}); err != nil {
+	if _, _, err := engine.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: builderCutoverTestScope, SpaceID: inbox.ID, Type: models.SpaceMemberAgent, MemberID: "inbox-agent"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -252,9 +254,9 @@ func TestAgentBuilderCutoverConvertsEachDraftAtStart(t *testing.T) {
 	if amend == nil || review == nil {
 		t.Fatalf("conversations by origin = %v", messages)
 	}
-	ana := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "ana"}
+	ana := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "ana"}
 	if amend.Sender != ana || amend.Content != "Help me plan trips\nMake it friendlier" || amend.BuilderParameters == nil ||
-		!reflect.DeepEqual(*amend.BuilderParameters, AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent, Name: "Trip planner", Model: "gpt-6-luna",
+		!reflect.DeepEqual(*amend.BuilderParameters, AgentBuilderParameters{Kind: models.AgentBuilderKindAgent, Name: "Trip planner", Model: "gpt-6-luna",
 			Draft: &AgentBuilderDraftProfile{Purpose: "Plans trips", SystemPrompt: "Plan trips.", Personality: "Warm", OperatingPrinciples: []string{"Ask first"}}}) {
 		t.Fatalf("amend message = %#v parameters %#v", amend, amend.BuilderParameters)
 	}

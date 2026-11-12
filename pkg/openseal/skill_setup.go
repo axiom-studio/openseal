@@ -3,37 +3,40 @@ package openseal
 import (
 	"context"
 	"errors"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"slices"
 	"time"
 )
 
-type SkillSetupRequest = runtime.SkillSetupRequest
-type SkillSetupPhase = runtime.SkillSetupPhase
-type SkillSetupValidationError = runtime.SkillSetupValidationError
+type SkillSetupRequest = models.SkillSetupRequest
+type SkillSetupPhase = models.SkillSetupPhase
+type SkillSetupValidationError = models.SkillSetupValidationError
 
-const SkillSetupPhaseConfiguration = runtime.SkillSetupPhaseConfiguration
-const SkillSetupPhaseBindingUpgrade = runtime.SkillSetupPhaseBindingUpgrade
+const SkillSetupPhaseConfiguration = models.SkillSetupPhaseConfiguration
+const SkillSetupPhaseBindingUpgrade = models.SkillSetupPhaseBindingUpgrade
 
-type SkillSetupResolutionReceipt = runtime.SkillSetupResolutionReceipt
+type SkillSetupResolutionReceipt = models.SkillSetupResolutionReceipt
 
-const SkillActionRequestSetup = runtime.SkillActionRequestSetup
-const SkillActionListSetupRequests = runtime.SkillActionListSetupRequests
-const ConversationTaskSkillSetupWakeType = runtime.ConversationTaskSkillSetupWakeType
+const SkillActionRequestSetup = agentrun.SkillActionRequestSetup
+const SkillActionListSetupRequests = skillbinding.SkillActionListSetupRequests
+const ConversationTaskSkillSetupWakeType = conversationrun.ConversationTaskSkillSetupWakeType
 
-var ErrSkillSetupConflict = runtime.ErrSkillSetupConflict
-var ErrInvalidSkillSetup = runtime.ErrInvalidSkillSetup
+var ErrSkillSetupConflict = models.ErrSkillSetupConflict
+var ErrInvalidSkillSetup = models.ErrInvalidSkillSetup
 
 // RebaseSkillSetupRequestAfterBindingUpgrade verifies durable migration proof
 // without completing the separate configuration or reauthorization step.
 func RebaseSkillSetupRequestAfterBindingUpgrade(request *SkillSetupRequest, expected int64, binding *skill.Binding) (*SkillSetupRequest, error) {
-	return runtime.RebaseSkillSetupRequestAfterBindingUpgrade(request, expected, binding)
+	return skillbinding.RebaseSkillSetupRequestAfterBindingUpgrade(request, expected, binding)
 }
 
 // ReconcileSkillSetupTask delivers a saved setup result to the exact background
 // task. A handled result must not also schedule a foreground conversation reply.
-func (e *Engine) ReconcileSkillSetupTask(ctx context.Context, scope runtime.Scope, requestID string) (*runtime.AgentRunCommandResult, bool, error) {
+func (e *Engine) ReconcileSkillSetupTask(ctx context.Context, scope models.Scope, requestID string) (*agentrun.AgentRunCommandResult, bool, error) {
 	if e == nil || e.conversationRunScheduler == nil {
 		return nil, false, errors.New("conversation run scheduling is unavailable")
 	}
@@ -47,7 +50,7 @@ func (e *Engine) ReconcileSkillSetupTask(ctx context.Context, scope runtime.Scop
 // ListSkillSetupRequests lists a conversation's setup requests. owner must
 // own the conversation: every request there is saved to it, or to an Agent
 // its builder acted for (targetAgentId).
-func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, conversationID string) ([]*runtime.SkillSetupRequest, error) {
+func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope models.Scope, owner ObjectiveOwner, conversationID string) ([]*models.SkillSetupRequest, error) {
 	if err := e.conversationOwnedBy(ctx, scope, owner, conversationID); err != nil {
 		return nil, err
 	}
@@ -55,7 +58,7 @@ func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope
 	if err != nil {
 		return nil, err
 	}
-	return slices.DeleteFunc(requests, func(request *runtime.SkillSetupRequest) bool { return request.ChatOwner() != owner }), nil
+	return slices.DeleteFunc(requests, func(request *models.SkillSetupRequest) bool { return request.ChatOwner() != owner }), nil
 }
 
 // reconciledSkillSetupRequests lists one conversation's requests saved to
@@ -64,7 +67,7 @@ func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope
 // A validated binding saved in Settings or an OAuth callback is the same
 // evidence as one saved in the chat form. Reconcile from canonical state so
 // closing a tab or losing a completion response cannot strand the request.
-func (e *Engine) reconciledSkillSetupRequests(ctx context.Context, scope runtime.Scope, deploymentID, conversationID string) ([]*runtime.SkillSetupRequest, error) {
+func (e *Engine) reconciledSkillSetupRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.SkillSetupRequest, error) {
 	requests, err := e.store.ListSkillSetupRequests(ctx, scope, deploymentID, conversationID)
 	if err != nil {
 		return nil, err
@@ -94,7 +97,7 @@ func (e *Engine) reconciledSkillSetupRequests(ctx context.Context, scope runtime
 				requests[index] = resolved
 				break
 			}
-			if errors.Is(resolveErr, runtime.ErrSkillSetupConflict) {
+			if errors.Is(resolveErr, models.ErrSkillSetupConflict) {
 				latest, readErr := e.store.GetSkillSetupRequest(ctx, scope, request.ID)
 				if readErr != nil {
 					return nil, readErr
@@ -111,14 +114,14 @@ func (e *Engine) reconciledSkillSetupRequests(ctx context.Context, scope runtime
 
 const skillSetupReconciliationActor = "system:binding-reconciliation"
 
-func skillSetupReconcilable(request *runtime.SkillSetupRequest) bool {
-	return request != nil && request.Status == "pending" && request.Phase != runtime.SkillSetupPhaseBindingUpgrade &&
-		request.Kind != runtime.SkillSetupKindConnectApp && request.Kind != runtime.SkillSetupKindConnectAccount
+func skillSetupReconcilable(request *models.SkillSetupRequest) bool {
+	return request != nil && request.Status == "pending" && request.Phase != models.SkillSetupPhaseBindingUpgrade &&
+		request.Kind != models.SkillSetupKindConnectApp && request.Kind != models.SkillSetupKindConnectAccount
 }
 
 // skillSetupBindingCandidate reports whether a binding is a save made for
 // this request. ResolveSkillSetupRequest still checks the requested access.
-func skillSetupBindingCandidate(request *runtime.SkillSetupRequest, binding *skill.Binding) bool {
+func skillSetupBindingCandidate(request *models.SkillSetupRequest, binding *skill.Binding) bool {
 	if binding == nil || binding.Disabled || binding.SkillID != request.SkillID || binding.SkillVersion != request.SkillVersion ||
 		binding.SourceIdentity != request.SourceIdentity || binding.Revision <= request.BindingRevision ||
 		(request.BindingID != "" && binding.ID != request.BindingID) {
@@ -134,17 +137,17 @@ func skillSetupBindingCandidate(request *runtime.SkillSetupRequest, binding *ski
 // reconciliation to retry.
 func (e *Engine) reconcileSkillSetupRequestsForBinding(ctx context.Context, binding *skill.Binding) {
 	pending, ok := e.store.(interface {
-		ListPendingSkillSetupRequests(context.Context, runtime.Scope, int, int) ([]*runtime.SkillSetupRequest, error)
+		ListPendingSkillSetupRequests(context.Context, models.Scope, int, int) ([]*models.SkillSetupRequest, error)
 	})
 	if !ok || binding == nil || binding.Disabled {
 		return
 	}
-	scope := runtime.Scope{Kind: binding.Scope.Kind, ID: binding.Scope.ID}
+	scope := models.Scope{Kind: binding.Scope.Kind, ID: binding.Scope.ID}
 	if scope.Validate() != nil {
 		return
 	}
 	const pageSize, maximumPages = 100, 20
-	var matches []*runtime.SkillSetupRequest
+	var matches []*models.SkillSetupRequest
 	for page := 0; page < maximumPages; page++ {
 		requests, err := pending.ListPendingSkillSetupRequests(ctx, scope, pageSize, page*pageSize)
 		if err != nil {
@@ -171,13 +174,13 @@ func (e *Engine) reconcileSkillSetupRequestsForBinding(ctx context.Context, bind
 // umbrella it is saved to, or the chat it was asked in. A builder's card for
 // another Agent is saved to that Agent and shown in the builder's chat, so
 // either umbrella opens it; every write still goes to request.Owner.
-func (e *Engine) GetSkillSetupRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string) (*runtime.SkillSetupRequest, error) {
+func (e *Engine) GetSkillSetupRequest(ctx context.Context, scope models.Scope, owner ObjectiveOwner, id string) (*models.SkillSetupRequest, error) {
 	r, err := e.store.GetSkillSetupRequest(ctx, scope, id)
 	if err != nil {
 		return nil, err
 	}
 	if r == nil || r.DeploymentID != r.Owner.ID || (r.Owner != owner && (!r.Targeted() || r.ChatOwner() != owner)) {
-		return nil, runtime.ErrInvalidSkillSetup
+		return nil, models.ErrInvalidSkillSetup
 	}
 	return r, nil
 }
@@ -187,7 +190,7 @@ func (e *Engine) GetSkillSetupRequest(ctx context.Context, scope runtime.Scope, 
 // A setup card is settled by a manager of its umbrella (or a system
 // reconciliation); connect cards follow their own authority. Hosts authorize
 // the exact target before calling this method.
-func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, bindingID string, resolver InteractionResolver, dismiss bool) (*runtime.SkillSetupRequest, error) {
+func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope models.Scope, owner ObjectiveOwner, id string, expected int64, bindingID string, resolver InteractionResolver, dismiss bool) (*models.SkillSetupRequest, error) {
 	r, err := e.GetSkillSetupRequest(ctx, scope, owner, id)
 	if err != nil {
 		return nil, err
@@ -198,13 +201,13 @@ func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Sco
 	}
 	// A connect card is completed by a connection, not a saved binding.
 	switch r.Kind {
-	case runtime.SkillSetupKindConnectApp:
+	case models.SkillSetupKindConnectApp:
 		resolution, resolveErr := e.ResolveConnectAppRequest(ctx, scope, owner, id, expected, resolver, dismiss)
 		if resolveErr != nil {
 			return nil, resolveErr
 		}
 		return resolution.Request, nil
-	case runtime.SkillSetupKindConnectAccount:
+	case models.SkillSetupKindConnectAccount:
 		return e.ResolveConnectAccountRequest(ctx, scope, owner, id, expected, resolver, dismiss)
 	}
 	if err := authorizeManagerInteraction(resolver); err != nil {
@@ -214,15 +217,15 @@ func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Sco
 		if (dismiss && r.Status == "dismissed") || (!dismiss && r.Status == "resolved" && r.ResolvedBindingID == bindingID) {
 			return r, nil
 		}
-		return nil, runtime.ErrSkillSetupConflict
+		return nil, models.ErrSkillSetupConflict
 	}
 	if r.Revision != expected {
-		return nil, runtime.ErrSkillSetupConflict
+		return nil, models.ErrSkillSetupConflict
 	}
 	if dismiss {
 		r.Status = "dismissed"
 	} else {
-		if r.Phase == runtime.SkillSetupPhaseBindingUpgrade {
+		if r.Phase == models.SkillSetupPhaseBindingUpgrade {
 			return nil, errors.New("the requested Skill binding upgrade must be completed before saving configuration")
 		}
 		binding, err := e.skills.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, r.Owner.ID, bindingID)

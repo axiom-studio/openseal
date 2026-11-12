@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestEngineExposesGovernedSkillCatalog(t *testing.T) {
@@ -157,7 +157,7 @@ func TestEngineExposesGovernedActionAndApprovalLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outcome.State != runtime.ToolEntryAwaitingApproval || outcome.Wait == nil || outcome.Wait.ApprovalID == "" {
+	if outcome.State != models.ToolEntryAwaitingApproval || outcome.Wait == nil || outcome.Wait.ApprovalID == "" {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 	approval, err := engine.GetApproval(ctx, scope, outcome.Wait.ApprovalID)

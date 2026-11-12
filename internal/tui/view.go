@@ -10,8 +10,10 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -365,12 +367,12 @@ func (m *Model) renderOverviewContent(width int) string {
 		if !isTerminal(run.Status) {
 			activeRuns++
 		}
-		if run.Status == runtime.AgentRunStatusWaitingForApproval || run.Status == runtime.AgentRunStatusFailed {
+		if run.Status == models.AgentRunStatusWaitingForApproval || run.Status == models.AgentRunStatusFailed {
 			attention++
 		}
 	}
 	for _, approval := range m.actionApprovals {
-		if approval != nil && approval.Status == runtime.ApprovalStatusPending {
+		if approval != nil && approval.Status == models.ApprovalStatusPending {
 			attention++
 		}
 	}
@@ -886,12 +888,12 @@ func (m *Model) renderObjectivesContent(width int) string {
 				}
 				actions = append(actions, action)
 			}
-			if selected.Status == runtime.RunbookActivationActive && m.supportsRunbook(kernelapi.OperationExecute) {
+			if selected.Status == models.RunbookActivationActive && m.supportsRunbook(kernelapi.OperationExecute) {
 				actions = append(actions, "u run now")
 			}
-			if selected.Status != runtime.RunbookActivationRetired && m.supportsRunbook(kernelapi.OperationUpdate) {
+			if selected.Status != models.RunbookActivationRetired && m.supportsRunbook(kernelapi.OperationUpdate) {
 				action := "p resume"
-				if selected.Status == runtime.RunbookActivationActive {
+				if selected.Status == models.RunbookActivationActive {
 					action = "p pause"
 				}
 				actions = append(actions, action)
@@ -916,7 +918,7 @@ func (m *Model) renderObjectivesContent(width int) string {
 }
 
 func (m *Model) renderObjectiveRunbooks(objectiveID string, width int) []string {
-	values := make([]*runtime.RunbookActivation, 0)
+	values := make([]*models.RunbookActivation, 0)
 	for _, value := range m.runbooks {
 		if value != nil && value.ObjectiveID == objectiveID {
 			values = append(values, value)
@@ -1097,7 +1099,7 @@ func (m *Model) renderSkillsContent(width int) string {
 		title += mutedStyle.Render("  refreshing…")
 	}
 	ownerLabel := "Agent"
-	if m.config.Owner.Type == runtime.OwnerTypeTeam {
+	if m.config.Owner.Type == models.OwnerTypeTeam {
 		ownerLabel = "Team"
 	}
 	lines := []string{title, mutedStyle.Render("Skills and authorized actions · grant each Agent or Team only what it needs."), "", mutedStyle.Render(ownerLabel + " authority")}
@@ -1171,11 +1173,11 @@ func (m *Model) renderSkillsContent(width int) string {
 		}
 	}
 	actionsTitle := "Authorized for this Agent"
-	if m.config.Owner.Type != runtime.OwnerTypeAgent {
+	if m.config.Owner.Type != models.OwnerTypeAgent {
 		actionsTitle = "Authorized actions"
 	}
 	lines = append(lines, "", mutedStyle.Render(actionsTitle))
-	if m.config.Owner.Type != runtime.OwnerTypeAgent {
+	if m.config.Owner.Type != models.OwnerTypeAgent {
 		lines = append(lines, mutedStyle.Render("Open an Agent-owned workspace to browse its complete action catalog."))
 	} else if !m.skillActionCapability.Available {
 		lines = append(lines, mutedStyle.Render("The kernel does not advertise owner-scoped action discovery."))
@@ -1235,7 +1237,7 @@ func (m *Model) renderRunsContent(width int) string {
 		if run.Budget != nil {
 			state := run.BudgetState
 			if state == "" {
-				state = runtime.BudgetStateActive
+				state = models.BudgetStateActive
 			}
 			lines = append(lines, mutedStyle.Render("Autonomy budget · "+string(state)))
 			lines = append(lines, renderBudgetLines(run.Budget, &run.BudgetUsage, max(width-8, 24))...)
@@ -1358,7 +1360,7 @@ func (m *Model) renderSelectedActionCalls(width int) []string {
 	return lines
 }
 
-func renderBudgetLines(policy *runtime.BudgetPolicy, usage *runtime.BudgetUsage, width int) []string {
+func renderBudgetLines(policy *models.BudgetPolicy, usage *models.BudgetUsage, width int) []string {
 	if policy == nil {
 		return nil
 	}
@@ -1472,15 +1474,15 @@ func (m *Model) renderAgentRequestsContent(width int) string {
 			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Evidence contract · %d acceptance field(s) · %d required artifact(s)", len(request.AcceptanceCriteria), required)))
 		}
 		actions := make([]string, 0, 5)
-		if m.canRespondToSelectedRequest(runtime.AgentRequestDecisionAccept) {
+		if m.canRespondToSelectedRequest(collaboration.AgentRequestDecisionAccept) {
 			actions = append(actions, "y accept", "q clarify", "x reject")
 		}
-		if m.canRespondToSelectedRequest(runtime.AgentRequestDecisionProvideClarification) {
+		if m.canRespondToSelectedRequest(collaboration.AgentRequestDecisionProvideClarification) {
 			actions = append(actions, "M answer clarification")
 		}
 		if m.canCompleteSelectedAgentRequest() {
 			actions = append(actions, "Enter complete")
-		} else if request.Status == runtime.AgentRequestStatusAccepted && request.Recipient == m.localCollaborationParty() && (len(request.AcceptanceCriteria) > 0 || hasRequiredArtifact(request.ArtifactRequirements)) {
+		} else if request.Status == models.AgentRequestStatusAccepted && request.Recipient == m.localCollaborationParty() && (len(request.AcceptanceCriteria) > 0 || hasRequiredArtifact(request.ArtifactRequirements)) {
 			lines = append(lines, mutedStyle.Render("Completion remains with the child Run until its required evidence and artifacts are registered."))
 		}
 		if len(actions) > 0 {
@@ -1535,7 +1537,7 @@ func (m *Model) renderActionApprovalsContent(width int) string {
 		}
 		if m.canResolveSelectedActionApproval() {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("y approve  ·  x reject"))
-		} else if approval.Status == runtime.ApprovalStatusPending && m.supportsActionApproval(kernelapi.OperationResolve) {
+		} else if approval.Status == models.ApprovalStatusPending && m.supportsActionApproval(kernelapi.OperationResolve) {
 			lines = append(lines, "", mutedStyle.Render("This local principal is not an eligible approver."))
 		}
 	}
@@ -1545,7 +1547,7 @@ func (m *Model) renderActionApprovalsContent(width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func hasRequiredArtifact(requirements []runtime.ArtifactRequirement) bool {
+func hasRequiredArtifact(requirements []models.ArtifactRequirement) bool {
 	for _, requirement := range requirements {
 		if requirement.Required {
 			return true
@@ -1554,8 +1556,8 @@ func hasRequiredArtifact(requirements []runtime.ArtifactRequirement) bool {
 	return false
 }
 
-func humanAgentRequestStatus(status runtime.AgentRequestStatus) string {
-	if status == runtime.AgentRequestStatusClarificationRequested {
+func humanAgentRequestStatus(status models.AgentRequestStatus) string {
+	if status == models.AgentRequestStatusClarificationRequested {
 		return "clarify"
 	}
 	return strings.ReplaceAll(string(status), "_", " ")
@@ -1574,7 +1576,7 @@ type tuiDeliveryReceipt struct {
 	domains        []string
 }
 
-func runDeliveryReceipt(run *runtime.AgentRun) (tuiDeliveryReceipt, bool) {
+func runDeliveryReceipt(run *models.AgentRun) (tuiDeliveryReceipt, bool) {
 	if run == nil || run.Output == nil || run.Output["status"] != "accepted" {
 		return tuiDeliveryReceipt{}, false
 	}
@@ -1680,7 +1682,7 @@ func (m *Model) renderActivityContent(width int) string {
 			prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
 			if index == m.activitySelected {
 				prefix, style = "› ", selectedStyle
-			} else if item.Severity == runtime.ActivitySeverityError {
+			} else if item.Severity == models.ActivitySeverityError {
 				style = lipgloss.NewStyle().Foreground(danger)
 			}
 			label := strings.ReplaceAll(item.EventType, "_", " ")
@@ -1741,7 +1743,7 @@ func (m *Model) renderActivityContent(width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func activityUsageLine(usage *runtime.BudgetUsage) string {
+func activityUsageLine(usage *models.BudgetUsage) string {
 	if usage == nil {
 		return ""
 	}
@@ -1771,7 +1773,7 @@ func activityUsageLine(usage *runtime.BudgetUsage) string {
 	return "Usage · " + strings.Join(parts, " · ")
 }
 
-func activitySubjectLines(item *runtime.ActivityProjection) []string {
+func activitySubjectLines(item *models.ActivityProjection) []string {
 	if item == nil {
 		return nil
 	}
@@ -1854,7 +1856,7 @@ func (m *Model) renderArtifactsContent(width int) string {
 				actions = append(actions, "e expand evidence")
 			}
 		}
-		if artifact.ContentAvailability == runtime.ArtifactContentAvailable && m.supportsArtifact(kernelapi.OperationDownload) {
+		if artifact.ContentAvailability == models.ArtifactContentAvailable && m.supportsArtifact(kernelapi.OperationDownload) {
 			actions = append(actions, "d download")
 		}
 		if len(actions) > 0 {
@@ -1914,7 +1916,7 @@ func (m *Model) renderChannelsContent(width int) string {
 				lines = append(lines, mutedStyle.Render(compact(meta, max(width-8, 28))))
 				lines = append(lines, "  "+compact(message.Content, max(width-10, 24)))
 				for _, reference := range message.References {
-					if reference.Kind != runtime.ConversationReferenceApproval {
+					if reference.Kind != models.ConversationReferenceApproval {
 						continue
 					}
 					if approval := m.actionApprovalByID(reference.ID); approval != nil {
@@ -1950,7 +1952,7 @@ func (m *Model) renderChannelsContent(width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) actionApprovalByID(id string) *runtime.ApprovalCheckpoint {
+func (m *Model) actionApprovalByID(id string) *models.ApprovalCheckpoint {
 	for _, approval := range m.actionApprovals {
 		if approval != nil && approval.ID == id {
 			return approval
@@ -1962,7 +1964,7 @@ func (m *Model) actionApprovalByID(id string) *runtime.ApprovalCheckpoint {
 // renderConversationActionApproval projects only typed, user-visible action
 // facts. It deliberately does not dump arbitrary arguments, which may contain
 // configuration or credential-shaped values owned by a host adapter.
-func renderConversationActionApproval(approval *runtime.ApprovalCheckpoint, width int) []string {
+func renderConversationActionApproval(approval *models.ApprovalCheckpoint, width int) []string {
 	if approval == nil {
 		return nil
 	}
@@ -1994,7 +1996,7 @@ func renderConversationActionApproval(approval *runtime.ApprovalCheckpoint, widt
 		lines = appendTypedConversationChange(lines, "Title", changes["title"], width)
 		lines = appendTypedConversationChange(lines, "Goal", changes["goal"], width)
 	}
-	if approval.Status == runtime.ApprovalStatusPending {
+	if approval.Status == models.ApprovalStatusPending {
 		lines = append(lines, mutedStyle.Render("    A approvals · review this exact proposal"))
 	} else if approval.DecisionBy != nil {
 		lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("    Decision · %s:%s", approval.DecisionBy.Type, approval.DecisionBy.ID), max(width-12, 20))))
@@ -2028,7 +2030,7 @@ func conversationResourceLabel(resourceType string) string {
 	}
 }
 
-func activePresenceSummary(presence []*runtime.ConversationPresence, width int) string {
+func activePresenceSummary(presence []*models.ConversationPresence, width int) string {
 	active := make([]string, 0, len(presence))
 	now := time.Now()
 	for _, item := range presence {
@@ -2047,7 +2049,7 @@ func activePresenceSummary(presence []*runtime.ConversationPresence, width int) 
 	return compact(strings.Join(active, " · "), max(width-6, 28))
 }
 
-func renderParticipationAudit(rounds []*runtime.ParticipationRoundResult, width int) []string {
+func renderParticipationAudit(rounds []*models.ParticipationRoundResult, width int) []string {
 	for _, result := range rounds {
 		if result == nil || result.Round == nil {
 			continue
@@ -2066,17 +2068,17 @@ func renderParticipationAudit(rounds []*runtime.ParticipationRoundResult, width 
 	return nil
 }
 
-func (m *Model) availableActions(run *runtime.AgentRun) string {
+func (m *Model) availableActions(run *models.AgentRun) string {
 	actions := make([]string, 0, 3)
-	if run.Status == runtime.AgentRunStatusPaused && m.commandAllowed(run, runtime.AgentRunCommandResume) {
+	if run.Status == models.AgentRunStatusPaused && m.commandAllowed(run, agentrun.AgentRunCommandResume) {
 		actions = append(actions, "p resume")
-	} else if m.commandAllowed(run, runtime.AgentRunCommandPause) {
+	} else if m.commandAllowed(run, agentrun.AgentRunCommandPause) {
 		actions = append(actions, "p pause")
 	}
-	if m.commandAllowed(run, runtime.AgentRunCommandIntervene) {
+	if m.commandAllowed(run, agentrun.AgentRunCommandIntervene) {
 		actions = append(actions, "g guide")
 	}
-	if m.commandAllowed(run, runtime.AgentRunCommandCancel) {
+	if m.commandAllowed(run, agentrun.AgentRunCommandCancel) {
 		actions = append(actions, "x stop")
 	}
 	return strings.Join(actions, "  ·  ")
@@ -2111,26 +2113,26 @@ func (m *Model) runsWidth() int {
 	return max(46, m.width-m.composerWidth()-6)
 }
 
-func humanStatus(status runtime.AgentRunStatus) string {
+func humanStatus(status models.AgentRunStatus) string {
 	switch status {
-	case runtime.AgentRunStatusWaitingForDependency:
+	case models.AgentRunStatusWaitingForDependency:
 		return "waiting"
-	case runtime.AgentRunStatusWaitingForAgent:
+	case models.AgentRunStatusWaitingForAgent:
 		return "delegated"
-	case runtime.AgentRunStatusWaitingForApproval:
+	case models.AgentRunStatusWaitingForApproval:
 		return "approval"
-	case runtime.AgentRunStatusWaitingForEvent:
+	case models.AgentRunStatusWaitingForEvent:
 		return "watching"
 	default:
 		return strings.ReplaceAll(string(status), "_", " ")
 	}
 }
 
-func humanIntent(intent runtime.ConversationMessageIntent) string {
+func humanIntent(intent models.ConversationMessageIntent) string {
 	return strings.ReplaceAll(string(intent), "_", " ")
 }
 
-func humanOwner(owner runtime.ObjectiveOwner) string {
+func humanOwner(owner models.ObjectiveOwner) string {
 	ownerType := string(owner.Type)
 	if ownerType != "" {
 		ownerType = strings.ToUpper(ownerType[:1]) + ownerType[1:]

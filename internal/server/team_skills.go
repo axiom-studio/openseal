@@ -7,7 +7,8 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
-	kernelruntime "github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -130,12 +131,12 @@ func (s *Server) handlePlanOwnerSkillReferenceUpgrade(w http.ResponseWriter, r *
 	if !ok {
 		return
 	}
-	var request kernelruntime.PlanSkillReferenceUpgradeRequest
+	var request skillbinding.PlanSkillReferenceUpgradeRequest
 	if err := decodeStrictJSON(r, &request); err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if request.Scope != (kernelruntime.Scope{}) && request.Scope != scope ||
+	if request.Scope != (models.Scope{}) && request.Scope != scope ||
 		request.DeploymentID != "" && request.DeploymentID != deploymentID ||
 		request.BindingID != "" && request.BindingID != bindingID {
 		s.respondError(w, http.StatusBadRequest, owner+" Skill upgrade identity does not match the request resource")
@@ -163,7 +164,7 @@ func (s *Server) handleApplyOwnerSkillReferenceUpgrade(w http.ResponseWriter, r 
 	if !ok {
 		return
 	}
-	var request kernelruntime.ApplySkillReferenceUpgradeRequest
+	var request skillbinding.ApplySkillReferenceUpgradeRequest
 	if err := decodeStrictJSON(r, &request); err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
@@ -187,23 +188,23 @@ func (s *Server) ownerSkillReferenceUpgradeService(
 	w http.ResponseWriter,
 	r *http.Request,
 	owner string,
-) (*kernelruntime.SkillReferenceUpgradeService, kernelruntime.Scope, string, string, bool) {
+) (*skillbinding.SkillReferenceUpgradeService, models.Scope, string, string, bool) {
 	catalog, skillScope, deploymentID, ok := s.ownerSkillCatalog(w, r, owner)
 	if !ok {
-		return nil, kernelruntime.Scope{}, "", "", false
+		return nil, models.Scope{}, "", "", false
 	}
 	bindingID := strings.TrimSpace(r.PathValue("bindingId"))
 	if bindingID == "" {
 		s.respondError(w, http.StatusBadRequest, "binding id is required")
-		return nil, kernelruntime.Scope{}, "", "", false
+		return nil, models.Scope{}, "", "", false
 	}
-	store, ok := s.store.(kernelruntime.SkillReferenceUpgradeStore)
+	store, ok := s.store.(models.SkillReferenceUpgradeStore)
 	if !ok {
 		s.respondError(w, http.StatusServiceUnavailable, owner+" Skill reference upgrades are unavailable")
-		return nil, kernelruntime.Scope{}, "", "", false
+		return nil, models.Scope{}, "", "", false
 	}
-	service := kernelruntime.NewSkillReferenceUpgradeService(store, catalog)
-	scope := kernelruntime.Scope{Kind: skillScope.Kind, ID: skillScope.ID}
+	service := skillbinding.NewSkillReferenceUpgradeService(store, catalog)
+	scope := models.Scope{Kind: skillScope.Kind, ID: skillScope.ID}
 	return service, scope, deploymentID, bindingID, true
 }
 
@@ -261,11 +262,11 @@ func (s *Server) respondSkillBindingError(w http.ResponseWriter, err error) {
 
 func (s *Server) respondSkillReferenceUpgradeError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, kernelruntime.ErrSkillReferenceUpgradeUnavailable):
+	case errors.Is(err, skillbinding.ErrSkillReferenceUpgradeUnavailable):
 		s.respondError(w, http.StatusServiceUnavailable, err.Error())
-	case errors.Is(err, kernelruntime.ErrSkillReferenceUpgradeConflict):
+	case errors.Is(err, models.ErrSkillReferenceUpgradeConflict):
 		s.respondError(w, http.StatusConflict, err.Error())
-	case errors.Is(err, kernelruntime.ErrSkillReferenceUpgradeApproval):
+	case errors.Is(err, skillbinding.ErrSkillReferenceUpgradeApproval):
 		s.respondError(w, http.StatusPreconditionRequired, err.Error())
 	case errors.Is(err, skill.ErrBindingNotFound):
 		s.respondError(w, http.StatusNotFound, err.Error())

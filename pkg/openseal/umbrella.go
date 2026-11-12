@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -24,9 +24,9 @@ func (e *Engine) ResolveUmbrella(ctx context.Context, scope skill.ScopeReference
 	}
 	switch kind {
 	case workforce.DeploymentKindAgent:
-		return ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: id}, nil
+		return ObjectiveOwner{Type: models.OwnerTypeAgent, ID: id}, nil
 	case workforce.DeploymentKindTeam:
-		return ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: id}, nil
+		return ObjectiveOwner{Type: models.OwnerTypeTeam, ID: id}, nil
 	}
 	return ObjectiveOwner{}, fmt.Errorf("deployment ID %s has unknown kind %q", id, kind)
 }
@@ -45,7 +45,7 @@ func (e *Engine) checkUmbrella(ctx context.Context, scope skill.ScopeReference, 
 		return fmt.Errorf("deployment %s is not a %s", owner.ID, owner.Type)
 	}
 	switch owner.Type {
-	case runtime.OwnerTypeAgent:
+	case models.OwnerTypeAgent:
 		deployment, err := e.agents.GetDeployment(ctx, scope, owner.ID)
 		if err != nil {
 			return err
@@ -53,7 +53,7 @@ func (e *Engine) checkUmbrella(ctx context.Context, scope skill.ScopeReference, 
 		if deployment.RolloutStatus == kernelagent.RolloutRetired {
 			return fmt.Errorf("Agent %s is retired", owner.ID)
 		}
-	case runtime.OwnerTypeTeam:
+	case models.OwnerTypeTeam:
 		deployment, err := e.teams.GetDeployment(ctx, scope, owner.ID)
 		if err != nil {
 			return err
@@ -130,13 +130,13 @@ func (e *Engine) DeleteOwnerSkillBinding(ctx context.Context, owner ObjectiveOwn
 }
 
 // conversationOwnedBy returns conversation conversationID when owner owns it.
-func (e *Engine) conversationOwnedBy(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, conversationID string) error {
+func (e *Engine) conversationOwnedBy(ctx context.Context, scope models.Scope, owner ObjectiveOwner, conversationID string) error {
 	conversation, err := e.GetConversation(ctx, scope, conversationID)
 	if err != nil {
 		return err
 	}
 	if conversation == nil || conversation.Owner != owner {
-		return runtime.ErrConversationNotFound
+		return models.ErrConversationNotFound
 	}
 	return nil
 }

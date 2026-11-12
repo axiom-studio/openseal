@@ -23,10 +23,29 @@ import (
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/httpaction"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
+	"github.com/axiom-studio/openseal/pkg/models"
 	kerneloauth "github.com/axiom-studio/openseal/pkg/oauth"
 	"github.com/axiom-studio/openseal/pkg/progression"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/callback"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
+	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
+	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
 	skillsource "github.com/axiom-studio/openseal/pkg/skill/source"
@@ -74,7 +93,7 @@ type (
 	RunbookPredicate         = runbook.Predicate
 	RunbookPredicateOperator = runbook.PredicateOperator
 	RunbookDiagnostic        = runbook.Diagnostic
-	RunbookStepProducer      = runtime.RunbookStepProducer
+	RunbookStepProducer      = routine.RunbookStepProducer
 )
 
 type (
@@ -254,308 +273,308 @@ type (
 	WorkforceSensitiveInputKind             = validation.SensitiveInputKind
 	WorkforceSensitiveInputFinding          = validation.SensitiveInputFinding
 	SensitiveInputError                     = validation.SensitiveInputError
-	SkillReferenceUpgradePlan               = runtime.SkillReferenceUpgradePlan
-	SkillReferenceUpgradeFinding            = runtime.SkillReferenceUpgradeFinding
-	SkillReferenceIdentity                  = runtime.SkillReferenceIdentity
-	SkillReferenceObjectiveReference        = runtime.SkillReferenceObjectiveReference
-	SkillReferenceObjectiveImpact           = runtime.SkillReferenceObjectiveImpact
-	PlanSkillReferenceUpgradeRequest        = runtime.PlanSkillReferenceUpgradeRequest
-	ApplySkillReferenceUpgradeRequest       = runtime.ApplySkillReferenceUpgradeRequest
-	SkillReferenceUpgradeApproval           = runtime.SkillReferenceUpgradeApproval
-	SkillReferenceUpgradeReceipt            = runtime.SkillReferenceUpgradeReceipt
-	SkillRuntimeUsageFilter                 = runtime.SkillRuntimeUsageFilter
-	SkillRuntimeReference                   = runtime.SkillRuntimeReference
-	SkillRuntimeUsageStore                  = runtime.SkillRuntimeUsageStore
+	SkillReferenceUpgradePlan               = models.SkillReferenceUpgradePlan
+	SkillReferenceUpgradeFinding            = models.SkillReferenceUpgradeFinding
+	SkillReferenceIdentity                  = models.SkillReferenceIdentity
+	SkillReferenceObjectiveReference        = models.SkillReferenceObjectiveReference
+	SkillReferenceObjectiveImpact           = models.SkillReferenceObjectiveImpact
+	PlanSkillReferenceUpgradeRequest        = skillbinding.PlanSkillReferenceUpgradeRequest
+	ApplySkillReferenceUpgradeRequest       = skillbinding.ApplySkillReferenceUpgradeRequest
+	SkillReferenceUpgradeApproval           = models.SkillReferenceUpgradeApproval
+	SkillReferenceUpgradeReceipt            = models.SkillReferenceUpgradeReceipt
+	SkillRuntimeUsageFilter                 = models.SkillRuntimeUsageFilter
+	SkillRuntimeReference                   = models.SkillRuntimeReference
+	SkillRuntimeUsageStore                  = models.SkillRuntimeUsageStore
 
-	PortfolioStore                       = runtime.PortfolioStore
-	KernelStore                          = runtime.KernelStore
-	PostgresStore                        = runtime.PostgresStore
-	PostgresStoreOption                  = runtime.PostgresStoreOption
-	PostgresPoolConfig                   = runtime.PostgresPoolConfig
-	PostgresPoolStats                    = runtime.PostgresPoolStats
-	WorkerLimiter                        = runtime.WorkerLimiter
-	WorkerLimiterStats                   = runtime.WorkerLimiterStats
-	Scope                                = runtime.Scope
-	ObjectiveOwner                       = runtime.ObjectiveOwner
-	Objective                            = runtime.Objective
-	ObjectiveExecutionPolicy             = runtime.ObjectiveExecutionPolicy
-	ObjectiveStatus                      = runtime.ObjectiveStatus
-	ScheduledAgentTask                   = runtime.ScheduledAgentTask
-	RoutineGrant                         = runtime.RoutineGrant
-	RoutineBrief                         = runtime.RoutineBrief
-	RoutineOwnerAddressResolver          = runtime.RoutineOwnerAddressResolver
-	RevokeRoutineGrantsRequest           = runtime.RevokeRoutineGrantsRequest
-	RoutineScript                        = runtime.RoutineScript
-	RoutineScriptStatus                  = runtime.RoutineScriptStatus
-	ChatFile                             = runtime.ChatFile
-	ChatFileResolver                     = runtime.ChatFileResolver
+	PortfolioStore                       = models.PortfolioStore
+	KernelStore                          = models.KernelStore
+	PostgresStore                        = postgres.Store
+	PostgresStoreOption                  = postgres.PostgresStoreOption
+	PostgresPoolConfig                   = postgres.PostgresPoolConfig
+	PostgresPoolStats                    = postgres.PostgresPoolStats
+	WorkerLimiter                        = workqueue.WorkerLimiter
+	WorkerLimiterStats                   = workqueue.WorkerLimiterStats
+	Scope                                = models.Scope
+	ObjectiveOwner                       = models.ObjectiveOwner
+	Objective                            = models.Objective
+	ObjectiveExecutionPolicy             = models.ObjectiveExecutionPolicy
+	ObjectiveStatus                      = models.ObjectiveStatus
+	ScheduledAgentTask                   = models.ScheduledAgentTask
+	RoutineGrant                         = models.RoutineGrant
+	RoutineBrief                         = routine.RoutineBrief
+	RoutineOwnerAddressResolver          = models.RoutineOwnerAddressResolver
+	RevokeRoutineGrantsRequest           = routine.RevokeRoutineGrantsRequest
+	RoutineScript                        = models.RoutineScript
+	RoutineScriptStatus                  = routine.RoutineScriptStatus
+	ChatFile                             = routine.ChatFile
+	ChatFileResolver                     = routine.ChatFileResolver
 	WorkspaceCommandPin                  = workspace.CommandPin
 	WorkspaceCommandRecord               = workspace.CommandRecord
 	WorkspaceExpectedDigest              = workspace.ExpectedDigest
-	RunbookActivation                    = runtime.RunbookActivation
-	RunbookDetail                        = runtime.RunbookDetail
-	RunbookExecutionAudit                = runtime.RunbookExecutionAudit
-	RunExecutionAudit                    = runtime.RunExecutionAudit
-	RunbookExecutionAuditRun             = runtime.RunbookExecutionAuditRun
-	RunbookNodeExecutionAudit            = runtime.RunbookNodeExecutionAudit
-	RunbookDataLineage                   = runtime.RunbookDataLineage
-	RunbookActivationStatus              = runtime.RunbookActivationStatus
-	RunbookActivationFilter              = runtime.RunbookActivationFilter
-	CreateRunbookActivationRequest       = runtime.CreateRunbookActivationRequest
-	UpdateRunbookActivationRequest       = runtime.UpdateRunbookActivationRequest
-	StartRunbookActivationRequest        = runtime.StartRunbookActivationRequest
-	RunbookScheduleResult                = runtime.RunbookScheduleResult
-	ObjectiveFilter                      = runtime.ObjectiveFilter
-	AgentRun                             = runtime.AgentRun
-	AgentRunIntervention                 = runtime.AgentRunIntervention
-	ConversationAnswerReceipt            = runtime.ConversationAnswerReceipt
-	HumanInterventionRequest             = runtime.HumanInterventionRequest
-	HumanInterventionStatus              = runtime.HumanInterventionStatus
-	BudgetPolicy                         = runtime.BudgetPolicy
-	BudgetUsage                          = runtime.BudgetUsage
-	BudgetReservation                    = runtime.BudgetReservation
-	BudgetState                          = runtime.BudgetState
-	AgentRunStatus                       = runtime.AgentRunStatus
-	AgentRunFilter                       = runtime.AgentRunFilter
-	AgentRunOrder                        = runtime.AgentRunOrder
-	AgentRunOwnerSummary                 = runtime.AgentRunOwnerSummary
-	RunSource                            = runtime.RunSource
-	RunKind                              = runtime.RunKind
-	WakeCondition                        = runtime.WakeCondition
-	CreateObjectiveRequest               = runtime.CreateObjectiveRequest
-	CreateObjectiveResult                = runtime.CreateObjectiveResult
-	UpdateObjectiveRequest               = runtime.UpdateObjectiveRequest
-	CreateAgentRunRequest                = runtime.CreateAgentRunRequest
-	AgentRunCommandKind                  = runtime.AgentRunCommandKind
-	AgentRunCommandRequest               = runtime.AgentRunCommandRequest
-	AgentRunCommandResult                = runtime.AgentRunCommandResult
-	RunActivityStore                     = runtime.RunActivityStore
-	ActivityEvent                        = runtime.ActivityEvent
-	ActivityActor                        = runtime.ActivityActor
-	ActivityFilter                       = runtime.ActivityFilter
-	ActivityFeedRequest                  = runtime.ActivityFeedRequest
-	ActivityProjection                   = runtime.ActivityProjection
-	ActivityFeedPage                     = runtime.ActivityFeedPage
-	ActivitySeverity                     = runtime.ActivitySeverity
-	ActivityVisibility                   = runtime.ActivityVisibility
-	RunTransitionRequest                 = runtime.RunTransitionRequest
-	RunDependencyStore                   = runtime.RunDependencyStore
-	DependencyKernelStore                = runtime.DependencyKernelStore
-	RunDependencyKind                    = runtime.RunDependencyKind
-	RunDependencyState                   = runtime.RunDependencyState
-	FanInMode                            = runtime.FanInMode
-	DependencyFailureMode                = runtime.DependencyFailureMode
-	RunDependencyGroupStatus             = runtime.RunDependencyGroupStatus
-	RunDependencyPolicy                  = runtime.RunDependencyPolicy
-	RunDependencyGroup                   = runtime.RunDependencyGroup
-	RunDependency                        = runtime.RunDependency
-	RunDependencySpec                    = runtime.RunDependencySpec
-	RunDependencyEvaluation              = runtime.RunDependencyEvaluation
-	CreateRunDependencyGroupRequest      = runtime.CreateRunDependencyGroupRequest
-	ResolveRunDependencyRequest          = runtime.ResolveRunDependencyRequest
-	ReconcileRunDependencyGroupRequest   = runtime.ReconcileRunDependencyGroupRequest
-	RunDependencyGroupWork               = runtime.RunDependencyGroupWork
-	RunDependencyResult                  = runtime.RunDependencyResult
-	ConversationStore                    = runtime.ConversationStore
-	Conversation                         = runtime.Conversation
-	ConversationStatus                   = runtime.ConversationStatus
-	ConversationParticipantType          = runtime.ConversationParticipantType
-	ConversationParticipant              = runtime.ConversationParticipant
-	ConversationMessageIntent            = runtime.ConversationMessageIntent
-	ConversationAudienceKind             = runtime.ConversationAudienceKind
-	ConversationAudience                 = runtime.ConversationAudience
-	ConversationReferenceKind            = runtime.ConversationReferenceKind
-	ConversationReference                = runtime.ConversationReference
-	ConversationArchiveSource            = runtime.ConversationArchiveSource
-	ConversationArchiveMessage           = runtime.ConversationArchiveMessage
-	ImportConversationArchiveRequest     = runtime.ImportConversationArchiveRequest
-	ConversationArchiveImportResult      = runtime.ConversationArchiveImportResult
-	ChannelMessage                       = runtime.ChannelMessage
-	ChannelMessageQuote                  = runtime.ChannelMessageQuote
-	AgentBuilderParameters               = runtime.AgentBuilderParameters
-	AgentBuilderDraftProfile             = runtime.AgentBuilderDraftProfile
-	MessageReaction                      = runtime.MessageReaction
-	MessageReactionRecord                = runtime.MessageReactionRecord
-	MessageReactionRequest               = runtime.MessageReactionRequest
-	MessageReactionResult                = runtime.MessageReactionResult
-	MessageReactionProjector             = runtime.MessageReactionProjector
-	ConversationReactionEvent            = runtime.ConversationReactionEvent
-	ConversationReactionStore            = runtime.ConversationReactionStore
-	TurnReaction                         = runtime.TurnReaction
-	ConversationCursor                   = runtime.ConversationCursor
-	ConversationPresenceState            = runtime.ConversationPresenceState
-	ConversationPresence                 = runtime.ConversationPresence
-	ConversationAddressing               = runtime.ConversationAddressing
-	ConversationResponder                = runtime.ConversationResponder
-	ConversationRouter                   = runtime.ConversationRouter
-	ConversationRouterFunc               = runtime.ConversationRouterFunc
-	ConversationRouteRequest             = runtime.ConversationRouteRequest
-	ConversationRouteDecision            = runtime.ConversationRouteDecision
-	RouteMember                          = runtime.RouteMember
-	ConversationRoutingRequest           = runtime.ConversationRoutingRequest
-	CommitConversationRoutingRequest     = runtime.CommitConversationRoutingRequest
-	ParticipationRoundStatus             = runtime.ParticipationRoundStatus
-	ParticipationRound                   = runtime.ParticipationRound
-	ConversationParticipantBinding       = runtime.ConversationParticipantBinding
-	ConversationParticipantQuery         = runtime.ConversationParticipantQuery
-	ConversationParticipantSource        = runtime.ConversationParticipantSource
-	ConversationParticipantSourceFunc    = runtime.ConversationParticipantSourceFunc
-	ConversationCoordinatorConfig        = runtime.ConversationCoordinatorConfig
-	ConversationRunSchedulerConfig       = runtime.ConversationRunSchedulerConfig
-	ConversationRunTurnRunnerConfig      = runtime.ConversationRunTurnRunnerConfig
-	ConversationPlace                    = runtime.ConversationPlace
-	ConversationRunReconcilerConfig      = runtime.ConversationRunReconcilerConfig
-	ConversationRunReconcileResult       = runtime.ConversationRunReconcileResult
-	ConversationChangeRequest            = runtime.ConversationChangeRequest
-	ConversationChangeSet                = runtime.ConversationChangeSet
-	CreateConversationRequest            = runtime.CreateConversationRequest
-	UpdateConversationRequest            = runtime.UpdateConversationRequest
-	ConversationApprovalMode             = runtime.ConversationApprovalMode
-	SetConversationApprovalModeRequest   = runtime.SetConversationApprovalModeRequest
-	SetConversationApprovalModeResult    = runtime.SetConversationApprovalModeResult
-	ConversationFilter                   = runtime.ConversationFilter
-	Space                                = runtime.Space
-	SpaceLook                            = runtime.SpaceLook
-	SpaceMember                          = runtime.SpaceMember
-	SpaceMemberType                      = runtime.SpaceMemberType
-	SpaceAccess                          = runtime.SpaceAccess
-	SpacePerson                          = runtime.SpacePerson
-	AddSpacePersonRequest                = runtime.AddSpacePersonRequest
-	SetSpaceAccessStateRequest           = runtime.SetSpaceAccessStateRequest
-	SpaceStore                           = runtime.SpaceStore
-	SpacePatch                           = runtime.SpacePatch
-	CreateSpaceRequest                   = runtime.CreateSpaceRequest
-	UpdateSpaceRequest                   = runtime.UpdateSpaceRequest
-	PutSpaceMemberRequest                = runtime.PutSpaceMemberRequest
-	DeleteSpaceMemberRequest             = runtime.DeleteSpaceMemberRequest
-	SpaceAgentRemovalTeam                = runtime.SpaceAgentRemovalTeam
-	SpaceAgentRemovalNeedsConfirmation   = runtime.SpaceAgentRemovalNeedsConfirmation
-	SpaceTeamOutcome                     = runtime.SpaceTeamOutcome
-	PostChannelMessageRequest            = runtime.PostChannelMessageRequest
-	ChannelMessageFilter                 = runtime.ChannelMessageFilter
-	ConversationViewer                   = runtime.ConversationViewer
-	ParticipationRoundFilter             = runtime.ParticipationRoundFilter
-	AdvanceConversationCursorRequest     = runtime.AdvanceConversationCursorRequest
-	SetConversationPresenceRequest       = runtime.SetConversationPresenceRequest
-	ReleaseConversationPresenceRequest   = runtime.ReleaseConversationPresenceRequest
-	ChannelMessageCommitResult           = runtime.ChannelMessageCommitResult
-	ParticipationRoundResult             = runtime.ParticipationRoundResult
-	EmbedInstallationStatus              = runtime.EmbedInstallationStatus
-	EmbedIdentityMode                    = runtime.EmbedIdentityMode
-	EmbedIdentityPolicy                  = runtime.EmbedIdentityPolicy
-	EmbedActionGrant                     = runtime.EmbedActionGrant
-	EmbedPermissionPolicy                = runtime.EmbedPermissionPolicy
-	EmbedInstallation                    = runtime.EmbedInstallation
-	EmbedSessionStatus                   = runtime.EmbedSessionStatus
-	EmbedSession                         = runtime.EmbedSession
-	EmbedInstallationFilter              = runtime.EmbedInstallationFilter
-	EmbedStore                           = runtime.EmbedStore
-	CreateEmbedInstallationRequest       = runtime.CreateEmbedInstallationRequest
-	UpdateEmbedInstallationRequest       = runtime.UpdateEmbedInstallationRequest
-	OpenEmbedSessionRequest              = runtime.OpenEmbedSessionRequest
-	OpenEmbedSessionResult               = runtime.OpenEmbedSessionResult
-	CollaborationStore                   = runtime.CollaborationStore
-	CollaborationKernelStore             = runtime.CollaborationKernelStore
-	CollaborationParty                   = runtime.CollaborationParty
-	ArtifactRequirement                  = runtime.ArtifactRequirement
-	ArtifactReference                    = runtime.ArtifactReference
-	Artifact                             = runtime.Artifact
-	ArtifactClassification               = runtime.ArtifactClassification
-	ArtifactRetention                    = runtime.ArtifactRetention
-	ArtifactProvenance                   = runtime.ArtifactProvenance
-	ArtifactEvidenceLink                 = runtime.EvidenceLink
-	ArtifactEvidenceRelation             = runtime.EvidenceRelation
-	ArtifactEvidenceTargetKind           = runtime.EvidenceTargetKind
-	ArtifactFilter                       = runtime.ArtifactFilter
-	ArtifactStore                        = runtime.ArtifactStore
-	ArtifactCatalog                      = runtime.ArtifactCatalog
-	RegisterArtifactRequest              = runtime.RegisterArtifactRequest
-	ArtifactRegistrationResult           = runtime.ArtifactRegistrationResult
-	ArtifactContentStore                 = runtime.ArtifactContentStore
-	ArtifactContentInspector             = runtime.ArtifactContentInspector
-	ArtifactContentDeleter               = runtime.ArtifactContentDeleter
-	ArtifactContentAvailability          = runtime.ArtifactContentAvailability
-	ArtifactContentResolver              = runtime.ArtifactContentResolver
-	ArtifactContentWrite                 = runtime.ArtifactContentWrite
-	ArtifactStoredContent                = runtime.ArtifactStoredContent
-	ArtifactContentResolutionRequest     = runtime.ArtifactContentResolutionRequest
-	ArtifactContentResolution            = runtime.ArtifactContentResolution
-	ArtifactRetentionService             = runtime.ArtifactRetentionService
-	ArtifactRetentionSweepResult         = runtime.ArtifactRetentionSweepResult
-	ArtifactRetentionDeletion            = runtime.ArtifactRetentionDeletion
-	AgentRequest                         = runtime.AgentRequest
-	AgentRequestKind                     = runtime.AgentRequestKind
-	AgentRequestStatus                   = runtime.AgentRequestStatus
-	AgentRequestDecision                 = runtime.AgentRequestDecision
-	AgentRequestBidDecision              = runtime.AgentRequestBidDecision
-	AgentRequestCandidate                = runtime.AgentRequestCandidate
-	AgentRequestBid                      = runtime.AgentRequestBid
-	AgentRequestAssignmentDecision       = runtime.AgentRequestAssignmentDecision
-	AgentRequestCompletionReviewDecision = runtime.AgentRequestCompletionReviewDecision
-	AgentRequestAcceptancePolicy         = runtime.AgentRequestAcceptancePolicy
-	AgentRequestFilter                   = runtime.AgentRequestFilter
-	CreateAgentRequestRequest            = runtime.CreateAgentRequestRequest
-	AgentRequestGroupSpec                = runtime.AgentRequestGroupSpec
-	CreateAgentRequestGroupRequest       = runtime.CreateAgentRequestGroupRequest
-	AgentRequestGroupResult              = runtime.AgentRequestGroupResult
-	RespondAgentRequestRequest           = runtime.RespondAgentRequestRequest
-	SubmitAgentRequestBidRequest         = runtime.SubmitAgentRequestBidRequest
-	CompleteAgentRequestRequest          = runtime.CompleteAgentRequestRequest
-	ReviewAgentRequestRequest            = runtime.ReviewAgentRequestCompletionRequest
-	AgentRequestResult                   = runtime.AgentRequestResult
-	AgentTurnStore                       = runtime.AgentTurnStore
-	AgentTurn                            = runtime.AgentTurn
-	AgentTurnStatus                      = runtime.AgentTurnStatus
-	AgentTurnFilter                      = runtime.AgentTurnFilter
+	RunbookActivation                    = models.RunbookActivation
+	RunbookDetail                        = routine.RunbookDetail
+	RunbookExecutionAudit                = routine.RunbookExecutionAudit
+	RunExecutionAudit                    = routine.RunExecutionAudit
+	RunbookExecutionAuditRun             = routine.RunbookExecutionAuditRun
+	RunbookNodeExecutionAudit            = routine.RunbookNodeExecutionAudit
+	RunbookDataLineage                   = routine.RunbookDataLineage
+	RunbookActivationStatus              = models.RunbookActivationStatus
+	RunbookActivationFilter              = models.RunbookActivationFilter
+	CreateRunbookActivationRequest       = routine.CreateRunbookActivationRequest
+	UpdateRunbookActivationRequest       = routine.UpdateRunbookActivationRequest
+	StartRunbookActivationRequest        = routine.StartRunbookActivationRequest
+	RunbookScheduleResult                = routine.RunbookScheduleResult
+	ObjectiveFilter                      = models.ObjectiveFilter
+	AgentRun                             = models.AgentRun
+	AgentRunIntervention                 = models.AgentRunIntervention
+	ConversationAnswerReceipt            = models.ConversationAnswerReceipt
+	HumanInterventionRequest             = models.HumanInterventionRequest
+	HumanInterventionStatus              = models.HumanInterventionStatus
+	BudgetPolicy                         = models.BudgetPolicy
+	BudgetUsage                          = models.BudgetUsage
+	BudgetReservation                    = models.BudgetReservation
+	BudgetState                          = models.BudgetState
+	AgentRunStatus                       = models.AgentRunStatus
+	AgentRunFilter                       = models.AgentRunFilter
+	AgentRunOrder                        = models.AgentRunOrder
+	AgentRunOwnerSummary                 = models.AgentRunOwnerSummary
+	RunSource                            = models.RunSource
+	RunKind                              = models.RunKind
+	WakeCondition                        = models.WakeCondition
+	CreateObjectiveRequest               = portfolio.CreateObjectiveRequest
+	CreateObjectiveResult                = portfolio.CreateObjectiveResult
+	UpdateObjectiveRequest               = portfolio.UpdateObjectiveRequest
+	CreateAgentRunRequest                = models.CreateAgentRunRequest
+	AgentRunCommandKind                  = agentrun.AgentRunCommandKind
+	AgentRunCommandRequest               = agentrun.AgentRunCommandRequest
+	AgentRunCommandResult                = agentrun.AgentRunCommandResult
+	RunActivityStore                     = models.RunActivityStore
+	ActivityEvent                        = models.ActivityEvent
+	ActivityActor                        = models.ActivityActor
+	ActivityFilter                       = models.ActivityFilter
+	ActivityFeedRequest                  = activity.ActivityFeedRequest
+	ActivityProjection                   = models.ActivityProjection
+	ActivityFeedPage                     = activity.ActivityFeedPage
+	ActivitySeverity                     = models.ActivitySeverity
+	ActivityVisibility                   = models.ActivityVisibility
+	RunTransitionRequest                 = activity.RunTransitionRequest
+	RunDependencyStore                   = models.RunDependencyStore
+	DependencyKernelStore                = models.DependencyKernelStore
+	RunDependencyKind                    = models.RunDependencyKind
+	RunDependencyState                   = models.RunDependencyState
+	FanInMode                            = models.FanInMode
+	DependencyFailureMode                = models.DependencyFailureMode
+	RunDependencyGroupStatus             = models.RunDependencyGroupStatus
+	RunDependencyPolicy                  = models.RunDependencyPolicy
+	RunDependencyGroup                   = models.RunDependencyGroup
+	RunDependency                        = models.RunDependency
+	RunDependencySpec                    = models.RunDependencySpec
+	RunDependencyEvaluation              = models.RunDependencyEvaluation
+	CreateRunDependencyGroupRequest      = models.CreateRunDependencyGroupRequest
+	ResolveRunDependencyRequest          = portfolio.ResolveRunDependencyRequest
+	ReconcileRunDependencyGroupRequest   = portfolio.ReconcileRunDependencyGroupRequest
+	RunDependencyGroupWork               = models.RunDependencyGroupWork
+	RunDependencyResult                  = models.RunDependencyResult
+	ConversationStore                    = models.ConversationStore
+	Conversation                         = models.Conversation
+	ConversationStatus                   = models.ConversationStatus
+	ConversationParticipantType          = models.ConversationParticipantType
+	ConversationParticipant              = models.ConversationParticipant
+	ConversationMessageIntent            = models.ConversationMessageIntent
+	ConversationAudienceKind             = models.ConversationAudienceKind
+	ConversationAudience                 = models.ConversationAudience
+	ConversationReferenceKind            = models.ConversationReferenceKind
+	ConversationReference                = models.ConversationReference
+	ConversationArchiveSource            = conversation.ConversationArchiveSource
+	ConversationArchiveMessage           = conversation.ConversationArchiveMessage
+	ImportConversationArchiveRequest     = conversation.ImportConversationArchiveRequest
+	ConversationArchiveImportResult      = conversation.ConversationArchiveImportResult
+	ChannelMessage                       = models.ChannelMessage
+	ChannelMessageQuote                  = models.ChannelMessageQuote
+	AgentBuilderParameters               = models.AgentBuilderParameters
+	AgentBuilderDraftProfile             = models.AgentBuilderDraftProfile
+	MessageReaction                      = models.MessageReaction
+	MessageReactionRecord                = models.MessageReactionRecord
+	MessageReactionRequest               = conversation.MessageReactionRequest
+	MessageReactionResult                = conversation.MessageReactionResult
+	MessageReactionProjector             = conversation.MessageReactionProjector
+	ConversationReactionEvent            = models.ConversationReactionEvent
+	ConversationReactionStore            = models.ConversationReactionStore
+	TurnReaction                         = conversation.TurnReaction
+	ConversationCursor                   = models.ConversationCursor
+	ConversationPresenceState            = models.ConversationPresenceState
+	ConversationPresence                 = models.ConversationPresence
+	ConversationAddressing               = models.ConversationAddressing
+	ConversationResponder                = models.ConversationResponder
+	ConversationRouter                   = conversation.ConversationRouter
+	ConversationRouterFunc               = conversation.ConversationRouterFunc
+	ConversationRouteRequest             = conversation.ConversationRouteRequest
+	ConversationRouteDecision            = conversation.ConversationRouteDecision
+	RouteMember                          = conversation.RouteMember
+	ConversationRoutingRequest           = conversation.ConversationRoutingRequest
+	CommitConversationRoutingRequest     = conversation.CommitConversationRoutingRequest
+	ParticipationRoundStatus             = models.ParticipationRoundStatus
+	ParticipationRound                   = models.ParticipationRound
+	ConversationParticipantBinding       = conversation.ConversationParticipantBinding
+	ConversationParticipantQuery         = conversation.ConversationParticipantQuery
+	ConversationParticipantSource        = conversation.ConversationParticipantSource
+	ConversationParticipantSourceFunc    = conversation.ConversationParticipantSourceFunc
+	ConversationCoordinatorConfig        = conversation.ConversationCoordinatorConfig
+	ConversationRunSchedulerConfig       = conversationrun.ConversationRunSchedulerConfig
+	ConversationRunTurnRunnerConfig      = conversationrun.ConversationRunTurnRunnerConfig
+	ConversationPlace                    = conversation.ConversationPlace
+	ConversationRunReconcilerConfig      = conversationrun.ConversationRunReconcilerConfig
+	ConversationRunReconcileResult       = conversationrun.ConversationRunReconcileResult
+	ConversationChangeRequest            = conversation.ConversationChangeRequest
+	ConversationChangeSet                = conversation.ConversationChangeSet
+	CreateConversationRequest            = conversation.CreateConversationRequest
+	UpdateConversationRequest            = conversation.UpdateConversationRequest
+	ConversationApprovalMode             = models.ConversationApprovalMode
+	SetConversationApprovalModeRequest   = conversation.SetConversationApprovalModeRequest
+	SetConversationApprovalModeResult    = conversation.SetConversationApprovalModeResult
+	ConversationFilter                   = models.ConversationFilter
+	Space                                = models.Space
+	SpaceLook                            = models.SpaceLook
+	SpaceMember                          = models.SpaceMember
+	SpaceMemberType                      = models.SpaceMemberType
+	SpaceAccess                          = models.SpaceAccess
+	SpacePerson                          = models.SpacePerson
+	AddSpacePersonRequest                = portfolio.AddSpacePersonRequest
+	SetSpaceAccessStateRequest           = portfolio.SetSpaceAccessStateRequest
+	SpaceStore                           = models.SpaceStore
+	SpacePatch                           = models.SpacePatch
+	CreateSpaceRequest                   = portfolio.CreateSpaceRequest
+	UpdateSpaceRequest                   = portfolio.UpdateSpaceRequest
+	PutSpaceMemberRequest                = portfolio.PutSpaceMemberRequest
+	DeleteSpaceMemberRequest             = portfolio.DeleteSpaceMemberRequest
+	SpaceAgentRemovalTeam                = portfolio.SpaceAgentRemovalTeam
+	SpaceAgentRemovalNeedsConfirmation   = portfolio.SpaceAgentRemovalNeedsConfirmation
+	SpaceTeamOutcome                     = portfolio.SpaceTeamOutcome
+	PostChannelMessageRequest            = conversation.PostChannelMessageRequest
+	ChannelMessageFilter                 = models.ChannelMessageFilter
+	ConversationViewer                   = models.ConversationViewer
+	ParticipationRoundFilter             = models.ParticipationRoundFilter
+	AdvanceConversationCursorRequest     = conversation.AdvanceConversationCursorRequest
+	SetConversationPresenceRequest       = conversation.SetConversationPresenceRequest
+	ReleaseConversationPresenceRequest   = models.ReleaseConversationPresenceRequest
+	ChannelMessageCommitResult           = models.ChannelMessageCommitResult
+	ParticipationRoundResult             = models.ParticipationRoundResult
+	EmbedInstallationStatus              = models.EmbedInstallationStatus
+	EmbedIdentityMode                    = models.EmbedIdentityMode
+	EmbedIdentityPolicy                  = models.EmbedIdentityPolicy
+	EmbedActionGrant                     = models.EmbedActionGrant
+	EmbedPermissionPolicy                = models.EmbedPermissionPolicy
+	EmbedInstallation                    = models.EmbedInstallation
+	EmbedSessionStatus                   = models.EmbedSessionStatus
+	EmbedSession                         = models.EmbedSession
+	EmbedInstallationFilter              = models.EmbedInstallationFilter
+	EmbedStore                           = models.EmbedStore
+	CreateEmbedInstallationRequest       = conversation.CreateEmbedInstallationRequest
+	UpdateEmbedInstallationRequest       = conversation.UpdateEmbedInstallationRequest
+	OpenEmbedSessionRequest              = conversation.OpenEmbedSessionRequest
+	OpenEmbedSessionResult               = conversation.OpenEmbedSessionResult
+	CollaborationStore                   = models.CollaborationStore
+	CollaborationKernelStore             = models.CollaborationKernelStore
+	CollaborationParty                   = models.CollaborationParty
+	ArtifactRequirement                  = models.ArtifactRequirement
+	ArtifactReference                    = models.ArtifactReference
+	Artifact                             = models.Artifact
+	ArtifactClassification               = models.ArtifactClassification
+	ArtifactRetention                    = models.ArtifactRetention
+	ArtifactProvenance                   = models.ArtifactProvenance
+	ArtifactEvidenceLink                 = models.EvidenceLink
+	ArtifactEvidenceRelation             = models.EvidenceRelation
+	ArtifactEvidenceTargetKind           = models.EvidenceTargetKind
+	ArtifactFilter                       = models.ArtifactFilter
+	ArtifactStore                        = models.ArtifactStore
+	ArtifactCatalog                      = artifactcatalog.ArtifactCatalog
+	RegisterArtifactRequest              = artifactcatalog.RegisterArtifactRequest
+	ArtifactRegistrationResult           = artifactcatalog.ArtifactRegistrationResult
+	ArtifactContentStore                 = models.ArtifactContentStore
+	ArtifactContentInspector             = artifactcatalog.ArtifactContentInspector
+	ArtifactContentDeleter               = artifactcatalog.ArtifactContentDeleter
+	ArtifactContentAvailability          = models.ArtifactContentAvailability
+	ArtifactContentResolver              = artifactcatalog.ArtifactContentResolver
+	ArtifactContentWrite                 = models.ArtifactContentWrite
+	ArtifactStoredContent                = models.ArtifactStoredContent
+	ArtifactContentResolutionRequest     = artifactcatalog.ArtifactContentResolutionRequest
+	ArtifactContentResolution            = artifactcatalog.ArtifactContentResolution
+	ArtifactRetentionService             = artifactcatalog.ArtifactRetentionService
+	ArtifactRetentionSweepResult         = artifactcatalog.ArtifactRetentionSweepResult
+	ArtifactRetentionDeletion            = artifactcatalog.ArtifactRetentionDeletion
+	AgentRequest                         = models.AgentRequest
+	AgentRequestKind                     = models.AgentRequestKind
+	AgentRequestStatus                   = models.AgentRequestStatus
+	AgentRequestDecision                 = collaboration.AgentRequestDecision
+	AgentRequestBidDecision              = models.AgentRequestBidDecision
+	AgentRequestCandidate                = models.AgentRequestCandidate
+	AgentRequestBid                      = models.AgentRequestBid
+	AgentRequestAssignmentDecision       = models.AgentRequestAssignmentDecision
+	AgentRequestCompletionReviewDecision = models.AgentRequestCompletionReviewDecision
+	AgentRequestAcceptancePolicy         = models.AgentRequestAcceptancePolicy
+	AgentRequestFilter                   = models.AgentRequestFilter
+	CreateAgentRequestRequest            = collaboration.CreateAgentRequestRequest
+	AgentRequestGroupSpec                = collaboration.AgentRequestGroupSpec
+	CreateAgentRequestGroupRequest       = collaboration.CreateAgentRequestGroupRequest
+	AgentRequestGroupResult              = collaboration.AgentRequestGroupResult
+	RespondAgentRequestRequest           = collaboration.RespondAgentRequestRequest
+	SubmitAgentRequestBidRequest         = collaboration.SubmitAgentRequestBidRequest
+	CompleteAgentRequestRequest          = collaboration.CompleteAgentRequestRequest
+	ReviewAgentRequestRequest            = collaboration.ReviewAgentRequestCompletionRequest
+	AgentRequestResult                   = collaboration.AgentRequestResult
+	AgentTurnStore                       = models.AgentTurnStore
+	AgentTurn                            = models.AgentTurn
+	AgentTurnStatus                      = models.AgentTurnStatus
+	AgentTurnFilter                      = models.AgentTurnFilter
 	AgentTurnRecord                      = kernelapi.AgentTurnRecord
-	TurnUsage                            = runtime.TurnUsage
-	BeginAgentTurnRequest                = runtime.BeginAgentTurnRequest
-	FinishAgentTurnRequest               = runtime.FinishAgentTurnRequest
-	HostedSkillPrompt                    = runtime.HostedSkillPrompt
-	HostedSkillSelection                 = runtime.HostedSkillSelection
-	HostedSkillDisposition               = runtime.HostedSkillDisposition
-	HostedRunbookOperation               = runtime.HostedRunbookOperation
-	HostedConversationTaskContext        = runtime.HostedConversationTaskContext
-	ConversationTaskSnapshot             = runtime.ConversationTaskSnapshot
-	ConversationTask                     = runtime.ConversationTask
-	ConversationTaskStore                = runtime.ConversationTaskStore
-	ConversationActiveRunsReadStore      = runtime.ConversationActiveRunsReadStore
-	ConversationForegroundRunsReadStore  = runtime.ConversationForegroundRunsReadStore
-	ConversationTaskKernelStore          = runtime.ConversationTaskKernelStore
-	ConversationTaskCreateRecord         = runtime.ConversationTaskCreateRecord
-	GetConversationTaskRequest           = runtime.GetConversationTaskRequest
-	CancelConversationTaskRequest        = runtime.CancelConversationTaskRequest
-	ConversationTaskFilter               = runtime.ConversationTaskFilter
-	ConversationTaskService              = runtime.ConversationTaskService
-	StartConversationTaskRequest         = runtime.StartConversationTaskRequest
-	ConversationTaskResult               = runtime.ConversationTaskResult
-	HostedRunBudget                      = runtime.HostedRunBudget
-	TurnHostFailure                      = runtime.TurnHostFailure
-	HostedContextPressure                = runtime.HostedContextPressure
-	CapabilityInvocationStepProducer     = runtime.CapabilityInvocationStepProducer
-	AgentRunScheduleStore                = runtime.AgentRunScheduleStore
-	AgentRunAdmissionStore               = runtime.AgentRunAdmissionStore
-	AgentRunClaimRequest                 = runtime.AgentRunClaimRequest
-	AgentRunAdmissionOutcome             = runtime.AgentRunAdmissionOutcome
-	AgentRunAdmissionReason              = runtime.AgentRunAdmissionReason
-	AgentRunAdmissionBlock               = runtime.AgentRunAdmissionBlock
-	AgentRunAdmissionDecision            = runtime.AgentRunAdmissionDecision
-	AgentRunWorkerConfig                 = runtime.AgentRunWorkerConfig
-	DynamicAgentRunWorkerConfig          = runtime.DynamicAgentRunWorkerConfig
-	TurnRunnerBinding                    = runtime.TurnRunnerBinding
-	PreparedSkillRuntime                 = runtime.PreparedSkillRuntime
-	TurnRunnerResolver                   = runtime.TurnRunnerResolver
-	TurnRunnerResolverFunc               = runtime.TurnRunnerResolverFunc
-	AgentTurnCatalog                     = runtime.AgentTurnCatalog
-	LoopBindingConfig                    = runtime.LoopBindingConfig
-	SkillHostCapabilityResolver          = runtime.SkillHostCapabilityResolver
-	SkillHostCapabilityResolverFunc      = runtime.SkillHostCapabilityResolverFunc
-	WorkerScopeSource                    = runtime.WorkerScopeSource
-	WorkerScopeSourceFunc                = runtime.WorkerScopeSourceFunc
-	WakeSignal                           = runtime.WakeSignal
-	WokenRun                             = runtime.WokenRun
-	WakeResult                           = runtime.WakeResult
-	EventEnvelope                        = runtime.EventEnvelope
+	TurnUsage                            = models.TurnUsage
+	BeginAgentTurnRequest                = activity.BeginAgentTurnRequest
+	FinishAgentTurnRequest               = activity.FinishAgentTurnRequest
+	HostedSkillPrompt                    = models.HostedSkillPrompt
+	HostedSkillSelection                 = models.HostedSkillSelection
+	HostedSkillDisposition               = models.HostedSkillDisposition
+	HostedRunbookOperation               = agentrun.HostedRunbookOperation
+	HostedConversationTaskContext        = models.HostedConversationTaskContext
+	ConversationTaskSnapshot             = models.ConversationTaskSnapshot
+	ConversationTask                     = models.ConversationTask
+	ConversationTaskStore                = models.ConversationTaskStore
+	ConversationActiveRunsReadStore      = models.ConversationActiveRunsReadStore
+	ConversationForegroundRunsReadStore  = models.ConversationForegroundRunsReadStore
+	ConversationTaskKernelStore          = models.ConversationTaskKernelStore
+	ConversationTaskCreateRecord         = models.ConversationTaskCreateRecord
+	GetConversationTaskRequest           = conversationrun.GetConversationTaskRequest
+	CancelConversationTaskRequest        = conversationrun.CancelConversationTaskRequest
+	ConversationTaskFilter               = models.ConversationTaskFilter
+	ConversationTaskService              = conversationrun.ConversationTaskService
+	StartConversationTaskRequest         = conversationrun.StartConversationTaskRequest
+	ConversationTaskResult               = models.ConversationTaskResult
+	HostedRunBudget                      = modelstep.HostedRunBudget
+	TurnHostFailure                      = modelstep.TurnHostFailure
+	HostedContextPressure                = modelstep.HostedContextPressure
+	CapabilityInvocationStepProducer     = modelstep.CapabilityInvocationStepProducer
+	AgentRunScheduleStore                = models.AgentRunScheduleStore
+	AgentRunAdmissionStore               = models.AgentRunAdmissionStore
+	AgentRunClaimRequest                 = agentrun.AgentRunClaimRequest
+	AgentRunAdmissionOutcome             = models.AgentRunAdmissionOutcome
+	AgentRunAdmissionReason              = models.AgentRunAdmissionReason
+	AgentRunAdmissionBlock               = models.AgentRunAdmissionBlock
+	AgentRunAdmissionDecision            = models.AgentRunAdmissionDecision
+	AgentRunWorkerConfig                 = runworker.AgentRunWorkerConfig
+	DynamicAgentRunWorkerConfig          = runworker.DynamicAgentRunWorkerConfig
+	TurnRunnerBinding                    = agentrun.TurnRunnerBinding
+	PreparedSkillRuntime                 = agentrun.PreparedSkillRuntime
+	TurnRunnerResolver                   = conversation.TurnRunnerResolver
+	TurnRunnerResolverFunc               = conversation.TurnRunnerResolverFunc
+	AgentTurnCatalog                     = conversationrun.AgentTurnCatalog
+	LoopBindingConfig                    = runworker.LoopBindingConfig
+	SkillHostCapabilityResolver          = runworker.SkillHostCapabilityResolver
+	SkillHostCapabilityResolverFunc      = runworker.SkillHostCapabilityResolverFunc
+	WorkerScopeSource                    = workqueue.WorkerScopeSource
+	WorkerScopeSourceFunc                = workqueue.WorkerScopeSourceFunc
+	WakeSignal                           = agentrun.WakeSignal
+	WokenRun                             = agentrun.WokenRun
+	WakeResult                           = agentrun.WakeResult
+	EventEnvelope                        = models.EventEnvelope
 	SkillCatalog                         = skill.Catalog
 	SkillDefinition                      = skill.Definition
 	SkillAction                          = skill.Action
@@ -667,58 +686,58 @@ type (
 	HTTPActionRequestPolicyFunc          = httpaction.RequestPolicyFunc
 	HTTPActionExecutor                   = httpaction.Executor
 	SkillCatalogStore                    = skill.CatalogStore
-	ActionStore                          = runtime.ActionStore
-	ActionCall                           = runtime.ActionCall
-	ExternalOperationIdentity            = runtime.ExternalOperationIdentity
-	ExternalOperationConflictError       = runtime.ExternalOperationConflictError
-	ActionCallStatus                     = runtime.ActionCallStatus
-	ActionFilter                         = runtime.ActionFilter
-	ActionDisposition                    = runtime.ActionDisposition
-	ActionPolicyInput                    = runtime.ActionPolicyInput
-	ActionPolicyDecision                 = runtime.ActionPolicyDecision
-	ActionPolicyEvaluator                = runtime.ActionPolicyEvaluator
-	ActionPolicyEvaluatorFunc            = runtime.ActionPolicyEvaluatorFunc
-	ActionProposalValidator              = runtime.ActionProposalValidator
-	ActionProposalValidationInput        = runtime.ActionProposalValidationInput
-	ProposeActionRequest                 = runtime.ProposeActionRequest
-	ActionProposalResult                 = runtime.ActionProposalResult
-	ApprovalCheckpoint                   = runtime.ApprovalCheckpoint
-	ApprovalStatus                       = runtime.ApprovalStatus
-	ApprovalDecision                     = runtime.ApprovalDecision
-	ApprovalPrincipal                    = runtime.ApprovalPrincipal
-	ApprovalFilter                       = runtime.ApprovalFilter
-	ApprovalAuthorizer                   = runtime.ApprovalAuthorizer
-	ApprovalAuthorizerFunc               = runtime.ApprovalAuthorizerFunc
-	ResolveApprovalRequest               = runtime.ResolveApprovalRequest
-	ApprovalResolutionResult             = runtime.ApprovalResolutionResult
-	RunForkBranch                        = runtime.RunForkBranch
-	CreateRunForkRequest                 = runtime.CreateRunForkRequest
-	RunForkResult                        = runtime.RunForkResult
-	RunForkCoordinator                   = runtime.RunForkCoordinator
-	ActionWorkerConfig                   = runtime.ActionWorkerConfig
-	DynamicActionWorkerConfig            = runtime.DynamicActionWorkerConfig
-	CredentialResolver                   = runtime.CredentialResolver
-	CredentialResolverFunc               = runtime.CredentialResolverFunc
-	CredentialResolutionRequest          = runtime.CredentialResolutionRequest
-	ActionDispatchInput                  = runtime.ActionDispatchInput
-	ActionDispatcher                     = runtime.ActionDispatcher
-	ActionDispatcherFunc                 = runtime.ActionDispatcherFunc
-	ToolInvoker                          = runtime.ToolInvoker
-	ToolInvokerFunc                      = runtime.ToolInvokerFunc
-	ToolInvocation                       = runtime.ToolInvocation
-	ToolActionDispatcher                 = runtime.ToolActionDispatcher
-	AgentBehaviorActionValidator         = runtime.AgentBehaviorActionValidator
-	AgentBehaviorActionDispatcher        = runtime.AgentBehaviorActionDispatcher
-	RunActionValidator                   = runtime.RunActionValidator
-	RunActionDispatcher                  = runtime.RunActionDispatcher
-	RunbookActionValidator               = runtime.RunbookActionValidator
-	RunbookActionDispatcher              = runtime.RunbookActionDispatcher
-	TeamMemberActionValidator            = runtime.TeamMemberActionValidator
-	TeamMemberActionDispatcher           = runtime.TeamMemberActionDispatcher
-	TeamSkillActionValidator             = runtime.TeamSkillActionValidator
-	TeamSkillAuthorityCatalog            = runtime.TeamSkillAuthorityCatalog
-	SkillBindingActionValidator          = runtime.SkillBindingActionValidator
-	SkillBindingActionDispatcher         = runtime.SkillBindingActionDispatcher
+	ActionStore                          = models.ActionStore
+	ActionCall                           = models.ActionCall
+	ExternalOperationIdentity            = activity.ExternalOperationIdentity
+	ExternalOperationConflictError       = models.ExternalOperationConflictError
+	ActionCallStatus                     = models.ActionCallStatus
+	ActionFilter                         = models.ActionFilter
+	ActionDisposition                    = action.ActionDisposition
+	ActionPolicyInput                    = action.ActionPolicyInput
+	ActionPolicyDecision                 = action.ActionPolicyDecision
+	ActionPolicyEvaluator                = action.ActionPolicyEvaluator
+	ActionPolicyEvaluatorFunc            = action.ActionPolicyEvaluatorFunc
+	ActionProposalValidator              = action.ActionProposalValidator
+	ActionProposalValidationInput        = agentrun.ActionProposalValidationInput
+	ProposeActionRequest                 = action.ProposeActionRequest
+	ActionProposalResult                 = models.ActionProposalResult
+	ApprovalCheckpoint                   = models.ApprovalCheckpoint
+	ApprovalStatus                       = models.ApprovalStatus
+	ApprovalDecision                     = models.ApprovalDecision
+	ApprovalPrincipal                    = models.ApprovalPrincipal
+	ApprovalFilter                       = models.ApprovalFilter
+	ApprovalAuthorizer                   = action.ApprovalAuthorizer
+	ApprovalAuthorizerFunc               = action.ApprovalAuthorizerFunc
+	ResolveApprovalRequest               = action.ResolveApprovalRequest
+	ApprovalResolutionResult             = models.ApprovalResolutionResult
+	RunForkBranch                        = agentrun.RunForkBranch
+	CreateRunForkRequest                 = agentrun.CreateRunForkRequest
+	RunForkResult                        = agentrun.RunForkResult
+	RunForkCoordinator                   = agentrun.RunForkCoordinator
+	ActionWorkerConfig                   = action.ActionWorkerConfig
+	DynamicActionWorkerConfig            = action.DynamicActionWorkerConfig
+	CredentialResolver                   = action.CredentialResolver
+	CredentialResolverFunc               = action.CredentialResolverFunc
+	CredentialResolutionRequest          = action.CredentialResolutionRequest
+	ActionDispatchInput                  = agentrun.ActionDispatchInput
+	ActionDispatcher                     = agentrun.ActionDispatcher
+	ActionDispatcherFunc                 = action.ActionDispatcherFunc
+	ToolInvoker                          = modelstep.ToolInvoker
+	ToolInvokerFunc                      = modelstep.ToolInvokerFunc
+	ToolInvocation                       = models.ToolInvocation
+	ToolActionDispatcher                 = modelstep.ToolActionDispatcher
+	AgentBehaviorActionValidator         = agentbuilder.AgentBehaviorActionValidator
+	AgentBehaviorActionDispatcher        = agentbuilder.AgentBehaviorActionDispatcher
+	RunActionValidator                   = agentrun.RunActionValidator
+	RunActionDispatcher                  = agentrun.RunActionDispatcher
+	RunbookActionValidator               = routine.RunbookActionValidator
+	RunbookActionDispatcher              = routine.RunbookActionDispatcher
+	TeamMemberActionValidator            = collaboration.TeamMemberActionValidator
+	TeamMemberActionDispatcher           = collaboration.TeamMemberActionDispatcher
+	TeamSkillActionValidator             = skillbinding.TeamSkillActionValidator
+	TeamSkillAuthorityCatalog            = skillbinding.TeamSkillAuthorityCatalog
+	SkillBindingActionValidator          = skillbinding.SkillBindingActionValidator
+	SkillBindingActionDispatcher         = skillbinding.SkillBindingActionDispatcher
 	OpenClawSkillSource                  = skillopenclaw.Source
 	OpenClawSkillFile                    = skillopenclaw.File
 	OpenClawSkillBundle                  = skillopenclaw.Bundle
@@ -746,163 +765,163 @@ type (
 // External conversation aliases are isolated so their intentionally explicit
 // names do not reformat the facade's larger compatibility catalog.
 type (
-	CallbackRegistrationStatus                      = runtime.CallbackRegistrationStatus
-	CallbackAdapterReference                        = runtime.CallbackAdapterReference
-	CallbackSubscription                            = runtime.CallbackSubscription
-	CallbackRegistration                            = runtime.CallbackRegistration
-	CallbackRegistrationFilter                      = runtime.CallbackRegistrationFilter
-	CreateCallbackRegistrationRequest               = runtime.CreateCallbackRegistrationRequest
-	UpdateCallbackRegistrationRequest               = runtime.UpdateCallbackRegistrationRequest
-	CallbackRegistrationStore                       = runtime.CallbackRegistrationStore
-	CallbackAdapterResolver                         = runtime.CallbackAdapterResolver
-	CallbackRegistry                                = runtime.CallbackRegistry
-	CallbackPublicRequest                           = runtime.CallbackPublicRequest
-	NormalizedCallbackEvent                         = runtime.NormalizedCallbackEvent
-	CallbackHostRequest                             = runtime.CallbackHostRequest
-	CallbackHostResult                              = runtime.CallbackHostResult
-	CallbackAdapterHost                             = runtime.CallbackAdapterHost
-	CallbackEventReceiptStatus                      = runtime.CallbackEventReceiptStatus
-	CallbackEventReceipt                            = runtime.CallbackEventReceipt
-	CallbackEventStore                              = runtime.CallbackEventStore
-	CallbackEventConsumer                           = runtime.CallbackEventConsumer
-	CallbackEventConsumerFunc                       = runtime.CallbackEventConsumerFunc
-	CallbackIngressResult                           = runtime.CallbackIngressResult
-	CallbackIngressService                          = runtime.CallbackIngressService
-	ApprovalCallbackConsumer                        = runtime.ApprovalCallbackConsumer
-	ExternalConversationEndpointStatus              = runtime.ExternalConversationEndpointStatus
-	ExternalConversationHandlerKind                 = runtime.ExternalConversationHandlerKind
-	ExternalConversationHandler                     = runtime.ExternalConversationHandler
-	ExternalConversationMessageSelection            = runtime.ExternalConversationMessageSelection
-	ExternalConversationReplyMode                   = runtime.ExternalConversationReplyMode
-	ExternalConversationPolicy                      = runtime.ExternalConversationPolicy
-	ExternalConversationAdapterReference            = runtime.ExternalConversationAdapterReference
-	ExternalConversationEndpoint                    = runtime.ExternalConversationEndpoint
-	ExternalConversationEndpointFilter              = runtime.ExternalConversationEndpointFilter
-	CreateExternalConversationEndpointRequest       = runtime.CreateExternalConversationEndpointRequest
-	UpdateExternalConversationEndpointRequest       = runtime.UpdateExternalConversationEndpointRequest
-	ExternalConversationEndpointStore               = runtime.ExternalConversationEndpointStore
-	ExternalConversationAdapterResolver             = runtime.ExternalConversationAdapterResolver
-	ExternalConversationEndpointService             = runtime.ExternalConversationEndpointService
-	NormalizedExternalConversationEvent             = runtime.NormalizedExternalConversationEvent
-	ExternalConversationInboxStatus                 = runtime.ExternalConversationInboxStatus
-	ExternalConversationInboxItem                   = runtime.ExternalConversationInboxItem
-	ExternalConversationMapping                     = runtime.ExternalConversationMapping
-	ExternalParticipantMapping                      = runtime.ExternalParticipantMapping
-	ExternalMessageDirection                        = runtime.ExternalMessageDirection
-	ExternalMessageMapping                          = runtime.ExternalMessageMapping
-	ExternalConversationDeliveryStatus              = runtime.ExternalConversationDeliveryStatus
-	ExternalConversationDelivery                    = runtime.ExternalConversationDelivery
-	ExternalConversationInboxFilter                 = runtime.ExternalConversationInboxFilter
-	ExternalConversationDeliveryFilter              = runtime.ExternalConversationDeliveryFilter
-	ExternalConversationTransportStore              = runtime.ExternalConversationTransportStore
-	ExternalConversationStore                       = runtime.ExternalConversationStore
-	ReceiveExternalConversationEventRequest         = runtime.ReceiveExternalConversationEventRequest
-	ReceiveExternalConversationEventResult          = runtime.ReceiveExternalConversationEventResult
-	EnqueueExternalConversationDeliveryRequest      = runtime.EnqueueExternalConversationDeliveryRequest
-	EnqueueExternalConversationDeliveryResult       = runtime.EnqueueExternalConversationDeliveryResult
-	ExternalConversationTransportService            = runtime.ExternalConversationTransportService
-	ExternalConversationIngressRequest              = runtime.ExternalConversationIngressRequest
-	ExternalConversationPublicIngressRequest        = runtime.ExternalConversationPublicIngressRequest
-	ExternalConversationIngressHostResult           = runtime.ExternalConversationIngressHostResult
-	ExternalConversationIngressHostRequest          = runtime.ExternalConversationIngressHostRequest
-	ExternalConversationIngressAdapterHost          = runtime.ExternalConversationIngressAdapterHost
-	ExternalConversationIngressResult               = runtime.ExternalConversationIngressResult
-	ExternalConversationIngressGateway              = runtime.ExternalConversationIngressGateway
-	ExternalConversationGatewayStatus               = runtime.ExternalConversationGatewayStatus
-	ExternalConversationGatewayRegistration         = runtime.ExternalConversationGatewayRegistration
-	ExternalConversationGatewayFilter               = runtime.ExternalConversationGatewayFilter
-	CreateExternalConversationGatewayRequest        = runtime.CreateExternalConversationGatewayRequest
-	UpdateExternalConversationGatewayRequest        = runtime.UpdateExternalConversationGatewayRequest
-	ExternalConversationGatewayStore                = runtime.ExternalConversationGatewayStore
-	ExternalConversationGatewayService              = runtime.ExternalConversationGatewayService
-	ExternalConversationVerifiedRoute               = runtime.ExternalConversationVerifiedRoute
-	ExternalConversationGatewayEvent                = runtime.ExternalConversationGatewayEvent
-	ExternalConversationGatewayHostRequest          = runtime.ExternalConversationGatewayHostRequest
-	ExternalConversationGatewayHostResult           = runtime.ExternalConversationGatewayHostResult
-	ExternalConversationGatewayAdapterHost          = runtime.ExternalConversationGatewayAdapterHost
-	ExternalConversationGatewayIngressResult        = runtime.ExternalConversationGatewayIngressResult
-	ExternalConversationDispatchRequest             = runtime.ExternalConversationDispatchRequest
-	ExternalConversationDispatchResult              = runtime.ExternalConversationDispatchResult
-	ExternalConversationDispatcher                  = runtime.ExternalConversationDispatcher
-	CanonicalExternalConversationDispatcher         = runtime.CanonicalExternalConversationDispatcher
-	ExternalConversationInboxWorkerConfig           = runtime.ExternalConversationInboxWorkerConfig
-	CallbackEventWorkerConfig                       = runtime.CallbackEventWorkerConfig
-	ExternalConversationInboxWorker                 = runtime.ExternalConversationInboxWorker
-	ExternalConversationDeliveryHostRequest         = runtime.ExternalConversationDeliveryHostRequest
-	ExternalConversationAcknowledgementStatus       = runtime.ExternalConversationAcknowledgementStatus
-	ExternalConversationDeliveryAcknowledgement     = runtime.ExternalConversationDeliveryAcknowledgement
-	ExternalConversationDeliveryOutcome             = runtime.ExternalConversationDeliveryOutcome
-	ExternalConversationDeliveryHostResult          = runtime.ExternalConversationDeliveryHostResult
-	ExternalConversationAdapterHost                 = runtime.ExternalConversationAdapterHost
-	ExternalConversationDestination                 = runtime.ExternalConversationDestination
-	ExternalConversationDestinationPage             = runtime.ExternalConversationDestinationPage
-	ExternalConversationDestinationDiscoveryRequest = runtime.ExternalConversationDestinationDiscoveryRequest
-	ExternalConversationDestinationDiscoveryHost    = runtime.ExternalConversationDestinationDiscoveryHost
-	ExternalConversationDeliveryWorkerConfig        = runtime.ExternalConversationDeliveryWorkerConfig
-	ExternalConversationDeliveryWorker              = runtime.ExternalConversationDeliveryWorker
-	ExternalConversationReplyStore                  = runtime.ExternalConversationReplyStore
-	ExternalConversationReplyWorker                 = runtime.ExternalConversationReplyWorker
-	RunProgressSnapshot                             = runtime.RunProgressSnapshot
-	RunProgressAcknowledgementRequest               = runtime.RunProgressAcknowledgementRequest
-	RunProgressAcknowledgementRenderer              = runtime.RunProgressAcknowledgementRenderer
-	RunProgressAcknowledgementRendererFunc          = runtime.RunProgressAcknowledgementRendererFunc
-	RunProgressAcknowledgement                      = runtime.RunProgressAcknowledgement
-	RunProgressAcknowledgementStore                 = runtime.RunProgressAcknowledgementStore
-	RunProgressAcknowledgementWorkerConfig          = runtime.RunProgressAcknowledgementWorkerConfig
-	RunProgressAcknowledgementWorker                = runtime.RunProgressAcknowledgementWorker
-	TurnRunnerProgressAcknowledgementRenderer       = runtime.TurnRunnerProgressAcknowledgementRenderer
-	ExternalConversationSupervisor                  = runtime.ExternalConversationSupervisor
+	CallbackRegistrationStatus                      = models.CallbackRegistrationStatus
+	CallbackAdapterReference                        = models.CallbackAdapterReference
+	CallbackSubscription                            = models.CallbackSubscription
+	CallbackRegistration                            = models.CallbackRegistration
+	CallbackRegistrationFilter                      = models.CallbackRegistrationFilter
+	CreateCallbackRegistrationRequest               = callback.CreateCallbackRegistrationRequest
+	UpdateCallbackRegistrationRequest               = callback.UpdateCallbackRegistrationRequest
+	CallbackRegistrationStore                       = models.CallbackRegistrationStore
+	CallbackAdapterResolver                         = callback.CallbackAdapterResolver
+	CallbackRegistry                                = callback.CallbackRegistry
+	CallbackPublicRequest                           = callback.CallbackPublicRequest
+	NormalizedCallbackEvent                         = callback.NormalizedCallbackEvent
+	CallbackHostRequest                             = callback.CallbackHostRequest
+	CallbackHostResult                              = callback.CallbackHostResult
+	CallbackAdapterHost                             = callback.CallbackAdapterHost
+	CallbackEventReceiptStatus                      = models.CallbackEventReceiptStatus
+	CallbackEventReceipt                            = models.CallbackEventReceipt
+	CallbackEventStore                              = models.CallbackEventStore
+	CallbackEventConsumer                           = callback.CallbackEventConsumer
+	CallbackEventConsumerFunc                       = callback.CallbackEventConsumerFunc
+	CallbackIngressResult                           = callback.CallbackIngressResult
+	CallbackIngressService                          = callback.CallbackIngressService
+	ApprovalCallbackConsumer                        = externalconversation.ApprovalCallbackConsumer
+	ExternalConversationEndpointStatus              = models.ExternalConversationEndpointStatus
+	ExternalConversationHandlerKind                 = models.ExternalConversationHandlerKind
+	ExternalConversationHandler                     = models.ExternalConversationHandler
+	ExternalConversationMessageSelection            = models.ExternalConversationMessageSelection
+	ExternalConversationReplyMode                   = models.ExternalConversationReplyMode
+	ExternalConversationPolicy                      = models.ExternalConversationPolicy
+	ExternalConversationAdapterReference            = models.ExternalConversationAdapterReference
+	ExternalConversationEndpoint                    = models.ExternalConversationEndpoint
+	ExternalConversationEndpointFilter              = models.ExternalConversationEndpointFilter
+	CreateExternalConversationEndpointRequest       = externalconversation.CreateExternalConversationEndpointRequest
+	UpdateExternalConversationEndpointRequest       = externalconversation.UpdateExternalConversationEndpointRequest
+	ExternalConversationEndpointStore               = models.ExternalConversationEndpointStore
+	ExternalConversationAdapterResolver             = externalconversation.ExternalConversationAdapterResolver
+	ExternalConversationEndpointService             = externalconversation.ExternalConversationEndpointService
+	NormalizedExternalConversationEvent             = models.NormalizedExternalConversationEvent
+	ExternalConversationInboxStatus                 = models.ExternalConversationInboxStatus
+	ExternalConversationInboxItem                   = models.ExternalConversationInboxItem
+	ExternalConversationMapping                     = models.ExternalConversationMapping
+	ExternalParticipantMapping                      = models.ExternalParticipantMapping
+	ExternalMessageDirection                        = models.ExternalMessageDirection
+	ExternalMessageMapping                          = models.ExternalMessageMapping
+	ExternalConversationDeliveryStatus              = models.ExternalConversationDeliveryStatus
+	ExternalConversationDelivery                    = models.ExternalConversationDelivery
+	ExternalConversationInboxFilter                 = models.ExternalConversationInboxFilter
+	ExternalConversationDeliveryFilter              = models.ExternalConversationDeliveryFilter
+	ExternalConversationTransportStore              = models.ExternalConversationTransportStore
+	ExternalConversationStore                       = models.ExternalConversationStore
+	ReceiveExternalConversationEventRequest         = externalconversation.ReceiveExternalConversationEventRequest
+	ReceiveExternalConversationEventResult          = externalconversation.ReceiveExternalConversationEventResult
+	EnqueueExternalConversationDeliveryRequest      = externalconversation.EnqueueExternalConversationDeliveryRequest
+	EnqueueExternalConversationDeliveryResult       = externalconversation.EnqueueExternalConversationDeliveryResult
+	ExternalConversationTransportService            = externalconversation.ExternalConversationTransportService
+	ExternalConversationIngressRequest              = externalconversation.ExternalConversationIngressRequest
+	ExternalConversationPublicIngressRequest        = externalconversation.ExternalConversationPublicIngressRequest
+	ExternalConversationIngressHostResult           = externalconversation.ExternalConversationIngressHostResult
+	ExternalConversationIngressHostRequest          = externalconversation.ExternalConversationIngressHostRequest
+	ExternalConversationIngressAdapterHost          = externalconversation.ExternalConversationIngressAdapterHost
+	ExternalConversationIngressResult               = externalconversation.ExternalConversationIngressResult
+	ExternalConversationIngressGateway              = models.ExternalConversationIngressGateway
+	ExternalConversationGatewayStatus               = models.ExternalConversationGatewayStatus
+	ExternalConversationGatewayRegistration         = models.ExternalConversationGatewayRegistration
+	ExternalConversationGatewayFilter               = models.ExternalConversationGatewayFilter
+	CreateExternalConversationGatewayRequest        = externalconversation.CreateExternalConversationGatewayRequest
+	UpdateExternalConversationGatewayRequest        = externalconversation.UpdateExternalConversationGatewayRequest
+	ExternalConversationGatewayStore                = models.ExternalConversationGatewayStore
+	ExternalConversationGatewayService              = externalconversation.ExternalConversationGatewayService
+	ExternalConversationVerifiedRoute               = models.ExternalConversationVerifiedRoute
+	ExternalConversationGatewayEvent                = externalconversation.ExternalConversationGatewayEvent
+	ExternalConversationGatewayHostRequest          = externalconversation.ExternalConversationGatewayHostRequest
+	ExternalConversationGatewayHostResult           = externalconversation.ExternalConversationGatewayHostResult
+	ExternalConversationGatewayAdapterHost          = externalconversation.ExternalConversationGatewayAdapterHost
+	ExternalConversationGatewayIngressResult        = externalconversation.ExternalConversationGatewayIngressResult
+	ExternalConversationDispatchRequest             = externalconversation.ExternalConversationDispatchRequest
+	ExternalConversationDispatchResult              = externalconversation.ExternalConversationDispatchResult
+	ExternalConversationDispatcher                  = externalconversation.ExternalConversationDispatcher
+	CanonicalExternalConversationDispatcher         = externalconversation.CanonicalExternalConversationDispatcher
+	ExternalConversationInboxWorkerConfig           = externalconversation.ExternalConversationInboxWorkerConfig
+	CallbackEventWorkerConfig                       = callback.CallbackEventWorkerConfig
+	ExternalConversationInboxWorker                 = externalconversation.ExternalConversationInboxWorker
+	ExternalConversationDeliveryHostRequest         = externalconversation.ExternalConversationDeliveryHostRequest
+	ExternalConversationAcknowledgementStatus       = externalconversation.ExternalConversationAcknowledgementStatus
+	ExternalConversationDeliveryAcknowledgement     = externalconversation.ExternalConversationDeliveryAcknowledgement
+	ExternalConversationDeliveryOutcome             = externalconversation.ExternalConversationDeliveryOutcome
+	ExternalConversationDeliveryHostResult          = externalconversation.ExternalConversationDeliveryHostResult
+	ExternalConversationAdapterHost                 = externalconversation.ExternalConversationAdapterHost
+	ExternalConversationDestination                 = externalconversation.ExternalConversationDestination
+	ExternalConversationDestinationPage             = externalconversation.ExternalConversationDestinationPage
+	ExternalConversationDestinationDiscoveryRequest = externalconversation.ExternalConversationDestinationDiscoveryRequest
+	ExternalConversationDestinationDiscoveryHost    = externalconversation.ExternalConversationDestinationDiscoveryHost
+	ExternalConversationDeliveryWorkerConfig        = externalconversation.ExternalConversationDeliveryWorkerConfig
+	ExternalConversationDeliveryWorker              = externalconversation.ExternalConversationDeliveryWorker
+	ExternalConversationReplyStore                  = models.ExternalConversationReplyStore
+	ExternalConversationReplyWorker                 = externalconversation.ExternalConversationReplyWorker
+	RunProgressSnapshot                             = agentrun.RunProgressSnapshot
+	RunProgressAcknowledgementRequest               = agentrun.RunProgressAcknowledgementRequest
+	RunProgressAcknowledgementRenderer              = agentrun.RunProgressAcknowledgementRenderer
+	RunProgressAcknowledgementRendererFunc          = externalconversation.RunProgressAcknowledgementRendererFunc
+	RunProgressAcknowledgement                      = externalconversation.RunProgressAcknowledgement
+	RunProgressAcknowledgementStore                 = models.RunProgressAcknowledgementStore
+	RunProgressAcknowledgementWorkerConfig          = externalconversation.RunProgressAcknowledgementWorkerConfig
+	RunProgressAcknowledgementWorker                = externalconversation.RunProgressAcknowledgementWorker
+	TurnRunnerProgressAcknowledgementRenderer       = externalconversation.TurnRunnerProgressAcknowledgementRenderer
+	ExternalConversationSupervisor                  = externalconversation.ExternalConversationSupervisor
 )
 
 // ExternalConversationGatewayVerificationAdapterHost opts in to handling
 // provider setup challenges while a saved gateway remains paused.
-type ExternalConversationGatewayVerificationAdapterHost = runtime.ExternalConversationGatewayVerificationAdapterHost
+type ExternalConversationGatewayVerificationAdapterHost = externalconversation.ExternalConversationGatewayVerificationAdapterHost
 
 // Credential lease aliases are kept in their own group so extending the
 // security protocol does not reformat the facade's much larger alias catalog.
 type (
-	ActionCredentialLeaseIssuer            = runtime.ActionCredentialLeaseIssuer
-	ActionCredentialLeaseIssuerFunc        = runtime.ActionCredentialLeaseIssuerFunc
-	ActionCredentialLeaseIssueRequest      = runtime.ActionCredentialLeaseIssueRequest
-	ActionLeaseIdentity                    = runtime.ActionLeaseIdentity
-	ActionCredentialFieldReference         = runtime.ActionCredentialFieldReference
-	ActionCredentialLease                  = runtime.ActionCredentialLease
-	ActionCredentialLeaseSignature         = runtime.ActionCredentialLeaseSignature
-	SignedActionCredentialLease            = runtime.SignedActionCredentialLease
-	CreateActionCredentialLeaseRequest     = runtime.CreateActionCredentialLeaseRequest
-	ActionCredentialLeaseSigner            = runtime.ActionCredentialLeaseSigner
-	ActionCredentialLeaseSignatureVerifier = runtime.ActionCredentialLeaseSignatureVerifier
-	ActionCredentialLeaseValidationRequest = runtime.ActionCredentialLeaseValidationRequest
-	ActionCredentialLeaseRedemptionRequest = runtime.ActionCredentialLeaseRedemptionRequest
-	ActionCredentialLeaseRedeemer          = runtime.ActionCredentialLeaseRedeemer
-	ActionCredentialLeaseValidator         = runtime.ActionCredentialLeaseValidator
+	ActionCredentialLeaseIssuer            = action.ActionCredentialLeaseIssuer
+	ActionCredentialLeaseIssuerFunc        = action.ActionCredentialLeaseIssuerFunc
+	ActionCredentialLeaseIssueRequest      = action.ActionCredentialLeaseIssueRequest
+	ActionLeaseIdentity                    = models.ActionLeaseIdentity
+	ActionCredentialFieldReference         = models.ActionCredentialFieldReference
+	ActionCredentialLease                  = models.ActionCredentialLease
+	ActionCredentialLeaseSignature         = models.ActionCredentialLeaseSignature
+	SignedActionCredentialLease            = models.SignedActionCredentialLease
+	CreateActionCredentialLeaseRequest     = models.CreateActionCredentialLeaseRequest
+	ActionCredentialLeaseSigner            = action.ActionCredentialLeaseSigner
+	ActionCredentialLeaseSignatureVerifier = action.ActionCredentialLeaseSignatureVerifier
+	ActionCredentialLeaseValidationRequest = action.ActionCredentialLeaseValidationRequest
+	ActionCredentialLeaseRedemptionRequest = models.ActionCredentialLeaseRedemptionRequest
+	ActionCredentialLeaseRedeemer          = models.ActionCredentialLeaseRedeemer
+	ActionCredentialLeaseValidator         = action.ActionCredentialLeaseValidator
 )
 
 type (
-	ConversationTaskMode                   = runtime.ConversationTaskMode
-	ConversationTaskProofStore             = runtime.ConversationTaskProofStore
-	ConversationTaskPromotionStore         = runtime.ConversationTaskPromotionStore
-	ConversationTaskPromotionRequest       = runtime.ConversationTaskPromotionRequest
-	ConversationTaskDueStore               = runtime.ConversationTaskDueStore
-	ConversationTaskDueFilter              = runtime.ConversationTaskDueFilter
-	ConversationTaskContinuationStore      = runtime.ConversationTaskContinuationStore
-	ConversationTaskContinuationReconciler = runtime.ConversationTaskContinuationReconciler
+	ConversationTaskMode                   = models.ConversationTaskMode
+	ConversationTaskProofStore             = models.ConversationTaskProofStore
+	ConversationTaskPromotionStore         = models.ConversationTaskPromotionStore
+	ConversationTaskPromotionRequest       = models.ConversationTaskPromotionRequest
+	ConversationTaskDueStore               = models.ConversationTaskDueStore
+	ConversationTaskDueFilter              = models.ConversationTaskDueFilter
+	ConversationTaskContinuationStore      = models.ConversationTaskContinuationStore
+	ConversationTaskContinuationReconciler = conversationrun.ConversationTaskContinuationReconciler
 )
 
 var (
-	NewConversationTaskContinuationReconciler = runtime.NewConversationTaskContinuationReconciler
-	ConversationTaskMatchesWorkRun            = runtime.ConversationTaskMatchesWorkRun
-	VerifyConversationTaskWorkRun             = runtime.VerifyConversationTaskWorkRun
-	ResolveTeamHandoffRequest                 = runtime.ResolveTeamHandoffRequest
-	ConversationTaskAcknowledgmentMessageID   = runtime.ConversationTaskAcknowledgmentMessageID
-	FindConversationTaskResultMessage         = runtime.FindConversationTaskResultMessage
+	NewConversationTaskContinuationReconciler = conversationrun.NewConversationTaskContinuationReconciler
+	ConversationTaskMatchesWorkRun            = models.ConversationTaskMatchesWorkRun
+	VerifyConversationTaskWorkRun             = agentrun.VerifyConversationTaskWorkRun
+	ResolveTeamHandoffRequest                 = conversation.ResolveTeamHandoffRequest
+	ConversationTaskAcknowledgmentMessageID   = models.ConversationTaskAcknowledgmentMessageID
+	FindConversationTaskResultMessage         = conversationrun.FindConversationTaskResultMessage
 )
 
 const (
-	ConversationTaskContextKey          = runtime.ConversationTaskContextKey
-	ConversationTaskModeIndependent     = runtime.ConversationTaskModeIndependent
-	ConversationTaskModeContinuation    = runtime.ConversationTaskModeContinuation
-	ConversationTaskForegroundTimeout   = runtime.ConversationTaskForegroundTimeout
+	ConversationTaskContextKey          = models.ConversationTaskContextKey
+	ConversationTaskModeIndependent     = models.ConversationTaskModeIndependent
+	ConversationTaskModeContinuation    = models.ConversationTaskModeContinuation
+	ConversationTaskForegroundTimeout   = models.ConversationTaskForegroundTimeout
 	AgentManifestAPIVersion             = kernelagent.ManifestAPIVersion
 	AgentManifestKind                   = kernelagent.ManifestKind
 	AgentBundleAPIVersion               = kernelagent.BundleAPIVersion
@@ -923,9 +942,9 @@ const (
 	TeamManifestAPIVersion              = kernelteam.ManifestAPIVersion
 	TeamManifestKind                    = kernelteam.ManifestKind
 	SkillSourceArtifactFormatOpenClawV1 = sourceartifact.FormatOpenClawSkillV1
-	ActionCredentialLeaseVersion        = runtime.ActionCredentialLeaseVersion
-	MaximumActionCredentialLeaseTTL     = runtime.MaximumActionCredentialLeaseTTL
-	MaximumConversationPlaces           = runtime.MaximumConversationPlaces
+	ActionCredentialLeaseVersion        = models.ActionCredentialLeaseVersion
+	MaximumActionCredentialLeaseTTL     = models.MaximumActionCredentialLeaseTTL
+	MaximumConversationPlaces           = conversation.MaximumConversationPlaces
 )
 
 func CompileAgentManifest(manifest *AgentManifest, definitionID string, provenance AgentDefinitionProvenance) (*AgentDefinition, error) {
@@ -1064,7 +1083,7 @@ type (
 
 const (
 	DeploymentChangeConfigurationUpdated    = workforce.DeploymentChangeConfigurationUpdated
-	TurnHostContextExceeded                 = runtime.TurnHostContextExceeded
+	TurnHostContextExceeded                 = modelstep.TurnHostContextExceeded
 	KernelAPIVersion                        = kernelapi.APIVersion
 	ChannelsCapabilityID                    = kernelapi.ChannelsCapabilityID
 	ChannelsCapabilityVersion               = kernelapi.ChannelsCapabilityVersion
@@ -1133,8 +1152,8 @@ const (
 	KernelOperationRefine                   = kernelapi.OperationRefine
 	KernelOperationPatch                    = kernelapi.OperationPatch
 	KernelOperationSearch                   = kernelapi.OperationSearch
-	HostedSkillApplied                      = runtime.HostedSkillApplied
-	HostedSkillNotApplied                   = runtime.HostedSkillNotApplied
+	HostedSkillApplied                      = models.HostedSkillApplied
+	HostedSkillNotApplied                   = models.HostedSkillNotApplied
 	RunbookAPIVersion                       = runbook.APIVersion
 	RunbookTriggerEvent                     = runbook.TriggerEvent
 	RunbookTriggerSchedule                  = runbook.TriggerSchedule
@@ -1291,68 +1310,68 @@ var (
 )
 
 var (
-	ConversationTaskGoalSummary         = runtime.ConversationTaskGoalSummary
-	PersistedTaskOrigin                 = runtime.PersistedTaskOrigin
-	NewConversationTaskService          = runtime.NewConversationTaskService
-	NewTurnHostFailure                  = runtime.NewTurnHostFailure
-	TerminalFailureReply                = runtime.TerminalFailureReply
-	ErrInvalidApprovalReviewContext     = runtime.ErrInvalidApprovalReviewContext
-	NewCapabilityInvocationStepProducer = runtime.NewCapabilityInvocationStepProducer
-	ResolveLoopBinding                  = runtime.ResolveLoopBinding
-	NewArtifactRetentionService         = runtime.NewArtifactRetentionService
-	ErrInvalidConversationTask          = runtime.ErrInvalidConversationTask
-	ErrConversationTaskNotFound         = runtime.ErrConversationTaskNotFound
-	ErrConversationTaskConflict         = runtime.ErrConversationTaskConflict
-	ErrTurnHostUnavailable              = runtime.ErrTurnHostUnavailable
-	ErrTurnHostConfiguration            = runtime.ErrTurnHostConfiguration
+	ConversationTaskGoalSummary         = conversationrun.ConversationTaskGoalSummary
+	PersistedTaskOrigin                 = agentrun.PersistedTaskOrigin
+	NewConversationTaskService          = conversationrun.NewConversationTaskService
+	NewTurnHostFailure                  = modelstep.NewTurnHostFailure
+	TerminalFailureReply                = conversation.TerminalFailureReply
+	ErrInvalidApprovalReviewContext     = action.ErrInvalidApprovalReviewContext
+	NewCapabilityInvocationStepProducer = modelstep.NewCapabilityInvocationStepProducer
+	ResolveLoopBinding                  = runworker.ResolveLoopBinding
+	NewArtifactRetentionService         = artifactcatalog.NewArtifactRetentionService
+	ErrInvalidConversationTask          = models.ErrInvalidConversationTask
+	ErrConversationTaskNotFound         = agentrun.ErrConversationTaskNotFound
+	ErrConversationTaskConflict         = models.ErrConversationTaskConflict
+	ErrTurnHostUnavailable              = modelstep.ErrTurnHostUnavailable
+	ErrTurnHostConfiguration            = modelstep.ErrTurnHostConfiguration
 	ValidateRunbook                     = runbook.Validate
 	VerifyRunbook                       = runbook.Verify
 	ValidateRunbookInterfaceInput       = runbook.ValidateInterfaceInput
-	NewRunbookStepProducer              = runtime.NewRunbookStepProducer
-	NewRunForkCoordinator               = runtime.NewRunForkCoordinator
-	ObjectiveManagementSkill            = runtime.ObjectiveManagementSkill
-	NewObjectiveActionValidator         = runtime.NewObjectiveActionValidator
-	NewObjectiveActionDispatcher        = runtime.NewObjectiveActionDispatcher
-	AgentManagementSkill                = runtime.AgentManagementSkill
-	RunManagementSkill                  = runtime.RunManagementSkill
-	NewAgentBehaviorActionValidator     = runtime.NewAgentBehaviorActionValidator
-	NewAgentBehaviorActionDispatcher    = runtime.NewAgentBehaviorActionDispatcher
-	NewRunActionValidator               = runtime.NewRunActionValidator
-	NewRunActionDispatcher              = runtime.NewRunActionDispatcher
-	RunbookManagementSkill              = runtime.RunbookManagementSkill
+	NewRunbookStepProducer              = routine.NewRunbookStepProducer
+	NewRunForkCoordinator               = agentrun.NewRunForkCoordinator
+	ObjectiveManagementSkill            = action.ObjectiveManagementSkill
+	NewObjectiveActionValidator         = action.NewObjectiveActionValidator
+	NewObjectiveActionDispatcher        = action.NewObjectiveActionDispatcher
+	AgentManagementSkill                = models.AgentManagementSkill
+	RunManagementSkill                  = agentrun.RunManagementSkill
+	NewAgentBehaviorActionValidator     = agentbuilder.NewAgentBehaviorActionValidator
+	NewAgentBehaviorActionDispatcher    = agentbuilder.NewAgentBehaviorActionDispatcher
+	NewRunActionValidator               = agentrun.NewRunActionValidator
+	NewRunActionDispatcher              = agentrun.NewRunActionDispatcher
+	RunbookManagementSkill              = routine.RunbookManagementSkill
 	PinRunCommand                       = workspace.PinRunCommand
 	RecordPinnedCommand                 = workspace.RecordPinnedCommand
 	ExpectedDigestOf                    = workspace.ExpectedDigestOf
-	ResolveRoutineScriptStatus          = runtime.ResolveRoutineScriptStatus
-	NewRunbookActionValidator           = runtime.NewRunbookActionValidator
-	NewRunbookActionDispatcher          = runtime.NewRunbookActionDispatcher
-	TeamManagementSkill                 = runtime.TeamManagementSkill
-	NewTeamMemberActionValidator        = runtime.NewTeamMemberActionValidator
-	NewTeamMemberActionDispatcher       = runtime.NewTeamMemberActionDispatcher
-	NewTeamSkillActionValidator         = runtime.NewTeamSkillActionValidator
-	AuthorizeTeamSkillActivation        = runtime.AuthorizeTeamSkillActivation
-	SkillManagementSkill                = runtime.SkillManagementSkill
-	NewSkillBindingActionValidator      = runtime.NewSkillBindingActionValidator
-	NewSkillBindingActionDispatcher     = runtime.NewSkillBindingActionDispatcher
+	ResolveRoutineScriptStatus          = routine.ResolveRoutineScriptStatus
+	NewRunbookActionValidator           = routine.NewRunbookActionValidator
+	NewRunbookActionDispatcher          = routine.NewRunbookActionDispatcher
+	TeamManagementSkill                 = collaboration.TeamManagementSkill
+	NewTeamMemberActionValidator        = collaboration.NewTeamMemberActionValidator
+	NewTeamMemberActionDispatcher       = collaboration.NewTeamMemberActionDispatcher
+	NewTeamSkillActionValidator         = skillbinding.NewTeamSkillActionValidator
+	AuthorizeTeamSkillActivation        = skillbinding.AuthorizeTeamSkillActivation
+	SkillManagementSkill                = skillbinding.SkillManagementSkill
+	NewSkillBindingActionValidator      = skillbinding.NewSkillBindingActionValidator
+	NewSkillBindingActionDispatcher     = skillbinding.NewSkillBindingActionDispatcher
 	NewHTTPActionExecutor               = httpaction.NewExecutor
 	DecodeHTTPActionInvocation          = httpaction.DecodeInvocation
 )
 
-var NewExternalConversationEndpointService = runtime.NewExternalConversationEndpointService
-var NewCallbackRegistry = runtime.NewCallbackRegistry
-var NewCallbackIngressService = runtime.NewCallbackIngressService
-var NewApprovalCallbackConsumer = runtime.NewApprovalCallbackConsumer
-var ConversationDestinationDiscoveryArguments = runtime.ConversationDestinationDiscoveryArguments
-var ProjectConversationDestinationPage = runtime.ProjectConversationDestinationPage
-var NewExternalConversationGatewayService = runtime.NewExternalConversationGatewayService
-var NewExternalConversationTransportService = runtime.NewExternalConversationTransportService
-var NewCanonicalExternalConversationDispatcher = runtime.NewCanonicalExternalConversationDispatcher
-var NewExternalConversationInboxWorker = runtime.NewExternalConversationInboxWorker
-var NewExternalConversationDeliveryWorker = runtime.NewExternalConversationDeliveryWorker
-var NewExternalConversationReplyWorker = runtime.NewExternalConversationReplyWorker
-var NewRunProgressAcknowledgementWorker = runtime.NewRunProgressAcknowledgementWorker
-var NewTurnRunnerProgressAcknowledgementRenderer = runtime.NewTurnRunnerProgressAcknowledgementRenderer
-var NewExternalConversationSupervisor = runtime.NewExternalConversationSupervisor
+var NewExternalConversationEndpointService = externalconversation.NewExternalConversationEndpointService
+var NewCallbackRegistry = callback.NewCallbackRegistry
+var NewCallbackIngressService = callback.NewCallbackIngressService
+var NewApprovalCallbackConsumer = externalconversation.NewApprovalCallbackConsumer
+var ConversationDestinationDiscoveryArguments = externalconversation.ConversationDestinationDiscoveryArguments
+var ProjectConversationDestinationPage = externalconversation.ProjectConversationDestinationPage
+var NewExternalConversationGatewayService = externalconversation.NewExternalConversationGatewayService
+var NewExternalConversationTransportService = externalconversation.NewExternalConversationTransportService
+var NewCanonicalExternalConversationDispatcher = externalconversation.NewCanonicalExternalConversationDispatcher
+var NewExternalConversationInboxWorker = externalconversation.NewExternalConversationInboxWorker
+var NewExternalConversationDeliveryWorker = externalconversation.NewExternalConversationDeliveryWorker
+var NewExternalConversationReplyWorker = externalconversation.NewExternalConversationReplyWorker
+var NewRunProgressAcknowledgementWorker = externalconversation.NewRunProgressAcknowledgementWorker
+var NewTurnRunnerProgressAcknowledgementRenderer = externalconversation.NewTurnRunnerProgressAcknowledgementRenderer
+var NewExternalConversationSupervisor = externalconversation.NewExternalConversationSupervisor
 var NewOAuthService = kerneloauth.NewService
 var NewOAuthMemoryStore = kerneloauth.NewMemoryStore
 var OAuthSessionIDFromState = kerneloauth.SessionIDFromState
@@ -1380,79 +1399,79 @@ const OAuthRefreshRevokedErrorCode = kerneloauth.RefreshRevokedErrorCode
 // runtime state, agent definitions/deployments, and skill bindings share one
 // authoritative persistence boundary.
 type PersistentKernelStore interface {
-	runtime.KernelStore
-	runtime.CollaborationStore
-	runtime.RunDependencyStore
-	runtime.ConversationStore
-	runtime.ArtifactStore
-	runtime.SkillReferenceUpgradeStore
+	models.KernelStore
+	models.CollaborationStore
+	models.RunDependencyStore
+	models.ConversationStore
+	models.ArtifactStore
+	models.SkillReferenceUpgradeStore
 	kernelagent.Store
 	kernelteam.Store
 	skill.CatalogStore
 	sourceartifact.Store
 }
 
-var _ PersistentKernelStore = (*runtime.PostgresStore)(nil)
+var _ PersistentKernelStore = (*postgres.Store)(nil)
 
 var (
-	ErrRunNotFound                          = runtime.ErrRunNotFound
-	ErrRevisionConflict                     = runtime.ErrRevisionConflict
-	ErrInvalidRunTransition                 = runtime.ErrInvalidRunTransition
-	ErrRunIdempotency                       = runtime.ErrRunIdempotency
-	ErrInvalidAgentRun                      = runtime.ErrInvalidAgentRun
-	ErrInvalidRunCommand                    = runtime.ErrInvalidRunCommand
-	ErrInvalidScope                         = runtime.ErrInvalidScope
-	ErrInvalidOwner                         = runtime.ErrInvalidOwner
-	ErrObjectiveNotFound                    = runtime.ErrObjectiveNotFound
-	ErrObjectiveIdempotency                 = runtime.ErrObjectiveIdempotency
-	ErrInvalidObjectiveTransition           = runtime.ErrInvalidObjectiveTransition
-	ErrRunbookActivationNotFound            = runtime.ErrRunbookActivationNotFound
-	ErrRoutineGrantsNotOwner                = runtime.ErrRoutineGrantsNotOwner
-	ErrRoutineHasNoScript                   = runtime.ErrRoutineHasNoScript
-	ErrChatFileNotFound                     = runtime.ErrChatFileNotFound
-	ErrRunbookDefinitionNotFound            = runtime.ErrRunbookDefinitionNotFound
-	ErrRunbookActivationInactive            = runtime.ErrRunbookActivationInactive
-	ErrRunbookActivationRevision            = runtime.ErrRunbookActivationRevision
-	ErrRunbookActivationIdempotency         = runtime.ErrRunbookActivationIdempotency
-	ErrBudgetExhausted                      = runtime.ErrBudgetExhausted
-	ErrTurnNotFound                         = runtime.ErrTurnNotFound
-	ErrActionNotFound                       = runtime.ErrActionNotFound
-	ErrApprovalNotFound                     = runtime.ErrApprovalNotFound
-	ErrApprovalResolved                     = runtime.ErrApprovalResolved
-	ErrActionIdempotencyConflict            = runtime.ErrIdempotencyConflict
-	ErrActionCredentialLeaseInvalid         = runtime.ErrActionCredentialLeaseInvalid
-	ErrActionCredentialLeaseExpired         = runtime.ErrActionCredentialLeaseExpired
-	ErrActionCredentialLeaseMismatch        = runtime.ErrActionCredentialLeaseMismatch
-	ErrActionCredentialLeaseReplay          = runtime.ErrActionCredentialLeaseReplay
-	ErrAgentRequestNotFound                 = runtime.ErrAgentRequestNotFound
-	ErrInvalidAgentRequestState             = runtime.ErrInvalidAgentRequestState
-	ErrAgentRequestUnauthorized             = runtime.ErrAgentRequestUnauthorized
-	ErrAgentRequestAssignment               = runtime.ErrAgentRequestAssignment
-	ErrAgentRequestIdempotency              = runtime.ErrAgentRequestIdempotency
-	ErrUnsafeSharedContext                  = runtime.ErrUnsafeSharedContext
-	ErrInvalidArtifact                      = runtime.ErrInvalidArtifact
-	ErrArtifactNotFound                     = runtime.ErrArtifactNotFound
-	ErrArtifactImmutable                    = runtime.ErrArtifactImmutable
-	ErrArtifactVersionConflict              = runtime.ErrArtifactVersionConflict
-	ErrInvalidArtifactRecord                = runtime.ErrInvalidArtifactRecord
-	ErrRunDependencyNotFound                = runtime.ErrRunDependencyNotFound
-	ErrDependencyGroupNotFound              = runtime.ErrDependencyGroupNotFound
-	ErrInvalidRunDependency                 = runtime.ErrInvalidRunDependency
-	ErrDependencyConflict                   = runtime.ErrDependencyConflict
-	ErrConversationNotFound                 = runtime.ErrConversationNotFound
-	ErrSpaceNotFound                        = runtime.ErrSpaceNotFound
-	ErrInvalidSpace                         = runtime.ErrInvalidSpace
-	ErrDefaultSpaceProtected                = runtime.ErrDefaultSpaceProtected
-	ErrNoDefaultSpace                       = runtime.ErrNoDefaultSpace
-	ErrTeamAgentOutsideSpace                = runtime.ErrTeamAgentOutsideSpace
-	ErrChannelMessageNotFound               = runtime.ErrChannelMessageNotFound
-	ErrParticipationRoundNotFound           = runtime.ErrParticipationRoundNotFound
-	ErrInvalidConversation                  = runtime.ErrInvalidConversation
-	ErrMessageConflict                      = runtime.ErrMessageConflict
-	ErrConversationCursorConflict           = runtime.ErrConversationCursorConflict
-	ErrConversationPresenceConflict         = runtime.ErrConversationPresenceConflict
-	ErrConversationCoordinationUnavailable  = runtime.ErrConversationCoordinationUnavailable
-	ErrNoConversationParticipants           = runtime.ErrNoConversationParticipants
+	ErrRunNotFound                          = models.ErrRunNotFound
+	ErrRevisionConflict                     = models.ErrRevisionConflict
+	ErrInvalidRunTransition                 = models.ErrInvalidRunTransition
+	ErrRunIdempotency                       = models.ErrRunIdempotency
+	ErrInvalidAgentRun                      = models.ErrInvalidAgentRun
+	ErrInvalidRunCommand                    = portfolio.ErrInvalidRunCommand
+	ErrInvalidScope                         = models.ErrInvalidScope
+	ErrInvalidOwner                         = models.ErrInvalidOwner
+	ErrObjectiveNotFound                    = models.ErrObjectiveNotFound
+	ErrObjectiveIdempotency                 = models.ErrObjectiveIdempotency
+	ErrInvalidObjectiveTransition           = portfolio.ErrInvalidObjectiveTransition
+	ErrRunbookActivationNotFound            = models.ErrRunbookActivationNotFound
+	ErrRoutineGrantsNotOwner                = routine.ErrRoutineGrantsNotOwner
+	ErrRoutineHasNoScript                   = routine.ErrRoutineHasNoScript
+	ErrChatFileNotFound                     = routine.ErrChatFileNotFound
+	ErrRunbookDefinitionNotFound            = routine.ErrRunbookDefinitionNotFound
+	ErrRunbookActivationInactive            = routine.ErrRunbookActivationInactive
+	ErrRunbookActivationRevision            = models.ErrRunbookActivationRevision
+	ErrRunbookActivationIdempotency         = models.ErrRunbookActivationIdempotency
+	ErrBudgetExhausted                      = models.ErrBudgetExhausted
+	ErrTurnNotFound                         = models.ErrTurnNotFound
+	ErrActionNotFound                       = models.ErrActionNotFound
+	ErrApprovalNotFound                     = models.ErrApprovalNotFound
+	ErrApprovalResolved                     = models.ErrApprovalResolved
+	ErrActionIdempotencyConflict            = models.ErrIdempotencyConflict
+	ErrActionCredentialLeaseInvalid         = models.ErrActionCredentialLeaseInvalid
+	ErrActionCredentialLeaseExpired         = models.ErrActionCredentialLeaseExpired
+	ErrActionCredentialLeaseMismatch        = models.ErrActionCredentialLeaseMismatch
+	ErrActionCredentialLeaseReplay          = models.ErrActionCredentialLeaseReplay
+	ErrAgentRequestNotFound                 = models.ErrAgentRequestNotFound
+	ErrInvalidAgentRequestState             = models.ErrInvalidAgentRequestState
+	ErrAgentRequestUnauthorized             = collaboration.ErrAgentRequestUnauthorized
+	ErrAgentRequestAssignment               = models.ErrAgentRequestAssignment
+	ErrAgentRequestIdempotency              = models.ErrAgentRequestIdempotency
+	ErrUnsafeSharedContext                  = models.ErrUnsafeSharedContext
+	ErrInvalidArtifact                      = models.ErrInvalidArtifact
+	ErrArtifactNotFound                     = artifactcatalog.ErrArtifactNotFound
+	ErrArtifactImmutable                    = models.ErrArtifactImmutable
+	ErrArtifactVersionConflict              = models.ErrArtifactVersionConflict
+	ErrInvalidArtifactRecord                = models.ErrInvalidArtifactRecord
+	ErrRunDependencyNotFound                = models.ErrRunDependencyNotFound
+	ErrDependencyGroupNotFound              = models.ErrDependencyGroupNotFound
+	ErrInvalidRunDependency                 = models.ErrInvalidRunDependency
+	ErrDependencyConflict                   = models.ErrDependencyConflict
+	ErrConversationNotFound                 = models.ErrConversationNotFound
+	ErrSpaceNotFound                        = models.ErrSpaceNotFound
+	ErrInvalidSpace                         = models.ErrInvalidSpace
+	ErrDefaultSpaceProtected                = models.ErrDefaultSpaceProtected
+	ErrNoDefaultSpace                       = models.ErrNoDefaultSpace
+	ErrTeamAgentOutsideSpace                = models.ErrTeamAgentOutsideSpace
+	ErrChannelMessageNotFound               = models.ErrChannelMessageNotFound
+	ErrParticipationRoundNotFound           = models.ErrParticipationRoundNotFound
+	ErrInvalidConversation                  = models.ErrInvalidConversation
+	ErrMessageConflict                      = models.ErrMessageConflict
+	ErrConversationCursorConflict           = models.ErrConversationCursorConflict
+	ErrConversationPresenceConflict         = models.ErrConversationPresenceConflict
+	ErrConversationCoordinationUnavailable  = conversation.ErrConversationCoordinationUnavailable
+	ErrNoConversationParticipants           = conversation.ErrNoConversationParticipants
 	ErrAgentDefinitionNotFound              = kernelagent.ErrDefinitionNotFound
 	ErrAgentDeploymentNotFound              = kernelagent.ErrDeploymentNotFound
 	ErrAgentAmendmentNotFound               = kernelagent.ErrAmendmentNotFound
@@ -1469,85 +1488,85 @@ var (
 	ErrTeamRosterMinimum                    = kernelteam.ErrRosterMinimum
 )
 
-func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
-	return runtime.NewToolActionDispatcher(invoker)
+func NewToolActionDispatcher(invoker modelstep.ToolInvoker) (*modelstep.ToolActionDispatcher, error) {
+	return modelstep.NewToolActionDispatcher(invoker)
 }
 
 func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*ActionCredentialLease, error) {
-	return runtime.NewActionCredentialLease(request)
+	return models.NewActionCredentialLease(request)
 }
 
 func SignActionCredentialLease(ctx context.Context, lease ActionCredentialLease, signer ActionCredentialLeaseSigner) (*SignedActionCredentialLease, error) {
-	return runtime.SignActionCredentialLease(ctx, lease, signer)
+	return action.SignActionCredentialLease(ctx, lease, signer)
 }
 
 func NewActionCredentialLeaseValidator(verifier ActionCredentialLeaseSignatureVerifier, redeemer ActionCredentialLeaseRedeemer) (*ActionCredentialLeaseValidator, error) {
-	return runtime.NewActionCredentialLeaseValidator(verifier, redeemer)
+	return action.NewActionCredentialLeaseValidator(verifier, redeemer)
 }
 
 func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string, credentialFields map[string][]string) error {
-	return runtime.MatchActionCredentialLease(lease, call, run, transport, credentialFields)
+	return models.MatchActionCredentialLease(lease, call, run, transport, credentialFields)
 }
 
 func MatchActionCredentialLeaseReferences(envelope *SignedActionCredentialLease, call *ActionCall, run *AgentRun, transport string) error {
-	return runtime.MatchActionCredentialLeaseReferences(envelope, call, run, transport)
+	return action.MatchActionCredentialLeaseReferences(envelope, call, run, transport)
 }
 
 func ValidateCredentialFreeContext(value interface{}) error {
-	return runtime.ValidateCredentialFreeContext(value)
+	return models.ValidateCredentialFreeContext(value)
 }
 
 func EvaluateBudget(policy BudgetPolicy, usage BudgetUsage) (BudgetState, []string, error) {
-	return runtime.EvaluateBudget(policy, usage)
+	return models.EvaluateBudget(policy, usage)
 }
 
-func DefaultConversationCoordinatorConfig() runtime.ConversationCoordinatorConfig {
-	return runtime.DefaultConversationCoordinatorConfig()
+func DefaultConversationCoordinatorConfig() conversation.ConversationCoordinatorConfig {
+	return conversation.DefaultConversationCoordinatorConfig()
 }
 
 // NewPostgresStore opens the production-grade shared persistence adapter and
 // applies OpenSeal's versioned schema migrations.
-func NewPostgresStore(ctx context.Context, dsn string, options ...runtime.PostgresStoreOption) (*runtime.PostgresStore, error) {
-	return runtime.NewPostgresStore(ctx, dsn, options...)
+func NewPostgresStore(ctx context.Context, dsn string, options ...postgres.PostgresStoreOption) (*postgres.Store, error) {
+	return postgres.NewPostgresStore(ctx, dsn, options...)
 }
 
-type PostgresMigrationEvent = runtime.PostgresMigrationEvent
-type PostgresMigrationPhase = runtime.PostgresMigrationPhase
-type PostgresMigrationStats = runtime.PostgresMigrationStats
+type PostgresMigrationEvent = postgres.PostgresMigrationEvent
+type PostgresMigrationPhase = postgres.PostgresMigrationPhase
+type PostgresMigrationStats = postgres.PostgresMigrationStats
 
 const (
-	PostgresMigrationWaiting  = runtime.PostgresMigrationWaiting
-	PostgresMigrationAcquired = runtime.PostgresMigrationAcquired
-	PostgresMigrationCurrent  = runtime.PostgresMigrationCurrent
-	PostgresMigrationComplete = runtime.PostgresMigrationComplete
-	PostgresMigrationTimeout  = runtime.PostgresMigrationTimeout
+	PostgresMigrationWaiting  = postgres.PostgresMigrationWaiting
+	PostgresMigrationAcquired = postgres.PostgresMigrationAcquired
+	PostgresMigrationCurrent  = postgres.PostgresMigrationCurrent
+	PostgresMigrationComplete = postgres.PostgresMigrationComplete
+	PostgresMigrationTimeout  = postgres.PostgresMigrationTimeout
 )
 
-var ErrPostgresMigrationLockTimeout = runtime.ErrPostgresMigrationLockTimeout
+var ErrPostgresMigrationLockTimeout = postgres.ErrPostgresMigrationLockTimeout
 
 // NewSQLiteStore opens the standalone durable kernel store.
-func NewSQLiteStore(path string) (*runtime.SQLiteStore, error) {
-	return runtime.NewSQLiteStore(path)
+func NewSQLiteStore(path string) (*sqlite.Store, error) {
+	return sqlite.NewSQLiteStore(path)
 }
 
-func WithPostgresSchema(schema string) runtime.PostgresStoreOption {
-	return runtime.WithPostgresSchema(schema)
+func WithPostgresSchema(schema string) postgres.PostgresStoreOption {
+	return postgres.WithPostgresSchema(schema)
 }
 
-func DefaultPostgresPoolConfig() runtime.PostgresPoolConfig {
-	return runtime.DefaultPostgresPoolConfig()
+func DefaultPostgresPoolConfig() postgres.PostgresPoolConfig {
+	return postgres.DefaultPostgresPoolConfig()
 }
 
-func WithPostgresPool(pool runtime.PostgresPoolConfig) runtime.PostgresStoreOption {
-	return runtime.WithPostgresPool(pool)
+func WithPostgresPool(pool postgres.PostgresPoolConfig) postgres.PostgresStoreOption {
+	return postgres.WithPostgresPool(pool)
 }
 
-func WithPostgresMigrationLock(timeout, pollInterval time.Duration) runtime.PostgresStoreOption {
-	return runtime.WithPostgresMigrationLock(timeout, pollInterval)
+func WithPostgresMigrationLock(timeout, pollInterval time.Duration) postgres.PostgresStoreOption {
+	return postgres.WithPostgresMigrationLock(timeout, pollInterval)
 }
 
-func WithPostgresMigrationObserver(observer runtime.PostgresMigrationObserver) runtime.PostgresStoreOption {
-	return runtime.WithPostgresMigrationObserver(observer)
+func WithPostgresMigrationObserver(observer postgres.PostgresMigrationObserver) postgres.PostgresStoreOption {
+	return postgres.WithPostgresMigrationObserver(observer)
 }
 
 func CompileOpenClawSkill(bundle skillopenclaw.Bundle) (*skillopenclaw.Compilation, error) {
@@ -1580,74 +1599,74 @@ const (
 	WorkforceSkillNeedsInstallation                  = skillcatalog.SkillReadinessNeedsInstallation
 	WorkforceSkillUnavailable                        = skillcatalog.SkillReadinessUnavailable
 
-	OwnerTypeAgent = runtime.OwnerTypeAgent
-	OwnerTypeTeam  = runtime.OwnerTypeTeam
+	OwnerTypeAgent = models.OwnerTypeAgent
+	OwnerTypeTeam  = models.OwnerTypeTeam
 
-	ObjectiveStatusDraft            = runtime.ObjectiveStatusDraft
-	ObjectiveStatusActive           = runtime.ObjectiveStatusActive
-	ObjectiveStatusPaused           = runtime.ObjectiveStatusPaused
-	ObjectiveStatusSatisfied        = runtime.ObjectiveStatusSatisfied
-	ObjectiveStatusFailed           = runtime.ObjectiveStatusFailed
-	ObjectiveStatusRetired          = runtime.ObjectiveStatusRetired
-	ObjectiveManagementSkillID      = runtime.ObjectiveManagementSkillID
-	ObjectiveManagementSkillVersion = runtime.ObjectiveManagementSkillVersion
-	ObjectiveActionCreate           = runtime.ObjectiveActionCreate
-	ObjectiveActionUpdate           = runtime.ObjectiveActionUpdate
-	ObjectiveActionPause            = runtime.ObjectiveActionPause
-	AgentManagementSkillID          = runtime.AgentManagementSkillID
-	AgentManagementSkillVersion     = runtime.AgentManagementSkillVersion
-	RunManagementSkillID            = runtime.RunManagementSkillID
-	RunManagementSkillVersion       = runtime.RunManagementSkillVersion
-	RunActionPause                  = runtime.RunActionPause
-	RunActionResume                 = runtime.RunActionResume
-	RunActionCancel                 = runtime.RunActionCancel
-	AgentActionAmendBehavior        = runtime.AgentActionAmendBehavior
-	AgentActionListChannels         = runtime.AgentActionListChannels
-	AgentActionConfigureChannel     = runtime.AgentActionConfigureChannel
-	RunbookManagementSkillID        = runtime.RunbookManagementSkillID
-	RunbookManagementSkillVersion   = runtime.RunbookManagementSkillVersion
-	RunbookActionCreateTask         = runtime.RunbookActionCreateTask
-	RunbookActionList               = runtime.RunbookActionList
-	RunbookActionSetStatus          = runtime.RunbookActionSetStatus
-	RunbookActionSetScript          = runtime.RunbookActionSetScript
+	ObjectiveStatusDraft            = models.ObjectiveStatusDraft
+	ObjectiveStatusActive           = models.ObjectiveStatusActive
+	ObjectiveStatusPaused           = models.ObjectiveStatusPaused
+	ObjectiveStatusSatisfied        = models.ObjectiveStatusSatisfied
+	ObjectiveStatusFailed           = models.ObjectiveStatusFailed
+	ObjectiveStatusRetired          = models.ObjectiveStatusRetired
+	ObjectiveManagementSkillID      = models.ObjectiveManagementSkillID
+	ObjectiveManagementSkillVersion = action.ObjectiveManagementSkillVersion
+	ObjectiveActionCreate           = action.ObjectiveActionCreate
+	ObjectiveActionUpdate           = action.ObjectiveActionUpdate
+	ObjectiveActionPause            = action.ObjectiveActionPause
+	AgentManagementSkillID          = models.AgentManagementSkillID
+	AgentManagementSkillVersion     = models.AgentManagementSkillVersion
+	RunManagementSkillID            = models.RunManagementSkillID
+	RunManagementSkillVersion       = agentrun.RunManagementSkillVersion
+	RunActionPause                  = models.RunActionPause
+	RunActionResume                 = models.RunActionResume
+	RunActionCancel                 = models.RunActionCancel
+	AgentActionAmendBehavior        = models.AgentActionAmendBehavior
+	AgentActionListChannels         = models.AgentActionListChannels
+	AgentActionConfigureChannel     = models.AgentActionConfigureChannel
+	RunbookManagementSkillID        = models.RunbookManagementSkillID
+	RunbookManagementSkillVersion   = routine.RunbookManagementSkillVersion
+	RunbookActionCreateTask         = action.RunbookActionCreateTask
+	RunbookActionList               = action.RunbookActionList
+	RunbookActionSetStatus          = action.RunbookActionSetStatus
+	RunbookActionSetScript          = action.RunbookActionSetScript
 	ExpectedDigestArgument          = workspace.ExpectedDigestArgument
 	RefusedCommandResult            = workspace.RefusedResult
-	RoutineScriptContextKey         = runtime.RoutineScriptContextKey
-	MaximumRoutineScriptSeconds     = runtime.MaximumRoutineScriptSeconds
-	DefaultRoutineScriptSeconds     = runtime.DefaultRoutineScriptSeconds
-	RunbookActionStart              = runtime.RunbookActionStart
-	RunbookActionReplaceSchedule    = runtime.RunbookActionReplaceSchedule
-	TeamManagementSkillID           = runtime.TeamManagementSkillID
-	TeamManagementSkillVersion      = runtime.TeamManagementSkillVersion
-	TeamActionUpdateMember          = runtime.TeamActionUpdateMember
-	TeamMemberAmendmentField        = runtime.TeamMemberAmendmentField
-	TeamActionUpdateProfile         = runtime.TeamActionUpdateProfile
-	TeamActionCreateTeam            = runtime.TeamActionCreateTeam
-	SkillManagementSkillID          = runtime.SkillManagementSkillID
-	SkillManagementSkillVersion     = runtime.SkillManagementSkillVersion
-	SkillActionDiscover             = runtime.SkillActionDiscoverBinding
-	SkillActionUpsertBinding        = runtime.SkillActionUpsertBinding
-	SkillActionDisableBinding       = runtime.SkillActionDisableBinding
-	RunbookActivationActive         = runtime.RunbookActivationActive
-	RunbookActivationPaused         = runtime.RunbookActivationPaused
-	RunbookActivationRetired        = runtime.RunbookActivationRetired
+	RoutineScriptContextKey         = routine.RoutineScriptContextKey
+	MaximumRoutineScriptSeconds     = models.MaximumRoutineScriptSeconds
+	DefaultRoutineScriptSeconds     = routine.DefaultRoutineScriptSeconds
+	RunbookActionStart              = routine.RunbookActionStart
+	RunbookActionReplaceSchedule    = routine.RunbookActionReplaceSchedule
+	TeamManagementSkillID           = models.TeamManagementSkillID
+	TeamManagementSkillVersion      = action.TeamManagementSkillVersion
+	TeamActionUpdateMember          = action.TeamActionUpdateMember
+	TeamMemberAmendmentField        = models.TeamMemberAmendmentField
+	TeamActionUpdateProfile         = action.TeamActionUpdateProfile
+	TeamActionCreateTeam            = action.TeamActionCreateTeam
+	SkillManagementSkillID          = models.SkillManagementSkillID
+	SkillManagementSkillVersion     = skillbinding.SkillManagementSkillVersion
+	SkillActionDiscover             = skillbinding.SkillActionDiscoverBinding
+	SkillActionUpsertBinding        = skillbinding.SkillActionUpsertBinding
+	SkillActionDisableBinding       = skillbinding.SkillActionDisableBinding
+	RunbookActivationActive         = models.RunbookActivationActive
+	RunbookActivationPaused         = models.RunbookActivationPaused
+	RunbookActivationRetired        = models.RunbookActivationRetired
 
-	RunSourceManual           = runtime.RunSourceManual
-	RunSourceChat             = runtime.RunSourceChat
-	RunSourceSchedule         = runtime.RunSourceSchedule
-	RunSourceEvent            = runtime.RunSourceEvent
-	RunSourceWebhook          = runtime.RunSourceWebhook
-	RunSourceRequest          = runtime.RunSourceRequest
-	RunSourceRequestDecision  = runtime.RunSourceRequestDecision
-	RunSourceCompletionReview = runtime.RunSourceCompletionReview
-	RunSourceHandoff          = runtime.RunSourceHandoff
-	RunSourceEscalation       = runtime.RunSourceEscalation
-	RunSourceObjective        = runtime.RunSourceObjective
-	RunSourceFork             = runtime.RunSourceFork
-	DelegationModeContextKey  = runtime.DelegationModeContextKey
+	RunSourceManual           = models.RunSourceManual
+	RunSourceChat             = models.RunSourceChat
+	RunSourceSchedule         = models.RunSourceSchedule
+	RunSourceEvent            = models.RunSourceEvent
+	RunSourceWebhook          = models.RunSourceWebhook
+	RunSourceRequest          = models.RunSourceRequest
+	RunSourceRequestDecision  = models.RunSourceRequestDecision
+	RunSourceCompletionReview = models.RunSourceCompletionReview
+	RunSourceHandoff          = models.RunSourceHandoff
+	RunSourceEscalation       = models.RunSourceEscalation
+	RunSourceObjective        = models.RunSourceObjective
+	RunSourceFork             = models.RunSourceFork
+	DelegationModeContextKey  = agentrun.DelegationModeContextKey
 
-	RunKindAgentWork    = runtime.RunKindAgentWork
-	RunKindConversation = runtime.RunKindConversation
+	RunKindAgentWork    = models.RunKindAgentWork
+	RunKindConversation = models.RunKindConversation
 
 	TeamChannelActive              = kernelteam.ChannelActive
 	TeamChannelObserveOnly         = kernelteam.ChannelObserveOnly
@@ -1669,185 +1688,185 @@ const (
 	AuthorityProgressionNoChange   = progression.DirectionNoChange
 	AuthorityProgressionRegress    = progression.DirectionRegress
 
-	AgentRunStatusQueued                          = runtime.AgentRunStatusQueued
-	AgentRunOrderScheduler                        = runtime.AgentRunOrderScheduler
-	AgentRunOrderCreatedDesc                      = runtime.AgentRunOrderCreatedDesc
-	AgentRunStatusPlanning                        = runtime.AgentRunStatusPlanning
-	AgentRunStatusRunning                         = runtime.AgentRunStatusRunning
-	AgentRunStatusPaused                          = runtime.AgentRunStatusPaused
-	AgentRunStatusSleeping                        = runtime.AgentRunStatusSleeping
-	AgentRunStatusWaitingForDependency            = runtime.AgentRunStatusWaitingForDependency
-	AgentRunStatusWaitingForAgent                 = runtime.AgentRunStatusWaitingForAgent
-	AgentRunStatusWaitingForApproval              = runtime.AgentRunStatusWaitingForApproval
-	AgentRunStatusWaitingForEvent                 = runtime.AgentRunStatusWaitingForEvent
-	AgentRunStatusCompleted                       = runtime.AgentRunStatusCompleted
-	AgentRunStatusFailed                          = runtime.AgentRunStatusFailed
-	AgentRunStatusCanceled                        = runtime.AgentRunStatusCanceled
-	AgentRunAdmissionClaimed                      = runtime.AgentRunAdmissionClaimed
-	AgentRunAdmissionReady                        = runtime.AgentRunAdmissionReady
-	AgentRunAdmissionIdle                         = runtime.AgentRunAdmissionIdle
-	AgentRunAdmissionNotDue                       = runtime.AgentRunAdmissionNotDue
-	AgentRunAdmissionLeaseHeld                    = runtime.AgentRunAdmissionLeaseHeld
-	AgentRunAdmissionBackpressured                = runtime.AgentRunAdmissionBackpressured
-	AgentRunAdmissionBudgetStopped                = runtime.AgentRunAdmissionBudgetStopped
-	AgentRunAdmissionReasonNotDue                 = runtime.AgentRunAdmissionReasonNotDue
-	AgentRunAdmissionReasonLeaseHeld              = runtime.AgentRunAdmissionReasonLeaseHeld
-	AgentRunAdmissionReasonAgentCapacity          = runtime.AgentRunAdmissionReasonAgentCapacity
-	AgentRunAdmissionReasonOwnerCapacity          = runtime.AgentRunAdmissionReasonOwnerCapacity
-	AgentRunAdmissionReasonObjectiveCapacity      = runtime.AgentRunAdmissionReasonObjectiveCapacity
-	AgentRunAdmissionReasonResourceCapacity       = runtime.AgentRunAdmissionReasonResourceCapacity
-	AgentRunAdmissionReasonConcurrencyCapacity    = runtime.AgentRunAdmissionReasonConcurrencyCapacity
-	AgentRunAdmissionReasonAttemptBudgetExhausted = runtime.AgentRunAdmissionReasonAttemptBudgetExhausted
+	AgentRunStatusQueued                          = models.AgentRunStatusQueued
+	AgentRunOrderScheduler                        = models.AgentRunOrderScheduler
+	AgentRunOrderCreatedDesc                      = models.AgentRunOrderCreatedDesc
+	AgentRunStatusPlanning                        = models.AgentRunStatusPlanning
+	AgentRunStatusRunning                         = models.AgentRunStatusRunning
+	AgentRunStatusPaused                          = models.AgentRunStatusPaused
+	AgentRunStatusSleeping                        = models.AgentRunStatusSleeping
+	AgentRunStatusWaitingForDependency            = models.AgentRunStatusWaitingForDependency
+	AgentRunStatusWaitingForAgent                 = models.AgentRunStatusWaitingForAgent
+	AgentRunStatusWaitingForApproval              = models.AgentRunStatusWaitingForApproval
+	AgentRunStatusWaitingForEvent                 = models.AgentRunStatusWaitingForEvent
+	AgentRunStatusCompleted                       = models.AgentRunStatusCompleted
+	AgentRunStatusFailed                          = models.AgentRunStatusFailed
+	AgentRunStatusCanceled                        = models.AgentRunStatusCanceled
+	AgentRunAdmissionClaimed                      = models.AgentRunAdmissionClaimed
+	AgentRunAdmissionReady                        = models.AgentRunAdmissionReady
+	AgentRunAdmissionIdle                         = models.AgentRunAdmissionIdle
+	AgentRunAdmissionNotDue                       = models.AgentRunAdmissionNotDue
+	AgentRunAdmissionLeaseHeld                    = models.AgentRunAdmissionLeaseHeld
+	AgentRunAdmissionBackpressured                = models.AgentRunAdmissionBackpressured
+	AgentRunAdmissionBudgetStopped                = models.AgentRunAdmissionBudgetStopped
+	AgentRunAdmissionReasonNotDue                 = models.AgentRunAdmissionReasonNotDue
+	AgentRunAdmissionReasonLeaseHeld              = models.AgentRunAdmissionReasonLeaseHeld
+	AgentRunAdmissionReasonAgentCapacity          = models.AgentRunAdmissionReasonAgentCapacity
+	AgentRunAdmissionReasonOwnerCapacity          = models.AgentRunAdmissionReasonOwnerCapacity
+	AgentRunAdmissionReasonObjectiveCapacity      = models.AgentRunAdmissionReasonObjectiveCapacity
+	AgentRunAdmissionReasonResourceCapacity       = models.AgentRunAdmissionReasonResourceCapacity
+	AgentRunAdmissionReasonConcurrencyCapacity    = models.AgentRunAdmissionReasonConcurrencyCapacity
+	AgentRunAdmissionReasonAttemptBudgetExhausted = models.AgentRunAdmissionReasonAttemptBudgetExhausted
 
-	BudgetStateActive    = runtime.BudgetStateActive
-	BudgetStateWarning   = runtime.BudgetStateWarning
-	BudgetStateExhausted = runtime.BudgetStateExhausted
+	BudgetStateActive    = models.BudgetStateActive
+	BudgetStateWarning   = models.BudgetStateWarning
+	BudgetStateExhausted = models.BudgetStateExhausted
 
-	AgentRunCommandPause                    = runtime.AgentRunCommandPause
-	AgentRunCommandResume                   = runtime.AgentRunCommandResume
-	AgentRunCommandRetry                    = runtime.AgentRunCommandRetry
-	AgentRunCommandCancel                   = runtime.AgentRunCommandCancel
-	AgentRunCommandIntervene                = runtime.AgentRunCommandIntervene
-	AgentRunCommandResolveHumanIntervention = runtime.AgentRunCommandResolveHumanIntervention
+	AgentRunCommandPause                    = agentrun.AgentRunCommandPause
+	AgentRunCommandResume                   = agentrun.AgentRunCommandResume
+	AgentRunCommandRetry                    = agentrun.AgentRunCommandRetry
+	AgentRunCommandCancel                   = agentrun.AgentRunCommandCancel
+	AgentRunCommandIntervene                = agentrun.AgentRunCommandIntervene
+	AgentRunCommandResolveHumanIntervention = agentrun.AgentRunCommandResolveHumanIntervention
 
-	HumanInterventionStatusPending  = runtime.HumanInterventionStatusPending
-	HumanInterventionStatusResolved = runtime.HumanInterventionStatusResolved
-	HumanInterventionStatusCanceled = runtime.HumanInterventionStatusCanceled
+	HumanInterventionStatusPending  = models.HumanInterventionStatusPending
+	HumanInterventionStatusResolved = models.HumanInterventionStatusResolved
+	HumanInterventionStatusCanceled = models.HumanInterventionStatusCanceled
 
-	ActivitySeverityDebug   = runtime.ActivitySeverityDebug
-	ActivitySeverityInfo    = runtime.ActivitySeverityInfo
-	ActivitySeverityWarning = runtime.ActivitySeverityWarning
-	ActivitySeverityError   = runtime.ActivitySeverityError
+	ActivitySeverityDebug   = models.ActivitySeverityDebug
+	ActivitySeverityInfo    = models.ActivitySeverityInfo
+	ActivitySeverityWarning = models.ActivitySeverityWarning
+	ActivitySeverityError   = models.ActivitySeverityError
 
-	ActivityVisibilityPrivate = runtime.ActivityVisibilityPrivate
-	ActivityVisibilityTeam    = runtime.ActivityVisibilityTeam
-	ActivityVisibilityScope   = runtime.ActivityVisibilityScope
+	ActivityVisibilityPrivate = models.ActivityVisibilityPrivate
+	ActivityVisibilityTeam    = models.ActivityVisibilityTeam
+	ActivityVisibilityScope   = models.ActivityVisibilityScope
 
-	AgentRequestKindRequest    = runtime.AgentRequestKindRequest
-	AgentRequestKindHandoff    = runtime.AgentRequestKindHandoff
-	AgentRequestKindEscalation = runtime.AgentRequestKindEscalation
+	AgentRequestKindRequest    = models.AgentRequestKindRequest
+	AgentRequestKindHandoff    = models.AgentRequestKindHandoff
+	AgentRequestKindEscalation = models.AgentRequestKindEscalation
 
-	AgentRequestStatusPending                = runtime.AgentRequestStatusPending
-	AgentRequestStatusClarificationRequested = runtime.AgentRequestStatusClarificationRequested
-	AgentRequestStatusAccepted               = runtime.AgentRequestStatusAccepted
-	AgentRequestStatusCompletionReview       = runtime.AgentRequestStatusCompletionReview
-	AgentRequestStatusCompleted              = runtime.AgentRequestStatusCompleted
-	AgentRequestStatusFailed                 = runtime.AgentRequestStatusFailed
-	AgentRequestStatusRejected               = runtime.AgentRequestStatusRejected
-	AgentRequestStatusCanceled               = runtime.AgentRequestStatusCanceled
+	AgentRequestStatusPending                = models.AgentRequestStatusPending
+	AgentRequestStatusClarificationRequested = models.AgentRequestStatusClarificationRequested
+	AgentRequestStatusAccepted               = models.AgentRequestStatusAccepted
+	AgentRequestStatusCompletionReview       = models.AgentRequestStatusCompletionReview
+	AgentRequestStatusCompleted              = models.AgentRequestStatusCompleted
+	AgentRequestStatusFailed                 = models.AgentRequestStatusFailed
+	AgentRequestStatusRejected               = models.AgentRequestStatusRejected
+	AgentRequestStatusCanceled               = models.AgentRequestStatusCanceled
 
-	AgentRequestDecisionAccept               = runtime.AgentRequestDecisionAccept
-	AgentRequestDecisionReject               = runtime.AgentRequestDecisionReject
-	AgentRequestDecisionRequestClarification = runtime.AgentRequestDecisionRequestClarification
-	AgentRequestDecisionProvideClarification = runtime.AgentRequestDecisionProvideClarification
+	AgentRequestDecisionAccept               = collaboration.AgentRequestDecisionAccept
+	AgentRequestDecisionReject               = collaboration.AgentRequestDecisionReject
+	AgentRequestDecisionRequestClarification = collaboration.AgentRequestDecisionRequestClarification
+	AgentRequestDecisionProvideClarification = collaboration.AgentRequestDecisionProvideClarification
 
-	AgentRequestAcceptanceRecipientReview = runtime.AgentRequestAcceptanceRecipientReview
-	AgentRequestAcceptancePreauthorized   = runtime.AgentRequestAcceptancePreauthorized
+	AgentRequestAcceptanceRecipientReview = models.AgentRequestAcceptanceRecipientReview
+	AgentRequestAcceptancePreauthorized   = models.AgentRequestAcceptancePreauthorized
 
-	AgentRequestBidAccept  = runtime.AgentRequestBidAccept
-	AgentRequestBidDecline = runtime.AgentRequestBidDecline
+	AgentRequestBidAccept  = models.AgentRequestBidAccept
+	AgentRequestBidDecline = models.AgentRequestBidDecline
 
-	ConversationStatusActive   = runtime.ConversationStatusActive
-	ConversationApprovalManual = runtime.ConversationApprovalManual
-	ConversationApprovalAuto   = runtime.ConversationApprovalAuto
-	ConversationApprovalSkip   = runtime.ConversationApprovalSkip
-	ConversationStatusArchived = runtime.ConversationStatusArchived
+	ConversationStatusActive   = models.ConversationStatusActive
+	ConversationApprovalManual = models.ConversationApprovalManual
+	ConversationApprovalAuto   = models.ConversationApprovalAuto
+	ConversationApprovalSkip   = models.ConversationApprovalSkip
+	ConversationStatusArchived = models.ConversationStatusArchived
 
-	SpaceMemberAgent = runtime.SpaceMemberAgent
-	SpaceMemberTeam  = runtime.SpaceMemberTeam
+	SpaceMemberAgent = models.SpaceMemberAgent
+	SpaceMemberTeam  = models.SpaceMemberTeam
 
-	SpaceTeamLeaves   = runtime.SpaceTeamLeaves
-	SpaceTeamArchived = runtime.SpaceTeamArchived
+	SpaceTeamLeaves   = portfolio.SpaceTeamLeaves
+	SpaceTeamArchived = portfolio.SpaceTeamArchived
 
-	SpaceAccessOwner    = runtime.SpaceAccessOwner
-	SpaceAccessInvited  = runtime.SpaceAccessInvited
-	SpaceAccessEveryone = runtime.SpaceAccessEveryone
+	SpaceAccessOwner    = models.SpaceAccessOwner
+	SpaceAccessInvited  = models.SpaceAccessInvited
+	SpaceAccessEveryone = models.SpaceAccessEveryone
 
-	ConversationParticipantUser       = runtime.ConversationParticipantUser
-	ConversationParticipantAgent      = runtime.ConversationParticipantAgent
-	ConversationParticipantTeam       = runtime.ConversationParticipantTeam
-	ConversationParticipantService    = runtime.ConversationParticipantService
-	VoiceCallCoordinatorParticipantID = runtime.VoiceCallCoordinatorParticipantID
+	ConversationParticipantUser       = models.ConversationParticipantUser
+	ConversationParticipantAgent      = models.ConversationParticipantAgent
+	ConversationParticipantTeam       = models.ConversationParticipantTeam
+	ConversationParticipantService    = models.ConversationParticipantService
+	VoiceCallCoordinatorParticipantID = models.VoiceCallCoordinatorParticipantID
 
-	MessageIntentQuestion        = runtime.MessageIntentQuestion
-	MessageIntentAnswer          = runtime.MessageIntentAnswer
-	MessageIntentUpdate          = runtime.MessageIntentUpdate
-	MessageIntentProposal        = runtime.MessageIntentProposal
-	MessageIntentDecision        = runtime.MessageIntentDecision
-	MessageIntentObjection       = runtime.MessageIntentObjection
-	MessageIntentHandoff         = runtime.MessageIntentHandoff
-	MessageIntentEscalation      = runtime.MessageIntentEscalation
-	MessageIntentApprovalRequest = runtime.MessageIntentApprovalRequest
-	MessageIntentAcknowledgment  = runtime.MessageIntentAcknowledgment
-	MessageIntentSystem          = runtime.MessageIntentSystem
+	MessageIntentQuestion        = models.MessageIntentQuestion
+	MessageIntentAnswer          = models.MessageIntentAnswer
+	MessageIntentUpdate          = models.MessageIntentUpdate
+	MessageIntentProposal        = models.MessageIntentProposal
+	MessageIntentDecision        = models.MessageIntentDecision
+	MessageIntentObjection       = models.MessageIntentObjection
+	MessageIntentHandoff         = models.MessageIntentHandoff
+	MessageIntentEscalation      = models.MessageIntentEscalation
+	MessageIntentApprovalRequest = models.MessageIntentApprovalRequest
+	MessageIntentAcknowledgment  = models.MessageIntentAcknowledgment
+	MessageIntentSystem          = models.MessageIntentSystem
 
-	ConversationAudienceChannel      = runtime.ConversationAudienceChannel
-	ConversationAudienceParticipants = runtime.ConversationAudienceParticipants
-	ConversationAudienceRoles        = runtime.ConversationAudienceRoles
-	ConversationAudienceEveryone     = runtime.ConversationAudienceEveryone
+	ConversationAudienceChannel      = models.ConversationAudienceChannel
+	ConversationAudienceParticipants = models.ConversationAudienceParticipants
+	ConversationAudienceRoles        = models.ConversationAudienceRoles
+	ConversationAudienceEveryone     = models.ConversationAudienceEveryone
 
-	ConversationReferenceObjective      = runtime.ConversationReferenceObjective
-	ConversationReferenceAgentControl   = runtime.ConversationReferenceAgentControl
-	ConversationReferenceAgentApprovals = runtime.ConversationReferenceAgentApprovals
-	ConversationReferenceEmbedSession   = runtime.ConversationReferenceEmbedSession
+	ConversationReferenceObjective      = models.ConversationReferenceObjective
+	ConversationReferenceAgentControl   = models.ConversationReferenceAgentControl
+	ConversationReferenceAgentApprovals = models.ConversationReferenceAgentApprovals
+	ConversationReferenceEmbedSession   = models.ConversationReferenceEmbedSession
 
-	EmbedInstallationActive             = runtime.EmbedInstallationActive
-	EmbedInstallationPaused             = runtime.EmbedInstallationPaused
-	EmbedInstallationRevoked            = runtime.EmbedInstallationRevoked
-	EmbedIdentityAnonymous              = runtime.EmbedIdentityAnonymous
-	EmbedIdentitySigned                 = runtime.EmbedIdentitySigned
-	EmbedSessionActive                  = runtime.EmbedSessionActive
-	EmbedSessionExpired                 = runtime.EmbedSessionExpired
-	EmbedSessionRevoked                 = runtime.EmbedSessionRevoked
-	ConversationReferenceTask           = runtime.ConversationReferenceTask
-	ConversationReferenceRun            = runtime.ConversationReferenceRun
-	ConversationReferenceRequest        = runtime.ConversationReferenceRequest
-	ConversationReferenceApproval       = runtime.ConversationReferenceApproval
-	ConversationReferenceArtifact       = runtime.ConversationReferenceArtifact
-	ConversationReferenceActivity       = runtime.ConversationReferenceActivity
-	ConversationReferenceExternalSource = runtime.ConversationReferenceExternalSource
+	EmbedInstallationActive             = models.EmbedInstallationActive
+	EmbedInstallationPaused             = models.EmbedInstallationPaused
+	EmbedInstallationRevoked            = models.EmbedInstallationRevoked
+	EmbedIdentityAnonymous              = models.EmbedIdentityAnonymous
+	EmbedIdentitySigned                 = models.EmbedIdentitySigned
+	EmbedSessionActive                  = models.EmbedSessionActive
+	EmbedSessionExpired                 = models.EmbedSessionExpired
+	EmbedSessionRevoked                 = models.EmbedSessionRevoked
+	ConversationReferenceTask           = models.ConversationReferenceTask
+	ConversationReferenceRun            = models.ConversationReferenceRun
+	ConversationReferenceRequest        = models.ConversationReferenceRequest
+	ConversationReferenceApproval       = models.ConversationReferenceApproval
+	ConversationReferenceArtifact       = models.ConversationReferenceArtifact
+	ConversationReferenceActivity       = models.ConversationReferenceActivity
+	ConversationReferenceExternalSource = models.ConversationReferenceExternalSource
 
-	ConversationPresenceTyping   = runtime.ConversationPresenceTyping
-	ConversationPresenceThinking = runtime.ConversationPresenceThinking
-	ConversationPresenceWorking  = runtime.ConversationPresenceWorking
+	ConversationPresenceTyping   = models.ConversationPresenceTyping
+	ConversationPresenceThinking = models.ConversationPresenceThinking
+	ConversationPresenceWorking  = models.ConversationPresenceWorking
 
-	ConversationAddressedMention  = runtime.ConversationAddressedMention
-	ConversationAddressedEveryone = runtime.ConversationAddressedEveryone
-	ConversationAddressedReply    = runtime.ConversationAddressedReply
-	ConversationAddressedRole     = runtime.ConversationAddressedRole
-	ConversationAddressedRouted   = runtime.ConversationAddressedRouted
+	ConversationAddressedMention  = models.ConversationAddressedMention
+	ConversationAddressedEveryone = models.ConversationAddressedEveryone
+	ConversationAddressedReply    = models.ConversationAddressedReply
+	ConversationAddressedRole     = models.ConversationAddressedRole
+	ConversationAddressedRouted   = models.ConversationAddressedRouted
 
-	ParticipationRoundCommitted = runtime.ParticipationRoundCommitted
+	ParticipationRoundCommitted = models.ParticipationRoundCommitted
 
-	RunDependencyKindRun          = runtime.RunDependencyKindRun
-	RunDependencyKindAgentRequest = runtime.RunDependencyKindAgentRequest
-	RunDependencyKindHandoff      = runtime.RunDependencyKindHandoff
-	RunDependencyKindAction       = runtime.RunDependencyKindAction
-	RunDependencyKindApproval     = runtime.RunDependencyKindApproval
+	RunDependencyKindRun          = models.RunDependencyKindRun
+	RunDependencyKindAgentRequest = models.RunDependencyKindAgentRequest
+	RunDependencyKindHandoff      = models.RunDependencyKindHandoff
+	RunDependencyKindAction       = models.RunDependencyKindAction
+	RunDependencyKindApproval     = models.RunDependencyKindApproval
 
-	RunDependencyStatePending   = runtime.RunDependencyStatePending
-	RunDependencyStateRunning   = runtime.RunDependencyStateRunning
-	RunDependencyStateSatisfied = runtime.RunDependencyStateSatisfied
-	RunDependencyStateFailed    = runtime.RunDependencyStateFailed
-	RunDependencyStateCanceled  = runtime.RunDependencyStateCanceled
+	RunDependencyStatePending   = models.RunDependencyStatePending
+	RunDependencyStateRunning   = models.RunDependencyStateRunning
+	RunDependencyStateSatisfied = models.RunDependencyStateSatisfied
+	RunDependencyStateFailed    = models.RunDependencyStateFailed
+	RunDependencyStateCanceled  = models.RunDependencyStateCanceled
 
-	FanInModeAll    = runtime.FanInModeAll
-	FanInModeAny    = runtime.FanInModeAny
-	FanInModeQuorum = runtime.FanInModeQuorum
+	FanInModeAll    = models.FanInModeAll
+	FanInModeAny    = models.FanInModeAny
+	FanInModeQuorum = models.FanInModeQuorum
 
-	DependencyFailureFailFast = runtime.DependencyFailureFailFast
-	DependencyFailureWait     = runtime.DependencyFailureWait
+	DependencyFailureFailFast = models.DependencyFailureFailFast
+	DependencyFailureWait     = models.DependencyFailureWait
 
-	RunDependencyGroupOpen      = runtime.RunDependencyGroupOpen
-	RunDependencyGroupWaiting   = runtime.RunDependencyGroupWaiting
-	RunDependencyGroupSatisfied = runtime.RunDependencyGroupSatisfied
-	RunDependencyGroupFailed    = runtime.RunDependencyGroupFailed
-	RunDependencyGroupCanceled  = runtime.RunDependencyGroupCanceled
+	RunDependencyGroupOpen      = models.RunDependencyGroupOpen
+	RunDependencyGroupWaiting   = models.RunDependencyGroupWaiting
+	RunDependencyGroupSatisfied = models.RunDependencyGroupSatisfied
+	RunDependencyGroupFailed    = models.RunDependencyGroupFailed
+	RunDependencyGroupCanceled  = models.RunDependencyGroupCanceled
 
-	AgentTurnStatusRunning   = runtime.AgentTurnStatusRunning
-	AgentTurnStatusCompleted = runtime.AgentTurnStatusCompleted
-	AgentTurnStatusFailed    = runtime.AgentTurnStatusFailed
-	AgentTurnStatusCanceled  = runtime.AgentTurnStatusCanceled
+	AgentTurnStatusRunning   = models.AgentTurnStatusRunning
+	AgentTurnStatusCompleted = models.AgentTurnStatusCompleted
+	AgentTurnStatusFailed    = models.AgentTurnStatusFailed
+	AgentTurnStatusCanceled  = models.AgentTurnStatusCanceled
 
 	SkillRiskRead        = skill.RiskLevelRead
 	SkillRiskWrite       = skill.RiskLevelWrite
@@ -1947,67 +1966,67 @@ const (
 )
 
 const (
-	MaximumExternalConversationIngressBytes = runtime.MaximumExternalConversationIngressBytes
-	MaximumCallbackIngressBytes             = runtime.MaximumCallbackIngressBytes
+	MaximumExternalConversationIngressBytes = externalconversation.MaximumExternalConversationIngressBytes
+	MaximumCallbackIngressBytes             = callback.MaximumCallbackIngressBytes
 
-	ExternalConversationEndpointActive  = runtime.ExternalConversationEndpointActive
-	ExternalConversationEndpointPaused  = runtime.ExternalConversationEndpointPaused
-	ExternalConversationEndpointRetired = runtime.ExternalConversationEndpointRetired
-	ExternalConversationGatewayActive   = runtime.ExternalConversationGatewayActive
-	ExternalConversationGatewayPaused   = runtime.ExternalConversationGatewayPaused
-	ExternalConversationGatewayRetired  = runtime.ExternalConversationGatewayRetired
-	CallbackRegistrationActive          = runtime.CallbackRegistrationActive
-	CallbackRegistrationPaused          = runtime.CallbackRegistrationPaused
-	CallbackRegistrationRetired         = runtime.CallbackRegistrationRetired
-	CallbackEventPending                = runtime.CallbackEventPending
-	CallbackEventApplied                = runtime.CallbackEventApplied
+	ExternalConversationEndpointActive  = models.ExternalConversationEndpointActive
+	ExternalConversationEndpointPaused  = models.ExternalConversationEndpointPaused
+	ExternalConversationEndpointRetired = models.ExternalConversationEndpointRetired
+	ExternalConversationGatewayActive   = models.ExternalConversationGatewayActive
+	ExternalConversationGatewayPaused   = models.ExternalConversationGatewayPaused
+	ExternalConversationGatewayRetired  = models.ExternalConversationGatewayRetired
+	CallbackRegistrationActive          = models.CallbackRegistrationActive
+	CallbackRegistrationPaused          = models.CallbackRegistrationPaused
+	CallbackRegistrationRetired         = models.CallbackRegistrationRetired
+	CallbackEventPending                = models.CallbackEventPending
+	CallbackEventApplied                = models.CallbackEventApplied
 
-	ExternalConversationHandlerAgent = runtime.ExternalConversationHandlerAgent
-	ExternalConversationHandlerTeam  = runtime.ExternalConversationHandlerTeam
+	ExternalConversationHandlerAgent = models.ExternalConversationHandlerAgent
+	ExternalConversationHandlerTeam  = models.ExternalConversationHandlerTeam
 
-	ExternalConversationSelectAllMessages     = runtime.ExternalConversationSelectAllMessages
-	ExternalConversationSelectMentions        = runtime.ExternalConversationSelectMentions
-	ExternalConversationSelectDirectOrMention = runtime.ExternalConversationSelectDirectOrMention
+	ExternalConversationSelectAllMessages     = models.ExternalConversationSelectAllMessages
+	ExternalConversationSelectMentions        = models.ExternalConversationSelectMentions
+	ExternalConversationSelectDirectOrMention = models.ExternalConversationSelectDirectOrMention
 
-	ExternalConversationReplyProviderDefault = runtime.ExternalConversationReplyProviderDefault
-	ExternalConversationReplyThread          = runtime.ExternalConversationReplyThread
-	ExternalConversationReplyChannel         = runtime.ExternalConversationReplyChannel
+	ExternalConversationReplyProviderDefault = models.ExternalConversationReplyProviderDefault
+	ExternalConversationReplyThread          = models.ExternalConversationReplyThread
+	ExternalConversationReplyChannel         = models.ExternalConversationReplyChannel
 
-	ExternalConversationInboxPending    = runtime.ExternalConversationInboxPending
-	ExternalConversationInboxLeased     = runtime.ExternalConversationInboxLeased
-	ExternalConversationInboxRetry      = runtime.ExternalConversationInboxRetry
-	ExternalConversationInboxApplied    = runtime.ExternalConversationInboxApplied
-	ExternalConversationInboxIgnored    = runtime.ExternalConversationInboxIgnored
-	ExternalConversationInboxDeadLetter = runtime.ExternalConversationInboxDeadLetter
+	ExternalConversationInboxPending    = models.ExternalConversationInboxPending
+	ExternalConversationInboxLeased     = models.ExternalConversationInboxLeased
+	ExternalConversationInboxRetry      = models.ExternalConversationInboxRetry
+	ExternalConversationInboxApplied    = models.ExternalConversationInboxApplied
+	ExternalConversationInboxIgnored    = models.ExternalConversationInboxIgnored
+	ExternalConversationInboxDeadLetter = models.ExternalConversationInboxDeadLetter
 
-	ExternalMessageInbound  = runtime.ExternalMessageInbound
-	ExternalMessageOutbound = runtime.ExternalMessageOutbound
+	ExternalMessageInbound  = models.ExternalMessageInbound
+	ExternalMessageOutbound = models.ExternalMessageOutbound
 
-	ExternalConversationDeliveryPending   = runtime.ExternalConversationDeliveryPending
-	ExternalConversationDeliveryLeased    = runtime.ExternalConversationDeliveryLeased
-	ExternalConversationDeliveryRetry     = runtime.ExternalConversationDeliveryRetry
-	ExternalConversationDeliveryDelivered = runtime.ExternalConversationDeliveryDelivered
-	ExternalConversationDeliveryFailed    = runtime.ExternalConversationDeliveryFailed
-	ExternalConversationDeliveryCanceled  = runtime.ExternalConversationDeliveryCanceled
+	ExternalConversationDeliveryPending   = models.ExternalConversationDeliveryPending
+	ExternalConversationDeliveryLeased    = models.ExternalConversationDeliveryLeased
+	ExternalConversationDeliveryRetry     = models.ExternalConversationDeliveryRetry
+	ExternalConversationDeliveryDelivered = models.ExternalConversationDeliveryDelivered
+	ExternalConversationDeliveryFailed    = models.ExternalConversationDeliveryFailed
+	ExternalConversationDeliveryCanceled  = models.ExternalConversationDeliveryCanceled
 
-	ExternalConversationAcknowledgementFound    = runtime.ExternalConversationAcknowledgementFound
-	ExternalConversationAcknowledgementNotFound = runtime.ExternalConversationAcknowledgementNotFound
-	ExternalConversationAcknowledgementUnknown  = runtime.ExternalConversationAcknowledgementUnknown
+	ExternalConversationAcknowledgementFound    = externalconversation.ExternalConversationAcknowledgementFound
+	ExternalConversationAcknowledgementNotFound = externalconversation.ExternalConversationAcknowledgementNotFound
+	ExternalConversationAcknowledgementUnknown  = externalconversation.ExternalConversationAcknowledgementUnknown
 
-	ExternalConversationDeliveryOutcomeDelivered = runtime.ExternalConversationDeliveryOutcomeDelivered
-	ExternalConversationDeliveryOutcomeRetry     = runtime.ExternalConversationDeliveryOutcomeRetry
-	ExternalConversationDeliveryOutcomeFailed    = runtime.ExternalConversationDeliveryOutcomeFailed
+	ExternalConversationDeliveryOutcomeDelivered = externalconversation.ExternalConversationDeliveryOutcomeDelivered
+	ExternalConversationDeliveryOutcomeRetry     = externalconversation.ExternalConversationDeliveryOutcomeRetry
+	ExternalConversationDeliveryOutcomeFailed    = externalconversation.ExternalConversationDeliveryOutcomeFailed
 )
 
 var (
-	ErrExternalOperationClaimed             = runtime.ErrExternalOperationClaimed
-	ErrExternalConversationEndpointNotFound = runtime.ErrExternalConversationEndpointNotFound
-	ErrExternalConversationGatewayNotFound  = runtime.ErrExternalConversationGatewayNotFound
-	ErrCallbackRegistrationNotFound         = runtime.ErrCallbackRegistrationNotFound
-	ErrInvalidCallbackRegistration          = runtime.ErrInvalidCallbackRegistration
-	ErrCallbackRegistrationConflict         = runtime.ErrCallbackRegistrationConflict
-	ErrExternalConversationConflict         = runtime.ErrExternalConversationConflict
-	ErrInvalidExternalConversation          = runtime.ErrInvalidExternalConversation
+	ErrExternalOperationClaimed             = models.ErrExternalOperationClaimed
+	ErrExternalConversationEndpointNotFound = models.ErrExternalConversationEndpointNotFound
+	ErrExternalConversationGatewayNotFound  = models.ErrExternalConversationGatewayNotFound
+	ErrCallbackRegistrationNotFound         = models.ErrCallbackRegistrationNotFound
+	ErrInvalidCallbackRegistration          = models.ErrInvalidCallbackRegistration
+	ErrCallbackRegistrationConflict         = models.ErrCallbackRegistrationConflict
+	ErrExternalConversationConflict         = models.ErrExternalConversationConflict
+	ErrInvalidExternalConversation          = models.ErrInvalidExternalConversation
 )
 
 const (
@@ -2018,31 +2037,31 @@ const (
 	SkillRuntimeReady       = skill.RuntimePreparationReady
 	SkillRuntimeUnavailable = skill.RuntimePreparationUnavailable
 
-	ActionDispositionAllow           = runtime.ActionDispositionAllow
-	ActionDispositionDeny            = runtime.ActionDispositionDeny
-	ActionDispositionRequireApproval = runtime.ActionDispositionRequireApproval
+	ActionDispositionAllow           = action.ActionDispositionAllow
+	ActionDispositionDeny            = action.ActionDispositionDeny
+	ActionDispositionRequireApproval = action.ActionDispositionRequireApproval
 
-	ActionCallStatusReady           = runtime.ActionCallStatusReady
-	ActionCallStatusWaitingApproval = runtime.ActionCallStatusWaitingApproval
-	ActionCallStatusDenied          = runtime.ActionCallStatusDenied
-	ActionCallStatusRunning         = runtime.ActionCallStatusRunning
-	ActionCallStatusSucceeded       = runtime.ActionCallStatusSucceeded
-	ActionCallStatusFailed          = runtime.ActionCallStatusFailed
+	ActionCallStatusReady           = models.ActionCallStatusReady
+	ActionCallStatusWaitingApproval = models.ActionCallStatusWaitingApproval
+	ActionCallStatusDenied          = models.ActionCallStatusDenied
+	ActionCallStatusRunning         = models.ActionCallStatusRunning
+	ActionCallStatusSucceeded       = models.ActionCallStatusSucceeded
+	ActionCallStatusFailed          = models.ActionCallStatusFailed
 
-	ApprovalStatusPending          = runtime.ApprovalStatusPending
-	ApprovalStatusApproved         = runtime.ApprovalStatusApproved
-	ApprovalStatusRejected         = runtime.ApprovalStatusRejected
-	ApprovalStatusChangesRequested = runtime.ApprovalStatusChangesRequested
-	ApprovalStatusExpired          = runtime.ApprovalStatusExpired
-	ApprovalStatusCanceled         = runtime.ApprovalStatusCanceled
-	ApprovalStatusSuperseded       = runtime.ApprovalStatusSuperseded
+	ApprovalStatusPending          = models.ApprovalStatusPending
+	ApprovalStatusApproved         = models.ApprovalStatusApproved
+	ApprovalStatusRejected         = models.ApprovalStatusRejected
+	ApprovalStatusChangesRequested = models.ApprovalStatusChangesRequested
+	ApprovalStatusExpired          = models.ApprovalStatusExpired
+	ApprovalStatusCanceled         = models.ApprovalStatusCanceled
+	ApprovalStatusSuperseded       = models.ApprovalStatusSuperseded
 
-	ApprovalDecisionApprove        = runtime.ApprovalDecisionApprove
-	ApprovalDecisionReject         = runtime.ApprovalDecisionReject
-	ApprovalDecisionRequestChanges = runtime.ApprovalDecisionRequestChanges
+	ApprovalDecisionApprove        = models.ApprovalDecisionApprove
+	ApprovalDecisionReject         = models.ApprovalDecisionReject
+	ApprovalDecisionRequestChanges = models.ApprovalDecisionRequestChanges
 
-	ApprovalTimeoutExpire  = runtime.ApprovalTimeoutExpire
-	ApprovalTimeoutApprove = runtime.ApprovalTimeoutApprove
+	ApprovalTimeoutExpire  = models.ApprovalTimeoutExpire
+	ApprovalTimeoutApprove = models.ApprovalTimeoutApprove
 
 	SkillSourceWorkspace    = skillsource.RootWorkspace
 	SkillSourceProjectAgent = skillsource.RootProjectAgent
@@ -2069,28 +2088,28 @@ const (
 	AgentAmendmentEvaluationFailed = kernelagent.AmendmentEvaluationFailed
 	AgentAmendmentActivated        = kernelagent.AmendmentActivated
 
-	ArtifactClassPublic        = runtime.ArtifactClassificationPublic
-	ArtifactClassInternal      = runtime.ArtifactClassificationInternal
-	ArtifactClassConfidential  = runtime.ArtifactClassificationConfidential
-	ArtifactClassRestricted    = runtime.ArtifactClassificationRestricted
-	ArtifactContentAvailable   = runtime.ArtifactContentAvailable
-	ArtifactContentUnavailable = runtime.ArtifactContentUnavailable
+	ArtifactClassPublic        = models.ArtifactClassificationPublic
+	ArtifactClassInternal      = models.ArtifactClassificationInternal
+	ArtifactClassConfidential  = models.ArtifactClassificationConfidential
+	ArtifactClassRestricted    = models.ArtifactClassificationRestricted
+	ArtifactContentAvailable   = models.ArtifactContentAvailable
+	ArtifactContentUnavailable = models.ArtifactContentUnavailable
 
-	ArtifactEvidenceDerivedFrom = runtime.EvidenceRelationDerivedFrom
-	ArtifactEvidenceSupports    = runtime.EvidenceRelationSupports
-	ArtifactEvidenceContradicts = runtime.EvidenceRelationContradicts
-	ArtifactEvidenceCites       = runtime.EvidenceRelationCites
-	ArtifactEvidenceInputTo     = runtime.EvidenceRelationInputTo
-	ArtifactEvidenceOutputOf    = runtime.EvidenceRelationOutputOf
+	ArtifactEvidenceDerivedFrom = models.EvidenceRelationDerivedFrom
+	ArtifactEvidenceSupports    = models.EvidenceRelationSupports
+	ArtifactEvidenceContradicts = models.EvidenceRelationContradicts
+	ArtifactEvidenceCites       = models.EvidenceRelationCites
+	ArtifactEvidenceInputTo     = models.EvidenceRelationInputTo
+	ArtifactEvidenceOutputOf    = models.EvidenceRelationOutputOf
 
-	ArtifactEvidenceTargetArtifact       = runtime.EvidenceTargetArtifact
-	ArtifactEvidenceTargetExternalSource = runtime.EvidenceTargetExternalSource
-	ArtifactEvidenceTargetRun            = runtime.EvidenceTargetRun
-	ArtifactEvidenceTargetActivity       = runtime.EvidenceTargetActivity
-	ArtifactEvidenceTargetRequest        = runtime.EvidenceTargetRequest
-	ArtifactEvidenceTargetAction         = runtime.EvidenceTargetAction
-	ArtifactEvidenceTargetTurn           = runtime.EvidenceTargetTurn
-	ArtifactEvidenceTargetClaim          = runtime.EvidenceTargetClaim
+	ArtifactEvidenceTargetArtifact       = models.EvidenceTargetArtifact
+	ArtifactEvidenceTargetExternalSource = models.EvidenceTargetExternalSource
+	ArtifactEvidenceTargetRun            = models.EvidenceTargetRun
+	ArtifactEvidenceTargetActivity       = models.EvidenceTargetActivity
+	ArtifactEvidenceTargetRequest        = models.EvidenceTargetRequest
+	ArtifactEvidenceTargetAction         = models.EvidenceTargetAction
+	ArtifactEvidenceTargetTurn           = models.EvidenceTargetTurn
+	ArtifactEvidenceTargetClaim          = models.EvidenceTargetClaim
 )
 
 const ()
@@ -2111,145 +2130,145 @@ var (
 	ErrAuthorityPolicyCeiling           = progression.ErrPolicyCeiling
 	ErrAuthorityRecommendationStale     = progression.ErrRecommendationStale
 	ErrAuthorityProgressionNoChange     = progression.ErrNoChange
-	ErrSkillReferenceUpgradeUnavailable = runtime.ErrSkillReferenceUpgradeUnavailable
-	ErrSkillReferenceUpgradeConflict    = runtime.ErrSkillReferenceUpgradeConflict
-	ErrSkillReferenceUpgradeApproval    = runtime.ErrSkillReferenceUpgradeApproval
-	ErrSkillReferenceUpgradeInvalid     = runtime.ErrSkillReferenceUpgradeInvalid
-	ErrSkillReferenceUpgradeBusy        = runtime.ErrSkillReferenceUpgradeBusy
-	ErrSkillReferenceUpgradeCurrent     = runtime.ErrSkillReferenceUpgradeCurrent
+	ErrSkillReferenceUpgradeUnavailable = skillbinding.ErrSkillReferenceUpgradeUnavailable
+	ErrSkillReferenceUpgradeConflict    = models.ErrSkillReferenceUpgradeConflict
+	ErrSkillReferenceUpgradeApproval    = skillbinding.ErrSkillReferenceUpgradeApproval
+	ErrSkillReferenceUpgradeInvalid     = models.ErrSkillReferenceUpgradeInvalid
+	ErrSkillReferenceUpgradeBusy        = models.ErrSkillReferenceUpgradeBusy
+	ErrSkillReferenceUpgradeCurrent     = skillbinding.ErrSkillReferenceUpgradeCurrent
 )
 
 // Engine is the primary entry point for OpenSeal. It composes the durable
 // Agent, Team, objective, collaboration, action, approval, and Skill services.
 type Engine struct {
-	store runtime.KernelStore
+	store models.KernelStore
 	// ownedStore is the in-memory store New opened, either as e.store or as
 	// the fallback for services a partial store lacks. Close frees it.
-	ownedStore                    *runtime.SQLiteStore
-	portfolio                     *runtime.PortfolioService
-	activity                      *runtime.RunActivityService
-	dependencies                  *runtime.DependencyCoordinator
-	conversations                 *runtime.ConversationService
-	spaces                        *runtime.SpaceService
-	embeds                        *runtime.EmbedSessionService
-	conversationCoordinator       *runtime.ConversationCoordinator
-	conversationParticipants      runtime.ConversationParticipantSource
-	conversationRouter            runtime.ConversationRouter
-	conversationCoordinatorConfig runtime.ConversationCoordinatorConfig
-	conversationRunScheduler      *runtime.ConversationRunScheduler
-	conversationRunReconciler     *runtime.ConversationRunReconciler
+	ownedStore                    *sqlite.Store
+	portfolio                     *portfolio.PortfolioService
+	activity                      *activity.RunActivityService
+	dependencies                  *portfolio.DependencyCoordinator
+	conversations                 *conversation.ConversationService
+	spaces                        *portfolio.SpaceService
+	embeds                        *conversation.EmbedSessionService
+	conversationCoordinator       *conversation.ConversationCoordinator
+	conversationParticipants      conversation.ConversationParticipantSource
+	conversationRouter            conversation.ConversationRouter
+	conversationCoordinatorConfig conversation.ConversationCoordinatorConfig
+	conversationRunScheduler      *conversationrun.ConversationRunScheduler
+	conversationRunReconciler     *conversationrun.ConversationRunReconciler
 	conversationRunConfig         *ConversationRunConfig
-	conversationRunScopes         runtime.WorkerScopeSource
+	conversationRunScopes         workqueue.WorkerScopeSource
 	externalConversations         externalConversationRuntime
 	callbacks                     callbackRuntime
 	routineEvents                 routineEventRuntime
-	conversationChanges           *runtime.ConversationChangeService
-	collaboration                 *runtime.CollaborationService
-	turns                         *runtime.AgentTurnService
-	runQueue                      *runtime.AgentRunScheduler
-	wake                          *runtime.AgentRunWakeService
-	actions                       *runtime.ActionCoordinator
-	approvals                     *runtime.ApprovalCoordinator
-	artifacts                     *runtime.ArtifactCatalog
-	runbookAudits                 *runtime.RunbookExecutionAuditService
-	actionPolicy                  runtime.ActionPolicyEvaluator
-	routineOwnerAddresses         runtime.RoutineOwnerAddressResolver
-	chatFiles                     runtime.ChatFileResolver
-	chatWorkspaces                runtime.ChatWorkspaces
-	actionValidators              []runtime.ActionProposalValidator
+	conversationChanges           *conversation.ConversationChangeService
+	collaboration                 *collaboration.CollaborationService
+	turns                         *activity.AgentTurnService
+	runQueue                      *agentrun.AgentRunScheduler
+	wake                          *agentrun.AgentRunWakeService
+	actions                       *action.ActionCoordinator
+	approvals                     *action.ApprovalCoordinator
+	artifacts                     *artifactcatalog.ArtifactCatalog
+	runbookAudits                 *routine.RunbookExecutionAuditService
+	actionPolicy                  action.ActionPolicyEvaluator
+	routineOwnerAddresses         models.RoutineOwnerAddressResolver
+	chatFiles                     routine.ChatFileResolver
+	chatWorkspaces                modelstep.ChatWorkspaces
+	actionValidators              []action.ActionProposalValidator
 	agentManagementActions        bool
-	agentBuilderHost              runtime.AgentBuilderHost
-	agentInstaller                *runtime.AgentInstaller
-	agentBuilderCutoverHost       runtime.AgentBuilderCutoverHost
+	agentBuilderHost              agentbuilder.AgentBuilderHost
+	agentInstaller                *agentbuilder.AgentInstaller
+	agentBuilderCutoverHost       agentbuilder.AgentBuilderCutoverHost
 	runbookManagementActions      bool
 	runManagementActions          bool
 	teamManagementActions         bool
 	skillManagementActions        bool
 	skillDiscovery                skill.DiscoveryProvider
-	appCatalog                    *runtime.AppCatalogRef
-	approvalAuth                  runtime.ApprovalAuthorizer
+	appCatalog                    *skillbinding.AppCatalogRef
+	approvalAuth                  action.ApprovalAuthorizer
 	skillSources                  *sourceartifact.Service
 	agentPoolSpecs                []agentRunWorkerSpec
-	agentPools                    []*runtime.AgentRunWorkerPool
+	agentPools                    []*runworker.AgentRunWorkerPool
 	agentSupervisorSpecs          []agentRunWorkerSupervisorSpec
-	agentSupervisors              []*runtime.AgentRunWorkerSupervisor
+	agentSupervisors              []*runworker.AgentRunWorkerSupervisor
 	actionPoolSpecs               []actionWorkerSpec
-	actionPools                   []*runtime.ActionWorkerPool
+	actionPools                   []*action.ActionWorkerPool
 	actionSupervisorSpecs         []actionWorkerSupervisorSpec
-	actionSupervisors             []*runtime.ActionWorkerSupervisor
-	governedWorker                *runtime.ActionWorker
-	governedTools                 *runtime.GovernedToolExecutor
-	credentialAvailability        runtime.CredentialAvailabilityChecker
+	actionSupervisors             []*action.ActionWorkerSupervisor
+	governedWorker                *action.ActionWorker
+	governedTools                 *runloop.GovernedToolExecutor
+	credentialAvailability        action.CredentialAvailabilityChecker
 	skills                        *skill.Catalog
-	skillReferenceUpgrades        *runtime.SkillReferenceUpgradeService
+	skillReferenceUpgrades        *skillbinding.SkillReferenceUpgradeService
 	agents                        *kernelagent.Registry
 	teams                         *kernelteam.Registry
 	progression                   *progression.Service
 	logger                        *zap.SugaredLogger
-	workerLimiter                 *runtime.WorkerLimiter
-	workSignals                   *runtime.WorkSignalStatus
-	workQueue                     runtime.WorkQueue
+	workerLimiter                 *workqueue.WorkerLimiter
+	workSignals                   *workqueue.WorkSignalStatus
+	workQueue                     workqueue.WorkQueue
 	workPublish                   func(context.Context)
 	workQueueCancel               context.CancelFunc
 	workQueueDone                 chan struct{}
 	workRelayRequests             chan struct{}
 	workRebuilds                  chan struct{}
 	workHandlersMu                sync.RWMutex
-	workHandlers                  map[runtime.WorkFamily][]func(runtime.Scope)
+	workHandlers                  map[models.WorkFamily][]func(models.Scope)
 }
 
 type agentRunWorkerSpec struct {
-	config   runtime.AgentRunWorkerConfig
-	resolver runtime.TurnRunnerResolver
+	config   runworker.AgentRunWorkerConfig
+	resolver conversation.TurnRunnerResolver
 }
 
 type agentRunWorkerSupervisorSpec struct {
-	config   runtime.DynamicAgentRunWorkerConfig
-	source   runtime.WorkerScopeSource
-	resolver runtime.TurnRunnerResolver
+	config   runworker.DynamicAgentRunWorkerConfig
+	source   workqueue.WorkerScopeSource
+	resolver conversation.TurnRunnerResolver
 }
 
 // ConversationRunConfig makes Team channel participation durable and
 // server-owned. Worker concurrency controls channels processed per scope;
 // each channel itself is always serialized across replicas.
 type ConversationRunConfig struct {
-	Scheduler  runtime.ConversationRunSchedulerConfig
-	Runner     runtime.ConversationRunTurnRunnerConfig
-	Reconciler runtime.ConversationRunReconcilerConfig
-	Workers    runtime.DynamicAgentRunWorkerConfig
+	Scheduler  conversationrun.ConversationRunSchedulerConfig
+	Runner     conversationrun.ConversationRunTurnRunnerConfig
+	Reconciler conversationrun.ConversationRunReconcilerConfig
+	Workers    runworker.DynamicAgentRunWorkerConfig
 }
 
-type ExternalConversationSupervisorConfig = runtime.ExternalConversationSupervisorConfig
+type ExternalConversationSupervisorConfig = externalconversation.ExternalConversationSupervisorConfig
 
 type externalConversationRuntime struct {
-	transport  *runtime.ExternalConversationTransportService
-	endpoints  *runtime.ExternalConversationEndpointService
-	gateways   *runtime.ExternalConversationGatewayService
-	supervisor *runtime.ExternalConversationSupervisor
-	config     *runtime.ExternalConversationSupervisorConfig
-	scopes     runtime.WorkerScopeSource
-	host       runtime.ExternalConversationAdapterHost
+	transport  *externalconversation.ExternalConversationTransportService
+	endpoints  *externalconversation.ExternalConversationEndpointService
+	gateways   *externalconversation.ExternalConversationGatewayService
+	supervisor *externalconversation.ExternalConversationSupervisor
+	config     *externalconversation.ExternalConversationSupervisorConfig
+	scopes     workqueue.WorkerScopeSource
+	host       externalconversation.ExternalConversationAdapterHost
 }
 
 type callbackRuntime struct {
-	registry *runtime.CallbackRegistry
-	ingress  *runtime.CallbackIngressService
-	worker   *runtime.CallbackEventWorker
+	registry *callback.CallbackRegistry
+	ingress  *callback.CallbackIngressService
+	worker   *callback.CallbackEventWorker
 }
 
 type actionWorkerSpec struct {
-	config      runtime.ActionWorkerConfig
-	credentials runtime.CredentialResolver
-	leaseIssuer runtime.ActionCredentialLeaseIssuer
-	dispatcher  runtime.ActionDispatcher
+	config      action.ActionWorkerConfig
+	credentials action.CredentialResolver
+	leaseIssuer action.ActionCredentialLeaseIssuer
+	dispatcher  agentrun.ActionDispatcher
 }
 
 type actionWorkerSupervisorSpec struct {
-	config      runtime.DynamicActionWorkerConfig
-	source      runtime.WorkerScopeSource
-	credentials runtime.CredentialResolver
-	leaseIssuer runtime.ActionCredentialLeaseIssuer
-	dispatcher  runtime.ActionDispatcher
+	config      action.DynamicActionWorkerConfig
+	source      workqueue.WorkerScopeSource
+	credentials action.CredentialResolver
+	leaseIssuer action.ActionCredentialLeaseIssuer
+	dispatcher  agentrun.ActionDispatcher
 }
 
 // Option configures an Engine.
@@ -2278,8 +2297,8 @@ type Option func(*Engine) error
 func New(opts ...Option) (_ *Engine, err error) {
 	logger, _ := zap.NewProduction()
 	e := &Engine{
-		workSignals:  runtime.NewWorkSignalStatus(),
-		approvalAuth: runtime.EligibleApprovalAuthorizer{},
+		workSignals:  workqueue.NewWorkSignalStatus(),
+		approvalAuth: action.EligibleApprovalAuthorizer{},
 		logger:       logger.Sugar(),
 	}
 	for _, opt := range opts {
@@ -2296,7 +2315,7 @@ func New(opts ...Option) (_ *Engine, err error) {
 		return nil, err
 	}
 	if e.actionPolicy == nil {
-		e.actionPolicy = runtime.ActionPolicyEvaluatorFunc(e.evaluateAgentActionAuthority)
+		e.actionPolicy = action.ActionPolicyEvaluatorFunc(e.evaluateAgentActionAuthority)
 	}
 	e.buildRoutineEvents()
 	if err := e.rebuildConversationCoordinator(); err != nil {
@@ -2320,14 +2339,14 @@ func New(opts ...Option) (_ *Engine, err error) {
 	// the host chain; ordinary Agent and Team Skill calls still pass through this
 	// guard immediately before the embedding host is invoked.
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := runtime.NewTeamSkillActionDispatcher(e, e.actionPoolSpecs[index].dispatcher)
+		dispatcher, dispatchErr := skillbinding.NewTeamSkillActionDispatcher(e, e.actionPoolSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return nil, fmt.Errorf("Team Skill action worker configuration: %w", dispatchErr)
 		}
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := runtime.NewTeamSkillActionDispatcher(e, e.actionSupervisorSpecs[index].dispatcher)
+		dispatcher, dispatchErr := skillbinding.NewTeamSkillActionDispatcher(e, e.actionSupervisorSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return nil, fmt.Errorf("Team Skill dynamic action worker configuration: %w", dispatchErr)
 		}
@@ -2348,7 +2367,7 @@ func New(opts ...Option) (_ *Engine, err error) {
 	if err := e.configureTeamManagementActions(); err != nil {
 		return nil, fmt.Errorf("Team management action configuration: %w", err)
 	}
-	teamSkillValidator, err := runtime.NewTeamSkillActionValidator(e)
+	teamSkillValidator, err := skillbinding.NewTeamSkillActionValidator(e)
 	if err != nil {
 		return nil, fmt.Errorf("Team Skill authority configuration: %w", err)
 	}
@@ -2455,13 +2474,13 @@ func (e *Engine) Close() error {
 }
 
 // Store returns the execution store.
-func (e *Engine) Store() runtime.KernelStore {
+func (e *Engine) Store() models.KernelStore {
 	return e.store
 }
 
 // WorkerConcurrencyStats exposes the process-wide worker admission state for
 // host metrics and rollout diagnostics.
-func (e *Engine) WorkerConcurrencyStats() runtime.WorkerLimiterStats {
+func (e *Engine) WorkerConcurrencyStats() workqueue.WorkerLimiterStats {
 	return e.workerLimiter.Stats()
 }
 
@@ -2473,7 +2492,7 @@ func (e *Engine) Logger() *zap.SugaredLogger {
 // WithStore sets the Engine's store in place of the default in-memory one.
 // See New for which services a store that implements only part of the
 // durable contract gets.
-func WithStore(store runtime.KernelStore) Option {
+func WithStore(store models.KernelStore) Option {
 	return func(e *Engine) error {
 		if store == nil {
 			return fmt.Errorf("store is required")
@@ -2508,9 +2527,9 @@ func WithPersistentStore(store PersistentKernelStore) Option {
 // authorized Agent roster and its router. The host keeps tenant, credential,
 // model, and deployment concerns behind these interfaces.
 func WithConversationCoordinator(
-	participants runtime.ConversationParticipantSource,
-	router runtime.ConversationRouter,
-	config runtime.ConversationCoordinatorConfig,
+	participants conversation.ConversationParticipantSource,
+	router conversation.ConversationRouter,
+	config conversation.ConversationCoordinatorConfig,
 ) Option {
 	return func(e *Engine) error {
 		e.conversationParticipants = participants
@@ -2524,7 +2543,7 @@ func WithConversationCoordinator(
 // caller into durable Run workers for every active host scope. The same host
 // participant/proposal adapters configured by WithConversationCoordinator are
 // used by the Run turn runner.
-func WithDynamicConversationRuns(config ConversationRunConfig, scopes runtime.WorkerScopeSource) Option {
+func WithDynamicConversationRuns(config ConversationRunConfig, scopes workqueue.WorkerScopeSource) Option {
 	return func(e *Engine) error {
 		if scopes == nil {
 			return fmt.Errorf("conversation Run scope source is required")
@@ -2539,9 +2558,9 @@ func WithDynamicConversationRuns(config ConversationRunConfig, scopes runtime.Wo
 // inbox, Runbook/Agent reply projection, and Skill-owned delivery outbox.
 // Provider adapters and credential redemption stay behind host.
 func WithExternalConversationTransport(
-	config runtime.ExternalConversationSupervisorConfig,
-	scopes runtime.WorkerScopeSource,
-	host runtime.ExternalConversationAdapterHost,
+	config externalconversation.ExternalConversationSupervisorConfig,
+	scopes workqueue.WorkerScopeSource,
+	host externalconversation.ExternalConversationAdapterHost,
 ) Option {
 	return func(e *Engine) error {
 		if scopes == nil || host == nil {
@@ -2559,7 +2578,7 @@ func (e *Engine) rebuildConversationCoordinator() error {
 	if e.conversationParticipants == nil && e.conversationRouter == nil {
 		return nil
 	}
-	coordinator, err := runtime.NewConversationCoordinator(
+	coordinator, err := conversation.NewConversationCoordinator(
 		e.conversations, e.conversationParticipants, e.conversationRouter, e.conversationCoordinatorConfig,
 	)
 	if err != nil {
@@ -2576,9 +2595,9 @@ func (e *Engine) rebuildConversationRuns() error {
 		return nil
 	}
 	if e.conversationRunConfig == nil || e.conversationRunScopes == nil || e.conversationCoordinator == nil {
-		return runtime.ErrConversationCoordinationUnavailable
+		return conversation.ErrConversationCoordinationUnavailable
 	}
-	conversationStore, ok := e.store.(runtime.ConversationStore)
+	conversationStore, ok := e.store.(models.ConversationStore)
 	if !ok {
 		return fmt.Errorf("persistent store does not implement conversation storage")
 	}
@@ -2587,10 +2606,10 @@ func (e *Engine) rebuildConversationRuns() error {
 		return fmt.Errorf("conversation scheduling and execution must use the same participation opt-in policy")
 	}
 	if config.Workers.Kind == "" {
-		config.Workers.Kind = runtime.RunKindConversation
+		config.Workers.Kind = models.RunKindConversation
 	}
-	if config.Workers.Kind != runtime.RunKindConversation {
-		return fmt.Errorf("conversation workers require Run kind %q", runtime.RunKindConversation)
+	if config.Workers.Kind != models.RunKindConversation {
+		return fmt.Errorf("conversation workers require Run kind %q", models.RunKindConversation)
 	}
 	if config.Workers.MaxActiveForConcurrencyKey == 0 {
 		config.Workers.MaxActiveForConcurrencyKey = 1
@@ -2601,19 +2620,19 @@ func (e *Engine) rebuildConversationRuns() error {
 	if strings.TrimSpace(config.Workers.WorkerIDPrefix) == "" {
 		config.Workers.WorkerIDPrefix = "conversation-run-worker"
 	}
-	scheduler, err := runtime.NewConversationRunScheduler(conversationStore, e.store, config.Scheduler)
+	scheduler, err := conversationrun.NewConversationRunScheduler(conversationStore, e.store, config.Scheduler)
 	if err != nil {
 		return err
 	}
 	if e.embeds != nil {
 		scheduler.SetSessionContextResolver(e.embeds)
 	}
-	runner, err := runtime.NewConversationRunTurnRunner(conversationStore, e.conversationCoordinator, config.Runner)
+	runner, err := conversationrun.NewConversationRunTurnRunner(conversationStore, e.conversationCoordinator, config.Runner)
 	if err != nil {
 		return err
 	}
 	runner.SetReactionProjector(e.ReactionProjector())
-	reconciler, err := runtime.NewConversationRunReconciler(scheduler, e.conversationRunScopes, e.logger, config.Reconciler)
+	reconciler, err := conversationrun.NewConversationRunReconciler(scheduler, e.conversationRunScopes, e.logger, config.Reconciler)
 	if err != nil {
 		return err
 	}
@@ -2630,17 +2649,17 @@ func (e *Engine) rebuildExternalConversations() error {
 	e.externalConversations.endpoints = nil
 	e.externalConversations.gateways = nil
 	e.externalConversations.supervisor = nil
-	store, ok := e.store.(runtime.ExternalConversationReplyStore)
+	store, ok := e.store.(models.ExternalConversationReplyStore)
 	if !ok || e.skills == nil {
 		if e.externalConversations.config != nil {
 			return fmt.Errorf("persistent store does not implement external conversation storage")
 		}
 		return nil
 	}
-	e.externalConversations.transport = runtime.NewExternalConversationTransportService(store, e.skills)
+	e.externalConversations.transport = externalconversation.NewExternalConversationTransportService(store, e.skills)
 	e.externalConversations.transport.SetRoutineEventOfferer(e.routineEvents.matcher)
-	e.externalConversations.endpoints = runtime.NewExternalConversationEndpointService(store, e.skills)
-	e.externalConversations.gateways = runtime.NewExternalConversationGatewayService(store, e.skills)
+	e.externalConversations.endpoints = externalconversation.NewExternalConversationEndpointService(store, e.skills)
+	e.externalConversations.gateways = externalconversation.NewExternalConversationGatewayService(store, e.skills)
 	if e.externalConversations.config == nil && e.externalConversations.scopes == nil && e.externalConversations.host == nil {
 		return nil
 	}
@@ -2648,50 +2667,50 @@ func (e *Engine) rebuildExternalConversations() error {
 		e.conversationRunScheduler == nil {
 		return fmt.Errorf("external conversation transport requires dynamic conversation Runs, scopes, host, and config")
 	}
-	dispatcher := runtime.NewCanonicalExternalConversationDispatcher(e.conversationRunScheduler)
+	dispatcher := externalconversation.NewCanonicalExternalConversationDispatcher(e.conversationRunScheduler)
 	inboxConfig := e.externalConversations.config.Inbox
-	if contextHost, ok := e.externalConversations.host.(runtime.ExternalConversationContextHost); ok {
+	if contextHost, ok := e.externalConversations.host.(externalconversation.ExternalConversationContextHost); ok {
 		inboxConfig.ContextHost = contextHost
 		inboxConfig.ContextCatalog = e.skills
 	}
-	if attachmentHost, ok := e.externalConversations.host.(runtime.ExternalConversationAttachmentHost); ok {
+	if attachmentHost, ok := e.externalConversations.host.(externalconversation.ExternalConversationAttachmentHost); ok {
 		inboxConfig.AttachmentHost = attachmentHost
 		inboxConfig.ContextCatalog = e.skills
 	}
-	inbox, err := runtime.NewExternalConversationInboxWorker(store, dispatcher, inboxConfig)
+	inbox, err := externalconversation.NewExternalConversationInboxWorker(store, dispatcher, inboxConfig)
 	if err != nil {
 		return err
 	}
-	replies, err := runtime.NewExternalConversationReplyWorker(store, e.skills)
+	replies, err := externalconversation.NewExternalConversationReplyWorker(store, e.skills)
 	if err != nil {
 		return err
 	}
-	acknowledgementStore, ok := e.store.(runtime.RunProgressAcknowledgementStore)
+	acknowledgementStore, ok := e.store.(models.RunProgressAcknowledgementStore)
 	if !ok {
 		return fmt.Errorf("persistent store does not implement Run progress acknowledgement storage")
 	}
-	acknowledgementRenderer, err := runtime.NewTurnRunnerProgressAcknowledgementRenderer(e.conversationRunConfig.Runner.AgentTurns)
+	acknowledgementRenderer, err := externalconversation.NewTurnRunnerProgressAcknowledgementRenderer(e.conversationRunConfig.Runner.AgentTurns)
 	if err != nil {
 		return err
 	}
-	acknowledgements, err := runtime.NewRunProgressAcknowledgementWorker(
+	acknowledgements, err := externalconversation.NewRunProgressAcknowledgementWorker(
 		acknowledgementStore, e.skills, acknowledgementRenderer, e.externalConversations.config.Acknowledgements,
 	)
 	if err != nil {
 		return err
 	}
-	delivery, err := runtime.NewExternalConversationDeliveryWorker(
+	delivery, err := externalconversation.NewExternalConversationDeliveryWorker(
 		store, e.skills, e.externalConversations.host, e.externalConversations.config.Delivery,
 	)
 	if err != nil {
 		return err
 	}
-	approvalStore, ok := e.store.(runtime.ApprovalNotificationStore)
+	approvalStore, ok := e.store.(models.ApprovalNotificationStore)
 	if !ok {
 		return fmt.Errorf("persistent store does not implement approval notification storage")
 	}
-	approvals := runtime.NewApprovalNotificationWorker(approvalStore, e.externalConversations.transport, e.skills)
-	e.externalConversations.supervisor, err = runtime.NewExternalConversationSupervisor(
+	approvals := externalconversation.NewApprovalNotificationWorker(approvalStore, e.externalConversations.transport, e.skills)
+	e.externalConversations.supervisor, err = externalconversation.NewExternalConversationSupervisor(
 		inbox, replies, delivery, approvals, e.externalConversations.scopes, e.logger, *e.externalConversations.config,
 	)
 	if err == nil {
@@ -2705,25 +2724,25 @@ func (e *Engine) rebuildCallbacks() error {
 	e.callbacks.ingress = nil
 	e.callbacks.worker = nil
 	store, ok := e.store.(interface {
-		runtime.CallbackRegistrationStore
-		runtime.CallbackEventStore
-		runtime.PortfolioStore
-		runtime.ActionStore
+		models.CallbackRegistrationStore
+		models.CallbackEventStore
+		models.PortfolioStore
+		models.ActionStore
 	})
 	if !ok || e.skills == nil {
 		return nil
 	}
-	e.callbacks.registry = runtime.NewCallbackRegistry(store, e.skills)
-	e.callbacks.ingress = runtime.NewCallbackIngressService(store, e.skills, map[string]runtime.CallbackEventConsumer{
-		"approvals": runtime.NewApprovalCallbackConsumer(store, e.externalConversations.transport),
-		"routines":  runtime.NewRoutineCallbackConsumer(e.routineEvents.matcher),
+	e.callbacks.registry = callback.NewCallbackRegistry(store, e.skills)
+	e.callbacks.ingress = callback.NewCallbackIngressService(store, e.skills, map[string]callback.CallbackEventConsumer{
+		"approvals": externalconversation.NewApprovalCallbackConsumer(store, e.externalConversations.transport),
+		"routines":  externalconversation.NewRoutineCallbackConsumer(e.routineEvents.matcher),
 	})
 	if e.externalConversations.supervisor != nil && e.externalConversations.config != nil {
 		callbackConfig := e.externalConversations.config.Callback
 		if strings.TrimSpace(callbackConfig.WorkerID) == "" {
 			callbackConfig.WorkerID = strings.TrimSpace(e.externalConversations.config.Inbox.WorkerID) + "-callbacks"
 		}
-		worker, err := runtime.NewCallbackEventWorker(store, e.callbacks.ingress, callbackConfig)
+		worker, err := callback.NewCallbackEventWorker(store, e.callbacks.ingress, callbackConfig)
 		if err != nil {
 			return err
 		}
@@ -2748,7 +2767,7 @@ func WithLogger(logger *zap.SugaredLogger) Option {
 // deployments overlap.
 func WithWorkerConcurrencyLimit(limit int) Option {
 	return func(e *Engine) error {
-		limiter, err := runtime.NewWorkerLimiter(limit)
+		limiter, err := workqueue.NewWorkerLimiter(limit)
 		if err != nil {
 			return err
 		}
@@ -2759,7 +2778,7 @@ func WithWorkerConcurrencyLimit(limit int) Option {
 
 // WithAgentRunWorkers adds a scope-bound autonomous portfolio worker pool.
 // The option may be repeated for additional scopes or agent deployments.
-func WithAgentRunWorkers(config runtime.AgentRunWorkerConfig, resolver runtime.TurnRunnerResolver) Option {
+func WithAgentRunWorkers(config runworker.AgentRunWorkerConfig, resolver conversation.TurnRunnerResolver) Option {
 	return func(e *Engine) error {
 		if resolver == nil {
 			return fmt.Errorf("turn runner resolver is required")
@@ -2773,9 +2792,9 @@ func WithAgentRunWorkers(config runtime.AgentRunWorkerConfig, resolver runtime.T
 // per active host scope. The option may be repeated for independent execution
 // kinds or scope sources.
 func WithDynamicAgentRunWorkers(
-	config runtime.DynamicAgentRunWorkerConfig,
-	source runtime.WorkerScopeSource,
-	resolver runtime.TurnRunnerResolver,
+	config runworker.DynamicAgentRunWorkerConfig,
+	source workqueue.WorkerScopeSource,
+	resolver conversation.TurnRunnerResolver,
 ) Option {
 	return func(e *Engine) error {
 		if source == nil || resolver == nil {
@@ -2798,7 +2817,7 @@ func WithSkillCatalog(catalog *skill.Catalog) Option {
 	}
 }
 
-func WithActionPolicy(policy runtime.ActionPolicyEvaluator) Option {
+func WithActionPolicy(policy action.ActionPolicyEvaluator) Option {
 	return func(e *Engine) error {
 		if policy == nil {
 			return fmt.Errorf("action policy is required")
@@ -2811,7 +2830,7 @@ func WithActionPolicy(policy runtime.ActionPolicyEvaluator) Option {
 // WithRoutineOwnerAddresses lets routine briefs grant sends limited to the
 // routine owner's own verified email addresses. Without it, owner-only grants
 // are neither offered nor applied.
-func WithRoutineOwnerAddresses(resolver runtime.RoutineOwnerAddressResolver) Option {
+func WithRoutineOwnerAddresses(resolver models.RoutineOwnerAddressResolver) Option {
 	return func(e *Engine) error {
 		if resolver == nil {
 			return fmt.Errorf("routine owner address resolver is required")
@@ -2826,7 +2845,7 @@ func WithRoutineOwnerAddresses(resolver runtime.RoutineOwnerAddressResolver) Opt
 // so a routine can run a saved script: proposing one pins the script's
 // current version, and a script routine reports when its file changed.
 // Without it, routines cannot run scripts.
-func WithChatFileContent(content runtime.ArtifactContentStore) Option {
+func WithChatFileContent(content models.ArtifactContentStore) Option {
 	return func(e *Engine) error {
 		if content == nil {
 			return fmt.Errorf("chat file content store is required")
@@ -2839,20 +2858,20 @@ func WithChatFileContent(content runtime.ArtifactContentStore) Option {
 // RoutineScriptStatus reports whether a script routine's chat file changed
 // since its script was approved. The routine keeps running the approved
 // version; the set_script action approves the current one.
-func (e *Engine) RoutineScriptStatus(ctx context.Context, scope runtime.Scope, activationID string) (*runtime.RoutineScriptStatus, error) {
-	return runtime.NewRunbookActivationService(e.store).RoutineScriptStatus(ctx, e.chatFiles, scope, activationID)
+func (e *Engine) RoutineScriptStatus(ctx context.Context, scope models.Scope, activationID string) (*routine.RoutineScriptStatus, error) {
+	return routine.NewRunbookActivationService(e.store).RoutineScriptStatus(ctx, e.chatFiles, scope, activationID)
 }
 
 // RevokeRoutineGrants clears what a routine may do without asking. Only the
 // user who asked for the routine may revoke; it is idempotent.
-func (e *Engine) RevokeRoutineGrants(ctx context.Context, scope runtime.Scope, activationID string, req runtime.RevokeRoutineGrantsRequest) (*runtime.RunbookActivation, error) {
-	return runtime.NewRunbookActivationService(e.store).RevokeGrants(ctx, scope, activationID, req)
+func (e *Engine) RevokeRoutineGrants(ctx context.Context, scope models.Scope, activationID string, req routine.RevokeRoutineGrantsRequest) (*models.RunbookActivation, error) {
+	return routine.NewRunbookActivationService(e.store).RevokeGrants(ctx, scope, activationID, req)
 }
 
 // WithActionProposalValidators adds deterministic, kernel-owned validation to
 // the governed action proposal path. Validators run before policy evaluation
 // and before an ApprovalCheckpoint is persisted.
-func WithActionProposalValidators(validators ...runtime.ActionProposalValidator) Option {
+func WithActionProposalValidators(validators ...action.ActionProposalValidator) Option {
 	return func(e *Engine) error {
 		for _, validator := range validators {
 			if validator == nil {
@@ -2925,20 +2944,20 @@ func (e *Engine) configureSkillManagementActions() error {
 	if !e.skillManagementActions {
 		return nil
 	}
-	if err := e.skills.Register(context.Background(), runtime.SkillManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
+	if err := e.skills.Register(context.Background(), skillbinding.SkillManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 		return err
 	}
-	validator, err := runtime.NewSkillBindingActionValidator(e.skills, e)
+	validator, err := skillbinding.NewSkillBindingActionValidator(e.skills, e)
 	if err != nil {
 		return err
 	}
 	validator.UseAgentRegistry(e.agents)
 	e.actionValidators = append(e.actionValidators, validator)
 	if e.appCatalog == nil {
-		e.appCatalog = &runtime.AppCatalogRef{}
+		e.appCatalog = &skillbinding.AppCatalogRef{}
 	}
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := runtime.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionPoolSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
+		dispatcher, dispatchErr := skillbinding.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionPoolSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
@@ -2947,7 +2966,7 @@ func (e *Engine) configureSkillManagementActions() error {
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := runtime.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionSupervisorSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
+		dispatcher, dispatchErr := skillbinding.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionSupervisorSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
@@ -2969,24 +2988,24 @@ func (e *Engine) configureAgentManagementActions() error {
 	if !e.agentManagementActions {
 		return nil
 	}
-	if err := e.skills.Register(context.Background(), runtime.AgentManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
+	if err := e.skills.Register(context.Background(), models.AgentManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 		return err
 	}
-	validator, err := runtime.NewAgentBehaviorActionValidator(e.agents, e.externalConversations.endpoints)
+	validator, err := agentbuilder.NewAgentBehaviorActionValidator(e.agents, e.externalConversations.endpoints)
 	if err != nil {
 		return err
 	}
 	validator.SetTeamRoster(e)
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionPoolSpecs[index].dispatcher, e.externalConversations.endpoints)
+		dispatcher, dispatchErr := agentbuilder.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionPoolSpecs[index].dispatcher, e.externalConversations.endpoints)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionSupervisorSpecs[index].dispatcher, e.externalConversations.endpoints)
+		dispatcher, dispatchErr := agentbuilder.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionSupervisorSpecs[index].dispatcher, e.externalConversations.endpoints)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
@@ -2999,17 +3018,17 @@ func (e *Engine) configureRunbookManagementActions() error {
 	if !e.runbookManagementActions {
 		return nil
 	}
-	if err := e.skills.Register(context.Background(), runtime.RunbookManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
+	if err := e.skills.Register(context.Background(), routine.RunbookManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 		return err
 	}
 	store, ok := e.store.(interface {
-		runtime.KernelStore
-		runtime.ConversationStore
+		models.KernelStore
+		models.ConversationStore
 	})
 	if !ok {
 		return errors.New("Runbook management actions require conversation-aware kernel storage")
 	}
-	validator, err := runtime.NewRunbookActionValidator(store)
+	validator, err := routine.NewRunbookActionValidator(store)
 	if err != nil {
 		return err
 	}
@@ -3020,7 +3039,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 	e.attachRoutineEventValidator(validator)
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := runtime.NewRunbookActionDispatcher(store, e.actionPoolSpecs[index].dispatcher)
+		dispatcher, dispatchErr := routine.NewRunbookActionDispatcher(store, e.actionPoolSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
@@ -3031,7 +3050,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := runtime.NewRunbookActionDispatcher(store, e.actionSupervisorSpecs[index].dispatcher)
+		dispatcher, dispatchErr := routine.NewRunbookActionDispatcher(store, e.actionSupervisorSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
@@ -3048,23 +3067,23 @@ func (e *Engine) configureRunManagementActions() error {
 	if !e.runManagementActions {
 		return nil
 	}
-	if err := e.skills.Register(context.Background(), runtime.RunManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
+	if err := e.skills.Register(context.Background(), agentrun.RunManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 		return err
 	}
-	validator, err := runtime.NewRunActionValidator(e.store)
+	validator, err := agentrun.NewRunActionValidator(e.store)
 	if err != nil {
 		return err
 	}
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := runtime.NewRunActionDispatcher(e.store, e.actionPoolSpecs[index].dispatcher)
+		dispatcher, dispatchErr := agentrun.NewRunActionDispatcher(e.store, e.actionPoolSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := runtime.NewRunActionDispatcher(e.store, e.actionSupervisorSpecs[index].dispatcher)
+		dispatcher, dispatchErr := agentrun.NewRunActionDispatcher(e.store, e.actionSupervisorSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
@@ -3077,10 +3096,10 @@ func (e *Engine) configureTeamManagementActions() error {
 	if !e.teamManagementActions {
 		return nil
 	}
-	if err := e.skills.Register(context.Background(), runtime.TeamManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
+	if err := e.skills.Register(context.Background(), collaboration.TeamManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 		return err
 	}
-	validator, err := runtime.NewTeamMemberActionValidator(e.teams)
+	validator, err := collaboration.NewTeamMemberActionValidator(e.teams)
 	if err != nil {
 		return err
 	}
@@ -3089,22 +3108,22 @@ func (e *Engine) configureTeamManagementActions() error {
 	// AgentBuilderActionDispatcher that configureAgentBuilderActions wraps
 	// around every action worker, so it exists only with Agent management.
 	if e.agentManagementActions {
-		conversations, _ := e.store.(runtime.ConversationStore)
-		createValidator, err := runtime.NewTeamCreateActionValidator(e.agents, e.teams, e.spaces, conversations, e.store)
+		conversations, _ := e.store.(models.ConversationStore)
+		createValidator, err := agentbuilder.NewTeamCreateActionValidator(e.agents, e.teams, e.spaces, conversations, e.store)
 		if err != nil {
 			return err
 		}
 		e.actionValidators = append(e.actionValidators, createValidator)
 	}
 	for index := range e.actionPoolSpecs {
-		dispatcher, dispatchErr := runtime.NewTeamMemberActionDispatcher(e.store, e.teams, e.actionPoolSpecs[index].dispatcher)
+		dispatcher, dispatchErr := collaboration.NewTeamMemberActionDispatcher(e.store, e.teams, e.actionPoolSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
-		dispatcher, dispatchErr := runtime.NewTeamMemberActionDispatcher(e.store, e.teams, e.actionSupervisorSpecs[index].dispatcher)
+		dispatcher, dispatchErr := collaboration.NewTeamMemberActionDispatcher(e.store, e.teams, e.actionSupervisorSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
@@ -3113,7 +3132,7 @@ func (e *Engine) configureTeamManagementActions() error {
 	return nil
 }
 
-func WithActionWorkers(config runtime.ActionWorkerConfig, credentials runtime.CredentialResolver, dispatcher runtime.ActionDispatcher) Option {
+func WithActionWorkers(config action.ActionWorkerConfig, credentials action.CredentialResolver, dispatcher agentrun.ActionDispatcher) Option {
 	return func(e *Engine) error {
 		if dispatcher == nil {
 			return fmt.Errorf("action dispatcher is required")
@@ -3125,7 +3144,7 @@ func WithActionWorkers(config runtime.ActionWorkerConfig, credentials runtime.Cr
 
 // WithActionCredentialLeaseWorkers dispatches credentialed actions with a
 // signed opaque lease instead of resolving plaintext values inside OpenSeal.
-func WithActionCredentialLeaseWorkers(config runtime.ActionWorkerConfig, issuer runtime.ActionCredentialLeaseIssuer, dispatcher runtime.ActionDispatcher) Option {
+func WithActionCredentialLeaseWorkers(config action.ActionWorkerConfig, issuer action.ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher) Option {
 	return func(e *Engine) error {
 		if issuer == nil || dispatcher == nil {
 			return fmt.Errorf("action credential lease issuer and dispatcher are required")
@@ -3138,7 +3157,7 @@ func WithActionCredentialLeaseWorkers(config runtime.ActionWorkerConfig, issuer 
 // WithDynamicActionWorkers reconciles one isolated worker pool per active
 // scope supplied by the embedding control plane. The option may be repeated
 // for independent scope sources or transport hosts.
-func WithDynamicActionWorkers(config runtime.DynamicActionWorkerConfig, source runtime.WorkerScopeSource, credentials runtime.CredentialResolver, dispatcher runtime.ActionDispatcher) Option {
+func WithDynamicActionWorkers(config action.DynamicActionWorkerConfig, source workqueue.WorkerScopeSource, credentials action.CredentialResolver, dispatcher agentrun.ActionDispatcher) Option {
 	return func(e *Engine) error {
 		if source == nil {
 			return fmt.Errorf("action worker scope source is required")
@@ -3156,7 +3175,7 @@ func WithDynamicActionWorkers(config runtime.DynamicActionWorkerConfig, source r
 // WithDynamicActionCredentialLeaseWorkers is the multi-tenant counterpart of
 // WithActionCredentialLeaseWorkers. Each scope keeps independent durable
 // action claims while the issuer derives one signed lease per execution.
-func WithDynamicActionCredentialLeaseWorkers(config runtime.DynamicActionWorkerConfig, source runtime.WorkerScopeSource, issuer runtime.ActionCredentialLeaseIssuer, dispatcher runtime.ActionDispatcher) Option {
+func WithDynamicActionCredentialLeaseWorkers(config action.DynamicActionWorkerConfig, source workqueue.WorkerScopeSource, issuer action.ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher) Option {
 	return func(e *Engine) error {
 		if source == nil || issuer == nil || dispatcher == nil {
 			return fmt.Errorf("action worker scope source, credential lease issuer, and dispatcher are required")
@@ -3168,7 +3187,7 @@ func WithDynamicActionCredentialLeaseWorkers(config runtime.DynamicActionWorkerC
 	}
 }
 
-func WithApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) Option {
+func WithApprovalAuthorizer(authorizer action.ApprovalAuthorizer) Option {
 	return func(e *Engine) error {
 		if authorizer == nil {
 			return fmt.Errorf("approval authorizer is required")
@@ -3179,20 +3198,20 @@ func WithApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) Option {
 }
 
 func (e *Engine) rebuildGovernance() {
-	e.actions = runtime.NewActionCoordinator(e.store, e.store, e.skills, e.actionPolicy, e.actionValidators)
+	e.actions = action.NewActionCoordinator(e.store, e.store, e.skills, e.actionPolicy, e.actionValidators)
 	e.actions.SetRoutineOwnerAddresses(e.routineOwnerAddresses)
-	e.approvals = runtime.NewApprovalCoordinator(e.store, e.store, e.approvalAuth)
+	e.approvals = action.NewApprovalCoordinator(e.store, e.store, e.approvalAuth)
 }
 func (e *Engine) rebuildActionWorkerPools() error {
 
-	e.actionPools = make([]*runtime.ActionWorkerPool, 0, len(e.actionPoolSpecs))
+	e.actionPools = make([]*action.ActionWorkerPool, 0, len(e.actionPoolSpecs))
 	for _, spec := range e.actionPoolSpecs {
-		var pool *runtime.ActionWorkerPool
+		var pool *action.ActionWorkerPool
 		var err error
 		if spec.leaseIssuer != nil {
-			pool, err = runtime.NewActionCredentialLeaseWorkerPool(e.store, e.skills, spec.leaseIssuer, spec.dispatcher, e.logger, spec.config)
+			pool, err = action.NewActionCredentialLeaseWorkerPool(e.store, e.skills, spec.leaseIssuer, spec.dispatcher, e.logger, spec.config)
 		} else {
-			pool, err = runtime.NewActionWorkerPool(e.store, e.skills, spec.credentials, spec.dispatcher, e.logger, spec.config)
+			pool, err = action.NewActionWorkerPool(e.store, e.skills, spec.credentials, spec.dispatcher, e.logger, spec.config)
 		}
 		if err != nil {
 			return err
@@ -3205,14 +3224,14 @@ func (e *Engine) rebuildActionWorkerPools() error {
 }
 
 func (e *Engine) rebuildActionWorkerSupervisors() error {
-	e.actionSupervisors = make([]*runtime.ActionWorkerSupervisor, 0, len(e.actionSupervisorSpecs))
+	e.actionSupervisors = make([]*action.ActionWorkerSupervisor, 0, len(e.actionSupervisorSpecs))
 	for _, spec := range e.actionSupervisorSpecs {
-		var supervisor *runtime.ActionWorkerSupervisor
+		var supervisor *action.ActionWorkerSupervisor
 		var err error
 		if spec.leaseIssuer != nil {
-			supervisor, err = runtime.NewActionCredentialLeaseWorkerSupervisor(e.store, e.skills, spec.leaseIssuer, spec.dispatcher, spec.source, e.logger, spec.config)
+			supervisor, err = action.NewActionCredentialLeaseWorkerSupervisor(e.store, e.skills, spec.leaseIssuer, spec.dispatcher, spec.source, e.logger, spec.config)
 		} else {
-			supervisor, err = runtime.NewActionWorkerSupervisor(e.store, e.skills, spec.credentials, spec.dispatcher, spec.source, e.logger, spec.config)
+			supervisor, err = action.NewActionWorkerSupervisor(e.store, e.skills, spec.credentials, spec.dispatcher, spec.source, e.logger, spec.config)
 		}
 		if err != nil {
 			return err
@@ -3229,9 +3248,9 @@ func (e *Engine) rebuildAgentWorkerPools() error {
 	if err != nil {
 		return err
 	}
-	e.agentPools = make([]*runtime.AgentRunWorkerPool, 0, len(e.agentPoolSpecs))
+	e.agentPools = make([]*runworker.AgentRunWorkerPool, 0, len(e.agentPoolSpecs))
 	for _, spec := range e.agentPoolSpecs {
-		pool, err := runtime.NewAgentRunWorkerPool(e.store, spec.resolver, e.logger, spec.config)
+		pool, err := runworker.NewAgentRunWorkerPool(e.store, spec.resolver, e.logger, spec.config)
 		if err != nil {
 			return err
 		}
@@ -3249,9 +3268,9 @@ func (e *Engine) rebuildAgentWorkerSupervisors() error {
 	if err != nil {
 		return err
 	}
-	e.agentSupervisors = make([]*runtime.AgentRunWorkerSupervisor, 0, len(e.agentSupervisorSpecs))
+	e.agentSupervisors = make([]*runworker.AgentRunWorkerSupervisor, 0, len(e.agentSupervisorSpecs))
 	for _, spec := range e.agentSupervisorSpecs {
-		supervisor, err := runtime.NewAgentRunWorkerSupervisor(e.store, spec.resolver, spec.source, e.logger, spec.config)
+		supervisor, err := runworker.NewAgentRunWorkerSupervisor(e.store, spec.resolver, spec.source, e.logger, spec.config)
 		if err != nil {
 			return err
 		}
@@ -3267,18 +3286,18 @@ func (e *Engine) rebuildAgentWorkerSupervisors() error {
 // newRunTerminalFinalizer is the finalizer every worker pool runs on a
 // terminal Run: the try_agent trial hand-off to its builder Run, then the
 // Skill resource finalizers when this Engine executes actions.
-func (e *Engine) newRunTerminalFinalizer() (runtime.RunTerminalFinalizer, error) {
-	var resources runtime.RunTerminalFinalizer
+func (e *Engine) newRunTerminalFinalizer() (agentrun.RunTerminalFinalizer, error) {
+	var resources agentrun.RunTerminalFinalizer
 	if len(e.actionSupervisorSpecs) > 0 || len(e.actionPoolSpecs) > 0 {
-		var dispatcher runtime.ActionDispatcher
+		var dispatcher agentrun.ActionDispatcher
 		if len(e.actionSupervisorSpecs) > 0 {
 			dispatcher = e.actionSupervisorSpecs[0].dispatcher
 		} else {
 			dispatcher = e.actionPoolSpecs[0].dispatcher
 		}
-		resources = runtime.NewActionRunTerminalFinalizer(e.store, e.skills, dispatcher)
+		resources = agentrun.NewActionRunTerminalFinalizer(e.store, e.skills, dispatcher)
 	}
-	return runtime.NewAgentTrialFinalizer(e.store, resources, e.wakeAgentWorkersForScope), nil
+	return agentbuilder.NewAgentTrialFinalizer(e.store, resources, e.wakeAgentWorkersForScope), nil
 }
 
 func (e *Engine) WakeAgentWorkers() {
@@ -3294,14 +3313,14 @@ func (e *Engine) WakeAgentWorkers() {
 // runnable work in one scope, for example a Run committed by another
 // process. Workers still claim through the durable store; a missed wake only
 // delays work until the next poll.
-func (e *Engine) WakeAgentWorkersForScope(scope runtime.Scope) {
+func (e *Engine) WakeAgentWorkersForScope(scope models.Scope) {
 	if e == nil {
 		return
 	}
 	e.wakeAgentWorkersForScope(scope)
 }
 
-func (e *Engine) wakeAgentWorkersForScope(scope runtime.Scope) {
+func (e *Engine) wakeAgentWorkersForScope(scope models.Scope) {
 	for _, pool := range e.agentPools {
 		pool.WakeScope(scope)
 	}
@@ -3322,14 +3341,14 @@ func (e *Engine) WakeActionWorkers() {
 // WakeActionWorkersForScope is a latency hint for hosts that observed newly
 // claimable ActionCalls in one scope. Workers still claim through the durable
 // store.
-func (e *Engine) WakeActionWorkersForScope(scope runtime.Scope) {
+func (e *Engine) WakeActionWorkersForScope(scope models.Scope) {
 	if e == nil {
 		return
 	}
 	e.wakeActionWorkersForScope(scope)
 }
 
-func (e *Engine) wakeActionWorkersForScope(scope runtime.Scope) {
+func (e *Engine) wakeActionWorkersForScope(scope models.Scope) {
 	for _, pool := range e.actionPools {
 		pool.WakeScope(scope)
 	}
@@ -3343,39 +3362,39 @@ func BuildGraph(nodes []*executor.NodeDefinition, connections []*executor.Connec
 	return executor.BuildGraph(nodes, connections)
 }
 
-func (e *Engine) CreateObjective(ctx context.Context, req runtime.CreateObjectiveRequest) (*runtime.Objective, error) {
+func (e *Engine) CreateObjective(ctx context.Context, req portfolio.CreateObjectiveRequest) (*models.Objective, error) {
 	return e.portfolio.CreateObjective(ctx, req)
 }
 
-func (e *Engine) CreateObjectiveIdempotent(ctx context.Context, req runtime.CreateObjectiveRequest) (*runtime.CreateObjectiveResult, error) {
+func (e *Engine) CreateObjectiveIdempotent(ctx context.Context, req portfolio.CreateObjectiveRequest) (*portfolio.CreateObjectiveResult, error) {
 	return e.portfolio.CreateObjectiveIdempotent(ctx, req)
 }
 
-func (e *Engine) GetObjective(ctx context.Context, scope runtime.Scope, objectiveID string) (*runtime.Objective, error) {
+func (e *Engine) GetObjective(ctx context.Context, scope models.Scope, objectiveID string) (*models.Objective, error) {
 	return e.portfolio.GetObjective(ctx, scope, objectiveID)
 }
 
-func (e *Engine) ListObjectives(ctx context.Context, filter runtime.ObjectiveFilter) ([]*runtime.Objective, error) {
+func (e *Engine) ListObjectives(ctx context.Context, filter models.ObjectiveFilter) ([]*models.Objective, error) {
 	return e.portfolio.ListObjectives(ctx, filter)
 }
 
-func (e *Engine) UpdateObjective(ctx context.Context, scope runtime.Scope, objectiveID string, req runtime.UpdateObjectiveRequest) (*runtime.Objective, error) {
+func (e *Engine) UpdateObjective(ctx context.Context, scope models.Scope, objectiveID string, req portfolio.UpdateObjectiveRequest) (*models.Objective, error) {
 	return e.portfolio.UpdateObjective(ctx, scope, objectiveID, req)
 }
 
-func (e *Engine) CreateRunbookActivation(ctx context.Context, req runtime.CreateRunbookActivationRequest) (*runtime.RunbookActivation, error) {
-	return runtime.NewRunbookActivationService(e.store).Create(ctx, req)
+func (e *Engine) CreateRunbookActivation(ctx context.Context, req routine.CreateRunbookActivationRequest) (*models.RunbookActivation, error) {
+	return routine.NewRunbookActivationService(e.store).Create(ctx, req)
 }
 
-func (e *Engine) GetRunbookActivation(ctx context.Context, scope runtime.Scope, activationID string) (*runtime.RunbookActivation, error) {
+func (e *Engine) GetRunbookActivation(ctx context.Context, scope models.Scope, activationID string) (*models.RunbookActivation, error) {
 	return e.store.GetRunbookActivation(ctx, scope, activationID)
 }
 
-func (e *Engine) GetRunbookDetail(ctx context.Context, scope runtime.Scope, activationID string) (*runtime.RunbookDetail, error) {
-	return runtime.ResolveRunbookDetail(ctx, e.store, e.agents, scope, activationID)
+func (e *Engine) GetRunbookDetail(ctx context.Context, scope models.Scope, activationID string) (*routine.RunbookDetail, error) {
+	return routine.ResolveRunbookDetail(ctx, e.store, e.agents, scope, activationID)
 }
 
-func (e *Engine) GetRunbookExecutionAudit(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunbookExecutionAudit, error) {
+func (e *Engine) GetRunbookExecutionAudit(ctx context.Context, scope models.Scope, runID string) (*routine.RunbookExecutionAudit, error) {
 	if e.runbookAudits == nil {
 		return nil, errors.New("Runbook execution audit is unavailable")
 	}
@@ -3384,39 +3403,39 @@ func (e *Engine) GetRunbookExecutionAudit(ctx context.Context, scope runtime.Sco
 
 // GetRunExecutionAudit projects the canonical graph for conversational,
 // delegated, and Runbook-backed Runs through one observation contract.
-func (e *Engine) GetRunExecutionAudit(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunExecutionAudit, error) {
+func (e *Engine) GetRunExecutionAudit(ctx context.Context, scope models.Scope, runID string) (*routine.RunExecutionAudit, error) {
 	if e.runbookAudits == nil {
 		return nil, errors.New("Run execution audit is unavailable")
 	}
 	return e.runbookAudits.Get(ctx, scope, runID)
 }
 
-func (e *Engine) ListRunbookActivations(ctx context.Context, filter runtime.RunbookActivationFilter) ([]*runtime.RunbookActivation, error) {
+func (e *Engine) ListRunbookActivations(ctx context.Context, filter models.RunbookActivationFilter) ([]*models.RunbookActivation, error) {
 	return e.store.ListRunbookActivations(ctx, filter)
 }
 
-func (e *Engine) UpdateRunbookActivation(ctx context.Context, scope runtime.Scope, activationID string, req runtime.UpdateRunbookActivationRequest) (*runtime.RunbookActivation, error) {
+func (e *Engine) UpdateRunbookActivation(ctx context.Context, scope models.Scope, activationID string, req routine.UpdateRunbookActivationRequest) (*models.RunbookActivation, error) {
 	// A resume re-runs the routine's source check with the host's Google catalog.
-	return runtime.NewRunbookActivationService(e.store).WithRoutineEventSources(e.routineEvents.sources).Update(ctx, scope, activationID, req)
+	return routine.NewRunbookActivationService(e.store).WithRoutineEventSources(e.routineEvents.sources).Update(ctx, scope, activationID, req)
 }
 
-func (e *Engine) StartRunbookActivation(ctx context.Context, scope runtime.Scope, activationID string, req runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error) {
-	return runtime.StartRunbookActivationWithExecutionPreparer(ctx, e.store, scope, activationID, req, e)
+func (e *Engine) StartRunbookActivation(ctx context.Context, scope models.Scope, activationID string, req routine.StartRunbookActivationRequest) (*agentrun.AgentRunCommandResult, error) {
+	return routine.StartRunbookActivationWithExecutionPreparer(ctx, e.store, scope, activationID, req, e)
 }
 
-func (e *Engine) ReconcileRunbookSchedules(ctx context.Context, scope runtime.Scope, limit int) (*runtime.RunbookScheduleResult, error) {
-	scheduler := runtime.NewRunbookScheduler(e.store)
+func (e *Engine) ReconcileRunbookSchedules(ctx context.Context, scope models.Scope, limit int) (*routine.RunbookScheduleResult, error) {
+	scheduler := routine.NewRunbookScheduler(e.store)
 	scheduler.SetAcceptedRunExecutionPreparer(e)
 	return scheduler.ReconcileScope(ctx, scope, limit)
 }
 
-func (e *Engine) ReconcileAllRunbookSchedules(ctx context.Context, limitPerScope int) (*runtime.RunbookScheduleResult, error) {
-	scheduler := runtime.NewRunbookScheduler(e.store)
+func (e *Engine) ReconcileAllRunbookSchedules(ctx context.Context, limitPerScope int) (*routine.RunbookScheduleResult, error) {
+	scheduler := routine.NewRunbookScheduler(e.store)
 	scheduler.SetAcceptedRunExecutionPreparer(e)
 	return scheduler.ReconcileAll(ctx, limitPerScope)
 }
 
-func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRun, error) {
+func (e *Engine) CreateAgentRun(ctx context.Context, req models.CreateAgentRunRequest) (*models.AgentRun, error) {
 	result, err := e.CreateAgentRunCommand(ctx, req)
 	if err != nil {
 		return nil, err
@@ -3426,7 +3445,7 @@ func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunR
 
 // CreateAgentRunCommand returns both the durable run and its creation event.
 // Idempotent replays return the existing run with a nil event.
-func (e *Engine) CreateAgentRunCommand(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error) {
+func (e *Engine) CreateAgentRunCommand(ctx context.Context, req models.CreateAgentRunRequest) (*agentrun.AgentRunCommandResult, error) {
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -3436,9 +3455,9 @@ func (e *Engine) CreateAgentRunCommand(ctx context.Context, req runtime.CreateAg
 	// An accepted delivery retry keeps its original immutable method even if
 	// the active deployment changed. Request-supplied snapshots are discarded.
 	req.Context = maps.Clone(req.Context)
-	delete(req.Context, runtime.AcceptedRunExecutionContextKey)
+	delete(req.Context, models.AcceptedRunExecutionContextKey)
 	if strings.TrimSpace(req.IdempotencyKey) != "" {
-		if replay, err := runtime.NewRunCommandService(e.store).FindCreatedAgentRun(ctx, req); err != nil || replay != nil {
+		if replay, err := agentrun.NewRunCommandService(e.store).FindCreatedAgentRun(ctx, req); err != nil || replay != nil {
 			return replay, err
 		}
 	}
@@ -3448,7 +3467,7 @@ func (e *Engine) CreateAgentRunCommand(ctx context.Context, req runtime.CreateAg
 	if err := e.PrepareAcceptedRunExecution(ctx, &req); err != nil {
 		return nil, err
 	}
-	return runtime.NewRunCommandService(e.store).CreateAgentRun(ctx, req)
+	return agentrun.NewRunCommandService(e.store).CreateAgentRun(ctx, req)
 }
 
 // ValidateAgentRunEntrypoint proves that an advertised runbook entrypoint is
@@ -3456,7 +3475,7 @@ func (e *Engine) CreateAgentRunCommand(ctx context.Context, req runtime.CreateAg
 // use it for capability discovery; CreateAgentRunCommand enforces it again at
 // the command boundary so stale UI or model-tool state fails before a Run is
 // persisted.
-func (e *Engine) ValidateAgentRunEntrypoint(ctx context.Context, scope runtime.Scope, agentID, entrypoint string) error {
+func (e *Engine) ValidateAgentRunEntrypoint(ctx context.Context, scope models.Scope, agentID, entrypoint string) error {
 	entrypoint = strings.TrimSpace(entrypoint)
 	if entrypoint == "" {
 		return nil
@@ -3482,12 +3501,12 @@ func (e *Engine) ValidateAgentRunEntrypoint(ctx context.Context, scope runtime.S
 	return nil
 }
 
-func (e *Engine) CommandAgentRun(ctx context.Context, req runtime.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error) {
-	return runtime.NewRunCommandService(e.store).CommandAgentRun(ctx, req)
+func (e *Engine) CommandAgentRun(ctx context.Context, req agentrun.AgentRunCommandRequest) (*agentrun.AgentRunCommandResult, error) {
+	return agentrun.NewRunCommandService(e.store).CommandAgentRun(ctx, req)
 }
 
-func (e *Engine) ConversationRetryEligibility(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunRetryEligibility, error) {
-	return runtime.NewRunCommandService(e.store).ConversationRetryEligibility(ctx, scope, runID)
+func (e *Engine) ConversationRetryEligibility(ctx context.Context, scope models.Scope, runID string) (*agentrun.RunRetryEligibility, error) {
+	return agentrun.NewRunCommandService(e.store).ConversationRetryEligibility(ctx, scope, runID)
 }
 
 // ConversationTasksAvailable reports whether this store implements the optional
@@ -3496,46 +3515,46 @@ func (e *Engine) ConversationTasksAvailable() bool {
 	if e == nil {
 		return false
 	}
-	_, ok := e.store.(runtime.ConversationTaskKernelStore)
+	_, ok := e.store.(models.ConversationTaskKernelStore)
 	return ok
 }
 
-func (e *Engine) conversationTaskService() (*runtime.ConversationTaskService, error) {
+func (e *Engine) conversationTaskService() (*conversationrun.ConversationTaskService, error) {
 	if e == nil {
-		return nil, runtime.ErrInvalidConversationTask
+		return nil, models.ErrInvalidConversationTask
 	}
-	store, ok := e.store.(runtime.ConversationTaskKernelStore)
+	store, ok := e.store.(models.ConversationTaskKernelStore)
 	if !ok {
 		return nil, errors.New("conversation task store is not configured")
 	}
-	service := runtime.NewConversationTaskService(store)
+	service := conversationrun.NewConversationTaskService(store)
 	service.SetAcceptedRunExecutionPreparer(e)
 	return service, nil
 }
 
-func (e *Engine) GetConversationTask(ctx context.Context, scope runtime.Scope, id string) (*runtime.ConversationTask, error) {
+func (e *Engine) GetConversationTask(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 	if e == nil {
-		return nil, runtime.ErrInvalidConversationTask
+		return nil, models.ErrInvalidConversationTask
 	}
-	store, ok := e.store.(runtime.ConversationTaskStore)
+	store, ok := e.store.(models.ConversationTaskStore)
 	if !ok {
 		return nil, errors.New("conversation task store is not configured")
 	}
 	return store.GetConversationTask(ctx, scope, id)
 }
 
-func (e *Engine) FindConversationTaskByWorkRunID(ctx context.Context, scope runtime.Scope, id string) (*runtime.ConversationTask, error) {
+func (e *Engine) FindConversationTaskByWorkRunID(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 	if e == nil {
-		return nil, runtime.ErrInvalidConversationTask
+		return nil, models.ErrInvalidConversationTask
 	}
-	store, ok := e.store.(runtime.ConversationTaskStore)
+	store, ok := e.store.(models.ConversationTaskStore)
 	if !ok {
 		return nil, errors.New("conversation task store is not configured")
 	}
 	return store.FindConversationTaskByWorkRunID(ctx, scope, id)
 }
 
-func (e *Engine) GetConversationTaskSnapshot(ctx context.Context, request runtime.GetConversationTaskRequest) (*runtime.ConversationTaskResult, error) {
+func (e *Engine) GetConversationTaskSnapshot(ctx context.Context, request conversationrun.GetConversationTaskRequest) (*models.ConversationTaskResult, error) {
 	service, err := e.conversationTaskService()
 	if err != nil {
 		return nil, err
@@ -3543,7 +3562,7 @@ func (e *Engine) GetConversationTaskSnapshot(ctx context.Context, request runtim
 	return service.Get(ctx, request)
 }
 
-func (e *Engine) ListConversationTasks(ctx context.Context, filter runtime.ConversationTaskFilter) ([]*runtime.ConversationTaskResult, error) {
+func (e *Engine) ListConversationTasks(ctx context.Context, filter models.ConversationTaskFilter) ([]*models.ConversationTaskResult, error) {
 	service, err := e.conversationTaskService()
 	if err != nil {
 		return nil, err
@@ -3551,7 +3570,7 @@ func (e *Engine) ListConversationTasks(ctx context.Context, filter runtime.Conve
 	return service.List(ctx, filter)
 }
 
-func (e *Engine) CancelConversationTask(ctx context.Context, request runtime.CancelConversationTaskRequest) (*runtime.ConversationTaskResult, error) {
+func (e *Engine) CancelConversationTask(ctx context.Context, request conversationrun.CancelConversationTaskRequest) (*models.ConversationTaskResult, error) {
 	service, err := e.conversationTaskService()
 	if err != nil {
 		return nil, err
@@ -3559,70 +3578,70 @@ func (e *Engine) CancelConversationTask(ctx context.Context, request runtime.Can
 	return service.Cancel(ctx, request)
 }
 
-func (e *Engine) GetAgentRun(ctx context.Context, scope runtime.Scope, runID string) (*runtime.AgentRun, error) {
+func (e *Engine) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
 	return e.portfolio.GetAgentRun(ctx, scope, runID)
 }
 
-func (e *Engine) ListAgentRuns(ctx context.Context, filter runtime.AgentRunFilter) ([]*runtime.AgentRun, error) {
+func (e *Engine) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	return e.portfolio.ListAgentRuns(ctx, filter)
 }
 
-func (e *Engine) SummarizeAgentRuns(ctx context.Context, scope runtime.Scope, owners []runtime.ObjectiveOwner) ([]runtime.AgentRunOwnerSummary, error) {
+func (e *Engine) SummarizeAgentRuns(ctx context.Context, scope models.Scope, owners []models.ObjectiveOwner) ([]models.AgentRunOwnerSummary, error) {
 	return e.portfolio.SummarizeAgentRuns(ctx, scope, owners)
 }
 
-func (e *Engine) RegisterArtifact(ctx context.Context, request runtime.RegisterArtifactRequest) (*runtime.ArtifactRegistrationResult, error) {
+func (e *Engine) RegisterArtifact(ctx context.Context, request artifactcatalog.RegisterArtifactRequest) (*artifactcatalog.ArtifactRegistrationResult, error) {
 	if e.artifacts == nil {
 		return nil, fmt.Errorf("artifact store is not configured")
 	}
 	return e.artifacts.Register(ctx, request)
 }
 
-func (e *Engine) GetArtifact(ctx context.Context, scope runtime.Scope, artifactID string, version int64) (*runtime.Artifact, error) {
+func (e *Engine) GetArtifact(ctx context.Context, scope models.Scope, artifactID string, version int64) (*models.Artifact, error) {
 	if e.artifacts == nil {
 		return nil, fmt.Errorf("artifact store is not configured")
 	}
 	return e.artifacts.Get(ctx, scope, artifactID, version)
 }
 
-func (e *Engine) ListArtifacts(ctx context.Context, filter runtime.ArtifactFilter) ([]*runtime.Artifact, error) {
+func (e *Engine) ListArtifacts(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
 	if e.artifacts == nil {
 		return nil, fmt.Errorf("artifact store is not configured")
 	}
 	return e.artifacts.List(ctx, filter)
 }
 
-func (e *Engine) TransitionAgentRun(ctx context.Context, scope runtime.Scope, runID string, req runtime.RunTransitionRequest) (*runtime.AgentRun, *runtime.ActivityEvent, error) {
+func (e *Engine) TransitionAgentRun(ctx context.Context, scope models.Scope, runID string, req activity.RunTransitionRequest) (*models.AgentRun, *models.ActivityEvent, error) {
 	return e.activity.TransitionRun(ctx, scope, runID, req)
 }
 
-func (e *Engine) AppendActivity(ctx context.Context, event *runtime.ActivityEvent) (*runtime.ActivityEvent, error) {
+func (e *Engine) AppendActivity(ctx context.Context, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	return e.activity.AppendActivity(ctx, event)
 }
 
-func (e *Engine) ListActivity(ctx context.Context, filter runtime.ActivityFilter) ([]*runtime.ActivityEvent, error) {
+func (e *Engine) ListActivity(ctx context.Context, filter models.ActivityFilter) ([]*models.ActivityEvent, error) {
 	return e.activity.ListActivity(ctx, filter)
 }
 
-func (e *Engine) ListActivityFeed(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
+func (e *Engine) ListActivityFeed(ctx context.Context, request activity.ActivityFeedRequest) (*activity.ActivityFeedPage, error) {
 	return e.activity.ListActivityFeed(ctx, request)
 }
 
-func (e *Engine) CreateConversation(ctx context.Context, request runtime.CreateConversationRequest) (*runtime.Conversation, bool, error) {
+func (e *Engine) CreateConversation(ctx context.Context, request conversation.CreateConversationRequest) (*models.Conversation, bool, error) {
 	if e.conversations == nil {
 		return nil, false, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.CreateConversation(ctx, request)
 }
 
-func (e *Engine) GetConversation(ctx context.Context, scope runtime.Scope, conversationID string) (*runtime.Conversation, error) {
+func (e *Engine) GetConversation(ctx context.Context, scope models.Scope, conversationID string) (*models.Conversation, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.GetConversation(ctx, scope, conversationID)
 }
 
-func (e *Engine) UpdateConversation(ctx context.Context, request runtime.UpdateConversationRequest) (*runtime.Conversation, error) {
+func (e *Engine) UpdateConversation(ctx context.Context, request conversation.UpdateConversationRequest) (*models.Conversation, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
@@ -3633,15 +3652,15 @@ func (e *Engine) UpdateConversation(ctx context.Context, request runtime.UpdateC
 // conversation's approval mode. The host must first authorize the caller as a
 // principal allowed to execute the conversation's Agent. Loosening the mode
 // approves pending checkpoints in the conversation that the new mode allows.
-func (e *Engine) SetConversationApprovalMode(ctx context.Context, request runtime.SetConversationApprovalModeRequest) (*runtime.SetConversationApprovalModeResult, error) {
-	store, ok := e.store.(runtime.ConversationApprovalModeKernelStore)
+func (e *Engine) SetConversationApprovalMode(ctx context.Context, request conversation.SetConversationApprovalModeRequest) (*conversation.SetConversationApprovalModeResult, error) {
+	store, ok := e.store.(models.ConversationApprovalModeKernelStore)
 	if !ok || e.conversations == nil {
 		return nil, fmt.Errorf("conversation approval modes are not supported by this store")
 	}
-	return runtime.NewConversationApprovalModeService(store).SetApprovalMode(ctx, request)
+	return conversation.NewConversationApprovalModeService(store).SetApprovalMode(ctx, request)
 }
 
-func (e *Engine) ListConversations(ctx context.Context, filter runtime.ConversationFilter) ([]*runtime.Conversation, error) {
+func (e *Engine) ListConversations(ctx context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
@@ -3651,7 +3670,7 @@ func (e *Engine) ListConversations(ctx context.Context, filter runtime.Conversat
 // LastConversationActivity returns, by owner id, the newest UpdatedAt of each
 // owner's active conversations that hold a message; an owner with none is
 // absent. One store query answers for every owner.
-func (e *Engine) LastConversationActivity(ctx context.Context, scope runtime.Scope, ownerType runtime.OwnerType, ownerIDs []string) (map[string]time.Time, error) {
+func (e *Engine) LastConversationActivity(ctx context.Context, scope models.Scope, ownerType models.OwnerType, ownerIDs []string) (map[string]time.Time, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
@@ -3661,7 +3680,7 @@ func (e *Engine) LastConversationActivity(ctx context.Context, scope runtime.Sco
 var errSpacesUnsupported = errors.New("spaces are not supported by this store")
 
 // ListSpaces returns the scope's spaces by position. It creates none.
-func (e *Engine) ListSpaces(ctx context.Context, scope runtime.Scope) ([]*runtime.Space, error) {
+func (e *Engine) ListSpaces(ctx context.Context, scope models.Scope) ([]*models.Space, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
@@ -3670,28 +3689,28 @@ func (e *Engine) ListSpaces(ctx context.Context, scope runtime.Scope) ([]*runtim
 
 // DefaultSpace returns the owner's default space in the scope: the first
 // space they created there. An owner with no space gets ErrNoDefaultSpace.
-func (e *Engine) DefaultSpace(ctx context.Context, scope runtime.Scope, ownerID string) (*runtime.Space, error) {
+func (e *Engine) DefaultSpace(ctx context.Context, scope models.Scope, ownerID string) (*models.Space, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
 	return e.spaces.DefaultSpace(ctx, scope, ownerID)
 }
 
-func (e *Engine) GetSpace(ctx context.Context, scope runtime.Scope, spaceID string) (*runtime.Space, error) {
+func (e *Engine) GetSpace(ctx context.Context, scope models.Scope, spaceID string) (*models.Space, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
 	return e.spaces.GetSpace(ctx, scope, spaceID)
 }
 
-func (e *Engine) CreateSpace(ctx context.Context, request runtime.CreateSpaceRequest) (*runtime.Space, error) {
+func (e *Engine) CreateSpace(ctx context.Context, request portfolio.CreateSpaceRequest) (*models.Space, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
 	return e.spaces.CreateSpace(ctx, request)
 }
 
-func (e *Engine) UpdateSpace(ctx context.Context, request runtime.UpdateSpaceRequest) (*runtime.Space, error) {
+func (e *Engine) UpdateSpace(ctx context.Context, request portfolio.UpdateSpaceRequest) (*models.Space, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
@@ -3701,14 +3720,14 @@ func (e *Engine) UpdateSpace(ctx context.Context, request runtime.UpdateSpaceReq
 // DeleteSpace deletes a space that is not a default space. Its conversations,
 // and the deployments that are in no other space, move to the default space
 // of its owner.
-func (e *Engine) DeleteSpace(ctx context.Context, scope runtime.Scope, spaceID string) error {
+func (e *Engine) DeleteSpace(ctx context.Context, scope models.Scope, spaceID string) error {
 	if e.spaces == nil {
 		return errSpacesUnsupported
 	}
 	return e.spaces.DeleteSpace(ctx, scope, spaceID)
 }
 
-func (e *Engine) ListSpaceMembers(ctx context.Context, scope runtime.Scope, spaceID string) ([]*runtime.SpaceMember, error) {
+func (e *Engine) ListSpaceMembers(ctx context.Context, scope models.Scope, spaceID string) ([]*models.SpaceMember, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
@@ -3718,14 +3737,14 @@ func (e *Engine) ListSpaceMembers(ctx context.Context, scope runtime.Scope, spac
 // PutSpaceMember adds an Agent or Team deployment to a space; a Team brings
 // the Agents on its roster. The host must first verify the deployment belongs
 // to the scope.
-func (e *Engine) PutSpaceMember(ctx context.Context, request runtime.PutSpaceMemberRequest) (*runtime.SpaceMember, bool, error) {
+func (e *Engine) PutSpaceMember(ctx context.Context, request portfolio.PutSpaceMemberRequest) (*models.SpaceMember, bool, error) {
 	if e.spaces == nil {
 		return nil, false, errSpacesUnsupported
 	}
 	member, created, err := e.spaces.PutSpaceMember(ctx, request)
 	// An Agent created in no space got no control conversation; its first
 	// space gives it one.
-	if err == nil && created && member.Type == runtime.SpaceMemberAgent && e.agents != nil {
+	if err == nil && created && member.Type == models.SpaceMemberAgent && e.agents != nil {
 		if deployment, getErr := e.agents.GetDeployment(ctx, skill.ScopeReference{Kind: request.Scope.Kind, ID: request.Scope.ID}, member.ID); getErr == nil {
 			e.ensureAgentControlConversationAfterWrite(ctx, deployment, "")
 		}
@@ -3737,7 +3756,7 @@ func (e *Engine) PutSpaceMember(ctx context.Context, request runtime.PutSpaceMem
 // the rosters of the Teams in that space, and a Team that cannot lose it is
 // archived; until the request confirms that, nothing changes and the error is
 // a *SpaceAgentRemovalNeedsConfirmation.
-func (e *Engine) DeleteSpaceMember(ctx context.Context, request runtime.DeleteSpaceMemberRequest) error {
+func (e *Engine) DeleteSpaceMember(ctx context.Context, request portfolio.DeleteSpaceMemberRequest) error {
 	if e.spaces == nil {
 		return errSpacesUnsupported
 	}
@@ -3746,7 +3765,7 @@ func (e *Engine) DeleteSpaceMember(ctx context.Context, request runtime.DeleteSp
 
 // ListScopeSpaceMembers returns every space membership of the scope: which
 // spaces each Agent and Team is in.
-func (e *Engine) ListScopeSpaceMembers(ctx context.Context, scope runtime.Scope) ([]*runtime.SpaceMember, error) {
+func (e *Engine) ListScopeSpaceMembers(ctx context.Context, scope models.Scope) ([]*models.SpaceMember, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
@@ -3754,7 +3773,7 @@ func (e *Engine) ListScopeSpaceMembers(ctx context.Context, scope runtime.Scope)
 }
 
 // SetSpaceAccess changes who may see the space.
-func (e *Engine) SetSpaceAccess(ctx context.Context, scope runtime.Scope, spaceID string, access runtime.SpaceAccess) (*runtime.Space, error) {
+func (e *Engine) SetSpaceAccess(ctx context.Context, scope models.Scope, spaceID string, access models.SpaceAccess) (*models.Space, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
@@ -3764,7 +3783,7 @@ func (e *Engine) SetSpaceAccess(ctx context.Context, scope runtime.Scope, spaceI
 // SetSpaceOwner hands a space to another owner. The host must first verify
 // the person belongs to the scope. Each of the two owners then has the oldest
 // space they own as their default space.
-func (e *Engine) SetSpaceOwner(ctx context.Context, scope runtime.Scope, spaceID, ownerID string) (*runtime.Space, error) {
+func (e *Engine) SetSpaceOwner(ctx context.Context, scope models.Scope, spaceID, ownerID string) (*models.Space, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
@@ -3773,7 +3792,7 @@ func (e *Engine) SetSpaceOwner(ctx context.Context, scope runtime.Scope, spaceID
 
 // SetSpaceAccessState replaces the space's owner, access and people at once.
 // The host must first verify the owner and people belong to the scope.
-func (e *Engine) SetSpaceAccessState(ctx context.Context, request runtime.SetSpaceAccessStateRequest) (*runtime.Space, error) {
+func (e *Engine) SetSpaceAccessState(ctx context.Context, request portfolio.SetSpaceAccessStateRequest) (*models.Space, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
@@ -3782,21 +3801,21 @@ func (e *Engine) SetSpaceAccessState(ctx context.Context, request runtime.SetSpa
 
 // AddSpacePerson adds a person to a space. The host must first verify the
 // person belongs to the scope.
-func (e *Engine) AddSpacePerson(ctx context.Context, request runtime.AddSpacePersonRequest) (*runtime.SpacePerson, bool, error) {
+func (e *Engine) AddSpacePerson(ctx context.Context, request portfolio.AddSpacePersonRequest) (*models.SpacePerson, bool, error) {
 	if e.spaces == nil {
 		return nil, false, errSpacesUnsupported
 	}
 	return e.spaces.AddSpacePerson(ctx, request)
 }
 
-func (e *Engine) RemoveSpacePerson(ctx context.Context, scope runtime.Scope, spaceID, userID string) error {
+func (e *Engine) RemoveSpacePerson(ctx context.Context, scope models.Scope, spaceID, userID string) error {
 	if e.spaces == nil {
 		return errSpacesUnsupported
 	}
 	return e.spaces.RemoveSpacePerson(ctx, scope, spaceID, userID)
 }
 
-func (e *Engine) ListSpacePeople(ctx context.Context, scope runtime.Scope, spaceID string) ([]*runtime.SpacePerson, error) {
+func (e *Engine) ListSpacePeople(ctx context.Context, scope models.Scope, spaceID string) ([]*models.SpacePerson, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
@@ -3805,7 +3824,7 @@ func (e *Engine) ListSpacePeople(ctx context.Context, scope runtime.Scope, space
 
 // VisibleSpaces returns the ids of the spaces the person may see: the ones
 // they own, the ones open to everyone, and the ones they were added to.
-func (e *Engine) VisibleSpaces(ctx context.Context, scope runtime.Scope, userID string) ([]string, error) {
+func (e *Engine) VisibleSpaces(ctx context.Context, scope models.Scope, userID string) ([]string, error) {
 	if e.spaces == nil {
 		return nil, errSpacesUnsupported
 	}
@@ -3813,7 +3832,7 @@ func (e *Engine) VisibleSpaces(ctx context.Context, scope runtime.Scope, userID 
 }
 
 // CanEditSpace reports whether the person owns the space.
-func (e *Engine) CanEditSpace(ctx context.Context, scope runtime.Scope, spaceID, userID string) (bool, error) {
+func (e *Engine) CanEditSpace(ctx context.Context, scope models.Scope, spaceID, userID string) (bool, error) {
 	if e.spaces == nil {
 		return false, errSpacesUnsupported
 	}
@@ -3822,56 +3841,56 @@ func (e *Engine) CanEditSpace(ctx context.Context, scope runtime.Scope, spaceID,
 
 // CanManageSpace reports whether the person may change the space's access
 // and people: its owner, or a tenant admin who can see it.
-func (e *Engine) CanManageSpace(ctx context.Context, scope runtime.Scope, spaceID, userID string, isAdmin bool) (bool, error) {
+func (e *Engine) CanManageSpace(ctx context.Context, scope models.Scope, spaceID, userID string, isAdmin bool) (bool, error) {
 	if e.spaces == nil {
 		return false, errSpacesUnsupported
 	}
 	return e.spaces.CanManageSpace(ctx, scope, spaceID, userID, isAdmin)
 }
 
-func (e *Engine) CreateEmbedInstallation(ctx context.Context, request runtime.CreateEmbedInstallationRequest) (*runtime.EmbedInstallation, error) {
+func (e *Engine) CreateEmbedInstallation(ctx context.Context, request conversation.CreateEmbedInstallationRequest) (*models.EmbedInstallation, error) {
 	if e.embeds == nil {
 		return nil, fmt.Errorf("embed store is not configured")
 	}
 	return e.embeds.CreateInstallation(ctx, request)
 }
 
-func (e *Engine) GetEmbedInstallation(ctx context.Context, scope runtime.Scope, id string) (*runtime.EmbedInstallation, error) {
+func (e *Engine) GetEmbedInstallation(ctx context.Context, scope models.Scope, id string) (*models.EmbedInstallation, error) {
 	if e.embeds == nil {
 		return nil, fmt.Errorf("embed store is not configured")
 	}
 	return e.embeds.GetInstallation(ctx, scope, id)
 }
 
-func (e *Engine) ListEmbedInstallations(ctx context.Context, filter runtime.EmbedInstallationFilter) ([]*runtime.EmbedInstallation, error) {
+func (e *Engine) ListEmbedInstallations(ctx context.Context, filter models.EmbedInstallationFilter) ([]*models.EmbedInstallation, error) {
 	if e.embeds == nil {
 		return nil, fmt.Errorf("embed store is not configured")
 	}
 	return e.embeds.ListInstallations(ctx, filter)
 }
 
-func (e *Engine) UpdateEmbedInstallation(ctx context.Context, request runtime.UpdateEmbedInstallationRequest) (*runtime.EmbedInstallation, error) {
+func (e *Engine) UpdateEmbedInstallation(ctx context.Context, request conversation.UpdateEmbedInstallationRequest) (*models.EmbedInstallation, error) {
 	if e.embeds == nil {
 		return nil, fmt.Errorf("embed store is not configured")
 	}
 	return e.embeds.UpdateInstallation(ctx, request)
 }
 
-func (e *Engine) OpenEmbedSession(ctx context.Context, request runtime.OpenEmbedSessionRequest) (*runtime.OpenEmbedSessionResult, error) {
+func (e *Engine) OpenEmbedSession(ctx context.Context, request conversation.OpenEmbedSessionRequest) (*conversation.OpenEmbedSessionResult, error) {
 	if e.embeds == nil {
 		return nil, fmt.Errorf("embed store is not configured")
 	}
 	return e.embeds.OpenSession(ctx, request)
 }
 
-func (e *Engine) AuthenticateEmbedSession(ctx context.Context, route, sessionID, capability, origin string) (*runtime.EmbedInstallation, *runtime.EmbedSession, error) {
+func (e *Engine) AuthenticateEmbedSession(ctx context.Context, route, sessionID, capability, origin string) (*models.EmbedInstallation, *models.EmbedSession, error) {
 	if e.embeds == nil {
 		return nil, nil, fmt.Errorf("embed store is not configured")
 	}
 	return e.embeds.Authenticate(ctx, route, sessionID, capability, origin)
 }
 
-func (e *Engine) ConsumeEmbedSessionMessage(ctx context.Context, installation *runtime.EmbedInstallation, session *runtime.EmbedSession) (*runtime.EmbedSession, error) {
+func (e *Engine) ConsumeEmbedSessionMessage(ctx context.Context, installation *models.EmbedInstallation, session *models.EmbedSession) (*models.EmbedSession, error) {
 	if e.embeds == nil {
 		return nil, fmt.Errorf("embed store is not configured")
 	}
@@ -3880,14 +3899,14 @@ func (e *Engine) ConsumeEmbedSessionMessage(ctx context.Context, installation *r
 
 // ImportConversationArchive migrates user-visible historical collaboration
 // facts without scheduling new conversation Runs for old messages.
-func (e *Engine) ImportConversationArchive(ctx context.Context, request runtime.ImportConversationArchiveRequest) (*runtime.ConversationArchiveImportResult, error) {
+func (e *Engine) ImportConversationArchive(ctx context.Context, request conversation.ImportConversationArchiveRequest) (*conversation.ConversationArchiveImportResult, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.ImportArchive(ctx, request)
 }
 
-func (e *Engine) PostChannelMessage(ctx context.Context, request runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error) {
+func (e *Engine) PostChannelMessage(ctx context.Context, request conversation.PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
@@ -3908,35 +3927,35 @@ func (e *Engine) PostChannelMessage(ctx context.Context, request runtime.PostCha
 	return result, nil
 }
 
-func (e *Engine) GetChannelMessage(ctx context.Context, scope runtime.Scope, conversationID, messageID string) (*runtime.ChannelMessage, error) {
+func (e *Engine) GetChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string) (*models.ChannelMessage, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.GetChannelMessage(ctx, scope, conversationID, messageID)
 }
 
-func (e *Engine) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope runtime.Scope, conversationID, key string) (*runtime.ParticipationRoundResult, error) {
+func (e *Engine) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ParticipationRoundResult, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.FindParticipationRoundByIdempotencyKey(ctx, scope, conversationID, key)
 }
 
-func (e *Engine) ListChannelMessages(ctx context.Context, filter runtime.ChannelMessageFilter) ([]*runtime.ChannelMessage, error) {
+func (e *Engine) ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.ListChannelMessages(ctx, filter)
 }
 
-func (e *Engine) GetVisibleChannelMessage(ctx context.Context, scope runtime.Scope, conversationID, messageID string, viewer runtime.ConversationViewer) (*runtime.ChannelMessage, error) {
+func (e *Engine) GetVisibleChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string, viewer models.ConversationViewer) (*models.ChannelMessage, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.GetVisibleChannelMessage(ctx, scope, conversationID, messageID, viewer)
 }
 
-func (e *Engine) ListConversationChanges(ctx context.Context, request runtime.ConversationChangeRequest) (*runtime.ConversationChangeSet, error) {
+func (e *Engine) ListConversationChanges(ctx context.Context, request conversation.ConversationChangeRequest) (*conversation.ConversationChangeSet, error) {
 	if e.conversationChanges == nil {
 		return nil, fmt.Errorf("conversation change service is not configured")
 	}
@@ -3963,8 +3982,8 @@ func (e *Engine) ConversationRunsAvailable() bool {
 // normalized by the exact Skill-owned adapter.
 func (e *Engine) ReceiveExternalConversationEvent(
 	ctx context.Context,
-	request runtime.ReceiveExternalConversationEventRequest,
-) (*runtime.ReceiveExternalConversationEventResult, error) {
+	request externalconversation.ReceiveExternalConversationEventRequest,
+) (*externalconversation.ReceiveExternalConversationEventResult, error) {
 	if e == nil || e.externalConversations.transport == nil {
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
@@ -3977,9 +3996,9 @@ func (e *Engine) ReceiveExternalConversationEvent(
 
 func (e *Engine) NormalizeExternalConversationIngress(
 	ctx context.Context,
-	request runtime.ExternalConversationIngressRequest,
-	host runtime.ExternalConversationIngressAdapterHost,
-) (*runtime.ExternalConversationIngressResult, error) {
+	request externalconversation.ExternalConversationIngressRequest,
+	host externalconversation.ExternalConversationIngressAdapterHost,
+) (*externalconversation.ExternalConversationIngressResult, error) {
 	if e == nil || e.externalConversations.transport == nil {
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
@@ -3992,9 +4011,9 @@ func (e *Engine) NormalizeExternalConversationIngress(
 
 func (e *Engine) NormalizeExternalConversationPublicIngress(
 	ctx context.Context,
-	request runtime.ExternalConversationPublicIngressRequest,
-	host runtime.ExternalConversationIngressAdapterHost,
-) (*runtime.ExternalConversationIngressResult, error) {
+	request externalconversation.ExternalConversationPublicIngressRequest,
+	host externalconversation.ExternalConversationIngressAdapterHost,
+) (*externalconversation.ExternalConversationIngressResult, error) {
 	if e == nil || e.externalConversations.transport == nil {
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
@@ -4007,10 +4026,10 @@ func (e *Engine) NormalizeExternalConversationPublicIngress(
 
 func (e *Engine) NormalizeExternalConversationGatewayIngress(
 	ctx context.Context,
-	gateway runtime.ExternalConversationIngressGateway,
-	request runtime.ExternalConversationPublicIngressRequest,
-	host runtime.ExternalConversationGatewayAdapterHost,
-) (*runtime.ExternalConversationGatewayIngressResult, error) {
+	gateway models.ExternalConversationIngressGateway,
+	request externalconversation.ExternalConversationPublicIngressRequest,
+	host externalconversation.ExternalConversationGatewayAdapterHost,
+) (*externalconversation.ExternalConversationGatewayIngressResult, error) {
 	if e == nil || e.externalConversations.transport == nil {
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
@@ -4025,9 +4044,9 @@ func (e *Engine) NormalizeExternalConversationGatewayIngress(
 
 func (e *Engine) NormalizeExternalConversationRegisteredGatewayIngress(
 	ctx context.Context,
-	request runtime.ExternalConversationPublicIngressRequest,
-	host runtime.ExternalConversationGatewayAdapterHost,
-) (*runtime.ExternalConversationGatewayIngressResult, error) {
+	request externalconversation.ExternalConversationPublicIngressRequest,
+	host externalconversation.ExternalConversationGatewayAdapterHost,
+) (*externalconversation.ExternalConversationGatewayIngressResult, error) {
 	if e == nil || e.externalConversations.transport == nil {
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
@@ -4042,8 +4061,8 @@ func (e *Engine) NormalizeExternalConversationRegisteredGatewayIngress(
 
 func (e *Engine) CreateExternalConversationGateway(
 	ctx context.Context,
-	request runtime.CreateExternalConversationGatewayRequest,
-) (*runtime.ExternalConversationGatewayRegistration, error) {
+	request externalconversation.CreateExternalConversationGatewayRequest,
+) (*models.ExternalConversationGatewayRegistration, error) {
 	if e == nil || e.externalConversations.gateways == nil {
 		return nil, fmt.Errorf("external conversation gateways are not configured")
 	}
@@ -4061,8 +4080,8 @@ func (e *Engine) CreateExternalConversationGateway(
 // conversation destination against an exact, reviewed Skill binding revision.
 func (e *Engine) CreateExternalConversationEndpoint(
 	ctx context.Context,
-	request runtime.CreateExternalConversationEndpointRequest,
-) (*runtime.ExternalConversationEndpoint, error) {
+	request externalconversation.CreateExternalConversationEndpointRequest,
+) (*models.ExternalConversationEndpoint, error) {
 	if e == nil || e.externalConversations.endpoints == nil {
 		return nil, fmt.Errorf("external conversation endpoints are not configured")
 	}
@@ -4075,9 +4094,9 @@ func (e *Engine) CreateExternalConversationEndpoint(
 // GetExternalConversationEndpoint returns one tenant-scoped endpoint.
 func (e *Engine) GetExternalConversationEndpoint(
 	ctx context.Context,
-	scope runtime.Scope,
+	scope models.Scope,
 	id string,
-) (*runtime.ExternalConversationEndpoint, error) {
+) (*models.ExternalConversationEndpoint, error) {
 	if e == nil || e.externalConversations.endpoints == nil {
 		return nil, fmt.Errorf("external conversation endpoints are not configured")
 	}
@@ -4088,8 +4107,8 @@ func (e *Engine) GetExternalConversationEndpoint(
 // scope. Provider credentials never enter this portable desired-state API.
 func (e *Engine) ListExternalConversationEndpoints(
 	ctx context.Context,
-	filter runtime.ExternalConversationEndpointFilter,
-) ([]*runtime.ExternalConversationEndpoint, error) {
+	filter models.ExternalConversationEndpointFilter,
+) ([]*models.ExternalConversationEndpoint, error) {
 	if e == nil || e.externalConversations.endpoints == nil {
 		return nil, fmt.Errorf("external conversation endpoints are not configured")
 	}
@@ -4100,10 +4119,10 @@ func (e *Engine) ListExternalConversationEndpoints(
 // configuration change without changing the pinned Skill adapter revision.
 func (e *Engine) UpdateExternalConversationEndpoint(
 	ctx context.Context,
-	scope runtime.Scope,
+	scope models.Scope,
 	id string,
-	request runtime.UpdateExternalConversationEndpointRequest,
-) (*runtime.ExternalConversationEndpoint, error) {
+	request externalconversation.UpdateExternalConversationEndpointRequest,
+) (*models.ExternalConversationEndpoint, error) {
 	if e == nil || e.externalConversations.endpoints == nil {
 		return nil, fmt.Errorf("external conversation endpoints are not configured")
 	}
@@ -4112,9 +4131,9 @@ func (e *Engine) UpdateExternalConversationEndpoint(
 
 func (e *Engine) GetExternalConversationGateway(
 	ctx context.Context,
-	scope runtime.Scope,
+	scope models.Scope,
 	id string,
-) (*runtime.ExternalConversationGatewayRegistration, error) {
+) (*models.ExternalConversationGatewayRegistration, error) {
 	if e == nil || e.externalConversations.gateways == nil {
 		return nil, fmt.Errorf("external conversation gateways are not configured")
 	}
@@ -4123,8 +4142,8 @@ func (e *Engine) GetExternalConversationGateway(
 
 func (e *Engine) ListExternalConversationGateways(
 	ctx context.Context,
-	filter runtime.ExternalConversationGatewayFilter,
-) ([]*runtime.ExternalConversationGatewayRegistration, error) {
+	filter models.ExternalConversationGatewayFilter,
+) ([]*models.ExternalConversationGatewayRegistration, error) {
 	if e == nil || e.externalConversations.gateways == nil {
 		return nil, fmt.Errorf("external conversation gateways are not configured")
 	}
@@ -4133,10 +4152,10 @@ func (e *Engine) ListExternalConversationGateways(
 
 func (e *Engine) UpdateExternalConversationGateway(
 	ctx context.Context,
-	scope runtime.Scope,
+	scope models.Scope,
 	id string,
-	request runtime.UpdateExternalConversationGatewayRequest,
-) (*runtime.ExternalConversationGatewayRegistration, error) {
+	request externalconversation.UpdateExternalConversationGatewayRequest,
+) (*models.ExternalConversationGatewayRegistration, error) {
 	if e == nil || e.externalConversations.gateways == nil {
 		return nil, fmt.Errorf("external conversation gateways are not configured")
 	}
@@ -4145,8 +4164,8 @@ func (e *Engine) UpdateExternalConversationGateway(
 
 func (e *Engine) CreateCallbackRegistration(
 	ctx context.Context,
-	request runtime.CreateCallbackRegistrationRequest,
-) (*runtime.CallbackRegistration, error) {
+	request callback.CreateCallbackRegistrationRequest,
+) (*models.CallbackRegistration, error) {
 	if e == nil || e.callbacks.registry == nil {
 		return nil, fmt.Errorf("callback registry is not configured")
 	}
@@ -4155,9 +4174,9 @@ func (e *Engine) CreateCallbackRegistration(
 
 func (e *Engine) GetCallbackRegistration(
 	ctx context.Context,
-	scope runtime.Scope,
+	scope models.Scope,
 	id string,
-) (*runtime.CallbackRegistration, error) {
+) (*models.CallbackRegistration, error) {
 	if e == nil || e.callbacks.registry == nil {
 		return nil, fmt.Errorf("callback registry is not configured")
 	}
@@ -4166,8 +4185,8 @@ func (e *Engine) GetCallbackRegistration(
 
 func (e *Engine) ListCallbackRegistrations(
 	ctx context.Context,
-	filter runtime.CallbackRegistrationFilter,
-) ([]*runtime.CallbackRegistration, error) {
+	filter models.CallbackRegistrationFilter,
+) ([]*models.CallbackRegistration, error) {
 	if e == nil || e.callbacks.registry == nil {
 		return nil, fmt.Errorf("callback registry is not configured")
 	}
@@ -4176,10 +4195,10 @@ func (e *Engine) ListCallbackRegistrations(
 
 func (e *Engine) UpdateCallbackRegistration(
 	ctx context.Context,
-	scope runtime.Scope,
+	scope models.Scope,
 	id string,
-	request runtime.UpdateCallbackRegistrationRequest,
-) (*runtime.CallbackRegistration, error) {
+	request callback.UpdateCallbackRegistrationRequest,
+) (*models.CallbackRegistration, error) {
 	if e == nil || e.callbacks.registry == nil {
 		return nil, fmt.Errorf("callback registry is not configured")
 	}
@@ -4188,9 +4207,9 @@ func (e *Engine) UpdateCallbackRegistration(
 
 func (e *Engine) ReceiveCallback(
 	ctx context.Context,
-	request runtime.CallbackPublicRequest,
-	host runtime.CallbackAdapterHost,
-) (*runtime.CallbackIngressResult, error) {
+	request callback.CallbackPublicRequest,
+	host callback.CallbackAdapterHost,
+) (*callback.CallbackIngressResult, error) {
 	if e == nil || e.callbacks.ingress == nil {
 		return nil, fmt.Errorf("callback ingress is not configured")
 	}
@@ -4203,8 +4222,8 @@ func (e *Engine) CallbackRegistryAvailable() bool {
 
 func (e *Engine) EnqueueExternalConversationDelivery(
 	ctx context.Context,
-	request runtime.EnqueueExternalConversationDeliveryRequest,
-) (*runtime.EnqueueExternalConversationDeliveryResult, error) {
+	request externalconversation.EnqueueExternalConversationDeliveryRequest,
+) (*externalconversation.EnqueueExternalConversationDeliveryResult, error) {
 	if e == nil || e.externalConversations.transport == nil {
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
@@ -4223,63 +4242,63 @@ func (e *Engine) ExternalConversationWorkersAvailable() bool {
 	return e != nil && e.externalConversations.supervisor != nil
 }
 
-func (e *Engine) GetParticipationRound(ctx context.Context, scope runtime.Scope, conversationID, roundID string) (*runtime.ParticipationRoundResult, error) {
+func (e *Engine) GetParticipationRound(ctx context.Context, scope models.Scope, conversationID, roundID string) (*models.ParticipationRoundResult, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.GetParticipationRound(ctx, scope, conversationID, roundID)
 }
 
-func (e *Engine) ListParticipationRounds(ctx context.Context, filter runtime.ParticipationRoundFilter) ([]*runtime.ParticipationRoundResult, error) {
+func (e *Engine) ListParticipationRounds(ctx context.Context, filter models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.ListParticipationRounds(ctx, filter)
 }
 
-func (e *Engine) AdvanceConversationCursor(ctx context.Context, request runtime.AdvanceConversationCursorRequest) (*runtime.ConversationCursor, bool, error) {
+func (e *Engine) AdvanceConversationCursor(ctx context.Context, request conversation.AdvanceConversationCursorRequest) (*models.ConversationCursor, bool, error) {
 	if e.conversations == nil {
 		return nil, false, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.AdvanceCursor(ctx, request)
 }
 
-func (e *Engine) GetConversationCursor(ctx context.Context, scope runtime.Scope, conversationID string, participant runtime.ConversationParticipant) (*runtime.ConversationCursor, error) {
+func (e *Engine) GetConversationCursor(ctx context.Context, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.GetCursor(ctx, scope, conversationID, participant)
 }
 
-func (e *Engine) ListConversationCursors(ctx context.Context, scope runtime.Scope, conversationID string) ([]*runtime.ConversationCursor, error) {
+func (e *Engine) ListConversationCursors(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationCursor, error) {
 	if e == nil || e.conversations == nil {
 		return nil, errors.New("conversation service is not configured")
 	}
 	return e.conversations.ListCursors(ctx, scope, conversationID)
 }
 
-func (e *Engine) SetConversationPresence(ctx context.Context, request runtime.SetConversationPresenceRequest) (*runtime.ConversationPresence, error) {
+func (e *Engine) SetConversationPresence(ctx context.Context, request conversation.SetConversationPresenceRequest) (*models.ConversationPresence, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.SetPresence(ctx, request)
 }
 
-func (e *Engine) ReleaseConversationPresence(ctx context.Context, request runtime.ReleaseConversationPresenceRequest) error {
+func (e *Engine) ReleaseConversationPresence(ctx context.Context, request models.ReleaseConversationPresenceRequest) error {
 	if e.conversations == nil {
 		return fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.ReleasePresence(ctx, request)
 }
 
-func (e *Engine) ListConversationPresence(ctx context.Context, scope runtime.Scope, conversationID string) ([]*runtime.ConversationPresence, error) {
+func (e *Engine) ListConversationPresence(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationPresence, error) {
 	if e.conversations == nil {
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.ListPresence(ctx, scope, conversationID)
 }
 
-func (e *Engine) CreateRunDependencyGroup(ctx context.Context, request runtime.CreateRunDependencyGroupRequest) (*runtime.RunDependencyResult, error) {
+func (e *Engine) CreateRunDependencyGroup(ctx context.Context, request models.CreateRunDependencyGroupRequest) (*models.RunDependencyResult, error) {
 	if e.dependencies == nil {
 		return nil, fmt.Errorf("run dependency store is not configured")
 	}
@@ -4290,7 +4309,7 @@ func (e *Engine) CreateRunDependencyGroup(ctx context.Context, request runtime.C
 	return result, err
 }
 
-func (e *Engine) ResolveRunDependency(ctx context.Context, request runtime.ResolveRunDependencyRequest) (*runtime.RunDependencyResult, error) {
+func (e *Engine) ResolveRunDependency(ctx context.Context, request portfolio.ResolveRunDependencyRequest) (*models.RunDependencyResult, error) {
 	if e.dependencies == nil {
 		return nil, fmt.Errorf("run dependency store is not configured")
 	}
@@ -4301,21 +4320,21 @@ func (e *Engine) ResolveRunDependency(ctx context.Context, request runtime.Resol
 	return result, err
 }
 
-func (e *Engine) GetRunDependencyGroup(ctx context.Context, scope runtime.Scope, groupID string) (*runtime.RunDependencyGroup, error) {
+func (e *Engine) GetRunDependencyGroup(ctx context.Context, scope models.Scope, groupID string) (*models.RunDependencyGroup, error) {
 	if e.dependencies == nil {
 		return nil, fmt.Errorf("run dependency store is not configured")
 	}
 	return e.dependencies.GetRunDependencyGroup(ctx, scope, groupID)
 }
 
-func (e *Engine) ListWaitingRunDependencyGroups(ctx context.Context, scope runtime.Scope, afterID string, limit int) ([]runtime.RunDependencyGroupWork, error) {
+func (e *Engine) ListWaitingRunDependencyGroups(ctx context.Context, scope models.Scope, afterID string, limit int) ([]models.RunDependencyGroupWork, error) {
 	if e.dependencies == nil {
 		return nil, fmt.Errorf("run dependency store is not configured")
 	}
 	return e.dependencies.ListWaitingRunDependencyGroups(ctx, scope, afterID, limit)
 }
 
-func (e *Engine) ReconcileRunDependencyGroup(ctx context.Context, request runtime.ReconcileRunDependencyGroupRequest) (*runtime.RunDependencyResult, error) {
+func (e *Engine) ReconcileRunDependencyGroup(ctx context.Context, request portfolio.ReconcileRunDependencyGroupRequest) (*models.RunDependencyResult, error) {
 	if e.dependencies == nil {
 		return nil, fmt.Errorf("run dependency store is not configured")
 	}
@@ -4326,21 +4345,21 @@ func (e *Engine) ReconcileRunDependencyGroup(ctx context.Context, request runtim
 	return result, err
 }
 
-func (e *Engine) FindRunDependencyGroupByIdempotencyKey(ctx context.Context, scope runtime.Scope, key string) (*runtime.RunDependencyGroup, error) {
+func (e *Engine) FindRunDependencyGroupByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.RunDependencyGroup, error) {
 	if e.dependencies == nil {
 		return nil, fmt.Errorf("run dependency store is not configured")
 	}
 	return e.dependencies.FindRunDependencyGroupByIdempotencyKey(ctx, scope, key)
 }
 
-func (e *Engine) ListRunDependencies(ctx context.Context, scope runtime.Scope, groupID string) ([]*runtime.RunDependency, error) {
+func (e *Engine) ListRunDependencies(ctx context.Context, scope models.Scope, groupID string) ([]*models.RunDependency, error) {
 	if e.dependencies == nil {
 		return nil, fmt.Errorf("run dependency store is not configured")
 	}
 	return e.dependencies.ListRunDependencies(ctx, scope, groupID)
 }
 
-func (e *Engine) CreateAgentRequest(ctx context.Context, request runtime.CreateAgentRequestRequest) (*runtime.AgentRequestResult, error) {
+func (e *Engine) CreateAgentRequest(ctx context.Context, request collaboration.CreateAgentRequestRequest) (*collaboration.AgentRequestResult, error) {
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
@@ -4351,7 +4370,7 @@ func (e *Engine) CreateAgentRequest(ctx context.Context, request runtime.CreateA
 	return result, err
 }
 
-func (e *Engine) CreateAgentRequestGroup(ctx context.Context, request runtime.CreateAgentRequestGroupRequest) (*runtime.AgentRequestGroupResult, error) {
+func (e *Engine) CreateAgentRequestGroup(ctx context.Context, request collaboration.CreateAgentRequestGroupRequest) (*collaboration.AgentRequestGroupResult, error) {
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
@@ -4362,7 +4381,7 @@ func (e *Engine) CreateAgentRequestGroup(ctx context.Context, request runtime.Cr
 	return result, err
 }
 
-func (e *Engine) RespondAgentRequest(ctx context.Context, request runtime.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error) {
+func (e *Engine) RespondAgentRequest(ctx context.Context, request collaboration.RespondAgentRequestRequest) (*collaboration.AgentRequestResult, error) {
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
@@ -4373,7 +4392,7 @@ func (e *Engine) RespondAgentRequest(ctx context.Context, request runtime.Respon
 	return result, err
 }
 
-func (e *Engine) SubmitAgentRequestBid(ctx context.Context, request runtime.SubmitAgentRequestBidRequest) (*runtime.AgentRequestResult, error) {
+func (e *Engine) SubmitAgentRequestBid(ctx context.Context, request collaboration.SubmitAgentRequestBidRequest) (*collaboration.AgentRequestResult, error) {
 	if e == nil || e.collaboration == nil {
 		return nil, errors.New("agent request collaboration is not configured")
 	}
@@ -4384,7 +4403,7 @@ func (e *Engine) SubmitAgentRequestBid(ctx context.Context, request runtime.Subm
 	return result, err
 }
 
-func (e *Engine) CompleteAgentRequest(ctx context.Context, request runtime.CompleteAgentRequestRequest) (*runtime.AgentRequestResult, error) {
+func (e *Engine) CompleteAgentRequest(ctx context.Context, request collaboration.CompleteAgentRequestRequest) (*collaboration.AgentRequestResult, error) {
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
@@ -4395,7 +4414,7 @@ func (e *Engine) CompleteAgentRequest(ctx context.Context, request runtime.Compl
 	return result, err
 }
 
-func (e *Engine) ReviewAgentRequestCompletion(ctx context.Context, request runtime.ReviewAgentRequestCompletionRequest) (*runtime.AgentRequestResult, error) {
+func (e *Engine) ReviewAgentRequestCompletion(ctx context.Context, request collaboration.ReviewAgentRequestCompletionRequest) (*collaboration.AgentRequestResult, error) {
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
@@ -4406,57 +4425,57 @@ func (e *Engine) ReviewAgentRequestCompletion(ctx context.Context, request runti
 	return result, err
 }
 
-func (e *Engine) GetAgentRequest(ctx context.Context, scope runtime.Scope, requestID string) (*runtime.AgentRequest, error) {
+func (e *Engine) GetAgentRequest(ctx context.Context, scope models.Scope, requestID string) (*models.AgentRequest, error) {
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
 	return e.collaboration.GetAgentRequest(ctx, scope, requestID)
 }
 
-func (e *Engine) ListAgentRequests(ctx context.Context, filter runtime.AgentRequestFilter) ([]*runtime.AgentRequest, error) {
+func (e *Engine) ListAgentRequests(ctx context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
 	return e.collaboration.ListAgentRequests(ctx, filter)
 }
 
-func (e *Engine) BeginAgentTurn(ctx context.Context, req runtime.BeginAgentTurnRequest) (*runtime.AgentTurn, error) {
+func (e *Engine) BeginAgentTurn(ctx context.Context, req activity.BeginAgentTurnRequest) (*models.AgentTurn, error) {
 	return e.turns.BeginTurn(ctx, req)
 }
 
-func (e *Engine) FinishAgentTurn(ctx context.Context, scope runtime.Scope, turnID string, req runtime.FinishAgentTurnRequest) (*runtime.AgentTurn, error) {
+func (e *Engine) FinishAgentTurn(ctx context.Context, scope models.Scope, turnID string, req activity.FinishAgentTurnRequest) (*models.AgentTurn, error) {
 	return e.turns.FinishTurn(ctx, scope, turnID, req)
 }
 
-func (e *Engine) GetAgentTurn(ctx context.Context, scope runtime.Scope, turnID string) (*runtime.AgentTurn, error) {
+func (e *Engine) GetAgentTurn(ctx context.Context, scope models.Scope, turnID string) (*models.AgentTurn, error) {
 	return e.turns.GetTurn(ctx, scope, turnID)
 }
 
-func (e *Engine) ListAgentTurns(ctx context.Context, filter runtime.AgentTurnFilter) ([]*runtime.AgentTurn, error) {
+func (e *Engine) ListAgentTurns(ctx context.Context, filter models.AgentTurnFilter) ([]*models.AgentTurn, error) {
 	return e.turns.ListTurns(ctx, filter)
 }
 
-func (e *Engine) ClaimNextAgentRun(ctx context.Context, req runtime.AgentRunClaimRequest) (*runtime.AgentRun, error) {
+func (e *Engine) ClaimNextAgentRun(ctx context.Context, req agentrun.AgentRunClaimRequest) (*models.AgentRun, error) {
 	return e.runQueue.ClaimNext(ctx, req)
 }
 
-func (e *Engine) ClaimNextAgentRunDecision(ctx context.Context, req runtime.AgentRunClaimRequest) (*runtime.AgentRunAdmissionDecision, error) {
+func (e *Engine) ClaimNextAgentRunDecision(ctx context.Context, req agentrun.AgentRunClaimRequest) (*models.AgentRunAdmissionDecision, error) {
 	return e.runQueue.ClaimNextDecision(ctx, req)
 }
 
-func (e *Engine) InspectAgentRunAdmission(ctx context.Context, req runtime.AgentRunClaimRequest) (*runtime.AgentRunAdmissionDecision, error) {
+func (e *Engine) InspectAgentRunAdmission(ctx context.Context, req agentrun.AgentRunClaimRequest) (*models.AgentRunAdmissionDecision, error) {
 	return e.runQueue.Inspect(ctx, req)
 }
 
-func (e *Engine) RenewAgentRunLease(ctx context.Context, scope runtime.Scope, runID, workerID string, leaseDuration time.Duration) (*runtime.AgentRun, error) {
+func (e *Engine) RenewAgentRunLease(ctx context.Context, scope models.Scope, runID, workerID string, leaseDuration time.Duration) (*models.AgentRun, error) {
 	return e.runQueue.RenewLease(ctx, scope, runID, workerID, leaseDuration)
 }
 
-func (e *Engine) WakeAgentRuns(ctx context.Context, signal runtime.WakeSignal) (*runtime.WakeResult, error) {
+func (e *Engine) WakeAgentRuns(ctx context.Context, signal agentrun.WakeSignal) (*agentrun.WakeResult, error) {
 	return e.wake.Wake(ctx, signal)
 }
 
-func (e *Engine) WakeDueAgentRuns(ctx context.Context, scope runtime.Scope, at time.Time) (*runtime.WakeResult, error) {
+func (e *Engine) WakeDueAgentRuns(ctx context.Context, scope models.Scope, at time.Time) (*agentrun.WakeResult, error) {
 	return e.wake.WakeDueTimers(ctx, scope, at)
 }
 
@@ -4533,42 +4552,42 @@ func (e *Engine) ResolveCallbackAdapterBinding(ctx context.Context, scope skill.
 	return e.skills.ResolveCallbackAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
 }
 
-func (e *Engine) PlanSkillReferenceUpgrade(ctx context.Context, request runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error) {
+func (e *Engine) PlanSkillReferenceUpgrade(ctx context.Context, request skillbinding.PlanSkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradePlan, error) {
 	if e == nil || e.skillReferenceUpgrades == nil {
-		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
+		return nil, skillbinding.ErrSkillReferenceUpgradeUnavailable
 	}
 	return e.skillReferenceUpgrades.Plan(ctx, request)
 }
 
-func (e *Engine) ApplySkillReferenceUpgrade(ctx context.Context, request runtime.ApplySkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradeReceipt, error) {
+func (e *Engine) ApplySkillReferenceUpgrade(ctx context.Context, request skillbinding.ApplySkillReferenceUpgradeRequest) (*models.SkillReferenceUpgradeReceipt, error) {
 	if e == nil || e.skillReferenceUpgrades == nil {
-		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
+		return nil, skillbinding.ErrSkillReferenceUpgradeUnavailable
 	}
 	return e.skillReferenceUpgrades.Apply(ctx, request)
 }
 
 // HasSkillRuntimeUsage reports whether replacing this executable version
 // would invalidate outstanding calls or receipts still owned by an active Run.
-func (e *Engine) HasSkillRuntimeUsage(ctx context.Context, filter runtime.SkillRuntimeUsageFilter) (bool, error) {
+func (e *Engine) HasSkillRuntimeUsage(ctx context.Context, filter models.SkillRuntimeUsageFilter) (bool, error) {
 	if e == nil {
-		return false, runtime.ErrSkillReferenceUpgradeUnavailable
+		return false, skillbinding.ErrSkillReferenceUpgradeUnavailable
 	}
-	store, ok := e.store.(runtime.SkillRuntimeUsageStore)
+	store, ok := e.store.(models.SkillRuntimeUsageStore)
 	if !ok {
-		return false, runtime.ErrSkillReferenceUpgradeUnavailable
+		return false, skillbinding.ErrSkillReferenceUpgradeUnavailable
 	}
 	return store.HasSkillRuntimeUsage(ctx, filter)
 }
 
 // ListReferencedSkillRuntimeVersions provides tenant-scoped metadata for
 // retaining exact execution versions while newer versions are staged.
-func (e *Engine) ListReferencedSkillRuntimeVersions(ctx context.Context, scope runtime.Scope) ([]runtime.SkillRuntimeReference, error) {
+func (e *Engine) ListReferencedSkillRuntimeVersions(ctx context.Context, scope models.Scope) ([]models.SkillRuntimeReference, error) {
 	if e == nil {
-		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
+		return nil, skillbinding.ErrSkillReferenceUpgradeUnavailable
 	}
-	store, ok := e.store.(runtime.SkillRuntimeUsageStore)
+	store, ok := e.store.(models.SkillRuntimeUsageStore)
 	if !ok {
-		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
+		return nil, skillbinding.ErrSkillReferenceUpgradeUnavailable
 	}
 	return store.ListReferencedSkillRuntimeVersions(ctx, scope)
 }
@@ -4614,7 +4633,7 @@ const (
 )
 
 // ErrRunUmbrellaUnavailable means a run no longer acts under a valid umbrella.
-var ErrRunUmbrellaUnavailable = runtime.ErrRunUmbrellaUnavailable
+var ErrRunUmbrellaUnavailable = models.ErrRunUmbrellaUnavailable
 
 // SkillBindingHoldsConnection reports whether a binding carries a connection.
 func SkillBindingHoldsConnection(binding *skill.Binding) bool {
@@ -4629,12 +4648,12 @@ func WithoutSkillConnections(ctx context.Context) context.Context {
 
 // RunUmbrella returns the Agent or Team whose connections run uses, failing
 // closed when the run no longer acts under it.
-func (e *Engine) RunUmbrella(ctx context.Context, run *runtime.AgentRun) (ObjectiveOwner, error) {
-	return runtime.RunUmbrella(ctx, e, run)
+func (e *Engine) RunUmbrella(ctx context.Context, run *models.AgentRun) (ObjectiveOwner, error) {
+	return models.RunUmbrella(ctx, e, run)
 }
 
 // RunSkillActor is the actor run activates and resolves Skills as.
-func RunSkillActor(run *runtime.AgentRun) skill.RunActor { return runtime.RunSkillActor(run) }
+func RunSkillActor(run *models.AgentRun) skill.RunActor { return models.RunSkillActor(run) }
 
 // WithSkillRunActor marks ctx as acting for one run so activation and exact
 // action resolution through it include that run's host bindings.
@@ -4667,9 +4686,9 @@ func (e *Engine) ActivateTeamSkillsForAgent(ctx context.Context, scope skill.Sco
 	if err != nil {
 		return nil, err
 	}
-	return runtime.AuthorizeTeamSkillActivation(ctx, e, &runtime.AgentRun{
-		Scope:           runtime.Scope{Kind: scope.Kind, ID: scope.ID},
-		Owner:           runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: teamDeploymentID},
+	return skillbinding.AuthorizeTeamSkillActivation(ctx, e, &models.AgentRun{
+		Scope:           models.Scope{Kind: scope.Kind, ID: scope.ID},
+		Owner:           models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: teamDeploymentID},
 		AssignedAgentID: agentDeploymentID,
 	}, activation)
 }
@@ -4745,8 +4764,8 @@ func (e *Engine) CreateAgentDeployment(ctx context.Context, deployment *kernelag
 		return nil, nil, err
 	}
 	person := actingPerson(actorType, actorID)
-	e.ensureDeploymentHasSpace(ctx, created.Scope, person, runtime.SpaceMemberAgent, created.ID)
-	if _, ensureErr := e.ensureAgentControlConversation(ctx, created, person); ensureErr != nil && !errors.Is(ensureErr, runtime.ErrNoDefaultSpace) {
+	e.ensureDeploymentHasSpace(ctx, created.Scope, person, models.SpaceMemberAgent, created.ID)
+	if _, ensureErr := e.ensureAgentControlConversation(ctx, created, person); ensureErr != nil && !errors.Is(ensureErr, models.ErrNoDefaultSpace) {
 		return created, activation, ensureErr
 	}
 	return created, activation, nil
@@ -4761,7 +4780,7 @@ func (e *Engine) CreateAgentDeploymentInSpace(ctx context.Context, spaceID strin
 	if deployment == nil {
 		return nil, nil, errors.New("agent deployment is required")
 	}
-	scope := runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
+	scope := models.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
 	if _, err := e.spaces.GetSpace(ctx, scope, spaceID); err != nil {
 		return nil, nil, err
 	}
@@ -4769,7 +4788,7 @@ func (e *Engine) CreateAgentDeploymentInSpace(ctx context.Context, spaceID strin
 	if err != nil {
 		return nil, nil, err
 	}
-	if _, _, err := e.spaces.PutSpaceMember(ctx, runtime.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: runtime.SpaceMemberAgent, MemberID: created.ID}); err != nil {
+	if _, _, err := e.spaces.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: models.SpaceMemberAgent, MemberID: created.ID}); err != nil {
 		return created, activation, err
 	}
 	if _, err := e.ensureAgentControlConversation(ctx, created, actingPerson(actorType, actorID)); err != nil {
@@ -4807,23 +4826,23 @@ func (e *Engine) ensureAgentControlConversationAfterWrite(ctx context.Context, d
 	if deployment == nil {
 		return
 	}
-	if _, err := e.ensureAgentControlConversation(ctx, deployment, person); err != nil && !errors.Is(err, runtime.ErrNoDefaultSpace) && e.logger != nil {
+	if _, err := e.ensureAgentControlConversation(ctx, deployment, person); err != nil && !errors.Is(err, models.ErrNoDefaultSpace) && e.logger != nil {
 		e.logger.Warnw("failed to ensure Agent control conversation", "deploymentId", deployment.ID, "error", err)
 	}
 }
 
 // ensureAgentControlConversation creates the control conversation in the
 // Agent's first space, else in the default space of person.
-func (e *Engine) ensureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment, person string) (*runtime.Conversation, error) {
+func (e *Engine) ensureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment, person string) (*models.Conversation, error) {
 	if e == nil || e.conversations == nil || deployment == nil {
 		return nil, errors.New("Agent control conversation service is unavailable")
 	}
-	scope := runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
-	conversation, _, err := e.conversations.CreateConversation(ctx, runtime.CreateConversationRequest{
+	scope := models.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
+	conversation, _, err := e.conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope:          scope,
-		Owner:          runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: deployment.ID},
+		Owner:          models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deployment.ID},
 		Title:          "Agent control",
-		Origin:         &runtime.ConversationReference{Kind: runtime.ConversationReferenceAgentControl, ID: agentControlReferenceID(deployment.ID)},
+		Origin:         &models.ConversationReference{Kind: models.ConversationReferenceAgentControl, ID: agentControlReferenceID(deployment.ID)},
 		CreatedBy:      person,
 		IdempotencyKey: "agent-control:" + deployment.ID,
 	})
@@ -4839,7 +4858,7 @@ func agentControlReferenceID(deploymentID string) string {
 }
 
 func AgentApprovalsConversationReferenceID(owner ObjectiveOwner) string {
-	return runtime.AgentApprovalsConversationReferenceID(owner)
+	return models.AgentApprovalsConversationReferenceID(owner)
 }
 
 func (e *Engine) UpdateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
@@ -4942,7 +4961,7 @@ func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kerneltea
 	if deployment == nil {
 		return nil, nil, errors.New("team deployment is required")
 	}
-	space, err := e.spaces.DefaultSpace(ctx, runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, actingPerson(actorType, actorID))
+	space, err := e.spaces.DefaultSpace(ctx, models.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, actingPerson(actorType, actorID))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4963,7 +4982,7 @@ func (e *Engine) CreateTeamDeploymentInSpace(ctx context.Context, spaceID string
 	if deployment == nil {
 		return nil, nil, errors.New("team deployment is required")
 	}
-	if err := e.spaces.CheckSpaceAgents(ctx, runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, spaceID, teamRosterAgents(deployment.Roster)); err != nil {
+	if err := e.spaces.CheckSpaceAgents(ctx, models.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, spaceID, teamRosterAgents(deployment.Roster)); err != nil {
 		return nil, nil, err
 	}
 	created, activation, err := e.teams.CreateDeployment(ctx, deployment, actorType, actorID, reason)
@@ -4976,8 +4995,8 @@ func (e *Engine) CreateTeamDeploymentInSpace(ctx context.Context, spaceID string
 // placeTeam runs after the Team's create has committed: it joins the space.
 // A failure is logged, not returned; the Team exists.
 func (e *Engine) placeTeam(ctx context.Context, team *kernelteam.Deployment, spaceID string) {
-	scope := runtime.Scope{Kind: team.Scope.Kind, ID: team.Scope.ID}
-	_, _, err := e.spaces.PutSpaceMember(ctx, runtime.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: runtime.SpaceMemberTeam, MemberID: team.ID})
+	scope := models.Scope{Kind: team.Scope.Kind, ID: team.Scope.ID}
+	_, _, err := e.spaces.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: models.SpaceMemberTeam, MemberID: team.ID})
 	if err != nil && e.logger != nil {
 		e.logger.Warnw("team was not placed in a space", "deploymentId", team.ID, "spaceId", spaceID, "error", err)
 	}
@@ -4997,11 +5016,11 @@ func teamRosterAgents(roster []kernelteam.RosterAssignment) []string {
 // space: a host provisions Agents before any space exists and adds them to
 // spaces itself. Any other failure is logged, not returned; the deployment
 // exists.
-func (e *Engine) ensureDeploymentHasSpace(ctx context.Context, scope skill.ScopeReference, person string, memberType runtime.SpaceMemberType, deploymentID string) {
+func (e *Engine) ensureDeploymentHasSpace(ctx context.Context, scope skill.ScopeReference, person string, memberType models.SpaceMemberType, deploymentID string) {
 	if e == nil || e.spaces == nil {
 		return
 	}
-	if _, err := e.spaces.EnsureMemberHasSpace(ctx, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, person, memberType, deploymentID); err != nil && !errors.Is(err, runtime.ErrNoDefaultSpace) && e.logger != nil {
+	if _, err := e.spaces.EnsureMemberHasSpace(ctx, models.Scope{Kind: scope.Kind, ID: scope.ID}, person, memberType, deploymentID); err != nil && !errors.Is(err, models.ErrNoDefaultSpace) && e.logger != nil {
 		e.logger.Warnw("deployment was not placed in a space", "deploymentId", deploymentID, "type", memberType, "error", err)
 	}
 }
@@ -5023,7 +5042,7 @@ func (e *Engine) UpdateTeamDeployment(ctx context.Context, deployment *kerneltea
 			joining := slices.DeleteFunc(teamRosterAgents(deployment.Roster), func(agentID string) bool {
 				return slices.Contains(teamRosterAgents(current.Roster), agentID)
 			})
-			if err := e.spaces.CheckTeamAgents(ctx, runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, deployment.ID, joining); err != nil {
+			if err := e.spaces.CheckTeamAgents(ctx, models.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, deployment.ID, joining); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -5091,22 +5110,22 @@ func (e *Engine) ValidateSkillOutput(ctx context.Context, action *skill.BoundAct
 	return e.skills.ValidateOutput(ctx, action, output)
 }
 
-func (e *Engine) ResolveApproval(ctx context.Context, req runtime.ResolveApprovalRequest) (*runtime.ApprovalResolutionResult, error) {
+func (e *Engine) ResolveApproval(ctx context.Context, req action.ResolveApprovalRequest) (*models.ApprovalResolutionResult, error) {
 	return e.approvals.Resolve(ctx, req)
 }
 
-func (e *Engine) GetActionCall(ctx context.Context, scope runtime.Scope, actionID string) (*runtime.ActionCall, error) {
+func (e *Engine) GetActionCall(ctx context.Context, scope models.Scope, actionID string) (*models.ActionCall, error) {
 	return e.store.GetActionCall(ctx, scope, actionID)
 }
 
-func (e *Engine) ListActionCalls(ctx context.Context, filter runtime.ActionFilter) ([]*runtime.ActionCall, error) {
+func (e *Engine) ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
 	return e.store.ListActionCalls(ctx, filter)
 }
 
-func (e *Engine) GetApproval(ctx context.Context, scope runtime.Scope, approvalID string) (*runtime.ApprovalCheckpoint, error) {
+func (e *Engine) GetApproval(ctx context.Context, scope models.Scope, approvalID string) (*models.ApprovalCheckpoint, error) {
 	return e.store.GetApproval(ctx, scope, approvalID)
 }
 
-func (e *Engine) ListApprovals(ctx context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
+func (e *Engine) ListApprovals(ctx context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
 	return e.store.ListApprovals(ctx, filter)
 }
