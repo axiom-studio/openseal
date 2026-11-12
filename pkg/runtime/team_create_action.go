@@ -319,7 +319,7 @@ func teamMembersMaximumRisk(members []resolvedTeamMember) capability.RiskLevel {
 	ceiling := capability.RiskLevelWrite
 	for _, member := range members {
 		risk := member.definition.Authority.MaximumRisk
-		if teamSkillRiskRank(risk) < 1<<30 && teamSkillRiskRank(risk) > teamSkillRiskRank(ceiling) {
+		if risk.Rank() >= 0 && risk.Rank() > ceiling.RankUnknownHighest() {
 			ceiling = risk
 		}
 	}

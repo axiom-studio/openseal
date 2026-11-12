@@ -154,7 +154,7 @@ func constrainEmbedSessionActions(run *AgentRun, actions []skill.ModelAction) []
 }
 
 func embedAuthorityAllows(authority map[string]interface{}, bindingID, action string, risk skill.RiskLevel) bool {
-	if authority == nil || embedRiskRank(risk) > embedRiskRank(skill.RiskLevel(strings.TrimSpace(fmt.Sprint(authority["maximumActionRisk"])))) {
+	if authority == nil || risk.RankUnknownHighest() > skill.RiskLevel(strings.TrimSpace(fmt.Sprint(authority["maximumActionRisk"]))).RankUnknownHighest() {
 		return false
 	}
 	grants, _ := authority["actionGrants"].([]interface{})
@@ -165,21 +165,4 @@ func embedAuthorityAllows(authority map[string]interface{}, bindingID, action st
 		}
 	}
 	return false
-}
-
-func embedRiskRank(value skill.RiskLevel) int {
-	switch value {
-	case skill.RiskLevelRead:
-		return 1
-	case skill.RiskLevelWrite:
-		return 2
-	case skill.RiskLevelExternal:
-		return 3
-	case skill.RiskLevelProduction:
-		return 4
-	case skill.RiskLevelDestructive:
-		return 5
-	default:
-		return 100
-	}
 }

@@ -682,7 +682,7 @@ func validateSkillBindingArguments(definition *skill.Definition, args skillBindi
 			return fmt.Errorf("binding action %q is not a unique action on the exact Skill definition", name)
 		}
 		seen[name] = true
-		if skillRiskRank(action.Risk) > skillRiskRank(args.MaximumRisk) {
+		if action.Risk.RankUnknownHighest() > args.MaximumRisk.RankUnknownHighest() {
 			return fmt.Errorf("binding action %s exceeds maximum risk", name)
 		}
 		for _, requirement := range action.Credentials {
@@ -1026,23 +1026,6 @@ func sameManagedSkillBinding(left, right *skill.Binding) bool {
 
 func skillBindingActionResult(operation string, binding *skill.Binding, replayed bool) map[string]interface{} {
 	return map[string]interface{}{"resourceType": "skill_binding", "operation": operation, "replayed": replayed, "binding": binding}
-}
-
-func skillRiskRank(value skill.RiskLevel) int {
-	switch value {
-	case skill.RiskLevelRead:
-		return 1
-	case skill.RiskLevelWrite:
-		return 2
-	case skill.RiskLevelExternal:
-		return 3
-	case skill.RiskLevelProduction:
-		return 4
-	case skill.RiskLevelDestructive:
-		return 5
-	default:
-		return 100
-	}
 }
 
 func isSkillBindingAction(bound *skill.BoundAction) bool {

@@ -399,7 +399,7 @@ func agentGrantsMaximumRisk(base capability.RiskLevel, grants []resolvedAgentSki
 	}
 	for _, resolved := range grants {
 		risk := resolved.grant.MaximumRisk
-		if teamSkillRiskRank(risk) < 1<<30 && teamSkillRiskRank(risk) > teamSkillRiskRank(ceiling) {
+		if risk.Rank() >= 0 && risk.Rank() > ceiling.RankUnknownHighest() {
 			ceiling = risk
 		}
 	}
@@ -525,7 +525,7 @@ func catalogGrantRisk(definition *skill.Definition, allowedActions []string) ski
 		if !ok {
 			continue
 		}
-		if rank := teamSkillRiskRank(action.Risk); rank < 1<<30 && rank > teamSkillRiskRank(ceiling) {
+		if rank := action.Risk.Rank(); rank >= 0 && rank > ceiling.RankUnknownHighest() {
 			ceiling = action.Risk
 		}
 	}

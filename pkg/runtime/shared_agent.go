@@ -631,7 +631,7 @@ func (i *AgentInstaller) planSharedAgentUpdate(ctx context.Context, request Shar
 	}
 	for index := range preview.Changes {
 		change := &preview.Changes[index]
-		if change.Kind == SharedAgentChangeSkillAdded && teamSkillRiskRank(diff.risks[change.Target]) > teamSkillRiskRank(preview.Risk.From) {
+		if change.Kind == SharedAgentChangeSkillAdded && diff.risks[change.Target].RankUnknownHighest() > preview.Risk.From.RankUnknownHighest() {
 			change.RiskUp = true
 		}
 	}
@@ -735,7 +735,7 @@ func (i *AgentInstaller) resolveSharedAgentSkillDiff(ctx context.Context, scope 
 		}
 		risk := shared.grant.grant.MaximumRisk
 		if existed {
-			if old, ok := result[bindingID]; ok && teamSkillRiskRank(risk) > teamSkillRiskRank(old) {
+			if old, ok := result[bindingID]; ok && risk.RankUnknownHighest() > old.RankUnknownHighest() {
 				change.RiskUp = true
 			}
 		} else {
@@ -770,7 +770,7 @@ func (i *AgentInstaller) resolveSharedAgentSkillDiff(ctx context.Context, scope 
 	}
 	diff.ceiling = capability.RiskLevelRead
 	for _, risk := range result {
-		if rank := teamSkillRiskRank(risk); rank < 1<<30 && rank > teamSkillRiskRank(diff.ceiling) {
+		if rank := risk.Rank(); rank >= 0 && rank > diff.ceiling.RankUnknownHighest() {
 			diff.ceiling = risk
 		}
 	}

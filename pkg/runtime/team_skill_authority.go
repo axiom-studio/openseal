@@ -218,26 +218,9 @@ func (a *teamSkillAuthority) allowsRisk(risk capability.RiskLevel) bool {
 		boundaries = append(boundaries, *a.agent.Restrictions.MaximumRisk)
 	}
 	for _, boundary := range boundaries {
-		if boundary != "" && teamSkillRiskRank(boundary) < teamSkillRiskRank(maximum) {
+		if boundary != "" && boundary.RankUnknownHighest() < maximum.RankUnknownHighest() {
 			maximum = boundary
 		}
 	}
-	return teamSkillRiskRank(risk) <= teamSkillRiskRank(maximum)
-}
-
-func teamSkillRiskRank(risk capability.RiskLevel) int {
-	switch risk {
-	case capability.RiskLevelRead:
-		return 0
-	case capability.RiskLevelWrite:
-		return 1
-	case capability.RiskLevelExternal:
-		return 2
-	case capability.RiskLevelProduction:
-		return 3
-	case capability.RiskLevelDestructive:
-		return 4
-	default:
-		return 1 << 30
-	}
+	return risk.RankUnknownHighest() <= maximum.RankUnknownHighest()
 }

@@ -198,7 +198,7 @@ func (v *staticVerifier) verifyActions() {
 		if !resolved.Allowed {
 			v.add(path, "action.not_authorized", "exact Skill action is not allowed by its binding", bindingPath)
 		}
-		if riskRank(resolved.Risk) > riskRank(resolved.MaximumRisk) {
+		if resolved.Risk.RankUnknownHighest() > resolved.MaximumRisk.RankUnknownHighest() {
 			v.add(path, "action.risk_exceeds_binding", fmt.Sprintf("action risk %s exceeds binding maximum %s", resolved.Risk, resolved.MaximumRisk), bindingPath)
 		}
 		for _, requirement := range resolved.RequiredCredentials {
@@ -328,23 +328,6 @@ func (v *staticVerifier) minimumActions(id string, visiting map[string]bool) int
 		minimum++
 	}
 	return minimum
-}
-
-func riskRank(value capability.RiskLevel) int {
-	switch value {
-	case capability.RiskLevelRead:
-		return 1
-	case capability.RiskLevelWrite:
-		return 2
-	case capability.RiskLevelExternal:
-		return 3
-	case capability.RiskLevelProduction:
-		return 4
-	case capability.RiskLevelDestructive:
-		return 5
-	default:
-		return 99
-	}
 }
 
 func isMutatingSideEffect(value capability.SideEffect) bool {

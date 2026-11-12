@@ -35,6 +35,15 @@ func (r RiskLevel) Rank() int {
 	}
 }
 
+// RankUnknownHighest is Rank, except that a level that is not one of the five
+// ranks above destructive, so an unknown risk never fits under a ceiling.
+func (r RiskLevel) RankUnknownHighest() int {
+	if rank := r.Rank(); rank >= 0 {
+		return rank
+	}
+	return 5
+}
+
 type SideEffect string
 
 const (
