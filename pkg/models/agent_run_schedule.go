@@ -379,6 +379,10 @@ func RunAttemptBudgetAtLimit(run *AgentRun) bool {
 	return run != nil && run.Budget != nil && run.Budget.MaxAttempts > 0 && run.BudgetUsage.Attempts >= run.Budget.MaxAttempts
 }
 
+func RunAttemptBudgetExceeded(run *AgentRun) bool {
+	return run != nil && run.Budget != nil && run.Budget.MaxAttempts > 0 && run.BudgetUsage.Attempts > run.Budget.MaxAttempts
+}
+
 func agentRunEffectivePriority(run *AgentRun, now time.Time, agingInterval time.Duration) int64 {
 	if agingInterval <= 0 {
 		agingInterval = time.Minute

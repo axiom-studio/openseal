@@ -113,6 +113,10 @@ func runAttemptBudgetAtLimit(run *AgentRun) bool {
 	return models.RunAttemptBudgetAtLimit(run)
 }
 
+func runAttemptBudgetExceeded(run *AgentRun) bool {
+	return models.RunAttemptBudgetExceeded(run)
+}
+
 func invalidEntry(format string, args ...interface{}) error {
 	return models.InvalidSessionEntryf(format, args...)
 }

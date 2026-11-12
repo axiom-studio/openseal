@@ -183,7 +183,3 @@ func (s *AgentRunScheduler) RenewLease(ctx context.Context, scope Scope, runID, 
 	}
 	return s.store.RenewAgentRunLease(ctx, scope, runID, workerID, s.now(), leaseDuration)
 }
-
-func runAttemptBudgetExceeded(run *AgentRun) bool {
-	return run != nil && run.Budget != nil && run.Budget.MaxAttempts > 0 && run.BudgetUsage.Attempts > run.Budget.MaxAttempts
-}
