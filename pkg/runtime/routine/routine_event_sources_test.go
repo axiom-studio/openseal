@@ -1,4 +1,4 @@
-package runtime
+package routine_test
 
 import (
 	"reflect"

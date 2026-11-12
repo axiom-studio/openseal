@@ -1,4 +1,4 @@
-package runtime
+package activity_test
 
 import (
 	"github.com/axiom-studio/openseal/pkg/models"

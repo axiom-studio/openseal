@@ -1,4 +1,4 @@
-package runtime
+package artifactcatalog_test
 
 import (
 	"context"

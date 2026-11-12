@@ -1,4 +1,4 @@
-package runtime
+package modelstep_test
 
 import (
 	"regexp"

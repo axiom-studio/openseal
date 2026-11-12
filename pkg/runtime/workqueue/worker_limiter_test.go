@@ -1,4 +1,4 @@
-package runtime
+package workqueue_test
 
 import (
 	"sync"

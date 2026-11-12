@@ -1,4 +1,4 @@
-package runtime
+package activity_test
 
 import (
 	"context"
