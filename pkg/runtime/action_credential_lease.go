@@ -2,81 +2,19 @@ package runtime
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-const (
-	ActionCredentialLeaseVersion    = "openseal.action-credential-lease/v2"
-	MaximumActionCredentialLeaseTTL = 5 * time.Minute
-)
-
 var (
-	ErrActionCredentialLeaseInvalid  = errors.New("action credential lease is invalid")
-	ErrActionCredentialLeaseExpired  = errors.New("action credential lease is expired")
-	ErrActionCredentialLeaseMismatch = errors.New("action credential lease does not match the expected authority")
-	ErrActionCredentialLeaseReplay   = errors.New("action credential lease was already consumed")
+	ErrActionCredentialLeaseReplay = errors.New("action credential lease was already consumed")
 )
-
-// ActionLeaseIdentity binds credential resolution to one immutable snapshot of
-// a claimed ActionCall. Renewing, releasing, or reclaiming the durable action
-// lease changes its revision, worker, expiry, or attempt and therefore changes
-// this identity.
-type ActionLeaseIdentity struct {
-	ID                 string    `json:"id"`
-	ActionCallRevision int64     `json:"actionCallRevision"`
-	Attempt            int       `json:"attempt"`
-	WorkerID           string    `json:"workerId"`
-	ExpiresAt          time.Time `json:"expiresAt"`
-}
-
-// ActionCredentialFieldReference names the exact fields a host may resolve
-// from one opaque credential reference. It contains identifiers only—never a
-// resolved value. Fields are canonical, sorted, and unique.
-type ActionCredentialFieldReference struct {
-	Name      string                    `json:"name"`
-	Reference skill.CredentialReference `json:"reference"`
-	Fields    []string                  `json:"fields"`
-}
-
-// ActionCredentialLease is the complete product-neutral authority statement
-// for one just-in-time credential resolution. It is intentionally map-free so
-// its canonical JSON representation can be signed consistently by hosts.
-type ActionCredentialLease struct {
-	Version         string              `json:"version"`
-	TenantID        string              `json:"tenantId"`
-	Scope           Scope               `json:"scope"`
-	RunID           string              `json:"runId"`
-	ActionCallID    string              `json:"actionCallId"`
-	ActionLease     ActionLeaseIdentity `json:"actionLease"`
-	SkillID         string              `json:"skillId"`
-	SkillVersion    string              `json:"skillVersion"`
-	Action          string              `json:"action"`
-	Transport       string              `json:"transport"`
-	BindingOwnerID  string              `json:"bindingOwnerId"`
-	BindingID       string              `json:"bindingId"`
-	BindingRevision int64               `json:"bindingRevision"`
-	AssignedAgentID string              `json:"assignedAgentId"`
-	// ActingUser is the run's ActingUser at issue; redemption requires it
-	// to still match the run.
-	ActingUser  string                           `json:"actingUser,omitempty"`
-	Credentials []ActionCredentialFieldReference `json:"credentials"`
-	Issuer      string                           `json:"issuer"`
-	Audience    string                           `json:"audience"`
-	IssuedAt    time.Time                        `json:"issuedAt"`
-	ExpiresAt   time.Time                        `json:"expiresAt"`
-	Nonce       string                           `json:"nonce"`
-}
 
 type ActionCredentialLeaseSignature struct {
 	Algorithm string `json:"algorithm"`
@@ -141,51 +79,6 @@ func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*Acti
 	return lease, nil
 }
 
-func (l *ActionCredentialLease) Validate() error {
-	if l == nil || l.Version != ActionCredentialLeaseVersion || l.Scope.Validate() != nil {
-		return fmt.Errorf("%w: version and scope are required", ErrActionCredentialLeaseInvalid)
-	}
-	identifiers := []string{l.TenantID, l.RunID, l.ActionCallID, l.ActionLease.ID, l.ActionLease.WorkerID, l.SkillID, l.SkillVersion, l.Action, l.Transport, l.BindingOwnerID, l.BindingID, l.AssignedAgentID, l.Issuer, l.Audience, l.Nonce}
-	for _, value := range identifiers {
-		if !validLeaseIdentifier(value, 512) {
-			return fmt.Errorf("%w: an identity field is empty or malformed", ErrActionCredentialLeaseInvalid)
-		}
-	}
-	if len(l.Nonce) < 16 {
-		return fmt.Errorf("%w: nonce must contain at least 16 characters", ErrActionCredentialLeaseInvalid)
-	}
-	if l.Scope.Kind == "tenant" && l.Scope.ID != l.TenantID {
-		return fmt.Errorf("%w: tenant does not match scope", ErrActionCredentialLeaseMismatch)
-	}
-	if l.BindingRevision < 1 || l.ActionLease.ActionCallRevision < 1 || l.ActionLease.Attempt < 1 || l.IssuedAt.IsZero() || l.ExpiresAt.IsZero() || l.ActionLease.ExpiresAt.IsZero() || !l.ExpiresAt.After(l.IssuedAt) || l.ExpiresAt.After(l.ActionLease.ExpiresAt) || l.ExpiresAt.Sub(l.IssuedAt) > MaximumActionCredentialLeaseTTL {
-		return fmt.Errorf("%w: revisions, attempt, and expiry are invalid", ErrActionCredentialLeaseInvalid)
-	}
-	if len(l.Credentials) == 0 {
-		return fmt.Errorf("%w: at least one credential field reference is required", ErrActionCredentialLeaseInvalid)
-	}
-	previous := ""
-	for _, credential := range l.Credentials {
-		if !validLeaseIdentifier(credential.Name, 128) || !validLeaseIdentifier(credential.Reference.Kind, 128) || !validOpaqueCredentialReference(credential.Reference.ID, 512) || credential.Name <= previous || len(credential.Fields) == 0 {
-			return fmt.Errorf("%w: credential references must be sorted, unique, and opaque", ErrActionCredentialLeaseInvalid)
-		}
-		previous = credential.Name
-		previousField := ""
-		for _, field := range credential.Fields {
-			if !validCredentialField(field) || field <= previousField {
-				return fmt.Errorf("%w: credential fields must be sorted and unique", ErrActionCredentialLeaseInvalid)
-			}
-			previousField = field
-		}
-	}
-	expectedID := computeActionLeaseIdentity(l.Scope, l.ActionCallID, l.RunID, ActionLeaseIdentity{
-		ActionCallRevision: l.ActionLease.ActionCallRevision, Attempt: l.ActionLease.Attempt, WorkerID: l.ActionLease.WorkerID, ExpiresAt: l.ActionLease.ExpiresAt,
-	})
-	if l.ActionLease.ID != expectedID {
-		return fmt.Errorf("%w: action lease identity does not match its immutable fields", ErrActionCredentialLeaseMismatch)
-	}
-	return nil
-}
-
 type ActionCredentialLeaseSigner interface {
 	SignActionCredentialLease(context.Context, []byte) (ActionCredentialLeaseSignature, error)
 }
@@ -227,30 +120,6 @@ type ActionCredentialLeaseValidationRequest struct {
 	// the host re-resolved for the lease's run (skill.Catalog.GetHostBinding).
 	// It is set only for a binding with no stored row.
 	HostBinding *skill.Binding
-}
-
-// ActionCredentialLeaseRedemptionRequest contains the host-authorized inputs
-// required to atomically revalidate and consume an already signature-verified
-// credential lease. CredentialFields contains field names only; resolved
-// credential values must never cross this persistence boundary.
-type ActionCredentialLeaseRedemptionRequest struct {
-	Lease ActionCredentialLease
-	// Transport and CredentialFields are derived by the trusted host from the
-	// exact current action definition. They are rechecked against durable
-	// ActionCall and SkillBinding authority inside the store transaction.
-	Transport        string
-	CredentialFields map[string][]string
-	// HostBinding replaces the stored binding row for a host-supplied
-	// binding; a stored row with the same identity then fails closed.
-	HostBinding *skill.Binding
-}
-
-// ActionCredentialLeaseRedeemer is the durable, product-neutral
-// single-use authority boundary for credential resolution. Implementations
-// must revalidate current action, Run, and Skill binding authority and consume
-// the nonce in one transaction before any credential value is resolved.
-type ActionCredentialLeaseRedeemer interface {
-	RedeemActionCredentialLease(context.Context, ActionCredentialLeaseRedemptionRequest) error
 }
 
 type ActionCredentialLeaseValidator struct {
@@ -355,32 +224,6 @@ func MatchActionCredentialLeaseReferences(envelope *SignedActionCredentialLease,
 	return nil
 }
 
-func matchActionCredentialLeaseCore(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string) error {
-	if call == nil || run == nil || call.Status != ActionCallStatusRunning || call.LeaseExpiresAt == nil || call.Scope != run.Scope || call.RunID != run.ID {
-		return ErrActionCredentialLeaseMismatch
-	}
-	// A heartbeat may monotonically advance the durable revision and expiry
-	// while the same worker still owns the same attempt. The signed identity
-	// remains the immutable issuance snapshot; reclaim changes attempt/owner or
-	// status and therefore still fails closed.
-	if lease.Scope != call.Scope || lease.RunID != call.RunID || lease.ActionCallID != call.ID ||
-		call.Revision < lease.ActionLease.ActionCallRevision || lease.ActionLease.Attempt != call.Attempt || lease.ActionLease.WorkerID != strings.TrimSpace(call.LeaseOwner) || canonicalLeaseTime(*call.LeaseExpiresAt).Before(lease.ActionLease.ExpiresAt) ||
-		lease.SkillID != call.SkillID || lease.SkillVersion != call.SkillVersion || lease.Action != call.Action || lease.Transport != strings.TrimSpace(transport) || lease.BindingOwnerID != call.DeploymentID ||
-		lease.BindingID != call.BindingID || lease.BindingRevision != call.BindingRevision || lease.AssignedAgentID != run.AssignedAgentID ||
-		lease.ActingUser != run.ActingUser {
-		return ErrActionCredentialLeaseMismatch
-	}
-	// A per-person account acts only for the person a run acts for.
-	if run.ActingUser == "" {
-		for _, reference := range call.CredentialRefs {
-			if skill.IsPersonCredentialReference(reference) {
-				return ErrActionCredentialLeaseMismatch
-			}
-		}
-	}
-	return nil
-}
-
 // matchActionCredentialLeaseUmbrella requires the redeemed binding, stored
 // or supplied by the host, to belong to the run's umbrella: the Agent of a
 // 1:1 run or the Team of a Team run. A run delegated to another Agent has no
@@ -393,56 +236,11 @@ func matchActionCredentialLeaseUmbrella(lease ActionCredentialLease, run *AgentR
 	return nil
 }
 
-func actionCredentialFields(references map[string]skill.CredentialReference, fields map[string][]string) ([]ActionCredentialFieldReference, error) {
-	if len(references) == 0 || len(fields) != len(references) {
-		return nil, fmt.Errorf("%w: exact fields are required for every credential reference", ErrActionCredentialLeaseMismatch)
-	}
-	names := make([]string, 0, len(references))
-	for name := range references {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	result := make([]ActionCredentialFieldReference, 0, len(names))
-	for _, name := range names {
-		selected, ok := fields[name]
-		if !ok || len(selected) == 0 {
-			return nil, fmt.Errorf("%w: credential %s has no exact field selection", ErrActionCredentialLeaseMismatch, name)
-		}
-		selected = append([]string(nil), selected...)
-		for index := range selected {
-			selected[index] = strings.TrimSpace(selected[index])
-		}
-		sort.Strings(selected)
-		result = append(result, ActionCredentialFieldReference{Name: strings.TrimSpace(name), Reference: references[name], Fields: selected})
-	}
-	for name := range fields {
-		if _, ok := references[name]; !ok {
-			return nil, fmt.Errorf("%w: unbound credential %s was requested", ErrActionCredentialLeaseMismatch, name)
-		}
-	}
-	return result, nil
-}
-
 func canonicalActionCredentialLeasePayload(lease ActionCredentialLease) ([]byte, error) {
 	if err := lease.Validate(); err != nil {
 		return nil, err
 	}
 	return json.Marshal(lease)
-}
-
-func computeActionLeaseIdentity(scope Scope, actionCallID, runID string, lease ActionLeaseIdentity) string {
-	canonical := struct {
-		Scope              Scope     `json:"scope"`
-		ActionCallID       string    `json:"actionCallId"`
-		RunID              string    `json:"runId"`
-		ActionCallRevision int64     `json:"actionCallRevision"`
-		Attempt            int       `json:"attempt"`
-		WorkerID           string    `json:"workerId"`
-		ExpiresAt          time.Time `json:"expiresAt"`
-	}{scope, actionCallID, runID, lease.ActionCallRevision, lease.Attempt, lease.WorkerID, canonicalLeaseTime(lease.ExpiresAt)}
-	encoded, _ := json.Marshal(canonical)
-	digest := sha256.Sum256(encoded)
-	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 func validateActionCredentialLeaseSignature(signature ActionCredentialLeaseSignature) error {
@@ -465,68 +263,4 @@ func cloneSignedActionCredentialLease(value *SignedActionCredentialLease) *Signe
 	result.Lease.Credentials = cloneActionCredentialFieldReferences(value.Lease.Credentials)
 	result.Signature = cloneActionCredentialLeaseSignature(value.Signature)
 	return &result
-}
-
-func cloneActionCredentialFieldReferences(values []ActionCredentialFieldReference) []ActionCredentialFieldReference {
-	result := make([]ActionCredentialFieldReference, len(values))
-	for index, value := range values {
-		result[index] = value
-		result[index].Fields = append([]string(nil), value.Fields...)
-	}
-	return result
-}
-
-func cloneActionCredentialFields(values map[string][]string) map[string][]string {
-	if values == nil {
-		return nil
-	}
-	result := make(map[string][]string, len(values))
-	for name, fields := range values {
-		result[name] = append([]string(nil), fields...)
-	}
-	return result
-}
-
-func canonicalLeaseTime(value time.Time) time.Time { return value.UTC().Round(0) }
-
-func validLeaseIdentifier(value string, maximum int) bool {
-	value = strings.TrimSpace(value)
-	if value == "" || len(value) > maximum {
-		return false
-	}
-	for _, character := range value {
-		if unicode.IsControl(character) || unicode.IsSpace(character) {
-			return false
-		}
-	}
-	return true
-}
-
-// validOpaqueCredentialReference validates a host-owned reference without
-// interpreting its provider-specific identifier. Credential-store and connection names
-// may legitimately contain spaces; signed JSON already preserves those bytes
-// without ambiguity. Leading/trailing whitespace and control characters remain
-// invalid so references retain a single canonical representation.
-func validOpaqueCredentialReference(value string, maximum int) bool {
-	if value == "" || value != strings.TrimSpace(value) || len(value) > maximum {
-		return false
-	}
-	for _, character := range value {
-		if unicode.IsControl(character) {
-			return false
-		}
-	}
-	return true
-}
-
-func validCredentialField(value string) bool {
-	if !validLeaseIdentifier(value, 256) {
-		return false
-	}
-	for _, character := range value {
-		if !(unicode.IsLetter(character) || unicode.IsDigit(character) || strings.ContainsRune("._/-[]", character)) {
-			return false
-		}
-	}
-	return true
 }

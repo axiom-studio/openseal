@@ -99,66 +99,6 @@ type ExternalConversationIngressHostRequest struct {
 	Request  *ExternalConversationIngressRequest `json:"request"`
 }
 
-// ExternalConversationIngressGateway pins one shared provider webhook to an
-// immutable Skill-owned verifier. It may live in a host/platform scope while
-// the endpoints selected from its verified routing claims remain tenant
-// scoped. Provider application secrets are supplied only by the Skill host.
-type ExternalConversationIngressGateway struct {
-	Scope Scope `json:"scope"`
-	// Owner is the Agent or Team whose binding the gateway serves;
-	// DeploymentID is always Owner.ID.
-	Owner          ObjectiveOwner                       `json:"owner"`
-	DeploymentID   string                               `json:"deploymentId"`
-	Adapter        ExternalConversationAdapterReference `json:"adapter"`
-	Provider       string                               `json:"provider"`
-	InstallationID string                               `json:"installationId,omitempty"`
-	ApplicationID  string                               `json:"applicationId,omitempty"`
-}
-
-func (g ExternalConversationIngressGateway) Validate() error {
-	if g.Scope.Validate() != nil || g.Owner.Validate() != nil || g.DeploymentID != g.Owner.ID ||
-		!validAgentReference(strings.TrimSpace(g.DeploymentID), 256) || !validOpaqueIdentifier(strings.TrimSpace(g.Provider), 128) {
-		return ErrInvalidExternalConversation
-	}
-	if (g.InstallationID != "" && !validOpaqueIdentifier(g.InstallationID, 1024)) ||
-		(g.ApplicationID != "" && (!validOpaqueIdentifier(g.ApplicationID, 1024) || g.InstallationID == "")) {
-		return ErrInvalidExternalConversation
-	}
-	if g.Scope.Kind == "platform" && (g.InstallationID != "" || g.ApplicationID != "") {
-		return fmt.Errorf("%w: platform gateway authority comes from tenant endpoint mappings", ErrInvalidExternalConversation)
-	}
-	return g.Adapter.Validate()
-}
-
-// ExternalConversationVerifiedRoute contains only routing facts asserted
-// after a Skill has authenticated the provider request. It is never populated
-// from an unverified HTTP body by the kernel or generic host.
-type ExternalConversationVerifiedRoute struct {
-	Provider       string `json:"provider"`
-	SkillID        string `json:"skillId"`
-	SkillVersion   string `json:"skillVersion"`
-	SourceIdentity string `json:"sourceIdentity,omitempty"`
-	AdapterID      string `json:"adapterId"`
-	InstallationID string `json:"installationId"`
-	ApplicationID  string `json:"applicationId,omitempty"`
-	Address        string `json:"address"`
-}
-
-func (r ExternalConversationVerifiedRoute) Validate() error {
-	for _, value := range []string{r.Provider, r.SkillID, r.SkillVersion, r.AdapterID, r.InstallationID, r.Address} {
-		if !validOpaqueIdentifier(strings.TrimSpace(value), 1024) {
-			return ErrInvalidExternalConversation
-		}
-	}
-	if r.ApplicationID != "" && !validOpaqueIdentifier(strings.TrimSpace(r.ApplicationID), 1024) {
-		return ErrInvalidExternalConversation
-	}
-	if len(r.SourceIdentity) > 1024 || strings.ContainsAny(r.SourceIdentity, "\r\n") {
-		return ErrInvalidExternalConversation
-	}
-	return nil
-}
-
 type ExternalConversationGatewayEvent struct {
 	InstallationID string                              `json:"installationId"`
 	ApplicationID  string                              `json:"applicationId,omitempty"`

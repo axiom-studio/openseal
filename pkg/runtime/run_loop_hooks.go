@@ -105,16 +105,6 @@ type FinalPark struct {
 	Park    LoopPark
 }
 
-// ReplyRunGuard fences a final reply: the reply commits only while the Run is
-// running under WorkerID's live lease with InterventionCount interventions.
-type ReplyRunGuard struct {
-	Scope             Scope
-	RunID             string
-	WorkerID          string
-	ConcurrencyKey    string
-	InterventionCount int
-}
-
 type FinalDelivery struct {
 	Run    *AgentRun
 	Step   *AgentTurn

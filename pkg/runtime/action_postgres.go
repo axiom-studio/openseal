@@ -11,6 +11,7 @@ import (
 
 	"github.com/lib/pq"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -160,7 +161,7 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 		}
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(*) FILTER (WHERE status IN ($1, $2, $3)) FROM `+s.table("action_calls")+`
 			WHERE scope_kind = $4 AND scope_id = $5 AND run_id = $6 AND turn_id = $7 AND payload->>'origin' = $8`,
-			nestedActionUnfinished[0], nestedActionUnfinished[1], nestedActionUnfinished[2],
+			models.NestedActionUnfinishedStatuses[0], models.NestedActionUnfinishedStatuses[1], models.NestedActionUnfinishedStatuses[2],
 			call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, string(ActionOriginVM)).Scan(&state.TotalCalls, &state.UnfinishedCalls); err != nil {
 			return nil, err
 		}

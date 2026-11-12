@@ -8,40 +8,7 @@ import (
 	"unicode/utf8"
 )
 
-// ConversationMessageDelivery is the durable receipt for a channel message
-// that the scheduler delivered to an already-active foreground conversation
-// Run as pending human input.
-type ConversationMessageDelivery struct {
-	ConversationID      string                  `json:"conversationId"`
-	MessageID           string                  `json:"messageId"`
-	Sequence            int64                   `json:"sequence"`
-	ThreadRootMessageID string                  `json:"threadRootMessageId,omitempty"`
-	Sender              ConversationParticipant `json:"sender"`
-}
-
 const maximumConversationFollowUpInstructionBytes = 16000
-
-func conversationFollowUpInterventionID(scope Scope, messageID string) string {
-	return stableConversationID(scope, "conversation-follow-up:"+messageID, "intervention")
-}
-
-// conversationRunFollowUps returns the messages delivered to this foreground
-// Run after its trigger, in delivery order.
-func conversationRunFollowUps(run *AgentRun) []ConversationMessageDelivery {
-	if run == nil {
-		return nil
-	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	var result []ConversationMessageDelivery
-	for _, intervention := range run.PendingInterventions {
-		delivery := intervention.ConversationMessage
-		if delivery != nil && delivery.ConversationID == conversationID && delivery.MessageID != "" &&
-			intervention.ID == conversationFollowUpInterventionID(run.Scope, delivery.MessageID) {
-			result = append(result, *delivery)
-		}
-	}
-	return result
-}
 
 func conversationRunHasFollowUp(run *AgentRun, messageID string) bool {
 	for _, delivery := range conversationRunFollowUps(run) {

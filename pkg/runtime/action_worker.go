@@ -532,26 +532,6 @@ func loopActionOwned(run *AgentRun, call *ActionCall, now time.Time) bool {
 		run.LeaseOwner != "" && run.LeaseOwner == call.LeaseOwner && run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(now)
 }
 
-// runOwnsActionDependency reports whether run waits on call as its action
-// dependency, active or paused. Stores use it to keep a paused dependency
-// unclaimed; loop calls are never a Run's dependency.
-func runOwnsActionDependency(run *AgentRun, call *ActionCall) bool {
-	if run == nil || call == nil || call.Origin == ActionOriginLoop || run.Scope != call.Scope || run.ID != call.RunID {
-		return false
-	}
-	condition := run.WakeCondition
-	if run.Status == AgentRunStatusPaused && run.PausedFrom == AgentRunStatusWaitingForDependency {
-		condition = run.PausedWakeCondition
-	} else if run.Status != AgentRunStatusWaitingForDependency {
-		return false
-	}
-	return condition != nil && condition.Type == "action" && condition.Reference == call.ID
-}
-
-func runHasPausedActionDependency(run *AgentRun, call *ActionCall) bool {
-	return run != nil && run.Status == AgentRunStatusPaused && runOwnsActionDependency(run, call)
-}
-
 func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bound *skill.BoundAction, credentials map[string]string, output map[string]interface{}, executionErr error, workerID string, dispatched bool) (*ActionExecutionResult, error) {
 	// Retry the outcome, not the external operation, when an operator updates
 	// the Run between our observation and its atomic completion transaction.

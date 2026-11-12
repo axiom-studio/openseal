@@ -10,8 +10,6 @@ import (
 )
 
 const (
-	// routingReasonContextKey carries the router's reason onto the answer.
-	routingReasonContextKey  = "routingReason"
 	teamRoutingRunContextKey = "routingRunId"
 	teamMemberRunGoal        = "Respond to a Team channel message"
 	teamRoutingRunGoal       = "Route a Team channel message"
@@ -24,35 +22,11 @@ const teamChannelRules = "You are one member of this Team channel and answer und
 	"Never @mention teammates just to agree, thank or acknowledge. " +
 	"Prefer a reaction (👀 picked up, ✅ done, 👍 agree) over a filler message."
 
-// isTeamMemberRun reports whether run is a Team member's answer to a Team
-// channel message: an ordinary conversation Run, assigned to that member.
-func isTeamMemberRun(run *AgentRun) bool {
-	return run != nil && run.Kind == RunKindConversation && run.Owner.Type == OwnerTypeTeam &&
-		strings.TrimSpace(run.AssignedAgentID) != ""
-}
-
 // isTeamRoutingRun reports whether run is a Team's routing Run: a
 // conversation Run with no assigned Agent, which starts member Runs.
 func isTeamRoutingRun(run *AgentRun) bool {
 	return run != nil && run.Kind == RunKindConversation && run.Owner.Type == OwnerTypeTeam &&
 		strings.TrimSpace(run.AssignedAgentID) == ""
-}
-
-// ConversationRunLane is a conversation Run's concurrency key: the channel or
-// one thread of it, then the Agent working in it. It is the same rule for an
-// Agent's own chat and a Team member's, so once a member is assigned its Run
-// is an Agent Run like any other. Only a Team's unassigned routing Run keeps
-// the bare channel lane. Hosts that verify a Run's chat origin compare against
-// it.
-func ConversationRunLane(conversationID, threadRoot, assignedAgentID string) string {
-	lane := conversationID
-	if threadRoot != "" {
-		lane += ":thread:" + threadRoot
-	}
-	if assignedAgentID != "" {
-		lane += ":agent:" + assignedAgentID
-	}
-	return lane
 }
 
 func conversationRoutingKey(scope Scope, conversationID, triggerID string) string {

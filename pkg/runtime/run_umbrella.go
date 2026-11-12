@@ -73,21 +73,6 @@ func RunUmbrella(ctx context.Context, roster TeamRosterReader, run *AgentRun) (O
 	return ObjectiveOwner{}, ErrRunUmbrellaUnavailable
 }
 
-// RunSkillActor is the actor a run activates and resolves Skills as: its
-// umbrella is always run.Owner, and it carries the person the run acts for.
-// An Agent-owned run whose assigned Agent is another Agent (a delegated
-// request, a completion review) gets an invalid actor, so it has no host
-// bindings and no lease: a delegated Agent never lends its own connections.
-// It does not check the roster: callers that use connections also call
-// RunUmbrella or the Team authority checks.
-func RunSkillActor(run *AgentRun) skill.RunActor {
-	if run == nil {
-		return skill.RunActor{}
-	}
-	// RunActor.Valid refuses an Agent umbrella that is not the acting Agent.
-	return skill.RunActor{RunID: run.ID, AgentID: run.AssignedAgentID, Umbrella: SkillUmbrella(run.Owner), ActingUser: run.ActingUser}
-}
-
 // ConversationUmbrella is the umbrella of every run in conversation.
 func ConversationUmbrella(conversation *Conversation) ObjectiveOwner {
 	if conversation == nil {
@@ -102,11 +87,6 @@ func TaskUmbrella(task *ConversationTask) (ObjectiveOwner, string) {
 		return ObjectiveOwner{}, ""
 	}
 	return task.Owner, task.TargetAgentID
-}
-
-// SkillUmbrella converts an owner to the skill package's umbrella.
-func SkillUmbrella(owner ObjectiveOwner) skill.Umbrella {
-	return skill.Umbrella{Kind: skill.UmbrellaKind(owner.Type), ID: owner.ID}
 }
 
 // OwnerOfSkillUmbrella converts the skill package's umbrella to an owner.

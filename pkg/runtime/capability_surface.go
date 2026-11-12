@@ -1,8 +1,6 @@
 package runtime
 
 import (
-	"encoding/json"
-	"maps"
 	"sort"
 	"strings"
 )
@@ -16,49 +14,11 @@ import (
 // compaction that summarizes a load entry carries its tools over
 // (CompactionEntry.CarriedTools); they are then callable from the start.
 
-// SurfacedTool is the frozen definition of one tool a load made callable.
-type SurfacedTool struct {
-	// Capability is the canonical capability ID (action:<name> or
-	// workspace:<operation>).
-	Capability  string                 `json:"capability"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"inputSchema"`
-}
-
 // SurfacedLoad is the tools that became callable at one entry of the path.
 // EntryID "" holds the tools carried over the latest compaction.
 type SurfacedLoad struct {
 	EntryID string
 	Tools   []SurfacedTool
-}
-
-func cloneSurfacedTools(in []SurfacedTool) []SurfacedTool {
-	if in == nil {
-		return nil
-	}
-	out := make([]SurfacedTool, len(in))
-	for i, tool := range in {
-		tool.InputSchema = cloneJSONObject(tool.InputSchema)
-		out[i] = tool
-	}
-	return out
-}
-
-// cloneJSONObject deep-copies a JSON object as its encoding would decode.
-func cloneJSONObject(in map[string]interface{}) map[string]interface{} {
-	if in == nil {
-		return nil
-	}
-	encoded, err := json.Marshal(in)
-	if err != nil {
-		return maps.Clone(in)
-	}
-	var out map[string]interface{}
-	if json.Unmarshal(encoded, &out) != nil {
-		return maps.Clone(in)
-	}
-	return out
 }
 
 // surfacedTool freezes a step tool definition.
@@ -67,18 +27,6 @@ func surfacedTool(capabilityID string, tool ModelStepTool) SurfacedTool {
 		Capability: capabilityID, Name: tool.Name, Description: tool.Description,
 		InputSchema: cloneJSONObject(tool.InputSchema),
 	}
-}
-
-// ModelStepTool is the loaded-group declaration of a frozen tool.
-func (t SurfacedTool) ModelStepTool(surface string) ModelStepTool {
-	tool := ModelStepTool{
-		Name: t.Name, Description: t.Description, InputSchema: cloneJSONObject(t.InputSchema),
-		Group: ModelStepToolLoaded, Surface: surface,
-	}
-	if strings.HasPrefix(t.Capability, capabilityActionPrefix) {
-		tool.Capability = strings.TrimPrefix(t.Capability, capabilityActionPrefix)
-	}
-	return tool
 }
 
 // SurfacedOnPath is every tool callable on the path beyond harness and core:

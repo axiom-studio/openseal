@@ -237,7 +237,7 @@ func TestChildSessionSeedBoundsBriefAndKind(t *testing.T) {
 	if len(body) != maximumChildBriefBytes-1 || !utf8.ValidString(text) {
 		t.Fatalf("brief kept %d bytes (valid %v)", len(body), utf8.ValidString(text))
 	}
-	if err := seed.User.validate(); err != nil {
+	if err := seed.User.Validate(); err != nil {
 		t.Fatalf("seed entry invalid: %v", err)
 	}
 }

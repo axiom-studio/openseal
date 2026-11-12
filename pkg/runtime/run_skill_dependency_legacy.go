@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 )
@@ -88,35 +87,4 @@ func legacyEmptyJSON(postgres bool) string {
 		return `'{}'::jsonb`
 	}
 	return `'{}'`
-}
-
-func legacyAcceptedRunExecution(run *AgentRun, deployment *kernelagent.AgentDeployment, definition *kernelagent.AgentDefinition) *AcceptedRunExecution {
-	if run == nil || isTerminalAgentRunStatus(run.Status) || run.Entrypoint == "" || run.Context[AcceptedRunExecutionContextKey] != nil || deployment == nil || definition == nil || definition.Runbook == nil || deployment.ID != run.AssignedAgentID {
-		return nil
-	}
-	method := definition.Runbook
-	proved := false
-	contextID, _ := run.Context["runbookDefinitionId"].(string)
-	contextVersion, _ := run.Context["runbookDefinitionVersion"].(string)
-	if contextID != "" || contextVersion != "" {
-		if contextID != method.ID || contextVersion != method.Version {
-			return nil
-		}
-		proved = true
-	}
-	if raw, exists := run.Plan["runbook"]; exists {
-		plan, ok := raw.(map[string]interface{})
-		if !ok || plan["id"] != method.ID || plan["version"] != method.Version {
-			return nil
-		}
-		proved = true
-	}
-	if !proved || strings.TrimSpace(run.Entrypoint) != run.Entrypoint {
-		return nil
-	}
-	pin, err := NewAcceptedRunExecution(run.Scope, deployment, definition, run.Entrypoint)
-	if err != nil {
-		return nil
-	}
-	return pin
 }

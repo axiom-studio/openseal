@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"database/sql"
-	"time"
 )
 
 func (s *SQLiteStore) WithSkillRuntimeMaintenanceMutation(ctx context.Context, proof *SkillRuntimeMaintenance, mutation func(context.Context) error) error {
@@ -32,40 +31,4 @@ func (s *PostgresStore) WithSkillRuntimeMaintenanceMutation(ctx context.Context,
 		return current, executeSkillRuntimeMaintenanceMutation(ctx, proof, current, mutation)
 	})
 	return err
-}
-
-func validateMaintenanceMutationArguments(proof *SkillRuntimeMaintenance, mutation func(context.Context) error) error {
-	if proof == nil || mutation == nil {
-		return ErrSkillRuntimeMaintenanceConflict
-	}
-	return validateMaintenanceIdentity(proof.Scope, proof.SkillID)
-}
-
-func executeSkillRuntimeMaintenanceMutation(ctx context.Context, proof, current *SkillRuntimeMaintenance, mutation func(context.Context) error) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if current == nil {
-		return ErrSkillRuntimeMaintenanceConflict
-	}
-	now := time.Now().UTC()
-	if err := ValidateSkillRuntimeMaintenanceContext(WithSkillRuntimeMaintenance(ctx, proof), current, now); err != nil {
-		return err
-	}
-	deadline := now.Add(15 * time.Second)
-	if safeExpiry := current.LeaseExpiresAt.Add(-250 * time.Millisecond); safeExpiry.Before(deadline) {
-		deadline = safeExpiry
-	}
-	if !deadline.After(now) {
-		return ErrSkillRuntimeMaintenanceConflict
-	}
-	bounded, cancel := context.WithDeadline(WithSkillRuntimeMaintenance(ctx, current), deadline)
-	defer cancel()
-	if err := mutation(bounded); err != nil {
-		return err
-	}
-	if err := bounded.Err(); err != nil {
-		return err
-	}
-	return ValidateSkillRuntimeMaintenanceContext(bounded, current, time.Now().UTC())
 }

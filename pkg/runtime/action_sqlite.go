@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -193,7 +194,7 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 		}
 		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN status IN (?, ?, ?) THEN 1 ELSE 0 END), 0) FROM action_calls
 			WHERE scope_kind = ? AND scope_id = ? AND run_id = ? AND turn_id = ? AND json_extract(payload, '$.origin') = ?`,
-			nestedActionUnfinished[0], nestedActionUnfinished[1], nestedActionUnfinished[2],
+			models.NestedActionUnfinishedStatuses[0], models.NestedActionUnfinishedStatuses[1], models.NestedActionUnfinishedStatuses[2],
 			call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, string(ActionOriginVM)).Scan(&state.TotalCalls, &state.UnfinishedCalls); err != nil {
 			return nil, err
 		}

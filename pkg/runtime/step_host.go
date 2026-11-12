@@ -202,22 +202,6 @@ type HostedSkillPrompt struct {
 	Instructions    string `json:"instructions"`
 }
 
-type HostedSkillDisposition string
-
-const (
-	HostedSkillApplied    HostedSkillDisposition = "applied"
-	HostedSkillNotApplied HostedSkillDisposition = "not_applied"
-)
-
-// HostedSkillSelection is the operator-facing disposition of one prompt Skill
-// offered to a step. It records capability choice without storing hidden
-// model reasoning.
-type HostedSkillSelection struct {
-	SkillRef    string                 `json:"skillRef"`
-	Disposition HostedSkillDisposition `json:"disposition"`
-	Summary     string                 `json:"summary"`
-}
-
 // HostedAgentTarget is one active, same-scope Agent deployment eligible for
 // bounded delegation. ID is the only durable identity; DisplayName and Purpose
 // are model-facing discovery labels and are never persisted as substitutes.

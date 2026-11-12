@@ -11,15 +11,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// WorkItem asks for one pass over a family's durable work in a scope at or
-// after DueAt. Items are hints: claims, leases and fairness are always decided
-// by the store, so a duplicate or early item costs one empty pass.
-type WorkItem struct {
-	Family WorkFamily
-	Scope  Scope
-	DueAt  time.Time
-}
-
 // WorkQueue is the shared, process-independent schedule of scope passes.
 // Every replica publishes into it and consumes from it, so idle scopes cost
 // nothing: no loop, no timer and no query exists for a scope until an item
@@ -40,12 +31,6 @@ type WorkQueue interface {
 // first time it has work.
 type WorkScopeChecker interface {
 	WorkerScopeActive(ctx context.Context, scope Scope) (bool, error)
-}
-
-// workItemKey identifies the family and scope an item schedules.
-type workItemKey struct {
-	Family WorkFamily
-	Scope  Scope
 }
 
 // workPublisher coalesces scheduled items in process and publishes them in

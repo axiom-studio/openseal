@@ -11,20 +11,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-// RunbookExecutionAuditStore is the portable read boundary required to
-// reconstruct one Runbook occurrence. Implementations already persist these
-// canonical facts; the audit service creates no parallel execution state.
-type RunbookExecutionAuditStore interface {
-	GetAgentRun(context.Context, Scope, string) (*AgentRun, error)
-	ListAgentRuns(context.Context, AgentRunFilter) ([]*AgentRun, error)
-	GetRunbookActivation(context.Context, Scope, string) (*RunbookActivation, error)
-	ListAgentTurns(context.Context, AgentTurnFilter) ([]*AgentTurn, error)
-	ListActionCalls(context.Context, ActionFilter) ([]*ActionCall, error)
-	ListApprovals(context.Context, ApprovalFilter) ([]*ApprovalCheckpoint, error)
-	ListArtifacts(context.Context, ArtifactFilter) ([]*Artifact, error)
-	ListAgentRequests(context.Context, AgentRequestFilter) ([]*AgentRequest, error)
-}
-
 type RunbookExecutionAuditRun struct {
 	ID               string         `json:"id"`
 	ParentRunID      string         `json:"parentRunId,omitempty"`

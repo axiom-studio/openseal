@@ -33,11 +33,6 @@ func (s *ConversationTaskService) Promote(ctx context.Context, req ConversationT
 	return store.PromoteConversationTask(ctx, req)
 }
 
-type ConversationTaskContinuationStore interface {
-	ConversationTaskPromotionStore
-	ConversationTaskDueStore
-}
-
 type conversationTaskContinuationCursor struct {
 	createdAt time.Time
 	id        string

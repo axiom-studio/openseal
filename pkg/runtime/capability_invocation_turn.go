@@ -10,18 +10,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
-const capabilityInvocationContextKey = "capabilityInvocation"
-
 // capabilityInvocationToolCallID is the id of the one governed tool call a
 // capability invocation Run makes.
 const capabilityInvocationToolCallID = "capability-invocation"
-
-// ActionCallReader reads the authoritative ActionCall behind a governed tool
-// entry. Deterministic producers read governed output from it, never from the
-// (possibly bounded) tool result content.
-type ActionCallReader interface {
-	GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error)
-}
 
 // CapabilityInvocationStepProducer deterministically projects a typed
 // scheduled or event capability request into one governed tool call, then

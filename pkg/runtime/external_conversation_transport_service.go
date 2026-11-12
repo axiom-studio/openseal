@@ -15,13 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type ExternalConversationStore interface {
-	ExternalConversationEndpointStore
-	ExternalConversationGatewayStore
-	ExternalConversationTransportStore
-	ConversationStore
-}
-
 type ReceiveExternalConversationEventRequest struct {
 	Scope           Scope
 	EndpointID      string
@@ -401,10 +394,6 @@ func externalConversationResolvedAdapterReference(resolved *skill.BoundConversat
 		BindingID:      resolved.Binding.ID, BindingRevision: resolved.Binding.Revision,
 		AdapterID: resolved.AdapterID,
 	}
-}
-
-func externalConversationAdapterBelongsToEndpoint(endpoint, captured ExternalConversationAdapterReference) bool {
-	return endpoint.BindingID == captured.BindingID && endpoint.AdapterID == captured.AdapterID
 }
 
 func externalConversationPolicyAccepts(policy ExternalConversationPolicy, event NormalizedExternalConversationEvent) (bool, string) {

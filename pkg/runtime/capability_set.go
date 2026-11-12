@@ -44,7 +44,6 @@ const (
 
 // Capability ID prefixes.
 const (
-	capabilityActionPrefix    = "action:"
 	capabilityPromptPrefix    = "prompt:"
 	capabilityWorkspacePrefix = "workspace:"
 	capabilityRunbookPrefix   = "runbook:"

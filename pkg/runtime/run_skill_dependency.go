@@ -1,20 +1,8 @@
 package runtime
 
 import (
-	"errors"
 	"strings"
 )
-
-var ErrRunSkillDependencyUnavailable = errors.New("selected Skill executable version is unavailable")
-
-func runSkillDependencyDeployment(run *AgentRun) string {
-	// A Team-owned method may use either member or Team grants. Its immutable
-	// method does not identify which live account supplies each future action.
-	if run.Owner.Type == OwnerTypeTeam {
-		return ""
-	}
-	return run.AssignedAgentID
-}
 
 func skillRuntimeDependencyTable(runs string) string {
 	if strings.HasSuffix(runs, `"agent_runs"`) {

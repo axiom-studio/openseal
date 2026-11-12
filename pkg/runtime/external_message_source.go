@@ -2,31 +2,7 @@ package runtime
 
 import (
 	"strings"
-	"time"
 )
-
-// ExternalMessageSource describes provider provenance, never authorization.
-// Names are provider-supplied labels; stable IDs distinguish namesakes.
-type ExternalMessageSource struct {
-	Provider               string    `json:"provider"`
-	WorkspaceID            string    `json:"workspaceId,omitempty"`
-	ChannelID              string    `json:"channelId"`
-	ChannelName            string    `json:"channelName,omitempty"`
-	ChannelType            string    `json:"channelType,omitempty"`
-	ThreadID               string    `json:"threadId,omitempty"`
-	MessageID              string    `json:"messageId"`
-	ParticipantID          string    `json:"participantId"`
-	ParticipantDisplayName string    `json:"participantDisplayName,omitempty"`
-	OccurredAt             time.Time `json:"occurredAt,omitempty"`
-}
-
-func cloneExternalMessageSource(in *ExternalMessageSource) *ExternalMessageSource {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	return &out
-}
 
 func externalMessageSource(endpoint *ExternalConversationEndpoint, event NormalizedExternalConversationEvent) *ExternalMessageSource {
 	source := &ExternalMessageSource{Provider: endpoint.Provider, WorkspaceID: endpoint.InstallationID,

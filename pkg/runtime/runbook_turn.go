@@ -837,19 +837,6 @@ func runbookBudgetPolicy(budgets map[string]runbook.BudgetAllocation, name strin
 	return runbookBudgetPolicyValue(&budget)
 }
 
-func runbookBudgetPolicyValue(budget *runbook.BudgetAllocation) *BudgetPolicy {
-	if budget == nil {
-		return nil
-	}
-	return &BudgetPolicy{
-		MaxAttempts: budget.MaxAttempts,
-		MaxTurns:    budget.MaxTurns, MaxInputTokens: budget.MaxInputTokens,
-		MaxOutputTokens: budget.MaxOutputTokens, MaxTotalTokens: budget.MaxTotalTokens,
-		MaxCostMicros: budget.MaxCostMicros, MaxDurationMS: budget.MaxDurationMS,
-		MaxActions: budget.MaxActions, WarningPermille: budget.WarningPermille,
-	}
-}
-
 // consumeDelegationResult reads the pending delegation's outcome from
 // Run.Output (collaboration result, or its dependency group). consumed is
 // false while none is recorded; failure is the node's failure message.

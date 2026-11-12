@@ -13,7 +13,7 @@ in the event-routines `SPEC.md`; this page names the code and the limits.
 
 An event routine is an ordinary routine activation: a `RunbookActivation` with
 `Task != nil`, `Trigger{Kind: event}` and `Task.Event` set to a
-`RoutineEventTrigger` (`pkg/runtime/routine_event.go`). The trigger holds the
+`RoutineEventTrigger` (`pkg/models/routine_event.go`). The trigger holds the
 event kind, one `SourceRef`, an AND list of filter conditions, calendar timing
 for calendar routines, `includeBots` for chat sources, `maxPerHour` (1 to 60,
 default 20) and an optional `maximumOccurrences`. An event Task always has a

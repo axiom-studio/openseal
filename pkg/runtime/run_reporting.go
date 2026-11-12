@@ -9,10 +9,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-const runReportingContextMilestones = "reportingMilestones"
-
-const runReportingContextRootRunID = "reportingRootRunId"
-
 func runReportingChannelKey(owner ObjectiveOwner, policy *runbook.ReportingPolicy) string {
 	if policy == nil {
 		return ""
@@ -317,27 +313,6 @@ func silentRoutineOccurrence(run *AgentRun) bool {
 	}
 	silent, _ := run.Output[finalOutputSilentKey].(bool)
 	return silent
-}
-
-func runReportsMilestone(run *AgentRun, milestone runbook.ReportingMilestone) bool {
-	if run == nil {
-		return false
-	}
-	switch values := run.Context[runReportingContextMilestones].(type) {
-	case []interface{}:
-		for _, value := range values {
-			if fmt.Sprint(value) == string(milestone) {
-				return true
-			}
-		}
-	case []string:
-		for _, value := range values {
-			if value == string(milestone) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func terminalRunStatusLabel(status AgentRunStatus) string {

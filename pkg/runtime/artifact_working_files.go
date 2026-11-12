@@ -6,46 +6,6 @@ import (
 	"time"
 )
 
-// ArtifactFiles narrows an artifact list by what a Run made a file for.
-//
-// A Run saves every file it writes, but its reply hands over only the ones it
-// names as its result or shows in the chat. The rest (scripts, drafts, the
-// panels of a composite) were made only to build that result. They stay in the
-// catalog as working files, so a later Run can still use them, and a list can
-// leave them out.
-type ArtifactFiles string
-
-const (
-	// ArtifactFilesAll lists results and working files alike.
-	ArtifactFilesAll ArtifactFiles = ""
-	// ArtifactFilesResults leaves working files out. A file nothing has
-	// marked (an upload, or one saved before files were marked) is a result.
-	ArtifactFilesResults ArtifactFiles = "results"
-	// ArtifactFilesWorking lists only working files.
-	ArtifactFilesWorking ArtifactFiles = "working"
-)
-
-func (f ArtifactFiles) Valid() bool {
-	return f == ArtifactFilesAll || f == ArtifactFilesResults || f == ArtifactFilesWorking
-}
-
-func (f ArtifactFiles) Keeps(working bool) bool {
-	switch f {
-	case ArtifactFilesResults:
-		return !working
-	case ArtifactFilesWorking:
-		return working
-	}
-	return true
-}
-
-// ArtifactWorkingFileStore is an ArtifactStore that remembers which files are
-// working files. Marking is by artifact id, across its versions: handing any
-// version over makes the file a result again.
-type ArtifactWorkingFileStore interface {
-	MarkArtifactFiles(ctx context.Context, scope Scope, working, results []string) error
-}
-
 // markRunFiles records which of a Run's saved files its reply handed over and
 // which it did not. It is a no-op for a store that keeps no such record.
 func markRunFiles(ctx context.Context, store ArtifactStore, scope Scope, saved []savedArtifact, handedOver []ConversationReference) error {

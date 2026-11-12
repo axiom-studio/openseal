@@ -94,44 +94,6 @@ type ModelStepSystemSection struct {
 	Text  string `json:"text"`
 }
 
-type ModelStepToolGroup string
-
-const (
-	ModelStepToolHarness ModelStepToolGroup = "harness" // final answer, wait, capability search/load, progress, workspace, child work
-	ModelStepToolCore    ModelStepToolGroup = "core"    // actions fixed at session start
-	ModelStepToolLoaded  ModelStepToolGroup = "loaded"  // capabilities loaded during the session: carried, then surfaced in path order
-)
-
-func (g ModelStepToolGroup) Rank() int {
-	switch g {
-	case ModelStepToolHarness:
-		return 1
-	case ModelStepToolCore:
-		return 2
-	case ModelStepToolLoaded:
-		return 3
-	}
-	return 0
-}
-
-type ModelStepTool struct {
-	Name        string                 `json:"name"` // ^[a-zA-Z0-9_-]{1,64}$, unique
-	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"inputSchema"` // JSON Schema object, type "object"
-	Group       ModelStepToolGroup     `json:"group"`
-	// Capability is the action name of a governed tool. The host uses it
-	// only to pick browser guidance and metrics.
-	Capability string `json:"capability,omitempty"`
-	// Surface is the id of the tool entry (a load_capabilities result in
-	// Entries) after which the tool became callable; that entry lists the
-	// tool's name in SessionEntryView.Surfaces. Only loaded tools may set it.
-	// "" means the tool is callable from the first entry: every harness and
-	// core tool, and loaded tools carried over a compaction. Surface is
-	// neutral data: a host may declare a surfaced tool from the start
-	// (append-only tool list) or reveal it at its surfacing entry.
-	Surface string `json:"surface,omitempty"`
-}
-
 type ModelStepStream struct {
 	AnswerPreview        bool   `json:"answerPreview,omitempty"`
 	ExternalChannelReply bool   `json:"externalChannelReply,omitempty"`

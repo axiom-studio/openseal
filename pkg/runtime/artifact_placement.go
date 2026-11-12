@@ -6,16 +6,6 @@ import (
 	"strings"
 )
 
-// ArtifactRunReader and ArtifactConversationReader are the lookups an
-// ArtifactPlacement needs. Kernel stores and services both satisfy them.
-type ArtifactRunReader interface {
-	GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error)
-}
-
-type ArtifactConversationReader interface {
-	GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error)
-}
-
 // ArtifactPlacement records where an artifact was made: the chat whose run
 // produced it and the space that chat lives in. Either reader may be nil;
 // placement then fills only what it can.

@@ -88,12 +88,6 @@ func (c RunProgressAcknowledgementWorkerConfig) normalize() (RunProgressAcknowle
 	return c, nil
 }
 
-type RunProgressAcknowledgementStore interface {
-	ExternalConversationStore
-	PortfolioStore
-	ListActivity(context.Context, ActivityFilter) ([]*ActivityEvent, error)
-}
-
 // RunProgressAcknowledgementWorker renders meaningful Run progress and lets
 // the bound conversation adapter choose its declared presentation capability.
 type RunProgressAcknowledgementWorker struct {

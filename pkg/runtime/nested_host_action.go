@@ -11,24 +11,10 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// ActionExecution says who performs an ActionCall once it may run.
-type ActionExecution string
-
-// ActionExecutionHost marks a nested call the host performs itself, such as
-// git over HTTPS for code in the chat's VM. The call is proposed, authorized,
-// approved and recorded exactly like the offered Skill action it names, but no
-// action worker dispatches it: the host claims it, takes a credential lease
-// for it, does the work and reports the outcome.
-const ActionExecutionHost ActionExecution = "host"
-
 const (
 	// NestedHostActionLease is how long a host holds a host call between
 	// acquisitions. Each acquisition renews it.
 	NestedHostActionLease = 10 * time.Minute
-	// NestedHostActionReadyGrace is how long a ready host call waits for its
-	// host before an action worker may recover it (and cancel or fail it,
-	// never dispatch it).
-	NestedHostActionReadyGrace = 15 * time.Minute
 )
 
 var (

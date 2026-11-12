@@ -10,14 +10,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
-// ExternalConversationReplyStore is the durable kernel view required to turn
-// a finished conversation Run into one canonical channel reply and one
-// provider delivery. It deliberately contains no provider-specific behavior.
-type ExternalConversationReplyStore interface {
-	ExternalConversationStore
-	PortfolioStore
-}
-
 // ExternalConversationReplyWorker projects applied inbox work after its
 // canonical Run finishes. Direct Agent/Team handlers normally already wrote
 // the reply; event Runbooks expose the reply as their typed "reply" output.

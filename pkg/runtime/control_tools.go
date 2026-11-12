@@ -16,26 +16,6 @@ import (
 // dispatcher. Each tool's schema, settle and resume live in its own file and
 // register here through registerControlHandler.
 
-type ControlToolName string
-
-const (
-	ControlToolFinalAnswer      ControlToolName = "turn_final_answer"
-	ControlToolRequestDecision  ControlToolName = "agent_request_decision"
-	ControlToolCompletionReview ControlToolName = "agent_request_review"
-	ControlToolReportProgress   ControlToolName = "turn_report_progress"
-	ControlToolWait             ControlToolName = "wait"
-	ControlToolAskUser          ControlToolName = "ask_user"
-	ControlToolReact            ControlToolName = "react"
-	ControlToolStartTask        ControlToolName = "conversation_start_task"
-	ControlToolFork             ControlToolName = "control_fork"
-	ControlToolRunOperation     ControlToolName = "run_operation"
-	ControlToolDelegate         ControlToolName = "agent_delegate"
-	ControlToolDelegateReply    ControlToolName = "agent_delegate_reply"
-	// Kernel-only calls of the runbook StepProducer (§12); never offered.
-	ControlToolRunbookFork     ControlToolName = "runbook_fork"
-	ControlToolRunbookDelegate ControlToolName = "runbook_delegate"
-)
-
 // controlToolOrder is the stable advertised order (SPEC §5.1, prompt cache):
 // the final tool of the Run's mode first, then progress, interaction, task
 // start and child work. Capability search/load and host tools follow in the
@@ -772,26 +752,6 @@ func decodeControlInto[T any](raw json.RawMessage) (interface{}, error) {
 
 func controlArgumentsInvalid(message string) *ToolResult {
 	return controlErrorResult(ToolResultFailed, controlArgumentsInvalidCode, message, nil)
-}
-
-// controlJSONResult is a control tool result: one json part holding value,
-// compact. value["status"] defaults to the result status.
-func controlJSONResult(status ToolResultStatus, value map[string]interface{}) *ToolResult {
-	if value == nil {
-		value = map[string]interface{}{}
-	}
-	if _, ok := value["status"]; !ok {
-		value["status"] = string(status)
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		encoded, _ = json.Marshal(map[string]interface{}{"status": string(ToolResultFailed), "error": "result_unencodable", "message": "The tool result could not be encoded."})
-		status = ToolResultFailed
-	}
-	return &ToolResult{
-		Status: status, IsError: status != ToolResultSucceeded,
-		Content: []ContentPart{{Type: ContentPartJSON, Value: encoded}},
-	}
 }
 
 // controlErrorResult is an is_error control result with a stable code and a

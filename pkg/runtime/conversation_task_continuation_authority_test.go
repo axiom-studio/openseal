@@ -124,8 +124,8 @@ func TestConversationTaskContinuationAdmitsOriginalDelegatedAuthorityOnly(t *tes
 	}
 	err = store.prepareConversationTaskAdmissionConn(t.Context(), conn, &claim, []*AgentRun{child})
 	conn.Close()
-	if err != nil || !claim.conversationTaskRuns[child.ID] {
-		t.Fatalf("original delegate bypassed background reserve: %#v %v", claim.conversationTaskRuns, err)
+	if err != nil || !claim.ConversationTaskRuns[child.ID] {
+		t.Fatalf("original delegate bypassed background reserve: %#v %v", claim.ConversationTaskRuns, err)
 	}
 	for _, mutate := range []func(*AgentRun){
 		func(run *AgentRun) { run.AssignedAgentID = "foreign-agent" },

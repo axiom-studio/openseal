@@ -24,13 +24,6 @@ const (
 	askUserParkSummary                 = "Asked a question"
 )
 
-const (
-	minimumAskUserOptions                = 2
-	maximumAskUserOptions                = 6
-	maximumAskUserOptionLabelBytes       = 80
-	maximumAskUserOptionDescriptionBytes = 240
-)
-
 type askUserArgs struct {
 	Question      string          `json:"question"`
 	Options       []askUserOption `json:"options,omitempty"`

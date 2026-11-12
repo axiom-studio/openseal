@@ -13,8 +13,6 @@ import (
 
 const (
 	conversationChangeCursorVersion  = 1
-	defaultConversationChangeLimit   = 100
-	maximumConversationChangeLimit   = 500
 	conversationRunProjectionLimit   = 100
 	conversationActivityRunBatchSize = 200
 )

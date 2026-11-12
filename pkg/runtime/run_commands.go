@@ -2,8 +2,6 @@ package runtime
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,12 +38,6 @@ type AgentRunCommandRequest struct {
 type AgentRunCommandResult struct {
 	Run   *AgentRun      `json:"run"`
 	Event *ActivityEvent `json:"event,omitempty"`
-}
-
-type RunCommandStore interface {
-	PortfolioStore
-	RunActivityStore
-	ActionStore
 }
 
 type RunCommandService struct {
@@ -674,11 +666,4 @@ func runCreationFingerprint(req CreateAgentRunRequest) (string, error) {
 		return "", fmt.Errorf("encode run creation fingerprint: %w", err)
 	}
 	return hashBytes(encoded), nil
-}
-
-func hashString(value string) string { return hashBytes([]byte(value)) }
-
-func hashBytes(value []byte) string {
-	digest := sha256.Sum256(value)
-	return "sha256:" + hex.EncodeToString(digest[:])
 }

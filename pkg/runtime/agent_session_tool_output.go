@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/toolfile"
 )
@@ -259,21 +258,6 @@ func compactToolResultValue(value interface{}, depth, entries, text int) interfa
 	default:
 		return typed
 	}
-}
-
-// cutUTF8 returns at most limit bytes of text without splitting a rune.
-func cutUTF8(text string, limit int) string {
-	if len(text) <= limit {
-		return text
-	}
-	if limit <= 0 {
-		return ""
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
-		cut--
-	}
-	return text[:cut]
 }
 
 func formatToolOutputSize(n int) string {

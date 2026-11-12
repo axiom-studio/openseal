@@ -10,16 +10,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
-// ApprovalNotificationStore is the durable intersection needed to project a
-// canonical approval into an external conversation. No provider-specific
-// fields or credentials cross this boundary.
-type ApprovalNotificationStore interface {
-	ExternalConversationStore
-	CallbackRegistrationStore
-	ActionStore
-	PortfolioStore
-}
-
 type ApprovalNotificationWorker struct {
 	store         ApprovalNotificationStore
 	conversations *ConversationService

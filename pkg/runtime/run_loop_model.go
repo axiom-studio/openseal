@@ -30,15 +30,6 @@ type ModelStepProducer struct {
 	cache sync.Map
 }
 
-// ModelStepProducerStore is what the producer uses: the session path it
-// renders, the governed calls whose screenshots it resolves, and the append
-// of the step's capabilities note. KernelStore satisfies it.
-type ModelStepProducerStore interface {
-	LoadAgentSessionPath(ctx context.Context, scope Scope, sessionID string) (*AgentSessionPath, error)
-	GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error)
-	AppendAgentSessionEntries(ctx context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error)
-}
-
 // ModelStepMedia are the image sources of the path renderer.
 type ModelStepMedia struct {
 	Artifacts ArtifactStore

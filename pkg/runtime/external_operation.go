@@ -8,8 +8,6 @@ import (
 	"unicode"
 )
 
-var ErrExternalOperationClaimed = errors.New("external operation is already claimed")
-
 // ExternalOperationIdentity is the stable, capability-independent identity of
 // an externally observable mutation. Resource names what is changed and
 // Operation names the intended effect. The ActionCall idempotency key supplies
@@ -114,25 +112,6 @@ func externalOperationLockKey(scope Scope, digest string) string {
 	return hashString(scope.Kind + "\x00" + scope.ID + "\x00" + digest)
 }
 
-func externalOperationProtects(status ActionCallStatus) bool {
-	switch status {
-	case ActionCallStatusReady, ActionCallStatusWaitingApproval, ActionCallStatusRunning,
-		ActionCallStatusSucceeded, ActionCallStatusCompensating, ActionCallStatusCompensated:
-		return true
-	default:
-		return false
-	}
-}
-
 func externalOperationReceiptComplete(status ActionCallStatus) bool {
 	return status == ActionCallStatusSucceeded || status == ActionCallStatusCompensated
 }
-
-// ExternalOperationConflictError identifies the prior authoritative receipt.
-// The attempted proposal is not persisted.
-type ExternalOperationConflictError struct {
-	Prior *ActionCall
-}
-
-func (e *ExternalOperationConflictError) Error() string { return ErrExternalOperationClaimed.Error() }
-func (e *ExternalOperationConflictError) Unwrap() error { return ErrExternalOperationClaimed }

@@ -3,43 +3,10 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
-
-// gatewayAuthorityFromEndpoints derives account routing authority only from
-// reviewed endpoint records belonging to the exact tenant/deployment/binding.
-// Unrelated endpoints and unverified provider bodies are never candidates.
-func gatewayAuthorityFromEndpoints(gateway ExternalConversationIngressGateway, endpoints []*ExternalConversationEndpoint) (ExternalConversationIngressGateway, bool, error) {
-	if gateway.Scope.Kind == "platform" || gateway.InstallationID != "" {
-		return gateway, false, nil
-	}
-	installationID, applicationID := "", ""
-	for _, endpoint := range endpoints {
-		if endpoint == nil || endpoint.Scope != gateway.Scope || endpoint.Status != ExternalConversationEndpointActive ||
-			endpoint.Owner != gateway.Owner || endpoint.DeploymentID != gateway.DeploymentID || endpoint.Provider != gateway.Provider ||
-			endpoint.Adapter.BindingID != gateway.Adapter.BindingID || endpoint.Adapter.AdapterID != gateway.Adapter.AdapterID ||
-			endpoint.Adapter.SkillID != gateway.Adapter.SkillID || endpoint.Adapter.SourceIdentity != gateway.Adapter.SourceIdentity ||
-			endpoint.Adapter.BindingRevision > gateway.Adapter.BindingRevision ||
-			strings.TrimSpace(endpoint.InstallationID) == "" {
-			continue
-		}
-		if installationID != "" && (installationID != endpoint.InstallationID || applicationID != endpoint.ApplicationID) {
-			return gateway, false, fmt.Errorf("%w: gateway binding has ambiguous provider installation authority", ErrExternalConversationConflict)
-		}
-		installationID, applicationID = endpoint.InstallationID, endpoint.ApplicationID
-	}
-	if installationID == "" {
-		return gateway, false, nil
-	}
-	gateway.InstallationID, gateway.ApplicationID = installationID, applicationID
-	if err := gateway.Validate(); err != nil {
-		return gateway, false, err
-	}
-	return gateway, true, nil
-}
 
 func (s *ExternalConversationGatewayService) prepareGatewayAuthority(ctx context.Context, gateway *ExternalConversationIngressGateway) error {
 	if gateway == nil || gateway.Scope.Kind == "platform" || gateway.InstallationID != "" {

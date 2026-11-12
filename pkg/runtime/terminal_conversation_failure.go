@@ -26,21 +26,6 @@ func (e undeliverableReport) Is(target error) bool {
 
 func undeliverable(reason string) error { return undeliverableReport{reason: reason} }
 
-// failedConversationReportCandidate is a failed chat Run with an Agent to
-// speak for it: an Agent's own Run or a Team member's. A Team's routing Run
-// has no speaker, so it reports nothing.
-func failedConversationReportCandidate(run *AgentRun) bool {
-	if run == nil || run.Status != AgentRunStatusFailed || run.Kind != RunKindConversation || run.ParentRunID != "" {
-		return false
-	}
-	if run.Owner.Type != OwnerTypeAgent && !isTeamMemberRun(run) {
-		return false
-	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
-	return validOpaqueIdentifier(conversationID, 128) && validOpaqueIdentifier(triggerID, 128)
-}
-
 func terminalConversationFailureReplyKey(run *AgentRun) string {
 	return "conversation-failure:" + run.ID + ":" + strconv.FormatInt(run.Revision, 10)
 }

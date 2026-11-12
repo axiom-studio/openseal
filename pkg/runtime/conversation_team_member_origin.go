@@ -32,11 +32,6 @@ func ConversationRunAgentID(conversation *Conversation, run *AgentRun) string {
 	return ""
 }
 
-// TeamRosterReader reads the current Team deployment for roster checks.
-type TeamRosterReader interface {
-	GetTeamDeployment(context.Context, capability.ScopeReference, string) (*kernelteam.Deployment, error)
-}
-
 // teamRosterReader returns store's Team deployment reader, or nil.
 func teamRosterReader(store any) TeamRosterReader {
 	teams, _ := store.(TeamRosterReader)
@@ -134,10 +129,6 @@ func verifyTeamMemberRun(ctx context.Context, runs teamMemberRunReader, conversa
 	return run.ID == runIDForIdempotencyKey(run.Scope, teamMemberRunKey(routing, run.AssignedAgentID)) &&
 		run.ConcurrencyKey == ConversationRunLane(conversation.ID, root, run.AssignedAgentID) &&
 		run.Context[conversationRunContextConversationID] == conversation.ID && run.Context[conversationRunContextTriggerID] == trigger.ID, nil
-}
-
-type TeamHandoffMessageReader interface {
-	GetChannelMessage(context.Context, Scope, string, string) (*ChannelMessage, error)
 }
 
 // ResolveTeamHandoffRequest returns the person's message behind a Team

@@ -20,12 +20,6 @@ const DelegationModeContextKey = "openseal.delegationMode"
 // delegated reasoning can also honor the exact invocation that started them.
 const RunbookInvocationContextKey = "openseal.runbookInvocation"
 
-type RunForkStore interface {
-	PortfolioStore
-	RunDependencyStore
-	RunActivityStore
-}
-
 type RunForkBranch struct {
 	ID              string                 `json:"id"`
 	Goal            string                 `json:"goal"`

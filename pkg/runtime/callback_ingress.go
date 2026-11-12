@@ -1,11 +1,9 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -106,85 +104,6 @@ func (r *CallbackHostResult) Validate() error {
 
 type CallbackAdapterHost interface {
 	NormalizeCallback(context.Context, CallbackHostRequest) (*CallbackHostResult, error)
-}
-
-type CallbackEventReceiptStatus string
-
-const (
-	CallbackEventPending CallbackEventReceiptStatus = "pending"
-	CallbackEventLeased  CallbackEventReceiptStatus = "leased"
-	CallbackEventApplied CallbackEventReceiptStatus = "applied"
-	CallbackEventFailed  CallbackEventReceiptStatus = "failed"
-)
-
-type CallbackEventReceipt struct {
-	ID                   string                     `json:"id"`
-	Scope                Scope                      `json:"scope"`
-	RegistrationID       string                     `json:"registrationId"`
-	RegistrationRevision int64                      `json:"registrationRevision"`
-	Event                EventEnvelope              `json:"event"`
-	Status               CallbackEventReceiptStatus `json:"status"`
-	Attempts             int                        `json:"attempts"`
-	AvailableAt          time.Time                  `json:"availableAt"`
-	LeaseOwner           string                     `json:"leaseOwner,omitempty"`
-	LeaseExpiresAt       time.Time                  `json:"leaseExpiresAt,omitempty"`
-	LastError            string                     `json:"lastError,omitempty"`
-	Revision             int64                      `json:"revision"`
-	CreatedAt            time.Time                  `json:"createdAt"`
-	UpdatedAt            time.Time                  `json:"updatedAt"`
-	AppliedAt            *time.Time                 `json:"appliedAt,omitempty"`
-}
-
-// Preserve the exact signed provider data through callback receipt clones and
-// database reloads. Only this durable receipt contract opts in to json.Number;
-// unrelated kernel JSON decoding keeps its existing representation.
-func (r *CallbackEventReceipt) UnmarshalJSON(data []byte) error {
-	type plain CallbackEventReceipt
-	var value plain
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-	if err := decoder.Decode(&value); err != nil {
-		return err
-	}
-	*r = CallbackEventReceipt(value)
-	return nil
-}
-
-func (r *CallbackEventReceipt) Validate() error {
-	if r == nil || !validOpaqueIdentifier(r.ID, 256) || r.Scope.Validate() != nil ||
-		!validOpaqueIdentifier(r.RegistrationID, 256) || r.RegistrationRevision < 1 ||
-		r.Event.Scope != r.Scope || r.Event.Validate() != nil || r.Attempts < 0 || r.Attempts > 1000 ||
-		r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() || r.UpdatedAt.Before(r.CreatedAt) || len(r.LastError) > 2000 {
-		return ErrInvalidCallbackRegistration
-	}
-	switch r.Status {
-	case CallbackEventPending:
-		if r.AvailableAt.IsZero() || r.LeaseOwner != "" || !r.LeaseExpiresAt.IsZero() || r.AppliedAt != nil {
-			return ErrInvalidCallbackRegistration
-		}
-	case CallbackEventLeased:
-		if r.AvailableAt.IsZero() || !validOpaqueIdentifier(r.LeaseOwner, 256) || r.LeaseExpiresAt.IsZero() || r.AppliedAt != nil {
-			return ErrInvalidCallbackRegistration
-		}
-	case CallbackEventApplied:
-		if r.LeaseOwner != "" || !r.LeaseExpiresAt.IsZero() || r.AppliedAt == nil || r.AppliedAt.Before(r.CreatedAt) {
-			return ErrInvalidCallbackRegistration
-		}
-	case CallbackEventFailed:
-		if r.LeaseOwner != "" || !r.LeaseExpiresAt.IsZero() || r.AppliedAt != nil || strings.TrimSpace(r.LastError) == "" {
-			return ErrInvalidCallbackRegistration
-		}
-	default:
-		return ErrInvalidCallbackRegistration
-	}
-	return nil
-}
-
-type CallbackEventStore interface {
-	ReceiveCallbackEvent(context.Context, *CallbackEventReceipt) (*CallbackEventReceipt, bool, error)
-	UpdateCallbackEvent(context.Context, *CallbackEventReceipt, int64) error
-	ClaimCallbackEvent(context.Context, Scope, string, time.Time, time.Duration) (*CallbackEventReceipt, error)
-	SaveClaimedCallbackEvent(context.Context, *CallbackEventReceipt, int64, string) error
 }
 
 type CallbackEventConsumer interface {
@@ -391,14 +310,4 @@ func normalizeStoredCallbackReceipt(value *CallbackEventReceipt) *CallbackEventR
 		value.AvailableAt = value.CreatedAt
 	}
 	return value
-}
-
-func cloneCallbackEventReceipt(value *CallbackEventReceipt) *CallbackEventReceipt {
-	if value == nil {
-		return nil
-	}
-	var result CallbackEventReceipt
-	encoded, _ := json.Marshal(value)
-	_ = json.Unmarshal(encoded, &result)
-	return &result
 }

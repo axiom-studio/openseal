@@ -7,10 +7,6 @@ import (
 	"strings"
 )
 
-// MaximumConversationRunbooks bounds the routines linked to one
-// conversation; linking more drops the oldest links.
-const MaximumConversationRunbooks = 32
-
 // maximumConversationRunbookLinkAttempts bounds retries when the
 // conversation changes while a link is recorded.
 const maximumConversationRunbookLinkAttempts = 5

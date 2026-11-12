@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-const skillRuntimeMaintenanceWakeType = "skill_runtime_maintenance"
 const skillRuntimeMaintenanceCheckpointKey = "_kernelSkillRuntimeMaintenance"
 
 type skillRuntimeMaintenanceWaiterStore interface {

@@ -41,11 +41,6 @@ type agentRequestTeamDefinitionStore interface {
 	GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error)
 }
 
-type AgentRequestInboxStore interface {
-	CollaborationKernelStore
-	RunCommandStore
-}
-
 type agentRequestInboxConversationStore interface {
 	AgentRequestInboxStore
 	ConversationStore

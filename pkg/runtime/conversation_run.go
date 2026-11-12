@@ -12,10 +12,7 @@ import (
 )
 
 const (
-	conversationRunContextConversationID = "conversationId"
-	conversationRunContextTriggerID      = "triggerMessageId"
-	conversationRunContextTriggerSeq     = "triggerSequence"
-	conversationRunSchedulerParticipant  = "conversation-run-scheduler"
+	conversationRunContextTriggerSeq = "triggerSequence"
 )
 
 const (
@@ -1146,27 +1143,6 @@ func conversationRunAssignment(run *AgentRun) *agentConversationAssignment {
 	return &agentConversationAssignment{From: from, Kind: string(run.Source), Work: run.Goal}
 }
 
-func validateConversationRun(run *AgentRun) error {
-	if run == nil || run.Kind != RunKindConversation || (run.Owner.Type != OwnerTypeTeam && run.Owner.Type != OwnerTypeAgent) {
-		return fmt.Errorf("%w: Team- or Agent-owned conversation Run is required", ErrInvalidAgentRun)
-	}
-	if run.Owner.Type == OwnerTypeAgent && run.AssignedAgentID != run.Owner.ID {
-		return fmt.Errorf("%w: Agent-owned conversation Run must be assigned to its owner", ErrInvalidAgentRun)
-	}
-	conversationID, conversationOK := run.Context[conversationRunContextConversationID].(string)
-	triggerID, triggerOK := run.Context[conversationRunContextTriggerID].(string)
-	root, _ := run.Context["threadRootMessageId"].(string)
-	if root != "" && !validOpaqueIdentifier(root, 128) {
-		return ErrInvalidAgentRun
-	}
-	reason, _ := run.Context[routingReasonContextKey].(string)
-	if !conversationOK || !triggerOK || !validOpaqueIdentifier(conversationID, 128) || !validOpaqueIdentifier(triggerID, 128) ||
-		run.ConcurrencyKey != ConversationRunLane(conversationID, root, run.AssignedAgentID) || len(reason) > MaximumRoutingReasonBytes {
-		return fmt.Errorf("%w: conversation Run context or concurrency key is invalid", ErrInvalidAgentRun)
-	}
-	return validateConversationRunSession(run)
-}
-
 func permanentConversationRunError(err error) bool {
 	return errors.Is(err, ErrConversationNotFound) || errors.Is(err, ErrChannelMessageNotFound) ||
 		errors.Is(err, ErrNoConversationParticipants) || errors.Is(err, ErrConversationCoordinationUnavailable) ||
@@ -1236,34 +1212,4 @@ var errConversationParticipationStopped = errors.New("channel participation is d
 // reply.
 func participationStoppedOutput() map[string]interface{} {
 	return map[string]interface{}{"participationSkipped": true, "reply": "No further participation will start for this message because it is outside the channel’s current participation opt-in. Previously started actions may still finish."}
-}
-
-// External provider messages never inherit the agent’s other private work.
-func externalChannelContext(conversation *Conversation) bool {
-	return conversation != nil && conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceExternalSource
-}
-
-// An explicit thread remains inside its conversation. Its root scopes model
-// context and execution; unthreaded application chats have no such scope.
-func externalConversationThreadRoot(conversation *Conversation, trigger *ChannelMessage) string {
-	if trigger == nil {
-		return ""
-	}
-	// Telegram DM reply IDs identify quoted messages, not separate conversations.
-	// Keep real Telegram topics isolated, and retain Slack's thread semantics.
-	if source := trigger.ExternalSource; externalChannelContext(conversation) && source != nil &&
-		source.Provider == "telegram" && source.ChannelType == "private" &&
-		!strings.HasPrefix(source.ThreadID, "topic:") && !strings.HasPrefix(source.ThreadID, "direct-topic:") {
-		return ""
-	}
-	if trigger.ThreadRootID != "" {
-		return trigger.ThreadRootID
-	}
-	if trigger.StartsThread {
-		return trigger.ID
-	}
-	if externalChannelContext(conversation) {
-		return trigger.ID
-	}
-	return ""
 }

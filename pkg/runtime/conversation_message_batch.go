@@ -2,35 +2,12 @@ package runtime
 
 import (
 	"context"
-	"fmt"
 )
-
-// MaximumChannelMessageBatchSize bounds optional exact-ID store reads. A
-// channel poll chunks larger selections rather than enlarging the SQL query.
-const MaximumChannelMessageBatchSize = 200
-
-// ChannelMessageBatchStore is an optional extension to ConversationStore.
-// Reads return only the exact scope, conversation and message IDs requested;
-// missing messages are omitted, and result order is unspecified. Callers still
-// apply the current viewer's audience and canonical ancestry visibility checks.
-type ChannelMessageBatchStore interface {
-	GetChannelMessagesByIDs(context.Context, Scope, string, []string) ([]*ChannelMessage, error)
-}
 
 var (
 	_ ChannelMessageBatchStore = (*SQLiteStore)(nil)
 	_ ChannelMessageBatchStore = (*PostgresStore)(nil)
 )
-
-func validateChannelMessageBatch(scope Scope, ids []string) error {
-	if err := scope.Validate(); err != nil {
-		return err
-	}
-	if len(ids) > MaximumChannelMessageBatchSize {
-		return fmt.Errorf("%w: message batch must contain at most %d IDs", ErrInvalidConversation, MaximumChannelMessageBatchSize)
-	}
-	return nil
-}
 
 func loadChannelMessageBatches(ctx context.Context, store ChannelMessageBatchStore, scope Scope, conversationID string, ids []string) (map[string]*ChannelMessage, error) {
 	unique := make([]string, 0, len(ids))

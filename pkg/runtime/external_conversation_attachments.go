@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"mime"
-	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -16,15 +15,6 @@ import (
 
 // Bound the wire payload below the default four MiB gRPC envelope limit.
 const MaximumExternalConversationAttachmentBytes = 2 << 20
-
-// Provider file IDs are durable references. Private URLs and bytes never enter
-// normalized ingress, outbox progress, or model-visible context.
-type ExternalConversationAttachment struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	MediaType string `json:"mediaType,omitempty"`
-	SizeBytes int64  `json:"sizeBytes"`
-}
 
 type ExternalConversationAttachmentContent struct {
 	ID        string `json:"id"`
@@ -43,25 +33,6 @@ type ExternalConversationAttachmentHostRequest struct {
 
 type ExternalConversationAttachmentHost interface {
 	ReadExternalConversationAttachment(context.Context, ExternalConversationAttachmentHostRequest) (*ExternalConversationAttachmentContent, error)
-}
-
-func validateExternalAttachments(files []ExternalConversationAttachment) error {
-	if len(files) > 8 {
-		return ErrInvalidExternalConversation
-	}
-	seen := map[string]bool{}
-	for _, file := range files {
-		if !validExternalConversationReference(file.ID, 256) || seen[file.ID] || strings.TrimSpace(file.Name) == "" || len(file.Name) > 256 || strings.ContainsAny(file.Name, "\r\n\x00") || file.SizeBytes < 0 || len(file.MediaType) > 128 {
-			return ErrInvalidExternalConversation
-		}
-		if file.MediaType != "" {
-			if _, _, err := mime.ParseMediaType(file.MediaType); err != nil {
-				return ErrInvalidExternalConversation
-			}
-		}
-		seen[file.ID] = true
-	}
-	return nil
 }
 
 func containsConversationFeature(features []capability.ConversationAdapterFeature, feature capability.ConversationAdapterFeature) bool {

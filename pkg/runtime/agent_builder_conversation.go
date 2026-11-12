@@ -24,22 +24,6 @@ const (
 	agentBuilderDraftMessageScan      = 50
 )
 
-// StartAgentBuilderRequest opens a builder conversation and posts the request
-// as its first message. Name and model travel in Parameters, never in Content.
-type StartAgentBuilderRequest struct {
-	Scope Scope
-	// Requester is the host-verified person asking (Type user).
-	Requester ConversationParticipant
-	// Prompt is the request as typed; it becomes the message Content.
-	Prompt string
-	// Parameters are the form fields; an empty Kind means "agent".
-	Parameters AgentBuilderParameters
-	// SpaceID places the conversation; "" uses the builder's first space,
-	// else the requester's default space.
-	SpaceID        string
-	IdempotencyKey string
-}
-
 type StartAgentBuilderResult struct {
 	Conversation *Conversation
 	Message      *ChannelMessage
@@ -164,14 +148,6 @@ type AgentBuilderDraft struct {
 	Approval          *ApprovalCheckpoint `json:"approval,omitempty"`
 	QuestionMessageID string              `json:"questionMessageId,omitempty"`
 	UpdatedAt         time.Time           `json:"updatedAt"`
-}
-
-// AgentBuilderDraftReader is the read surface ListAgentBuilderDrafts needs.
-type AgentBuilderDraftReader interface {
-	ListConversations(context.Context, ConversationFilter) ([]*Conversation, error)
-	ListChannelMessages(context.Context, ChannelMessageFilter) ([]*ChannelMessage, error)
-	ListAgentRuns(context.Context, AgentRunFilter) ([]*AgentRun, error)
-	ListApprovals(context.Context, ApprovalFilter) ([]*ApprovalCheckpoint, error)
 }
 
 // ListAgentBuilderDrafts lists the requester's active builder conversations,
@@ -340,16 +316,6 @@ func agentBuilderParameterName(ctx context.Context, reader AgentBuilderDraftRead
 		return "", err
 	}
 	return first[0].BuilderParameters.Name, nil
-}
-
-// agentBuilderDraftStarter is the person whose first message makes a
-// builder conversation their draft, else "".
-func agentBuilderDraftStarter(conversation *Conversation, message *ChannelMessage) string {
-	if conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceAgentBuilder ||
-		message.Sequence != 1 || message.Sender.Type != ConversationParticipantUser {
-		return ""
-	}
-	return message.Sender.ID
 }
 
 // createdAgentBuilderConversation is the conversation whose approved card
