@@ -948,3 +948,91 @@ func TestLoopRunSessionSeed(t *testing.T) {
 		t.Fatal("brief and event entries share an id")
 	}
 }
+
+func TestResolveLoopBindingAgentTrial(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "trial"}
+	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{ID: "finn", Scope: skillScope, DefinitionID: "finn-definition", ActiveVersion: "7", RolloutStatus: kernelagent.RolloutActive},
+		definition: &kernelagent.AgentDefinition{ID: "finn-definition", Version: "7", Purpose: "Build Agents", SystemPrompt: "You are Finn, the builder."},
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skillScope, DeploymentID: "finn"},
+	}
+	store := newTestKernelStore(t)
+	parent := &AgentRun{
+		ID: "parent", Scope: scope, Kind: RunKindConversation, RootRunID: "parent", Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
+		AssignedAgentID: "finn", Goal: "Build an Agent", Status: AgentRunStatusRunning, Revision: 1, CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateAgentRun(t.Context(), cloneAgentRun(parent)); err != nil {
+		t.Fatal(err)
+	}
+	// The trial context is stored on the child as the JSON object of an
+	// AgentTrialContext.
+	encoded, err := json.Marshal(AgentTrialContext{
+		Profile: agentProfileArguments{
+			DisplayName: "Inbox Triage", Purpose: "Sort the support inbox.", SystemPrompt: "Sort mail by urgency.",
+			Personality: "Friendly", OperatingPrinciples: []string{"Flag anything legal."},
+		},
+		ParentRunID: parent.ID, ActionCallID: "trial-call",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trial map[string]interface{}
+	if err := json.Unmarshal(encoded, &trial); err != nil {
+		t.Fatal(err)
+	}
+	child := claimedBindingRun(t, store, &AgentRun{
+		ID: "child", Scope: scope, Kind: RunKindAgentWork, ParentRunID: parent.ID, RootRunID: parent.ID,
+		Owner: parent.Owner, AssignedAgentID: "finn", Goal: "Hello there", Source: RunSourceHandoff,
+		Context: map[string]interface{}{AgentTrialContextKey: trial, AgentTrialModelContextKey: "gpt-6-luna"},
+	})
+	config := loopBindingTestConfig(t, store, &progressAckStepHost{})
+	config.ChatWorkspaces = bindingTestChatWorkspaces{}
+	binding, err := ResolveLoopBinding(t.Context(), catalog, cloneAgentRun(child), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.activationDeployments) != 0 {
+		t.Fatalf("trial activated Skills: %v", catalog.activationDeployments)
+	}
+	if binding.DeploymentID != "finn" || binding.DefinitionID != "finn-definition" || binding.DefinitionVersion != "7" ||
+		binding.Model != "gpt-6-luna" || len(binding.ModelActions) != 0 || len(binding.RunbookOperations) != 0 ||
+		binding.Final != nil || binding.FinalOutput != nil {
+		t.Fatalf("binding = %#v", binding)
+	}
+	authority := binding.Authority
+	if authority.finalMode() != FinalModeDefault || authority.CanAskUser || authority.ForkAllowed || authority.CanReportProgress ||
+		authority.CanWait || authority.CanReact || authority.TaskStart != nil || len(authority.DelegateTargets) != 0 {
+		t.Fatalf("authority = %#v", authority)
+	}
+	req := prepareBindingStep(t, binding, child)
+	if tools := bindingToolNames(req); !slices.Equal(tools, []string{string(ControlToolFinalAnswer)}) {
+		t.Fatalf("tools = %v", tools)
+	}
+	if req.DefinitionID != "finn-definition" || req.DefinitionVersion != "7" || req.Model != "gpt-6-luna" {
+		t.Fatalf("request identity = %s@%s model %q", req.DefinitionID, req.DefinitionVersion, req.Model)
+	}
+	instructions := strings.Join(req.System.AgentInstructions, "\n")
+	for _, want := range []string{"Sort mail by urgency.", "Purpose: Sort the support inbox.", "Personality: Friendly", "Flag anything legal."} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("instructions lack %q: %q", want, instructions)
+		}
+	}
+	if strings.Contains(instructions, "You are Finn") || strings.Contains(instructions, "Build Agents") {
+		t.Fatalf("instructions carry the builder's persona: %q", instructions)
+	}
+	entries, err := store.ListAgentSessionEntries(t.Context(), SessionEntryFilter{Scope: scope, SessionID: binding.Session.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].User == nil || len(entries[0].User.Content) != 1 || entries[0].User.Content[0].Text != "Hello there" {
+		t.Fatalf("seed = %#v", entries)
+	}
+
+	// A trial context on a Run that is not its child is refused.
+	stray := cloneAgentRun(child)
+	stray.ParentRunID = "someone-else"
+	if _, err := ResolveLoopBinding(t.Context(), catalog, stray, config); err == nil {
+		t.Fatal("stray trial context accepted")
+	}
+}

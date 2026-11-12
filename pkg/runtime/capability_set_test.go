@@ -442,3 +442,40 @@ func TestPathLoadedCapabilityIDsChildSessionInheritsParentUpToFork(t *testing.T)
 		t.Fatalf("got %v want %v", got, want)
 	}
 }
+
+func TestLoadSurfacesWholeSkillWithinBudget(t *testing.T) {
+	catalog := capabilityCatalogFixture()
+	s := NewCapabilitySet(catalog, []string{"action:notion.op3"}, CapabilitySetConfig{})
+	_, isError, loaded := ExecuteLoadCapabilities(s, loadArgs("action:notion.op5"), capabilityToolName)
+	if isError {
+		t.Fatal("load failed")
+	}
+	// The requested action first, then its Skill's other actions in catalog
+	// order; op3 was already loaded and the bound prompt was too.
+	want := []string{"action:notion.op5", "action:notion.op0", "action:notion.op1", "action:notion.op2", "action:notion.op4", "action:notion.op6", "action:notion.op7"}
+	if !reflect.DeepEqual(loaded, want) {
+		t.Fatalf("loaded = %v\nwant %v", loaded, want)
+	}
+
+	// A budget for two more definitions keeps the first two siblings.
+	cost := s.toolCost("action:notion.op0")
+	bounded := NewCapabilitySet(catalog, nil, CapabilitySetConfig{SkillLoadBudget: 3*cost + cost/2})
+	_, _, loaded = ExecuteLoadCapabilities(bounded, loadArgs("action:notion.op5"), capabilityToolName)
+	if want := []string{"prompt:skill-notion@3", "action:notion.op5", "action:notion.op0", "action:notion.op1"}; !reflect.DeepEqual(loaded, want) {
+		t.Fatalf("bounded loaded = %v\nwant %v", loaded, want)
+	}
+	// Instructions load one at a time.
+	_, _, loaded = ExecuteLoadCapabilities(NewCapabilitySet(catalog, nil, CapabilitySetConfig{}), loadArgs("prompt:skill-research-1@1"), capabilityToolName)
+	if !reflect.DeepEqual(loaded, []string{"prompt:skill-research-1@1"}) {
+		t.Fatalf("prompt load = %v", loaded)
+	}
+	// Another Skill connection (binding) is not a sibling.
+	other := capabilityCatalogFixture()
+	other.Actions[1].BindingID = "binding-2"
+	_, _, loaded = ExecuteLoadCapabilities(NewCapabilitySet(other, nil, CapabilitySetConfig{}), loadArgs("action:notion.op0"), capabilityToolName)
+	for _, id := range loaded {
+		if id == "action:notion.op1" {
+			t.Fatal("an action of another binding was loaded")
+		}
+	}
+}
