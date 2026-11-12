@@ -120,11 +120,11 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 		t.Fatalf("activity filters = %d, want one per finalization attempt", len(store.activityFilters))
 	}
 	for _, filter := range store.activityFilters {
-		if !filter.Descending || len(filter.EventTypes) != 2 || filter.EventTypes[0] != runResourcesReleasedEvent || filter.EventTypes[1] != runResourcesQuarantinedEvent {
+		if !filter.Descending || len(filter.EventTypes) != 2 || filter.EventTypes[0] != "run.resources_released" || filter.EventTypes[1] != "run.resources_release_quarantined" {
 			t.Fatalf("terminal finalizer activity filter = %#v", filter)
 		}
 	}
-	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{runResourcesReleasedEvent}, Limit: 10})
+	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{"run.resources_released"}, Limit: 10})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("cleanup events = %#v, %v", events, err)
 	}
@@ -184,7 +184,7 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 	if dispatches != 0 {
 		t.Fatalf("stale finalizer dispatched %d times", dispatches)
 	}
-	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{runResourcesQuarantinedEvent}, Limit: 10})
+	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{"run.resources_release_quarantined"}, Limit: 10})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("quarantine events = %#v, %v", events, err)
 	}

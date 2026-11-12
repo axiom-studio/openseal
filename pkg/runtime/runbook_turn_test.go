@@ -415,7 +415,7 @@ func TestRunbookProducerFailsKernelCallThatEndedWithoutResult(t *testing.T) {
 	path.Entries = []*SessionEntry{{
 		ID: "tool:step-1:" + out.ToolCalls[0].ID, RunID: run.ID, StepID: "step-1", Type: SessionEntryTool, State: ToolEntryError,
 		ToolCallID: out.ToolCalls[0].ID,
-		Tool:       &ToolEntry{Name: string(ControlToolRunbookFork), Result: controlErrorResult(ToolResultRefused, forkRejectedCode, "budget exhausted", nil)},
+		Tool:       &ToolEntry{Name: string(ControlToolRunbookFork), Result: controlErrorResult(ToolResultRefused, "fork_rejected", "budget exhausted", nil)},
 	}}
 	failed := produceRunbook(t, producer, runbookInput(run, 3, nil, path))
 	if failed.Failure == nil || !strings.Contains(failed.Failure.Message, "ended without a durable result") || !strings.Contains(failed.Failure.Message, "budget exhausted") {
@@ -480,6 +480,24 @@ func TestRunbookKernelToolsAreNeverOffered(t *testing.T) {
 // applied, through the real claim tool executor and ControlExecutor.
 
 const runbookLoopWorker = "runbook-loop-worker"
+
+// runbookCheckpointPending is the pending part of the runbook engine state
+// a Run's checkpoint stores under "runbook".
+type runbookCheckpointPending struct {
+	PendingFork       string `json:"pendingFork"`
+	PendingDelegation string `json:"pendingDelegation"`
+	PendingCall       string `json:"pendingCall"`
+}
+
+func pendingRunbookCheckpoint(checkpoint map[string]interface{}) (runbookCheckpointPending, error) {
+	var state runbookCheckpointPending
+	encoded, err := json.Marshal(checkpoint["runbook"])
+	if err != nil {
+		return state, err
+	}
+	err = json.Unmarshal(encoded, &state)
+	return state, err
+}
 
 type runbookLoopFixture struct {
 	t        *testing.T
@@ -602,7 +620,7 @@ func TestRunbookForkSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T) {
 	if waiting.Status != AgentRunStatusWaitingForDependency || waiting.WakeCondition == nil || waiting.WakeCondition.Type != "run_dependencies" {
 		t.Fatalf("source=%#v", waiting)
 	}
-	state, err := decodeRunbookState(waiting.Checkpoint)
+	state, err := pendingRunbookCheckpoint(waiting.Checkpoint)
 	if err != nil || state.PendingFork != "fork" || state.PendingCall == "" {
 		t.Fatalf("engine state was not applied before the fork: %#v err=%v", state, err)
 	}
@@ -689,7 +707,7 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 	if waiting.Status != AgentRunStatusWaitingForAgent {
 		t.Fatalf("source=%#v", waiting)
 	}
-	state, err := decodeRunbookState(waiting.Checkpoint)
+	state, err := pendingRunbookCheckpoint(waiting.Checkpoint)
 	if err != nil || state.PendingDelegation != "delegate" || state.PendingCall == "" {
 		t.Fatalf("engine state was not applied before the delegation: %#v err=%v", state, err)
 	}
@@ -750,10 +768,12 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 }
 
 func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
-	f := newRunbookLoopFixture(t, concurrentRunbookDefinition())
+	store := newTestKernelStore(t)
+	control := &ControlExecutor{Portfolio: store, Sessions: store, Forks: NewRunForkCoordinator(store), Collaboration: NewCollaborationService(store)}
+	producer := newTestRunbookProducer(t, concurrentRunbookDefinition(), "manual", store)
 	cc := ControlContext{
 		Run:     &AgentRun{ID: "run", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "fork", "pendingFork": "fork", "pendingCall": "runbook.2.fork"}}},
-		Binding: &TurnRunnerBinding{Producer: f.producer}, Origin: ControlOriginKernel,
+		Binding: &TurnRunnerBinding{Producer: producer}, Origin: ControlOriginKernel,
 		Entry:     &SessionEntry{ToolCallID: "runbook.9.fork"},
 		Arguments: &runbookKernelArgs{Step: "fork", Visit: 9},
 	}
@@ -773,7 +793,7 @@ func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
 	if _, _, _, err := runbookKernelCall(cc, pending); err == nil {
 		t.Fatal("a kernel call without its tool entry settled")
 	}
-	result, err := (runbookForkHandler{}).Run(f.ctx, f.control, cc)
+	result, err := (runbookForkHandler{}).Run(t.Context(), control, cc)
 	if err == nil || result.Entry != nil {
 		t.Fatalf("an entry-less fork call was not refused: %#v", result)
 	}
