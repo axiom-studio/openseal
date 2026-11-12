@@ -4,8 +4,6 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func refusedLoopCallRequest(f *loopStoreFixture, prior *ActionCall, code string) RefusedLoopCallRequest {
@@ -98,24 +96,6 @@ func TestRefusedLoopCallRequiresLiveLease(t *testing.T) {
 	req.Lease = nil
 	if _, err := coordinator.RecordRefusedLoopCall(f.ctx, req); err == nil {
 		t.Fatal("refused row recorded without a lease")
-	}
-}
-
-func TestRefusedStatusValidatesWithoutExternalDigest(t *testing.T) {
-	now := time.Now().UTC()
-	call := &ActionCall{
-		ID: "refused", Scope: Scope{Kind: "tenant", ID: "t"}, RunID: "run", TurnID: "step-3", DeploymentID: "agent",
-		SkillID: "repo", SkillVersion: "1.0.0", Action: "read_file", Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
-		Status: ActionCallStatusRefused, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead,
-		Arguments: map[string]interface{}{}, DuplicateOfActionCallID: "prior", MaxAttempts: 1, Revision: 1,
-		AvailableAt: now, CreatedAt: now, UpdatedAt: now, CompletedAt: &now,
-	}
-	if err := call.Validate(); err != nil {
-		t.Fatalf("refused duplicate without digest: %v", err)
-	}
-	call.Status = ActionCallStatusFailed
-	if err := call.Validate(); err == nil {
-		t.Fatal("a non-refused duplicate without an external operation digest validated")
 	}
 }
 

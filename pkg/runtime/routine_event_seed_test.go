@@ -49,6 +49,10 @@ func (k *routineEventSeedKeeper) KeepRoutineEvents(_ context.Context, _ *AgentRu
 
 var routineEventSeedScope = Scope{Kind: "tenant", ID: "seed"}
 
+func routineSlackTestRef() string {
+	return RoutineConversationSourceRef("dep-1", "bind-1", "slack", "T01")
+}
+
 // routineEventSeedFixture is a Slack routine occurrence with n events whose
 // payloads are payloadBytes long.
 func routineEventSeedFixture(n, payloadBytes int) (*AgentRun, *routineEventSeedFakeStore) {

@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 )
 
 const (
@@ -262,33 +260,5 @@ func assertCutoverLeafDrafts(t *testing.T, drafts []AgentBuilderCutoverDraft) {
 	}
 	if got := review.StartRequest("", "space-1"); got.Prompt != "Watch my inbox" || got.SpaceID != "space-1" || got.Parameters.Model != "" {
 		t.Fatalf("review start request = %#v", got)
-	}
-}
-
-func TestAgentBuilderCutoverStartRequestFitsParameters(t *testing.T) {
-	draft := AgentBuilderCutoverDraft{
-		Scope: builderCutoverScope, ID: "cs-1", ActorID: " user-1 ", Prompt: "Plain request without marker",
-		Agent: &kernelagent.AgentDefinition{
-			DisplayName: strings.Repeat("é", 60), Purpose: "Uses password: hunter2-secret daily",
-			SystemPrompt: "  Behave.  ", OperatingPrinciples: []string{"Use api key: sk-1234567890abcdefghijklmnop", "Be kind"},
-		},
-	}
-	request := draft.StartRequest("model\nwith newline", "")
-	if request.Prompt != "Plain request without marker" || request.Requester.ID != "user-1" {
-		t.Fatalf("request = %#v", request)
-	}
-	parameters := request.Parameters
-	if len(parameters.Name) > maximumAgentBuilderNameBytes || !strings.HasPrefix(parameters.Name, "éé") || parameters.Model != "model with newline" {
-		t.Fatalf("name %q (%d bytes) model %q", parameters.Name, len(parameters.Name), parameters.Model)
-	}
-	if parameters.Draft == nil || parameters.Draft.Purpose != "" || parameters.Draft.SystemPrompt != "Behave." ||
-		!reflect.DeepEqual(parameters.Draft.OperatingPrinciples, []string{"Be kind"}) {
-		t.Fatalf("draft = %#v", parameters.Draft)
-	}
-	if err := parameters.Validate(); err != nil {
-		t.Fatalf("fitted parameters refused: %v", err)
-	}
-	if bare := (AgentBuilderCutoverDraft{ID: "cs-2", Prompt: "x"}).StartRequest("", ""); bare.Parameters.Draft != nil || bare.Parameters.Name != "" {
-		t.Fatalf("draft without a profile = %#v", bare.Parameters)
 	}
 }

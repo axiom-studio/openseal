@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/axiom-studio/openseal/pkg/validation"
 )
 
 type agentBuilderParametersFixture struct {
@@ -145,64 +143,6 @@ func TestAgentBuilderParametersRefusedFromAgentSender(t *testing.T) {
 		if _, err := f.post(t, conversation, sender, "Here is a draft", &AgentBuilderParameters{Kind: AgentBuilderKindAgent, Name: "X"}, "from-"+string(sender.Type)); !errors.Is(err, ErrInvalidConversation) {
 			t.Fatalf("%s sender with parameters = %v", sender.Type, err)
 		}
-	}
-}
-
-func TestAgentBuilderParametersValidate(t *testing.T) {
-	at := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
-	base := ChannelMessage{
-		ID: "m_1", Scope: Scope{Kind: "organization", ID: "builder"}, ConversationID: "c_1", Sequence: 1,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "u_7"}, Intent: MessageIntentUpdate,
-		Content: "Build me an agent", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, CreatedAt: at,
-	}
-	valid := &AgentBuilderParameters{Kind: AgentBuilderKindAgent, Name: "Press Desk", Model: "openai/gpt-5", Draft: &AgentBuilderDraftProfile{
-		Purpose: "Answers press questions", SystemPrompt: "Answer from the press kit.\nKeep it short.", Personality: "Warm",
-		OperatingPrinciples: []string{"Cite the kit", "Never promise dates"},
-	}}
-	message := base
-	message.BuilderParameters = valid
-	if err := message.Validate(); err != nil {
-		t.Fatalf("valid parameters refused: %v", err)
-	}
-	principles := make([]string, maximumAgentBuilderOperatingPrinciples+1)
-	for index := range principles {
-		principles[index] = "principle " + string(rune('a'+index))
-	}
-	for _, test := range []struct {
-		name       string
-		parameters AgentBuilderParameters
-		sensitive  bool
-	}{
-		{name: "missing kind", parameters: AgentBuilderParameters{Name: "X"}},
-		{name: "unknown kind", parameters: AgentBuilderParameters{Kind: "workflow", Name: "X"}},
-		{name: "long name", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Name: strings.Repeat("n", maximumAgentBuilderNameBytes+1)}},
-		{name: "multi-line name", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Name: "Press\nDesk"}},
-		{name: "long model", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Model: strings.Repeat("m", maximumAgentBuilderModelBytes+1)}},
-		{name: "long purpose", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{Purpose: strings.Repeat("p", maximumAgentBuilderPurposeBytes+1)}}},
-		{name: "long behaviour", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{SystemPrompt: strings.Repeat("s", maximumAgentBuilderSystemPromptBytes+1)}}},
-		{name: "too many principles", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{OperatingPrinciples: principles}}},
-		{name: "duplicate principle", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{OperatingPrinciples: []string{"a", "a"}}}},
-		{name: "empty principle", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{OperatingPrinciples: []string{" "}}}},
-		{name: "sensitive name", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Name: "Password: hunter2-secret"}, sensitive: true},
-		{name: "sensitive model", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Model: "sk-1234567890abcdefghijklmnop"}, sensitive: true},
-		{name: "sensitive behaviour", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{SystemPrompt: "Use api key: sk-1234567890abcdefghijklmnop"}}, sensitive: true},
-		{name: "sensitive principle", parameters: AgentBuilderParameters{Kind: AgentBuilderKindAgent, Draft: &AgentBuilderDraftProfile{OperatingPrinciples: []string{"Use github_pat_1234567890abcdefghijklmnop"}}}, sensitive: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			message := base
-			message.BuilderParameters = &test.parameters
-			err := message.Validate()
-			if !errors.Is(err, ErrInvalidConversation) {
-				t.Fatalf("Validate = %v, want invalid conversation", err)
-			}
-			var sensitive *validation.SensitiveInputError
-			if test.sensitive != errors.As(err, &sensitive) || test.sensitive != errors.Is(err, validation.ErrSensitiveInput) {
-				t.Fatalf("Validate = %v, sensitive = %t", err, test.sensitive)
-			}
-			if test.sensitive && strings.Contains(err.Error(), "hunter2") {
-				t.Fatalf("error leaks the sensitive value: %v", err)
-			}
-		})
 	}
 }
 

@@ -1,4 +1,4 @@
-package runtime
+package models
 
 import (
 	"encoding/json"
@@ -66,14 +66,14 @@ func TestPartialBudgetAllowsFirstTurnAndUnboundedAction(t *testing.T) {
 		BudgetState: BudgetStateActive,
 	}
 	turn := BudgetReservation{ID: "turn-1", Usage: BudgetUsage{Turns: 1, InputTokens: 12000, OutputTokens: 1000, DurationMS: 500}, CreatedAt: time.Now()}
-	if err := reserveRunBudget(run, turn); err != nil {
+	if err := ReserveRunBudget(run, turn); err != nil {
 		t.Fatalf("reserve first turn: %v", err)
 	}
-	if err := settleRunBudgetReservation(run, turn.ID, turn.Usage); err != nil {
+	if err := SettleRunBudgetReservation(run, turn.ID, turn.Usage); err != nil {
 		t.Fatalf("settle first turn: %v", err)
 	}
 	action := BudgetReservation{ID: "action-1", Usage: BudgetUsage{Actions: 1}, CreatedAt: time.Now()}
-	if err := reserveRunBudget(run, action); err != nil {
+	if err := ReserveRunBudget(run, action); err != nil {
 		t.Fatalf("reserve action on omitted unbounded maxActions: %v", err)
 	}
 	if run.BudgetState != BudgetStateActive {

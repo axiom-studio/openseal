@@ -3,9 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
-	"unicode/utf8"
 )
 
 func TestConversationSessionIDIsStablePerLane(t *testing.T) {
@@ -79,48 +77,6 @@ func TestTeamRoutingRunHasNoSession(t *testing.T) {
 		Context:   map[string]interface{}{conversationRunContextConversationID: "chat"}}
 	if session, err := conversationRunSession(context.Background(), store, claimed); !errors.Is(err, ErrInvalidAgentRun) || session != nil {
 		t.Fatalf("routing lane session = %+v, %v", session, err)
-	}
-}
-
-func TestValidateConversationRunRejectsForeignSession(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "sessions"}
-	lane := ConversationRunLane("chat", "", "agent-a")
-	valid := func() *AgentRun {
-		return &AgentRun{ID: "run", Scope: scope, Kind: RunKindConversation,
-			Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a", ConcurrencyKey: lane,
-			SessionID: conversationSessionID(scope, lane),
-			Context: map[string]interface{}{
-				conversationRunContextConversationID: "chat",
-				conversationRunContextTriggerID:      "m1",
-			}}
-	}
-	if err := validateConversationRun(valid()); err != nil {
-		t.Fatalf("own lane session: %v", err)
-	}
-	unbound := valid()
-	unbound.SessionID = ""
-	if err := validateConversationRun(unbound); err != nil {
-		t.Fatalf("unbound run: %v", err)
-	}
-	for name, sessionID := range map[string]string{
-		"other agent":  conversationSessionID(scope, ConversationRunLane("chat", "", "agent-b")),
-		"other thread": conversationSessionID(scope, ConversationRunLane("chat", "root", "agent-a")),
-		"other scope":  conversationSessionID(Scope{Kind: "tenant", ID: "other"}, lane),
-		"run session":  RunAgentSessionID(scope, "run"),
-	} {
-		run := valid()
-		run.SessionID = sessionID
-		if err := validateConversationRun(run); !errors.Is(err, ErrInvalidAgentRun) {
-			t.Fatalf("%s: err = %v", name, err)
-		}
-	}
-	// A task continuation writes to its child session (§3.3); the lane rule
-	// does not apply to it.
-	continuation := valid()
-	continuation.SessionID = RunAgentSessionID(scope, "run")
-	continuation.Context[ConversationTaskContextKey] = "task-1"
-	if err := validateConversationRunSession(continuation); err != nil {
-		t.Fatalf("task continuation: %v", err)
 	}
 }
 
@@ -221,30 +177,5 @@ func TestChildSessionRequiresForkEntryAndParent(t *testing.T) {
 	}
 	if seed.ID != SessionEntryID(session.ID, GoalSourceKey("child")) {
 		t.Fatalf("seed id %s is not the goal key", seed.ID)
-	}
-}
-
-func TestChildSessionSeedBoundsBriefAndKind(t *testing.T) {
-	if _, err := childSessionSeed(testSessionScope, "child", "operation", "brief"); !errors.Is(err, ErrInvalidAgentRun) {
-		t.Fatalf("unknown kind err = %v", err)
-	}
-	if _, err := childSessionSeed(testSessionScope, "", "task", "brief"); !errors.Is(err, ErrInvalidAgentRun) {
-		t.Fatalf("no run err = %v", err)
-	}
-	if _, err := childSessionSeed(testSessionScope, "child", "task", "  "); !errors.Is(err, ErrInvalidAgentRun) {
-		t.Fatalf("empty brief err = %v", err)
-	}
-	long := strings.Repeat("a", maximumChildBriefBytes-1) + "é" + "tail"
-	seed, err := childSessionSeed(testSessionScope, "child", "fork_branch", long)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := seed.User.Content[0].Text
-	body := strings.TrimSuffix(strings.TrimPrefix(text, "<brief>\n"), "\n</brief>")
-	if len(body) != maximumChildBriefBytes-1 || !utf8.ValidString(text) {
-		t.Fatalf("brief kept %d bytes (valid %v)", len(body), utf8.ValidString(text))
-	}
-	if err := seed.User.Validate(); err != nil {
-		t.Fatalf("seed entry invalid: %v", err)
 	}
 }

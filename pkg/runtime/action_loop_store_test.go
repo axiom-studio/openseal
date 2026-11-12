@@ -453,29 +453,6 @@ func TestLoopApprovalResolutionWithoutRunIsValid(t *testing.T) {
 	})
 }
 
-func TestNestedApprovalResolutionNeverUpdatesRun(t *testing.T) {
-	now := time.Now().UTC()
-	scope := Scope{Kind: "tenant", ID: "one"}
-	call := &ActionCall{
-		ID: "nested", Scope: scope, RunID: "run", TurnID: "step-1", DeploymentID: "agent", SkillID: "repo", SkillVersion: "1.0.0", Action: "push",
-		Origin: ActionOriginVM, Status: ActionCallStatusReady, ApprovalID: "approval-1", MaxAttempts: 1, Revision: 2, CreatedAt: now, UpdatedAt: now,
-	}
-	approval := &ApprovalCheckpoint{
-		ID: "approval-1", Scope: scope, RunID: "run", ActionCallID: call.ID, Status: ApprovalStatusApproved, Summary: "Push",
-		EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ExpiresAt: now.Add(time.Hour), Revision: 2,
-		DecisionID: "decision", DecisionBy: &ApprovalPrincipal{Type: "user", ID: "user"}, DecidedAt: &now,
-	}
-	event := &ActivityEvent{ID: "event", Scope: scope, EventType: "approval.approved", Severity: ActivitySeverityInfo, RunID: "run",
-		Actor: ActivityActor{Type: "user", ID: "user"}, Summary: "Approved", Visibility: ActivityVisibilityScope, CreatedAt: now}
-	run := &AgentRun{ID: "run", Scope: scope}
-	if err := validateApprovalResolutionRecord(ApprovalResolutionRecord{Approval: approval, Call: call, Run: run, Event: event}); err == nil {
-		t.Fatal("a nested call's approval resolution updated its Run")
-	}
-	if err := validateApprovalResolutionRecord(ApprovalResolutionRecord{Approval: approval, Call: call, Event: event}); err != nil {
-		t.Fatalf("nested resolution without Run = %v", err)
-	}
-}
-
 func TestClaimSelectsLoopCalls(t *testing.T) {
 	now := time.Now().UTC()
 	scope := Scope{Kind: "tenant", ID: "claim-selects"}

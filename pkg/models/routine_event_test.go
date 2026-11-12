@@ -1,4 +1,4 @@
-package runtime
+package models
 
 import (
 	"encoding/json"
@@ -149,22 +149,22 @@ func TestRoutineSourceRefs(t *testing.T) {
 		RoutineEventWebhook:         HookSourceRef(hookID),
 	}
 	for kind, sourceRef := range valid {
-		if err := validateRoutineSourceRef(kind, sourceRef); err != nil {
+		if err := ValidateRoutineSourceRef(kind, sourceRef); err != nil {
 			t.Errorf("%s %q: %v", kind, sourceRef, err)
 		}
 		for otherKind, otherRef := range valid {
 			if otherRef == sourceRef {
 				continue
 			}
-			if err := validateRoutineSourceRef(kind, otherRef); err == nil {
+			if err := ValidateRoutineSourceRef(kind, otherRef); err == nil {
 				t.Errorf("%s accepted %s source %q", kind, otherKind, otherRef)
 			}
 		}
 	}
-	if err := validateRoutineSourceRef(RoutineEventWebhook, "hook:hk_short"); err == nil {
+	if err := ValidateRoutineSourceRef(RoutineEventWebhook, "hook:hk_short"); err == nil {
 		t.Error("webhook accepted a malformed hook id")
 	}
-	if err := validateRoutineSourceRef(RoutineEventSlackMessage, "conversation:"+strings.Repeat("G", 40)); err == nil {
+	if err := ValidateRoutineSourceRef(RoutineEventSlackMessage, "conversation:"+strings.Repeat("G", 40)); err == nil {
 		t.Error("slack accepted a non-hex conversation hash")
 	}
 }

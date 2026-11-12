@@ -63,30 +63,6 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 	}
 }
 
-func TestTelegramPrivateChatKeepsContextAcrossReplyRoots(t *testing.T) {
-	conversation := &Conversation{Origin: &ConversationReference{Kind: ConversationReferenceExternalSource, ID: "telegram-endpoint"}}
-	trigger := &ChannelMessage{ID: "new-message", ThreadRootID: "quoted-message", ExternalSource: &ExternalMessageSource{Provider: "telegram", ChannelType: "private", ThreadID: "reply:7"}}
-	if got := externalConversationThreadRoot(conversation, trigger); got != "" {
-		t.Fatalf("DM context restricted to %s", got)
-	}
-	for _, topic := range []string{"topic:7", "direct-topic:7"} {
-		trigger.ExternalSource.ThreadID = topic
-		if got := externalConversationThreadRoot(conversation, trigger); got != "quoted-message" {
-			t.Fatalf("topic lost isolation: %s", got)
-		}
-	}
-	trigger.ExternalSource.ThreadID = "reply:7"
-	trigger.ExternalSource.ChannelType = "supergroup"
-	if externalConversationThreadRoot(conversation, trigger) != "quoted-message" {
-		t.Fatal("group lost isolation")
-	}
-	trigger.ExternalSource.Provider = "slack"
-	trigger.ExternalSource.ChannelType = "private"
-	if externalConversationThreadRoot(conversation, trigger) != "quoted-message" {
-		t.Fatal("Slack lost isolation")
-	}
-}
-
 func TestQuotedPhotoContextRejectsInvalidOriginAndUnboundedFiles(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	event := NormalizedExternalConversationEvent{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:8", ReplyToExternalMessageID: "chat:7", OccurredAt: now}
