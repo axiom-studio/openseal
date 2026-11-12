@@ -30,14 +30,14 @@ type ArtifactRetentionService struct {
 	now       func() time.Time
 }
 
-func NewArtifactRetentionService(store ArtifactStore, inspector ArtifactContentInspector, deleter ArtifactContentDeleter, opts ...models.ServiceOption) (*ArtifactRetentionService, error) {
+func NewArtifactRetentionService(store models.ArtifactStore, inspector ArtifactContentInspector, deleter ArtifactContentDeleter, opts ...models.ServiceOption) (*ArtifactRetentionService, error) {
 	if store == nil || inspector == nil || deleter == nil {
 		return nil, errors.New("artifact catalog, content inspector, and content deleter are required")
 	}
 	return &ArtifactRetentionService{catalog: NewArtifactCatalog(store, opts...), inspector: inspector, deleter: deleter, now: models.ClockFrom(opts)}, nil
 }
 
-func (s *ArtifactRetentionService) Sweep(ctx context.Context, scope Scope, offset, limit int) (*ArtifactRetentionSweepResult, error) {
+func (s *ArtifactRetentionService) Sweep(ctx context.Context, scope models.Scope, offset, limit int) (*ArtifactRetentionSweepResult, error) {
 	if s == nil || s.catalog == nil || s.inspector == nil || s.deleter == nil {
 		return nil, errors.New("artifact retention service is not configured")
 	}
@@ -45,7 +45,7 @@ func (s *ArtifactRetentionService) Sweep(ctx context.Context, scope Scope, offse
 		return nil, errors.New("artifact retention sweep offset must be non-negative and limit between 1 and 100")
 	}
 	now := s.now().UTC()
-	artifacts, err := s.catalog.List(ctx, ArtifactFilter{Scope: scope, RetentionDueBefore: &now, Offset: offset, Limit: limit})
+	artifacts, err := s.catalog.List(ctx, models.ArtifactFilter{Scope: scope, RetentionDueBefore: &now, Offset: offset, Limit: limit})
 	if err != nil {
 		return nil, err
 	}
