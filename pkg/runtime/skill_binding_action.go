@@ -764,7 +764,7 @@ func exactSkillDefinition(ctx context.Context, catalog *skill.Catalog, id, versi
 func skillBindingCandidate(scope skill.ScopeReference, deploymentID string, args skillBindingUpsertArguments, current *skill.Binding) *skill.Binding {
 	var credentials map[string]skill.CredentialReference
 	if current != nil {
-		credentials = cloneCredentialReferences(current.Credentials)
+		credentials = maps.Clone(current.Credentials)
 	}
 	allowed := append([]string(nil), args.AllowedActions...)
 	sort.Strings(allowed)

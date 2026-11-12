@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -162,7 +163,7 @@ func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *tes
 	}
 	_, err = dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{
 		Call: call, Run: run, Bound: bound, Arguments: map[string]interface{}{},
-		CredentialLease: envelope, CredentialReferences: cloneCredentialReferences(call.CredentialRefs),
+		CredentialLease: envelope, CredentialReferences: maps.Clone(call.CredentialRefs),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +178,7 @@ func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *tes
 
 	_, err = dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{
 		Call: call, Run: run, Bound: bound, Arguments: map[string]interface{}{}, Credentials: map[string]string{"reddit": "plaintext"},
-		CredentialLease: envelope, CredentialReferences: cloneCredentialReferences(call.CredentialRefs),
+		CredentialLease: envelope, CredentialReferences: maps.Clone(call.CredentialRefs),
 	})
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Fatalf("mixed plaintext and opaque authority was accepted: %v", err)
@@ -197,7 +198,7 @@ func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *tes
 	otherBound.Definition = &otherDefinition
 	_, err = dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{
 		Call: call, Run: run, Bound: &otherBound, Arguments: map[string]interface{}{}, CredentialLease: envelope,
-		CredentialReferences: cloneCredentialReferences(call.CredentialRefs),
+		CredentialReferences: maps.Clone(call.CredentialRefs),
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("credential lease was paired with another tool endpoint: %v", err)

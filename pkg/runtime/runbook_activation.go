@@ -614,7 +614,7 @@ func runbookVerificationEnvironment(definition *kernelagent.AgentDefinition, bin
 				Enabled: !binding.Disabled, Allowed: allowed[actionName], MaximumRisk: binding.MaximumRisk,
 				Risk: action.Risk, SideEffect: action.SideEffect, Idempotency: action.Idempotency,
 				RequiredCredentials: append([]capability.CredentialRequirement(nil), action.Credentials...),
-				BoundCredentials:    cloneCredentialReferences(binding.Credentials), CompensationAction: action.CompensationAction,
+				BoundCredentials:    maps.Clone(binding.Credentials), CompensationAction: action.CompensationAction,
 				FinalizerAction: action.FinalizerAction, RequiresApproval: requiresApproval,
 				ApprovalRoutePresent: !requiresApproval || approvalRoutes || standing[binding.SkillID+"\x00"+actionName] && !action.AlwaysReview(),
 			})

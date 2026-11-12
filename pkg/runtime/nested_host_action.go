@@ -210,7 +210,7 @@ func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope S
 		return nil, fmt.Errorf("host call credential lease transport: %w", err)
 	}
 	lease, err := issuer.IssueActionCredentialLease(ctx, ActionCredentialLeaseIssueRequest{
-		Call: cloneActionCall(call), Run: cloneAgentRun(run), References: cloneCredentialReferences(call.CredentialRefs), Transport: transport,
+		Call: cloneActionCall(call), Run: cloneAgentRun(run), References: maps.Clone(call.CredentialRefs), Transport: transport,
 	})
 	if err != nil {
 		return nil, err

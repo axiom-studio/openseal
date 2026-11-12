@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -303,7 +304,7 @@ func (i *AgentInstaller) grantAgentSkill(ctx context.Context, scope Scope, deplo
 	}
 	candidate := skillBindingCandidate(reference, deploymentID, args, current)
 	if credentials != nil {
-		candidate.Credentials = cloneCredentialReferences(credentials)
+		candidate.Credentials = maps.Clone(credentials)
 	}
 	if current != nil && !current.Disabled && sameManagedSkillBinding(current, candidate) {
 		return current, nil

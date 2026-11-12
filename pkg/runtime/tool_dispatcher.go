@@ -98,7 +98,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input agentru
 		SkillSourceIdentity: sourceIdentity, SkillDefinitionDigest: definitionDigest,
 		Action: input.Bound.Action.Name, Arguments: arguments, FileArguments: fileinput.Properties(input.Bound.Action.InputSchema),
 		FileReferences: fileReferences, OutputSchema: maps.Clone(input.Bound.Action.OutputSchema), BindingConfig: maps.Clone(input.Bound.Binding.Config), Credentials: input.Credentials,
-		CredentialLease: cloneSignedActionCredentialLease(input.CredentialLease), CredentialReferences: cloneCredentialReferences(input.CredentialReferences),
+		CredentialLease: cloneSignedActionCredentialLease(input.CredentialLease), CredentialReferences: maps.Clone(input.CredentialReferences),
 	}
 	if input.Call != nil {
 		invocation.ActionCallID = input.Call.ID

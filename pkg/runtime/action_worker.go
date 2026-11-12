@@ -321,9 +321,9 @@ func (w *ActionWorker) executeClaimed(ctx context.Context, call *ActionCall, wor
 			if transportErr != nil {
 				executionErr = fmt.Errorf("delegated credential lease transport: %w", transportErr)
 			} else {
-				credentialReferences = cloneCredentialReferences(call.CredentialRefs)
+				credentialReferences = maps.Clone(call.CredentialRefs)
 				credentialLease, executionErr = w.leaseIssuer.IssueActionCredentialLease(executionCtx, ActionCredentialLeaseIssueRequest{
-					Call: cloneActionCall(call), Run: cloneAgentRun(sourceRun), References: cloneCredentialReferences(call.CredentialRefs), Transport: credentialTransport,
+					Call: cloneActionCall(call), Run: cloneAgentRun(sourceRun), References: maps.Clone(call.CredentialRefs), Transport: credentialTransport,
 				})
 			}
 			if executionErr == nil {
@@ -332,7 +332,7 @@ func (w *ActionWorker) executeClaimed(ctx context.Context, call *ActionCall, wor
 		} else if w.credentials != nil {
 			credentials, executionErr = w.credentials.ResolveCredentials(executionCtx, CredentialResolutionRequest{
 				Scope: call.Scope, DeploymentID: call.DeploymentID, SkillID: call.SkillID, SkillVersion: call.SkillVersion,
-				Action: call.Action, ActionCallID: call.ID, RunID: call.RunID, References: cloneCredentialReferences(call.CredentialRefs),
+				Action: call.Action, ActionCallID: call.ID, RunID: call.RunID, References: maps.Clone(call.CredentialRefs),
 				Umbrella: umbrella, ActingUser: sourceRun.ActingUser, Requirements: actionCredentialRequirements(bound),
 			})
 			if executionErr == nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -57,7 +58,7 @@ func (w *ActionWorker) checkCredentialAvailability(ctx context.Context, run *Age
 	}
 	availability, err := checker.CheckCredentialAvailability(ctx, CredentialAvailabilityRequest{
 		Scope: call.Scope, Umbrella: umbrella, ActingUser: run.ActingUser, DeploymentID: call.DeploymentID, BindingID: call.BindingID,
-		References: cloneCredentialReferences(call.CredentialRefs), Requirements: actionCredentialRequirements(bound),
+		References: maps.Clone(call.CredentialRefs), Requirements: actionCredentialRequirements(bound),
 	})
 	if err != nil {
 		return umbrella, err

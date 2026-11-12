@@ -215,14 +215,3 @@ func interactionRequestRefused(call *models.ActionCall) bool {
 	_, refused := call.Output["refused"].(map[string]interface{})
 	return refused
 }
-
-func cloneCredentialReferences(input map[string]skill.CredentialReference) map[string]skill.CredentialReference {
-	if input == nil {
-		return nil
-	}
-	result := make(map[string]skill.CredentialReference, len(input))
-	for name, reference := range input {
-		result[name] = reference
-	}
-	return result
-}

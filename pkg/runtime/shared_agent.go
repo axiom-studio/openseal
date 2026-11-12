@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -284,7 +285,7 @@ func (i *AgentInstaller) PlanSharedAgentInstall(ctx context.Context, request Sha
 			}
 		}
 		candidate := skillBindingCandidate(reference, plan.DeploymentID, sharedSkillBindingArguments(bindingID, shared.grant.grant), nil)
-		candidate.Credentials = cloneCredentialReferences(shared.grant.credentials)
+		candidate.Credentials = maps.Clone(shared.grant.credentials)
 		plan.Bindings = append(plan.Bindings, candidate)
 	}
 	resolved.maximumRisk = agentGrantsMaximumRisk("", resolved.grants)
@@ -487,7 +488,7 @@ func (i *AgentInstaller) finishSharedAgentUpdate(
 		if current == nil || current.Disabled {
 			continue
 		}
-		credentials := cloneCredentialReferences(grant.credentials)
+		credentials := maps.Clone(grant.credentials)
 		for slot, requirement := range requirements {
 			if existing, ok := current.Credentials[slot]; ok && existing.Kind == requirement.Kind && strings.TrimSpace(existing.ID) != "" {
 				credentials[slot] = existing
@@ -937,7 +938,7 @@ func sharedAgentPlanCredentials(resolved *sharedAgentResolvedInstall, bindings [
 			grants = append(grants, grant)
 			continue
 		}
-		credentials := cloneCredentialReferences(grant.credentials)
+		credentials := maps.Clone(grant.credentials)
 		if binding := bySkill[grant.grant.SkillID]; binding != nil {
 			for slot, reference := range binding.Credentials {
 				requirement, ok := requirements[slot]
