@@ -18,7 +18,7 @@ type StartTaskArgs struct {
 	Acknowledgment string `json:"acknowledgment"`
 }
 
-// parseStartTaskArgs strictly decodes and checks the arguments of a
+// ParseStartTaskArgs strictly decodes and checks the arguments of a
 // conversation_start_task call: a trimmed goal and acknowledgment within
 // their limits.
 func ParseStartTaskArgs(raw json.RawMessage) (*StartTaskArgs, error) {
@@ -37,7 +37,7 @@ func ParseStartTaskArgs(raw json.RawMessage) (*StartTaskArgs, error) {
 	return args, nil
 }
 
-// startTaskArguments decodes the arguments of a conversation_start_task
+// StartTaskEntryArgs decodes the arguments of a conversation_start_task
 // entry exactly as the handler does (nil when it is not one or they are
 // invalid). Admission and provenance proofs compare against these.
 func StartTaskEntryArgs(entry *SessionEntry) *StartTaskArgs {
@@ -52,5 +52,5 @@ func StartTaskEntryArgs(entry *SessionEntry) *StartTaskArgs {
 	return args
 }
 
-// startTaskKey is the idempotency key of the task an entry starts (§3.4).
+// StartTaskKey is the idempotency key of the task an entry starts (§3.4).
 func StartTaskKey(entryID string) string { return startTaskKeyPrefix + entryID }

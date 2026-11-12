@@ -128,7 +128,7 @@ func ToolOutputPreviewText(content []ContentPart) string {
 	return strings.Join(pieces, "\n")
 }
 
-// compactToolResultContent shortens text/json parts so that together they fit
+// CompactToolResultContent shortens text/json parts so that together they fit
 // MaxToolResultContentBytes. Json parts are compacted down the level ladder and
 // wrapped as {"truncated":true,...}; text parts share what is left. When nothing
 // fits, the content is one text part saying it could not be shortened.

@@ -164,7 +164,7 @@ func IsAgentManagementAction(bound *skill.BoundAction) bool {
 		(bound.Action.Name == AgentActionAmendBehavior || bound.Action.Name == AgentActionListChannels || bound.Action.Name == AgentActionConfigureChannel)
 }
 
-// canonicalActionReview applies the current kernel contract's review floor to
+// CanonicalActionReview applies the current kernel contract's review floor to
 // an Agent management action bound at any supported version. Published
 // versions are immutable, so bindings pinned before review: always was
 // declared (1.2.0 through 1.3.1) still inherit it from AgentManagementSkill().

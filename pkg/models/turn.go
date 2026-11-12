@@ -232,7 +232,7 @@ func CloneAgentTurn(in *AgentTurn) *AgentTurn {
 // turn.narration event summary) on a rune boundary.
 const maximumStepNarrationBytes = 2000
 
-// boundStepNarration trims the narration and cuts it to
+// BoundStepNarration trims the narration and cuts it to
 // maximumStepNarrationBytes on a rune boundary.
 func BoundStepNarration(text string) string {
 	text = strings.TrimSpace(text)

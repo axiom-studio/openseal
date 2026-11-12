@@ -50,7 +50,7 @@ func (preview TurnAnswerPreview) Validate() error {
 	return nil
 }
 
-// projectTurnAnswerPreview exposes only the typed public preview of a
+// ProjectTurnAnswerPreview exposes only the typed public preview of a
 // turn.answer_preview event, never arbitrary payload fields. It also
 // reconstructs snapshots after a database JSON round-trip.
 func ProjectTurnAnswerPreview(event *ActivityEvent) *TurnAnswerPreview {

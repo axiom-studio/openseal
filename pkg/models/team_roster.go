@@ -35,7 +35,7 @@ func AgentOnChatRoster(ctx context.Context, teams TeamRosterReader, scope Scope,
 	return false, nil
 }
 
-// teamRoster is the Agent deployment IDs on teamID's current deployment and
+// TeamRoster is the Agent deployment IDs on teamID's current deployment and
 // whether that deployment is active. A missing Team, a missing catalog and a
 // deployment from another scope have no roster.
 func TeamRoster(ctx context.Context, teams TeamRosterReader, scope Scope, teamID string) ([]string, bool, error) {

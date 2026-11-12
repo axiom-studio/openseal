@@ -29,7 +29,7 @@ type askUserOption struct {
 // askUserOptionID is the kernel-assigned id of the index-th option ("o1".."o6").
 func askUserOptionID(index int) string { return fmt.Sprintf("o%d", index+1) }
 
-// channelQuestion is the posted shape of the options (nil without options).
+// ChannelQuestion is the posted shape of the options (nil without options).
 func (a *AskUserArgs) ChannelQuestion() *ChannelQuestion {
 	if a == nil || len(a.Options) == 0 {
 		return nil
@@ -41,7 +41,7 @@ func (a *AskUserArgs) ChannelQuestion() *ChannelQuestion {
 	return question
 }
 
-// selectedLabels maps chosen option ids to their labels, in option order.
+// SelectedLabels maps chosen option ids to their labels, in option order.
 func (a *AskUserArgs) SelectedLabels(ids []string) []string {
 	labels := []string{}
 	for index, option := range a.Options {
@@ -52,7 +52,7 @@ func (a *AskUserArgs) SelectedLabels(ids []string) []string {
 	return labels
 }
 
-// parseAskUserArgs strictly decodes and checks the arguments of an ask_user
+// ParseAskUserArgs strictly decodes and checks the arguments of an ask_user
 // call: a trimmed question and, when given, distinct trimmed options.
 func ParseAskUserArgs(raw json.RawMessage) (*AskUserArgs, error) {
 	args := &AskUserArgs{}
@@ -93,7 +93,7 @@ func ParseAskUserArgs(raw json.RawMessage) (*AskUserArgs, error) {
 	return args, nil
 }
 
-// askUserEntryArgs decodes an ask_user entry's arguments (nil when the entry
+// AskUserEntryArgs decodes an ask_user entry's arguments (nil when the entry
 // is not a valid ask_user call).
 func AskUserEntryArgs(entry *SessionEntry) *AskUserArgs {
 	if entry == nil || entry.Type != SessionEntryTool || entry.Tool == nil || entry.Tool.Name != string(ControlToolAskUser) {
@@ -106,7 +106,7 @@ func AskUserEntryArgs(entry *SessionEntry) *AskUserArgs {
 	return args
 }
 
-// askUserQuestion is the posted text of an ask_user entry: its trimmed
+// AskUserEntryQuestion is the posted text of an ask_user entry: its trimmed
 // question argument ("" when the entry is not an ask_user call).
 func AskUserEntryQuestion(entry *SessionEntry) string {
 	if args := AskUserEntryArgs(entry); args != nil {

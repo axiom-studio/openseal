@@ -240,13 +240,13 @@ func agentTryAgentAction() skill.Action {
 	}
 }
 
-// normalizedAgentName is the key the name check compares: case-folded, with
+// NormalizedAgentName is the key the name check compares: case-folded, with
 // runs of whitespace collapsed to one space.
 func NormalizedAgentName(name string) string {
 	return strings.ToLower(strings.Join(strings.Fields(name), " "))
 }
 
-// normalized returns the profile with trimmed text and deduplicated
+// Normalized returns the profile with trimmed text and deduplicated
 // principles, the form a definition stores.
 func (p AgentProfileArguments) Normalized() AgentProfileArguments {
 	p.DisplayName = strings.TrimSpace(p.DisplayName)
@@ -258,13 +258,13 @@ func (p AgentProfileArguments) Normalized() AgentProfileArguments {
 	return p
 }
 
-// validateAgentProfileText enforces the profile bounds and refuses secrets in
+// ValidateAgentProfileText enforces the profile bounds and refuses secrets in
 // any profile text. profile must already be normalized.
 func ValidateAgentProfileText(profile AgentProfileArguments) error {
 	return ValidateAgentProfileFields(profile, nil)
 }
 
-// validateAgentProfileFields checks the named profile fields, or every field
+// ValidateAgentProfileFields checks the named profile fields, or every field
 // when fields is nil.
 func ValidateAgentProfileFields(profile AgentProfileArguments, fields map[string]bool) error {
 	checked := func(name string) bool { return fields == nil || fields[name] }

@@ -54,7 +54,7 @@ func ControlJSONResult(status ToolResultStatus, value map[string]interface{}) *T
 	}
 }
 
-// decodeControlArguments decodes raw strictly: unknown fields are refused and
+// DecodeControlArguments decodes raw strictly: unknown fields are refused and
 // raw must hold exactly one JSON value. Empty input decodes as {}.
 func DecodeControlArguments(raw json.RawMessage, target interface{}) error {
 	if len(bytes.TrimSpace(raw)) == 0 {
@@ -72,7 +72,7 @@ func DecodeControlArguments(raw json.RawMessage, target interface{}) error {
 	return nil
 }
 
-// decodeControlInto is the decode of a handler whose arguments are T.
+// DecodeControlInto is the decode of a handler whose arguments are T.
 func DecodeControlInto[T any](raw json.RawMessage) (interface{}, error) {
 	var value T
 	if err := DecodeControlArguments(raw, &value); err != nil {

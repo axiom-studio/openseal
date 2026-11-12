@@ -203,7 +203,7 @@ func IsWaitingRunStatus(status AgentRunStatus) bool {
 		status == AgentRunStatusWaitingForEvent
 }
 
-// terminalCreditError reads the kernel-classified cause of a failed Run, never
+// TerminalCreditError reads the kernel-classified cause of a failed Run, never
 // provider text, so only a Workspace credit refusal yields a credit error.
 func TerminalCreditError(status AgentRunStatus, failure *RunFailureExplanation) *RunCreditError {
 	if status != AgentRunStatusFailed || failure == nil || failure.Code != RunCreditErrorWorkspaceCreditsExhausted {

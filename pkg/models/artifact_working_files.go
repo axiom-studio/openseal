@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-// markRunFiles records which of a Run's saved files its reply handed over and
+// MarkRunFiles records which of a Run's saved files its reply handed over and
 // which it did not. It is a no-op for a store that keeps no such record.
 func MarkRunFiles(ctx context.Context, store ArtifactStore, scope Scope, saved []SavedArtifact, handedOver []ConversationReference) error {
 	marker, ok := store.(ArtifactWorkingFileStore)

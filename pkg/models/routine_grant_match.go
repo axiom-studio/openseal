@@ -31,7 +31,7 @@ var routineUngrantableSkills = map[string]bool{
 	computerSkillID: true,
 }
 
-// routineUngrantableSkill reports whether a routine may never be granted
+// RoutineUngrantableSkill reports whether a routine may never be granted
 // actions of skillID: the management skills and the computer skill.
 func RoutineUngrantableSkill(skillID string) bool {
 	return routineUngrantableSkills[skillID]
@@ -55,7 +55,7 @@ func routineGrantToolPinned(grant RoutineGrant, tool *skill.BindingTool) bool {
 	return err == nil && string(pinned) == string(current)
 }
 
-// routineRecipientKey reports whether an argument names message recipients.
+// IsRoutineRecipientKey reports whether an argument names message recipients.
 func IsRoutineRecipientKey(name string) bool {
 	key := strings.ToLower(strings.TrimSpace(name))
 	switch key {
@@ -79,7 +79,7 @@ func routineDestinationKey(name string) bool {
 	return false
 }
 
-// routineActionDestinationKeys returns the destination arguments of an
+// RoutineActionDestinationKeys returns the destination arguments of an
 // action's input schema.
 func RoutineActionDestinationKeys(schema map[string]interface{}) []string {
 	properties, _ := schema["properties"].(map[string]interface{})
@@ -92,7 +92,7 @@ func RoutineActionDestinationKeys(schema map[string]interface{}) []string {
 	return keys
 }
 
-// routineActionPostsToDestination reports whether an action has side effects
+// RoutineActionPostsToDestination reports whether an action has side effects
 // in a channel or conversation it takes as an argument.
 func RoutineActionPostsToDestination(action skill.Action) bool {
 	return action.SideEffect != skill.SideEffectRead && action.SideEffect != skill.SideEffectNone && len(RoutineActionDestinationKeys(action.InputSchema)) > 0
@@ -267,7 +267,7 @@ func RoutineOwner(activation *RunbookActivation) (ConversationParticipant, error
 	return ConversationParticipant{Type: ConversationParticipantUser, ID: activation.Task.CreatedBy}, nil
 }
 
-// resolveRoutineGrant returns the approved routine grant that covers this
+// ResolveRoutineGrant returns the approved routine grant that covers this
 // action, or nil. A review: always action is never covered, and an owner-only
 // grant covers a send only when every recipient is the owner's address. A
 // call of a binding-tools base action is covered only by a grant naming the

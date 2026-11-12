@@ -46,7 +46,7 @@ func (p ModelStepPurpose) Valid() bool {
 	return false
 }
 
-// toolFree reports whether the purpose sends no tools.
+// ToolFree reports whether the purpose sends no tools.
 func (p ModelStepPurpose) ToolFree() bool {
 	return p == ModelStepPurposeExplanation || p == ModelStepPurposeAcknowledgement
 }
@@ -197,7 +197,7 @@ type ModelStepRenderInfo struct {
 // ---------------------------------------------------------------------------
 // Validation
 
-// maxModelStepMediaBytes is the decoded cap of one view image (1 MiB).
+// MaxModelStepMediaBytes is the decoded cap of one view image (1 MiB).
 const MaxModelStepMediaBytes = 1 << 20
 
 var (
@@ -205,7 +205,7 @@ var (
 	modelStepSectionIDPattern = regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)
 )
 
-// validModelStepToolName reports whether name is a tool name every model
+// ValidModelStepToolName reports whether name is a tool name every model
 // provider accepts.
 func ValidModelStepToolName(name string) bool {
 	return modelStepToolNamePattern.MatchString(name)

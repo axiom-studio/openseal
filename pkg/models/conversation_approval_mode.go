@@ -84,7 +84,7 @@ type AgentRunReader interface {
 	GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error)
 }
 
-// inheritRoutineEventBatch gives a child Run its source's routineEventBatchId,
+// InheritRoutineEventBatch gives a child Run its source's routineEventBatchId,
 // and drops any value the child's caller-supplied context tried to set, so
 // only a real occurrence and the Runs under it carry the key.
 func InheritRoutineEventBatch(source *AgentRun, context map[string]interface{}) map[string]interface{} {

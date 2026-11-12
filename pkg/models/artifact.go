@@ -499,7 +499,7 @@ func RunContextConversationID(run *AgentRun) string {
 	return id
 }
 
-// savedArtifact is a file a tool saved, with the chat path it was saved from
+// SavedArtifact is a file a tool saved, with the chat path it was saved from
 // when the tool reported one, so an answer can hand it over by either.
 //
 // Shown is set for a file the Agent showed in the chat itself (save_app,

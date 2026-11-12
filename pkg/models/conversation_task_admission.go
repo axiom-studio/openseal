@@ -262,7 +262,7 @@ type ConversationTaskProofStore interface {
 	FindParticipationRoundByIdempotencyKey(context.Context, Scope, string, string) (*ParticipationRoundResult, error)
 }
 
-// validateConversationTaskStartAuthority reports whether run is a foreground
+// ValidateConversationTaskStartAuthority reports whether run is a foreground
 // conversation Run allowed to start independent work in taskContext's
 // conversation and thread.
 func ValidateConversationTaskStartAuthority(run *AgentRun, taskContext *HostedConversationTaskContext) error {
