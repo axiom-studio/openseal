@@ -140,14 +140,8 @@ func (f *SessionFixture) laneSessionID(agentID string) string {
 // createRun stores a queued Run bound to sessionID (may be "").
 func (f *SessionFixture) createRun(agentID, sessionID string) *models.AgentRun {
 	f.T.Helper()
-	id := uuid.NewString()
-	run := &models.AgentRun{
-		ID: id, Kind: models.RunKindAgentWork, Scope: f.Scope, RootRunID: id,
-		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: agentID}, AssignedAgentID: agentID,
-		Goal: "work on c1", Source: models.RunSourceObjective, Status: models.AgentRunStatusQueued,
-		AvailableAt: f.Now, QueueEnteredAt: f.Now, Revision: 1, CreatedAt: f.Now, UpdatedAt: f.Now,
-		SessionID: sessionID, Engine: "loop", // runtime.RunEngineLoop: a Run the run loop drives
-	}
+	run := QueuedAgentRun(f.Scope, agentID, "work on c1", f.Now)
+	run.SessionID = sessionID
 	if err := f.Store.CreateAgentRun(f.Ctx, run); err != nil {
 		f.T.Fatalf("create run: %v", err)
 	}

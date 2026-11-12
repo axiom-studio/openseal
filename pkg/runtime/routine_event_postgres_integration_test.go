@@ -36,7 +36,7 @@ func openPostgresRoutineEventStore(t *testing.T) *PostgresStore {
 }
 
 func TestPostgresRoutineEventStore(t *testing.T) {
-	runRoutineEventStoreContract(t, func(t *testing.T) (models.KernelStore, routineEventPayloadProbe) {
+	storetest.RunRoutineEventContract(t, func(t *testing.T) (models.KernelStore, storetest.RoutineEventPayloadProbe) {
 		store := openPostgresRoutineEventStore(t)
 		return store, func(t *testing.T, scope models.Scope, activationID, eventID string) bool {
 			var hasPayload bool
@@ -54,12 +54,12 @@ func TestPostgresRoutineEventStore(t *testing.T) {
 		ctx := t.Context()
 		scope := models.Scope{Kind: "tenant", ID: "claims"}
 		now := time.Now().UTC().Truncate(time.Microsecond)
-		activation := routineEventTestActivation(scope, "racing", now)
+		activation := storetest.RoutineEventActivation(scope, "racing", now)
 		if err := store.CreateRunbookActivation(ctx, activation); err != nil {
 			t.Fatal(err)
 		}
 		for i := 0; i < 20; i++ {
-			event := routineTestEvent(scope, activation, uuid.NewString(), now.Add(time.Duration(i)*time.Millisecond))
+			event := storetest.RoutineEventFor(scope, activation, uuid.NewString(), now.Add(time.Duration(i)*time.Millisecond))
 			if _, err := store.InsertRoutineEvent(ctx, &models.RoutineEventRecord{Scope: scope, ActivationID: activation.ID, Event: event,
 				State: models.RoutineEventPending, ReceivedAt: event.OccurredAt}); err != nil {
 				t.Fatal(err)
@@ -192,7 +192,7 @@ func TestPostgresMigration80RoutineEvents(t *testing.T) {
 	assertRoutineEventTables(t, ctx, store, false)
 	// An event Task written by a release that did not fill the columns.
 	scope := models.Scope{Kind: "tenant", ID: "migrated"}
-	activation := routineEventTestActivation(scope, "written-at-79", time.Now().UTC())
+	activation := storetest.RoutineEventActivation(scope, "written-at-79", time.Now().UTC())
 	if err := store.CreateRunbookActivation(ctx, activation); err != nil {
 		t.Fatal(err)
 	}
