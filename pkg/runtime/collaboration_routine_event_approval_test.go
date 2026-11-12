@@ -21,21 +21,21 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	coordinator := action.NewActionCoordinator(store, store, conversationtest.ApprovalModeCatalog(t), action.NewDefaultActionPolicy(), nil)
 	scope := conversation.Scope
 
-	occurrence := &AgentRun{ID: "occurrence", Scope: scope, RootRunID: "occurrence", Context: map[string]interface{}{
-		"conversationId": conversation.ID, scheduledTaskContextKey: true, RoutineEventBatchContextKey: "batch-1",
+	occurrence := &models.AgentRun{ID: "occurrence", Scope: scope, RootRunID: "occurrence", Context: map[string]interface{}{
+		"conversationId": conversation.ID, models.ScheduledTaskContextKey: true, models.RoutineEventBatchContextKey: "batch-1",
 	}}
-	child := buildCollaborationChildRun(occurrence, &AgentRequest{ID: "request", Kind: AgentRequestKindHandoff}, time.Now(), "child")
-	scheduled := &AgentRun{ID: "scheduled", Scope: scope, RootRunID: "scheduled", Context: map[string]interface{}{
-		"conversationId": conversation.ID, scheduledTaskContextKey: true,
+	child := buildCollaborationChildRun(occurrence, &models.AgentRequest{ID: "request", Kind: models.AgentRequestKindHandoff}, time.Now(), "child")
+	scheduled := &models.AgentRun{ID: "scheduled", Scope: scope, RootRunID: "scheduled", Context: map[string]interface{}{
+		"conversationId": conversation.ID, models.ScheduledTaskContextKey: true,
 	}}
-	runs := conversationtest.RunsByID{occurrence.ID: cloneAgentRun(occurrence)}
+	runs := conversationtest.RunsByID{occurrence.ID: models.CloneAgentRun(occurrence)}
 	for _, test := range []struct {
-		run  *AgentRun
-		want ConversationApprovalMode
+		run  *models.AgentRun
+		want models.ConversationApprovalMode
 	}{
-		{occurrence, ConversationApprovalManual},
-		{child, ConversationApprovalManual},
-		{scheduled, ConversationApprovalAuto},
+		{occurrence, models.ConversationApprovalManual},
+		{child, models.ConversationApprovalManual},
+		{scheduled, models.ConversationApprovalAuto},
 	} {
 		id, mode, err := action.RunConversationApprovalMode(ctx, runs, store, test.run)
 		if err != nil || id != conversation.ID || mode != test.want {
@@ -45,7 +45,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 
 	// Under auto, an event occurrence's write still waits for review.
 	result, f, err := conversationtest.ProposeLoopForApprovalModeWithContext(t, store, coordinator, map[string]interface{}{
-		"conversationId": conversation.ID, scheduledTaskContextKey: true, RoutineEventBatchContextKey: "batch-2",
+		"conversationId": conversation.ID, models.ScheduledTaskContextKey: true, models.RoutineEventBatchContextKey: "batch-2",
 	}, "note", "event-run", map[string]interface{}{})
 	if err != nil {
 		t.Fatal(err)
@@ -54,14 +54,14 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 		t.Fatalf("event occurrence write ran without review: %#v", result.Call)
 	}
 	f.ParkOnApproval(result.Approval.ID)
-	conversation = conversationtest.SetApprovalMode(t, service, conversation, ConversationApprovalManual).Conversation
+	conversation = conversationtest.SetApprovalMode(t, service, conversation, models.ConversationApprovalManual).Conversation
 	plain := conversationtest.ProposeForApprovalMode(t, store, coordinator, conversation, "note")
 
-	loosened := conversationtest.SetApprovalMode(t, service, conversation, ConversationApprovalSkip)
+	loosened := conversationtest.SetApprovalMode(t, service, conversation, models.ConversationApprovalSkip)
 	if len(loosened.ApprovedApprovalIDs) != 1 || loosened.ApprovedApprovalIDs[0] != plain.ID || loosened.ApprovalSweepIncomplete {
 		t.Fatalf("skip sweep = %#v", loosened)
 	}
-	if pending, _ := store.GetApproval(ctx, scope, result.Approval.ID); pending.Status != ApprovalStatusPending {
+	if pending, _ := store.GetApproval(ctx, scope, result.Approval.ID); pending.Status != models.ApprovalStatusPending {
 		t.Fatalf("the sweep approved an event occurrence's checkpoint: %#v", pending)
 	}
 }
@@ -72,7 +72,7 @@ type countingRunReader struct {
 	reads int
 }
 
-func (r *countingRunReader) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {
+func (r *countingRunReader) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
 	r.reads++
 	return r.AgentRunReader.GetAgentRun(ctx, scope, runID)
 }
@@ -84,23 +84,23 @@ func TestRoutineEventBatchInheritedWithoutRootRead(t *testing.T) {
 	store := newTestKernelStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	scope := conversation.Scope
-	chat := &AgentRun{ID: "chat", Kind: RunKindConversation, Scope: scope, RootRunID: "chat", Context: map[string]interface{}{
+	chat := &models.AgentRun{ID: "chat", Kind: models.RunKindConversation, Scope: scope, RootRunID: "chat", Context: map[string]interface{}{
 		"conversationId": conversation.ID,
 	}}
-	occurrence := &AgentRun{ID: "occurrence", Kind: RunKindConversation, Scope: scope, RootRunID: "occurrence", Context: map[string]interface{}{
-		"conversationId": conversation.ID, scheduledTaskContextKey: true, RoutineEventBatchContextKey: "batch-1",
+	occurrence := &models.AgentRun{ID: "occurrence", Kind: models.RunKindConversation, Scope: scope, RootRunID: "occurrence", Context: map[string]interface{}{
+		"conversationId": conversation.ID, models.ScheduledTaskContextKey: true, models.RoutineEventBatchContextKey: "batch-1",
 	}}
-	forged := &AgentRequest{ID: "request", Kind: AgentRequestKindHandoff, SharedContext: map[string]interface{}{RoutineEventBatchContextKey: "forged"}}
+	forged := &models.AgentRequest{ID: "request", Kind: models.AgentRequestKindHandoff, SharedContext: map[string]interface{}{models.RoutineEventBatchContextKey: "forged"}}
 	for _, test := range []struct {
-		source    *AgentRun
+		source    *models.AgentRun
 		wantBatch string
-		wantMode  ConversationApprovalMode
+		wantMode  models.ConversationApprovalMode
 	}{
-		{chat, "", ConversationApprovalAuto},
-		{occurrence, "batch-1", ConversationApprovalManual},
+		{chat, "", models.ConversationApprovalAuto},
+		{occurrence, "batch-1", models.ConversationApprovalManual},
 	} {
 		child := buildCollaborationChildRun(test.source, forged, time.Now(), test.source.ID+"-child")
-		if got := routineEventBatchOf(child); got != test.wantBatch {
+		if got := models.RoutineEventBatchID(child); got != test.wantBatch {
 			t.Fatalf("%s child batch = %q, want %q", test.source.ID, got, test.wantBatch)
 		}
 		reader := &countingRunReader{AgentRunReader: store}

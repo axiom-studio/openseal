@@ -25,8 +25,8 @@ type AgentRequestConversationProjector struct {
 }
 
 func NewAgentRequestConversationProjector(store interface {
-	CollaborationKernelStore
-	ConversationStore
+	models.CollaborationKernelStore
+	models.ConversationStore
 }, opts ...models.ServiceOption) (*AgentRequestConversationProjector, error) {
 	if store == nil {
 		return nil, errors.New("collaboration conversation store is required")
@@ -38,7 +38,7 @@ func NewAgentRequestConversationProjector(store interface {
 	}, nil
 }
 
-func (p *AgentRequestConversationProjector) Reconcile(ctx context.Context, scope Scope) (int, error) {
+func (p *AgentRequestConversationProjector) Reconcile(ctx context.Context, scope models.Scope) (int, error) {
 	if p == nil || p.collaboration == nil || p.conversations == nil {
 		return 0, errors.New("AgentRequest conversation projector is not configured")
 	}
@@ -49,7 +49,7 @@ func (p *AgentRequestConversationProjector) Reconcile(ctx context.Context, scope
 	projected := 0
 	var failures []error
 	for offset := 0; ; offset += pageSize {
-		requests, err := p.collaboration.ListAgentRequests(ctx, AgentRequestFilter{Scope: scope, Limit: pageSize, Offset: offset})
+		requests, err := p.collaboration.ListAgentRequests(ctx, models.AgentRequestFilter{Scope: scope, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return projected, errors.Join(append(failures, err)...)
 		}
@@ -70,7 +70,7 @@ func (p *AgentRequestConversationProjector) Reconcile(ctx context.Context, scope
 					// Conversations are independently owned channel projections. Once a
 					// channel is deleted, its historical AgentRequest reference can never
 					// be projected again and must not poison the durable inbox worker.
-					if errors.Is(err, ErrConversationNotFound) {
+					if errors.Is(err, models.ErrConversationNotFound) {
 						p.rememberProjection(projectionKey)
 						continue
 					}
@@ -87,7 +87,7 @@ func (p *AgentRequestConversationProjector) Reconcile(ctx context.Context, scope
 	}
 }
 
-func agentRequestConversationProjectionKey(request *AgentRequest, conversationID string) string {
+func agentRequestConversationProjectionKey(request *models.AgentRequest, conversationID string) string {
 	if request == nil {
 		return ""
 	}
@@ -121,29 +121,29 @@ func (p *AgentRequestConversationProjector) rememberProjection(key string) {
 	p.completedFIFO = append(p.completedFIFO, key)
 }
 
-func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, request *AgentRequest, conversationID string) error {
+func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, request *models.AgentRequest, conversationID string) error {
 	conversation, err := p.conversations.GetConversation(ctx, request.Scope, conversationID)
 	if err != nil {
 		return err
 	}
 	rootKey := "agent-request:" + request.ID + ":requested"
-	rootID := stableConversationID(request.Scope, rootKey, "message")
-	intent := MessageIntentProposal
+	rootID := models.StableConversationID(request.Scope, rootKey, "message")
+	intent := models.MessageIntentProposal
 	content := "Requested: " + request.Goal
-	if request.Kind == AgentRequestKindHandoff {
-		intent = MessageIntentHandoff
+	if request.Kind == models.AgentRequestKindHandoff {
+		intent = models.MessageIntentHandoff
 		content = "Handed off: " + request.Goal
-	} else if request.Kind == AgentRequestKindEscalation {
-		intent = MessageIntentEscalation
+	} else if request.Kind == models.AgentRequestKindEscalation {
+		intent = models.MessageIntentEscalation
 		content = "Escalated: " + request.Goal
 	}
 	current, err := p.post(ctx, conversation, runtimeconversation.PostChannelMessageRequest{
 		Sender: participantForCollaborationParty(request.Requester), SenderDisplayName: displayNameForCollaborationParty(request.Requester),
-		Intent: intent, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-		Mentions: []ConversationParticipant{participantForCollaborationParty(request.Recipient)},
-		References: []ConversationReference{
-			{Kind: ConversationReferenceRequest, ID: request.ID},
-			{Kind: ConversationReferenceRun, ID: request.SourceRunID},
+		Intent: intent, Content: content, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
+		Mentions: []models.ConversationParticipant{participantForCollaborationParty(request.Recipient)},
+		References: []models.ConversationReference{
+			{Kind: models.ConversationReferenceRequest, ID: request.ID},
+			{Kind: models.ConversationReferenceRun, ID: request.SourceRunID},
 		},
 		RequiresResponse: true, IdempotencyKey: rootKey,
 	})
@@ -153,13 +153,13 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 
 	if request.Clarification != "" {
 		clarificationKey := "agent-request:" + request.ID + ":clarification"
-		clarificationID := stableConversationID(request.Scope, clarificationKey, "message")
+		clarificationID := models.StableConversationID(request.Scope, clarificationKey, "message")
 		current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 			Sender: participantForAssignedAgent(request), SenderDisplayName: displayNameForAssignedAgent(request),
-			Intent: MessageIntentQuestion, Content: request.Clarification,
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: rootID,
-			Mentions:         []ConversationParticipant{participantForCollaborationParty(request.Requester)},
-			References:       []ConversationReference{{Kind: ConversationReferenceRequest, ID: request.ID}},
+			Intent: models.MessageIntentQuestion, Content: request.Clarification,
+			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: rootID,
+			Mentions:         []models.ConversationParticipant{participantForCollaborationParty(request.Requester)},
+			References:       []models.ConversationReference{{Kind: models.ConversationReferenceRequest, ID: request.ID}},
 			RequiresResponse: true, ResolvesMessageID: rootID, IdempotencyKey: clarificationKey,
 		})
 		if err != nil {
@@ -168,9 +168,9 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 		if request.Response != "" {
 			current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 				Sender: participantForCollaborationParty(request.Requester), SenderDisplayName: displayNameForCollaborationParty(request.Requester),
-				Intent: MessageIntentAnswer, Content: request.Response,
-				Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: clarificationID,
-				References:        []ConversationReference{{Kind: ConversationReferenceRequest, ID: request.ID}},
+				Intent: models.MessageIntentAnswer, Content: request.Response,
+				Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: clarificationID,
+				References:        []models.ConversationReference{{Kind: models.ConversationReferenceRequest, ID: request.ID}},
 				ResolvesMessageID: clarificationID, IdempotencyKey: "agent-request:" + request.ID + ":clarification-response",
 			})
 			if err != nil {
@@ -182,8 +182,8 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 	if request.AcceptedAt != nil {
 		current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 			Sender: participantForAssignedAgent(request), SenderDisplayName: displayNameForAssignedAgent(request),
-			Intent: MessageIntentAcknowledgment, Content: "Accepted: " + request.Goal,
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: rootID,
+			Intent: models.MessageIntentAcknowledgment, Content: "Accepted: " + request.Goal,
+			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: rootID,
 			References: requestConversationReferences(request, true), ResolvesMessageID: rootID,
 			IdempotencyKey: "agent-request:" + request.ID + ":accepted",
 		})
@@ -193,17 +193,17 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 	}
 
 	completionKey := "agent-request:" + request.ID + ":completion-submitted"
-	completionID := stableConversationID(request.Scope, completionKey, "message")
+	completionID := models.StableConversationID(request.Scope, completionKey, "message")
 	if request.CompletionSubmittedAt != nil {
 		requiresReview := request.DelegationPolicy != nil && request.DelegationPolicy.RequireCompletionReview
-		completionIntent := MessageIntentUpdate
+		completionIntent := models.MessageIntentUpdate
 		if requiresReview {
-			completionIntent = MessageIntentProposal
+			completionIntent = models.MessageIntentProposal
 		}
 		current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 			Sender: participantForAssignedAgent(request), SenderDisplayName: displayNameForAssignedAgent(request),
 			Intent: completionIntent, Content: "Completed delegated work: " + request.CompletionSummary,
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: rootID,
+			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: rootID,
 			Mentions: completionReviewMentions(request, requiresReview), References: requestConversationReferences(request, true),
 			RequiresResponse: requiresReview, IdempotencyKey: completionKey,
 		})
@@ -214,14 +214,14 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 
 	if request.ReviewedAt != nil && request.CompletionReviewer != nil {
 		content := "Approved completed work: " + request.CompletionReviewSummary
-		if request.Status == AgentRequestStatusFailed {
+		if request.Status == models.AgentRequestStatusFailed {
 			content = "Rejected completed work: " + request.CompletionReviewSummary
 		}
 		current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 			Sender:            participantForCollaborationParty(*request.CompletionReviewer),
 			SenderDisplayName: displayNameForCollaborationParty(*request.CompletionReviewer),
-			Intent:            MessageIntentDecision, Content: content,
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: completionID,
+			Intent:            models.MessageIntentDecision, Content: content,
+			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: completionID,
 			References: requestConversationReferences(request, true), ResolvesMessageID: completionID,
 			IdempotencyKey: "agent-request:" + request.ID + ":completion-reviewed",
 		})
@@ -230,13 +230,13 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 		}
 	}
 
-	if request.AcceptedAt == nil && (request.Status == AgentRequestStatusRejected || request.Status == AgentRequestStatusFailed || request.Status == AgentRequestStatusCanceled) {
+	if request.AcceptedAt == nil && (request.Status == models.AgentRequestStatusRejected || request.Status == models.AgentRequestStatusFailed || request.Status == models.AgentRequestStatusCanceled) {
 		content := collaborationTerminalContent(request)
 		_, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 			Sender: participantForAssignedAgent(request), SenderDisplayName: displayNameForAssignedAgent(request),
-			Intent: MessageIntentDecision, Content: content,
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: rootID,
-			References:        []ConversationReference{{Kind: ConversationReferenceRequest, ID: request.ID}},
+			Intent: models.MessageIntentDecision, Content: content,
+			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: rootID,
+			References:        []models.ConversationReference{{Kind: models.ConversationReferenceRequest, ID: request.ID}},
 			ResolvesMessageID: rootID, IdempotencyKey: "agent-request:" + request.ID + ":terminal",
 		})
 		return err
@@ -246,14 +246,14 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 
 func (p *AgentRequestConversationProjector) post(
 	ctx context.Context,
-	conversation *Conversation,
+	conversation *models.Conversation,
 	request runtimeconversation.PostChannelMessageRequest,
-) (*Conversation, error) {
+) (*models.Conversation, error) {
 	request.Scope = conversation.Scope
 	request.ConversationID = conversation.ID
 	request.ExpectedRevision = conversation.Revision
 	result, err := p.conversations.PostChannelMessage(ctx, request)
-	if errors.Is(err, ErrRevisionConflict) {
+	if errors.Is(err, models.ErrRevisionConflict) {
 		conversation, err = p.conversations.GetConversation(ctx, conversation.Scope, conversation.ID)
 		if err != nil {
 			return nil, err
@@ -267,32 +267,32 @@ func (p *AgentRequestConversationProjector) post(
 	return result.Conversation, nil
 }
 
-func participantForCollaborationParty(party CollaborationParty) ConversationParticipant {
-	participantType := ConversationParticipantAgent
-	if party.Type == OwnerTypeTeam {
-		participantType = ConversationParticipantTeam
+func participantForCollaborationParty(party models.CollaborationParty) models.ConversationParticipant {
+	participantType := models.ConversationParticipantAgent
+	if party.Type == models.OwnerTypeTeam {
+		participantType = models.ConversationParticipantTeam
 	}
-	return ConversationParticipant{Type: participantType, ID: party.ID}
+	return models.ConversationParticipant{Type: participantType, ID: party.ID}
 }
 
-func participantForAssignedAgent(request *AgentRequest) ConversationParticipant {
+func participantForAssignedAgent(request *models.AgentRequest) models.ConversationParticipant {
 	if request != nil && strings.TrimSpace(request.AssignedAgentID) != "" {
-		return ConversationParticipant{Type: ConversationParticipantAgent, ID: request.AssignedAgentID}
+		return models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: request.AssignedAgentID}
 	}
 	if request != nil {
 		return participantForCollaborationParty(request.Recipient)
 	}
-	return ConversationParticipant{}
+	return models.ConversationParticipant{}
 }
 
-func displayNameForCollaborationParty(party CollaborationParty) string {
-	if party.Type == OwnerTypeTeam {
+func displayNameForCollaborationParty(party models.CollaborationParty) string {
+	if party.Type == models.OwnerTypeTeam {
 		return "Team"
 	}
 	return "Agent"
 }
 
-func displayNameForAssignedAgent(request *AgentRequest) string {
+func displayNameForAssignedAgent(request *models.AgentRequest) string {
 	if request != nil && strings.TrimSpace(request.AssignedAgentID) != "" {
 		return "Agent"
 	}
@@ -302,28 +302,28 @@ func displayNameForAssignedAgent(request *AgentRequest) string {
 	return "Agent"
 }
 
-func requestConversationReferences(request *AgentRequest, includeChild bool) []ConversationReference {
-	references := []ConversationReference{
-		{Kind: ConversationReferenceRequest, ID: request.ID},
-		{Kind: ConversationReferenceRun, ID: request.SourceRunID},
+func requestConversationReferences(request *models.AgentRequest, includeChild bool) []models.ConversationReference {
+	references := []models.ConversationReference{
+		{Kind: models.ConversationReferenceRequest, ID: request.ID},
+		{Kind: models.ConversationReferenceRun, ID: request.SourceRunID},
 	}
 	if includeChild && strings.TrimSpace(request.ChildRunID) != "" {
-		references = append(references, ConversationReference{Kind: ConversationReferenceRun, ID: request.ChildRunID})
+		references = append(references, models.ConversationReference{Kind: models.ConversationReferenceRun, ID: request.ChildRunID})
 	}
 	for _, artifact := range request.Artifacts {
-		references = append(references, ConversationReference{Kind: ConversationReferenceArtifact, ID: artifact.ID, Version: int64(artifact.Version)})
+		references = append(references, models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: artifact.ID, Version: int64(artifact.Version)})
 	}
 	return references
 }
 
-func completionReviewMentions(request *AgentRequest, required bool) []ConversationParticipant {
+func completionReviewMentions(request *models.AgentRequest, required bool) []models.ConversationParticipant {
 	if !required || request == nil {
 		return nil
 	}
-	return []ConversationParticipant{participantForCollaborationParty(request.Requester)}
+	return []models.ConversationParticipant{participantForCollaborationParty(request.Requester)}
 }
 
-func collaborationTerminalContent(request *AgentRequest) string {
+func collaborationTerminalContent(request *models.AgentRequest) string {
 	reason := strings.TrimSpace(request.ResolutionReason)
 	if reason == "" {
 		reason = strings.TrimSpace(request.Clarification)

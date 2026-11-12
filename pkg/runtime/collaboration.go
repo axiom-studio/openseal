@@ -18,6 +18,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/google/uuid"
 )
@@ -35,7 +36,7 @@ const (
 	AgentRequestDecisionProvideClarification AgentRequestDecision = "provide_clarification"
 )
 
-func completionReviewQuorum(policy *AgentRequestDelegationPolicy) int {
+func completionReviewQuorum(policy *models.AgentRequestDelegationPolicy) int {
 	if policy == nil || !policy.RequireCompletionReview {
 		return 0
 	}
@@ -47,27 +48,27 @@ func completionReviewQuorum(policy *AgentRequestDelegationPolicy) int {
 
 type CreateAgentRequestRequest struct {
 	ID                   string
-	Scope                Scope
-	Kind                 AgentRequestKind
-	Requester            CollaborationParty
-	Recipient            CollaborationParty
+	Scope                models.Scope
+	Kind                 models.AgentRequestKind
+	Requester            models.CollaborationParty
+	Recipient            models.CollaborationParty
 	SourceRunID          string
 	Goal                 string
 	Instructions         string
 	SemanticRole         string
 	AcceptanceCriteria   map[string]interface{}
-	ArtifactRequirements []ArtifactRequirement
+	ArtifactRequirements []models.ArtifactRequirement
 	SharedContext        map[string]interface{}
 	ChildCheckpoint      map[string]interface{}
-	AcceptancePolicy     AgentRequestAcceptancePolicy
+	AcceptancePolicy     models.AgentRequestAcceptancePolicy
 	ConversationRefs     []string
-	BudgetAllocation     *BudgetPolicy
+	BudgetAllocation     *models.BudgetPolicy
 	IdempotencyKey       string
 	DependencyGroupID    string
 	DependencyID         string
 	// ToolTransition (singular requests only) moves the source Run's
 	// delegating tool entry in the create transaction (CTL-6a).
-	ToolTransition *ToolEntryTransitionRequest
+	ToolTransition *models.ToolEntryTransitionRequest
 	// RequireInterventionCount (singular requests only) refuses the create
 	// with ErrSteeringArrived when the source gained an intervention since
 	// the caller read it.
@@ -77,82 +78,82 @@ type CreateAgentRequestRequest struct {
 type AgentRequestGroupSpec struct {
 	ID                   string
 	DependencyID         string
-	Kind                 AgentRequestKind
-	Recipient            CollaborationParty
+	Kind                 models.AgentRequestKind
+	Recipient            models.CollaborationParty
 	Goal                 string
 	Instructions         string
 	SemanticRole         string
 	AcceptanceCriteria   map[string]interface{}
-	ArtifactRequirements []ArtifactRequirement
+	ArtifactRequirements []models.ArtifactRequirement
 	SharedContext        map[string]interface{}
 	ChildCheckpoint      map[string]interface{}
-	AcceptancePolicy     AgentRequestAcceptancePolicy
+	AcceptancePolicy     models.AgentRequestAcceptancePolicy
 	ConversationRefs     []string
-	BudgetAllocation     *BudgetPolicy
+	BudgetAllocation     *models.BudgetPolicy
 	Required             *bool
 }
 
 type CreateAgentRequestGroupRequest struct {
 	ID                     string
-	Scope                  Scope
+	Scope                  models.Scope
 	SourceRunID            string
 	ExpectedSourceRevision int64
-	Requester              CollaborationParty
-	Policy                 RunDependencyPolicy
+	Requester              models.CollaborationParty
+	Policy                 models.RunDependencyPolicy
 	Requests               []AgentRequestGroupSpec
 	IdempotencyKey         string
-	Actor                  ActivityActor
-	Visibility             ActivityVisibility
+	Actor                  models.ActivityActor
+	Visibility             models.ActivityVisibility
 }
 
 type AgentRequestGroupResult struct {
-	Group    *RunDependencyResult `json:"dependencyGroup"`
-	Requests []*AgentRequest      `json:"requests"`
-	Events   []*ActivityEvent     `json:"events,omitempty"`
+	Group    *models.RunDependencyResult `json:"dependencyGroup"`
+	Requests []*models.AgentRequest      `json:"requests"`
+	Events   []*models.ActivityEvent     `json:"events,omitempty"`
 }
 
 type RespondAgentRequestRequest struct {
-	Scope            Scope
+	Scope            models.Scope
 	RequestID        string
 	ExpectedRevision int64
 	Decision         AgentRequestDecision
-	Principal        CollaborationParty
-	Actor            CollaborationParty
+	Principal        models.CollaborationParty
+	Actor            models.CollaborationParty
 	AssignedAgentID  string
 	Message          string
 	DecisionRunID    string
 }
 
 type SubmitAgentRequestBidRequest struct {
-	Scope             Scope
+	Scope             models.Scope
 	RequestID         string
 	ExpectedRevision  int64
 	AgentDeploymentID string
-	Decision          AgentRequestBidDecision
+	Decision          models.AgentRequestBidDecision
 	Reason            string
 	IdempotencyKey    string
 }
 
 type CompleteAgentRequestRequest struct {
-	Scope                 Scope
+	Scope                 models.Scope
 	RequestID             string
 	ExpectedRevision      int64
 	ExpectedChildRevision int64
-	Principal             CollaborationParty
-	Actor                 CollaborationParty
+	Principal             models.CollaborationParty
+	Actor                 models.CollaborationParty
 	Summary               string
 	AcceptanceEvidence    map[string]interface{}
-	Artifacts             []ArtifactReference
+	Artifacts             []models.ArtifactReference
 	CompletionKey         string
 }
 
 type ReviewAgentRequestCompletionRequest struct {
-	Scope                 Scope
+	Scope                 models.Scope
 	RequestID             string
 	ExpectedRevision      int64
 	ExpectedChildRevision int64
-	Principal             CollaborationParty
-	Actor                 CollaborationParty
+	Principal             models.CollaborationParty
+	Actor                 models.CollaborationParty
 	Approve               bool
 	ResolveDisagreement   bool
 	Summary               string
@@ -160,10 +161,10 @@ type ReviewAgentRequestCompletionRequest struct {
 }
 
 type AgentRequestResult struct {
-	Request *AgentRequest    `json:"request"`
-	Source  *AgentRun        `json:"sourceRun,omitempty"`
-	Child   *AgentRun        `json:"childRun,omitempty"`
-	Events  []*ActivityEvent `json:"events,omitempty"`
+	Request *models.AgentRequest    `json:"request"`
+	Source  *models.AgentRun        `json:"sourceRun,omitempty"`
+	Child   *models.AgentRun        `json:"childRun,omitempty"`
+	Events  []*models.ActivityEvent `json:"events,omitempty"`
 }
 
 type collaborationAgentStore interface {
@@ -172,24 +173,24 @@ type collaborationAgentStore interface {
 }
 
 type CollaborationService struct {
-	store             CollaborationStore
-	runs              PortfolioStore
-	artifacts         ArtifactStore
-	dependencies      *DependencyCoordinator
-	teams             TeamRosterReader
-	executionPreparer AcceptedRunExecutionPreparer
+	store             models.CollaborationStore
+	runs              models.PortfolioStore
+	artifacts         models.ArtifactStore
+	dependencies      *portfolio.DependencyCoordinator
+	teams             models.TeamRosterReader
+	executionPreparer models.AcceptedRunExecutionPreparer
 	now               func() time.Time
 	newID             func() string
 }
 
-func NewCollaborationService(store CollaborationKernelStore, opts ...models.ServiceOption) *CollaborationService {
-	service := &CollaborationService{store: store, runs: store, artifacts: store, dependencies: NewDependencyCoordinator(store, opts...), now: models.ClockFrom(opts), newID: uuid.NewString}
-	service.teams = teamRosterReader(store)
+func NewCollaborationService(store models.CollaborationKernelStore, opts ...models.ServiceOption) *CollaborationService {
+	service := &CollaborationService{store: store, runs: store, artifacts: store, dependencies: portfolio.NewDependencyCoordinator(store, opts...), now: models.ClockFrom(opts), newID: uuid.NewString}
+	service.teams = models.TeamRosterReaderOf(store)
 	return service
 }
 
-func (s *CollaborationService) resolveSourceDelegationPolicy(ctx context.Context, source *AgentRun) (*AgentRequestDelegationPolicy, error) {
-	if source == nil || source.Owner.Type != OwnerTypeTeam || s.teams == nil {
+func (s *CollaborationService) resolveSourceDelegationPolicy(ctx context.Context, source *models.AgentRun) (*models.AgentRequestDelegationPolicy, error) {
+	if source == nil || source.Owner.Type != models.OwnerTypeTeam || s.teams == nil {
 		return nil, nil
 	}
 	deployment, err := s.teams.GetTeamDeployment(ctx, capability.ScopeReference{Kind: source.Scope.Kind, ID: source.Scope.ID}, source.Owner.ID)
@@ -202,24 +203,24 @@ func (s *CollaborationService) resolveSourceDelegationPolicy(ctx context.Context
 		return nil, err
 	}
 	if deployment == nil || deployment.Status != kernelteam.DeploymentActive {
-		return nil, fmt.Errorf("%w: source Team deployment is not active", ErrAgentRequestAssignment)
+		return nil, fmt.Errorf("%w: source Team deployment is not active", models.ErrAgentRequestAssignment)
 	}
 	definitions, ok := s.teams.(agentRequestTeamDefinitionStore)
 	if !ok {
-		return nil, fmt.Errorf("%w: source Team delegation policy is unavailable", ErrAgentRequestAssignment)
+		return nil, fmt.Errorf("%w: source Team delegation policy is unavailable", models.ErrAgentRequestAssignment)
 	}
 	definition, err := definitions.GetTeamDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	if err != nil {
 		return nil, err
 	}
 	if definition == nil {
-		return nil, fmt.Errorf("%w: source Team definition is unavailable", ErrAgentRequestAssignment)
+		return nil, fmt.Errorf("%w: source Team definition is unavailable", models.ErrAgentRequestAssignment)
 	}
 	depth, err := s.sourceDelegationDepth(ctx, source)
 	if err != nil {
 		return nil, err
 	}
-	return &AgentRequestDelegationPolicy{
+	return &models.AgentRequestDelegationPolicy{
 		TeamDeploymentID: deployment.ID, TeamDefinitionID: definition.ID, TeamDefinitionVersion: definition.Version,
 		DelegationDepth: depth + 1,
 		MaximumDepth:    definition.Delegation.MaximumDepth, MaximumConcurrent: definition.Delegation.MaximumConcurrent,
@@ -229,7 +230,7 @@ func (s *CollaborationService) resolveSourceDelegationPolicy(ctx context.Context
 	}, nil
 }
 
-func (s *CollaborationService) sourceDelegationDepth(ctx context.Context, source *AgentRun) (int, error) {
+func (s *CollaborationService) sourceDelegationDepth(ctx context.Context, source *models.AgentRun) (int, error) {
 	depth := 0
 	current := source
 	for current != nil {
@@ -246,21 +247,21 @@ func (s *CollaborationService) sourceDelegationDepth(ctx context.Context, source
 			return 0, err
 		}
 		if parent == nil {
-			return 0, ErrRunNotFound
+			return 0, models.ErrRunNotFound
 		}
 		current = parent
 	}
 	return depth, nil
 }
 
-func (s *CollaborationService) validateSourceDelegationPolicy(ctx context.Context, req CreateAgentRequestRequest, policy *AgentRequestDelegationPolicy) error {
+func (s *CollaborationService) validateSourceDelegationPolicy(ctx context.Context, req CreateAgentRequestRequest, policy *models.AgentRequestDelegationPolicy) error {
 	if policy == nil {
 		return nil
 	}
 	if policy.MaximumDepth > 0 && policy.DelegationDepth > policy.MaximumDepth {
-		return fmt.Errorf("%w: Team delegation depth %d exceeds maximum %d", ErrAgentRequestAssignment, policy.DelegationDepth, policy.MaximumDepth)
+		return fmt.Errorf("%w: Team delegation depth %d exceeds maximum %d", models.ErrAgentRequestAssignment, policy.DelegationDepth, policy.MaximumDepth)
 	}
-	if !policy.AllowPeerDelegation && req.Requester.Type == OwnerTypeAgent && req.Recipient.Type == OwnerTypeAgent && req.Requester.ID != req.Recipient.ID {
+	if !policy.AllowPeerDelegation && req.Requester.Type == models.OwnerTypeAgent && req.Recipient.Type == models.OwnerTypeAgent && req.Requester.ID != req.Recipient.ID {
 		return fmt.Errorf("%w: Team policy does not allow peer delegation", ErrAgentRequestUnauthorized)
 	}
 	return nil
@@ -270,19 +271,19 @@ func (s *CollaborationService) validateSourceDelegationPolicy(ctx context.Contex
 // source of singular delegated work. Collaboration acceptance reserves the
 // Run's one wake condition, so terminal, paused, sleeping, and already-waiting
 // Runs must start a new Run before requesting or handing off more work.
-func CanStartAgentRequestFromRun(run *AgentRun) bool {
-	return canEnterDependencyWait(run)
+func CanStartAgentRequestFromRun(run *models.AgentRun) bool {
+	return models.CanEnterDependencyWait(run)
 }
 
-func validateAgentRequestSource(run *AgentRun) error {
+func validateAgentRequestSource(run *models.AgentRun) error {
 	if CanStartAgentRequestFromRun(run) {
 		return nil
 	}
-	status := AgentRunStatus("")
+	status := models.AgentRunStatus("")
 	if run != nil {
 		status = run.Status
 	}
-	return fmt.Errorf("%w: source run cannot start collaboration from %s", ErrInvalidAgentRequestState, status)
+	return fmt.Errorf("%w: source run cannot start collaboration from %s", models.ErrInvalidAgentRequestState, status)
 }
 
 func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req CreateAgentRequestRequest) (*AgentRequestResult, error) {
@@ -292,7 +293,7 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	if !validAgentRequestKind(req.Kind) {
+	if !models.IsValidAgentRequestKind(req.Kind) {
 		return nil, errors.New("agent request kind must be request, handoff, or escalation")
 	}
 	if err := req.Requester.Validate(); err != nil {
@@ -304,14 +305,14 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if strings.TrimSpace(req.SourceRunID) == "" || strings.TrimSpace(req.Goal) == "" {
 		return nil, errors.New("source run and goal are required")
 	}
-	if err := ValidateCredentialFreeContext(req.SharedContext); err != nil {
+	if err := models.ValidateCredentialFreeContext(req.SharedContext); err != nil {
 		return nil, err
 	}
-	if err := ValidateCredentialFreeContext(req.ChildCheckpoint); err != nil {
+	if err := models.ValidateCredentialFreeContext(req.ChildCheckpoint); err != nil {
 		return nil, err
 	}
-	if err := validateArtifactRequirements(req.ArtifactRequirements); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
+	if err := models.ValidateArtifactRequirements(req.ArtifactRequirements); err != nil {
+		return nil, fmt.Errorf("%w: %w", models.ErrInvalidArtifact, err)
 	}
 	if key := strings.TrimSpace(req.IdempotencyKey); key != "" {
 		existing, err := s.store.FindAgentRequestByIdempotencyKey(ctx, req.Scope, key)
@@ -322,7 +323,7 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 			if sameAgentRequestIntent(existing, req) {
 				return &AgentRequestResult{Request: existing}, nil
 			}
-			return nil, ErrAgentRequestIdempotency
+			return nil, models.ErrAgentRequestIdempotency
 		}
 	}
 	source, err := s.runs.GetAgentRun(ctx, req.Scope, req.SourceRunID)
@@ -330,9 +331,9 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		return nil, err
 	}
 	if source == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
-	if !requesterControlsRun(req.Requester, source) {
+	if !models.RequesterControlsRun(req.Requester, source) {
 		return nil, ErrAgentRequestUnauthorized
 	}
 	if err := validateTaskDelegationSource(ctx, s.runs, source); err != nil {
@@ -348,9 +349,9 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if err := s.validateSourceDelegationPolicy(ctx, req, delegationPolicy); err != nil {
 		return nil, err
 	}
-	acceptancePolicy := normalizeAgentRequestAcceptancePolicy(req.AcceptancePolicy)
+	acceptancePolicy := models.NormalizeAgentRequestAcceptancePolicy(req.AcceptancePolicy)
 	if delegationPolicy != nil && delegationPolicy.RequireAcceptance {
-		acceptancePolicy = AgentRequestAcceptanceRecipientReview
+		acceptancePolicy = models.AgentRequestAcceptanceRecipientReview
 	}
 	// Grouped requests are created only after their dependency coordinator has
 	// atomically moved the source into the group's wait state. Their membership
@@ -365,19 +366,19 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if requestID == "" {
 		requestID = s.newID()
 	}
-	request := &AgentRequest{
-		ID: requestID, Scope: req.Scope, Kind: req.Kind, Status: AgentRequestStatusPending,
+	request := &models.AgentRequest{
+		ID: requestID, Scope: req.Scope, Kind: req.Kind, Status: models.AgentRequestStatusPending,
 		Requester: req.Requester, Recipient: req.Recipient, SourceRunID: source.ID, ObjectiveID: source.ObjectiveID,
 		DependencyGroupID: strings.TrimSpace(req.DependencyGroupID), DependencyID: strings.TrimSpace(req.DependencyID),
 		Goal: strings.TrimSpace(req.Goal), Instructions: strings.TrimSpace(req.Instructions), SemanticRole: strings.TrimSpace(req.SemanticRole),
-		AcceptanceCriteria: maps.Clone(req.AcceptanceCriteria), ArtifactRequirements: cloneArtifactRequirements(req.ArtifactRequirements),
+		AcceptanceCriteria: maps.Clone(req.AcceptanceCriteria), ArtifactRequirements: models.CloneArtifactRequirements(req.ArtifactRequirements),
 		SharedContext: maps.Clone(req.SharedContext), ChildCheckpoint: maps.Clone(req.ChildCheckpoint),
-		AcceptancePolicy: acceptancePolicy, DelegationPolicy: cloneAgentRequestDelegationPolicy(delegationPolicy),
+		AcceptancePolicy: acceptancePolicy, DelegationPolicy: models.CloneAgentRequestDelegationPolicy(delegationPolicy),
 		ConversationRefs: append([]string(nil), req.ConversationRefs...),
-		BudgetAllocation: cloneBudgetPolicy(req.BudgetAllocation),
+		BudgetAllocation: models.CloneBudgetPolicy(req.BudgetAllocation),
 		IdempotencyKey:   strings.TrimSpace(req.IdempotencyKey), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if request.Recipient.Type == OwnerTypeTeam {
+	if request.Recipient.Type == models.OwnerTypeTeam {
 		request.Candidates, err = s.resolveTeamRequestCandidates(ctx, request)
 		if err != nil {
 			return nil, err
@@ -386,7 +387,7 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
-	if err := validateChildBudgetAllocation(source, request.BudgetAllocation); err != nil {
+	if err := models.ValidateChildBudgetAllocation(source, request.BudgetAllocation); err != nil {
 		return nil, err
 	}
 	if request.DependencyGroupID != "" {
@@ -396,15 +397,15 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	}
 	eventType := "collaboration.requested"
 	summary := fmt.Sprintf("Requested work from %s %s", request.Recipient.Type, request.Recipient.ID)
-	if request.Kind == AgentRequestKindHandoff {
+	if request.Kind == models.AgentRequestKindHandoff {
 		eventType = "handoff.proposed"
 		summary = fmt.Sprintf("Proposed handoff to %s %s", request.Recipient.Type, request.Recipient.ID)
-	} else if request.Kind == AgentRequestKindEscalation {
+	} else if request.Kind == models.AgentRequestKindEscalation {
 		eventType = "escalation.requested"
 		summary = fmt.Sprintf("Escalated work to %s %s", request.Recipient.Type, request.Recipient.ID)
 	}
 	event := collaborationEvent(source, request, eventType, summary, req.Requester, now)
-	record := AgentRequestCreateRecord{Request: request, Event: event}
+	record := models.AgentRequestCreateRecord{Request: request, Event: event}
 	if delegationPolicy != nil && delegationPolicy.MaximumConcurrent > 0 {
 		record.DelegationTeamID = delegationPolicy.TeamDeploymentID
 		record.MaximumConcurrent = delegationPolicy.MaximumConcurrent
@@ -425,8 +426,8 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		return nil, err
 	}
 	return &AgentRequestResult{
-		Request: cloneAgentRequest(request), Source: cloneAgentRun(record.SourceRun),
-		Events: []*ActivityEvent{persisted},
+		Request: models.CloneAgentRequest(request), Source: models.CloneAgentRun(record.SourceRun),
+		Events: []*models.ActivityEvent{persisted},
 	}, nil
 }
 
@@ -452,7 +453,7 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 		return nil, err
 	}
 	if source == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	replaying := false
 	if source.Revision != req.ExpectedSourceRevision {
@@ -460,11 +461,11 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 			if findErr != nil {
 				return nil, findErr
 			}
-			return nil, ErrRevisionConflict
+			return nil, models.ErrRevisionConflict
 		}
 		replaying = true
 	}
-	if !requesterControlsRun(req.Requester, source) {
+	if !models.RequesterControlsRun(req.Requester, source) {
 		return nil, ErrAgentRequestUnauthorized
 	}
 	if !replaying {
@@ -476,12 +477,12 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 	if groupID == "" {
 		groupID = stableCollaborationID(req.Scope, key, "group")
 	}
-	dependencySpecs := make([]RunDependencySpec, 0, len(req.Requests))
+	dependencySpecs := make([]models.RunDependencySpec, 0, len(req.Requests))
 	requestInputs := make([]CreateAgentRequestRequest, 0, len(req.Requests))
 	seenDependencies := make(map[string]struct{}, len(req.Requests))
-	allocations := make([]*BudgetPolicy, 0, len(req.Requests))
+	allocations := make([]*models.BudgetPolicy, 0, len(req.Requests))
 	for index, spec := range req.Requests {
-		if spec.Kind != AgentRequestKindRequest && spec.Kind != AgentRequestKindEscalation {
+		if spec.Kind != models.AgentRequestKindRequest && spec.Kind != models.AgentRequestKindEscalation {
 			return nil, errors.New("grouped collaboration supports request and escalation fan-out; handoff transfers must remain singular")
 		}
 		if err := spec.Recipient.Validate(); err != nil {
@@ -496,13 +497,13 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 		if strings.TrimSpace(spec.Goal) == "" {
 			return nil, fmt.Errorf("request %d goal is required", index+1)
 		}
-		if err := ValidateCredentialFreeContext(spec.SharedContext); err != nil {
+		if err := models.ValidateCredentialFreeContext(spec.SharedContext); err != nil {
 			return nil, err
 		}
-		if err := validateArtifactRequirements(spec.ArtifactRequirements); err != nil {
-			return nil, fmt.Errorf("%w: request %d: %w", ErrInvalidArtifact, index+1, err)
+		if err := models.ValidateArtifactRequirements(spec.ArtifactRequirements); err != nil {
+			return nil, fmt.Errorf("%w: request %d: %w", models.ErrInvalidArtifact, index+1, err)
 		}
-		if err := validateChildBudgetAllocation(source, spec.BudgetAllocation); err != nil {
+		if err := models.ValidateChildBudgetAllocation(source, spec.BudgetAllocation); err != nil {
 			return nil, fmt.Errorf("request %d: %w", index+1, err)
 		}
 		allocations = append(allocations, spec.BudgetAllocation)
@@ -518,8 +519,8 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 		if requestID == "" {
 			requestID = stableCollaborationID(req.Scope, key, dependencyID)
 		}
-		dependencySpecs = append(dependencySpecs, RunDependencySpec{
-			ID: dependencyID, RequestID: requestID, Kind: RunDependencyKindAgentRequest, Required: spec.Required,
+		dependencySpecs = append(dependencySpecs, models.RunDependencySpec{
+			ID: dependencyID, RequestID: requestID, Kind: models.RunDependencyKindAgentRequest, Required: spec.Required,
 		})
 		requestInputs = append(requestInputs, CreateAgentRequestRequest{
 			ID: requestID, Scope: req.Scope, Kind: spec.Kind, Requester: req.Requester, Recipient: spec.Recipient,
@@ -531,17 +532,17 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 			IdempotencyKey:   key + ":request:" + dependencyID, DependencyGroupID: groupID, DependencyID: dependencyID,
 		})
 	}
-	if err := validateGroupedBudgetAllocations(source, allocations); err != nil {
+	if err := models.ValidateGroupedBudgetAllocations(source, allocations); err != nil {
 		return nil, err
 	}
-	group, err := s.dependencies.CreateRunDependencyGroup(ctx, CreateRunDependencyGroupRequest{
+	group, err := s.dependencies.CreateRunDependencyGroup(ctx, models.CreateRunDependencyGroupRequest{
 		ID: groupID, Scope: req.Scope, SourceRunID: req.SourceRunID, ExpectedSourceRevision: req.ExpectedSourceRevision,
 		Policy: req.Policy, Dependencies: dependencySpecs, IdempotencyKey: key, Actor: req.Actor, Visibility: req.Visibility,
 	})
 	if err != nil {
 		return nil, err
 	}
-	result := &AgentRequestGroupResult{Group: group, Requests: make([]*AgentRequest, 0, len(requestInputs))}
+	result := &AgentRequestGroupResult{Group: group, Requests: make([]*models.AgentRequest, 0, len(requestInputs))}
 	result.Events = append(result.Events, group.Events...)
 	for _, input := range requestInputs {
 		created, err := s.CreateAgentRequest(ctx, input)
@@ -554,13 +555,13 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 	return result, nil
 }
 
-func validateTaskDelegationSource(ctx context.Context, store PortfolioStore, source *AgentRun) error {
+func validateTaskDelegationSource(ctx context.Context, store models.PortfolioStore, source *models.AgentRun) error {
 	task, err := agentrun.PersistedTaskWorkOrigin(ctx, store, source)
 	if err != nil {
 		return err
 	}
 	if task != nil {
-		return ErrInvalidConversationTask
+		return models.ErrInvalidConversationTask
 	}
 	return nil
 }
@@ -574,13 +575,13 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		return nil, err
 	}
 	if request == nil {
-		return nil, ErrAgentRequestNotFound
+		return nil, models.ErrAgentRequestNotFound
 	}
 	if request.Revision != req.ExpectedRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	if request.Status != AgentRequestStatusPending && request.Status != AgentRequestStatusClarificationRequested {
-		return nil, ErrInvalidAgentRequestState
+	if request.Status != models.AgentRequestStatusPending && request.Status != models.AgentRequestStatusClarificationRequested {
+		return nil, models.ErrInvalidAgentRequestState
 	}
 	if req.Decision == AgentRequestDecisionProvideClarification {
 		if req.Principal != request.Requester {
@@ -594,9 +595,9 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		return nil, err
 	}
 	if source == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
-	var groupedDependency *RunDependency
+	var groupedDependency *models.RunDependency
 	if request.DependencyGroupID != "" {
 		groupedDependency, err = s.groupedRequestDependency(ctx, request, source, false)
 		if err != nil {
@@ -614,19 +615,19 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 	if err := s.validateDecisionRunAuthority(ctx, request, actor, req.DecisionRunID); err != nil {
 		return nil, err
 	}
-	updated := cloneAgentRequest(request)
+	updated := models.CloneAgentRequest(request)
 	updated.Revision++
 	updated.UpdatedAt = now
 	updated.Response = strings.TrimSpace(req.Message)
-	record := AgentRequestResponseRecord{Request: updated, ExpectedRequestRevision: request.Revision}
+	record := models.AgentRequestResponseRecord{Request: updated, ExpectedRequestRevision: request.Revision}
 	eventType := ""
 	summary := ""
 	switch req.Decision {
 	case AgentRequestDecisionProvideClarification:
-		if request.Status != AgentRequestStatusClarificationRequested || strings.TrimSpace(req.Message) == "" {
+		if request.Status != models.AgentRequestStatusClarificationRequested || strings.TrimSpace(req.Message) == "" {
 			return nil, errors.New("clarification response is required for a request awaiting clarification")
 		}
-		updated.Status = AgentRequestStatusPending
+		updated.Status = models.AgentRequestStatusPending
 		eventType = "collaboration.clarification_provided"
 		summary = fmt.Sprintf("%s %s provided clarification", actor.Type, actor.ID)
 		if groupedDependency == nil {
@@ -637,13 +638,13 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 			record.ExpectedSourceRevision = source.Revision
 		}
 	case AgentRequestDecisionRequestClarification:
-		if request.Status != AgentRequestStatusPending {
-			return nil, ErrInvalidAgentRequestState
+		if request.Status != models.AgentRequestStatusPending {
+			return nil, models.ErrInvalidAgentRequestState
 		}
 		if strings.TrimSpace(req.Message) == "" {
 			return nil, errors.New("clarification question is required")
 		}
-		updated.Status = AgentRequestStatusClarificationRequested
+		updated.Status = models.AgentRequestStatusClarificationRequested
 		updated.Clarification = strings.TrimSpace(req.Message)
 		eventType = "collaboration.clarification_requested"
 		summary = fmt.Sprintf("%s %s requested clarification", actor.Type, actor.ID)
@@ -655,7 +656,7 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 			record.ExpectedSourceRevision = source.Revision
 		}
 	case AgentRequestDecisionReject:
-		updated.Status = AgentRequestStatusRejected
+		updated.Status = models.AgentRequestStatusRejected
 		updated.ResolvedAt = &now
 		eventType = "collaboration.rejected"
 		summary = fmt.Sprintf("%s %s rejected the request", actor.Type, actor.ID)
@@ -664,10 +665,10 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 			if reason == "" {
 				reason = "recipient rejected the request"
 			}
-			record.DependencyResolution = &RunDependencyResolutionRecord{
+			record.DependencyResolution = &models.RunDependencyResolutionRecord{
 				Scope: updated.Scope, GroupID: updated.DependencyGroupID, DependencyID: updated.DependencyID,
-				ExpectedDependencyRevision: groupedDependency.Revision, State: RunDependencyStateFailed, Error: reason,
-				Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: ActivityVisibilityTeam, OccurredAt: now,
+				ExpectedDependencyRevision: groupedDependency.Revision, State: models.RunDependencyStateFailed, Error: reason,
+				Actor: models.ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: models.ActivityVisibilityTeam, OccurredAt: now,
 			}
 		} else {
 			record.SourceRun, err = sourceResumingAfterAgentRequestDecision(source, updated, now)
@@ -691,11 +692,11 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		if err := s.verifyChatAssignment(ctx, source, assignedAgentID); err != nil {
 			return nil, err
 		}
-		updated.Status = AgentRequestStatusAccepted
+		updated.Status = models.AgentRequestStatusAccepted
 		updated.AcceptedAt = &now
 		updated.AssignedAgentID = assignedAgentID
-		if request.Recipient.Type == OwnerTypeTeam {
-			updated.AssignmentDecision = &AgentRequestAssignmentDecision{
+		if request.Recipient.Type == models.OwnerTypeTeam {
+			updated.AssignmentDecision = &models.AgentRequestAssignmentDecision{
 				AgentDeploymentID: assignedAgentID,
 				Reason:            teamAssignmentReason(request, assignedAgentID),
 				DecidedAt:         now,
@@ -706,17 +707,17 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		if err != nil {
 			return nil, err
 		}
-		if task != nil && task.Mode == ConversationTaskModeContinuation {
-			child.Kind = RunKindAgentWork
+		if task != nil && task.Mode == models.ConversationTaskModeContinuation {
+			child.Kind = models.RunKindAgentWork
 		}
 		entrypoint, err := agentrun.RequestedAcceptedChildEntrypoint(updated.SharedContext)
 		if err != nil {
 			return nil, err
 		}
-		childRequest := CreateAgentRunRequest{
+		childRequest := models.CreateAgentRunRequest{
 			Kind: child.Kind, Scope: child.Scope, ObjectiveID: child.ObjectiveID, ParentRunID: child.ParentRunID,
 			Owner: child.Owner, AssignedAgentID: child.AssignedAgentID, ActingUser: child.ActingUser, Entrypoint: entrypoint,
-			ConcurrencyKey: child.ConcurrencyKey, ResourceRequirements: cloneResourceQuantities(child.ResourceRequirements),
+			ConcurrencyKey: child.ConcurrencyKey, ResourceRequirements: portfolio.CloneResourceQuantities(child.ResourceRequirements),
 			Goal: child.Goal, Source: child.Source, Priority: child.Priority, Deadline: child.Deadline,
 			Context: child.Context, Plan: child.Plan, Checkpoint: child.Checkpoint, WakeCondition: child.WakeCondition,
 			Budget: child.Budget, Policy: child.Policy,
@@ -727,7 +728,7 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		}
 		child.Entrypoint, child.Context, child.Plan = childRequest.Entrypoint, childRequest.Context, childRequest.Plan
 		if child.Entrypoint != "" {
-			child.Kind = RunKindAgentWork
+			child.Kind = models.RunKindAgentWork
 		}
 		if err := child.Validate(); err != nil {
 			return nil, err
@@ -744,9 +745,9 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 			record.SourceRun.WakeCondition = cloneWakeCondition(source.WakeCondition)
 		}
 		eventType = "collaboration.accepted"
-		if updated.Kind == AgentRequestKindHandoff {
+		if updated.Kind == models.AgentRequestKindHandoff {
 			eventType = "handoff.accepted"
-		} else if updated.Kind == AgentRequestKindEscalation {
+		} else if updated.Kind == models.AgentRequestKindEscalation {
 			eventType = "escalation.accepted"
 		}
 		summary = fmt.Sprintf("%s %s accepted the work", actor.Type, actor.ID)
@@ -769,10 +770,10 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 	} else if record.SourceRun != nil {
 		source = record.SourceRun
 	}
-	return &AgentRequestResult{Request: cloneAgentRequest(updated), Source: cloneAgentRun(source), Child: cloneAgentRun(record.ChildRun), Events: events}, nil
+	return &AgentRequestResult{Request: models.CloneAgentRequest(updated), Source: models.CloneAgentRun(source), Child: models.CloneAgentRun(record.ChildRun), Events: events}, nil
 }
 
-func (s *CollaborationService) validateDecisionRunAuthority(ctx context.Context, request *AgentRequest, actor CollaborationParty, decisionRunID string) error {
+func (s *CollaborationService) validateDecisionRunAuthority(ctx context.Context, request *models.AgentRequest, actor models.CollaborationParty, decisionRunID string) error {
 	decisionRunID = strings.TrimSpace(decisionRunID)
 	if decisionRunID == "" {
 		return nil
@@ -781,9 +782,9 @@ func (s *CollaborationService) validateDecisionRunAuthority(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	if run == nil || run.Source != RunSourceRequestDecision || run.Status != AgentRunStatusCompleted ||
-		run.AssignedAgentID != actor.ID || actor.Type != OwnerTypeAgent ||
-		run.Owner != (ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID}) {
+	if run == nil || run.Source != models.RunSourceRequestDecision || run.Status != models.AgentRunStatusCompleted ||
+		run.AssignedAgentID != actor.ID || actor.Type != models.OwnerTypeAgent ||
+		run.Owner != (models.ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID}) {
 		return ErrAgentRequestUnauthorized
 	}
 	inbox, _ := run.Context[agentrun.AgentRequestInboxContextKey].(map[string]interface{})
@@ -798,7 +799,7 @@ func (s *CollaborationService) validateDecisionRunAuthority(ctx context.Context,
 	return nil
 }
 
-func linkAgentRequestDecisionRun(event *ActivityEvent, decisionRunID string) {
+func linkAgentRequestDecisionRun(event *models.ActivityEvent, decisionRunID string) {
 	if event == nil || strings.TrimSpace(decisionRunID) == "" {
 		return
 	}
@@ -826,21 +827,21 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 		return nil, err
 	}
 	if request == nil {
-		return nil, ErrAgentRequestNotFound
+		return nil, models.ErrAgentRequestNotFound
 	}
 	if req.Principal != request.Recipient {
 		return nil, ErrAgentRequestUnauthorized
 	}
 	artifacts, err := s.resolveArtifactReferences(ctx, req.Scope, request.ArtifactRequirements, req.Artifacts)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
+		return nil, fmt.Errorf("%w: %w", models.ErrInvalidArtifact, err)
 	}
-	if request.Status == AgentRequestStatusCompleted || request.Status == AgentRequestStatusCompletionReview {
+	if request.Status == models.AgentRequestStatusCompleted || request.Status == models.AgentRequestStatusCompletionReview {
 		if request.CompletionKey != strings.TrimSpace(req.CompletionKey) || request.CompletionKey == "" {
-			return nil, ErrInvalidAgentRequestState
+			return nil, models.ErrInvalidAgentRequestState
 		}
 		if !sameAgentRequestCompletion(request, req, artifacts) {
-			return nil, ErrAgentRequestIdempotency
+			return nil, models.ErrAgentRequestIdempotency
 		}
 		source, sourceErr := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
 		if sourceErr != nil {
@@ -853,10 +854,10 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 		return &AgentRequestResult{Request: request, Source: source, Child: child}, nil
 	}
 	if request.Revision != req.ExpectedRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	if request.Status != AgentRequestStatusAccepted || strings.TrimSpace(request.ChildRunID) == "" {
-		return nil, ErrInvalidAgentRequestState
+	if request.Status != models.AgentRequestStatusAccepted || strings.TrimSpace(request.ChildRunID) == "" {
+		return nil, models.ErrInvalidAgentRequestState
 	}
 	actor := req.Actor
 	if strings.TrimSpace(actor.ID) == "" {
@@ -871,7 +872,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	if len(request.AcceptanceCriteria) > 0 && len(req.AcceptanceEvidence) == 0 {
 		return nil, errors.New("acceptance evidence is required")
 	}
-	if err := ValidateCredentialFreeContext(req.AcceptanceEvidence); err != nil {
+	if err := models.ValidateCredentialFreeContext(req.AcceptanceEvidence); err != nil {
 		return nil, err
 	}
 	source, err := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
@@ -883,20 +884,20 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 		return nil, err
 	}
 	if source == nil || child == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
-	if child.ParentRunID != source.ID || child.RootRunID != source.RootRunID || child.Status == AgentRunStatusFailed || child.Status == AgentRunStatusCanceled {
-		return nil, ErrInvalidAgentRequestState
+	if child.ParentRunID != source.ID || child.RootRunID != source.RootRunID || child.Status == models.AgentRunStatusFailed || child.Status == models.AgentRunStatusCanceled {
+		return nil, models.ErrInvalidAgentRequestState
 	}
 	if req.ExpectedChildRevision != child.Revision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	now := s.now()
-	updatedRequest := cloneAgentRequest(request)
+	updatedRequest := models.CloneAgentRequest(request)
 	requiresReview := updatedRequest.DelegationPolicy != nil && updatedRequest.DelegationPolicy.RequireCompletionReview
-	updatedRequest.Status = AgentRequestStatusCompleted
+	updatedRequest.Status = models.AgentRequestStatusCompleted
 	if requiresReview {
-		updatedRequest.Status = AgentRequestStatusCompletionReview
+		updatedRequest.Status = models.AgentRequestStatusCompletionReview
 	}
 	updatedRequest.CompletionSummary = strings.TrimSpace(req.Summary)
 	updatedRequest.AcceptanceEvidence = maps.Clone(req.AcceptanceEvidence)
@@ -912,25 +913,25 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 
 	sharedChildOutput := maps.Clone(child.Output)
 	updatedChild := completedCollaborationChildRun(child, updatedRequest, now)
-	var updatedSource *AgentRun
-	var dependencyResolution *RunDependencyResolutionRecord
+	var updatedSource *models.AgentRun
+	var dependencyResolution *models.RunDependencyResolutionRecord
 	if requiresReview {
-		updatedSource = cloneAgentRun(source)
+		updatedSource = models.CloneAgentRun(source)
 	} else if updatedRequest.DependencyGroupID != "" {
 		edge, edgeErr := s.groupedRequestDependency(ctx, updatedRequest, source, true)
 		if edgeErr != nil {
 			return nil, edgeErr
 		}
-		dependencyResolution = &RunDependencyResolutionRecord{
+		dependencyResolution = &models.RunDependencyResolutionRecord{
 			Scope: updatedRequest.Scope, GroupID: updatedRequest.DependencyGroupID, DependencyID: updatedRequest.DependencyID,
-			ExpectedDependencyRevision: edge.Revision, State: RunDependencyStateSatisfied,
+			ExpectedDependencyRevision: edge.Revision, State: models.RunDependencyStateSatisfied,
 			Result: map[string]interface{}{
 				"requestId": updatedRequest.ID, "childRunId": updatedRequest.ChildRunID,
 				"summary": updatedRequest.CompletionSummary, "acceptanceEvidence": maps.Clone(updatedRequest.AcceptanceEvidence),
 				"output": sharedChildOutput,
 			},
-			Artifacts: updatedRequest.Artifacts, Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID},
-			Visibility: ActivityVisibilityTeam, OccurredAt: now,
+			Artifacts: updatedRequest.Artifacts, Actor: models.ActivityActor{Type: string(actor.Type), ID: actor.ID},
+			Visibility: models.ActivityVisibilityTeam, OccurredAt: now,
 		}
 	} else {
 		updatedSource, err = completedCollaborationSourceRun(source, updatedRequest, sharedChildOutput, now)
@@ -942,12 +943,12 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	if requiresReview {
 		eventType = "collaboration.completion_review_requested"
 	}
-	if request.Kind == AgentRequestKindHandoff {
+	if request.Kind == models.AgentRequestKindHandoff {
 		eventType = "handoff.completed"
 		if requiresReview {
 			eventType = "handoff.completion_review_requested"
 		}
-	} else if request.Kind == AgentRequestKindEscalation {
+	} else if request.Kind == models.AgentRequestKindEscalation {
 		eventType = "escalation.completed"
 		if requiresReview {
 			eventType = "escalation.completion_review_requested"
@@ -957,7 +958,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	if requiresReview {
 		summary = fmt.Sprintf("%s %s submitted completed work for independent review", actor.Type, actor.ID)
 	}
-	record := AgentRequestCompletionRecord{
+	record := models.AgentRequestCompletionRecord{
 		Request: updatedRequest, ExpectedRequestRevision: request.Revision,
 		ExpectedSourceRevision: source.Revision, DependencyResolution: dependencyResolution,
 		ChildRun: updatedChild, ExpectedChildRevision: child.Revision,
@@ -978,7 +979,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 		}
 	}
 	return &AgentRequestResult{
-		Request: cloneAgentRequest(updatedRequest), Source: cloneAgentRun(updatedSource), Child: cloneAgentRun(updatedChild), Events: events,
+		Request: models.CloneAgentRequest(updatedRequest), Source: models.CloneAgentRun(updatedSource), Child: models.CloneAgentRun(updatedChild), Events: events,
 	}, nil
 }
 
@@ -997,12 +998,12 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 		return nil, err
 	}
 	if request == nil {
-		return nil, ErrAgentRequestNotFound
+		return nil, models.ErrAgentRequestNotFound
 	}
 	key := strings.TrimSpace(req.IdempotencyKey)
 	if request.CompletionReviewKey != "" {
 		if request.CompletionReviewKey != key || key == "" {
-			return nil, ErrInvalidAgentRequestState
+			return nil, models.ErrInvalidAgentRequestState
 		}
 		source, sourceErr := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
 		if sourceErr != nil {
@@ -1015,13 +1016,13 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 		return &AgentRequestResult{Request: request, Source: source, Child: child}, nil
 	}
 	if request.Revision != req.ExpectedRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	if request.Status != AgentRequestStatusCompletionReview || request.DelegationPolicy == nil || !request.DelegationPolicy.RequireCompletionReview {
-		return nil, ErrInvalidAgentRequestState
+	if request.Status != models.AgentRequestStatusCompletionReview || request.DelegationPolicy == nil || !request.DelegationPolicy.RequireCompletionReview {
+		return nil, models.ErrInvalidAgentRequestState
 	}
 	if req.ResolveDisagreement != request.ReviewDisagreement {
-		return nil, fmt.Errorf("%w: disagreement resolution must match the durable review state", ErrInvalidAgentRequestState)
+		return nil, fmt.Errorf("%w: disagreement resolution must match the durable review state", models.ErrInvalidAgentRequestState)
 	}
 	if req.Principal != request.Requester || req.Principal == request.Recipient {
 		return nil, ErrAgentRequestUnauthorized
@@ -1033,7 +1034,7 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 	if err := actor.Validate(); err != nil {
 		return nil, fmt.Errorf("actor: %w", err)
 	}
-	if actor.Type != OwnerTypeAgent || actor.ID == request.AssignedAgentID {
+	if actor.Type != models.OwnerTypeAgent || actor.ID == request.AssignedAgentID {
 		return nil, fmt.Errorf("%w: completed work requires an independent Agent reviewer", ErrAgentRequestUnauthorized)
 	}
 	for _, decision := range request.CompletionReviews {
@@ -1041,10 +1042,10 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 			if decision.Reviewer == actor && decision.Approve == req.Approve && decision.Summary == strings.TrimSpace(req.Summary) {
 				return &AgentRequestResult{Request: request}, nil
 			}
-			return nil, ErrAgentRequestIdempotency
+			return nil, models.ErrAgentRequestIdempotency
 		}
 		if decision.Reviewer == actor {
-			return nil, fmt.Errorf("%w: reviewer already submitted a completion decision", ErrInvalidAgentRequestState)
+			return nil, fmt.Errorf("%w: reviewer already submitted a completion decision", models.ErrInvalidAgentRequestState)
 		}
 	}
 	summary := strings.TrimSpace(req.Summary)
@@ -1059,18 +1060,18 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	if source == nil || child == nil || child.Status != AgentRunStatusCompleted || child.ParentRunID != source.ID || req.ExpectedChildRevision != child.Revision {
-		return nil, ErrInvalidAgentRequestState
+	if source == nil || child == nil || child.Status != models.AgentRunStatusCompleted || child.ParentRunID != source.ID || req.ExpectedChildRevision != child.Revision {
+		return nil, models.ErrInvalidAgentRequestState
 	}
 	now := s.now()
-	updatedRequest := cloneAgentRequest(request)
+	updatedRequest := models.CloneAgentRequest(request)
 	updatedRequest.Revision++
 	updatedRequest.UpdatedAt = now
-	updatedRequest.CompletionReviews = append(updatedRequest.CompletionReviews, AgentRequestCompletionReviewDecision{
+	updatedRequest.CompletionReviews = append(updatedRequest.CompletionReviews, models.AgentRequestCompletionReviewDecision{
 		Reviewer: actor, Approve: req.Approve, Summary: summary, IdempotencyKey: key, DecidedAt: now,
 	})
 	quorum := completionReviewQuorum(updatedRequest.DelegationPolicy)
-	approvals, rejections := completionReviewCounts(updatedRequest.CompletionReviews)
+	approvals, rejections := models.CompletionReviewCounts(updatedRequest.CompletionReviews)
 	disagreement := approvals > 0 && rejections > 0 && updatedRequest.DelegationPolicy.EscalateOnDisagreement && !req.ResolveDisagreement
 	if disagreement || approvals < quorum && rejections < quorum {
 		updatedRequest.ReviewDisagreement = disagreement
@@ -1081,13 +1082,13 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 			eventSummary = fmt.Sprintf("Completion reviewers disagreed after %d decisions; escalation is required", len(updatedRequest.CompletionReviews))
 		}
 		event := collaborationCompletionEvent(source, updatedRequest, eventType, eventSummary, actor, now)
-		persisted, persistErr := s.store.CoordinateAgentRequest(ctx, AgentRequestCoordinationRecord{
+		persisted, persistErr := s.store.CoordinateAgentRequest(ctx, models.AgentRequestCoordinationRecord{
 			Request: updatedRequest, ExpectedRequestRevision: request.Revision, Event: event,
 		})
 		if persistErr != nil {
 			return nil, persistErr
 		}
-		return &AgentRequestResult{Request: cloneAgentRequest(updatedRequest), Source: cloneAgentRun(source), Child: cloneAgentRun(child), Events: []*ActivityEvent{persisted}}, nil
+		return &AgentRequestResult{Request: models.CloneAgentRequest(updatedRequest), Source: models.CloneAgentRun(source), Child: models.CloneAgentRun(child), Events: []*models.ActivityEvent{persisted}}, nil
 	}
 	updatedRequest.CompletionReviewer = &actor
 	updatedRequest.CompletionReviewSummary = summary
@@ -1095,31 +1096,31 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 	updatedRequest.ReviewDisagreement = false
 	updatedRequest.ReviewedAt = &now
 	updatedRequest.ResolvedAt = &now
-	updatedChild := cloneAgentRun(child)
+	updatedChild := models.CloneAgentRun(child)
 	updatedChild.Revision++
 	updatedChild.UpdatedAt = now
-	var updatedSource *AgentRun
-	var dependencyResolution *RunDependencyResolutionRecord
+	var updatedSource *models.AgentRun
+	var dependencyResolution *models.RunDependencyResolutionRecord
 	eventType := "collaboration.completion_review_approved"
 	eventSummary := fmt.Sprintf("%s %s approved the completed work", actor.Type, actor.ID)
-	dependencyState := RunDependencyStateSatisfied
+	dependencyState := models.RunDependencyStateSatisfied
 	if req.ResolveDisagreement {
 		eventType = "collaboration.completion_review_disagreement_resolved"
 		eventSummary = fmt.Sprintf("Agent %s resolved the completion review disagreement", actor.ID)
 	}
 	if approvals >= quorum {
-		updatedRequest.Status = AgentRequestStatusCompleted
+		updatedRequest.Status = models.AgentRequestStatusCompleted
 		updatedRequest.CompletedAt = &now
 		updatedChild.Output = collaborationCompletionOutput(updatedChild.Output, updatedRequest, maps.Clone(child.Output))
 		if updatedRequest.DependencyGroupID == "" {
 			updatedSource, err = completedCollaborationSourceRun(source, updatedRequest, maps.Clone(child.Output), now)
 		}
 	} else {
-		updatedRequest.Status = AgentRequestStatusFailed
+		updatedRequest.Status = models.AgentRequestStatusFailed
 		updatedRequest.ResolutionReason = summary
 		eventType = "collaboration.completion_review_rejected"
 		eventSummary = fmt.Sprintf("%s %s rejected the completed work", actor.Type, actor.ID)
-		dependencyState = RunDependencyStateFailed
+		dependencyState = models.RunDependencyStateFailed
 		if updatedRequest.DependencyGroupID == "" {
 			updatedSource, err = failedCollaborationSourceRun(source, updatedRequest, now)
 		}
@@ -1127,9 +1128,9 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	if request.Kind == AgentRequestKindHandoff {
+	if request.Kind == models.AgentRequestKindHandoff {
 		eventType = strings.Replace(eventType, "collaboration.", "handoff.", 1)
-	} else if request.Kind == AgentRequestKindEscalation {
+	} else if request.Kind == models.AgentRequestKindEscalation {
 		eventType = strings.Replace(eventType, "collaboration.", "escalation.", 1)
 	}
 	if updatedRequest.DependencyGroupID != "" {
@@ -1137,7 +1138,7 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 		if edgeErr != nil {
 			return nil, edgeErr
 		}
-		dependencyResolution = &RunDependencyResolutionRecord{
+		dependencyResolution = &models.RunDependencyResolutionRecord{
 			Scope: updatedRequest.Scope, GroupID: updatedRequest.DependencyGroupID, DependencyID: updatedRequest.DependencyID,
 			ExpectedDependencyRevision: edge.Revision, State: dependencyState,
 			Result: map[string]interface{}{
@@ -1146,10 +1147,10 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 				"acceptanceEvidence": maps.Clone(updatedRequest.AcceptanceEvidence), "output": maps.Clone(child.Output),
 			},
 			Error: updatedRequest.ResolutionReason, Artifacts: updatedRequest.Artifacts,
-			Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: ActivityVisibilityTeam, OccurredAt: now,
+			Actor: models.ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: models.ActivityVisibilityTeam, OccurredAt: now,
 		}
 	}
-	record := AgentRequestCompletionRecord{
+	record := models.AgentRequestCompletionRecord{
 		Request: updatedRequest, ExpectedRequestRevision: request.Revision,
 		SourceRun: updatedSource, ExpectedSourceRevision: source.Revision, DependencyResolution: dependencyResolution,
 		ChildRun: updatedChild, ExpectedChildRevision: child.Revision,
@@ -1166,13 +1167,13 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 			return nil, err
 		}
 	}
-	return &AgentRequestResult{Request: cloneAgentRequest(updatedRequest), Source: cloneAgentRun(updatedSource), Child: cloneAgentRun(updatedChild), Events: events}, nil
+	return &AgentRequestResult{Request: models.CloneAgentRequest(updatedRequest), Source: models.CloneAgentRun(updatedSource), Child: models.CloneAgentRun(updatedChild), Events: events}, nil
 }
 
 // ResolveTerminalAgentRequestChild closes the collaboration lifecycle from an
 // authoritative terminal child Run. Artifact-bearing requests remain accepted
 // until their required immutable artifacts are explicitly supplied.
-func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Context, child *AgentRun) (*AgentRequestResult, error) {
+func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Context, child *models.AgentRun) (*AgentRequestResult, error) {
 	if s == nil || s.store == nil || s.runs == nil || child == nil {
 		return nil, errors.New("collaboration service and child run are required")
 	}
@@ -1190,15 +1191,15 @@ func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Cont
 		return nil, err
 	}
 	if request.ChildRunID != child.ID {
-		return nil, ErrInvalidAgentRequestState
+		return nil, models.ErrInvalidAgentRequestState
 	}
-	if request.Status == AgentRequestStatusCompletionReview || request.Status == AgentRequestStatusCompleted || request.Status == AgentRequestStatusFailed || request.Status == AgentRequestStatusCanceled {
+	if request.Status == models.AgentRequestStatusCompletionReview || request.Status == models.AgentRequestStatusCompleted || request.Status == models.AgentRequestStatusFailed || request.Status == models.AgentRequestStatusCanceled {
 		return &AgentRequestResult{Request: request, Child: child}, nil
 	}
-	if request.Status != AgentRequestStatusAccepted {
-		return nil, ErrInvalidAgentRequestState
+	if request.Status != models.AgentRequestStatusAccepted {
+		return nil, models.ErrInvalidAgentRequestState
 	}
-	if child.Status == AgentRunStatusCompleted {
+	if child.Status == models.AgentRunStatusCompleted {
 		if len(request.ArtifactRequirements) > 0 {
 			artifacts, present, err := terminalChildArtifactReferences(child.Output)
 			if err != nil {
@@ -1227,14 +1228,14 @@ func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Cont
 			AcceptanceEvidence: evidence, CompletionKey: "terminal-child:" + child.ID,
 		})
 	}
-	if child.Status != AgentRunStatusFailed && child.Status != AgentRunStatusCanceled {
-		return nil, ErrInvalidAgentRequestState
+	if child.Status != models.AgentRunStatusFailed && child.Status != models.AgentRunStatusCanceled {
+		return nil, models.ErrInvalidAgentRequestState
 	}
 	now := s.now()
-	updated := cloneAgentRequest(request)
-	updated.Status = AgentRequestStatusFailed
-	if child.Status == AgentRunStatusCanceled {
-		updated.Status = AgentRequestStatusCanceled
+	updated := models.CloneAgentRequest(request)
+	updated.Status = models.AgentRequestStatusFailed
+	if child.Status == models.AgentRunStatusCanceled {
+		updated.Status = models.AgentRequestStatusCanceled
 	}
 	updated.ResolutionReason = strings.TrimSpace(child.Error)
 	if updated.ResolutionReason == "" {
@@ -1243,28 +1244,28 @@ func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Cont
 	updated.Revision++
 	updated.UpdatedAt = now
 	updated.ResolvedAt = &now
-	record := AgentRequestResponseRecord{Request: updated, ExpectedRequestRevision: request.Revision}
+	record := models.AgentRequestResponseRecord{Request: updated, ExpectedRequestRevision: request.Revision}
 	source, err := s.runs.GetAgentRun(ctx, child.Scope, request.SourceRunID)
 	if err != nil {
 		return nil, err
 	}
 	if source == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if request.DependencyGroupID != "" {
 		edge, edgeErr := s.groupedRequestDependency(ctx, request, source, true)
 		if edgeErr != nil {
 			return nil, edgeErr
 		}
-		state := RunDependencyStateFailed
-		if child.Status == AgentRunStatusCanceled {
-			state = RunDependencyStateCanceled
+		state := models.RunDependencyStateFailed
+		if child.Status == models.AgentRunStatusCanceled {
+			state = models.RunDependencyStateCanceled
 		}
-		record.DependencyResolution = &RunDependencyResolutionRecord{
+		record.DependencyResolution = &models.RunDependencyResolutionRecord{
 			Scope: request.Scope, GroupID: request.DependencyGroupID, DependencyID: request.DependencyID,
 			ExpectedDependencyRevision: edge.Revision, State: state, Error: updated.ResolutionReason,
-			Actor:      ActivityActor{Type: string(request.Recipient.Type), ID: request.Recipient.ID},
-			Visibility: ActivityVisibilityTeam, OccurredAt: now,
+			Actor:      models.ActivityActor{Type: string(request.Recipient.Type), ID: request.Recipient.ID},
+			Visibility: models.ActivityVisibilityTeam, OccurredAt: now,
 		}
 	} else {
 		record.SourceRun, err = failedCollaborationSourceRun(source, updated, now)
@@ -1274,16 +1275,16 @@ func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Cont
 		record.ExpectedSourceRevision = source.Revision
 	}
 	eventType := "collaboration.failed"
-	if request.Kind == AgentRequestKindHandoff {
+	if request.Kind == models.AgentRequestKindHandoff {
 		eventType = "handoff.failed"
-	} else if request.Kind == AgentRequestKindEscalation {
+	} else if request.Kind == models.AgentRequestKindEscalation {
 		eventType = "escalation.failed"
 	}
-	if child.Status == AgentRunStatusCanceled {
+	if child.Status == models.AgentRunStatusCanceled {
 		eventType = "collaboration.canceled"
-		if request.Kind == AgentRequestKindHandoff {
+		if request.Kind == models.AgentRequestKindHandoff {
 			eventType = "handoff.canceled"
-		} else if request.Kind == AgentRequestKindEscalation {
+		} else if request.Kind == models.AgentRequestKindEscalation {
 			eventType = "escalation.canceled"
 		}
 	}
@@ -1303,7 +1304,7 @@ func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Cont
 	return &AgentRequestResult{Request: updated, Source: record.SourceRun, Child: child, Events: events}, nil
 }
 
-func terminalChildArtifactReferences(output map[string]interface{}) ([]ArtifactReference, bool, error) {
+func terminalChildArtifactReferences(output map[string]interface{}) ([]models.ArtifactReference, bool, error) {
 	if len(output) == 0 {
 		return nil, false, nil
 	}
@@ -1318,7 +1319,7 @@ func terminalChildArtifactReferences(output map[string]interface{}) ([]ArtifactR
 	if err != nil {
 		return nil, true, fmt.Errorf("encode terminal child artifact references: %w", err)
 	}
-	var references []ArtifactReference
+	var references []models.ArtifactReference
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&references); err != nil {
@@ -1330,83 +1331,83 @@ func terminalChildArtifactReferences(output map[string]interface{}) ([]ArtifactR
 	return references, true, nil
 }
 
-func (s *CollaborationService) groupedRequestDependency(ctx context.Context, request *AgentRequest, source *AgentRun, allowTerminalGroup bool) (*RunDependency, error) {
+func (s *CollaborationService) groupedRequestDependency(ctx context.Context, request *models.AgentRequest, source *models.AgentRun, allowTerminalGroup bool) (*models.RunDependency, error) {
 	if request == nil || source == nil || request.DependencyGroupID == "" || request.DependencyID == "" {
-		return nil, ErrInvalidAgentRequestState
+		return nil, models.ErrInvalidAgentRequestState
 	}
 	group, err := s.dependencies.GetRunDependencyGroup(ctx, request.Scope, request.DependencyGroupID)
 	if err != nil {
 		return nil, err
 	}
-	waiting := source.Status == AgentRunStatusWaitingForDependency && source.WakeCondition != nil &&
+	waiting := source.Status == models.AgentRunStatusWaitingForDependency && source.WakeCondition != nil &&
 		source.WakeCondition.Type == "run_dependencies" && source.WakeCondition.Reference == group.ID
-	terminal := group.Status == RunDependencyGroupSatisfied || group.Status == RunDependencyGroupFailed || group.Status == RunDependencyGroupCanceled
+	terminal := group.Status == models.RunDependencyGroupSatisfied || group.Status == models.RunDependencyGroupFailed || group.Status == models.RunDependencyGroupCanceled
 	if group.SourceRunID != request.SourceRunID || (!waiting && !(allowTerminalGroup && terminal)) {
-		return nil, fmt.Errorf("%w: source run is not waiting on dependency group %s", ErrInvalidAgentRequestState, group.ID)
+		return nil, fmt.Errorf("%w: source run is not waiting on dependency group %s", models.ErrInvalidAgentRequestState, group.ID)
 	}
 	edges, err := s.dependencies.ListRunDependencies(ctx, request.Scope, group.ID)
 	if err != nil {
 		return nil, err
 	}
 	for _, edge := range edges {
-		if edge.ID == request.DependencyID && edge.RequestID == request.ID && edge.Kind == RunDependencyKindAgentRequest {
+		if edge.ID == request.DependencyID && edge.RequestID == request.ID && edge.Kind == models.RunDependencyKindAgentRequest {
 			return edge, nil
 		}
 	}
-	return nil, fmt.Errorf("%w: request %s is not linked to dependency %s", ErrInvalidAgentRequestState, request.ID, request.DependencyID)
+	return nil, fmt.Errorf("%w: request %s is not linked to dependency %s", models.ErrInvalidAgentRequestState, request.ID, request.DependencyID)
 }
 
-func (s *CollaborationService) GetAgentRequest(ctx context.Context, scope Scope, requestID string) (*AgentRequest, error) {
+func (s *CollaborationService) GetAgentRequest(ctx context.Context, scope models.Scope, requestID string) (*models.AgentRequest, error) {
 	request, err := s.store.GetAgentRequest(ctx, scope, requestID)
 	if err != nil {
 		return nil, err
 	}
 	if request == nil {
-		return nil, ErrAgentRequestNotFound
+		return nil, models.ErrAgentRequestNotFound
 	}
 	return request, nil
 }
 
-func (s *CollaborationService) ListAgentRequests(ctx context.Context, filter AgentRequestFilter) ([]*AgentRequest, error) {
+func (s *CollaborationService) ListAgentRequests(ctx context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("collaboration store is not configured")
 	}
 	return s.store.ListAgentRequests(ctx, filter)
 }
 
-func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now time.Time, id string) *AgentRun {
-	owner := collaborationChildOwner(source, request)
+func buildCollaborationChildRun(source *models.AgentRun, request *models.AgentRequest, now time.Time, id string) *models.AgentRun {
+	owner := models.CollaborationChildOwner(source, request)
 	assignedAgent := request.AssignedAgentID
 	context := maps.Clone(request.SharedContext)
 	if context == nil {
 		context = make(map[string]interface{})
 	}
-	context = inheritRoutineEventBatch(source, context)
+	context = models.InheritRoutineEventBatch(source, context)
 	context["collaboration"] = map[string]interface{}{
 		"requestId": request.ID, "kind": request.Kind, "requester": request.Requester,
 		"recipient": request.Recipient, "semanticRole": request.SemanticRole,
-		"acceptanceCriteria": maps.Clone(request.AcceptanceCriteria), "artifactRequirements": cloneArtifactRequirements(request.ArtifactRequirements),
+		"acceptanceCriteria": maps.Clone(request.AcceptanceCriteria), "artifactRequirements": models.CloneArtifactRequirements(request.ArtifactRequirements),
 	}
-	sourceKind := RunSourceRequest
-	if request.Kind == AgentRequestKindHandoff {
-		sourceKind = RunSourceHandoff
-	} else if request.Kind == AgentRequestKindEscalation {
-		sourceKind = RunSourceEscalation
+	sourceKind := models.RunSourceRequest
+	if request.Kind == models.AgentRequestKindHandoff {
+		sourceKind = models.RunSourceHandoff
+	} else if request.Kind == models.AgentRequestKindEscalation {
+		sourceKind = models.RunSourceEscalation
 	}
-	kind, lane := normalizeRunKind(source.Kind), source.ConcurrencyKey
-	if kind == RunKindConversation {
+	kind, lane := models.NormalizeRunKind(source.Kind), source.ConcurrencyKey
+	if kind == models.RunKindConversation {
 		lane = collaborationChatPlacement(source, assignedAgent, context)
 	}
-	child := &AgentRun{
+	child := &models.AgentRun{
 		ID: id, Kind: kind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID, RootRunID: source.RootRunID,
 		Owner: owner, AssignedAgentID: assignedAgent, ActingUser: source.ActingUser, ConcurrencyKey: lane,
-		Goal: request.Goal, Source: sourceKind, Status: AgentRunStatusQueued,
+		Goal: request.Goal, Source: sourceKind, Status: models.AgentRunStatusQueued,
 		Priority: source.Priority, AvailableAt: now, QueueEnteredAt: now, Context: context,
-		Checkpoint: maps.Clone(request.ChildCheckpoint), Budget: cloneBudgetPolicy(request.BudgetAllocation),
-		Policy: maps.Clone(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now, Engine: RunEngineLoop,
+		Checkpoint: maps.Clone(request.ChildCheckpoint), Budget: models.CloneBudgetPolicy(request.BudgetAllocation),
+		Policy: maps.Clone(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now, Engine: models.RunEngineLoop,
 	}
 	if child.Budget != nil {
-		child.BudgetState = BudgetStateActive
+		child.BudgetState = models.BudgetStateActive
 	}
 	return child
 }
@@ -1414,8 +1415,8 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 // collaborationChatPlacement puts work handed over in a Team chat into that
 // same chat: the recipient answers there as an ordinary chat Run, in its own
 // lane, with the whole conversation, exactly as if the message reached it first.
-func collaborationChatPlacement(source *AgentRun, assignedAgent string, context map[string]interface{}) string {
-	for _, key := range []string{conversationRunContextConversationID, conversationRunContextTriggerID, conversation.ConversationRunContextTriggerSeq, "threadRootMessageId", "responseMode"} {
+func collaborationChatPlacement(source *models.AgentRun, assignedAgent string, context map[string]interface{}) string {
+	for _, key := range []string{models.ConversationRunConversationIDContextKey, models.ConversationRunTriggerIDContextKey, conversation.ConversationRunContextTriggerSeq, "threadRootMessageId", "responseMode"} {
 		if value, ok := source.Context[key]; ok {
 			context[key] = value
 		}
@@ -1423,17 +1424,17 @@ func collaborationChatPlacement(source *AgentRun, assignedAgent string, context 
 	if from := strings.TrimSpace(source.AssignedAgentID); from != "" {
 		context[conversation.CollaborationHandedOffByContextKey] = from
 	}
-	conversationID, _ := context[conversationRunContextConversationID].(string)
+	conversationID, _ := context[models.ConversationRunConversationIDContextKey].(string)
 	root, _ := context["threadRootMessageId"].(string)
-	return ConversationRunLane(conversationID, root, assignedAgent)
+	return models.ConversationRunLane(conversationID, root, assignedAgent)
 }
 
 // validateChatDelegationSource allows chat hand-offs only between Team
 // members. An Agent's 1:1 chat belongs to that Agent, so no other Agent can
 // answer in it.
-func validateChatDelegationSource(source *AgentRun) error {
-	if source != nil && source.Kind == RunKindConversation && source.Owner.Type != OwnerTypeTeam {
-		return fmt.Errorf("%w: only Team chats hand work to another Agent", ErrInvalidAgentRequestState)
+func validateChatDelegationSource(source *models.AgentRun) error {
+	if source != nil && source.Kind == models.RunKindConversation && source.Owner.Type != models.OwnerTypeTeam {
+		return fmt.Errorf("%w: only Team chats hand work to another Agent", models.ErrInvalidAgentRequestState)
 	}
 	return nil
 }
@@ -1442,18 +1443,18 @@ func validateChatDelegationSource(source *AgentRun) error {
 // hands work to the Team, which routes among its members, or to an Agent on
 // its current active roster. It is checked when the request is created and
 // again when it is accepted.
-func (s *CollaborationService) validateChatDelegation(ctx context.Context, source *AgentRun, recipient CollaborationParty) error {
+func (s *CollaborationService) validateChatDelegation(ctx context.Context, source *models.AgentRun, recipient models.CollaborationParty) error {
 	if err := validateChatDelegationSource(source); err != nil {
 		return err
 	}
-	if source == nil || source.Kind != RunKindConversation {
+	if source == nil || source.Kind != models.RunKindConversation {
 		return nil
 	}
-	if recipient == (CollaborationParty{Type: OwnerTypeTeam, ID: source.Owner.ID}) {
+	if recipient == (models.CollaborationParty{Type: models.OwnerTypeTeam, ID: source.Owner.ID}) {
 		return nil
 	}
-	if recipient.Type == OwnerTypeAgent {
-		onRoster, err := AgentOnChatRoster(ctx, s.teams, source.Scope, source.Owner, recipient.ID)
+	if recipient.Type == models.OwnerTypeAgent {
+		onRoster, err := models.AgentOnChatRoster(ctx, s.teams, source.Scope, source.Owner, recipient.ID)
 		if err != nil {
 			return err
 		}
@@ -1467,11 +1468,11 @@ func (s *CollaborationService) validateChatDelegation(ctx context.Context, sourc
 // verifyChatAssignment keeps accepted Team chat work on the chat's roster:
 // the child answers in that chat, so a member removed after the request was
 // made cannot accept it.
-func (s *CollaborationService) verifyChatAssignment(ctx context.Context, source *AgentRun, assignedAgentID string) error {
-	if source == nil || normalizeRunKind(source.Kind) != RunKindConversation || source.Owner.Type != OwnerTypeTeam {
+func (s *CollaborationService) verifyChatAssignment(ctx context.Context, source *models.AgentRun, assignedAgentID string) error {
+	if source == nil || models.NormalizeRunKind(source.Kind) != models.RunKindConversation || source.Owner.Type != models.OwnerTypeTeam {
 		return nil
 	}
-	onRoster, err := AgentOnChatRoster(ctx, s.teams, source.Scope, source.Owner, assignedAgentID)
+	onRoster, err := models.AgentOnChatRoster(ctx, s.teams, source.Scope, source.Owner, assignedAgentID)
 	if err != nil {
 		return err
 	}
@@ -1481,9 +1482,9 @@ func (s *CollaborationService) verifyChatAssignment(ctx context.Context, source 
 	return nil
 }
 
-func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context, request *AgentRequest) ([]AgentRequestCandidate, error) {
+func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context, request *models.AgentRequest) ([]models.AgentRequestCandidate, error) {
 	if s.teams == nil {
-		return nil, fmt.Errorf("%w: Team roster assignment is unavailable", ErrAgentRequestAssignment)
+		return nil, fmt.Errorf("%w: Team roster assignment is unavailable", models.ErrAgentRequestAssignment)
 	}
 	scope := capability.ScopeReference{Kind: request.Scope.Kind, ID: request.Scope.ID}
 	deployment, err := s.teams.GetTeamDeployment(ctx, scope, request.Recipient.ID)
@@ -1491,10 +1492,10 @@ func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context,
 		return nil, err
 	}
 	if deployment == nil || deployment.Status != kernelteam.DeploymentActive {
-		return nil, fmt.Errorf("%w: recipient Team deployment is not active", ErrAgentRequestAssignment)
+		return nil, fmt.Errorf("%w: recipient Team deployment is not active", models.ErrAgentRequestAssignment)
 	}
 	agents, hasAgentCatalog := s.store.(collaborationAgentStore)
-	candidates := make([]AgentRequestCandidate, 0, len(deployment.Roster))
+	candidates := make([]models.AgentRequestCandidate, 0, len(deployment.Roster))
 	for _, assignment := range deployment.Roster {
 		if request.SemanticRole != "" && assignment.ID != request.SemanticRole {
 			continue
@@ -1507,7 +1508,7 @@ func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context,
 			}
 			if agentDeployment == nil {
 				if len(assignment.RequiredSkillIDs) > 0 {
-					return nil, fmt.Errorf("%w: Agent authority catalog cannot verify member %q", ErrAgentRequestAssignment, assignment.ID)
+					return nil, fmt.Errorf("%w: Agent authority catalog cannot verify member %q", models.ErrAgentRequestAssignment, assignment.ID)
 				}
 			} else if agentDeployment.RolloutStatus != kernelagent.RolloutActive {
 				continue
@@ -1525,15 +1526,15 @@ func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context,
 				}
 			}
 		} else if len(assignment.RequiredSkillIDs) > 0 {
-			return nil, fmt.Errorf("%w: Agent authority catalog is required to evaluate member %q", ErrAgentRequestAssignment, assignment.ID)
+			return nil, fmt.Errorf("%w: Agent authority catalog is required to evaluate member %q", models.ErrAgentRequestAssignment, assignment.ID)
 		}
-		runs, listErr := s.runs.ListAgentRuns(ctx, AgentRunFilter{Scope: request.Scope, AssignedAgentID: assignment.AgentDeploymentID, Limit: 500})
+		runs, listErr := s.runs.ListAgentRuns(ctx, models.AgentRunFilter{Scope: request.Scope, AssignedAgentID: assignment.AgentDeploymentID, Limit: 500})
 		if listErr != nil {
 			return nil, listErr
 		}
 		active := 0
 		for _, run := range runs {
-			if !isTerminalAgentRunStatus(run.Status) {
+			if !models.IsTerminalAgentRunStatus(run.Status) {
 				active++
 			}
 		}
@@ -1541,14 +1542,14 @@ func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context,
 		if available < 0 {
 			available = 0
 		}
-		candidates = append(candidates, AgentRequestCandidate{
+		candidates = append(candidates, models.AgentRequestCandidate{
 			AgentDeploymentID: assignment.AgentDeploymentID, RosterAssignmentID: assignment.ID,
 			RequiredSkillIDs: append([]string(nil), assignment.RequiredSkillIDs...), CapacityLimit: limit, ActiveRuns: active, AvailableSlots: available,
 		})
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].AgentDeploymentID < candidates[j].AgentDeploymentID })
 	if len(candidates) == 0 {
-		return nil, fmt.Errorf("%w: recipient Team has no eligible Agent for semantic role %q", ErrAgentRequestAssignment, request.SemanticRole)
+		return nil, fmt.Errorf("%w: recipient Team has no eligible Agent for semantic role %q", models.ErrAgentRequestAssignment, request.SemanticRole)
 	}
 	return candidates, nil
 }
@@ -1581,14 +1582,14 @@ func (s *CollaborationService) SubmitAgentRequestBid(ctx context.Context, req Su
 		return nil, err
 	}
 	if request == nil {
-		return nil, ErrAgentRequestNotFound
+		return nil, models.ErrAgentRequestNotFound
 	}
-	if request.Revision != req.ExpectedRevision || request.Status != AgentRequestStatusPending || request.Recipient.Type != OwnerTypeTeam {
-		return nil, ErrInvalidAgentRequestState
+	if request.Revision != req.ExpectedRevision || request.Status != models.AgentRequestStatusPending || request.Recipient.Type != models.OwnerTypeTeam {
+		return nil, models.ErrInvalidAgentRequestState
 	}
 	agentID := strings.TrimSpace(req.AgentDeploymentID)
 	key := strings.TrimSpace(req.IdempotencyKey)
-	if agentID == "" || key == "" || req.Decision != AgentRequestBidAccept && req.Decision != AgentRequestBidDecline {
+	if agentID == "" || key == "" || req.Decision != models.AgentRequestBidAccept && req.Decision != models.AgentRequestBidDecline {
 		return nil, errors.New("Team work bid requires an eligible Agent, accept or decline decision, and idempotency key")
 	}
 	eligible := false
@@ -1599,50 +1600,50 @@ func (s *CollaborationService) SubmitAgentRequestBid(ctx context.Context, req Su
 		}
 	}
 	if !eligible {
-		return nil, fmt.Errorf("%w: bidding Agent is not an eligible Team member", ErrAgentRequestAssignment)
+		return nil, fmt.Errorf("%w: bidding Agent is not an eligible Team member", models.ErrAgentRequestAssignment)
 	}
 	for _, bid := range request.Bids {
 		if bid.AgentDeploymentID == agentID {
 			if bid.IdempotencyKey == key && bid.Decision == req.Decision && bid.Reason == strings.TrimSpace(req.Reason) {
 				return &AgentRequestResult{Request: request}, nil
 			}
-			return nil, ErrAgentRequestIdempotency
+			return nil, models.ErrAgentRequestIdempotency
 		}
 	}
 	now := s.now()
-	updated := cloneAgentRequest(request)
-	updated.Bids = append(updated.Bids, AgentRequestBid{AgentDeploymentID: agentID, Decision: req.Decision, Reason: strings.TrimSpace(req.Reason), IdempotencyKey: key, SubmittedAt: now})
+	updated := models.CloneAgentRequest(request)
+	updated.Bids = append(updated.Bids, models.AgentRequestBid{AgentDeploymentID: agentID, Decision: req.Decision, Reason: strings.TrimSpace(req.Reason), IdempotencyKey: key, SubmittedAt: now})
 	updated.Revision++
 	updated.UpdatedAt = now
 	source, err := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
 	if err != nil {
 		return nil, err
 	}
-	event := collaborationEvent(source, updated, "collaboration.work_bid_submitted", fmt.Sprintf("Agent %s %sed the Team work offer", agentID, req.Decision), CollaborationParty{Type: OwnerTypeAgent, ID: agentID}, now)
-	persisted, err := s.store.CoordinateAgentRequest(ctx, AgentRequestCoordinationRecord{Request: updated, ExpectedRequestRevision: request.Revision, Event: event})
+	event := collaborationEvent(source, updated, "collaboration.work_bid_submitted", fmt.Sprintf("Agent %s %sed the Team work offer", agentID, req.Decision), models.CollaborationParty{Type: models.OwnerTypeAgent, ID: agentID}, now)
+	persisted, err := s.store.CoordinateAgentRequest(ctx, models.AgentRequestCoordinationRecord{Request: updated, ExpectedRequestRevision: request.Revision, Event: event})
 	if err != nil {
 		return nil, err
 	}
-	return &AgentRequestResult{Request: updated, Source: source, Events: []*ActivityEvent{persisted}}, nil
+	return &AgentRequestResult{Request: updated, Source: source, Events: []*models.ActivityEvent{persisted}}, nil
 }
 
-func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, request *AgentRequest, assignedAgentID string) (string, error) {
+func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, request *models.AgentRequest, assignedAgentID string) (string, error) {
 	assignedAgentID = strings.TrimSpace(assignedAgentID)
-	if request.Recipient.Type == OwnerTypeAgent {
+	if request.Recipient.Type == models.OwnerTypeAgent {
 		if assignedAgentID != "" && assignedAgentID != request.Recipient.ID {
-			return "", fmt.Errorf("%w: assigned Agent does not match the recipient", ErrAgentRequestAssignment)
+			return "", fmt.Errorf("%w: assigned Agent does not match the recipient", models.ErrAgentRequestAssignment)
 		}
 		return request.Recipient.ID, nil
 	}
 	if s.teams == nil {
-		return "", fmt.Errorf("%w: Team roster assignment is unavailable", ErrAgentRequestAssignment)
+		return "", fmt.Errorf("%w: Team roster assignment is unavailable", models.ErrAgentRequestAssignment)
 	}
 	deployment, err := s.teams.GetTeamDeployment(ctx, capability.ScopeReference{Kind: request.Scope.Kind, ID: request.Scope.ID}, request.Recipient.ID)
 	if err != nil {
 		return "", err
 	}
 	if deployment == nil || deployment.Status != kernelteam.DeploymentActive {
-		return "", fmt.Errorf("%w: recipient Team deployment is not active", ErrAgentRequestAssignment)
+		return "", fmt.Errorf("%w: recipient Team deployment is not active", models.ErrAgentRequestAssignment)
 	}
 	eligible := make([]kernelteam.RosterAssignment, 0, len(deployment.Roster))
 	for _, assignment := range deployment.Roster {
@@ -1652,7 +1653,7 @@ func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, req
 	}
 	if assignedAgentID == "" {
 		if len(eligible) == 0 {
-			return "", fmt.Errorf("%w: recipient Team has no Agent for semantic role %q", ErrAgentRequestAssignment, request.SemanticRole)
+			return "", fmt.Errorf("%w: recipient Team has no Agent for semantic role %q", models.ErrAgentRequestAssignment, request.SemanticRole)
 		}
 		accepted := acceptedTeamRequestCandidates(request)
 		if len(accepted) > 0 {
@@ -1661,24 +1662,24 @@ func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, req
 		if len(eligible) == 1 {
 			return eligible[0].AgentDeploymentID, nil
 		}
-		return "", fmt.Errorf("%w: Team request acceptance requires an explicit assigned Agent or accepted bid because %d roster members are eligible", ErrAgentRequestAssignment, len(eligible))
+		return "", fmt.Errorf("%w: Team request acceptance requires an explicit assigned Agent or accepted bid because %d roster members are eligible", models.ErrAgentRequestAssignment, len(eligible))
 	}
 	for _, assignment := range eligible {
 		if assignment.AgentDeploymentID == assignedAgentID {
 			return assignedAgentID, nil
 		}
 	}
-	return "", fmt.Errorf("%w: assigned Agent is not an eligible member of the recipient Team", ErrAgentRequestAssignment)
+	return "", fmt.Errorf("%w: assigned Agent is not an eligible member of the recipient Team", models.ErrAgentRequestAssignment)
 }
 
-func acceptedTeamRequestCandidates(request *AgentRequest) []AgentRequestCandidate {
+func acceptedTeamRequestCandidates(request *models.AgentRequest) []models.AgentRequestCandidate {
 	accepted := make(map[string]struct{})
 	for _, bid := range request.Bids {
-		if bid.Decision == AgentRequestBidAccept {
+		if bid.Decision == models.AgentRequestBidAccept {
 			accepted[bid.AgentDeploymentID] = struct{}{}
 		}
 	}
-	result := make([]AgentRequestCandidate, 0, len(accepted))
+	result := make([]models.AgentRequestCandidate, 0, len(accepted))
 	for _, candidate := range request.Candidates {
 		if _, ok := accepted[candidate.AgentDeploymentID]; ok && candidate.AvailableSlots > 0 {
 			result = append(result, candidate)
@@ -1696,7 +1697,7 @@ func acceptedTeamRequestCandidates(request *AgentRequest) []AgentRequestCandidat
 	return result
 }
 
-func teamAssignmentReason(request *AgentRequest, selected string) string {
+func teamAssignmentReason(request *models.AgentRequest, selected string) string {
 	accepted := acceptedTeamRequestCandidates(request)
 	for index, candidate := range accepted {
 		if candidate.AgentDeploymentID == selected {
@@ -1709,7 +1710,7 @@ func teamAssignmentReason(request *AgentRequest, selected string) string {
 	return "selected explicitly from the eligible roster under the reviewed Team role policy"
 }
 
-func cloneWakeCondition(condition *WakeCondition) *WakeCondition {
+func cloneWakeCondition(condition *models.WakeCondition) *models.WakeCondition {
 	if condition == nil {
 		return nil
 	}
@@ -1722,25 +1723,25 @@ func cloneWakeCondition(condition *WakeCondition) *WakeCondition {
 	return &cloned
 }
 
-func sourceWaitsForAgentRequestDecision(source *AgentRun, requestID string) bool {
-	return source != nil && source.Status == AgentRunStatusWaitingForAgent && source.WakeCondition != nil &&
+func sourceWaitsForAgentRequestDecision(source *models.AgentRun, requestID string) bool {
+	return source != nil && source.Status == models.AgentRunStatusWaitingForAgent && source.WakeCondition != nil &&
 		source.WakeCondition.Type == "agent_request_decision" &&
 		source.WakeCondition.Reference == strings.TrimSpace(requestID)
 }
 
-func sourceAwaitingAgentRequestDecision(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
+func sourceAwaitingAgentRequestDecision(source *models.AgentRun, request *models.AgentRequest, now time.Time) (*models.AgentRun, error) {
 	if source == nil || request == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if sourceWaitsForAgentRequestDecision(source, request.ID) {
-		return cloneAgentRun(source), nil
+		return models.CloneAgentRun(source), nil
 	}
 	if !CanStartAgentRequestFromRun(source) {
-		return nil, fmt.Errorf("%w: source run cannot await request decision from %s", ErrInvalidAgentRequestState, source.Status)
+		return nil, fmt.Errorf("%w: source run cannot await request decision from %s", models.ErrInvalidAgentRequestState, source.Status)
 	}
-	updated := cloneAgentRun(source)
-	updated.Status = AgentRunStatusWaitingForAgent
-	updated.WakeCondition = &WakeCondition{Type: "agent_request_decision", Reference: request.ID}
+	updated := models.CloneAgentRun(source)
+	updated.Status = models.AgentRunStatusWaitingForAgent
+	updated.WakeCondition = &models.WakeCondition{Type: "agent_request_decision", Reference: request.ID}
 	updated.Revision++
 	updated.UpdatedAt = now
 	updated.LeaseOwner = ""
@@ -1748,15 +1749,15 @@ func sourceAwaitingAgentRequestDecision(source *AgentRun, request *AgentRequest,
 	return updated, updated.Validate()
 }
 
-func sourceResumingAfterAgentRequestDecision(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
+func sourceResumingAfterAgentRequestDecision(source *models.AgentRun, request *models.AgentRequest, now time.Time) (*models.AgentRun, error) {
 	if source == nil || request == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if !sourceWaitsForAgentRequestDecision(source, request.ID) {
-		return nil, fmt.Errorf("%w: source run is not awaiting request %s", ErrInvalidAgentRequestState, request.ID)
+		return nil, fmt.Errorf("%w: source run is not awaiting request %s", models.ErrInvalidAgentRequestState, request.ID)
 	}
-	updated := cloneAgentRun(source)
-	updated.Status = AgentRunStatusQueued
+	updated := models.CloneAgentRun(source)
+	updated.Status = models.AgentRunStatusQueued
 	updated.WakeCondition = nil
 	updated.Revision++
 	updated.UpdatedAt = now
@@ -1780,9 +1781,9 @@ func sourceResumingAfterAgentRequestDecision(source *AgentRun, request *AgentReq
 	return updated, updated.Validate()
 }
 
-func acceptedSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
-	updated := cloneAgentRun(source)
-	if err := addRunBudgetAllocation(updated, request.ID, request.BudgetAllocation); err != nil {
+func acceptedSourceRun(source *models.AgentRun, request *models.AgentRequest, now time.Time) (*models.AgentRun, error) {
+	updated := models.CloneAgentRun(source)
+	if err := models.AddRunBudgetAllocation(updated, request.ID, request.BudgetAllocation); err != nil {
 		return nil, err
 	}
 	updated.Revision++
@@ -1790,22 +1791,22 @@ func acceptedSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (
 	updated.LeaseOwner = ""
 	updated.LeaseExpiresAt = nil
 	requiresCompletionReview := request.DelegationPolicy != nil && request.DelegationPolicy.RequireCompletionReview
-	if request.Kind == AgentRequestKindHandoff && !requiresCompletionReview {
-		updated.Status = AgentRunStatusCompleted
+	if request.Kind == models.AgentRequestKindHandoff && !requiresCompletionReview {
+		updated.Status = models.AgentRunStatusCompleted
 		updated.WakeCondition = nil
 		updated.Output = map[string]interface{}{"handoffRequestId": request.ID, "childRunId": request.ChildRunID}
 		updated.CompletedAt = &now
 	} else {
-		updated.Status = AgentRunStatusWaitingForDependency
-		updated.WakeCondition = &WakeCondition{Type: "agent_request", Reference: request.ID}
+		updated.Status = models.AgentRunStatusWaitingForDependency
+		updated.WakeCondition = &models.WakeCondition{Type: "agent_request", Reference: request.ID}
 	}
 	return updated, nil
 }
 
-func completedCollaborationChildRun(child *AgentRun, request *AgentRequest, now time.Time) *AgentRun {
-	updated := cloneAgentRun(child)
+func completedCollaborationChildRun(child *models.AgentRun, request *models.AgentRequest, now time.Time) *models.AgentRun {
+	updated := models.CloneAgentRun(child)
 	sharedOutput := maps.Clone(updated.Output)
-	updated.Status = AgentRunStatusCompleted
+	updated.Status = models.AgentRunStatusCompleted
 	updated.Revision++
 	updated.UpdatedAt = now
 	updated.CompletedAt = &now
@@ -1816,22 +1817,22 @@ func completedCollaborationChildRun(child *AgentRun, request *AgentRequest, now 
 	return updated
 }
 
-func completedCollaborationSourceRun(source *AgentRun, request *AgentRequest, childOutput map[string]interface{}, now time.Time) (*AgentRun, error) {
-	updated := cloneAgentRun(source)
-	if updated.Status == AgentRunStatusWaitingForDependency && updated.WakeCondition != nil &&
+func completedCollaborationSourceRun(source *models.AgentRun, request *models.AgentRequest, childOutput map[string]interface{}, now time.Time) (*models.AgentRun, error) {
+	updated := models.CloneAgentRun(source)
+	if updated.Status == models.AgentRunStatusWaitingForDependency && updated.WakeCondition != nil &&
 		updated.WakeCondition.Type == "agent_request" && updated.WakeCondition.Reference == request.ID {
 		updated.WakeCondition = nil
 		updated.LastWakeSignalID = "agent_request:" + request.ID + ":" + fmt.Sprint(request.Revision)
-		if request.Kind == AgentRequestKindHandoff {
-			updated.Status = AgentRunStatusCompleted
+		if request.Kind == models.AgentRequestKindHandoff {
+			updated.Status = models.AgentRunStatusCompleted
 			updated.CompletedAt = &now
 		} else {
-			updated.Status = AgentRunStatusQueued
+			updated.Status = models.AgentRunStatusQueued
 			updated.AvailableAt = now
 			updated.QueueEnteredAt = now
 		}
-	} else if updated.Status != AgentRunStatusCompleted {
-		return nil, fmt.Errorf("%w: source run is not waiting on request %s", ErrInvalidAgentRequestState, request.ID)
+	} else if updated.Status != models.AgentRunStatusCompleted {
+		return nil, fmt.Errorf("%w: source run is not waiting on request %s", models.ErrInvalidAgentRequestState, request.ID)
 	}
 	updated.Revision++
 	updated.UpdatedAt = now
@@ -1841,17 +1842,17 @@ func completedCollaborationSourceRun(source *AgentRun, request *AgentRequest, ch
 	return updated, nil
 }
 
-func failedCollaborationSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
-	updated := cloneAgentRun(source)
-	if updated.Status == AgentRunStatusWaitingForDependency && updated.WakeCondition != nil &&
+func failedCollaborationSourceRun(source *models.AgentRun, request *models.AgentRequest, now time.Time) (*models.AgentRun, error) {
+	updated := models.CloneAgentRun(source)
+	if updated.Status == models.AgentRunStatusWaitingForDependency && updated.WakeCondition != nil &&
 		updated.WakeCondition.Type == "agent_request" && updated.WakeCondition.Reference == request.ID {
-		updated.Status = AgentRunStatusQueued
+		updated.Status = models.AgentRunStatusQueued
 		updated.AvailableAt = now
 		updated.QueueEnteredAt = now
 		updated.WakeCondition = nil
 		updated.LastWakeSignalID = "agent_request:" + request.ID + ":" + fmt.Sprint(request.Revision)
-	} else if updated.Status != AgentRunStatusCompleted {
-		return nil, fmt.Errorf("%w: source run is not waiting on request %s", ErrInvalidAgentRequestState, request.ID)
+	} else if updated.Status != models.AgentRunStatusCompleted {
+		return nil, fmt.Errorf("%w: source run is not waiting on request %s", models.ErrInvalidAgentRequestState, request.ID)
 	}
 	updated.Revision++
 	updated.UpdatedAt = now
@@ -1861,7 +1862,7 @@ func failedCollaborationSourceRun(source *AgentRun, request *AgentRequest, now t
 	return updated, nil
 }
 
-func collaborationCompletionOutput(existing map[string]interface{}, request *AgentRequest, childOutput map[string]interface{}) map[string]interface{} {
+func collaborationCompletionOutput(existing map[string]interface{}, request *models.AgentRequest, childOutput map[string]interface{}) map[string]interface{} {
 	result := maps.Clone(existing)
 	if result == nil {
 		result = make(map[string]interface{})
@@ -1876,13 +1877,13 @@ func collaborationCompletionOutput(existing map[string]interface{}, request *Age
 		"requestId": request.ID, "kind": request.Kind, "childRunId": request.ChildRunID,
 		"status":  request.Status,
 		"summary": request.CompletionSummary, "acceptanceEvidence": maps.Clone(request.AcceptanceEvidence),
-		"artifacts": cloneArtifactReferences(request.Artifacts), "output": maps.Clone(childOutput),
+		"artifacts": models.CloneArtifactReferences(request.Artifacts), "output": maps.Clone(childOutput),
 	}
 	result["collaborationResults"] = results
 	return result
 }
 
-func collaborationResolutionOutput(existing map[string]interface{}, request *AgentRequest) map[string]interface{} {
+func collaborationResolutionOutput(existing map[string]interface{}, request *models.AgentRequest) map[string]interface{} {
 	result := maps.Clone(existing)
 	if result == nil {
 		result = make(map[string]interface{})
@@ -1921,16 +1922,16 @@ func terminalChildSummary(output map[string]interface{}) string {
 	return "Completed delegated work"
 }
 
-func collaborationEvent(run *AgentRun, request *AgentRequest, eventType, summary string, actor CollaborationParty, now time.Time) *ActivityEvent {
-	teamID := teamIDForRun(run)
-	if teamID == "" && request.Recipient.Type == OwnerTypeTeam {
+func collaborationEvent(run *models.AgentRun, request *models.AgentRequest, eventType, summary string, actor models.CollaborationParty, now time.Time) *models.ActivityEvent {
+	teamID := models.TeamIDForRun(run)
+	if teamID == "" && request.Recipient.Type == models.OwnerTypeTeam {
 		teamID = request.Recipient.ID
 	}
-	return &ActivityEvent{
-		ID: uuid.NewString(), Scope: run.Scope, EventType: eventType, Severity: ActivitySeverityInfo,
+	return &models.ActivityEvent{
+		ID: uuid.NewString(), Scope: run.Scope, EventType: eventType, Severity: models.ActivitySeverityInfo,
 		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, ParentRunID: run.ParentRunID,
 		TeamID: teamID, ConversationRefs: append([]string(nil), request.ConversationRefs...),
-		Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Summary: summary, Visibility: ActivityVisibilityTeam,
+		Actor: models.ActivityActor{Type: string(actor.Type), ID: actor.ID}, Summary: summary, Visibility: models.ActivityVisibilityTeam,
 		CorrelationID: request.ID, CausationID: request.SourceRunID, CreatedAt: now,
 		Payload: map[string]interface{}{
 			"requestId": request.ID, "kind": request.Kind, "status": request.Status, "recipient": request.Recipient,
@@ -1940,7 +1941,7 @@ func collaborationEvent(run *AgentRun, request *AgentRequest, eventType, summary
 	}
 }
 
-func collaborationCompletionEvent(run *AgentRun, request *AgentRequest, eventType, summary string, actor CollaborationParty, now time.Time) *ActivityEvent {
+func collaborationCompletionEvent(run *models.AgentRun, request *models.AgentRequest, eventType, summary string, actor models.CollaborationParty, now time.Time) *models.ActivityEvent {
 	event := collaborationEvent(run, request, eventType, summary, actor, now)
 	artifacts := make([]map[string]interface{}, 0, len(request.Artifacts))
 	for _, artifact := range request.Artifacts {
@@ -1960,8 +1961,8 @@ func collaborationCompletionEvent(run *AgentRun, request *AgentRequest, eventTyp
 	return event
 }
 
-func validateArtifactReferenceIntents(requirements []ArtifactRequirement, references []ArtifactReference) error {
-	requirementsByName := make(map[string]ArtifactRequirement, len(requirements))
+func validateArtifactReferenceIntents(requirements []models.ArtifactRequirement, references []models.ArtifactReference) error {
+	requirementsByName := make(map[string]models.ArtifactRequirement, len(requirements))
 	for _, requirement := range requirements {
 		requirementsByName[strings.TrimSpace(requirement.Name)] = requirement
 	}
@@ -2000,11 +2001,11 @@ func validateArtifactReferenceIntents(requirements []ArtifactRequirement, refere
 	return nil
 }
 
-func (s *CollaborationService) resolveArtifactReferences(ctx context.Context, scope Scope, requirements []ArtifactRequirement, references []ArtifactReference) ([]ArtifactReference, error) {
+func (s *CollaborationService) resolveArtifactReferences(ctx context.Context, scope models.Scope, requirements []models.ArtifactRequirement, references []models.ArtifactReference) ([]models.ArtifactReference, error) {
 	if err := validateArtifactReferenceIntents(requirements, references); err != nil {
 		return nil, err
 	}
-	resolved := make([]ArtifactReference, 0, len(references))
+	resolved := make([]models.ArtifactReference, 0, len(references))
 	for _, reference := range references {
 		artifact, err := s.artifacts.GetArtifact(ctx, scope, strings.TrimSpace(reference.ID), reference.Version)
 		if err != nil {
@@ -2017,22 +2018,22 @@ func (s *CollaborationService) resolveArtifactReferences(ctx context.Context, sc
 		for _, evidence := range artifact.Evidence {
 			evidenceRefs = append(evidenceRefs, evidence.TargetRef)
 		}
-		resolved = append(resolved, ArtifactReference{
+		resolved = append(resolved, models.ArtifactReference{
 			ID: artifact.ID, Version: artifact.Version, RequirementName: strings.TrimSpace(reference.RequirementName),
 			Name: artifact.Name, Type: artifact.Type, MediaType: artifact.MediaType, ContentRef: artifact.ContentRef,
 			Digest: artifact.Digest, SizeBytes: artifact.SizeBytes, Metadata: maps.Clone(artifact.Metadata), EvidenceRefs: evidenceRefs,
 		})
 	}
-	if err := validateArtifactReferences(requirements, resolved); err != nil {
+	if err := models.ValidateArtifactReferences(requirements, resolved); err != nil {
 		return nil, err
 	}
 	return normalizeArtifactReferences(resolved), nil
 }
 
-func sameAgentRequestIntent(existing *AgentRequest, req CreateAgentRequestRequest) bool {
-	acceptancePolicy := normalizeAgentRequestAcceptancePolicy(req.AcceptancePolicy)
+func sameAgentRequestIntent(existing *models.AgentRequest, req CreateAgentRequestRequest) bool {
+	acceptancePolicy := models.NormalizeAgentRequestAcceptancePolicy(req.AcceptancePolicy)
 	if existing.DelegationPolicy != nil && existing.DelegationPolicy.RequireAcceptance {
-		acceptancePolicy = AgentRequestAcceptanceRecipientReview
+		acceptancePolicy = models.AgentRequestAcceptanceRecipientReview
 	}
 	return existing.Kind == req.Kind && existing.Requester == req.Requester && existing.Recipient == req.Recipient &&
 		existing.SourceRunID == strings.TrimSpace(req.SourceRunID) && existing.Goal == strings.TrimSpace(req.Goal) &&
@@ -2064,34 +2065,34 @@ func emptyJSONCollection(value interface{}) bool {
 	return (reflected.Kind() == reflect.Map || reflected.Kind() == reflect.Slice) && reflected.Len() == 0
 }
 
-func sameBudgetPolicy(left, right *BudgetPolicy) bool {
+func sameBudgetPolicy(left, right *models.BudgetPolicy) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
 	}
 	return *left == *right
 }
 
-func stableCollaborationID(scope Scope, key, suffix string) string {
+func stableCollaborationID(scope models.Scope, key, suffix string) string {
 	seed := strings.Join([]string{"openseal", "collaboration", scope.Key(), strings.TrimSpace(key), strings.TrimSpace(suffix)}, ":")
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(seed)).String()
 }
 
-func sameAgentRequestCompletion(existing *AgentRequest, req CompleteAgentRequestRequest, artifacts []ArtifactReference) bool {
+func sameAgentRequestCompletion(existing *models.AgentRequest, req CompleteAgentRequestRequest, artifacts []models.ArtifactReference) bool {
 	left, _ := json.Marshal(struct {
 		Summary   string
 		Evidence  map[string]interface{}
-		Artifacts []ArtifactReference
+		Artifacts []models.ArtifactReference
 	}{existing.CompletionSummary, existing.AcceptanceEvidence, existing.Artifacts})
 	right, _ := json.Marshal(struct {
 		Summary   string
 		Evidence  map[string]interface{}
-		Artifacts []ArtifactReference
+		Artifacts []models.ArtifactReference
 	}{strings.TrimSpace(req.Summary), req.AcceptanceEvidence, artifacts})
 	return bytes.Equal(left, right)
 }
 
-func normalizeArtifactReferences(in []ArtifactReference) []ArtifactReference {
-	result := cloneArtifactReferences(in)
+func normalizeArtifactReferences(in []models.ArtifactReference) []models.ArtifactReference {
+	result := models.CloneArtifactReferences(in)
 	for index := range result {
 		result[index].ID = strings.TrimSpace(result[index].ID)
 		result[index].RequirementName = strings.TrimSpace(result[index].RequirementName)

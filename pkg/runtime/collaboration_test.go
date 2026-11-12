@@ -12,7 +12,10 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -58,7 +61,7 @@ func (s collaborationTeamStoreStub) GetTeamDefinition(_ context.Context, id, ver
 	return s.definition, nil
 }
 
-func activeCollaborationTeam(scope Scope, id string, assignments ...kernelteam.RosterAssignment) collaborationTeamStoreStub {
+func activeCollaborationTeam(scope models.Scope, id string, assignments ...kernelteam.RosterAssignment) collaborationTeamStoreStub {
 	return collaborationTeamStoreStub{deployment: &kernelteam.Deployment{
 		ID: id, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: assignments, Revision: 1,
@@ -68,11 +71,11 @@ func activeCollaborationTeam(scope Scope, id string, assignments ...kernelteam.R
 func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "acme"}
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	store := newTestKernelStore(t)
-	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "developer",
-		Goal: "Coordinate the release", Source: RunSourceManual,
+	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "developer",
+		Goal: "Coordinate the release", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -91,14 +94,14 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 		},
 	}
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer"}, SourceRunID: source.ID,
-		Goal: "Review the release", AcceptancePolicy: AgentRequestAcceptancePreauthorized, IdempotencyKey: "review-release",
+		Scope: scope, Kind: models.AgentRequestKindRequest, Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "reviewer"}, SourceRunID: source.ID,
+		Goal: "Review the release", AcceptancePolicy: models.AgentRequestAcceptancePreauthorized, IdempotencyKey: "review-release",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Request.AcceptancePolicy != AgentRequestAcceptanceRecipientReview {
+	if created.Request.AcceptancePolicy != models.AgentRequestAcceptanceRecipientReview {
 		t.Fatalf("acceptance policy = %q", created.Request.AcceptancePolicy)
 	}
 	policy := created.Request.DelegationPolicy
@@ -108,16 +111,16 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 		t.Fatalf("delegation policy snapshot = %#v", policy)
 	}
 	replayed, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer"}, SourceRunID: source.ID,
-		Goal: "Review the release", AcceptancePolicy: AgentRequestAcceptancePreauthorized, IdempotencyKey: "review-release",
+		Scope: scope, Kind: models.AgentRequestKindRequest, Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "reviewer"}, SourceRunID: source.ID,
+		Goal: "Review the release", AcceptancePolicy: models.AgentRequestAcceptancePreauthorized, IdempotencyKey: "review-release",
 	})
 	if err != nil || replayed.Request.ID != created.Request.ID {
 		t.Fatalf("policy-governed replay = %#v, %v", replayed, err)
 	}
 	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer"},
+		Decision: AgentRequestDecisionAccept, Principal: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "reviewer"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -130,8 +133,8 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if submitted.Request.Status != AgentRequestStatusCompletionReview || submitted.Request.CompletionSubmittedAt == nil ||
-		submitted.Source.Status != AgentRunStatusWaitingForDependency || submitted.Child.Status != AgentRunStatusCompleted {
+	if submitted.Request.Status != models.AgentRequestStatusCompletionReview || submitted.Request.CompletionSubmittedAt == nil ||
+		submitted.Source.Status != models.AgentRunStatusWaitingForDependency || submitted.Child.Status != models.AgentRunStatusCompleted {
 		t.Fatalf("completion review checkpoint = %#v / %#v / %#v", submitted.Request, submitted.Source, submitted.Child)
 	}
 	if _, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
@@ -149,8 +152,8 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reviewed.Request.Status != AgentRequestStatusCompleted || reviewed.Request.ReviewedAt == nil || reviewed.Request.CompletedAt == nil ||
-		reviewed.Source.Status != AgentRunStatusQueued || reviewed.Request.CompletionReviewer == nil || *reviewed.Request.CompletionReviewer != submitted.Request.Requester {
+	if reviewed.Request.Status != models.AgentRequestStatusCompleted || reviewed.Request.ReviewedAt == nil || reviewed.Request.CompletedAt == nil ||
+		reviewed.Source.Status != models.AgentRunStatusQueued || reviewed.Request.CompletionReviewer == nil || *reviewed.Request.CompletionReviewer != submitted.Request.Requester {
 		t.Fatalf("reviewed completion = %#v / %#v", reviewed.Request, reviewed.Source)
 	}
 }
@@ -158,11 +161,11 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 func TestTeamCompletionReviewQuorumEscalatesAndResolvesDisagreement(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "review-quorum"}
+	scope := models.Scope{Kind: "tenant", ID: "review-quorum"}
 	store := newTestKernelStore(t)
-	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "lead",
-		Goal: "Coordinate reviewed delivery", Source: RunSourceManual,
+	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "lead",
+		Goal: "Coordinate reviewed delivery", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -179,8 +182,8 @@ func TestTeamCompletionReviewQuorumEscalatesAndResolvesDisagreement(t *testing.T
 		}},
 	}
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, Requester: CollaborationParty{Type: OwnerTypeTeam, ID: "delivery-team"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "worker"}, SourceRunID: source.ID, Goal: "Produce reviewed evidence",
+		Scope: scope, Kind: models.AgentRequestKindRequest, Requester: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "delivery-team"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "worker"}, SourceRunID: source.ID, Goal: "Produce reviewed evidence",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -203,29 +206,29 @@ func TestTeamCompletionReviewQuorumEscalatesAndResolvesDisagreement(t *testing.T
 	first, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
 		Scope: scope, RequestID: submitted.Request.ID, ExpectedRevision: submitted.Request.Revision,
 		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
-		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer-a"}, Approve: true,
+		Actor: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "reviewer-a"}, Approve: true,
 		Summary: "Evidence is complete", IdempotencyKey: "review-a",
 	})
-	if err != nil || first.Request.Status != AgentRequestStatusCompletionReview || len(first.Request.CompletionReviews) != 1 {
+	if err != nil || first.Request.Status != models.AgentRequestStatusCompletionReview || len(first.Request.CompletionReviews) != 1 {
 		t.Fatalf("first quorum decision = %#v, %v", first, err)
 	}
 	second, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
 		Scope: scope, RequestID: first.Request.ID, ExpectedRevision: first.Request.Revision,
 		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
-		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer-b"}, Approve: false,
+		Actor: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "reviewer-b"}, Approve: false,
 		Summary: "Evidence misses one criterion", IdempotencyKey: "review-b",
 	})
-	if err != nil || !second.Request.ReviewDisagreement || second.Request.Status != AgentRequestStatusCompletionReview {
+	if err != nil || !second.Request.ReviewDisagreement || second.Request.Status != models.AgentRequestStatusCompletionReview {
 		t.Fatalf("disagreement = %#v, %v", second, err)
 	}
 	resolved, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
 		Scope: scope, RequestID: second.Request.ID, ExpectedRevision: second.Request.Revision,
 		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
-		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer-c"}, Approve: true, ResolveDisagreement: true,
+		Actor: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "reviewer-c"}, Approve: true, ResolveDisagreement: true,
 		Summary: "Escalation review confirms the evidence", IdempotencyKey: "review-c",
 	})
-	if err != nil || resolved.Request.Status != AgentRequestStatusCompleted || resolved.Request.ReviewDisagreement ||
-		len(resolved.Request.CompletionReviews) != 3 || resolved.Source.Status != AgentRunStatusQueued {
+	if err != nil || resolved.Request.Status != models.AgentRequestStatusCompleted || resolved.Request.ReviewDisagreement ||
+		len(resolved.Request.CompletionReviews) != 3 || resolved.Source.Status != models.AgentRunStatusQueued {
 		t.Fatalf("resolved disagreement = %#v, %v", resolved, err)
 	}
 }
@@ -233,10 +236,10 @@ func TestTeamCompletionReviewQuorumEscalatesAndResolvesDisagreement(t *testing.T
 func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	newService := func(policy kernelteam.DelegationPolicy) (*sqlite.Store, *PortfolioService, *CollaborationService) {
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	newService := func(policy kernelteam.DelegationPolicy) (*sqlite.Store, *portfolio.PortfolioService, *CollaborationService) {
 		store := newTestKernelStore(t)
-		portfolio := NewPortfolioService(store)
+		portfolio := portfolio.NewPortfolioService(store)
 		service := NewCollaborationService(store)
 		service.teams = collaborationTeamStoreStub{
 			deployment: &kernelteam.Deployment{
@@ -247,11 +250,11 @@ func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 		}
 		return store, portfolio, service
 	}
-	createSource := func(t *testing.T, portfolio *PortfolioService, assigned, key string, parent *AgentRun) *AgentRun {
+	createSource := func(t *testing.T, portfolio *portfolio.PortfolioService, assigned, key string, parent *models.AgentRun) *models.AgentRun {
 		t.Helper()
-		request := CreateAgentRunRequest{
-			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: assigned,
-			Goal: "Coordinate delivery", Source: RunSourceManual, IdempotencyKey: key,
+		request := models.CreateAgentRunRequest{
+			Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: assigned,
+			Goal: "Coordinate delivery", Source: models.RunSourceManual, IdempotencyKey: key,
 		}
 		if parent != nil {
 			request.ParentRunID = parent.ID
@@ -263,10 +266,10 @@ func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 		}
 		return run
 	}
-	request := func(source *AgentRun, recipient, key string) CreateAgentRequestRequest {
+	request := func(source *models.AgentRun, recipient, key string) CreateAgentRequestRequest {
 		return CreateAgentRequestRequest{
-			Scope: scope, Kind: AgentRequestKindRequest, Requester: CollaborationParty{Type: OwnerTypeAgent, ID: source.AssignedAgentID},
-			Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: recipient}, SourceRunID: source.ID,
+			Scope: scope, Kind: models.AgentRequestKindRequest, Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: source.AssignedAgentID},
+			Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: recipient}, SourceRunID: source.ID,
 			Goal: "Review delivery", IdempotencyKey: key,
 		}
 	}
@@ -283,7 +286,7 @@ func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 		_, portfolio, service := newService(kernelteam.DelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 3, AllowPeerDelegation: true})
 		parent := createSource(t, portfolio, "lead", "depth-parent", nil)
 		child := createSource(t, portfolio, "developer", "depth-child", parent)
-		if _, err := service.CreateAgentRequest(ctx, request(child, "reviewer", "depth-request")); !errors.Is(err, ErrAgentRequestAssignment) || !strings.Contains(err.Error(), "depth 2") {
+		if _, err := service.CreateAgentRequest(ctx, request(child, "reviewer", "depth-request")); !errors.Is(err, models.ErrAgentRequestAssignment) || !strings.Contains(err.Error(), "depth 2") {
 			t.Fatalf("depth error = %v", err)
 		}
 	})
@@ -295,7 +298,7 @@ func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 		second := createSource(t, portfolio, "developer", "concurrent-source-2", nil)
-		if _, err := service.CreateAgentRequest(ctx, request(second, "reviewer", "concurrent-request-2")); !errors.Is(err, ErrAgentRequestAssignment) || !strings.Contains(err.Error(), "reaching maximum 1") {
+		if _, err := service.CreateAgentRequest(ctx, request(second, "reviewer", "concurrent-request-2")); !errors.Is(err, models.ErrAgentRequestAssignment) || !strings.Contains(err.Error(), "reaching maximum 1") {
 			t.Fatalf("concurrency error = %v", err)
 		}
 	})
@@ -305,9 +308,9 @@ func TestCollaborationReservesTeamDelegationCapacityAtomically(t *testing.T) {
 	t.Parallel()
 	stores := []struct {
 		name string
-		open func(*testing.T) (CollaborationKernelStore, func())
+		open func(*testing.T) (models.CollaborationKernelStore, func())
 	}{
-		{name: "sqlite", open: func(t *testing.T) (CollaborationKernelStore, func()) {
+		{name: "sqlite", open: func(t *testing.T) (models.CollaborationKernelStore, func()) {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "delegation-capacity.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -321,14 +324,14 @@ func TestCollaborationReservesTeamDelegationCapacityAtomically(t *testing.T) {
 			store, closeStore := tc.open(t)
 			defer closeStore()
 			ctx := context.Background()
-			scope := Scope{Kind: "tenant", ID: "atomic"}
-			portfolio := NewPortfolioService(store)
-			sources := make([]*AgentRun, 2)
+			scope := models.Scope{Kind: "tenant", ID: "atomic"}
+			portfolio := portfolio.NewPortfolioService(store)
+			sources := make([]*models.AgentRun, 2)
 			for index := range sources {
 				var err error
-				sources[index], err = portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-					Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, AssignedAgentID: "agent",
-					Goal: "Coordinate", Source: RunSourceManual, IdempotencyKey: fmt.Sprintf("source-%d", index),
+				sources[index], err = portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+					Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, AssignedAgentID: "agent",
+					Goal: "Coordinate", Source: models.RunSourceManual, IdempotencyKey: fmt.Sprintf("source-%d", index),
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -348,15 +351,15 @@ func TestCollaborationReservesTeamDelegationCapacityAtomically(t *testing.T) {
 			var group sync.WaitGroup
 			for index, source := range sources {
 				group.Add(1)
-				go func(index int, source *AgentRun) {
+				go func(index int, source *models.AgentRun) {
 					defer group.Done()
 					<-start
 					service := NewCollaborationService(store)
 					service.teams = teamStore
 					_, errorsByIndex[index] = service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-						Scope: scope, Kind: AgentRequestKindRequest,
-						Requester:   CollaborationParty{Type: OwnerTypeAgent, ID: "agent"},
-						Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: fmt.Sprintf("reviewer-%d", index)},
+						Scope: scope, Kind: models.AgentRequestKindRequest,
+						Requester:   models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "agent"},
+						Recipient:   models.CollaborationParty{Type: models.OwnerTypeAgent, ID: fmt.Sprintf("reviewer-%d", index)},
 						SourceRunID: source.ID, Goal: "Review", IdempotencyKey: fmt.Sprintf("request-%d", index),
 					})
 				}(index, source)
@@ -368,7 +371,7 @@ func TestCollaborationReservesTeamDelegationCapacityAtomically(t *testing.T) {
 				switch {
 				case err == nil:
 					succeeded++
-				case errors.Is(err, ErrAgentRequestAssignment) && strings.Contains(err.Error(), "reaching maximum 1"):
+				case errors.Is(err, models.ErrAgentRequestAssignment) && strings.Contains(err.Error(), "reaching maximum 1"):
 					capacityRejected++
 				default:
 					t.Fatalf("unexpected concurrent creation error: %v", err)
@@ -389,10 +392,10 @@ func TestCollaborationCompletionReviewSurvivesPortableStoreRestart(t *testing.T)
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "review"}
-	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, AssignedAgentID: "author",
-		Goal: "Produce reviewed work", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "review"}
+	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, AssignedAgentID: "author",
+		Goal: "Produce reviewed work", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -409,8 +412,8 @@ func TestCollaborationCompletionReviewSurvivesPortableStoreRestart(t *testing.T)
 	service := NewCollaborationService(store)
 	service.teams = teamStore
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "author"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "specialist"}, SourceRunID: source.ID,
+		Scope: scope, Kind: models.AgentRequestKindRequest, Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "author"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "specialist"}, SourceRunID: source.ID,
 		Goal: "Produce result", IdempotencyKey: "portable-review",
 	})
 	if err != nil {
@@ -428,7 +431,7 @@ func TestCollaborationCompletionReviewSurvivesPortableStoreRestart(t *testing.T)
 		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
 		Summary: "Portable result", CompletionKey: "portable-completion",
 	})
-	if err != nil || submitted.Request.Status != AgentRequestStatusCompletionReview {
+	if err != nil || submitted.Request.Status != models.AgentRequestStatusCompletionReview {
 		t.Fatalf("submitted review = %#v, %v", submitted, err)
 	}
 	if err := store.Close(); err != nil {
@@ -447,7 +450,7 @@ func TestCollaborationCompletionReviewSurvivesPortableStoreRestart(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reviewed.Request.Status != AgentRequestStatusCompleted || reviewed.Source.Status != AgentRunStatusQueued {
+	if reviewed.Request.Status != models.AgentRequestStatusCompleted || reviewed.Source.Status != models.AgentRunStatusQueued {
 		t.Fatalf("review after restart = %#v / %#v", reviewed.Request, reviewed.Source)
 	}
 }
@@ -456,9 +459,9 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 	t.Parallel()
 	stores := []struct {
 		name string
-		open func(*testing.T) (CollaborationKernelStore, func())
+		open func(*testing.T) (models.CollaborationKernelStore, func())
 	}{
-		{name: "sqlite", open: func(t *testing.T) (CollaborationKernelStore, func()) {
+		{name: "sqlite", open: func(t *testing.T) (models.CollaborationKernelStore, func()) {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "collaboration.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -472,25 +475,25 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			store, closeStore := tc.open(t)
 			defer closeStore()
 			ctx := context.Background()
-			scope := Scope{Kind: "tenant", ID: "acme"}
-			portfolio := NewPortfolioService(store)
-			source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
-				Goal: "Ship the release", Source: RunSourceManual,
+			scope := models.Scope{Kind: "tenant", ID: "acme"}
+			portfolio := portfolio.NewPortfolioService(store)
+			source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
+				Goal: "Ship the release", Source: models.RunSourceManual,
 				Context: map[string]interface{}{"sourceOnly": true, "privateCredentialRef": "binding:must-not-transfer"},
-				Budget:  &BudgetPolicy{MaxTotalTokens: 1000}, Policy: map[string]interface{}{"risk": "guarded"},
+				Budget:  &models.BudgetPolicy{MaxTotalTokens: 1000}, Policy: map[string]interface{}{"risk": "guarded"},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			service := NewCollaborationService(store)
 			create := CreateAgentRequestRequest{
-				Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-				Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-				Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+				Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+				Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+				Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 				Goal:      "Turn the release into a launch brief", SemanticRole: "launch-editor",
 				AcceptanceCriteria: map[string]interface{}{"format": "markdown"},
-				ArtifactRequirements: []ArtifactRequirement{{
+				ArtifactRequirements: []models.ArtifactRequirement{{
 					Name: "launch-brief", Type: "document", Required: true,
 					Schema: map[string]interface{}{
 						"type": "object", "required": []interface{}{"wordCount"},
@@ -501,17 +504,17 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 				ChildCheckpoint:  map[string]interface{}{"phase": "draft", "audience": "platform-engineering"},
 				ConversationRefs: []string{"team:gtm:42"},
 				IdempotencyKey:   "release-launch-brief",
-				BudgetAllocation: &BudgetPolicy{MaxTotalTokens: 500},
+				BudgetAllocation: &models.BudgetPolicy{MaxTotalTokens: 500},
 			}
 			created, err := service.CreateAgentRequest(ctx, create)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if created.Request.Status != AgentRequestStatusPending || created.Source == nil ||
-				created.Source.Status != AgentRunStatusWaitingForAgent || created.Source.WakeCondition == nil ||
+			if created.Request.Status != models.AgentRequestStatusPending || created.Source == nil ||
+				created.Source.Status != models.AgentRunStatusWaitingForAgent || created.Source.WakeCondition == nil ||
 				created.Source.WakeCondition.Type != "agent_request_decision" ||
 				created.Source.WakeCondition.Reference != created.Request.ID ||
-				len(created.Events) != 1 || created.Events[0].TeamID != "product" || created.Events[0].Visibility != ActivityVisibilityTeam {
+				len(created.Events) != 1 || created.Events[0].TeamID != "product" || created.Events[0].Visibility != models.ActivityVisibilityTeam {
 				t.Fatalf("created request = %#v, events = %#v", created.Request, created.Events)
 			}
 			duplicate, err := service.CreateAgentRequest(ctx, create)
@@ -520,10 +523,10 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			}
 			conflictingIntent := create
 			conflictingIntent.SharedContext = map[string]interface{}{"release": "different"}
-			if _, err := service.CreateAgentRequest(ctx, conflictingIntent); !errors.Is(err, ErrAgentRequestIdempotency) {
+			if _, err := service.CreateAgentRequest(ctx, conflictingIntent); !errors.Is(err, models.ErrAgentRequestIdempotency) {
 				t.Fatalf("conflicting request intent error = %v", err)
 			}
-			listed, err := service.ListAgentRequests(ctx, AgentRequestFilter{Scope: scope, Recipient: &create.Recipient})
+			listed, err := service.ListAgentRequests(ctx, models.AgentRequestFilter{Scope: scope, Recipient: &create.Recipient})
 			if err != nil || len(listed) != 1 || listed[0].ID != created.Request.ID {
 				t.Fatalf("recipient requests = %#v, %v", listed, err)
 			}
@@ -533,7 +536,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 				Decision: AgentRequestDecisionRequestClarification, Principal: create.Recipient,
 				Message: "Which audience should this prioritize?",
 			})
-			if err != nil || question.Request.Status != AgentRequestStatusClarificationRequested || question.Child != nil {
+			if err != nil || question.Request.Status != models.AgentRequestStatusClarificationRequested || question.Child != nil {
 				t.Fatalf("clarification request = %#v, %v", question, err)
 			}
 			clarified, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
@@ -541,7 +544,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 				Decision: AgentRequestDecisionProvideClarification, Principal: create.Requester,
 				Message: "Prioritize existing platform engineering customers.",
 			})
-			if err != nil || clarified.Request.Status != AgentRequestStatusPending || clarified.Request.Revision != 3 {
+			if err != nil || clarified.Request.Status != models.AgentRequestStatusPending || clarified.Request.Revision != 3 {
 				t.Fatalf("clarification response = %#v, %v", clarified, err)
 			}
 			accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
@@ -551,13 +554,13 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if accepted.Request.Status != AgentRequestStatusAccepted || accepted.Child == nil || accepted.Child.ParentRunID != source.ID || accepted.Child.RootRunID != source.RootRunID {
+			if accepted.Request.Status != models.AgentRequestStatusAccepted || accepted.Child == nil || accepted.Child.ParentRunID != source.ID || accepted.Child.RootRunID != source.RootRunID {
 				t.Fatalf("accepted request = %#v", accepted)
 			}
 			if accepted.Request.AcceptedAt == nil || accepted.Request.ResolvedAt != nil {
 				t.Fatalf("accepted request timestamps = %#v", accepted.Request)
 			}
-			if accepted.Child.Owner != source.Owner || accepted.Child.AssignedAgentID != "marketing" || accepted.Child.Source != RunSourceRequest {
+			if accepted.Child.Owner != source.Owner || accepted.Child.AssignedAgentID != "marketing" || accepted.Child.Source != models.RunSourceRequest {
 				t.Fatalf("child ownership = %#v", accepted.Child)
 			}
 			if accepted.Child.Context["sourceOnly"] != nil || accepted.Child.Context["privateCredentialRef"] != nil || accepted.Child.Context["release"] != "2026.07" {
@@ -567,20 +570,20 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 				t.Fatalf("child checkpoint = %#v", accepted.Child.Checkpoint)
 			}
 			persistedSource, err := portfolio.GetAgentRun(ctx, scope, source.ID)
-			if err != nil || persistedSource.Status != AgentRunStatusWaitingForDependency || persistedSource.WakeCondition == nil || persistedSource.WakeCondition.Reference != created.Request.ID {
+			if err != nil || persistedSource.Status != models.AgentRunStatusWaitingForDependency || persistedSource.WakeCondition == nil || persistedSource.WakeCondition.Reference != created.Request.ID {
 				t.Fatalf("source after acceptance = %#v, %v", persistedSource, err)
 			}
 			child, err := portfolio.GetAgentRun(ctx, scope, accepted.Child.ID)
 			if err != nil || child.AssignedAgentID != "marketing" {
 				t.Fatalf("persisted child = %#v, %v", child, err)
 			}
-			_, err = artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &Artifact{
+			_, err = artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
 				ID: "artifact-launch-brief", Version: 1, Scope: scope, Name: "launch-brief.md",
 				Type: "document", MediaType: "text/markdown", ContentRef: "artifact-store:launch-brief-v1",
 				Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SizeBytes: 2048,
-				Classification: ArtifactClassificationInternal, Metadata: map[string]interface{}{"wordCount": 420},
-				Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "marketing"}, RunID: child.ID, RequestID: created.Request.ID},
-				Evidence:   []EvidenceLink{{Relation: EvidenceRelationSupports, TargetKind: EvidenceTargetClaim, TargetRef: "review:editorial-7"}},
+				Classification: models.ArtifactClassificationInternal, Metadata: map[string]interface{}{"wordCount": 420},
+				Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "marketing"}, RunID: child.ID, RequestID: created.Request.ID},
+				Evidence:   []models.EvidenceLink{{Relation: models.EvidenceRelationSupports, TargetKind: models.EvidenceTargetClaim, TargetRef: "review:editorial-7"}},
 			}})
 			if err != nil {
 				t.Fatal(err)
@@ -588,10 +591,10 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			completion := CompleteAgentRequestRequest{
 				Scope: scope, RequestID: created.Request.ID, ExpectedRevision: accepted.Request.Revision,
 				ExpectedChildRevision: child.Revision, Principal: create.Recipient,
-				Actor:              CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+				Actor:              models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 				Summary:            "Delivered the launch brief with audience-specific messaging.",
 				AcceptanceEvidence: map[string]interface{}{"format": "markdown", "review": "passed"},
-				Artifacts: []ArtifactReference{{
+				Artifacts: []models.ArtifactReference{{
 					ID: "artifact-launch-brief", Version: 1, RequirementName: "launch-brief",
 				}},
 				CompletionKey: "complete-launch-brief-v1",
@@ -600,7 +603,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if completed.Request.Status != AgentRequestStatusCompleted || completed.Request.CompletedAt == nil || completed.Source.Status != AgentRunStatusQueued || completed.Child.Status != AgentRunStatusCompleted {
+			if completed.Request.Status != models.AgentRequestStatusCompleted || completed.Request.CompletedAt == nil || completed.Source.Status != models.AgentRunStatusQueued || completed.Child.Status != models.AgentRunStatusCompleted {
 				t.Fatalf("completed request = %#v", completed)
 			}
 			if len(completed.Request.Artifacts) != 1 || completed.Request.Artifacts[0].ContentRef != "artifact-store:launch-brief-v1" || completed.Source.WakeCondition != nil {
@@ -612,10 +615,10 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			}
 			conflictingCompletion := completion
 			conflictingCompletion.Summary = "A different result under the same key"
-			if _, err := service.CompleteAgentRequest(ctx, conflictingCompletion); !errors.Is(err, ErrAgentRequestIdempotency) {
+			if _, err := service.CompleteAgentRequest(ctx, conflictingCompletion); !errors.Is(err, models.ErrAgentRequestIdempotency) {
 				t.Fatalf("conflicting completion error = %v", err)
 			}
-			activity, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, TeamID: "product", Descending: true, Limit: 20})
+			activity, err := store.ListActivity(ctx, models.ActivityFilter{Scope: scope, TeamID: "product", Descending: true, Limit: 20})
 			if err != nil || len(activity) != 7 || activity[0].EventType != "collaboration.completed" {
 				t.Fatalf("team activity = %#v, %v", activity, err)
 			}
@@ -627,11 +630,11 @@ func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 	t.Parallel()
 	store := newTestKernelStore(t)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	portfolio := NewPortfolioService(store)
-	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
-		Goal: "Ship feature", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	portfolio := portfolio.NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "Ship feature", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -641,34 +644,34 @@ func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 		kernelteam.RosterAssignment{ID: "marketer", AgentDeploymentID: "marketing-agent"},
 		kernelteam.RosterAssignment{ID: "marketer-two", AgentDeploymentID: "marketing-agent-two"})
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindHandoff, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"}, Goal: "Own launch and lead follow-up",
+		Scope: scope, Kind: models.AgentRequestKindHandoff, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "gtm"}, Goal: "Own launch and lead follow-up",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: 1,
-		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"},
+		Decision: AgentRequestDecisionAccept, Principal: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "gtm"},
 	}); err == nil || !strings.Contains(err.Error(), "explicit assigned Agent") {
 		t.Fatalf("missing Team assignment error = %v", err)
 	}
 	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: 1,
-		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"}, AssignedAgentID: "marketing-agent",
+		Decision: AgentRequestDecisionAccept, Principal: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "gtm"}, AssignedAgentID: "marketing-agent",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.Request.AssignedAgentID != "marketing-agent" || accepted.Child.Owner != (ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}) || accepted.Child.AssignedAgentID != "marketing-agent" || accepted.Child.Source != RunSourceHandoff {
+	if accepted.Request.AssignedAgentID != "marketing-agent" || accepted.Child.Owner != (models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "gtm"}) || accepted.Child.AssignedAgentID != "marketing-agent" || accepted.Child.Source != models.RunSourceHandoff {
 		t.Fatalf("handoff child = %#v", accepted.Child)
 	}
 	persistedSource, err := portfolio.GetAgentRun(ctx, scope, source.ID)
-	if err != nil || persistedSource.Status != AgentRunStatusCompleted || persistedSource.CompletedAt == nil {
+	if err != nil || persistedSource.Status != models.AgentRunStatusCompleted || persistedSource.CompletedAt == nil {
 		t.Fatalf("handoff source = %#v, %v", persistedSource, err)
 	}
-	activity, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, TeamID: "gtm", Descending: true, Limit: 10})
+	activity, err := store.ListActivity(ctx, models.ActivityFilter{Scope: scope, TeamID: "gtm", Descending: true, Limit: 10})
 	if err != nil || len(activity) != 3 {
 		t.Fatalf("handoff team activity = %#v, %v", activity, err)
 	}
@@ -682,10 +685,10 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := Scope{Kind: "tenant", ID: "team-offers"}
-	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coordinator"}, AssignedAgentID: "coordinator",
-		Goal: "Coordinate release analysis", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "team-offers"}
+	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "coordinator"}, AssignedAgentID: "coordinator",
+		Goal: "Coordinate release analysis", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -697,9 +700,9 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 	service := NewCollaborationService(store)
 	service.teams = teamStore
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "coordinator"},
-		Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "reviewers"},
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "coordinator"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "reviewers"},
 		Goal:      "Review release evidence", IdempotencyKey: "release-review",
 	})
 	if err != nil {
@@ -710,21 +713,21 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 	}
 	bid, err := service.SubmitAgentRequestBid(ctx, SubmitAgentRequestBidRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: 1, AgentDeploymentID: "z-agent",
-		Decision: AgentRequestBidAccept, Reason: "available", IdempotencyKey: "z-accept",
+		Decision: models.AgentRequestBidAccept, Reason: "available", IdempotencyKey: "z-accept",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	replayed, err := service.SubmitAgentRequestBid(ctx, SubmitAgentRequestBidRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: bid.Request.Revision, AgentDeploymentID: "z-agent",
-		Decision: AgentRequestBidAccept, Reason: "available", IdempotencyKey: "z-accept",
+		Decision: models.AgentRequestBidAccept, Reason: "available", IdempotencyKey: "z-accept",
 	})
 	if err != nil || replayed.Request.Revision != bid.Request.Revision {
 		t.Fatalf("idempotent bid = %#v, %v", replayed, err)
 	}
 	bid, err = service.SubmitAgentRequestBid(ctx, SubmitAgentRequestBidRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: bid.Request.Revision, AgentDeploymentID: "a-agent",
-		Decision: AgentRequestBidAccept, Reason: "available", IdempotencyKey: "a-accept",
+		Decision: models.AgentRequestBidAccept, Reason: "available", IdempotencyKey: "a-accept",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -741,7 +744,7 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 	restartedService.teams = teamStore
 	accepted, err := restartedService.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: bid.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "reviewers"},
+		Decision: AgentRequestDecisionAccept, Principal: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "reviewers"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -755,7 +758,7 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 func TestTeamWorkOfferFiltersMemberSkillsAndRecordsCapacity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "team-authority"}
+	scope := models.Scope{Kind: "tenant", ID: "team-authority"}
 	kernel := newTestKernelStore(t)
 	store := &collaborationAgentCatalogStore{
 		Store: kernel,
@@ -769,18 +772,18 @@ func TestTeamWorkOfferFiltersMemberSkillsAndRecordsCapacity(t *testing.T) {
 			"writer@1":  {ID: "writer", Version: "1", Authority: kernelagent.AuthorityPolicy{AllowedSkillIDs: []string{"writing"}}},
 		},
 	}
-	portfolio := NewPortfolioService(store)
-	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead",
-		Goal: "Coordinate analysis", Source: RunSourceManual,
+	portfolio := portfolio.NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead",
+		Goal: "Coordinate analysis", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for index, agentID := range []string{"eligible", "busy"} {
-		if _, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: agentID}, AssignedAgentID: agentID,
-			Goal: fmt.Sprintf("existing work %d", index), Source: RunSourceManual,
+		if _, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+			Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: agentID}, AssignedAgentID: agentID,
+			Goal: fmt.Sprintf("existing work %d", index), Source: models.RunSourceManual,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -798,8 +801,8 @@ func TestTeamWorkOfferFiltersMemberSkillsAndRecordsCapacity(t *testing.T) {
 		definition: &kernelteam.Definition{ID: "analysis", Version: "1"},
 	}
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"}, Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "analysis"},
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "lead"}, Recipient: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "analysis"},
 		Goal: "Analyze evidence",
 	})
 	if err != nil {
@@ -811,16 +814,16 @@ func TestTeamWorkOfferFiltersMemberSkillsAndRecordsCapacity(t *testing.T) {
 		t.Fatalf("authority and capacity candidates = %#v", created.Request.Candidates)
 	}
 	// A semantic role names one member by its roster id.
-	second, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead",
-		Goal: "Coordinate more analysis", Source: RunSourceManual,
+	second, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead",
+		Goal: "Coordinate more analysis", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	single, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: second.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"}, Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "analysis"},
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: second.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "lead"}, Recipient: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "analysis"},
 		SemanticRole: "eligible", Goal: "Analyze more evidence",
 	})
 	if err != nil || len(single.Request.Candidates) != 1 || single.Request.Candidates[0].RosterAssignmentID != "eligible" {
@@ -836,17 +839,17 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
 		name string
-		run  *AgentRun
+		run  *models.AgentRun
 		want bool
 	}{
-		{name: "queued", run: &AgentRun{Status: AgentRunStatusQueued}, want: true},
-		{name: "planning", run: &AgentRun{Status: AgentRunStatusPlanning}, want: true},
-		{name: "running", run: &AgentRun{Status: AgentRunStatusRunning}, want: true},
-		{name: "already waiting", run: &AgentRun{Status: AgentRunStatusRunning, WakeCondition: &WakeCondition{Type: "event"}}},
-		{name: "paused", run: &AgentRun{Status: AgentRunStatusPaused}},
-		{name: "completed", run: &AgentRun{Status: AgentRunStatusCompleted}},
-		{name: "failed", run: &AgentRun{Status: AgentRunStatusFailed}},
-		{name: "canceled", run: &AgentRun{Status: AgentRunStatusCanceled}},
+		{name: "queued", run: &models.AgentRun{Status: models.AgentRunStatusQueued}, want: true},
+		{name: "planning", run: &models.AgentRun{Status: models.AgentRunStatusPlanning}, want: true},
+		{name: "running", run: &models.AgentRun{Status: models.AgentRunStatusRunning}, want: true},
+		{name: "already waiting", run: &models.AgentRun{Status: models.AgentRunStatusRunning, WakeCondition: &models.WakeCondition{Type: "event"}}},
+		{name: "paused", run: &models.AgentRun{Status: models.AgentRunStatusPaused}},
+		{name: "completed", run: &models.AgentRun{Status: models.AgentRunStatusCompleted}},
+		{name: "failed", run: &models.AgentRun{Status: models.AgentRunStatusFailed}},
+		{name: "canceled", run: &models.AgentRun{Status: models.AgentRunStatusCanceled}},
 		{name: "missing run"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -857,47 +860,47 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 	}
 
 	store := newTestKernelStore(t)
-	portfolio := NewPortfolioService(store)
-	activity := NewRunActivityService(store, store)
+	portfolio := portfolio.NewPortfolioService(store)
+	activity := runtimeactivity.NewRunActivityService(store, store)
 	service := NewCollaborationService(store)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}
-	recipient := CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}
+	recipient := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"}
 
-	terminal, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Already shipped", Source: RunSourceManual,
+	terminal, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Already shipped", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal, _, err = activity.TransitionRun(ctx, scope, terminal.ID, RunTransitionRequest{ExpectedRevision: terminal.Revision, Status: AgentRunStatusRunning})
+	terminal, _, err = activity.TransitionRun(ctx, scope, terminal.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: terminal.Revision, Status: models.AgentRunStatusRunning})
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal, _, err = activity.TransitionRun(ctx, scope, terminal.ID, RunTransitionRequest{ExpectedRevision: terminal.Revision, Status: AgentRunStatusCompleted})
+	terminal, _, err = activity.TransitionRun(ctx, scope, terminal.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: terminal.Revision, Status: models.AgentRunStatusCompleted})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []AgentRequestKind{AgentRequestKindRequest, AgentRequestKindHandoff, AgentRequestKindEscalation} {
+	for _, kind := range []models.AgentRequestKind{models.AgentRequestKindRequest, models.AgentRequestKindHandoff, models.AgentRequestKindEscalation} {
 		_, createErr := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 			Scope: scope, Kind: kind, SourceRunID: terminal.ID,
-			Requester: CollaborationParty(owner), Recipient: recipient, Goal: "Start follow-up",
+			Requester: models.CollaborationParty(owner), Recipient: recipient, Goal: "Start follow-up",
 		})
-		if !errors.Is(createErr, ErrInvalidAgentRequestState) || !strings.Contains(createErr.Error(), "completed") {
+		if !errors.Is(createErr, models.ErrInvalidAgentRequestState) || !strings.Contains(createErr.Error(), "completed") {
 			t.Fatalf("create %s from terminal source error = %v", kind, createErr)
 		}
 	}
 
-	active, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Ship next release", Source: RunSourceManual,
+	active, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Ship next release", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: active.ID,
-		Requester: CollaborationParty(owner), Recipient: recipient, Goal: "Prepare the release brief",
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: active.ID,
+		Requester: models.CollaborationParty(owner), Recipient: recipient, Goal: "Prepare the release brief",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -906,11 +909,11 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	active, _, err = activity.TransitionRun(ctx, scope, active.ID, RunTransitionRequest{ExpectedRevision: active.Revision, Status: AgentRunStatusRunning})
+	active, _, err = activity.TransitionRun(ctx, scope, active.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: active.Revision, Status: models.AgentRunStatusRunning})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = activity.TransitionRun(ctx, scope, active.ID, RunTransitionRequest{ExpectedRevision: active.Revision, Status: AgentRunStatusCompleted})
+	_, _, err = activity.TransitionRun(ctx, scope, active.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: active.Revision, Status: models.AgentRunStatusCompleted})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -918,11 +921,11 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
 		Decision: AgentRequestDecisionAccept, Principal: recipient,
 	})
-	if !errors.Is(err, ErrInvalidAgentRequestState) || !strings.Contains(err.Error(), "completed") {
+	if !errors.Is(err, models.ErrInvalidAgentRequestState) || !strings.Contains(err.Error(), "completed") {
 		t.Fatalf("accept after source completion error = %v", err)
 	}
 	restored, err := service.GetAgentRequest(ctx, scope, created.Request.ID)
-	if err != nil || restored.Status != AgentRequestStatusPending || restored.ChildRunID != "" {
+	if err != nil || restored.Status != models.AgentRequestStatusPending || restored.ChildRunID != "" {
 		t.Fatalf("request mutated after rejected acceptance: %#v, %v", restored, err)
 	}
 }
@@ -931,33 +934,33 @@ func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *test
 	t.Parallel()
 	store := newTestKernelStore(t)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	portfolio := NewPortfolioService(store)
-	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
-		Goal: "work", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	portfolio := portfolio.NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "work", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	service := NewCollaborationService(store)
 	base := CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, Goal: "draft launch",
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"}, Goal: "draft launch",
 	}
 	unsafe := base
 	unsafe.SharedContext = map[string]interface{}{"nested": map[string]interface{}{"api_token": "secret"}}
-	if _, err := service.CreateAgentRequest(ctx, unsafe); !errors.Is(err, ErrUnsafeSharedContext) {
+	if _, err := service.CreateAgentRequest(ctx, unsafe); !errors.Is(err, models.ErrUnsafeSharedContext) {
 		t.Fatalf("unsafe context error = %v", err)
 	}
 	unsafeCheckpoint := base
 	unsafeCheckpoint.ChildCheckpoint = map[string]interface{}{"nested": map[string]interface{}{"accessToken": "secret"}}
-	if _, err := service.CreateAgentRequest(ctx, unsafeCheckpoint); !errors.Is(err, ErrUnsafeSharedContext) {
+	if _, err := service.CreateAgentRequest(ctx, unsafeCheckpoint); !errors.Is(err, models.ErrUnsafeSharedContext) {
 		t.Fatalf("unsafe child checkpoint error = %v", err)
 	}
 	unauthorized := base
-	unauthorized.Requester = CollaborationParty{Type: OwnerTypeAgent, ID: "intruder"}
+	unauthorized.Requester = models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "intruder"}
 	if _, err := service.CreateAgentRequest(ctx, unauthorized); !errors.Is(err, ErrAgentRequestUnauthorized) {
 		t.Fatalf("unauthorized requester error = %v", err)
 	}
@@ -967,11 +970,11 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	t.Parallel()
 	store := newTestKernelStore(t)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	portfolio := NewPortfolioService(store)
-	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}, AssignedAgentID: "developer",
-		Goal: "Launch", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	portfolio := portfolio.NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "gtm"}, AssignedAgentID: "developer",
+		Goal: "Launch", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -979,11 +982,11 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	service := NewCollaborationService(store)
 	service.teams = activeCollaborationTeam(scope, "marketing", kernelteam.RosterAssignment{ID: "editor", AgentDeploymentID: "marketing-editor"})
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"},
-		Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "marketing"}, Goal: "Publish launch brief",
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "gtm"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "marketing"}, Goal: "Publish launch brief",
 		AcceptanceCriteria: map[string]interface{}{"reviewed": true},
-		ArtifactRequirements: []ArtifactRequirement{{
+		ArtifactRequirements: []models.ArtifactRequirement{{
 			Name: "brief", Type: "document", Required: true,
 			Schema: map[string]interface{}{"type": "object", "required": []interface{}{"reviewed"}, "properties": map[string]interface{}{"reviewed": map[string]interface{}{"const": true}}},
 		}},
@@ -993,7 +996,7 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	}
 	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: 1, Decision: AgentRequestDecisionAccept,
-		Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "marketing"},
+		Principal: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "marketing"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1001,18 +1004,18 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	if accepted.Request.AssignedAgentID != "marketing-editor" || accepted.Child.AssignedAgentID != "marketing-editor" {
 		t.Fatalf("automatic unique-role assignment = %#v", accepted)
 	}
-	for _, artifact := range []*Artifact{
+	for _, artifact := range []*models.Artifact{
 		{
 			ID: "brief-1", Version: 1, Scope: scope, Name: "brief.md", Type: "document",
-			ContentRef: "artifact-store:brief-1", Digest: digestFor("brief-1"), Classification: ArtifactClassificationInternal,
+			ContentRef: "artifact-store:brief-1", Digest: digestFor("brief-1"), Classification: models.ArtifactClassificationInternal,
 			Metadata:   map[string]interface{}{"reviewed": true},
-			Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "marketing-editor"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
+			Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "marketing-editor"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
 		},
 		{
 			ID: "brief-bad-schema", Version: 1, Scope: scope, Name: "brief.md", Type: "document",
-			ContentRef: "artifact-store:brief-bad-schema", Digest: digestFor("brief-bad-schema"), Classification: ArtifactClassificationInternal,
+			ContentRef: "artifact-store:brief-bad-schema", Digest: digestFor("brief-bad-schema"), Classification: models.ArtifactClassificationInternal,
 			Metadata:   map[string]interface{}{"reviewed": false},
-			Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "marketing-editor"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
+			Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "marketing-editor"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
 		},
 	} {
 		if _, err := artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); err != nil {
@@ -1021,15 +1024,15 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	}
 	base := CompleteAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: accepted.Request.Revision,
-		ExpectedChildRevision: accepted.Child.Revision, Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "marketing"},
-		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing-editor"}, Summary: "Brief ready",
+		ExpectedChildRevision: accepted.Child.Revision, Principal: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "marketing"},
+		Actor: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing-editor"}, Summary: "Brief ready",
 		AcceptanceEvidence: map[string]interface{}{"reviewed": true}, CompletionKey: "brief-v1",
-		Artifacts: []ArtifactReference{{
+		Artifacts: []models.ArtifactReference{{
 			ID: "brief-1", Version: 1, RequirementName: "brief",
 		}},
 	}
 	unauthorized := base
-	unauthorized.Principal = CollaborationParty{Type: OwnerTypeAgent, ID: "marketing-editor"}
+	unauthorized.Principal = models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing-editor"}
 	if _, err := service.CompleteAgentRequest(ctx, unauthorized); !errors.Is(err, ErrAgentRequestUnauthorized) {
 		t.Fatalf("unauthorized completion error = %v", err)
 	}
@@ -1039,30 +1042,30 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 		t.Fatalf("missing evidence error = %v", err)
 	}
 	unsafeURL := base
-	unsafeURL.Artifacts = cloneArtifactReferences(base.Artifacts)
+	unsafeURL.Artifacts = models.CloneArtifactReferences(base.Artifacts)
 	unsafeURL.Artifacts[0].ContentRef = "https://store.test/brief?token=secret"
 	if _, err := service.CompleteAgentRequest(ctx, unsafeURL); err == nil || !strings.Contains(err.Error(), "only id, version") {
 		t.Fatalf("unsafe artifact reference error = %v", err)
 	}
 	badSchema := base
-	badSchema.Artifacts = cloneArtifactReferences(base.Artifacts)
+	badSchema.Artifacts = models.CloneArtifactReferences(base.Artifacts)
 	badSchema.Artifacts[0].ID = "brief-bad-schema"
 	if _, err := service.CompleteAgentRequest(ctx, badSchema); err == nil || !strings.Contains(err.Error(), "JSON schema") {
 		t.Fatalf("artifact schema error = %v", err)
 	}
 	tamperedMetadata := base
-	tamperedMetadata.Artifacts = cloneArtifactReferences(base.Artifacts)
+	tamperedMetadata.Artifacts = models.CloneArtifactReferences(base.Artifacts)
 	tamperedMetadata.Artifacts[0].Metadata = map[string]interface{}{"reviewed": true}
 	if _, err := service.CompleteAgentRequest(ctx, tamperedMetadata); err == nil || !strings.Contains(err.Error(), "only id, version") {
 		t.Fatalf("tampered artifact metadata error = %v", err)
 	}
 	unregistered := base
-	unregistered.Artifacts = []ArtifactReference{{ID: "missing", Version: 1, RequirementName: "brief"}}
+	unregistered.Artifacts = []models.ArtifactReference{{ID: "missing", Version: 1, RequirementName: "brief"}}
 	if _, err := service.CompleteAgentRequest(ctx, unregistered); !errors.Is(err, artifactcatalog.ErrArtifactNotFound) {
 		t.Fatalf("unregistered artifact error = %v", err)
 	}
 	completed, err := service.CompleteAgentRequest(ctx, base)
-	if err != nil || completed.Request.Status != AgentRequestStatusCompleted || completed.Request.Artifacts[0].ID != "brief-1" {
+	if err != nil || completed.Request.Status != models.AgentRequestStatusCompleted || completed.Request.Artifacts[0].ID != "brief-1" {
 		t.Fatalf("valid Team completion = %#v, %v", completed, err)
 	}
 }
@@ -1075,19 +1078,19 @@ func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	portfolio := NewPortfolioService(store)
-	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
-		Goal: "work", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	portfolio := portfolio.NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "work", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	created, err := NewCollaborationService(store).CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "analyst"}, Goal: "measure launch impact",
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "analyst"}, Goal: "measure launch impact",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1109,42 +1112,42 @@ func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := t.Context()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	portfolio := NewPortfolioService(store)
-	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
-		Goal: "Build the feature", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	portfolio := portfolio.NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "Build the feature", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	service := NewCollaborationService(store)
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindHandoff, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, Goal: "Publish the launch",
+		Scope: scope, Kind: models.AgentRequestKindHandoff, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"}, Goal: "Publish the launch",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Decision: AgentRequestDecisionAccept, Principal: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	activity := NewRunActivityService(store, store)
-	running, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, RunTransitionRequest{
-		ExpectedRevision: accepted.Child.Revision, Status: AgentRunStatusRunning,
-		Summary: "Delegated run started", Actor: ActivityActor{Type: "worker", ID: "worker-1"},
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: accepted.Child.Revision, Status: models.AgentRunStatusRunning,
+		Summary: "Delegated run started", Actor: models.ActivityActor{Type: "worker", ID: "worker-1"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, RunTransitionRequest{
-		ExpectedRevision: running.Revision, Status: AgentRunStatusFailed, Error: "provider exhausted retries",
-		Summary: "Delegated run failed", Actor: ActivityActor{Type: "worker", ID: "worker-1"},
+	failed, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: models.AgentRunStatusFailed, Error: "provider exhausted retries",
+		Summary: "Delegated run failed", Actor: models.ActivityActor{Type: "worker", ID: "worker-1"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1153,7 +1156,7 @@ func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.Request.Status != AgentRequestStatusFailed || resolved.Request.ResolutionReason != "provider exhausted retries" {
+	if resolved.Request.Status != models.AgentRequestStatusFailed || resolved.Request.ResolutionReason != "provider exhausted retries" {
 		t.Fatalf("resolved request = %#v", resolved.Request)
 	}
 	refreshedSource, err := portfolio.GetAgentRun(ctx, scope, source.ID)
@@ -1162,7 +1165,7 @@ func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
 	}
 	results, _ := refreshedSource.Output["collaborationResults"].(map[string]interface{})
 	result, _ := results[created.Request.ID].(map[string]interface{})
-	if refreshedSource.Status != AgentRunStatusCompleted || result["status"] != string(AgentRequestStatusFailed) ||
+	if refreshedSource.Status != models.AgentRunStatusCompleted || result["status"] != string(models.AgentRequestStatusFailed) ||
 		result["reason"] != "provider exhausted retries" {
 		t.Fatalf("source=%#v result=%#v", refreshedSource, result)
 	}
@@ -1171,52 +1174,52 @@ func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
 func TestTerminalChildCompletesArtifactBearingRequestFromRegisteredOutput(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := t.Context()
-	scope := Scope{Kind: "tenant", ID: "artifact-delegation"}
-	portfolio := NewPortfolioService(store)
-	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
-		Goal: "Ship the release", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "artifact-delegation"}
+	portfolio := portfolio.NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "Ship the release", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	service := NewCollaborationService(store)
 	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, Goal: "Create the launch report",
-		ArtifactRequirements: []ArtifactRequirement{{Name: "launch-report", Type: "report", Required: true}},
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"}, Goal: "Create the launch report",
+		ArtifactRequirements: []models.ArtifactRequirement{{Name: "launch-report", Type: "report", Required: true}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Decision: AgentRequestDecisionAccept, Principal: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &Artifact{
+	_, err = artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
 		ID: "launch-report", Version: 1, Scope: scope, Name: "launch-report.pdf", Type: "report", MediaType: "application/pdf",
 		ContentRef: "artifact-store:launch-report", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		SizeBytes: 4096, Classification: ArtifactClassificationInternal,
-		Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "marketing"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
+		SizeBytes: 4096, Classification: models.ArtifactClassificationInternal,
+		Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "marketing"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	activity := NewRunActivityService(store, store)
-	running, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, RunTransitionRequest{
-		ExpectedRevision: accepted.Child.Revision, Status: AgentRunStatusRunning,
-		Summary: "Creating report", Actor: ActivityActor{Type: "worker", ID: "worker-1"},
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: accepted.Child.Revision, Status: models.AgentRunStatusRunning,
+		Summary: "Creating report", Actor: models.ActivityActor{Type: "worker", ID: "worker-1"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	completedChild, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, RunTransitionRequest{
-		ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted,
-		Summary: "Report created", Actor: ActivityActor{Type: "worker", ID: "worker-1"},
+	completedChild, _, err := activity.TransitionRun(ctx, scope, accepted.Child.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: models.AgentRunStatusCompleted,
+		Summary: "Report created", Actor: models.ActivityActor{Type: "worker", ID: "worker-1"},
 		Output: map[string]interface{}{
 			"summary":      "Delivered the launch report.",
 			"artifactRefs": []interface{}{map[string]interface{}{"id": "launch-report", "version": 1, "requirementName": "launch-report"}},
@@ -1229,9 +1232,9 @@ func TestTerminalChildCompletesArtifactBearingRequestFromRegisteredOutput(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.Request.Status != AgentRequestStatusCompleted || len(resolved.Request.Artifacts) != 1 ||
+	if resolved.Request.Status != models.AgentRequestStatusCompleted || len(resolved.Request.Artifacts) != 1 ||
 		resolved.Request.Artifacts[0].ID != "launch-report" || resolved.Request.Artifacts[0].ContentRef != "artifact-store:launch-report" ||
-		resolved.Source.Status != AgentRunStatusQueued {
+		resolved.Source.Status != models.AgentRunStatusQueued {
 		t.Fatalf("artifact-bearing resolution = %#v", resolved)
 	}
 }

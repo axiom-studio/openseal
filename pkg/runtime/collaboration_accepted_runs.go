@@ -1,12 +1,14 @@
 package runtime
 
-func (s *CollaborationService) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
+import "github.com/axiom-studio/openseal/pkg/models"
+
+func (s *CollaborationService) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
 	if s != nil {
 		s.executionPreparer = preparer
 	}
 }
 
-func (r *AgentRequestInboxReconciler) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
+func (r *AgentRequestInboxReconciler) SetAcceptedRunExecutionPreparer(preparer models.AcceptedRunExecutionPreparer) {
 	if r != nil {
 		r.collaboration.SetAcceptedRunExecutionPreparer(preparer)
 	}

@@ -10,14 +10,16 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 type handoffCommandTestStore interface {
-	KernelStore
-	CollaborationKernelStore
+	models.KernelStore
+	models.CollaborationKernelStore
 }
 
 func forHandoffCommandStores(t *testing.T, test func(*testing.T, handoffCommandTestStore)) {
@@ -39,9 +41,9 @@ func forHandoffCommandStores(t *testing.T, test func(*testing.T, handoffCommandT
 type handoffCommandFixture struct {
 	t             *testing.T
 	store         handoffCommandTestStore
-	scope         Scope
+	scope         models.Scope
 	now           time.Time
-	portfolio     *PortfolioService
+	portfolio     *portfolio.PortfolioService
 	collaboration *CollaborationService
 	commands      *agentrun.RunCommandService
 	sourceID      string
@@ -49,22 +51,22 @@ type handoffCommandFixture struct {
 	requestID     string
 }
 
-func newHandoffCommandFixture(t *testing.T, store handoffCommandTestStore, kind AgentRequestKind, teamOwned, review bool) *handoffCommandFixture {
+func newHandoffCommandFixture(t *testing.T, store handoffCommandTestStore, kind models.AgentRequestKind, teamOwned, review bool) *handoffCommandFixture {
 	t.Helper()
 	return newHandoffCommandFixtureWithParent(t, store, kind, teamOwned, review, "", true)
 }
 
-func newHandoffCommandFixtureWithParent(t *testing.T, store handoffCommandTestStore, kind AgentRequestKind, teamOwned, review bool, parentID string, accept bool) *handoffCommandFixture {
+func newHandoffCommandFixtureWithParent(t *testing.T, store handoffCommandTestStore, kind models.AgentRequestKind, teamOwned, review bool, parentID string, accept bool) *handoffCommandFixture {
 	t.Helper()
 	f := &handoffCommandFixture{
-		t: t, store: store, scope: Scope{Kind: "tenant", ID: "handoff-ownership"},
+		t: t, store: store, scope: models.Scope{Kind: "tenant", ID: "handoff-ownership"},
 		now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
 	}
 	clock := models.WithClock(func() time.Time { return f.now })
-	f.portfolio, f.collaboration, f.commands = NewPortfolioService(store, clock), NewCollaborationService(store, clock), agentrun.NewRunCommandService(store, clock)
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}
+	f.portfolio, f.collaboration, f.commands = portfolio.NewPortfolioService(store, clock), NewCollaborationService(store, clock), agentrun.NewRunCommandService(store, clock)
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}
 	if teamOwned {
-		owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}
+		owner = models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}
 		f.collaboration.teams = collaborationTeamStoreStub{
 			deployment: &kernelteam.Deployment{
 				ID: owner.ID, Scope: capability.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID},
@@ -76,8 +78,8 @@ func newHandoffCommandFixtureWithParent(t *testing.T, store handoffCommandTestSt
 			}},
 		}
 	}
-	source, err := f.portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: f.scope, ParentRunID: parentID, Owner: owner, AssignedAgentID: "developer", Goal: "Build the feature", Source: RunSourceManual,
+	source, err := f.portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: f.scope, ParentRunID: parentID, Owner: owner, AssignedAgentID: "developer", Goal: "Build the feature", Source: models.RunSourceManual,
 		Checkpoint: map[string]interface{}{"sourceProgress": "implementation done"},
 	})
 	if err != nil {
@@ -86,8 +88,8 @@ func newHandoffCommandFixtureWithParent(t *testing.T, store handoffCommandTestSt
 	f.sourceID = source.ID
 	created, err := f.collaboration.CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
 		Scope: f.scope, Kind: kind, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 		Goal:      "Prepare the launch follow-up", IdempotencyKey: "launch-handoff",
 		AcceptanceCriteria: map[string]interface{}{"required": "one follow-up"},
 		ChildCheckpoint:    map[string]interface{}{"recipientProgress": "accepted"},
@@ -110,7 +112,7 @@ func newHandoffCommandFixtureWithParent(t *testing.T, store handoffCommandTestSt
 	return f
 }
 
-func (f *handoffCommandFixture) run(id string) *AgentRun {
+func (f *handoffCommandFixture) run(id string) *models.AgentRun {
 	f.t.Helper()
 	run, err := f.store.GetAgentRun(f.t.Context(), f.scope, id)
 	if err != nil || run == nil {
@@ -119,7 +121,7 @@ func (f *handoffCommandFixture) run(id string) *AgentRun {
 	return run
 }
 
-func (f *handoffCommandFixture) request() *AgentRequest {
+func (f *handoffCommandFixture) request() *models.AgentRequest {
 	f.t.Helper()
 	request, err := f.store.GetAgentRequest(f.t.Context(), f.scope, f.requestID)
 	if err != nil || request == nil {
@@ -128,11 +130,11 @@ func (f *handoffCommandFixture) request() *AgentRequest {
 	return request
 }
 
-func (f *handoffCommandFixture) childOf(parentID, agentID string) *AgentRun {
+func (f *handoffCommandFixture) childOf(parentID, agentID string) *models.AgentRun {
 	f.t.Helper()
-	run, err := f.portfolio.CreateAgentRun(f.t.Context(), CreateAgentRunRequest{
-		Scope: f.scope, ParentRunID: parentID, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: agentID},
-		AssignedAgentID: agentID, Goal: "Owned follow-up", Source: RunSourceManual,
+	run, err := f.portfolio.CreateAgentRun(f.t.Context(), models.CreateAgentRunRequest{
+		Scope: f.scope, ParentRunID: parentID, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: agentID},
+		AssignedAgentID: agentID, Goal: "Owned follow-up", Source: models.RunSourceManual,
 		Checkpoint: map[string]interface{}{"ownedProgress": "not started"},
 	})
 	if err != nil {
@@ -141,13 +143,13 @@ func (f *handoffCommandFixture) childOf(parentID, agentID string) *AgentRun {
 	return f.run(run.ID)
 }
 
-func (f *handoffCommandFixture) transition(id string, status AgentRunStatus, output map[string]interface{}) *AgentRun {
+func (f *handoffCommandFixture) transition(id string, status models.AgentRunStatus, output map[string]interface{}) *models.AgentRun {
 	f.t.Helper()
 	run := f.run(id)
-	activity := NewRunActivityService(f.store, f.store, models.WithClock(func() time.Time { return f.now }))
-	updated, _, err := activity.TransitionRun(f.t.Context(), f.scope, id, RunTransitionRequest{
+	activity := runtimeactivity.NewRunActivityService(f.store, f.store, models.WithClock(func() time.Time { return f.now }))
+	updated, _, err := activity.TransitionRun(f.t.Context(), f.scope, id, runtimeactivity.RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: status, Output: output, LeaseOwner: run.LeaseOwner,
-		Actor: ActivityActor{Type: "test", ID: "handoff-worker"}, Summary: "Advance fixture run",
+		Actor: models.ActivityActor{Type: "test", ID: "handoff-worker"}, Summary: "Advance fixture run",
 	})
 	if err != nil {
 		f.t.Fatal(err)
@@ -155,19 +157,19 @@ func (f *handoffCommandFixture) transition(id string, status AgentRunStatus, out
 	return updated
 }
 
-func (f *handoffCommandFixture) claimChild() *AgentRun {
+func (f *handoffCommandFixture) claimChild() *models.AgentRun {
 	f.t.Helper()
-	run, err := f.store.ClaimNextAgentRun(f.t.Context(), AgentRunClaim{
+	run, err := f.store.ClaimNextAgentRun(f.t.Context(), models.AgentRunClaim{
 		Scope: f.scope, WorkerID: "marketing-worker", AssignedAgentID: "marketing", Now: f.now,
 		LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
-	if err != nil || run == nil || run.ID != f.childID || run.Status != AgentRunStatusRunning {
+	if err != nil || run == nil || run.ID != f.childID || run.Status != models.AgentRunStatusRunning {
 		f.t.Fatalf("claim transferred child: %#v, %v", run, err)
 	}
 	return f.run(run.ID)
 }
 
-func (f *handoffCommandFixture) assertUnchanged(before *AgentRun) {
+func (f *handoffCommandFixture) assertUnchanged(before *models.AgentRun) {
 	f.t.Helper()
 	if after := f.run(before.ID); !reflect.DeepEqual(before, after) {
 		f.t.Fatalf("run %s changed during source cleanup:\nbefore=%#v\nafter=%#v", before.ID, before, after)
@@ -177,14 +179,14 @@ func (f *handoffCommandFixture) assertUnchanged(before *AgentRun) {
 func (f *handoffCommandFixture) assertCanceled(id string) {
 	f.t.Helper()
 	run := f.run(id)
-	if run.Status != AgentRunStatusCanceled || run.LeaseOwner != "" || run.LeaseExpiresAt != nil {
+	if run.Status != models.AgentRunStatusCanceled || run.LeaseOwner != "" || run.LeaseExpiresAt != nil {
 		f.t.Fatalf("owned run was not canceled and released: %#v", run)
 	}
 }
 
-func (f *handoffCommandFixture) events(id string) []*ActivityEvent {
+func (f *handoffCommandFixture) events(id string) []*models.ActivityEvent {
 	f.t.Helper()
-	events, err := f.store.ListActivity(f.t.Context(), ActivityFilter{Scope: f.scope, RunID: id, Limit: 100})
+	events, err := f.store.ListActivity(f.t.Context(), models.ActivityFilter{Scope: f.scope, RunID: id, Limit: 100})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -194,20 +196,20 @@ func (f *handoffCommandFixture) events(id string) []*ActivityEvent {
 // These mutations deliberately corrupt one durable authority fact at a time.
 // They use the canonical CAS write contracts, rather than changing the pointer
 // passed to CascadeTerminalRun or bypassing a backend's durable records.
-func (f *handoffCommandFixture) mutateRequest(mutate func(*AgentRequest)) {
+func (f *handoffCommandFixture) mutateRequest(mutate func(*models.AgentRequest)) {
 	f.t.Helper()
 	request := f.request()
 	revision := request.Revision
 	mutate(request)
 	request.Revision++
 	request.UpdatedAt = f.now
-	_, err := f.store.CoordinateAgentRequest(f.t.Context(), AgentRequestCoordinationRecord{
+	_, err := f.store.CoordinateAgentRequest(f.t.Context(), models.AgentRequestCoordinationRecord{
 		Request: request, ExpectedRequestRevision: revision,
-		Event: &ActivityEvent{
+		Event: &models.ActivityEvent{
 			ID: "corrupt-request-proof", Scope: request.Scope, RunID: request.SourceRunID,
-			EventType: "collaboration.test_mutated", Actor: ActivityActor{Type: "test", ID: "fixture"},
-			Summary: "Corrupt one durable handoff proof", Severity: ActivitySeverityInfo,
-			Visibility: ActivityVisibilityScope, CreatedAt: f.now,
+			EventType: "collaboration.test_mutated", Actor: models.ActivityActor{Type: "test", ID: "fixture"},
+			Summary: "Corrupt one durable handoff proof", Severity: models.ActivitySeverityInfo,
+			Visibility: models.ActivityVisibilityScope, CreatedAt: f.now,
 		},
 	})
 	if err != nil {
@@ -215,17 +217,17 @@ func (f *handoffCommandFixture) mutateRequest(mutate func(*AgentRequest)) {
 	}
 }
 
-func (f *handoffCommandFixture) mutateRun(id string, mutate func(*AgentRun)) {
+func (f *handoffCommandFixture) mutateRun(id string, mutate func(*models.AgentRun)) {
 	f.t.Helper()
 	run := f.run(id)
 	revision := run.Revision
 	mutate(run)
 	run.Revision++
 	run.UpdatedAt = f.now
-	_, err := f.store.UpdateAgentRunWithEvent(f.t.Context(), run, revision, &ActivityEvent{
+	_, err := f.store.UpdateAgentRunWithEvent(f.t.Context(), run, revision, &models.ActivityEvent{
 		ID: "corrupt-run-proof", Scope: run.Scope, RunID: run.ID, EventType: "run.test_mutated",
-		Actor: ActivityActor{Type: "test", ID: "fixture"}, Summary: "Corrupt one durable handoff proof",
-		Severity: ActivitySeverityInfo, Visibility: ActivityVisibilityScope, CreatedAt: f.now,
+		Actor: models.ActivityActor{Type: "test", ID: "fixture"}, Summary: "Corrupt one durable handoff proof",
+		Severity: models.ActivitySeverityInfo, Visibility: models.ActivityVisibilityScope, CreatedAt: f.now,
 	}, nil)
 	if err != nil {
 		f.t.Fatal(err)
@@ -240,7 +242,7 @@ func TestRunCommandsHandoffTransfersCancellationOwnershipAndCompletes(t *testing
 		}
 		t.Run(name, func(t *testing.T) {
 			forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-				f := newHandoffCommandFixture(t, store, AgentRequestKindHandoff, false, false)
+				f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
 				if running {
 					f.claimChild()
 				}
@@ -248,8 +250,8 @@ func TestRunCommandsHandoffTransfersCancellationOwnershipAndCompletes(t *testing
 				grandchild := f.childOf(child.ID, "marketing-helper")
 				sibling := f.childOf(source.ID, "developer-helper")
 				requestBefore := f.request()
-				if source.Status != AgentRunStatusCompleted || child.ParentRunID != source.ID ||
-					child.RootRunID != source.RootRunID || child.Owner.ID != "marketing" || child.Source != RunSourceHandoff {
+				if source.Status != models.AgentRunStatusCompleted || child.ParentRunID != source.ID ||
+					child.RootRunID != source.RootRunID || child.Owner.ID != "marketing" || child.Source != models.RunSourceHandoff {
 					t.Fatalf("invalid accepted handoff fixture: source=%#v child=%#v", source, child)
 				}
 				if err := f.commands.CascadeTerminalRun(t.Context(), source); err != nil {
@@ -275,9 +277,9 @@ func TestRunCommandsHandoffTransfersCancellationOwnershipAndCompletes(t *testing
 				if !running {
 					f.claimChild()
 				}
-				f.transition(child.ID, AgentRunStatusCompleted, map[string]interface{}{"followUp": "Publish the launch note"})
+				f.transition(child.ID, models.AgentRunStatusCompleted, map[string]interface{}{"followUp": "Publish the launch note"})
 				resolved, err := f.collaboration.ResolveTerminalAgentRequestChild(t.Context(), f.run(child.ID))
-				if err != nil || resolved == nil || resolved.Request.Status != AgentRequestStatusCompleted {
+				if err != nil || resolved == nil || resolved.Request.Status != models.AgentRequestStatusCompleted {
 					t.Fatalf("artifact-free completion: %#v, %v", resolved, err)
 				}
 				request := f.request()
@@ -285,7 +287,7 @@ func TestRunCommandsHandoffTransfersCancellationOwnershipAndCompletes(t *testing
 					t.Fatalf("handoff completion receipt: %#v", request)
 				}
 				completedSource, completedChild := f.run(source.ID), f.run(child.ID)
-				if completedChild.ParentRunID != source.ID || completedChild.RootRunID != source.RootRunID || completedSource.Status != AgentRunStatusCompleted {
+				if completedChild.ParentRunID != source.ID || completedChild.RootRunID != source.RootRunID || completedSource.Status != models.AgentRunStatusCompleted {
 					t.Fatal("completion lost transferred lineage or revived source")
 				}
 				if err := f.commands.CascadeTerminalRun(t.Context(), completedSource); err != nil {
@@ -301,13 +303,13 @@ func TestRunCommandsHandoffTransfersCancellationOwnershipAndCompletes(t *testing
 
 func TestRunCommandsHandoffDirectCancellationStillOwnsSubtree(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, AgentRequestKindHandoff, false, false)
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
 		child := f.claimChild()
 		grandchild := f.childOf(child.ID, "marketing-helper")
 		source := f.run(f.sourceID)
 		if _, err := f.commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
 			Scope: f.scope, RunID: child.ID, ExpectedRevision: child.Revision, Kind: agentrun.AgentRunCommandCancel,
-			Actor: ActivityActor{Type: "user", ID: "recipient"},
+			Actor: models.ActivityActor{Type: "user", ID: "recipient"},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -329,44 +331,44 @@ func TestRunCommandsHandoffDirectCancellationStillOwnsSubtree(t *testing.T) {
 func TestRunCommandsHandoffRequiresExactDurableTransferProof(t *testing.T) {
 	tests := []struct {
 		name    string
-		request func(*AgentRequest)
-		source  func(*AgentRun)
-		child   func(*AgentRun)
+		request func(*models.AgentRequest)
+		source  func(*models.AgentRun)
+		child   func(*models.AgentRun)
 	}{
-		{name: "requested", request: func(r *AgentRequest) { r.Status = AgentRequestStatusPending }},
-		{name: "rejected", request: func(r *AgentRequest) { r.Status = AgentRequestStatusRejected }},
-		{name: "canceled", request: func(r *AgentRequest) { r.Status = AgentRequestStatusCanceled }},
-		{name: "failed", request: func(r *AgentRequest) { r.Status = AgentRequestStatusFailed }},
-		{name: "unaccepted", request: func(r *AgentRequest) { r.AcceptedAt = nil }},
-		{name: "zero acceptance time", request: func(r *AgentRequest) { r.AcceptedAt = &time.Time{} }},
-		{name: "ordinary request", request: func(r *AgentRequest) { r.Kind = AgentRequestKindRequest }},
-		{name: "wrong source", request: func(r *AgentRequest) { r.SourceRunID = "another-source" }},
-		{name: "wrong child", request: func(r *AgentRequest) { r.ChildRunID = "another-child" }},
-		{name: "wrong requester", request: func(r *AgentRequest) { r.Requester.ID = "another-requester" }},
-		{name: "wrong recipient", request: func(r *AgentRequest) { r.Recipient.ID = "another-recipient" }},
-		{name: "wrong assignment", request: func(r *AgentRequest) { r.AssignedAgentID = "another-agent" }},
-		{name: "no assignment", request: func(r *AgentRequest) { r.AssignedAgentID = "" }},
-		{name: "group owned", request: func(r *AgentRequest) {
+		{name: "requested", request: func(r *models.AgentRequest) { r.Status = models.AgentRequestStatusPending }},
+		{name: "rejected", request: func(r *models.AgentRequest) { r.Status = models.AgentRequestStatusRejected }},
+		{name: "canceled", request: func(r *models.AgentRequest) { r.Status = models.AgentRequestStatusCanceled }},
+		{name: "failed", request: func(r *models.AgentRequest) { r.Status = models.AgentRequestStatusFailed }},
+		{name: "unaccepted", request: func(r *models.AgentRequest) { r.AcceptedAt = nil }},
+		{name: "zero acceptance time", request: func(r *models.AgentRequest) { r.AcceptedAt = &time.Time{} }},
+		{name: "ordinary request", request: func(r *models.AgentRequest) { r.Kind = models.AgentRequestKindRequest }},
+		{name: "wrong source", request: func(r *models.AgentRequest) { r.SourceRunID = "another-source" }},
+		{name: "wrong child", request: func(r *models.AgentRequest) { r.ChildRunID = "another-child" }},
+		{name: "wrong requester", request: func(r *models.AgentRequest) { r.Requester.ID = "another-requester" }},
+		{name: "wrong recipient", request: func(r *models.AgentRequest) { r.Recipient.ID = "another-recipient" }},
+		{name: "wrong assignment", request: func(r *models.AgentRequest) { r.AssignedAgentID = "another-agent" }},
+		{name: "no assignment", request: func(r *models.AgentRequest) { r.AssignedAgentID = "" }},
+		{name: "group owned", request: func(r *models.AgentRequest) {
 			r.DependencyGroupID, r.DependencyID = "owned-group", "owned-edge"
 		}},
-		{name: "review policy", request: func(r *AgentRequest) {
-			r.DelegationPolicy = &AgentRequestDelegationPolicy{
+		{name: "review policy", request: func(r *models.AgentRequest) {
+			r.DelegationPolicy = &models.AgentRequestDelegationPolicy{
 				TeamDeploymentID: "team", TeamDefinitionID: "team", TeamDefinitionVersion: "1",
 				DelegationDepth: 1, RequireCompletionReview: true,
 			}
 		}},
-		{name: "missing request", source: func(r *AgentRun) { r.Output["handoffRequestId"] = "missing-request" }},
-		{name: "wrong output child", source: func(r *AgentRun) { r.Output["childRunId"] = "another-child" }},
-		{name: "non-handoff child", child: func(r *AgentRun) { r.Source = RunSourceRequest }},
-		{name: "wrong child root", child: func(r *AgentRun) { r.RootRunID = "another-root" }},
-		{name: "wrong child owner", child: func(r *AgentRun) { r.Owner.ID = "another-owner" }},
-		{name: "failed source", source: func(r *AgentRun) { r.Status = AgentRunStatusFailed }},
-		{name: "canceled source", source: func(r *AgentRun) { r.Status = AgentRunStatusCanceled }},
+		{name: "missing request", source: func(r *models.AgentRun) { r.Output["handoffRequestId"] = "missing-request" }},
+		{name: "wrong output child", source: func(r *models.AgentRun) { r.Output["childRunId"] = "another-child" }},
+		{name: "non-handoff child", child: func(r *models.AgentRun) { r.Source = models.RunSourceRequest }},
+		{name: "wrong child root", child: func(r *models.AgentRun) { r.RootRunID = "another-root" }},
+		{name: "wrong child owner", child: func(r *models.AgentRun) { r.Owner.ID = "another-owner" }},
+		{name: "failed source", source: func(r *models.AgentRun) { r.Status = models.AgentRunStatusFailed }},
+		{name: "canceled source", source: func(r *models.AgentRun) { r.Status = models.AgentRunStatusCanceled }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-				f := newHandoffCommandFixture(t, store, AgentRequestKindHandoff, false, false)
+				f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
 				grandchild := f.childOf(f.childID, "marketing-helper")
 				if tc.request != nil {
 					f.mutateRequest(tc.request)
@@ -394,19 +396,19 @@ func TestRunCommandsHandoffRequiresExactDurableTransferProof(t *testing.T) {
 
 func TestRunCommandsHandoffIgnoresForgedCallerFacts(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, AgentRequestKindHandoff, false, false)
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
 		child := f.run(f.childID)
 		// A stale caller can omit the receipt or supply another status; neither
 		// changes the authoritative completed source's transferred ownership.
 		forged := f.run(f.sourceID)
-		forged.Status, forged.Output = AgentRunStatusCanceled, nil
+		forged.Status, forged.Output = models.AgentRunStatusCanceled, nil
 		if err := f.commands.CascadeTerminalRun(t.Context(), forged); err != nil {
 			t.Fatal(err)
 		}
 		f.assertUnchanged(child)
 		// Conversely, an invented receipt on the pointer cannot protect work
 		// after the durable source no longer has that proof.
-		f.mutateRun(f.sourceID, func(r *AgentRun) { r.Output = nil })
+		f.mutateRun(f.sourceID, func(r *models.AgentRun) { r.Output = nil })
 		forged = f.run(f.sourceID)
 		forged.Output = map[string]interface{}{"handoffRequestId": f.requestID, "childRunId": f.childID}
 		if err := f.commands.CascadeTerminalRun(t.Context(), forged); err != nil {
@@ -418,21 +420,21 @@ func TestRunCommandsHandoffIgnoresForgedCallerFacts(t *testing.T) {
 
 func TestRunCommandsHandoffCannotForgeTerminalParentOrForeignScope(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, AgentRequestKindHandoff, false, false)
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
 		transferredBefore := f.run(f.childID)
 		live := f.childOf(f.sourceID, "live-owner")
 		owned := f.childOf(live.ID, "owned-agent")
 		before := f.events(owned.ID)
-		forged := cloneAgentRun(live)
-		forged.Status = AgentRunStatusCompleted
-		if err := f.commands.CascadeTerminalRun(t.Context(), forged); !errors.Is(err, ErrInvalidRunTransition) {
+		forged := models.CloneAgentRun(live)
+		forged.Status = models.AgentRunStatusCompleted
+		if err := f.commands.CascadeTerminalRun(t.Context(), forged); !errors.Is(err, models.ErrInvalidRunTransition) {
 			t.Fatalf("forged terminal status: %v", err)
 		}
 		f.assertUnchanged(live)
 		f.assertUnchanged(owned)
 		forged = f.run(f.sourceID)
 		forged.Scope.ID = "another-tenant"
-		if err := f.commands.CascadeTerminalRun(t.Context(), forged); !errors.Is(err, ErrRunNotFound) {
+		if err := f.commands.CascadeTerminalRun(t.Context(), forged); !errors.Is(err, models.ErrRunNotFound) {
 			t.Fatalf("foreign scoped parent: %v", err)
 		}
 		f.assertUnchanged(transferredBefore)
@@ -445,19 +447,19 @@ func TestRunCommandsHandoffCannotForgeTerminalParentOrForeignScope(t *testing.T)
 func TestRunCommandsHandoffOrdinaryDelegationAndReviewRemainOwned(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		kind   AgentRequestKind
+		kind   models.AgentRequestKind
 		review bool
-	}{{"ordinary request", AgentRequestKindRequest, false}, {"handoff awaiting review", AgentRequestKindHandoff, true}} {
+	}{{"ordinary request", models.AgentRequestKindRequest, false}, {"handoff awaiting review", models.AgentRequestKindHandoff, true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
 				f := newHandoffCommandFixture(t, store, tc.kind, tc.review, tc.review)
 				grandchild := f.childOf(f.childID, "marketing-helper")
-				if source := f.run(f.sourceID); source.Status != AgentRunStatusWaitingForDependency {
+				if source := f.run(f.sourceID); source.Status != models.AgentRunStatusWaitingForDependency {
 					t.Fatalf("source should retain ownership while waiting: %#v", source)
 				}
-				f.transition(f.sourceID, AgentRunStatusCanceled, nil)
+				f.transition(f.sourceID, models.AgentRunStatusCanceled, nil)
 				forged := f.run(f.sourceID)
-				forged.Status = AgentRunStatusCompleted
+				forged.Status = models.AgentRunStatusCompleted
 				forged.Output = map[string]interface{}{"handoffRequestId": f.requestID, "childRunId": f.childID}
 				if err := f.commands.CascadeTerminalRun(t.Context(), forged); err != nil {
 					t.Fatal(err)
@@ -471,10 +473,10 @@ func TestRunCommandsHandoffOrdinaryDelegationAndReviewRemainOwned(t *testing.T) 
 
 func TestRunCommandsHandoffRecognizesTeamAssignedRequester(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, AgentRequestKindHandoff, true, false)
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, true, false)
 		source, child := f.run(f.sourceID), f.run(f.childID)
 		grandchild := f.childOf(child.ID, "marketing-helper")
-		if source.Owner.Type != OwnerTypeTeam || f.request().Requester.Type != OwnerTypeAgent {
+		if source.Owner.Type != models.OwnerTypeTeam || f.request().Requester.Type != models.OwnerTypeAgent {
 			t.Fatal("fixture must exercise a Team-owned source with its assigned agent requesting the handoff")
 		}
 		if err := f.commands.CascadeTerminalRun(t.Context(), source); err != nil {
@@ -488,19 +490,19 @@ func TestRunCommandsHandoffRecognizesTeamAssignedRequester(t *testing.T) {
 
 func TestRunCommandsHandoffReceiptIsScopeBound(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, AgentRequestKindHandoff, false, false)
-		foreignScope := Scope{Kind: f.scope.Kind, ID: "another-tenant"}
-		foreignSource, err := f.portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
-			Scope: foreignScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"},
-			AssignedAgentID: "developer", Goal: "Foreign feature", Source: RunSourceManual,
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
+		foreignScope := models.Scope{Kind: f.scope.Kind, ID: "another-tenant"}
+		foreignSource, err := f.portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+			Scope: foreignScope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"},
+			AssignedAgentID: "developer", Goal: "Foreign feature", Source: models.RunSourceManual,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		foreignRequest, err := f.collaboration.CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
-			Scope: foreignScope, Kind: AgentRequestKindHandoff, SourceRunID: foreignSource.ID,
-			Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-			Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+			Scope: foreignScope, Kind: models.AgentRequestKindHandoff, SourceRunID: foreignSource.ID,
+			Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+			Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 			Goal:      "Foreign launch", IdempotencyKey: "launch-handoff",
 		})
 		if err != nil {
@@ -525,7 +527,7 @@ func TestRunCommandsHandoffReceiptIsScopeBound(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		f.mutateRun(f.sourceID, func(r *AgentRun) {
+		f.mutateRun(f.sourceID, func(r *models.AgentRun) {
 			r.Output["handoffRequestId"] = accepted.Request.ID
 		})
 		if err := f.commands.CascadeTerminalRun(t.Context(), f.run(f.sourceID)); err != nil {
@@ -558,7 +560,7 @@ type handoffAfterChildSnapshotStore struct {
 	called   bool
 }
 
-func (s *handoffAfterChildSnapshotStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
+func (s *handoffAfterChildSnapshotStore) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	runs, err := s.handoffCommandTestStore.ListAgentRuns(ctx, filter)
 	if err == nil && filter.ParentRunID == s.parentID && !s.called {
 		s.called = true
@@ -569,23 +571,23 @@ func (s *handoffAfterChildSnapshotStore) ListAgentRuns(ctx context.Context, filt
 
 func TestRunCommandsHandoffAcceptanceDuringRecursiveDiscoveryUsesCanonicalSource(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		portfolio := NewPortfolioService(store)
-		scope := Scope{Kind: "tenant", ID: "handoff-ownership"}
-		outer, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
-			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coordinator"}, AssignedAgentID: "coordinator",
-			Goal: "Coordinate the delivery", Source: RunSourceManual,
+		portfolio := portfolio.NewPortfolioService(store)
+		scope := models.Scope{Kind: "tenant", ID: "handoff-ownership"}
+		outer, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+			Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "coordinator"}, AssignedAgentID: "coordinator",
+			Goal: "Coordinate the delivery", Source: models.RunSourceManual,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		f := newHandoffCommandFixtureWithParent(t, store, AgentRequestKindHandoff, false, false, outer.ID, false)
-		if f.run(f.sourceID).Status != AgentRunStatusWaitingForAgent {
+		f := newHandoffCommandFixtureWithParent(t, store, models.AgentRequestKindHandoff, false, false, outer.ID, false)
+		if f.run(f.sourceID).Status != models.AgentRunStatusWaitingForAgent {
 			t.Fatal("unaccepted handoff source must be waiting for its recipient")
 		}
-		f.transition(outer.ID, AgentRunStatusRunning, nil)
-		outer = f.transition(outer.ID, AgentRunStatusCompleted, nil)
-		var sourceAfterAcceptance, childAfterAcceptance, ownedAfterAcceptance *AgentRun
-		var requestAfterAcceptance *AgentRequest
+		f.transition(outer.ID, models.AgentRunStatusRunning, nil)
+		outer = f.transition(outer.ID, models.AgentRunStatusCompleted, nil)
+		var sourceAfterAcceptance, childAfterAcceptance, ownedAfterAcceptance *models.AgentRun
+		var requestAfterAcceptance *models.AgentRequest
 		wrapped := &handoffAfterChildSnapshotStore{handoffCommandTestStore: store, parentID: outer.ID}
 		wrapped.after = func() {
 			request := f.request()
@@ -621,36 +623,36 @@ func TestRunCommandsHandoffAcceptanceDuringRecursiveDiscoveryUsesCanonicalSource
 func TestRunCommandsHandoffGroupedReceiptDoesNotTransferOwnershipAfterQuorum(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
 		f := &handoffCommandFixture{
-			t: t, store: store, scope: Scope{Kind: "tenant", ID: "handoff-ownership"},
+			t: t, store: store, scope: models.Scope{Kind: "tenant", ID: "handoff-ownership"},
 			now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
 		}
 		clock := models.WithClock(func() time.Time { return f.now })
-		f.portfolio, f.collaboration, f.commands = NewPortfolioService(store, clock), NewCollaborationService(store, clock), agentrun.NewRunCommandService(store, clock)
-		source, err := f.portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
-			Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
-			Goal: "Accept the first adequate result", Source: RunSourceManual,
+		f.portfolio, f.collaboration, f.commands = portfolio.NewPortfolioService(store, clock), NewCollaborationService(store, clock), agentrun.NewRunCommandService(store, clock)
+		source, err := f.portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+			Scope: f.scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+			Goal: "Accept the first adequate result", Source: models.RunSourceManual,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		f.sourceID = source.ID
-		coordinator := NewDependencyCoordinator(store, models.WithClock(func() time.Time { return f.now }))
-		group, err := coordinator.CreateRunDependencyGroup(t.Context(), CreateRunDependencyGroupRequest{
+		coordinator := portfolio.NewDependencyCoordinator(store, models.WithClock(func() time.Time { return f.now }))
+		group, err := coordinator.CreateRunDependencyGroup(t.Context(), models.CreateRunDependencyGroupRequest{
 			ID: "owned-group", Scope: f.scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
-			Policy: RunDependencyPolicy{Mode: FanInModeQuorum, Quorum: 1, FailureMode: DependencyFailureWait},
-			Dependencies: []RunDependencySpec{
-				{ID: "handoff-edge", RequestID: "handoff-request", Kind: RunDependencyKindAgentRequest},
-				{ID: "winner-edge", RequestID: "winner-request", Kind: RunDependencyKindAgentRequest},
+			Policy: models.RunDependencyPolicy{Mode: models.FanInModeQuorum, Quorum: 1, FailureMode: models.DependencyFailureWait},
+			Dependencies: []models.RunDependencySpec{
+				{ID: "handoff-edge", RequestID: "handoff-request", Kind: models.RunDependencyKindAgentRequest},
+				{ID: "winner-edge", RequestID: "winner-request", Kind: models.RunDependencyKindAgentRequest},
 			},
-			Actor: ActivityActor{Type: "test", ID: "coordinator"},
+			Actor: models.ActivityActor{Type: "test", ID: "coordinator"},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		created, err := f.collaboration.CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
-			ID: "handoff-request", Scope: f.scope, Kind: AgentRequestKindHandoff, SourceRunID: source.ID,
-			Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-			Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, Goal: "Prepare a launch candidate",
+			ID: "handoff-request", Scope: f.scope, Kind: models.AgentRequestKindHandoff, SourceRunID: source.ID,
+			Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+			Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"}, Goal: "Prepare a launch candidate",
 			DependencyGroupID: group.Group.ID, DependencyID: "handoff-edge", IdempotencyKey: "group-owned-handoff",
 		})
 		if err != nil {
@@ -666,20 +668,20 @@ func TestRunCommandsHandoffGroupedReceiptDoesNotTransferOwnershipAfterQuorum(t *
 		f.childID, f.requestID = accepted.Child.ID, accepted.Request.ID
 		grandchild := f.childOf(f.childID, "marketing-helper")
 		waiting := f.run(f.sourceID)
-		if waiting.Status != AgentRunStatusWaitingForDependency || waiting.Output["handoffRequestId"] != f.requestID {
+		if waiting.Status != models.AgentRunStatusWaitingForDependency || waiting.Output["handoffRequestId"] != f.requestID {
 			t.Fatalf("group acceptance must retain its source wait and receipt: %#v", waiting)
 		}
-		joined, err := coordinator.ResolveRunDependency(t.Context(), ResolveRunDependencyRequest{
+		joined, err := coordinator.ResolveRunDependency(t.Context(), portfolio.ResolveRunDependencyRequest{
 			Scope: f.scope, GroupID: group.Group.ID, DependencyID: "winner-edge", ExpectedDependencyRevision: 1,
-			State: RunDependencyStateSatisfied, Result: map[string]interface{}{"summary": "another candidate won"},
-			Actor: ActivityActor{Type: "test", ID: "coordinator"},
+			State: models.RunDependencyStateSatisfied, Result: map[string]interface{}{"summary": "another candidate won"},
+			Actor: models.ActivityActor{Type: "test", ID: "coordinator"},
 		})
-		if err != nil || joined.Source.Status != AgentRunStatusQueued || joined.Group.Status != RunDependencyGroupSatisfied {
+		if err != nil || joined.Source.Status != models.AgentRunStatusQueued || joined.Group.Status != models.RunDependencyGroupSatisfied {
 			t.Fatalf("quorum result: %#v, %v", joined, err)
 		}
-		f.transition(f.sourceID, AgentRunStatusRunning, nil)
-		completed := f.transition(f.sourceID, AgentRunStatusCompleted, nil)
-		if completed.Output["handoffRequestId"] != f.requestID || f.request().Status != AgentRequestStatusAccepted {
+		f.transition(f.sourceID, models.AgentRunStatusRunning, nil)
+		completed := f.transition(f.sourceID, models.AgentRunStatusCompleted, nil)
+		if completed.Output["handoffRequestId"] != f.requestID || f.request().Status != models.AgentRequestStatusAccepted {
 			t.Fatal("completed source must still carry the accepted grouped handoff receipt")
 		}
 		if err := f.commands.CascadeTerminalRun(t.Context(), completed); err != nil {
@@ -693,19 +695,19 @@ func TestRunCommandsHandoffGroupedReceiptDoesNotTransferOwnershipAfterQuorum(t *
 
 // A host can satisfy the published command-store contract without exposing
 // the underlying backend's additional collaboration read capability.
-type handoffRunCommandStoreOnly struct{ RunCommandStore }
+type handoffRunCommandStoreOnly struct{ models.RunCommandStore }
 
 func TestRunCommandsHandoffUnavailableReceiptReaderFailsClosed(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, AgentRequestKindHandoff, false, false)
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
 		source, child := f.run(f.sourceID), f.run(f.childID)
 		grandchild := f.childOf(child.ID, "marketing-helper")
 		receipt := f.request()
-		beforeEvents := map[string][]*ActivityEvent{
+		beforeEvents := map[string][]*models.ActivityEvent{
 			source.ID: f.events(source.ID), child.ID: f.events(child.ID), grandchild.ID: f.events(grandchild.ID),
 		}
 		commands := agentrun.NewRunCommandService(handoffRunCommandStoreOnly{RunCommandStore: store}, models.WithClock(func() time.Time { return f.now }))
-		if err := commands.CascadeTerminalRun(t.Context(), source); !errors.Is(err, ErrInvalidRunTransition) {
+		if err := commands.CascadeTerminalRun(t.Context(), source); !errors.Is(err, models.ErrInvalidRunTransition) {
 			t.Fatalf("unavailable scoped receipt reader: %v", err)
 		}
 		f.assertUnchanged(source)
@@ -724,8 +726,8 @@ func TestRunCommandsHandoffUnavailableReceiptReaderFailsClosed(t *testing.T) {
 		// completed parent with no handoff receipt candidate.
 		ordinary := f.childOf(source.ID, "ordinary-owner")
 		owned := f.childOf(ordinary.ID, "ordinary-helper")
-		f.transition(ordinary.ID, AgentRunStatusRunning, nil)
-		ordinary = f.transition(ordinary.ID, AgentRunStatusCompleted, nil)
+		f.transition(ordinary.ID, models.AgentRunStatusRunning, nil)
+		ordinary = f.transition(ordinary.ID, models.AgentRunStatusCompleted, nil)
 		if err := commands.CascadeTerminalRun(t.Context(), ordinary); err != nil {
 			t.Fatal(err)
 		}

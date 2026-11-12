@@ -39,8 +39,8 @@ type agentRequestTeamDefinitionStore interface {
 }
 
 type agentRequestInboxConversationStore interface {
-	AgentRequestInboxStore
-	ConversationStore
+	models.AgentRequestInboxStore
+	models.ConversationStore
 }
 
 type AgentRequestInboxReconcileResult struct {
@@ -69,7 +69,7 @@ type AgentRequestInboxReconciler struct {
 	now                func() time.Time
 }
 
-func NewAgentRequestInboxReconciler(store AgentRequestInboxStore, opts ...models.ServiceOption) (*AgentRequestInboxReconciler, error) {
+func NewAgentRequestInboxReconciler(store models.AgentRequestInboxStore, opts ...models.ServiceOption) (*AgentRequestInboxReconciler, error) {
 	if store == nil {
 		return nil, errors.New("AgentRequest inbox store is required")
 	}
@@ -84,13 +84,13 @@ func NewAgentRequestInboxReconciler(store AgentRequestInboxStore, opts ...models
 	return reconciler, nil
 }
 
-func (r *AgentRequestInboxReconciler) Reconcile(ctx context.Context, scope Scope, assignedAgentID string) (*AgentRequestInboxReconcileResult, error) {
+func (r *AgentRequestInboxReconciler) Reconcile(ctx context.Context, scope models.Scope, assignedAgentID string) (*AgentRequestInboxReconcileResult, error) {
 	return r.reconcile(ctx, scope, assignedAgentID, true)
 }
 
 // ReconcileWorker keeps durable request intake responsive while bounding the
 // independently idempotent conversation projection work.
-func (r *AgentRequestInboxReconciler) ReconcileWorker(ctx context.Context, scope Scope, assignedAgentID string) (*AgentRequestInboxReconcileResult, error) {
+func (r *AgentRequestInboxReconciler) ReconcileWorker(ctx context.Context, scope models.Scope, assignedAgentID string) (*AgentRequestInboxReconcileResult, error) {
 	projectConversations := false
 	if r != nil {
 		now := time.Now
@@ -102,7 +102,7 @@ func (r *AgentRequestInboxReconciler) ReconcileWorker(ctx context.Context, scope
 	return r.reconcile(ctx, scope, assignedAgentID, projectConversations)
 }
 
-func (r *AgentRequestInboxReconciler) reconcile(ctx context.Context, scope Scope, assignedAgentID string, projectConversations bool) (*AgentRequestInboxReconcileResult, error) {
+func (r *AgentRequestInboxReconciler) reconcile(ctx context.Context, scope models.Scope, assignedAgentID string, projectConversations bool) (*AgentRequestInboxReconcileResult, error) {
 	if r == nil || r.collaboration == nil || r.commands == nil {
 		return nil, errors.New("AgentRequest inbox reconciler is not configured")
 	}
@@ -123,7 +123,7 @@ func (r *AgentRequestInboxReconciler) reconcile(ctx context.Context, scope Scope
 		}
 	}
 	for _, request := range requests {
-		if request.Status == AgentRequestStatusCompletionReview {
+		if request.Status == models.AgentRequestStatusCompletionReview {
 			if err := r.reconcileCompletionReview(ctx, request, assignedAgentID, result); err != nil {
 				failures = append(failures, fmt.Errorf("completion review %s: %w", request.ID, err))
 			}
@@ -137,13 +137,13 @@ func (r *AgentRequestInboxReconciler) reconcile(ctx context.Context, scope Scope
 		if filter := strings.TrimSpace(assignedAgentID); filter != "" && filter != assigned {
 			continue
 		}
-		actor := CollaborationParty{Type: OwnerTypeAgent, ID: assigned}
-		if request.AcceptancePolicy == AgentRequestAcceptancePreauthorized || !requireReview {
+		actor := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: assigned}
+		if request.AcceptancePolicy == models.AgentRequestAcceptancePreauthorized || !requireReview {
 			if _, responseErr := r.collaboration.RespondAgentRequest(ctx, RespondAgentRequestRequest{
 				Scope: scope, RequestID: request.ID, ExpectedRevision: request.Revision,
 				Decision: AgentRequestDecisionAccept, Principal: request.Recipient, Actor: actor,
 				AssignedAgentID: assigned, Message: "Accepted under the configured recipient policy.",
-			}); responseErr != nil && !errors.Is(responseErr, ErrRevisionConflict) && !errors.Is(responseErr, ErrInvalidAgentRequestState) {
+			}); responseErr != nil && !errors.Is(responseErr, models.ErrRevisionConflict) && !errors.Is(responseErr, models.ErrInvalidAgentRequestState) {
 				failures = append(failures, fmt.Errorf("accept request %s: %w", request.ID, responseErr))
 			} else if responseErr == nil {
 				result.RequestsAccepted++
@@ -164,7 +164,7 @@ func (r *AgentRequestInboxReconciler) reconcile(ctx context.Context, scope Scope
 		} else {
 			result.DecisionRunsReused++
 		}
-		if isTerminalAgentRunStatus(decisionRun.Status) {
+		if models.IsTerminalAgentRunStatus(decisionRun.Status) {
 			applied, resolveErr := r.ResolveDecisionRun(ctx, decisionRun)
 			if resolveErr != nil {
 				failures = append(failures, fmt.Errorf("resolve review %s: %w", request.ID, resolveErr))
@@ -205,12 +205,12 @@ func (r *AgentRequestInboxReconciler) deferredProjectionAt() *time.Time {
 	return new(r.lastProjection.Add(agentRequestConversationProjectionInterval))
 }
 
-func (r *AgentRequestInboxReconciler) pendingRequests(ctx context.Context, scope Scope) ([]*AgentRequest, error) {
+func (r *AgentRequestInboxReconciler) pendingRequests(ctx context.Context, scope models.Scope) ([]*models.AgentRequest, error) {
 	const pageSize = 100
-	result := make([]*AgentRequest, 0)
+	result := make([]*models.AgentRequest, 0)
 	for offset := 0; ; offset += pageSize {
-		page, err := r.collaboration.ListAgentRequests(ctx, AgentRequestFilter{
-			Scope: scope, Statuses: []AgentRequestStatus{AgentRequestStatusPending, AgentRequestStatusCompletionReview}, Limit: pageSize, Offset: offset,
+		page, err := r.collaboration.ListAgentRequests(ctx, models.AgentRequestFilter{
+			Scope: scope, Statuses: []models.AgentRequestStatus{models.AgentRequestStatusPending, models.AgentRequestStatusCompletionReview}, Limit: pageSize, Offset: offset,
 		})
 		if err != nil {
 			return nil, err
@@ -222,11 +222,11 @@ func (r *AgentRequestInboxReconciler) pendingRequests(ctx context.Context, scope
 	}
 }
 
-func (r *AgentRequestInboxReconciler) recipientAssignment(ctx context.Context, request *AgentRequest) (string, bool, error) {
+func (r *AgentRequestInboxReconciler) recipientAssignment(ctx context.Context, request *models.AgentRequest) (string, bool, error) {
 	if request == nil {
-		return "", false, ErrAgentRequestNotFound
+		return "", false, models.ErrAgentRequestNotFound
 	}
-	if request.Recipient.Type == OwnerTypeAgent {
+	if request.Recipient.Type == models.OwnerTypeAgent {
 		return request.Recipient.ID, true, nil
 	}
 	assigned, definition, err := r.teamPartyAssignment(ctx, request.Scope, request.Recipient, request.SemanticRole, "", false)
@@ -236,7 +236,7 @@ func (r *AgentRequestInboxReconciler) recipientAssignment(ctx context.Context, r
 	return assigned, definition.Delegation.RequireAcceptance, nil
 }
 
-func (r *AgentRequestInboxReconciler) completionReviewerAssignment(ctx context.Context, request *AgentRequest) (string, error) {
+func (r *AgentRequestInboxReconciler) completionReviewerAssignment(ctx context.Context, request *models.AgentRequest) (string, error) {
 	reviewers, err := r.completionReviewerAssignments(ctx, request)
 	if err != nil {
 		return "", err
@@ -244,27 +244,27 @@ func (r *AgentRequestInboxReconciler) completionReviewerAssignment(ctx context.C
 	return reviewers[0], nil
 }
 
-func (r *AgentRequestInboxReconciler) completionReviewerAssignments(ctx context.Context, request *AgentRequest) ([]string, error) {
+func (r *AgentRequestInboxReconciler) completionReviewerAssignments(ctx context.Context, request *models.AgentRequest) ([]string, error) {
 	if request == nil {
-		return nil, ErrAgentRequestNotFound
+		return nil, models.ErrAgentRequestNotFound
 	}
-	if request.Requester.Type == OwnerTypeAgent {
+	if request.Requester.Type == models.OwnerTypeAgent {
 		if completionReviewQuorum(request.DelegationPolicy) <= 1 && (request.DelegationPolicy == nil || !request.DelegationPolicy.EscalateOnDisagreement) {
 			if request.Requester.ID == request.AssignedAgentID {
-				return nil, fmt.Errorf("%w: completed work cannot be reviewed by its worker", ErrAgentRequestAssignment)
+				return nil, fmt.Errorf("%w: completed work cannot be reviewed by its worker", models.ErrAgentRequestAssignment)
 			}
 			return []string{request.Requester.ID}, nil
 		}
 		if request.DelegationPolicy == nil || strings.TrimSpace(request.DelegationPolicy.TeamDeploymentID) == "" {
-			return nil, fmt.Errorf("%w: completed work cannot be reviewed by its worker", ErrAgentRequestAssignment)
+			return nil, fmt.Errorf("%w: completed work cannot be reviewed by its worker", models.ErrAgentRequestAssignment)
 		}
-		requesterTeam := CollaborationParty{Type: OwnerTypeTeam, ID: request.DelegationPolicy.TeamDeploymentID}
+		requesterTeam := models.CollaborationParty{Type: models.OwnerTypeTeam, ID: request.DelegationPolicy.TeamDeploymentID}
 		return r.teamCompletionReviewerAssignments(ctx, request, requesterTeam)
 	}
 	return r.teamCompletionReviewerAssignments(ctx, request, request.Requester)
 }
 
-func (r *AgentRequestInboxReconciler) teamCompletionReviewerAssignments(ctx context.Context, request *AgentRequest, team CollaborationParty) ([]string, error) {
+func (r *AgentRequestInboxReconciler) teamCompletionReviewerAssignments(ctx context.Context, request *models.AgentRequest, team models.CollaborationParty) ([]string, error) {
 	eligible, _, err := r.teamPartyAssignments(ctx, request.Scope, team, "", request.AssignedAgentID, true)
 	if err != nil {
 		return nil, err
@@ -277,15 +277,15 @@ func (r *AgentRequestInboxReconciler) teamCompletionReviewerAssignments(ctx cont
 		wanted = 1
 	}
 	if len(eligible) < wanted {
-		return nil, fmt.Errorf("%w: Team has %d independent reviewers but policy requires %d", ErrAgentRequestAssignment, len(eligible), wanted)
+		return nil, fmt.Errorf("%w: Team has %d independent reviewers but policy requires %d", models.ErrAgentRequestAssignment, len(eligible), wanted)
 	}
 	return eligible[:wanted], nil
 }
 
 func (r *AgentRequestInboxReconciler) teamPartyAssignment(
 	ctx context.Context,
-	scope Scope,
-	party CollaborationParty,
+	scope models.Scope,
+	party models.CollaborationParty,
 	semanticRole string,
 	excludedAgentID string,
 	useApprovers bool,
@@ -299,14 +299,14 @@ func (r *AgentRequestInboxReconciler) teamPartyAssignment(
 
 func (r *AgentRequestInboxReconciler) teamPartyAssignments(
 	ctx context.Context,
-	scope Scope,
-	party CollaborationParty,
+	scope models.Scope,
+	party models.CollaborationParty,
 	semanticRole string,
 	excludedAgentID string,
 	useApprovers bool,
 ) ([]string, *kernelteam.Definition, error) {
 	if r.collaboration.teams == nil {
-		return nil, nil, fmt.Errorf("%w: Team roster assignment is unavailable", ErrAgentRequestAssignment)
+		return nil, nil, fmt.Errorf("%w: Team roster assignment is unavailable", models.ErrAgentRequestAssignment)
 	}
 	deployment, err := r.collaboration.teams.GetTeamDeployment(ctx, capability.ScopeReference{
 		Kind: scope.Kind, ID: scope.ID,
@@ -315,18 +315,18 @@ func (r *AgentRequestInboxReconciler) teamPartyAssignments(
 		return nil, nil, err
 	}
 	if deployment == nil || deployment.Status != kernelteam.DeploymentActive {
-		return nil, nil, fmt.Errorf("%w: Team deployment is not active", ErrAgentRequestAssignment)
+		return nil, nil, fmt.Errorf("%w: Team deployment is not active", models.ErrAgentRequestAssignment)
 	}
 	definitions, ok := r.collaboration.store.(agentRequestTeamDefinitionStore)
 	if !ok {
-		return nil, nil, fmt.Errorf("%w: Team delegation policy is unavailable", ErrAgentRequestAssignment)
+		return nil, nil, fmt.Errorf("%w: Team delegation policy is unavailable", models.ErrAgentRequestAssignment)
 	}
 	definition, err := definitions.GetTeamDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	if err != nil {
 		return nil, nil, err
 	}
 	if definition == nil {
-		return nil, nil, fmt.Errorf("%w: active Team definition is unavailable", ErrAgentRequestAssignment)
+		return nil, nil, fmt.Errorf("%w: active Team definition is unavailable", models.ErrAgentRequestAssignment)
 	}
 	// With no member marked as an approver, every member may review.
 	approversOnly := useApprovers && slices.ContainsFunc(deployment.Roster, func(assignment kernelteam.RosterAssignment) bool { return assignment.Approver })
@@ -338,7 +338,7 @@ func (r *AgentRequestInboxReconciler) teamPartyAssignments(
 		}
 	}
 	if len(eligible) == 0 {
-		return nil, nil, fmt.Errorf("%w: Team has no independent Agent eligible for review as member %q", ErrAgentRequestAssignment, semanticRole)
+		return nil, nil, fmt.Errorf("%w: Team has no independent Agent eligible for review as member %q", models.ErrAgentRequestAssignment, semanticRole)
 	}
 	sort.Slice(eligible, func(i, j int) bool {
 		if eligible[i].AgentDeploymentID != eligible[j].AgentDeploymentID {
@@ -355,7 +355,7 @@ func (r *AgentRequestInboxReconciler) teamPartyAssignments(
 
 func (r *AgentRequestInboxReconciler) reconcileCompletionReview(
 	ctx context.Context,
-	request *AgentRequest,
+	request *models.AgentRequest,
 	assignedAgentFilter string,
 	result *AgentRequestInboxReconcileResult,
 ) error {
@@ -383,7 +383,7 @@ func (r *AgentRequestInboxReconciler) reconcileCompletionReview(
 		} else {
 			result.CompletionReviewsReused++
 		}
-		if isTerminalAgentRunStatus(reviewRun.Status) {
+		if models.IsTerminalAgentRunStatus(reviewRun.Status) {
 			applied, resolveErr := r.ResolveCompletionReviewRun(ctx, reviewRun)
 			if resolveErr != nil {
 				return resolveErr
@@ -398,9 +398,9 @@ func (r *AgentRequestInboxReconciler) reconcileCompletionReview(
 
 func (r *AgentRequestInboxReconciler) ensureCompletionReviewRun(
 	ctx context.Context,
-	request *AgentRequest,
+	request *models.AgentRequest,
 	reviewerID string,
-) (*AgentRun, bool, error) {
+) (*models.AgentRun, bool, error) {
 	source, err := r.collaboration.runs.GetAgentRun(ctx, request.Scope, request.SourceRunID)
 	if err != nil {
 		return nil, false, err
@@ -409,8 +409,8 @@ func (r *AgentRequestInboxReconciler) ensureCompletionReviewRun(
 	if err != nil {
 		return nil, false, err
 	}
-	if source == nil || child == nil || child.Status != AgentRunStatusCompleted {
-		return nil, false, ErrInvalidAgentRequestState
+	if source == nil || child == nil || child.Status != models.AgentRunStatusCompleted {
+		return nil, false, models.ErrInvalidAgentRequestState
 	}
 	existing, err := r.findCompletionReviewRun(ctx, request, source, reviewerID)
 	if err != nil || existing != nil {
@@ -421,29 +421,29 @@ func (r *AgentRequestInboxReconciler) ensureCompletionReviewRun(
 		"requester": request.Requester, "recipient": request.Recipient,
 		"workerAgentId": request.AssignedAgentID, "goal": request.Goal,
 		"instructions": request.Instructions, "acceptanceCriteria": maps.Clone(request.AcceptanceCriteria),
-		"artifactRequirements": cloneArtifactRequirements(request.ArtifactRequirements),
+		"artifactRequirements": models.CloneArtifactRequirements(request.ArtifactRequirements),
 		"completionSummary":    request.CompletionSummary, "acceptanceEvidence": maps.Clone(request.AcceptanceEvidence),
 		"artifacts": request.Artifacts, "output": maps.Clone(child.Output),
 		"conversationRefs": append([]string(nil), request.ConversationRefs...),
 	}
 	contextValue := map[string]interface{}{agentrun.AgentRequestCompletionReviewContextKey: review}
 	key := fmt.Sprintf("agent-request-completion-review:%s:%s:%s", request.ID, request.CompletionKey, reviewerID)
-	created, err := r.commands.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: request.Scope, Kind: RunKindAgentWork, ParentRunID: source.ID,
-		Owner:           ObjectiveOwner{Type: request.Requester.Type, ID: request.Requester.ID},
+	created, err := r.commands.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: request.Scope, Kind: models.RunKindAgentWork, ParentRunID: source.ID,
+		Owner:           models.ObjectiveOwner{Type: request.Requester.Type, ID: request.Requester.ID},
 		AssignedAgentID: reviewerID, ActingUser: source.ActingUser,
 		ConcurrencyKey: "agent-request-completion-review:" + request.ID + ":" + reviewerID,
 		Goal:           "Independently review completed delegated work: " + request.Goal,
-		Source:         RunSourceCompletionReview, Priority: source.Priority, Context: contextValue,
-		Budget: &BudgetPolicy{
+		Source:         models.RunSourceCompletionReview, Priority: source.Priority, Context: contextValue,
+		Budget: &models.BudgetPolicy{
 			MaxAttempts: 5, MaxTurns: 12, MaxInputTokens: 256000, MaxOutputTokens: 4096,
 			MaxTotalTokens: 272384, MaxDurationMS: 180000,
 		},
-		IdempotencyKey: key, Actor: ActivityActor{Type: "system", ID: "agent-request-inbox"},
-		Visibility: ActivityVisibilityTeam,
+		IdempotencyKey: key, Actor: models.ActivityActor{Type: "system", ID: "agent-request-inbox"},
+		Visibility: models.ActivityVisibilityTeam,
 	})
 	if err != nil {
-		if errors.Is(err, ErrRunIdempotency) {
+		if errors.Is(err, models.ErrRunIdempotency) {
 			existing, findErr := r.findCompletionReviewRun(ctx, request, source, reviewerID)
 			if findErr != nil {
 				return nil, false, findErr
@@ -459,14 +459,14 @@ func (r *AgentRequestInboxReconciler) ensureCompletionReviewRun(
 
 func (r *AgentRequestInboxReconciler) findCompletionReviewRun(
 	ctx context.Context,
-	request *AgentRequest,
-	source *AgentRun,
+	request *models.AgentRequest,
+	source *models.AgentRun,
 	reviewerID string,
-) (*AgentRun, error) {
+) (*models.AgentRun, error) {
 	const pageSize = 100
-	var matched *AgentRun
+	var matched *models.AgentRun
 	for offset := 0; ; offset += pageSize {
-		runs, err := r.collaboration.runs.ListAgentRuns(ctx, AgentRunFilter{
+		runs, err := r.collaboration.runs.ListAgentRuns(ctx, models.AgentRunFilter{
 			Scope: request.Scope, ParentRunID: source.ID, AssignedAgentID: reviewerID, Limit: pageSize, Offset: offset,
 		})
 		if err != nil {
@@ -487,10 +487,10 @@ func (r *AgentRequestInboxReconciler) findCompletionReviewRun(
 	}
 }
 
-func completionReviewRunMatchesRequest(run *AgentRun, request *AgentRequest, reviewerID string) bool {
-	if run == nil || request == nil || run.Source != RunSourceCompletionReview ||
+func completionReviewRunMatchesRequest(run *models.AgentRun, request *models.AgentRequest, reviewerID string) bool {
+	if run == nil || request == nil || run.Source != models.RunSourceCompletionReview ||
 		run.Scope != request.Scope || run.ParentRunID != request.SourceRunID ||
-		run.Owner != (ObjectiveOwner{Type: request.Requester.Type, ID: request.Requester.ID}) ||
+		run.Owner != (models.ObjectiveOwner{Type: request.Requester.Type, ID: request.Requester.ID}) ||
 		run.AssignedAgentID != reviewerID || run.ConcurrencyKey != "agent-request-completion-review:"+request.ID+":"+reviewerID {
 		return false
 	}
@@ -503,13 +503,13 @@ func completionReviewRunMatchesRequest(run *AgentRun, request *AgentRequest, rev
 	return strings.TrimSpace(requestID) == request.ID && strings.TrimSpace(completionKey) != "" && completionKey == request.CompletionKey
 }
 
-func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, request *AgentRequest, assignedAgentID string) (*AgentRun, bool, bool, error) {
+func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, request *models.AgentRequest, assignedAgentID string) (*models.AgentRun, bool, bool, error) {
 	source, err := r.collaboration.runs.GetAgentRun(ctx, request.Scope, request.SourceRunID)
 	if err != nil {
 		return nil, false, false, err
 	}
 	if source == nil {
-		return nil, false, false, ErrRunNotFound
+		return nil, false, false, models.ErrRunNotFound
 	}
 	existing, err := r.findDecisionRun(ctx, request, source, assignedAgentID)
 	if err != nil {
@@ -524,26 +524,26 @@ func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, req
 		"instructions": request.Instructions, "semanticRole": request.SemanticRole,
 		"clarificationQuestion": request.Clarification, "clarificationResponse": request.Response,
 		"acceptanceCriteria":   maps.Clone(request.AcceptanceCriteria),
-		"artifactRequirements": cloneArtifactRequirements(request.ArtifactRequirements),
+		"artifactRequirements": models.CloneArtifactRequirements(request.ArtifactRequirements),
 		"sharedContext":        maps.Clone(request.SharedContext), "conversationRefs": append([]string(nil), request.ConversationRefs...),
 	}
 	contextValue := map[string]interface{}{agentrun.AgentRequestInboxContextKey: inbox}
 	key := fmt.Sprintf("agent-request-decision:%s:%d:%s", request.ID, request.Revision, assignedAgentID)
-	created, err := r.commands.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: request.Scope, Kind: RunKindAgentWork, ParentRunID: source.ID,
-		Owner:           ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID},
+	created, err := r.commands.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: request.Scope, Kind: models.RunKindAgentWork, ParentRunID: source.ID,
+		Owner:           models.ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID},
 		AssignedAgentID: assignedAgentID, ActingUser: source.ActingUser, ConcurrencyKey: "agent-request:" + request.ID,
-		Goal: "Evaluate incoming work request: " + request.Goal, Source: RunSourceRequestDecision,
+		Goal: "Evaluate incoming work request: " + request.Goal, Source: models.RunSourceRequestDecision,
 		Priority: source.Priority, Context: contextValue,
-		Budget: &BudgetPolicy{
+		Budget: &models.BudgetPolicy{
 			MaxAttempts: 5, MaxTurns: 12, MaxInputTokens: 192000, MaxOutputTokens: 4096,
 			MaxTotalTokens: 208384, MaxDurationMS: 180000,
 		},
-		IdempotencyKey: key, Actor: ActivityActor{Type: "system", ID: "agent-request-inbox"},
-		Visibility: ActivityVisibilityTeam,
+		IdempotencyKey: key, Actor: models.ActivityActor{Type: "system", ID: "agent-request-inbox"},
+		Visibility: models.ActivityVisibilityTeam,
 	})
 	if err != nil {
-		if errors.Is(err, ErrRunIdempotency) {
+		if errors.Is(err, models.ErrRunIdempotency) {
 			existing, findErr := r.findDecisionRun(ctx, request, source, assignedAgentID)
 			if findErr != nil {
 				return nil, false, false, findErr
@@ -551,7 +551,7 @@ func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, req
 			if existing != nil {
 				return existing, false, false, nil
 			}
-			resolved, resolveErr := r.failDecisionReview(ctx, request, source, nil, AgentRequestStatusFailed,
+			resolved, resolveErr := r.failDecisionReview(ctx, request, source, nil, models.AgentRequestStatusFailed,
 				"AgentRequest review could not recover its durable decision Run.")
 			if resolveErr != nil {
 				return nil, false, false, errors.Join(err, resolveErr)
@@ -563,11 +563,11 @@ func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, req
 	return created.Run, created.Event != nil, false, nil
 }
 
-func (r *AgentRequestInboxReconciler) findDecisionRun(ctx context.Context, request *AgentRequest, source *AgentRun, assignedAgentID string) (*AgentRun, error) {
+func (r *AgentRequestInboxReconciler) findDecisionRun(ctx context.Context, request *models.AgentRequest, source *models.AgentRun, assignedAgentID string) (*models.AgentRun, error) {
 	const pageSize = 100
-	var matched *AgentRun
+	var matched *models.AgentRun
 	for offset := 0; ; offset += pageSize {
-		runs, err := r.collaboration.runs.ListAgentRuns(ctx, AgentRunFilter{
+		runs, err := r.collaboration.runs.ListAgentRuns(ctx, models.AgentRunFilter{
 			Scope: request.Scope, ParentRunID: source.ID, AssignedAgentID: assignedAgentID, Limit: pageSize, Offset: offset,
 		})
 		if err != nil {
@@ -588,10 +588,10 @@ func (r *AgentRequestInboxReconciler) findDecisionRun(ctx context.Context, reque
 	}
 }
 
-func decisionRunMatchesRequest(run *AgentRun, request *AgentRequest, assignedAgentID string) bool {
-	if run == nil || request == nil || run.Source != RunSourceRequestDecision ||
+func decisionRunMatchesRequest(run *models.AgentRun, request *models.AgentRequest, assignedAgentID string) bool {
+	if run == nil || request == nil || run.Source != models.RunSourceRequestDecision ||
 		run.Scope != request.Scope || run.ParentRunID != request.SourceRunID ||
-		run.Owner != (ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID}) ||
+		run.Owner != (models.ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID}) ||
 		run.AssignedAgentID != assignedAgentID || run.ConcurrencyKey != "agent-request:"+request.ID {
 		return false
 	}
@@ -604,8 +604,8 @@ func decisionRunMatchesRequest(run *AgentRun, request *AgentRequest, assignedAge
 	return strings.TrimSpace(requestID) == request.ID && err == nil && requestRevision == request.Revision
 }
 
-func (r *AgentRequestInboxReconciler) ResolveDecisionRun(ctx context.Context, run *AgentRun) (bool, error) {
-	if r == nil || r.collaboration == nil || run == nil || run.Source != RunSourceRequestDecision || !isTerminalAgentRunStatus(run.Status) {
+func (r *AgentRequestInboxReconciler) ResolveDecisionRun(ctx context.Context, run *models.AgentRun) (bool, error) {
+	if r == nil || r.collaboration == nil || run == nil || run.Source != models.RunSourceRequestDecision || !models.IsTerminalAgentRunStatus(run.Status) {
 		return false, nil
 	}
 	inbox, ok := run.Context[agentrun.AgentRequestInboxContextKey].(map[string]interface{})
@@ -622,13 +622,13 @@ func (r *AgentRequestInboxReconciler) ResolveDecisionRun(ctx context.Context, ru
 	if err != nil {
 		return false, err
 	}
-	if request.Status != AgentRequestStatusPending || request.Revision != requestRevision {
+	if request.Status != models.AgentRequestStatusPending || request.Revision != requestRevision {
 		return false, nil
 	}
-	if run.Status == AgentRunStatusFailed || run.Status == AgentRunStatusCanceled {
-		status := AgentRequestStatusFailed
-		if run.Status == AgentRunStatusCanceled {
-			status = AgentRequestStatusCanceled
+	if run.Status == models.AgentRunStatusFailed || run.Status == models.AgentRunStatusCanceled {
+		status := models.AgentRequestStatusFailed
+		if run.Status == models.AgentRunStatusCanceled {
+			status = models.AgentRequestStatusCanceled
 		}
 		source, err := r.collaboration.runs.GetAgentRun(ctx, request.Scope, request.SourceRunID)
 		if err != nil {
@@ -644,7 +644,7 @@ func (r *AgentRequestInboxReconciler) ResolveDecisionRun(ctx context.Context, ru
 	if err != nil {
 		return false, err
 	}
-	actor := CollaborationParty{Type: OwnerTypeAgent, ID: run.AssignedAgentID}
+	actor := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: run.AssignedAgentID}
 	response := RespondAgentRequestRequest{
 		Scope: run.Scope, RequestID: request.ID, ExpectedRevision: request.Revision,
 		Decision: decision, Principal: request.Recipient, Actor: actor, Message: message,
@@ -654,14 +654,14 @@ func (r *AgentRequestInboxReconciler) ResolveDecisionRun(ctx context.Context, ru
 		response.AssignedAgentID = run.AssignedAgentID
 	}
 	_, err = r.collaboration.RespondAgentRequest(ctx, response)
-	if errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidAgentRequestState) {
+	if errors.Is(err, models.ErrRevisionConflict) || errors.Is(err, models.ErrInvalidAgentRequestState) {
 		return false, nil
 	}
 	return err == nil, err
 }
 
-func (r *AgentRequestInboxReconciler) ResolveCompletionReviewRun(ctx context.Context, run *AgentRun) (bool, error) {
-	if r == nil || r.collaboration == nil || run == nil || run.Source != RunSourceCompletionReview || !isTerminalAgentRunStatus(run.Status) {
+func (r *AgentRequestInboxReconciler) ResolveCompletionReviewRun(ctx context.Context, run *models.AgentRun) (bool, error) {
+	if r == nil || r.collaboration == nil || run == nil || run.Source != models.RunSourceCompletionReview || !models.IsTerminalAgentRunStatus(run.Status) {
 		return false, nil
 	}
 	review, ok := run.Context[agentrun.AgentRequestCompletionReviewContextKey].(map[string]interface{})
@@ -679,12 +679,12 @@ func (r *AgentRequestInboxReconciler) ResolveCompletionReviewRun(ctx context.Con
 	if err != nil {
 		return false, err
 	}
-	if request.Status != AgentRequestStatusCompletionReview || request.CompletionKey != completionKey {
+	if request.Status != models.AgentRequestStatusCompletionReview || request.CompletionKey != completionKey {
 		return false, nil
 	}
 	approve := false
 	message := strings.TrimSpace(run.Error)
-	if run.Status == AgentRunStatusCompleted {
+	if run.Status == models.AgentRunStatusCompleted {
 		approve, message, err = parseAgentRequestCompletionReviewOutput(run.Output)
 		if err != nil {
 			return false, err
@@ -697,16 +697,16 @@ func (r *AgentRequestInboxReconciler) ResolveCompletionReviewRun(ctx context.Con
 		return false, err
 	}
 	if child == nil {
-		return false, ErrRunNotFound
+		return false, models.ErrRunNotFound
 	}
 	_, err = r.collaboration.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
 		Scope: run.Scope, RequestID: request.ID, ExpectedRevision: request.Revision,
 		ExpectedChildRevision: child.Revision, Principal: request.Requester,
-		Actor:   CollaborationParty{Type: OwnerTypeAgent, ID: run.AssignedAgentID},
+		Actor:   models.CollaborationParty{Type: models.OwnerTypeAgent, ID: run.AssignedAgentID},
 		Approve: approve, ResolveDisagreement: request.ReviewDisagreement, Summary: message,
 		IdempotencyKey: fmt.Sprintf("agent-request-completion-review:%s:%s", request.ID, run.ID),
 	})
-	if errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidAgentRequestState) {
+	if errors.Is(err, models.ErrRevisionConflict) || errors.Is(err, models.ErrInvalidAgentRequestState) {
 		return false, nil
 	}
 	return err == nil, err
@@ -714,18 +714,18 @@ func (r *AgentRequestInboxReconciler) ResolveCompletionReviewRun(ctx context.Con
 
 func (r *AgentRequestInboxReconciler) failDecisionReview(
 	ctx context.Context,
-	request *AgentRequest,
-	source *AgentRun,
-	decisionRun *AgentRun,
-	status AgentRequestStatus,
+	request *models.AgentRequest,
+	source *models.AgentRun,
+	decisionRun *models.AgentRun,
+	status models.AgentRequestStatus,
 	reason string,
 ) (bool, error) {
-	if request == nil || source == nil || request.Status != AgentRequestStatusPending ||
-		(status != AgentRequestStatusFailed && status != AgentRequestStatusCanceled) {
-		return false, ErrInvalidAgentRequestState
+	if request == nil || source == nil || request.Status != models.AgentRequestStatusPending ||
+		(status != models.AgentRequestStatusFailed && status != models.AgentRequestStatusCanceled) {
+		return false, models.ErrInvalidAgentRequestState
 	}
 	now := r.collaboration.now()
-	updated := cloneAgentRequest(request)
+	updated := models.CloneAgentRequest(request)
 	updated.Status = status
 	updated.ResolutionReason = strings.TrimSpace(reason)
 	if updated.ResolutionReason == "" {
@@ -734,8 +734,8 @@ func (r *AgentRequestInboxReconciler) failDecisionReview(
 	updated.Revision++
 	updated.UpdatedAt = now
 	updated.ResolvedAt = &now
-	record := AgentRequestResponseRecord{Request: updated, ExpectedRequestRevision: request.Revision}
-	actor := CollaborationParty{Type: OwnerTypeAgent, ID: request.Recipient.ID}
+	record := models.AgentRequestResponseRecord{Request: updated, ExpectedRequestRevision: request.Revision}
+	actor := models.CollaborationParty{Type: models.OwnerTypeAgent, ID: request.Recipient.ID}
 	if decisionRun != nil && strings.TrimSpace(decisionRun.AssignedAgentID) != "" {
 		actor.ID = decisionRun.AssignedAgentID
 	}
@@ -744,14 +744,14 @@ func (r *AgentRequestInboxReconciler) failDecisionReview(
 		if err != nil {
 			return false, err
 		}
-		state := RunDependencyStateFailed
-		if status == AgentRequestStatusCanceled {
-			state = RunDependencyStateCanceled
+		state := models.RunDependencyStateFailed
+		if status == models.AgentRequestStatusCanceled {
+			state = models.RunDependencyStateCanceled
 		}
-		record.DependencyResolution = &RunDependencyResolutionRecord{
+		record.DependencyResolution = &models.RunDependencyResolutionRecord{
 			Scope: request.Scope, GroupID: request.DependencyGroupID, DependencyID: request.DependencyID,
 			ExpectedDependencyRevision: dependency.Revision, State: state, Error: updated.ResolutionReason,
-			Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: ActivityVisibilityTeam, OccurredAt: now,
+			Actor: models.ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: models.ActivityVisibilityTeam, OccurredAt: now,
 		}
 	} else if sourceWaitsForAgentRequestDecision(source, request.ID) {
 		resumed, err := sourceResumingAfterAgentRequestDecision(source, updated, now)
@@ -763,17 +763,17 @@ func (r *AgentRequestInboxReconciler) failDecisionReview(
 		record.ExpectedSourceRevision = source.Revision
 	}
 	eventType := "collaboration.review_failed"
-	if status == AgentRequestStatusCanceled {
+	if status == models.AgentRequestStatusCanceled {
 		eventType = "collaboration.review_canceled"
 	}
-	if request.Kind == AgentRequestKindHandoff {
+	if request.Kind == models.AgentRequestKindHandoff {
 		eventType = "handoff.review_failed"
-		if status == AgentRequestStatusCanceled {
+		if status == models.AgentRequestStatusCanceled {
 			eventType = "handoff.review_canceled"
 		}
-	} else if request.Kind == AgentRequestKindEscalation {
+	} else if request.Kind == models.AgentRequestKindEscalation {
 		eventType = "escalation.review_failed"
-		if status == AgentRequestStatusCanceled {
+		if status == models.AgentRequestStatusCanceled {
 			eventType = "escalation.review_canceled"
 		}
 	}
@@ -783,7 +783,7 @@ func (r *AgentRequestInboxReconciler) failDecisionReview(
 		linkAgentRequestDecisionRun(record.SourceEvent, decisionRun.ID)
 	}
 	if _, err := r.collaboration.store.RespondAgentRequest(ctx, record); err != nil {
-		if errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidAgentRequestState) {
+		if errors.Is(err, models.ErrRevisionConflict) || errors.Is(err, models.ErrInvalidAgentRequestState) {
 			return false, nil
 		}
 		return false, err

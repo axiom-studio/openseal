@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -31,7 +32,7 @@ func IsSupportedTeamManagementSkillVersion(version string) bool {
 // kernel derives both from the durable Run and active Team.
 func TeamManagementSkill() *skill.Definition {
 	return &skill.Definition{
-		ID: TeamManagementSkillID, Version: action.TeamManagementSkillVersion,
+		ID: models.TeamManagementSkillID, Version: action.TeamManagementSkillVersion,
 		Name: "Teams", Description: "Create Teams from existing Agents, and propose governed changes to the current Team's profile and its members' behavior.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: action.TeamManagementEndpoint},
 		Actions: map[string]skill.Action{
@@ -124,7 +125,7 @@ func (v *TeamMemberActionValidator) ValidateActionProposal(ctx context.Context, 
 	if v == nil || v.teams == nil || input.Run == nil {
 		return nil, errors.New("team member action validator is not configured")
 	}
-	if input.Run.Owner.Type != OwnerTypeTeam {
+	if input.Run.Owner.Type != models.OwnerTypeTeam {
 		return nil, errors.New("team member actions require a Team-owned conversation Run")
 	}
 	args, deployment, _, member, err := resolveTeamMemberAction(ctx, v.teams, input.Run, input.Arguments)
@@ -148,12 +149,12 @@ func (v *TeamMemberActionValidator) ValidateActionProposal(ctx context.Context, 
 // The generic Action approval principal is reused only when it is also
 // eligible under the Team definition's amendment policy.
 type TeamMemberActionDispatcher struct {
-	store    KernelStore
+	store    models.KernelStore
 	teams    *kernelteam.Registry
 	fallback agentrun.ActionDispatcher
 }
 
-func NewTeamMemberActionDispatcher(store KernelStore, teams *kernelteam.Registry, fallback agentrun.ActionDispatcher) (*TeamMemberActionDispatcher, error) {
+func NewTeamMemberActionDispatcher(store models.KernelStore, teams *kernelteam.Registry, fallback agentrun.ActionDispatcher) (*TeamMemberActionDispatcher, error) {
 	if store == nil || teams == nil {
 		return nil, errors.New("kernel store and team registry are required")
 	}
@@ -173,14 +174,14 @@ func (d *TeamMemberActionDispatcher) DispatchAction(ctx context.Context, input a
 	run, err := d.store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil || run == nil {
 		if err == nil {
-			err = ErrRunNotFound
+			err = models.ErrRunNotFound
 		}
 		return nil, err
 	}
 	args, deployment, definition, _, err := resolveTeamMemberAction(ctx, d.teams, run, input.Arguments)
 	if err != nil {
 		// A retry after the roster update observes the next deployment revision.
-		if errors.Is(err, ErrRevisionConflict) {
+		if errors.Is(err, models.ErrRevisionConflict) {
 			return d.replayedResult(ctx, input.Call, run, args)
 		}
 		return nil, err
@@ -213,7 +214,7 @@ func (d *TeamMemberActionDispatcher) DispatchAction(ctx context.Context, input a
 	return teamMemberActionResult(updated, activation, false), nil
 }
 
-func resolveTeamMemberAction(ctx context.Context, teams *kernelteam.Registry, run *AgentRun, arguments map[string]interface{}) (teamMemberActionArguments, *kernelteam.Deployment, *kernelteam.Definition, kernelteam.RosterAssignment, error) {
+func resolveTeamMemberAction(ctx context.Context, teams *kernelteam.Registry, run *models.AgentRun, arguments map[string]interface{}) (teamMemberActionArguments, *kernelteam.Deployment, *kernelteam.Definition, kernelteam.RosterAssignment, error) {
 	var args teamMemberActionArguments
 	none := kernelteam.RosterAssignment{}
 	if err := decodeTeamMemberArguments(arguments, &args); err != nil {
@@ -227,7 +228,7 @@ func resolveTeamMemberAction(ctx context.Context, teams *kernelteam.Registry, ru
 	if err != nil {
 		return args, nil, nil, none, err
 	}
-	onRoster, err := AgentOnChatRoster(ctx, newRoutineTeamRoster(teams), run.Scope, run.Owner, strings.TrimSpace(run.AssignedAgentID))
+	onRoster, err := models.AgentOnChatRoster(ctx, newRoutineTeamRoster(teams), run.Scope, run.Owner, strings.TrimSpace(run.AssignedAgentID))
 	if err != nil {
 		return args, nil, nil, none, err
 	}
@@ -235,13 +236,13 @@ func resolveTeamMemberAction(ctx context.Context, teams *kernelteam.Registry, ru
 		return args, nil, nil, none, errors.New("team member action Agent is not on the active Team roster")
 	}
 	if deployment.Revision != args.ExpectedDeploymentRevision {
-		return args, nil, nil, none, ErrRevisionConflict
+		return args, nil, nil, none, models.ErrRevisionConflict
 	}
 	definition, err := teams.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	if err != nil {
 		return args, nil, nil, none, err
 	}
-	if !definition.Amendments.AgentMayPropose || !containsString(definition.Amendments.AllowedFields, TeamMemberAmendmentField) {
+	if !definition.Amendments.AgentMayPropose || !models.MatchesStringFilter(definition.Amendments.AllowedFields, models.TeamMemberAmendmentField) {
 		return args, nil, nil, none, errors.New("team definition policy does not allow Agent-proposed member changes")
 	}
 	if len(definition.Evaluations) > 0 {
@@ -299,7 +300,7 @@ func teamMemberActionReason(callID string) string {
 	return "Approved Team member change from conversation (action " + strings.TrimSpace(callID) + ")"
 }
 
-func approvedActionCheckpoint(ctx context.Context, store ActionStore, call *ActionCall) (*ApprovalCheckpoint, error) {
+func approvedActionCheckpoint(ctx context.Context, store models.ActionStore, call *models.ActionCall) (*models.ApprovalCheckpoint, error) {
 	if strings.TrimSpace(call.ApprovalID) == "" {
 		return nil, errors.New("Team definition policy requires an approved action checkpoint")
 	}
@@ -307,7 +308,7 @@ func approvedActionCheckpoint(ctx context.Context, store ActionStore, call *Acti
 	if err != nil {
 		return nil, err
 	}
-	if approval.Status != ApprovalStatusApproved || approval.DecisionBy == nil {
+	if approval.Status != models.ApprovalStatusApproved || approval.DecisionBy == nil {
 		return nil, errors.New("Team definition policy requires an approved action checkpoint with a decision principal")
 	}
 	return approval, nil
@@ -315,7 +316,7 @@ func approvedActionCheckpoint(ctx context.Context, store ActionStore, call *Acti
 
 // replayedResult answers a retry whose roster update already committed: the
 // next revision's activation carries this call's reason.
-func (d *TeamMemberActionDispatcher) replayedResult(ctx context.Context, call *ActionCall, run *AgentRun, args teamMemberActionArguments) (map[string]interface{}, error) {
+func (d *TeamMemberActionDispatcher) replayedResult(ctx context.Context, call *models.ActionCall, run *models.AgentRun, args teamMemberActionArguments) (map[string]interface{}, error) {
 	scope := capability.ScopeReference{Kind: call.Scope.Kind, ID: call.Scope.ID}
 	deployment, err := d.teams.GetDeployment(ctx, scope, run.Owner.ID)
 	if err != nil {
@@ -329,7 +330,7 @@ func (d *TeamMemberActionDispatcher) replayedResult(ctx context.Context, call *A
 	if deployment.Revision != args.ExpectedDeploymentRevision+1 || !slices.ContainsFunc(activations, func(activation workforce.DefinitionActivation) bool {
 		return activation.DeploymentRevision == deployment.Revision && activation.Reason == reason
 	}) {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	return teamMemberActionResult(deployment, nil, true), nil
 }
@@ -345,6 +346,6 @@ func teamMemberActionResult(deployment *kernelteam.Deployment, activation *workf
 }
 
 func isTeamMemberAction(bound *skill.BoundAction) bool {
-	return bound != nil && bound.Definition != nil && bound.Definition.ID == TeamManagementSkillID &&
+	return bound != nil && bound.Definition != nil && bound.Definition.ID == models.TeamManagementSkillID &&
 		bound.Definition.Version == action.TeamManagementSkillVersion && bound.Action.Name == action.TeamActionUpdateMember
 }
