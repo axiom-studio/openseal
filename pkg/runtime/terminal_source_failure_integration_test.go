@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
@@ -26,13 +27,13 @@ func sourceFailureRun(t *testing.T, store sourceFailureStore, at time.Time) (*Ag
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "source-failure-" + uuid.NewString()[:8]}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
+	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion,
 		Content: "Check my recent emails", StartThread: true, ResponseMode: "spoken", RequiresResponse: true,
@@ -156,12 +157,12 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 				}
 				failedSourceCall(t, kernel, sessions, run, "step-1", "skill-live-browser", callError, failure.Code(), failure.Details(), now)
 				// The loop stops on the step's error streak; the failure names no call.
-				explanation := beginRunFailureExplanation(run, modelstep.RunFailureKindRepeatLimit, modelstep.RunFailureCodeErrorStreak, "The same error kept repeating.", "", "")
+				explanation := runtimeconversation.BeginRunFailureExplanation(run, modelstep.RunFailureKindRepeatLimit, modelstep.RunFailureCodeErrorStreak, "The same error kept repeating.", "", "")
 				switch code {
 				case "stale rate limit":
 					// A newer untyped failure in a later step stopped the attempt.
 					failedSourceCall(t, kernel, sessions, run, "step-2", "skill-gmail", "execution failed: PRIVATE_CURRENT", "", nil, now)
-					explanation = beginRunFailureExplanation(run, RunFailureKindExecution, "action_failed", "A tool failed.", "", "")
+					explanation = runtimeconversation.BeginRunFailureExplanation(run, runtimeconversation.RunFailureKindExecution, "action_failed", "A tool failed.", "", "")
 				case "recovered rate limit":
 					// The model moved past the 429 and later steps succeeded.
 					appendSourceStep(t, sessions, run, "step-2", now, storetest.ToolSessionEntry(run.ID+":step-2:tool", "step-2", "call-step-2", ToolEntryCompleted))
@@ -211,7 +212,7 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 						t.Fatalf("file size limit hidden: %q", message.Content)
 					}
 				default:
-					if message.Content != TerminalFailureReply("execution_failed") {
+					if message.Content != runtimeconversation.TerminalFailureReply("execution_failed") {
 						t.Fatalf("stale or raw evidence attributed: %q", message.Content)
 					}
 				}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -294,7 +295,7 @@ func TestLoadFreezesSurfacedToolsOnTheEntry(t *testing.T) {
 		t.Fatalf("load entry = %s %+v", stored.State, stored.Tool.SurfacedTools)
 	}
 	first := stored.Tool.SurfacedTools[0]
-	names := LoopGovernedToolNames(x.binding.ModelActions)
+	names := conversation.LoopGovernedToolNames(x.binding.ModelActions)
 	if first.Capability != "action:notion.op2" || first.Name != names["notion.op2"] || first.Description != "Notion operation 2" ||
 		first.InputSchema["type"] != "object" {
 		t.Fatalf("frozen tool = %+v", first)

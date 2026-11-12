@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
@@ -159,7 +160,7 @@ func (s *loopRoutineScript) FinalFailure(run *AgentRun, entries []*SessionEntry)
 	if message == "" {
 		return nil
 	}
-	return beginRunFailureExplanation(run, RunFailureKindRoutineScript, RunFailureCodeRoutineScript, message, "", "")
+	return conversation.BeginRunFailureExplanation(run, conversation.RunFailureKindRoutineScript, RunFailureCodeRoutineScript, message, "", "")
 }
 
 // routineScriptAttempt is one run_command tool entry of the Run: its pinned

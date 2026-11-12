@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // A provider message whose thread history was unavailable keeps its source
@@ -17,7 +18,7 @@ func TestExternalMessageSourceSurvivesUnavailableHistoryAndReachesStep(t *testin
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	item := receiveContextTestEvent(t, store, endpoint, "identity-message", "trigger", "thread", now)
-	host := &recordingContextHost{result: &ExternalConversationContextResult{Status: ExternalConversationContextUnavailable, Source: &ExternalMessageSource{
+	host := &recordingContextHost{result: &ExternalConversationContextResult{Status: conversation.ExternalConversationContextUnavailable, Source: &ExternalMessageSource{
 		ChannelID: item.Event.ExternalConversationID, ParticipantID: item.Event.ExternalParticipantID, ParticipantDisplayName: "Kev",
 		ChannelName: "engineering", ChannelType: "private_channel",
 	}}}

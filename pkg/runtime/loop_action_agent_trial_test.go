@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
@@ -82,7 +83,7 @@ func TestAgentTrialFinalizerDeliversReceiptAndQueuesParent(t *testing.T) {
 func TestAgentTrialResumeRendersFailure(t *testing.T) {
 	f := newAgentTrialFinalizerFixture(t, AgentRunStatusRunning)
 	child := f.endChild(t, AgentRunStatusFailed, nil, "")
-	child.FailureExplanation = &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "model", Message: "The model is unavailable."}
+	child.FailureExplanation = &RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "model", Message: "The model is unavailable."}
 	putAgentTrialRun(t, f.store, child)
 	// No receipt (the finalizer missed it): the resume reads the child.
 	outcome := settleAgentTrialCall(t, f, f.parent, nil, time.Now())

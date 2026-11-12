@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -148,9 +149,9 @@ const taskStartFixtureCallID = "call-start-task"
 func settledTaskSourceFixture(t *testing.T, store *sqlite.Store) (*AgentRun, *AgentTurn, *Conversation, *ChannelMessage) {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "worker-task"}
-	conversations := NewConversationService(store)
+	conversations := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",
 	})
 	if err != nil {
@@ -353,10 +354,10 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 	for _, threaded := range []bool{false, true} {
 		t.Run(map[bool]string{false: "directed question", true: "private thread"}[threaded], func(t *testing.T) {
 			store := newTestKernelStore(t)
-			service := NewConversationService(store)
+			service := runtimeconversation.NewConversationService(store)
 			scope := Scope{Kind: "tenant", ID: "private-task"}
 			seedTestSpace(t, store, scope)
-			conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Private question", IdempotencyKey: "private-task"})
+			conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Private question", IdempotencyKey: "private-task"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -364,7 +365,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 			target := ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent"}
 			root := ""
 			if threaded {
-				parent, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: actor, Intent: MessageIntentQuestion, Content: "Private call thread", Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{target}}, IdempotencyKey: "private-root"})
+				parent, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: actor, Intent: MessageIntentQuestion, Content: "Private call thread", Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{target}}, IdempotencyKey: "private-root"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -375,7 +376,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 			if threaded {
 				audience = ConversationAudience{Kind: ConversationAudienceChannel}
 			}
-			posted, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: actor, Intent: MessageIntentQuestion, Content: "Review the release", Audience: audience, ReplyToMessageID: root, RequiresResponse: true, IdempotencyKey: "work"})
+			posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: actor, Intent: MessageIntentQuestion, Content: "Review the release", Audience: audience, ReplyToMessageID: root, RequiresResponse: true, IdempotencyKey: "work"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -446,7 +447,7 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if err != nil || held == nil || held.ID != first.WorkRun.ID {
 		t.Fatalf("hold background: %#v %v", held, err)
 	}
-	conversations := NewConversationService(store)
+	conversations := runtimeconversation.NewConversationService(store)
 	scheduler := mustConversationRunScheduler(t, store)
 	post := func(key, content string) *AgentRun {
 		t.Helper()

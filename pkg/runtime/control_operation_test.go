@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -321,12 +322,12 @@ func TestRunOperationTwiceInOneRunCreatesTwoChildren(t *testing.T) {
 
 func TestRunOperationPostsStartedMessagePerChild(t *testing.T) {
 	store := newTestKernelStore(t)
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	var trigger *ChannelMessage
 	var conversation *Conversation
 	c := newOperationCall(t, store, func(scope Scope, req *CreateAgentRunRequest) {
 		seedTestSpace(t, store, scope)
-		created, _, err := service.CreateConversation(context.Background(), CreateConversationRequest{
+		created, _, err := service.CreateConversation(context.Background(), runtimeconversation.CreateConversationRequest{
 			Scope: scope, Owner: req.Owner, Title: "Agent work", IdempotencyKey: "op-channel",
 		})
 		if err != nil {

@@ -10,6 +10,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -103,12 +104,12 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (age
 
 	authority.CanReact = run.Kind == RunKindConversation && chatReply && run.AssignedAgentID == agentID
 	if in.Runs != nil && in.Conversations != nil {
-		_, conversation, trigger, err := conversationWorkOrigin(ctx, in.Runs, in.Conversations, run)
+		_, conversation, trigger, err := runtimeconversation.ConversationWorkOrigin(ctx, in.Runs, in.Conversations, run)
 		if err != nil {
 			return agentrun.ControlAuthority{}, fmt.Errorf("resolve conversation origin: %w", err)
 		}
 		authority.CanAskUser = conversation != nil && trigger != nil && run.AssignedAgentID == agentID &&
-			run.AssignedAgentID == ConversationRunAgentID(conversation, run)
+			run.AssignedAgentID == runtimeconversation.ConversationRunAgentID(conversation, run)
 		authority.ExternalChannelReply = externalChannelContext(conversation)
 		_, authority.ApprovalMode, err = action.RunConversationApprovalMode(ctx, in.Runs, in.Conversations, run)
 		if err != nil {

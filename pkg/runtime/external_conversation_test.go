@@ -12,6 +12,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -541,16 +542,16 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 		t.Fatalf("undeclared event error = %v", err)
 	}
 
-	conversations := NewConversationService(store, models.WithClock(func() time.Time { return now }))
+	conversations := runtimeconversation.NewConversationService(store, models.WithClock(func() time.Time { return now }))
 	seedTestSpace(t, store, scope)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
 		Title: "Slack C012345", IdempotencyKey: "external:" + endpoint.ID + ":C/one",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	reply, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "slack-agent"},
 		Intent: MessageIntentAnswer, Content: "How can I help?",

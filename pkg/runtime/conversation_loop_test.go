@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -96,7 +97,7 @@ type chatLoopFixture struct {
 	t            *testing.T
 	ctx          context.Context
 	store        chatLoopStore
-	service      *ConversationService
+	service      *conversation.ConversationService
 	conversation *Conversation
 	runner       *ConversationRunTurnRunner
 	actions      *chatLoopActions
@@ -123,13 +124,13 @@ func newChatLoopFixture(t *testing.T, base conversationThreadStartTestStore, opt
 	}
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "chat-loop-" + uuid.NewString()[:8]}
-	service := NewConversationService(store)
+	service := conversation.NewConversationService(store)
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
 	if options.team {
 		owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-1"}
 	}
 	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: "Chat loop", IdempotencyKey: "chat-loop",
 	})
 	if err != nil {
@@ -230,7 +231,7 @@ func (f *chatLoopFixture) setParticipation(enabled bool) {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	f.conversation, err = f.service.UpdateConversation(f.ctx, UpdateConversationRequest{
+	f.conversation, err = f.service.UpdateConversation(f.ctx, conversation.UpdateConversationRequest{
 		Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision, ParticipationEnabled: &enabled,
 	})
 	if err != nil {
@@ -248,7 +249,7 @@ func (f *chatLoopFixture) post(key, userID, content string) *ChannelMessage {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	posted, err := f.service.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+	posted, err := f.service.PostChannelMessage(f.ctx, conversation.PostChannelMessageRequest{
 		Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: userID}, Intent: MessageIntentQuestion,
 		Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: key,
@@ -266,7 +267,7 @@ func (f *chatLoopFixture) post(key, userID, content string) *ChannelMessage {
 // startRun creates and claims the chat Run that answers trigger.
 func (f *chatLoopFixture) startRun(trigger *ChannelMessage) *AgentRun {
 	f.t.Helper()
-	request := conversationAgentRunRequest(f.conversation, trigger)
+	request := conversation.ConversationAgentRunRequest(f.conversation, trigger)
 	if f.team {
 		request.AssignedAgentID = "agent-1"
 		request.ConcurrencyKey = ConversationRunLane(f.conversation.ID, "", "agent-1")

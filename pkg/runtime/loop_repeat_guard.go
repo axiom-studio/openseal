@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -62,7 +63,7 @@ func newRepeatLedger() *repeatLedger {
 
 // loadRepeatLedger pages the Run's tool and user entries of sessionID until
 // exhausted.
-func loadRepeatLedger(ctx context.Context, store loopSessionEntryLister, scope Scope, sessionID, runID string) (*repeatLedger, error) {
+func loadRepeatLedger(ctx context.Context, store conversation.LoopSessionEntryLister, scope Scope, sessionID, runID string) (*repeatLedger, error) {
 	if store == nil || sessionID == "" || runID == "" {
 		return nil, errors.New("repeat ledger needs a session store, session and Run")
 	}

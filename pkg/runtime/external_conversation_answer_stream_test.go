@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // streamChatHost is a provider chat: sends post messages, updates edit them
@@ -141,9 +142,9 @@ func (f *answerStreamFixture) finish(status AgentRunStatus, answer string) {
 	f.t.Helper()
 	ctx := f.t.Context()
 	if answer != "" {
-		conversations := NewConversationService(f.store)
+		conversations := conversation.NewConversationService(f.store)
 		current, _ := conversations.GetConversation(ctx, f.endpoint.Scope, f.conversation.ID)
-		if _, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+		if _, err := conversations.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 			Scope: f.endpoint.Scope, ConversationID: f.conversation.ID, ExpectedRevision: current.Revision,
 			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: f.endpoint.DeploymentID},
 			Intent: MessageIntentAnswer, Content: answer, Audience: ConversationAudience{Kind: ConversationAudienceChannel},

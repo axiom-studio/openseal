@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -31,8 +32,8 @@ func newRoutineReportFixture(t *testing.T, threadID string, mapSource bool) *rou
 	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend,
 	})
-	conversations := NewConversationService(store)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversations := runtimeconversation.NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack DM",
 		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
 		IdempotencyKey: "routine-report-conversation",
@@ -51,7 +52,7 @@ func newRoutineReportFixture(t *testing.T, threadID string, mapSource bool) *rou
 			t.Fatal(err)
 		}
 	}
-	source, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	source, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender:         ConversationParticipant{Type: ConversationParticipantUser, ID: "U123"},
 		ExternalSource: &ExternalMessageSource{Provider: "slack", ChannelID: "D123", ChannelType: "im", ThreadID: threadID, MessageID: "171.001", ParticipantID: "U123"},

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 func TestUnsupportedURLRejected(t *testing.T) {
@@ -87,7 +88,7 @@ func TestApprovalClaimOnceThenFailsRun(t *testing.T) {
 	}
 	result := f.settleFinal("second", agentrun.ControlAuthority{})
 	if result.Kind != ControlFailed || result.Failure == nil || result.Failure.Code != finalUnverifiedApprovalCode ||
-		result.Failure.Kind != RunFailureKindExecution || result.Entry == nil || result.Entry.State != ToolEntryError {
+		result.Failure.Kind != conversation.RunFailureKindExecution || result.Entry == nil || result.Entry.State != ToolEntryError {
 		t.Fatalf("second = %#v", result)
 	}
 	requireControlError(t, f.stored("second").Tool.Result, ToolResultFailed, finalUnverifiedApprovalCode)

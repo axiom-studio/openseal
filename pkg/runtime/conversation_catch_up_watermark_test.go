@@ -84,9 +84,9 @@ func (p *catchUpPreparer) BeforeStep(ctx context.Context, in agentrun.StepInput,
 		p.before = nil
 		before()
 	}
-	result, err := p.f.catchUp.collect(ctx, p.f.request(in.Run, in.Session, p.through))
+	result, err := p.f.catchUp.Collect(ctx, p.f.request(in.Run, in.Session, p.through))
 	if err != nil {
 		return nil, err
 	}
-	return result.stepContextAppend(in.Session), nil
+	return result.StepContextAppend(in.Session), nil
 }

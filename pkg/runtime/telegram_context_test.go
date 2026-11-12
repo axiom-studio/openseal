@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -29,7 +30,7 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 	photo := &quotedPhotoHost{}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	item := receiveContextTestEvent(t, store, endpoint, "photo-reply", "reply", "parent", now)
-	history := &recordingContextHost{result: &ExternalConversationContextResult{Status: ExternalConversationContextPartial, Messages: []ExternalConversationContextMessage{{
+	history := &recordingContextHost{result: &ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []ExternalConversationContextMessage{{
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: "parent", ExternalMessageID: "parent", ExternalParticipantID: "Kev", ParticipantDisplayName: "Kev", OccurredAt: now.Add(-time.Second),
 		Attachments: []ExternalConversationAttachment{{ID: "photo", Name: "photo.png", MediaType: "image/png", SizeBytes: 68}},
 	}}}}
@@ -69,7 +70,7 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content ArtifactContentStore, conversation *Conversation, trigger *ChannelMessage, messageID string) *SessionEntry {
 	t.Helper()
 	ctx := t.Context()
-	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, conversationAgentRunRequest(conversation, trigger))
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, runtimeconversation.ConversationAgentRunRequest(conversation, trigger))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +83,7 @@ func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content ArtifactCon
 		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model", Producer: &chatLoopProducer{},
 		Authority: agentrun.ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
 	}}
-	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, NewConversationService(store)), ConversationRunTurnRunnerConfig{
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, runtimeconversation.NewConversationService(store)), ConversationRunTurnRunnerConfig{
 		AttachmentContent: content, AgentTurns: agent,
 	})
 	if err != nil {
@@ -110,7 +111,7 @@ func TestQuotedPhotoContextRejectsInvalidOriginAndUnboundedFiles(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	event := NormalizedExternalConversationEvent{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:8", ReplyToExternalMessageID: "chat:7", OccurredAt: now}
 	parent := ExternalConversationContextMessage{ExternalConversationID: "chat", ExternalThreadID: "reply:7", ExternalMessageID: "chat:7", ExternalParticipantID: "user", OccurredAt: now, Attachments: []ExternalConversationAttachment{{ID: "photo", Name: "photo.jpg", MediaType: "image/jpeg", SizeBytes: 20}}}
-	result := &ExternalConversationContextResult{Status: ExternalConversationContextPartial, Messages: []ExternalConversationContextMessage{parent}}
+	result := &ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextPartial, Messages: []ExternalConversationContextMessage{parent}}
 	messages, _, ok := normalizeExternalConversationContext(result, event)
 	if !ok || len(messages) != 1 {
 		t.Fatal("same-second quoted photo lost")

@@ -8,12 +8,13 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type conversationFollowUpFixture struct {
 	store        *sqlite.Store
-	service      *ConversationService
+	service      *conversation.ConversationService
 	scheduler    *ConversationRunScheduler
 	conversation *Conversation
 }
@@ -21,9 +22,9 @@ type conversationFollowUpFixture struct {
 func newConversationFollowUpFixture(t *testing.T) *conversationFollowUpFixture {
 	t.Helper()
 	store := newTestKernelStore(t)
-	service := NewConversationService(store)
+	service := conversation.NewConversationService(store)
 	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "follow-ups"})
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: Scope{Kind: "tenant", ID: "follow-ups"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"},
 		Title: "Shopping assistant", IdempotencyKey: "follow-up-channel",
 	})
@@ -39,7 +40,7 @@ func (f *conversationFollowUpFixture) post(t *testing.T, sender, content string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := f.service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+	result, err := f.service.PostChannelMessage(t.Context(), conversation.PostChannelMessageRequest{
 		Scope: f.conversation.Scope, ConversationID: f.conversation.ID, ExpectedRevision: current.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: sender}, Intent: MessageIntentQuestion,
 		Content: content, RequiresResponse: true, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -239,7 +240,7 @@ func (f *chatLoopFixture) schedule(message *ChannelMessage) *AgentRun {
 // Team chat, as the routing Run would (teamMemberRunRequest).
 func (f *chatLoopFixture) startMember(trigger *ChannelMessage, agentID string) *AgentRun {
 	f.t.Helper()
-	request := conversationAgentRunRequest(f.conversation, trigger)
+	request := conversation.ConversationAgentRunRequest(f.conversation, trigger)
 	request.AssignedAgentID = agentID
 	request.ConcurrencyKey = ConversationRunLane(f.conversation.ID, "", agentID)
 	request.SessionID = conversationSessionID(f.conversation.Scope, request.ConcurrencyKey)

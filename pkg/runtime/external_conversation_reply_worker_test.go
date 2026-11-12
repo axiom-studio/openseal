@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testing.T) {
@@ -14,8 +15,8 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
-	conversations := NewConversationService(store)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversations := runtimeconversation.NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack thread",
 		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
 		IdempotencyKey: "reply-worker-conversation",
@@ -23,7 +24,7 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbound, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	inbound, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "U123"},
 		Intent: MessageIntentQuestion, Content: "Can you help?",
@@ -59,7 +60,7 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 		t.Fatal(err)
 	}
 	current, _ := conversations.GetConversation(ctx, endpoint.Scope, conversation.ID)
-	_, err = conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	_, err = conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.DeploymentID},
 		Intent: MessageIntentAcknowledgment, Content: "Working on it",
@@ -141,15 +142,15 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "webchat")
-	conversations := NewConversationService(store)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversations := runtimeconversation.NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Web chat",
 		IdempotencyKey: "direct-reply-conversation",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbound, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	inbound, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "visitor"},
 		Intent: MessageIntentQuestion, Content: "Hello",
@@ -169,7 +170,7 @@ func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *test
 		t.Fatal(err)
 	}
 	current, _ := conversations.GetConversation(ctx, endpoint.Scope, conversation.ID)
-	reply, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	reply, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.DeploymentID},
 		Intent: MessageIntentAnswer, Content: "Hello there",

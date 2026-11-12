@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // ask_user (section 04 §10.2): a settle-phase control tool that posts one
@@ -71,12 +72,12 @@ func askUserPark(entryID string) *agentrun.LoopPark {
 	}
 }
 
-func (x *ControlExecutor) conversationService() *ConversationService {
+func (x *ControlExecutor) conversationService() *runtimeconversation.ConversationService {
 	if x.Conversations != nil {
 		return x.Conversations
 	}
 	if x.Reporting != nil {
-		return NewConversationService(x.Reporting, models.WithClock(x.Now))
+		return runtimeconversation.NewConversationService(x.Reporting, models.WithClock(x.Now))
 	}
 	return nil
 }
@@ -92,16 +93,16 @@ func (x *ControlExecutor) askUserOrigin(ctx context.Context, run *AgentRun) (*Co
 	var err error
 	switch {
 	case x.Reporting != nil:
-		_, conversation, trigger, err = conversationWorkOrigin(ctx, x.Portfolio, x.Reporting, run)
+		_, conversation, trigger, err = runtimeconversation.ConversationWorkOrigin(ctx, x.Portfolio, x.Reporting, run)
 	case x.Conversations != nil:
-		_, conversation, trigger, err = x.Conversations.workOrigin(ctx, x.Portfolio, run)
+		_, conversation, trigger, err = x.Conversations.WorkOrigin(ctx, x.Portfolio, run)
 	default:
 		return nil, nil, nil
 	}
 	if err != nil || conversation == nil || trigger == nil {
 		return nil, nil, err
 	}
-	agentID := ConversationRunAgentID(conversation, run)
+	agentID := runtimeconversation.ConversationRunAgentID(conversation, run)
 	if agentID == "" || strings.TrimSpace(run.AssignedAgentID) != agentID {
 		return nil, nil, nil
 	}
@@ -124,7 +125,7 @@ func (askUserHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.C
 		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "already_asked",
 			fmt.Sprintf("You asked this at step %d; the answer was: %s", prior.Step, answer), nil))
 	}
-	key := conversationClarificationKey(cc.Run.ID, cc.Entry.ID)
+	key := runtimeconversation.ConversationClarificationKey(cc.Run.ID, cc.Entry.ID)
 	meta := &ControlEntryMeta{Kind: ControlToolAskUser, QuestionMessageID: stableConversationID(cc.Run.Scope, key, "message")}
 	entry, err := x.transitionControlEntry(ctx, cc, ToolEntryAwaitingEvent,
 		&ToolEntryWait{EventWaitID: cc.Entry.ID, Reason: askUserWaitReason}, nil, meta)
@@ -187,7 +188,7 @@ func (x *ControlExecutor) postAskUserQuestion(ctx context.Context, run *AgentRun
 	}
 	current := conversation
 	for attempt := 0; attempt < 3; attempt++ {
-		_, err := service.PostChannelMessage(ctx, conversationQuestionPostRequest(run, current, trigger, args, key))
+		_, err := service.PostChannelMessage(ctx, runtimeconversation.ConversationQuestionPostRequest(run, current, trigger, args, key))
 		if err == nil {
 			return nil
 		}
@@ -211,7 +212,7 @@ func (askUserHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentru
 		return ControlResume{}, fmt.Errorf("%w: ask_user resume of %s in state %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
 	}
 	args := cc.Arguments.(*askUserArgs)
-	key := conversationClarificationKey(cc.Run.ID, cc.Entry.ID)
+	key := runtimeconversation.ConversationClarificationKey(cc.Run.ID, cc.Entry.ID)
 	if answer := askUserAnswer(cc.Run, cc.Entry, stableConversationID(cc.Run.Scope, key, "message")); answer != nil {
 		value := map[string]interface{}{
 			"status": "answered", "answer": truncateControlText(answer.AnswerContent, cc.Run.ID), "messageId": answer.AnswerMessageID,

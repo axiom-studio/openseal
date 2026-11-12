@@ -9,12 +9,13 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type conversationActorFixture struct {
 	store        *sqlite.Store
-	service      *ConversationService
+	service      *runtimeconversation.ConversationService
 	scheduler    *ConversationRunScheduler
 	conversation *Conversation
 }
@@ -22,9 +23,9 @@ type conversationActorFixture struct {
 func newConversationActorFixture(t *testing.T, scope Scope, agentID string) *conversationActorFixture {
 	t.Helper()
 	store := newTestKernelStore(t)
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: agentID},
 		Title: "Shared organization conversation", IdempotencyKey: "shared-conversation",
 	})
@@ -34,7 +35,7 @@ func newConversationActorFixture(t *testing.T, scope Scope, agentID string) *con
 	return &conversationActorFixture{store, service, mustConversationRunScheduler(t, store), conversation}
 }
 
-func (f *conversationActorFixture) post(t *testing.T, request PostChannelMessageRequest) *ChannelMessage {
+func (f *conversationActorFixture) post(t *testing.T, request runtimeconversation.PostChannelMessageRequest) *ChannelMessage {
 	t.Helper()
 	current, err := f.service.GetConversation(t.Context(), f.conversation.Scope, f.conversation.ID)
 	if err != nil {
@@ -125,9 +126,9 @@ func TestConversationClarificationOnlyAcceptsInitiatingUsersAnswer(t *testing.T)
 			f := newConversationActorFixture(t, Scope{Kind: "organization", ID: "shared"}, "writer")
 			a := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
 			b := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}
-			trigger := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "request-a"})
+			trigger := f.post(t, runtimeconversation.PostChannelMessageRequest{Sender: a, IdempotencyKey: "request-a"})
 			root, child, question := f.waitingQuestion(t, trigger)
-			request := PostChannelMessageRequest{Sender: b, Intent: MessageIntentAnswer, Content: "Use the finance team as the audience.", IdempotencyKey: "answer-b"}
+			request := runtimeconversation.PostChannelMessageRequest{Sender: b, Intent: MessageIntentAnswer, Content: "Use the finance team as the audience.", IdempotencyKey: "answer-b"}
 			switch target {
 			case "reply":
 				request.ReplyToMessageID = question.ID
@@ -152,7 +153,7 @@ func TestConversationClarificationOnlyAcceptsInitiatingUsersAnswer(t *testing.T)
 			f.assertRunUnchanged(t, root)
 			f.assertRunUnchanged(t, child)
 
-			answerA := f.post(t, PostChannelMessageRequest{Sender: a, Intent: MessageIntentAnswer, ResolvesMessageID: question.ID, Content: "Write for general readers.", IdempotencyKey: "answer-a"})
+			answerA := f.post(t, runtimeconversation.PostChannelMessageRequest{Sender: a, Intent: MessageIntentAnswer, ResolvesMessageID: question.ID, Content: "Write for general readers.", IdempotencyKey: "answer-a"})
 			resumed := f.schedule(t, answerA)
 			if resumed.ID != child.ID || resumed.Status != AgentRunStatusQueued || resumed.WakeCondition != nil || len(resumed.PendingInterventions) != 1 || resumed.PendingInterventions[0].Actor.ID != a.ID {
 				t.Fatalf("original member's clarification did not resume exactly once: %#v", resumed)
@@ -177,7 +178,7 @@ func TestConversationFollowUpsSeparateMembersIncludingDelayedScheduling(t *testi
 			f := newConversationActorFixture(t, Scope{Kind: "organization", ID: "shared"}, "writer")
 			a := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
 			b := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}
-			requests := []PostChannelMessageRequest{
+			requests := []runtimeconversation.PostChannelMessageRequest{
 				{Sender: a, IdempotencyKey: "a-first"},
 				{Sender: b, IdempotencyKey: "b-first"},
 				{Sender: a, IdempotencyKey: "a-second"},
@@ -232,7 +233,7 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 	catalog, scope := cancellationActionCatalog(t)
 	f := newConversationActorFixture(t, scope, "research-agent")
 	a := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
-	trigger := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "request-a"})
+	trigger := f.post(t, runtimeconversation.PostChannelMessageRequest{Sender: a, IdempotencyKey: "request-a"})
 	root := f.schedule(t, trigger)
 	// The run loop claims member A's Run; one of its steps proposes the
 	// reviewed action and the step-end park waits on its approval.
@@ -249,7 +250,7 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 	}
 	loop.ParkOnApproval(proposal.Approval.ID)
 	parked := loop.Run
-	messageB := f.post(t, PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, IdempotencyKey: "request-b"})
+	messageB := f.post(t, runtimeconversation.PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, IdempotencyKey: "request-b"})
 	runB := f.schedule(t, messageB)
 	if runB.ID == root.ID || runB.Context[conversationRunContextTriggerID] != messageB.ID {
 		t.Fatalf("member B inherited member A's run: %#v", runB)
@@ -266,7 +267,7 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 
 	// The requesting member's own message replaces the approval: the action
 	// is not carried out and their Run resumes with the message.
-	messageA := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "follow-up-a"})
+	messageA := f.post(t, runtimeconversation.PostChannelMessageRequest{Sender: a, IdempotencyKey: "follow-up-a"})
 	delivered := f.schedule(t, messageA)
 	if delivered.ID != root.ID || delivered.Status != AgentRunStatusQueued || delivered.WakeCondition != nil ||
 		!runHasFollowUp(delivered, messageA.ID) {
@@ -295,17 +296,17 @@ func TestConversationClarificationUsesOnlyCanonicalVoiceInitiator(t *testing.T) 
 		t.Run(test.name, func(t *testing.T) {
 			f := newConversationActorFixture(t, Scope{Kind: "organization", ID: "shared-voice"}, "writer")
 			a := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
-			request := PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantService, ID: test.serviceID}, Intent: MessageIntentUpdate, ResponseMode: test.response, IdempotencyKey: "call-start"}
+			request := runtimeconversation.PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantService, ID: test.serviceID}, Intent: MessageIntentUpdate, ResponseMode: test.response, IdempotencyKey: "call-start"}
 			if test.initiator {
 				request.Initiator = &a
 			}
 			trigger := f.post(t, request)
 			root, child, question := f.waitingQuestion(t, trigger)
-			answerB := f.post(t, PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, Intent: MessageIntentAnswer, ResolvesMessageID: question.ID, IdempotencyKey: "answer-b"})
+			answerB := f.post(t, runtimeconversation.PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, Intent: MessageIntentAnswer, ResolvesMessageID: question.ID, IdempotencyKey: "answer-b"})
 			f.schedule(t, answerB)
 			f.assertRunUnchanged(t, root)
 			f.assertRunUnchanged(t, child)
-			answerA := f.post(t, PostChannelMessageRequest{Sender: a, Intent: MessageIntentAnswer, ResolvesMessageID: question.ID, IdempotencyKey: "answer-a"})
+			answerA := f.post(t, runtimeconversation.PostChannelMessageRequest{Sender: a, Intent: MessageIntentAnswer, ResolvesMessageID: question.ID, IdempotencyKey: "answer-a"})
 			result := f.schedule(t, answerA)
 			if test.wantResumed {
 				if result.ID != child.ID || result.Status != AgentRunStatusQueued || len(result.PendingInterventions) != 1 || result.PendingInterventions[0].Actor.ID != a.ID {
@@ -325,15 +326,15 @@ func TestConversationClarificationUsesOnlyCanonicalVoiceInitiator(t *testing.T) 
 func TestConversationFollowUpUsesVoiceInitiator(t *testing.T) {
 	f := newConversationActorFixture(t, Scope{Kind: "organization", ID: "shared-voice"}, "writer")
 	a := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
-	trigger := f.post(t, PostChannelMessageRequest{
+	trigger := f.post(t, runtimeconversation.PostChannelMessageRequest{
 		Sender: ConversationParticipant{Type: ConversationParticipantService, ID: VoiceCallCoordinatorParticipantID}, Initiator: &a,
 		Intent: MessageIntentUpdate, ResponseMode: "spoken", IdempotencyKey: "call-start",
 	})
 	voice := f.schedule(t, trigger)
-	messageB := f.post(t, PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, IdempotencyKey: "request-b"})
+	messageB := f.post(t, runtimeconversation.PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, IdempotencyKey: "request-b"})
 	runB := f.schedule(t, messageB)
 	f.assertRunUnchanged(t, voice)
-	messageA := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "request-a"})
+	messageA := f.post(t, runtimeconversation.PostChannelMessageRequest{Sender: a, IdempotencyKey: "request-a"})
 	f.schedule(t, messageA)
 	current, err := f.store.GetAgentRun(t.Context(), voice.Scope, voice.ID)
 	if err != nil || current.Status != AgentRunStatusQueued || !runHasFollowUp(current, messageA.ID) {
@@ -371,7 +372,7 @@ func TestConversationInitiatingUserRejectsUnboundOrMalformedOrigin(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			message := cloneChannelMessage(voice)
 			test.change(message)
-			actor, valid := conversationMessageInitiatingUser(conversation, message)
+			actor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, message)
 			if valid != test.valid || valid && actor != a {
 				t.Fatalf("origin actor = %#v, valid=%v; want valid=%v", actor, valid, test.valid)
 			}

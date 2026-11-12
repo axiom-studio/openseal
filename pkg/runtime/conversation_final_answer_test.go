@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -49,7 +50,7 @@ type finalDeliveryFixture struct {
 	t            *testing.T
 	ctx          context.Context
 	store        finalDeliveryStore
-	service      *ConversationService
+	service      *runtimeconversation.ConversationService
 	conversation *Conversation
 	trigger      *ChannelMessage
 	run          *AgentRun
@@ -66,7 +67,7 @@ type finalDeliveryOptions struct {
 	team          bool
 	responseMode  string
 	participation bool // RequireParticipationOptIn with participation disabled
-	coordinator   func(*testing.T, *ConversationService) *ConversationCoordinator
+	coordinator   func(*testing.T, *runtimeconversation.ConversationService) *runtimeconversation.ConversationCoordinator
 	visualChecks  func(*AgentRun) presentation.ValidateOptions
 }
 
@@ -86,19 +87,19 @@ func newFinalDeliveryFixture(t *testing.T, base conversationThreadStartTestStore
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	scope := Scope{Kind: "tenant", ID: "final-" + uuid.NewString()[:8]}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
 	if options.team {
 		owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-1"}
 	}
 	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: "Final answers", IdempotencyKey: "final-" + uuid.NewString()[:8],
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,
 		Content: "Can you pull the quarterly report?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -111,7 +112,7 @@ func newFinalDeliveryFixture(t *testing.T, base conversationThreadStartTestStore
 	if conversation, err = service.GetConversation(ctx, scope, conversation.ID); err != nil {
 		t.Fatal(err)
 	}
-	request := conversationAgentRunRequest(conversation, trigger)
+	request := runtimeconversation.ConversationAgentRunRequest(conversation, trigger)
 	if options.team {
 		request.AssignedAgentID = "agent-1"
 		request.ConcurrencyKey = ConversationRunLane(conversation.ID, "", "agent-1")
@@ -307,7 +308,7 @@ func (f *finalDeliveryFixture) followUp(key, content string) *ChannelMessage {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	posted, err := f.service.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+	posted, err := f.service.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.run.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,
 		Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: key,
@@ -345,7 +346,7 @@ func TestFinalAnswerSendsBackFilesThatAreNotSavedFileIDs(t *testing.T) {
 		f.governed("export", ActionCallStatusSucceeded, map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": "report-pdf", "version": 1, "path": "docs/report.pdf"}}})
 		f.governed("failed", ActionCallStatusFailed, map[string]interface{}{"artifactRefs": []interface{}{ref("failed-file", 1)}})
 		for _, files := range [][]interface{}{{"docs/draft.pdf"}, {"docs/report.pdf", "failed-file"}} {
-			answer, _ := f.finalEntry("Here is the report.", map[string]interface{}{finalOutputSummaryKey: "Here is the report.", finalOutputFilesKey: files})
+			answer, _ := f.finalEntry("Here is the report.", map[string]interface{}{finalOutputSummaryKey: "Here is the report.", runtimeconversation.FinalOutputFilesKey: files})
 			result := f.mustDeliver(answer, agentrun.FinalDeliveryRetryFinal)
 			if !strings.Contains(result.RejectionText, files[len(files)-1].(string)) || !strings.Contains(result.RejectionText, "docs/report.pdf") {
 				t.Fatalf("files %v: rejection = %q", files, result.RejectionText)
@@ -367,7 +368,7 @@ func TestFinalAnswerPostsThreadReplyWithRunAndArtifactRefs(t *testing.T) {
 		f.governed("failed", ActionCallStatusFailed, map[string]interface{}{"artifactRefs": []interface{}{ref("failed-file", 1)}})
 		// The answer hands over the files it names; the Run's others stay in the Library.
 		answer, _ := f.finalEntry("Here is the quarterly report.", map[string]interface{}{
-			finalOutputSummaryKey: "Here is the quarterly report.", finalOutputFilesKey: []interface{}{"report-pdf", "report-csv"}})
+			finalOutputSummaryKey: "Here is the quarterly report.", runtimeconversation.FinalOutputFilesKey: []interface{}{"report-pdf", "report-csv"}})
 		result := f.mustDeliver(answer, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 {
@@ -436,7 +437,7 @@ func TestSilentOnlyForSpoken(t *testing.T) {
 
 func TestReactionOnlyCompletionPostsNoMessage(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
-		args, _ := json.Marshal(TurnReaction{MessageID: f.trigger.ID, Emoji: "👍"})
+		args, _ := json.Marshal(runtimeconversation.TurnReaction{MessageID: f.trigger.ID, Emoji: "👍"})
 		_, entries := f.step(agentrun.LoopToolCall{ID: "react", Name: string(ControlToolReact), Arguments: args})
 		f.settle(entries["react"], ToolEntryCompleted, "", `{"status":"added"}`)
 		// The control section's reactions-only final.
@@ -594,18 +595,18 @@ func TestUnconsumedInterventionBlocksPostAndContinues(t *testing.T) {
 }
 
 func TestTeamHandoffMentionsFromFinalAnswer(t *testing.T) {
-	team := func(t *testing.T, service *ConversationService) *ConversationCoordinator {
+	team := func(t *testing.T, service *runtimeconversation.ConversationService) *runtimeconversation.ConversationCoordinator {
 		t.Helper()
-		participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
-			return []ConversationParticipantBinding{
+		participants := runtimeconversation.ConversationParticipantSourceFunc(func(context.Context, runtimeconversation.ConversationParticipantQuery) ([]runtimeconversation.ConversationParticipantBinding, error) {
+			return []runtimeconversation.ConversationParticipantBinding{
 				{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-1"}},
 				{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-2"}},
 			}, nil
 		})
-		router := ConversationRouterFunc(func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error) {
-			return ConversationRouteDecision{AgentID: "agent-1"}, nil
+		router := runtimeconversation.ConversationRouterFunc(func(context.Context, runtimeconversation.ConversationRouteRequest) (runtimeconversation.ConversationRouteDecision, error) {
+			return runtimeconversation.ConversationRouteDecision{AgentID: "agent-1"}, nil
 		})
-		coordinator, err := NewConversationCoordinator(service, participants, router, DefaultConversationCoordinatorConfig())
+		coordinator, err := runtimeconversation.NewConversationCoordinator(service, participants, router, runtimeconversation.DefaultConversationCoordinatorConfig())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -636,7 +637,7 @@ func TestOTPAnswerIsPostedThenParks(t *testing.T) {
 func TestFailureExplanationIsPostedAndFails(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		f.mutateRun(func(run *AgentRun) {
-			run.FailureExplanation = &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "execution_failed", Message: "The export service was unavailable."}
+			run.FailureExplanation = &RunFailureExplanation{Kind: runtimeconversation.RunFailureKindExecution, Code: "execution_failed", Message: "The export service was unavailable."}
 		})
 		answer, _ := f.finalEntry("I couldn't export the report: the export service was down.",
 			map[string]interface{}{finalOutputSummaryKey: "x", agentrun.FinalOutputVisualKey: finalDeliveryVisual()})
@@ -650,12 +651,12 @@ func TestFailureExplanationIsPostedAndFails(t *testing.T) {
 	// An empty explanation posts the kernel's reply.
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		f.mutateRun(func(run *AgentRun) {
-			run.FailureExplanation = &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "execution_failed", Message: "The export service was unavailable."}
+			run.FailureExplanation = &RunFailureExplanation{Kind: runtimeconversation.RunFailureKindExecution, Code: "execution_failed", Message: "The export service was unavailable."}
 		})
 		answer, _ := f.finalEntry("", map[string]interface{}{agentrun.FinalOutputSilentKey: true})
 		f.mustDeliver(answer, agentrun.FinalDeliveryFail)
 		answers := f.answers()
-		if len(answers) != 1 || answers[0].Content != TerminalFailureReply("execution_failed") {
+		if len(answers) != 1 || answers[0].Content != runtimeconversation.TerminalFailureReply("execution_failed") {
 			t.Fatalf("answers = %#v", answers)
 		}
 	})

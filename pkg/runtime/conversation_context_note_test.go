@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // The run_context note (run-loop section 05 §5, CONV-04), on the
@@ -15,15 +17,15 @@ func (f *CatchUpFixture) noteRunner() *ConversationRunTurnRunner {
 	return &ConversationRunTurnRunner{conversations: f.service, portfolio: f.store, runbooks: f.store}
 }
 
-func (f *CatchUpFixture) noteInput(run *AgentRun, session *AgentSession, trigger *ChannelMessage) conversationContextInput {
-	return conversationContextInput{
+func (f *CatchUpFixture) noteInput(run *AgentRun, session *AgentSession, trigger *ChannelMessage) conversation.ConversationContextInput {
+	return conversation.ConversationContextInput{
 		Run: run, Session: session, Sessions: f.store, Conversation: f.conversation, Trigger: trigger,
 		Viewer: f.viewer(), Step: 1,
 	}
 }
 
 // note builds the run_context note of in and appends it to the session.
-func (f *CatchUpFixture) note(runner *ConversationRunTurnRunner, in conversationContextInput) *SessionEntry {
+func (f *CatchUpFixture) note(runner *ConversationRunTurnRunner, in conversation.ConversationContextInput) *SessionEntry {
 	f.t.Helper()
 	note, err := runner.conversationRunContextNote(f.t.Context(), in)
 	if err != nil {
@@ -68,7 +70,7 @@ func runContextSectionNames(t *testing.T, note *SessionEntry) map[string]bool {
 func TestRunContextNoteAlwaysHasRespondTo(t *testing.T) {
 	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
 		runner := f.noteRunner()
-		trigger := f.post(PostChannelMessageRequest{IdempotencyKey: "q1", Content: "What is on today?", SenderDisplayName: "Kev"})
+		trigger := f.post(conversation.PostChannelMessageRequest{IdempotencyKey: "q1", Content: "What is on today?", SenderDisplayName: "Kev"})
 		run, session := f.open("")
 		first := f.note(runner, f.noteInput(run, session, trigger))
 		if first == nil || first.Note.Kind != NoteRunContext || first.SourceKey != RunContextSourceKey(run.ID) ||
@@ -79,13 +81,13 @@ func TestRunContextNoteAlwaysHasRespondTo(t *testing.T) {
 		if !strings.HasPrefix(first.Note.Text, want) || !strings.HasSuffix(first.Note.Text, "\n</run_context>") {
 			t.Fatalf("note text = %q", first.Note.Text)
 		}
-		if names := runContextSectionNames(t, first); !names[contextSectionRespondTo] || !names[contextSectionChannel] || !names[contextSectionActiveRuns] {
+		if names := runContextSectionNames(t, first); !names[conversation.ContextSectionRespondTo] || !names[conversation.ContextSectionChannel] || !names[conversation.ContextSectionActiveRuns] {
 			t.Fatalf("first sections = %v", names)
 		}
 		// The next Run of the lane sees nothing new but still gets respond_to.
 		second := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
 		names := runContextSectionNames(t, second)
-		if second == nil || len(names) != 1 || !names[contextSectionRespondTo] {
+		if second == nil || len(names) != 1 || !names[conversation.ContextSectionRespondTo] {
 			t.Fatalf("second note sections = %v (%v)", names, second)
 		}
 	})
@@ -99,7 +101,7 @@ func TestRunContextSectionsEmittedOnlyWhenChanged(t *testing.T) {
 		trigger := f.say("q1", "Draw me a cat")
 		run, session := f.open("")
 		first := f.note(runner, f.noteInput(run, session, trigger))
-		if names := runContextSectionNames(t, first); !names[contextSectionImageStyle] || !names[contextSectionChannel] {
+		if names := runContextSectionNames(t, first); !names[conversation.ContextSectionImageStyle] || !names[conversation.ContextSectionChannel] {
 			t.Fatalf("first sections = %v", names)
 		}
 		if !strings.Contains(first.Note.Text, "Preferred picture style: watercolor.") || !strings.Contains(first.Note.Text, `Channel "Catch-up" (`+f.conversation.ID+`).`) {
@@ -107,13 +109,13 @@ func TestRunContextSectionsEmittedOnlyWhenChanged(t *testing.T) {
 		}
 
 		unchanged := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
-		if names := runContextSectionNames(t, unchanged); names[contextSectionImageStyle] || names[contextSectionChannel] || names[contextSectionActiveRuns] {
+		if names := runContextSectionNames(t, unchanged); names[conversation.ContextSectionImageStyle] || names[conversation.ContextSectionChannel] || names[conversation.ContextSectionActiveRuns] {
 			t.Fatalf("unchanged sections re-sent: %v", names)
 		}
 
 		style = "ink"
 		changed := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
-		if names := runContextSectionNames(t, changed); !names[contextSectionImageStyle] || names[contextSectionChannel] {
+		if names := runContextSectionNames(t, changed); !names[conversation.ContextSectionImageStyle] || names[conversation.ContextSectionChannel] {
 			t.Fatalf("changed sections = %v", names)
 		}
 		if !strings.Contains(changed.Note.Text, "Preferred picture style: ink.") {
@@ -127,7 +129,7 @@ func TestRunContextSectionsEmittedOnlyWhenChanged(t *testing.T) {
 			t.Fatalf("cleared text = %q", cleared.Note.Text)
 		}
 		again := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
-		if names := runContextSectionNames(t, again); names[contextSectionImageStyle] {
+		if names := runContextSectionNames(t, again); names[conversation.ContextSectionImageStyle] {
 			t.Fatalf("none text re-sent: %q", again.Note.Text)
 		}
 	})
@@ -143,7 +145,7 @@ func TestRunContextNamesTheWorkMachine(t *testing.T) {
 		trigger := f.say("q1", "can you do ls?")
 		run, session := f.open("")
 		first := f.note(runner, f.noteInput(run, session, trigger))
-		if names := runContextSectionNames(t, first); !names[contextSectionWorkMachine] || !strings.Contains(first.Note.Text, machine) {
+		if names := runContextSectionNames(t, first); !names[conversation.ContextSectionWorkMachine] || !strings.Contains(first.Note.Text, machine) {
 			t.Fatalf("first = %v %q", names, first.Note.Text)
 		}
 		machine = ""
@@ -173,7 +175,7 @@ func TestRunContextReEmittedAfterCompaction(t *testing.T) {
 			t.Fatalf("append compaction: %v", err)
 		}
 		after := f.note(runner, f.noteInput(next, session, trigger))
-		if names := runContextSectionNames(t, after); !names[contextSectionChannel] || !names[contextSectionActiveRuns] {
+		if names := runContextSectionNames(t, after); !names[conversation.ContextSectionChannel] || !names[conversation.ContextSectionActiveRuns] {
 			t.Fatalf("sections after compaction = %v", names)
 		}
 	})
@@ -215,7 +217,7 @@ func TestActiveRunsBecomesNoneWhenWorkEnds(t *testing.T) {
 			t.Fatal(err)
 		}
 		ended := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
-		if names := runContextSectionNames(t, ended); !names[contextSectionActiveRuns] || !strings.Contains(ended.Note.Text, "Active work: none.") {
+		if names := runContextSectionNames(t, ended); !names[conversation.ContextSectionActiveRuns] || !strings.Contains(ended.Note.Text, "Active work: none.") {
 			t.Fatalf("after the work ended = %q", ended.Note.Text)
 		}
 	})
@@ -223,13 +225,13 @@ func TestActiveRunsBecomesNoneWhenWorkEnds(t *testing.T) {
 
 func TestTeamRosterSectionAndRoutingReason(t *testing.T) {
 	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}, func(t *testing.T, f *CatchUpFixture) {
-		participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
-			return []ConversationParticipantBinding{{Participant: f.agent()}, {Participant: AgentParticipant("maya")}}, nil
+		participants := conversation.ConversationParticipantSourceFunc(func(context.Context, conversation.ConversationParticipantQuery) ([]conversation.ConversationParticipantBinding, error) {
+			return []conversation.ConversationParticipantBinding{{Participant: f.agent()}, {Participant: AgentParticipant("maya")}}, nil
 		})
-		router := ConversationRouterFunc(func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error) {
-			return ConversationRouteDecision{AgentID: f.agentID}, nil
+		router := conversation.ConversationRouterFunc(func(context.Context, conversation.ConversationRouteRequest) (conversation.ConversationRouteDecision, error) {
+			return conversation.ConversationRouteDecision{AgentID: f.agentID}, nil
 		})
-		coordinator, err := NewConversationCoordinator(f.service, participants, router, DefaultConversationCoordinatorConfig())
+		coordinator, err := conversation.NewConversationCoordinator(f.service, participants, router, conversation.DefaultConversationCoordinatorConfig())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -249,7 +251,7 @@ func TestTeamRosterSectionAndRoutingReason(t *testing.T) {
 				t.Fatalf("note lacks %q: %q", want, note.Note.Text)
 			}
 		}
-		if names := runContextSectionNames(t, note); !names[contextSectionTeam] {
+		if names := runContextSectionNames(t, note); !names[conversation.ContextSectionTeam] {
 			t.Fatalf("sections = %v", names)
 		}
 		// A 1:1 Agent Run has no Team section.
@@ -340,7 +342,7 @@ func TestRunContextListsRecentConversationTasks(t *testing.T) {
 		run, session := f.open("")
 		text := f.note(runner, f.noteInput(run, session, trigger)).Note.Text
 		want := "Conversation tasks you started for this person here, newest first:\n" +
-			"- task " + running.Task.ID + " (independent, running) workRunId work-research revision 3, started " + conversationMessageTime(f.now) +
+			"- task " + running.Task.ID + " (independent, running) workRunId work-research revision 3, started " + conversation.ConversationMessageTime(f.now) +
 			`: "Research the three vendors and compare prices"`
 		if !strings.Contains(text, want) || !strings.Contains(text, "- task "+done.Task.ID+" (independent, completed) workRunId work-inbox") {
 			t.Fatalf("tasks section = %q", text)
@@ -348,7 +350,7 @@ func TestRunContextListsRecentConversationTasks(t *testing.T) {
 		if strings.Contains(text, forged.Task.ID) || strings.Contains(text, other.Task.ID) {
 			t.Fatalf("unverified tasks listed: %q", text)
 		}
-		if tasks.filter.ActiveOnly || tasks.filter.Limit != runContextMaximumTasks || tasks.filter.AuthenticatedActor != trigger.Sender {
+		if tasks.filter.ActiveOnly || tasks.filter.Limit != conversation.RunContextMaximumTasks || tasks.filter.AuthenticatedActor != trigger.Sender {
 			t.Fatalf("task filter = %#v", tasks.filter)
 		}
 

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -24,10 +25,10 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 				t.Cleanup(func() { _ = disk.Close() })
 				store = disk
 			}
-			service := NewConversationService(store)
+			service := runtimeconversation.NewConversationService(store)
 			scope := Scope{Kind: "tenant", ID: "initiator"}
 			seedTestSpace(t, store.(SpaceStore), scope)
-			conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+			conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 				Title: "Conversation", IdempotencyKey: "conversation",
 			})
@@ -35,7 +36,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 				t.Fatal(err)
 			}
 			initiator := &ConversationParticipant{Type: ConversationParticipantUser, ID: "42"}
-			request := PostChannelMessageRequest{
+			request := runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 				Sender:    ConversationParticipant{Type: ConversationParticipantService, ID: "service"},
 				Initiator: initiator, Intent: MessageIntentUpdate, Content: "Service started.",
@@ -55,7 +56,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				service = NewConversationService(disk)
+				service = runtimeconversation.NewConversationService(disk)
 			}
 			loaded, err := service.GetChannelMessage(ctx, scope, conversation.ID, posted.Message.ID)
 			if err != nil || loaded.Initiator == nil || loaded.Initiator.Type != ConversationParticipantUser || loaded.Initiator.ID != "42" {
@@ -101,17 +102,17 @@ func TestChannelMessagesRejectUntrustedInitiator(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
 			store := newTestKernelStore(t)
-			service := NewConversationService(store)
+			service := runtimeconversation.NewConversationService(store)
 			scope := Scope{Kind: "tenant", ID: "initiator"}
 			seedTestSpace(t, store, scope)
-			conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+			conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 				Title: "Conversation", IdempotencyKey: "conversation",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = service.PostChannelMessage(ctx, PostChannelMessageRequest{
+			_, err = service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 				Sender: ConversationParticipant{Type: test.sender, ID: "sender"}, Initiator: &test.initiator,
 				Intent: MessageIntentUpdate, Content: "An event", Audience: ConversationAudience{Kind: ConversationAudienceChannel},

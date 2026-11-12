@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -25,17 +26,17 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	}
 	ctx := context.Background()
 	fixed := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	primaryService := NewConversationService(primary, models.WithClock(func() time.Time { return fixed }))
-	replicaService := NewConversationService(replica, models.WithClock(func() time.Time { return fixed }))
+	primaryService := runtimeconversation.NewConversationService(primary, models.WithClock(func() time.Time { return fixed }))
+	replicaService := runtimeconversation.NewConversationService(replica, models.WithClock(func() time.Time { return fixed }))
 	scope := Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, primary, scope)
-	conversation, _, err := primaryService.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := primaryService.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, Title: "Release", IdempotencyKey: "release-v1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	question, err := primaryService.PostChannelMessage(ctx, PostChannelMessageRequest{
+	question, err := primaryService.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
 		Content: "Is it ready?", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,
@@ -45,14 +46,14 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		t.Fatal(err)
 	}
 	agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: "developer"}
-	cursor, _, err := primaryService.AdvanceCursor(ctx, AdvanceConversationCursorRequest{
+	cursor, _, err := primaryService.AdvanceCursor(ctx, runtimeconversation.AdvanceConversationCursorRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: agent,
 		DeliveredSequence: question.Message.Sequence, ReadSequence: question.Message.Sequence,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	presence, err := primaryService.SetPresence(ctx, SetConversationPresenceRequest{
+	presence, err := primaryService.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: ConversationPresenceWorking,
 		Summary: "Checking release", RunID: "release-run", TTL: 30 * time.Second,
 	})
@@ -60,7 +61,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		t.Fatal(err)
 	}
 	thinkingParticipant := ConversationParticipant{Type: ConversationParticipantAgent, ID: "reviewer"}
-	thinkingPresence, err := primaryService.SetPresence(ctx, SetConversationPresenceRequest{
+	thinkingPresence, err := primaryService.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: thinkingParticipant,
 		State: ConversationPresenceThinking, Summary: "Evaluating evidence", TTL: 30 * time.Second,
 	})
@@ -68,19 +69,19 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		t.Fatal(err)
 	}
 	typingParticipant := ConversationParticipant{Type: ConversationParticipantAgent, ID: "release-manager"}
-	typingPresence, err := primaryService.SetPresence(ctx, SetConversationPresenceRequest{
+	typingPresence, err := primaryService.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: typingParticipant,
 		State: ConversationPresenceTyping, Summary: "Writing the decision", TTL: 30 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	roundRequest := CommitConversationRoutingRequest{
+	roundRequest := runtimeconversation.CommitConversationRoutingRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: question.Conversation.Revision,
 		TriggerMessageID: question.Message.ID, IdempotencyKey: "round-v1",
 		Responders: []ConversationResponder{{Participant: agent, Addressed: ConversationAddressedRouted, Reason: "owns the release"}},
 	}
-	services := []*ConversationService{primaryService, replicaService}
+	services := []*runtimeconversation.ConversationService{primaryService, replicaService}
 	var committed atomic.Int32
 	var failed atomic.Int32
 	failureErrors := make(chan error, 12)
@@ -123,7 +124,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	}
 	defer restarted.Close()
 	restartedServiceClock := func() time.Time { return fixed }
-	restartedService := NewConversationService(restarted, models.WithClock(func() time.Time { return restartedServiceClock() }))
+	restartedService := runtimeconversation.NewConversationService(restarted, models.WithClock(func() time.Time { return restartedServiceClock() }))
 	restored, err := restartedService.GetConversation(ctx, scope, conversation.ID)
 	if err != nil || restored.Revision != 3 || restored.LastSequence != 1 {
 		t.Fatalf("restored conversation = %#v, err = %v", restored, err)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 const externalConversationActorID = "openseal.external-conversation"
@@ -104,7 +105,7 @@ func (c ExternalConversationInboxWorkerConfig) normalize() (ExternalConversation
 // worker may restart after any write without duplicating the visible message.
 type ExternalConversationInboxWorker struct {
 	store         ExternalConversationStore
-	conversations *ConversationService
+	conversations *runtimeconversation.ConversationService
 	dispatcher    ExternalConversationDispatcher
 	config        ExternalConversationInboxWorkerConfig
 	now           func() time.Time
@@ -124,7 +125,7 @@ func NewExternalConversationInboxWorker(
 		return nil, err
 	}
 	return &ExternalConversationInboxWorker{
-		store: store, conversations: NewConversationService(store, opts...), dispatcher: dispatcher, config: normalized, now: models.ClockFrom(opts),
+		store: store, conversations: runtimeconversation.NewConversationService(store, opts...), dispatcher: dispatcher, config: normalized, now: models.ClockFrom(opts),
 	}, nil
 }
 
@@ -226,7 +227,7 @@ func (w *ExternalConversationInboxWorker) ensureConversation(
 	if base == nil {
 		key := stableExternalConversationID(endpoint.Scope, endpoint.ID, "conversation", event.ExternalConversationID)
 		origin := &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}
-		conversation, _, createErr := w.conversations.CreateConversation(ctx, CreateConversationRequest{
+		conversation, _, createErr := w.conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 			Scope: endpoint.Scope, Owner: endpoint.Owner, Title: endpoint.Name, Origin: origin, CreatedBy: endpoint.CreatedBy, IdempotencyKey: key,
 		})
 		if createErr != nil {
@@ -394,7 +395,7 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 	thread *ExternalConversationMapping,
 	participant *ExternalParticipantMapping,
 	event NormalizedExternalConversationEvent,
-	contextState *ExternalConversationContextState,
+	contextState *runtimeconversation.ExternalConversationContextState,
 ) (*ChannelMessage, error) {
 	if existing, err := w.store.GetExternalMessageMapping(
 		ctx, endpoint.Scope, endpoint.ID, ExternalMessageInbound, event.ExternalMessageID,
@@ -420,9 +421,9 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 		if origin := externalConversationContextOriginReference(endpoint.ID, contextState); origin != nil {
 			references = append(references, *origin)
 		}
-		if code := normalizeExternalConversationContextErrorCode(contextState.ErrorCode); code != "" {
+		if code := runtimeconversation.NormalizeExternalConversationContextErrorCode(contextState.ErrorCode); code != "" {
 			references = append(references, ConversationReference{Kind: ConversationReferenceExternalSource,
-				ID: externalConversationContextErrorPrefix(endpoint.ID) + code})
+				ID: runtimeconversation.ExternalConversationContextErrorPrefix(endpoint.ID) + code})
 		}
 	}
 	attachmentRefs, notices, err := w.importAttachments(ctx, endpoint, conversation, event)
@@ -468,7 +469,7 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 		}
 		source := externalMessageSource(endpoint, event)
 		source.ParticipantDisplayName = sourceLabel(participant.DisplayName, 160)
-		result, postErr := w.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+		result, postErr := w.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 			Sender: participant.Participant, SenderDisplayName: participant.DisplayName,
 			ExternalSource: source,

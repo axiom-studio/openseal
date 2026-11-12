@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -76,8 +77,8 @@ func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *Conversati
 	if _, _, err := store.CreateConversation(t.Context(), conversation, "catalog-task-page"); err != nil {
 		t.Fatal(err)
 	}
-	service := NewConversationService(store)
-	if _, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+	service := runtimeconversation.NewConversationService(store)
+	if _, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		ID: "thread", Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, Intent: MessageIntentQuestion,
 		Content: "Work on these independent requests.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, StartThread: true, IdempotencyKey: "thread",
@@ -95,7 +96,7 @@ func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *Conversati
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+		if _, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 			ID: record.Task.SourceMessageID, Scope: scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 			Sender: actor, Intent: MessageIntentQuestion, Content: record.Task.Goal,
 			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: "thread", IdempotencyKey: record.Task.SourceMessageID,

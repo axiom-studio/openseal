@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -29,13 +30,13 @@ func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ..
 	scope := Scope{Kind: "tenant", ID: "task-test"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}
 	reader := store.(ConversationStore)
-	service := NewConversationService(reader)
+	service := conversation.NewConversationService(reader)
 	seedTestSpace(t, store.(SpaceStore), scope)
-	c, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
+	c, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{Scope: scope, ConversationID: c.ID, ExpectedRevision: c.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentQuestion, Content: "Check the public forecast every thirty minutes", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "user-request"})
+	posted, err := service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{Scope: scope, ConversationID: c.ID, ExpectedRevision: c.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentQuestion, Content: "Check the public forecast every thirty minutes", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "user-request"})
 	if err != nil {
 		t.Fatal(err)
 	}

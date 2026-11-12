@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -19,7 +20,7 @@ type conversationTaskClarificationStore interface {
 
 type conversationTaskClarificationFixture struct {
 	store        conversationTaskClarificationStore
-	service      *ConversationService
+	service      *runtimeconversation.ConversationService
 	scheduler    *ConversationRunScheduler
 	conversation *Conversation
 	trigger      *ChannelMessage
@@ -43,9 +44,9 @@ func forConversationTaskClarificationStores(t *testing.T, test func(*testing.T, 
 
 func newConversationTaskClarificationFixture(t *testing.T, store conversationTaskClarificationStore, threaded bool) *conversationTaskClarificationFixture {
 	t.Helper()
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store.(SpaceStore), Scope{Kind: "organization", ID: "task-clarification"})
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
 		Scope: Scope{Kind: "organization", ID: "task-clarification"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"},
 		Title: "Independent writing task", IdempotencyKey: "task-clarification",
 	})
@@ -54,7 +55,7 @@ func newConversationTaskClarificationFixture(t *testing.T, store conversationTas
 	}
 	f := &conversationTaskClarificationFixture{store: store, service: service, conversation: conversation}
 	f.resetScheduler(t)
-	f.trigger = f.post(t, PostChannelMessageRequest{
+	f.trigger = f.post(t, runtimeconversation.PostChannelMessageRequest{
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, Intent: MessageIntentQuestion,
 		Content:          "Write a 1000-character introduction to black holes for the requested audience.",
 		RequiresResponse: true, StartThread: threaded, IdempotencyKey: "original-request",
@@ -106,7 +107,7 @@ func (f *conversationTaskClarificationFixture) resetScheduler(t *testing.T) {
 	}
 }
 
-func (f *conversationTaskClarificationFixture) post(t *testing.T, req PostChannelMessageRequest) *ChannelMessage {
+func (f *conversationTaskClarificationFixture) post(t *testing.T, req runtimeconversation.PostChannelMessageRequest) *ChannelMessage {
 	t.Helper()
 	current, err := f.service.GetConversation(t.Context(), f.conversation.Scope, f.conversation.ID)
 	if err != nil {
@@ -257,7 +258,7 @@ func TestConversationTaskClarificationRoundTrip(t *testing.T) {
 				if again := f.question(t); again.ID != question.ID {
 					t.Fatal("reconciliation duplicated the clarification question")
 				}
-				request := PostChannelMessageRequest{
+				request := runtimeconversation.PostChannelMessageRequest{
 					Sender: f.task.AuthenticatedActor, Intent: MessageIntentAnswer, RequiresResponse: true,
 					Content: "Adult general readers. Keep the introduction within 1000 characters.", IdempotencyKey: "clarification-answer",
 				}
@@ -348,7 +349,7 @@ func TestConversationTaskClarificationRejectsExplicitAnswersOutsideAuthority(t *
 			forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
 				f := newConversationTaskClarificationFixture(t, store, true)
 				question := f.question(t)
-				request := PostChannelMessageRequest{
+				request := runtimeconversation.PostChannelMessageRequest{
 					Sender: f.task.AuthenticatedActor, Intent: MessageIntentAnswer, RequiresResponse: true,
 					ReplyToMessageID: question.ID, ResolvesMessageID: question.ID,
 					Content: "Use the finance team as the audience.", IdempotencyKey: "rejected-answer",
@@ -357,7 +358,7 @@ func TestConversationTaskClarificationRejectsExplicitAnswersOutsideAuthority(t *
 				case "other actor":
 					request.Sender.ID = "other-member"
 				case "other thread":
-					other := f.post(t, PostChannelMessageRequest{
+					other := f.post(t, runtimeconversation.PostChannelMessageRequest{
 						Sender: f.task.AuthenticatedActor, Intent: MessageIntentUpdate, Content: "Another discussion", StartThread: true, IdempotencyKey: "other-thread",
 					})
 					request.ReplyToMessageID = other.ID
@@ -383,7 +384,7 @@ func TestConversationTaskClarificationRejectsExplicitAnswersOutsideAuthority(t *
 func TestConversationTaskClarificationOriginRequiresCanonicalProvenance(t *testing.T) {
 	forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
 		f := newConversationTaskClarificationFixture(t, store, false)
-		source, conversation, trigger, err := conversationWorkOrigin(t.Context(), store, store, f.work)
+		source, conversation, trigger, err := runtimeconversation.ConversationWorkOrigin(t.Context(), store, store, f.work)
 		if err != nil || source == nil || source.ID != f.source.ID || source.Status != AgentRunStatusCompleted ||
 			conversation == nil || conversation.ID != f.conversation.ID || trigger == nil || trigger.ID != f.trigger.ID {
 			t.Fatalf("canonical independent task lost its completed source: %#v, %#v, %#v, %v", source, conversation, trigger, err)
@@ -405,7 +406,7 @@ func TestConversationTaskClarificationOriginRequiresCanonicalProvenance(t *testi
 				forged := cloneAgentRun(f.work)
 				tc.mutate(forged)
 				for _, replay := range []bool{false, true} {
-					source, conversation, trigger, err := conversationWorkOriginForState(t.Context(), store, store, forged, replay)
+					source, conversation, trigger, err := runtimeconversation.ConversationWorkOriginForState(t.Context(), store, store, forged, replay)
 					if source != nil || conversation != nil || trigger != nil {
 						t.Fatalf("forged provenance resolved an origin (replay=%v): %#v, %#v, %#v, %v", replay, source, conversation, trigger, err)
 					}
@@ -420,7 +421,7 @@ func TestConversationTaskClarificationReplayDoesNotAnswerLaterQuestion(t *testin
 	forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
 		f := newConversationTaskClarificationFixture(t, store, true)
 		firstQuestion := f.question(t)
-		firstAnswer := f.post(t, PostChannelMessageRequest{
+		firstAnswer := f.post(t, runtimeconversation.PostChannelMessageRequest{
 			Sender: f.task.AuthenticatedActor, Intent: MessageIntentAnswer, RequiresResponse: true,
 			ReplyToMessageID: firstQuestion.ID, ResolvesMessageID: firstQuestion.ID,
 			Content: "Adult general readers.", IdempotencyKey: "first-answer",
@@ -444,7 +445,7 @@ func TestConversationTaskClarificationReplayDoesNotAnswerLaterQuestion(t *testin
 			t.Fatalf("old answer resumed later clarification: %#v, %v, %v", old, replayed, err)
 		}
 		f.assertWorkUnchanged(t, before)
-		secondAnswer := f.post(t, PostChannelMessageRequest{
+		secondAnswer := f.post(t, runtimeconversation.PostChannelMessageRequest{
 			Sender: f.task.AuthenticatedActor, Intent: MessageIntentAnswer, RequiresResponse: true,
 			ReplyToMessageID: secondQuestion.ID, ResolvesMessageID: secondQuestion.ID,
 			Content: "Yes, include one short numerical example.", IdempotencyKey: "second-answer",

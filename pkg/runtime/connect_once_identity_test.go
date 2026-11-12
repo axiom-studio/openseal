@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -23,7 +24,7 @@ func TestChatRunsActForThePersonWhoAsked(t *testing.T) {
 		"service initiator": {&ChannelMessage{ID: "m2", Scope: scope, ConversationID: "chat", Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "coordinator"}, Initiator: &initiator}, "9"},
 		"agent":             {&ChannelMessage{ID: "m3", Scope: scope, ConversationID: "chat", Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "helper"}}, ""},
 	} {
-		if got := conversationAgentRunRequest(conversation, test.message).ActingUser; got != test.want {
+		if got := runtimeconversation.ConversationAgentRunRequest(conversation, test.message).ActingUser; got != test.want {
 			t.Errorf("%s: ActingUser = %q, want %q", name, got, test.want)
 		}
 	}
@@ -31,7 +32,7 @@ func TestChatRunsActForThePersonWhoAsked(t *testing.T) {
 	// A Team member's answer acts for the person the routing run acts for.
 	routing := &AgentRun{ID: "routing", Scope: scope, Owner: conversation.Owner, ActingUser: "7", Context: map[string]interface{}{}}
 	trigger := &ChannelMessage{ID: "m1", Scope: scope, ConversationID: "chat"}
-	member := teamMemberRunRequest(routing, conversation, trigger, ConversationResponder{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "member"}}, "key")
+	member := runtimeconversation.TeamMemberRunRequest(routing, conversation, trigger, ConversationResponder{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "member"}}, "key")
 	if member.ActingUser != "7" {
 		t.Fatalf("Team member run ActingUser = %q", member.ActingUser)
 	}

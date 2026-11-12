@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 const conversationAnswerEvent = "run.conversation_answer_received"
@@ -17,7 +18,7 @@ func clarificationQuestionKey(run *AgentRun) string {
 	if run == nil || run.WakeCondition == nil {
 		return ""
 	}
-	return conversationClarificationKey(run.ID, run.WakeCondition.Reference)
+	return runtimeconversation.ConversationClarificationKey(run.ID, run.WakeCondition.Reference)
 }
 func isConversationQuestionWait(run *AgentRun) bool {
 	return run != nil && run.Status == AgentRunStatusWaitingForEvent && run.WakeCondition != nil && run.WakeCondition.Type == "user_message" &&
@@ -46,11 +47,11 @@ func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx con
 			if !isConversationQuestionWait(run) {
 				continue
 			}
-			_, conversation, trigger, err := conversationWorkOrigin(ctx, s.runStore, s.conversationStore, run)
+			_, conversation, trigger, err := runtimeconversation.ConversationWorkOrigin(ctx, s.runStore, s.conversationStore, run)
 			if err != nil {
 				return err
 			}
-			if conversation == nil || trigger == nil || ConversationRunAgentID(conversation, run) == "" {
+			if conversation == nil || trigger == nil || runtimeconversation.ConversationRunAgentID(conversation, run) == "" {
 				continue
 			}
 			if s.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
@@ -63,7 +64,7 @@ func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx con
 			if entry == nil {
 				continue
 			}
-			posted, postErr := s.conversations.PostChannelMessage(ctx, conversationQuestionPostRequest(run, conversation, trigger, askUserEntryArgs(entry), clarificationQuestionKey(run)))
+			posted, postErr := s.conversations.PostChannelMessage(ctx, runtimeconversation.ConversationQuestionPostRequest(run, conversation, trigger, askUserEntryArgs(entry), clarificationQuestionKey(run)))
 			if errors.Is(postErr, ErrRevisionConflict) {
 				continue
 			}
@@ -98,7 +99,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 	if (conversation.Owner.Type != OwnerTypeAgent && conversation.Owner.Type != OwnerTypeTeam) || answer.Sender.Type != ConversationParticipantUser {
 		return nil, taskTargeted, nil
 	}
-	actor, valid := conversationMessageInitiatingUser(conversation, answer)
+	actor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, answer)
 	if !valid {
 		return nil, taskTargeted, nil
 	}
@@ -126,14 +127,14 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				}
 				// A Team's question is its asking member's; another member
 				// never receives an answer to it.
-				if agentID := ConversationRunAgentID(conversation, run); run == nil || agentID == "" || agentID != question.Sender.ID {
+				if agentID := runtimeconversation.ConversationRunAgentID(conversation, run); run == nil || agentID == "" || agentID != question.Sender.ID {
 					continue
 				}
-				source, origin, trigger, err := conversationWorkOriginForState(ctx, s.runStore, s.conversationStore, run, true)
+				source, origin, trigger, err := runtimeconversation.ConversationWorkOriginForState(ctx, s.runStore, s.conversationStore, run, true)
 				if err != nil {
 					return nil, false, err
 				}
-				originalActor, valid := conversationMessageInitiatingUser(conversation, trigger)
+				originalActor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, trigger)
 				if origin == nil || origin.ID != conversation.ID || !valid || originalActor != actor {
 					continue
 				}
@@ -152,7 +153,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				if !isConversationQuestionWait(run) || clarificationQuestionKey(run) != question.IdempotencyKey {
 					continue
 				}
-				_, origin, _, err = conversationWorkOrigin(ctx, s.runStore, s.conversationStore, run)
+				_, origin, _, err = runtimeconversation.ConversationWorkOrigin(ctx, s.runStore, s.conversationStore, run)
 				if err != nil {
 					return nil, false, err
 				}
@@ -260,11 +261,11 @@ func (s *ConversationRunScheduler) acknowledgeConversationAnswer(ctx context.Con
 	if err != nil {
 		return nil, false, err
 	}
-	_, err = s.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	_, err = s.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: ConversationRunAgentID(conversation, run)}, Intent: MessageIntentAcknowledgment,
+		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: runtimeconversation.ConversationRunAgentID(conversation, run)}, Intent: MessageIntentAcknowledgment,
 		Content: "Your answer has been passed to the task.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-		ReplyToMessageID: answer.ID, ResolvesMessageID: answer.ID, References: conversationClarificationReferences(run),
+		ReplyToMessageID: answer.ID, ResolvesMessageID: answer.ID, References: runtimeconversation.ConversationClarificationReferences(run),
 		IdempotencyKey: "conversation-answer-received:" + answer.ID,
 	})
 	return &agentrun.AgentRunCommandResult{Run: run}, true, err

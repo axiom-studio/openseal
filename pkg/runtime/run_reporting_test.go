@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
@@ -11,9 +12,9 @@ func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "conversation-runbook-start"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"}
-	service := NewConversationService(store)
+	service := conversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: "Agent work", IdempotencyKey: "agent-work-channel",
 	})
 	if err != nil {
@@ -55,7 +56,7 @@ func TestRoutineOccurrenceSilentPostsNothing(t *testing.T) {
 	if err := f.worker.project(t.Context(), run); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := NewConversationService(f.store).ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: f.conversation.ID})
+	messages, err := conversation.NewConversationService(f.store).ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: f.conversation.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

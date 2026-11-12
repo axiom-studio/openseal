@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
 )
@@ -80,7 +81,7 @@ func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
 // with Run work. See workqueue.ScopePools for when a scope has a pool.
 type AgentRunWorkerSupervisor struct {
 	store    KernelStore
-	resolver TurnRunnerResolver
+	resolver conversation.TurnRunnerResolver
 	config   DynamicAgentRunWorkerConfig
 	logger   *zap.SugaredLogger
 	pools    *workqueue.ScopePools[*AgentRunWorkerPool]
@@ -117,7 +118,7 @@ func (s *AgentRunWorkerSupervisor) SetWorkerLimiter(limiter *workqueue.WorkerLim
 
 func NewAgentRunWorkerSupervisor(
 	store KernelStore,
-	resolver TurnRunnerResolver,
+	resolver conversation.TurnRunnerResolver,
 	source workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config DynamicAgentRunWorkerConfig,

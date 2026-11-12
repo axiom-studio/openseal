@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // Work a Team member hands to a teammate in the chat is answered in that same
@@ -54,5 +56,5 @@ var collaborationChildSource = map[AgentRequestKind]RunSource{AgentRequestKindRe
 func handOffRespondTo(source, run *AgentRun) string {
 	trigger := &ChannelMessage{ID: "ask", ConversationID: "chat", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "ana"}}
 	conversation := &Conversation{ID: "chat", Scope: source.Scope, Owner: source.Owner}
-	return runContextRespondTo(conversationContextInput{Run: run, Conversation: conversation, Trigger: trigger})
+	return runtimeconversation.RunContextRespondTo(runtimeconversation.ConversationContextInput{Run: run, Conversation: conversation, Trigger: trigger})
 }

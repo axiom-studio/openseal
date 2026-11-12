@@ -12,12 +12,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/callback"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 type ApprovalNotificationWorker struct {
 	store         ApprovalNotificationStore
-	conversations *ConversationService
+	conversations *conversation.ConversationService
 	transport     *ExternalConversationTransportService
 	callbacks     *callback.CallbackRegistry
 	now           func() time.Time
@@ -32,7 +33,7 @@ func NewApprovalNotificationWorker(
 	opts ...models.ServiceOption,
 ) *ApprovalNotificationWorker {
 	return &ApprovalNotificationWorker{
-		store: store, conversations: NewConversationService(store, opts...), transport: transport,
+		store: store, conversations: conversation.NewConversationService(store, opts...), transport: transport,
 		callbacks: callback.NewCallbackRegistry(store, callbackResolver, opts...), now: models.ClockFrom(opts),
 	}
 }
@@ -160,7 +161,7 @@ func (w *ApprovalNotificationWorker) agentApprovalConversation(ctx context.Conte
 		}
 		return existing, nil
 	}
-	conversation, _, err := w.conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := w.conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: "Approvals", CreatedBy: person,
 		Origin: &ConversationReference{Kind: ConversationReferenceAgentApprovals, ID: AgentApprovalsConversationReferenceID(owner)}, IdempotencyKey: key,
 	})
@@ -542,7 +543,7 @@ func (w *ApprovalNotificationWorker) approvalConversation(
 		}
 		return existing, nil
 	}
-	conversation, _, err := w.conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := w.conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: endpoint.Owner, Title: endpoint.Name + " approvals", CreatedBy: endpoint.CreatedBy, IdempotencyKey: key,
 	})
 	if !errors.Is(err, ErrMessageConflict) {
@@ -597,7 +598,7 @@ func (w *ApprovalNotificationWorker) postApprovalMessage(
 	conversationID string,
 	messageKey string,
 ) (*ChannelMessageCommitResult, error) {
-	request := PostChannelMessageRequest{
+	request := conversation.PostChannelMessageRequest{
 		Scope: approval.Scope, ConversationID: conversationID,
 		Sender:            ConversationParticipant{Type: ConversationParticipantService, ID: "approval-coordinator"},
 		SenderDisplayName: "Approval coordinator", Intent: MessageIntentApprovalRequest,
@@ -636,7 +637,7 @@ func (w *ApprovalNotificationWorker) postOutcomeMessage(
 			content += " " + strings.TrimSpace(call.Error)
 		}
 	}
-	request := PostChannelMessageRequest{
+	request := conversation.PostChannelMessageRequest{
 		Scope: approval.Scope, ConversationID: conversationID,
 		Sender:            ConversationParticipant{Type: ConversationParticipantService, ID: "approval-coordinator"},
 		SenderDisplayName: "Approval coordinator", Intent: MessageIntentUpdate,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // Only documented user-facing output fields are projected. Never stringify an
@@ -99,7 +101,7 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			}
 			// Only the Agent that posted the reply repairs it, with its own
 			// operation's output, while it is still on the chat's roster.
-			agentID := ConversationRunAgentID(conversation, run)
+			agentID := runtimeconversation.ConversationRunAgentID(conversation, run)
 			if agentID == "" || old.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID}) || operation.AssignedAgentID != agentID {
 				continue
 			}
@@ -110,7 +112,7 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			if !onRoster {
 				continue
 			}
-			posted, err := s.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+			posted, err := s.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 				Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID}, Intent: MessageIntentAnswer,
 				Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,

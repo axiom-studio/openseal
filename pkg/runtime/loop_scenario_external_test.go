@@ -23,6 +23,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -105,7 +106,7 @@ func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, op
 // conversation, schedules its Run and records the applied inbox item.
 func (f *externalLoopFixture) startExternal(text string) externalChat {
 	f.t.Helper()
-	conversation, _, err := f.convs.CreateConversation(f.ctx, CreateConversationRequest{
+	conversation, _, err := f.convs.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
 		Scope: f.scope, Owner: f.endpoint.Owner, Title: "Provider thread",
 		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: f.endpoint.ID, Version: f.endpoint.Revision},
 		IdempotencyKey: "external-loop-chat",
@@ -113,7 +114,7 @@ func (f *externalLoopFixture) startExternal(text string) externalChat {
 	if err != nil {
 		f.t.Fatalf("create conversation: %v", err)
 	}
-	posted, err := f.convs.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+	posted, err := f.convs.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: loopFixtureUser}, Intent: MessageIntentQuestion,
 		Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,

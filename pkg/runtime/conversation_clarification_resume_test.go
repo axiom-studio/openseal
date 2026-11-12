@@ -1,6 +1,10 @@
 package runtime
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+)
 
 func TestConversationClarificationReplayWithInactiveParent(t *testing.T) {
 	for _, status := range []AgentRunStatus{AgentRunStatusPaused, AgentRunStatusCompleted} {
@@ -12,9 +16,9 @@ func TestConversationClarificationReplayWithInactiveParent(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				f := newConversationActorFixture(t, Scope{Kind: "organization", ID: "shared"}, "writer")
 				a := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
-				trigger := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "request"})
+				trigger := f.post(t, conversation.PostChannelMessageRequest{Sender: a, IdempotencyKey: "request"})
 				root, child, question := f.waitingQuestion(t, trigger)
-				answer := f.post(t, PostChannelMessageRequest{Sender: a, Intent: MessageIntentAnswer, ResolvesMessageID: question.ID, IdempotencyKey: "answer"})
+				answer := f.post(t, conversation.PostChannelMessageRequest{Sender: a, Intent: MessageIntentAnswer, ResolvesMessageID: question.ID, IdempotencyKey: "answer"})
 				if accepted {
 					child = f.schedule(t, answer)
 					if child.Kind != RunKindAgentWork || len(child.PendingInterventions) != 1 {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -53,17 +54,17 @@ type ExternalConversationContextResult struct {
 	Messages  []ExternalConversationContextMessage `json:"messages,omitempty"`
 }
 
-func externalConversationContextReference(endpointID string, state *ExternalConversationContextState) ConversationReference {
+func externalConversationContextReference(endpointID string, state *runtimeconversation.ExternalConversationContextState) ConversationReference {
 	return ConversationReference{Kind: ConversationReferenceExternalSource,
-		ID: externalConversationContextReferencePrefix(endpointID) + state.Status, Version: int64(state.ImportedMessages) + 1}
+		ID: runtimeconversation.ExternalConversationContextReferencePrefix(endpointID) + state.Status, Version: int64(state.ImportedMessages) + 1}
 }
 
-func externalConversationContextOriginReference(endpointID string, state *ExternalConversationContextState) *ConversationReference {
+func externalConversationContextOriginReference(endpointID string, state *runtimeconversation.ExternalConversationContextState) *ConversationReference {
 	if state.ExternalConversationID == "" {
 		return nil
 	}
 	encoded, _ := json.Marshal([]string{state.ExternalConversationID, state.ExternalThreadID})
-	id := externalConversationContextOriginPrefix(endpointID) + base64.RawURLEncoding.EncodeToString(encoded)
+	id := runtimeconversation.ExternalConversationContextOriginPrefix(endpointID) + base64.RawURLEncoding.EncodeToString(encoded)
 	if len(id) > 256 {
 		return nil
 	}
@@ -72,7 +73,7 @@ func externalConversationContextOriginReference(endpointID string, state *Extern
 
 func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, endpoint *ExternalConversationEndpoint,
 	conversation *Conversation, mapping *ExternalConversationMapping, item *ExternalConversationInboxItem,
-) (*ExternalConversationMapping, *ExternalConversationContextState, error) {
+) (*ExternalConversationMapping, *runtimeconversation.ExternalConversationContextState, error) {
 	if w.config.ContextHost == nil || w.config.ContextCatalog == nil {
 		return mapping, nil, nil
 	}
@@ -80,9 +81,9 @@ func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, en
 	if message, err := w.store.FindChannelMessageByIdempotencyKey(ctx, endpoint.Scope, conversation.ID, key); err != nil {
 		return mapping, nil, err
 	} else if message != nil {
-		return mapping, ExternalConversationContextAvailability(message, endpoint.ID), nil
+		return mapping, runtimeconversation.ExternalConversationContextAvailability(message, endpoint.ID), nil
 	}
-	state := &ExternalConversationContextState{Status: ExternalConversationContextUnavailable,
+	state := &runtimeconversation.ExternalConversationContextState{Status: runtimeconversation.ExternalConversationContextUnavailable,
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: item.Event.ExternalThreadID}
 	adapter, err := w.resolveContextAdapter(ctx, endpoint, item.Adapter)
 	if err != nil {
@@ -105,7 +106,7 @@ func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, en
 	})
 	cancel()
 	if result != nil {
-		state.ErrorCode = normalizeExternalConversationContextErrorCode(result.ErrorCode)
+		state.ErrorCode = runtimeconversation.NormalizeExternalConversationContextErrorCode(result.ErrorCode)
 	}
 	if readErr != nil || result == nil {
 		return mapping, state, nil
@@ -129,7 +130,7 @@ func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, en
 			item.Event.ParticipantDisplayName = name
 		}
 	}
-	if result.Status == ExternalConversationContextUnavailable {
+	if result.Status == runtimeconversation.ExternalConversationContextUnavailable {
 		return mapping, state, nil
 	}
 	messages, status, valid := normalizeExternalConversationContext(result, item.Event)
@@ -140,7 +141,7 @@ func (w *ExternalConversationInboxWorker) hydrateContext(ctx context.Context, en
 	for _, historical := range messages {
 		message, importErr := w.ensureContextMessage(ctx, endpoint, conversation, mapping, historical)
 		if errors.Is(importErr, errExternalConversationContextMappingMismatch) {
-			state.Status = ExternalConversationContextPartial
+			state.Status = runtimeconversation.ExternalConversationContextPartial
 			continue
 		}
 		if importErr != nil {
@@ -173,7 +174,7 @@ func (w *ExternalConversationInboxWorker) resolveContextAdapter(ctx context.Cont
 }
 
 func normalizeExternalConversationContext(result *ExternalConversationContextResult, event NormalizedExternalConversationEvent) ([]ExternalConversationContextMessage, string, bool) {
-	if !validExternalConversationContextStatus(result.Status) || len(result.Messages) > MaximumExternalConversationContextMessages {
+	if !runtimeconversation.ValidExternalConversationContextStatus(result.Status) || len(result.Messages) > runtimeconversation.MaximumExternalConversationContextMessages {
 		return nil, "", false
 	}
 	status := result.Status
@@ -193,7 +194,7 @@ func normalizeExternalConversationContext(result *ExternalConversationContextRes
 			continue
 		}
 		if message.OccurredAt.After(event.OccurredAt) || (message.OccurredAt.Equal(event.OccurredAt) && message.ExternalMessageID != event.ReplyToExternalMessageID) {
-			status = ExternalConversationContextPartial
+			status = runtimeconversation.ExternalConversationContextPartial
 			continue
 		}
 		message.ExternalThreadID = event.ExternalThreadID
@@ -228,7 +229,7 @@ func normalizeExternalConversationContext(result *ExternalConversationContextRes
 	})
 	if event.ExternalThreadID != "" && event.ExternalThreadID != event.ExternalMessageID &&
 		(len(messages) == 0 || messages[0].ExternalMessageID != event.ExternalThreadID) {
-		status = ExternalConversationContextPartial
+		status = runtimeconversation.ExternalConversationContextPartial
 	}
 	return messages, status, true
 }

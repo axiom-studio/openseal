@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 const (
@@ -637,12 +638,12 @@ func TestLoopApprovalModeIsCarriedOnTheStepRequest(t *testing.T) {
 		if !ok {
 			t.Fatalf("%T has no approval modes", f.chats)
 		}
-		service := NewConversationApprovalModeService(modes, models.WithClock(f.clock.Now))
+		service := runtimeconversation.NewConversationApprovalModeService(modes, models.WithClock(f.clock.Now))
 		current, err := f.convs.GetConversation(f.ctx, f.scope, conversation.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := service.SetApprovalMode(f.ctx, SetConversationApprovalModeRequest{
+		result, err := service.SetApprovalMode(f.ctx, runtimeconversation.SetConversationApprovalModeRequest{
 			Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision, Mode: ConversationApprovalSkip,
 			Actor: ActivityActor{Type: "user", ID: loopFixtureUser},
 		})
@@ -749,7 +750,7 @@ func (f *loopFixture) onlyRunID() string {
 // the trigger is posted, and a trigger that may require a response.
 func (f *loopFixture) startChatWith(text string, created func(*Conversation), requiresResponse bool) (*Conversation, *AgentRun) {
 	f.t.Helper()
-	conversation, _, err := f.convs.CreateConversation(f.ctx, CreateConversationRequest{
+	conversation, _, err := f.convs.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
 		Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent}, Title: "Loop fixture chat",
 		IdempotencyKey: "loop-chat-with",
 	})
@@ -759,7 +760,7 @@ func (f *loopFixture) startChatWith(text string, created func(*Conversation), re
 	if created != nil {
 		created(conversation)
 	}
-	posted, err := f.convs.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+	posted, err := f.convs.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: loopFixtureUser}, Intent: MessageIntentQuestion,
 		Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: requiresResponse,

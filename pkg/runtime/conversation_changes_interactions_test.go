@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -22,7 +23,7 @@ type interactionChangeFixture struct {
 	conversation *Conversation
 	trigger      *ChannelMessage
 	run          *AgentRun
-	changes      *ConversationChangeService
+	changes      *runtimeconversation.ConversationChangeService
 	clock        func() time.Time // the change service's clock
 }
 
@@ -49,15 +50,15 @@ func newInteractionChangeFixture(t *testing.T, store KernelStore) *interactionCh
 	t.Helper()
 	f := &interactionChangeFixture{ctx: context.Background(), store: store, scope: Scope{Kind: "tenant", ID: "interactions"}, clock: time.Now}
 	conversationStore := store.(ConversationStore)
-	conversations := NewConversationService(conversationStore)
+	conversations := runtimeconversation.NewConversationService(conversationStore)
 	seedTestSpace(t, store.(SpaceStore), f.scope)
-	conversation, _, err := conversations.CreateConversation(f.ctx, CreateConversationRequest{
+	conversation, _, err := conversations.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
 		Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := conversations.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+	posted, err := conversations.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
 		Content: "Deploy the release", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -74,7 +75,7 @@ func newInteractionChangeFixture(t *testing.T, store KernelStore) *interactionCh
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.changes, err = NewConversationChangeService(conversationStore, store, models.WithClock(func() time.Time { return f.clock() }))
+	f.changes, err = runtimeconversation.NewConversationChangeService(conversationStore, store, models.WithClock(func() time.Time { return f.clock() }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,9 +83,9 @@ func newInteractionChangeFixture(t *testing.T, store KernelStore) *interactionCh
 	return f
 }
 
-func (f *interactionChangeFixture) list(t *testing.T, cursor string) *ConversationChangeSet {
+func (f *interactionChangeFixture) list(t *testing.T, cursor string) *runtimeconversation.ConversationChangeSet {
 	t.Helper()
-	changes, err := f.changes.ListChanges(f.ctx, ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor})
+	changes, err := f.changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,15 +264,15 @@ func (p teamRosterPortfolio) GetTeamDeployment(_ context.Context, scope capabili
 // one saved to a member's own umbrella never shows in the Team chat.
 func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	ctx, store, scope := context.Background(), newTestKernelStore(t), Scope{Kind: "tenant", ID: "team-requests"}
-	conversations := NewConversationService(store)
+	conversations := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}, Title: "Team", IdempotencyKey: "team",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	posted, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
 		Content: "Connect Vercel", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true, IdempotencyKey: "ask",
@@ -281,7 +282,7 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	}
 	team := &kernelteam.Deployment{ID: "gtm", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: "a", AgentDeploymentID: "member"}, {ID: "b", AgentDeploymentID: "other"}}}
-	changes, err := NewConversationChangeService(store, teamRosterPortfolio{Store: store, team: team})
+	changes, err := runtimeconversation.NewConversationChangeService(store, teamRosterPortfolio{Store: store, team: team})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +303,7 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	set, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	set, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +315,7 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	}
 	// A paused Team's members keep their pending requests in the chat.
 	team.Status = kernelteam.DeploymentPaused
-	set, err = changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	set, err = changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

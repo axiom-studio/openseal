@@ -27,6 +27,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -116,14 +117,14 @@ func (f *mediaFixture) putArtifact(id, mediaType string, data []byte, recordDige
 // startChatWithAttachments posts text with references as ana and schedules it.
 func (f *mediaFixture) startChatWithAttachments(text string, refs ...ConversationReference) (*Conversation, *AgentRun) {
 	f.t.Helper()
-	conversation, _, err := f.convs.CreateConversation(f.ctx, CreateConversationRequest{
+	conversation, _, err := f.convs.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
 		Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent}, Title: "Media chat",
 		IdempotencyKey: "media-chat-" + fmt.Sprint(f.clock.Now().UnixNano()),
 	})
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	posted, err := f.convs.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+	posted, err := f.convs.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: loopFixtureUser}, Intent: MessageIntentQuestion,
 		Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, References: refs,

@@ -3,20 +3,22 @@ package runtime
 import (
 	"strings"
 	"testing"
+
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // startSpokenChat posts text as the fixture user with the given response mode
 // and schedules the reply Run through the production scheduler.
 func startSpokenChat(f *loopFixture, text, mode string) (*Conversation, *AgentRun) {
 	f.t.Helper()
-	conversation, _, err := f.convs.CreateConversation(f.ctx, CreateConversationRequest{
+	conversation, _, err := f.convs.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
 		Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent},
 		Title: "Spoken chat", IdempotencyKey: "spoken-chat",
 	})
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	posted, err := f.convs.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+	posted, err := f.convs.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: loopFixtureUser},
 		Intent: MessageIntentQuestion, Content: text, ResponseMode: mode,

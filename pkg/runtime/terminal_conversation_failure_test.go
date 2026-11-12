@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/google/uuid"
 )
 
@@ -15,9 +16,9 @@ func terminalFailureConversationFixture(t *testing.T, store terminalReportingCon
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "failure-" + uuid.NewString()}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +26,7 @@ func terminalFailureConversationFixture(t *testing.T, store terminalReportingCon
 	if private {
 		audience = ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantAgent, ID: owner.ID}}}
 	}
-	posted, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+	posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion,
 		Content: "Check my recent emails", Audience: audience, StartThread: true, ResponseMode: "spoken",
@@ -71,7 +72,7 @@ func failTerminalConversation(t *testing.T, store terminalReportingContractStore
 func assertTerminalConversationFailure(t *testing.T, store terminalReportingContractStore, run *AgentRun, trigger *ChannelMessage, code string) *ChannelMessage {
 	t.Helper()
 	message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, terminalConversationFailureReplyKey(run))
-	if err != nil || message == nil || message.Content != TerminalFailureReply(code) || message.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}) || message.Intent != MessageIntentAnswer || message.ReplyToMessageID != trigger.ID || message.ResolvesMessageID != trigger.ID || message.ThreadRootID != trigger.ID || message.ResponseMode != trigger.ResponseMode {
+	if err != nil || message == nil || message.Content != runtimeconversation.TerminalFailureReply(code) || message.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}) || message.Intent != MessageIntentAnswer || message.ReplyToMessageID != trigger.ID || message.ResolvesMessageID != trigger.ID || message.ThreadRootID != trigger.ID || message.ResponseMode != trigger.ResponseMode {
 		t.Fatalf("failure reply lost canonical actor, cause or call thread: %#v %v", message, err)
 	}
 	if strings.Contains(message.Content, "NEVER-PUBLISH") || !strings.Contains(message.Content, "Ask me to try again") {
@@ -106,7 +107,7 @@ func TestTerminalConversationFailureAtomicCrashRestartAndPrivateCallThread(t *te
 			id      string
 			visible bool
 		}{{"kev", true}, {"other-user", false}} {
-			messages, err := NewConversationService(store).ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: trigger.ConversationID, ThreadRootID: trigger.ID, Limit: 20, Viewer: &ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: viewer.id}}})
+			messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: trigger.ConversationID, ThreadRootID: trigger.ID, Limit: 20, Viewer: &ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: viewer.id}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -161,7 +162,7 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 		}
 		message := assertTerminalConversationFailure(t, store, second, trigger, "tool_call_cardinality")
 		old, err := store.FindChannelMessageByIdempotencyKey(t.Context(), first.Scope, trigger.ConversationID, terminalConversationFailureReplyKey(first))
-		if err != nil || old == nil || old.ID == message.ID || old.Content != TerminalFailureReply("provider_rate_limited") {
+		if err != nil || old == nil || old.ID == message.ID || old.Content != runtimeconversation.TerminalFailureReply("provider_rate_limited") {
 			t.Fatalf("manual attempts collapsed: %#v %#v %v", old, message, err)
 		}
 	})
@@ -183,8 +184,8 @@ func TestTerminalConversationFailureRejectsForgedOriginAndPreservesSavedAnswer(t
 			t.Fatal("forged origin published an Agent answer")
 		}
 	}
-	service := NewConversationService(store)
-	posted, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: trigger.Sequence + 1,
+	service := runtimeconversation.NewConversationService(store)
+	posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: trigger.Sequence + 1,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}, Intent: MessageIntentAnswer, Content: "The saved explanation", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
 		References: []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}, IdempotencyKey: conversationTaskFinalResponseKey(run)})
 	if err != nil {
@@ -205,13 +206,13 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 		for _, startsThread := range []bool{false, true} {
 			scope := Scope{Kind: "tenant", ID: "canonical-scheduled-failure-" + uuid.NewString()}
 			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
-			service := NewConversationService(store)
+			service := runtimeconversation.NewConversationService(store)
 			seedTestSpace(t, store.(SpaceStore), scope)
-			conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "Scheduled user question", IdempotencyKey: uuid.NewString()})
+			conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Scheduled user question", IdempotencyKey: uuid.NewString()})
 			if err != nil {
 				t.Fatal(err)
 			}
-			posted, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+			posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 				Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion,
 				Content: "Check my calendar", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, StartThread: startsThread,
@@ -248,7 +249,7 @@ func TestTerminalConversationFailureResponseFlagCannotAuthorizeControlSource(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	control, err := NewConversationService(store).PostChannelMessage(t.Context(), PostChannelMessageRequest{
+	control, err := runtimeconversation.NewConversationService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentSystem,
 		Content: "Control projection", RequiresResponse: true, StartThread: true,
@@ -303,7 +304,7 @@ func TestFailedConversationReplySkipsServiceWakeWithoutRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wake, err := NewConversationService(store).PostChannelMessage(t.Context(), PostChannelMessageRequest{
+	wake, err := runtimeconversation.NewConversationService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "skill-setup-coordinator"}, Intent: MessageIntentUpdate,
 		Content: "Gmail is connected", StartThread: true,

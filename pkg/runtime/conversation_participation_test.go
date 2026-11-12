@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 type participationTestStore interface {
@@ -11,15 +13,15 @@ type participationTestStore interface {
 
 func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
 	store := newTestKernelStore(t)
-	service := NewConversationService(store)
+	service := conversation.NewConversationService(store)
 	scope := Scope{Kind: "local", ID: "default"}
 	seedTestSpace(t, store, scope)
-	channel, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, Title: "Research", IdempotencyKey: "archive"})
+	channel, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, Title: "Research", IdempotencyKey: "archive"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	enabled := true
-	channel, err = service.UpdateConversation(t.Context(), UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision, ParticipationEnabled: &enabled})
+	channel, err = service.UpdateConversation(t.Context(), conversation.UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision, ParticipationEnabled: &enabled})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +31,7 @@ func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		channel, err = service.UpdateConversation(t.Context(), UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision, Status: &status})
+		channel, err = service.UpdateConversation(t.Context(), conversation.UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision, Status: &status})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -37,7 +39,7 @@ func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
 			t.Fatal("archive/restore re-enabled participation")
 		}
 	}
-	channel, err = service.UpdateConversation(t.Context(), UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision, ParticipationEnabled: &enabled})
+	channel, err = service.UpdateConversation(t.Context(), conversation.UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision, ParticipationEnabled: &enabled})
 	if err != nil {
 		t.Fatal(err)
 	}

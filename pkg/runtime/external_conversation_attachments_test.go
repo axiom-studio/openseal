@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -70,8 +71,8 @@ func TestExternalConversationImportsFileOnceAndScopesArtifact(t *testing.T) {
 	store, catalog, endpoint := fileConversationFixture(t)
 	content := &externalFileContentStore{}
 	host := &externalFileHost{}
-	service := NewConversationService(store)
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "files", IdempotencyKey: "files"})
+	service := runtimeconversation.NewConversationService(store)
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "files", IdempotencyKey: "files"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,12 +125,12 @@ func (h *checkpointConversationHost) DeliverExternalConversation(_ context.Conte
 }
 func TestExternalConversationDeliveryPersistsCheckpointAcrossWorkerRestart(t *testing.T) {
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
-	conversations := NewConversationService(store)
-	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "files", IdempotencyKey: "checkpoint"})
+	conversations := runtimeconversation.NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "files", IdempotencyKey: "checkpoint"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply, err := conversations.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID}, Intent: MessageIntentAnswer, Content: "Here is your file.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "reply"})
+	reply, err := conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID}, Intent: MessageIntentAnswer, Content: "Here is your file.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "reply"})
 	if err != nil {
 		t.Fatal(err)
 	}

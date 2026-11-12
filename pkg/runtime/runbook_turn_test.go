@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -105,7 +106,7 @@ func TestRunbookProducerFailsOnUnsuccessfulOrRefusedAction(t *testing.T) {
 			}
 			appendRunbookToolResult(path, run.ID, first.ToolCalls[0].ID, state, actionID)
 			second := produceRunbook(t, producer, runbookInput(run, 2, binding, path))
-			if second.Failure == nil || !strings.Contains(second.Failure.Message, item.expect) || second.Failure.Kind != RunFailureKindExecution {
+			if second.Failure == nil || !strings.Contains(second.Failure.Message, item.expect) || second.Failure.Kind != conversation.RunFailureKindExecution {
 				t.Fatalf("second=%#v", second)
 			}
 			trace, err := RunbookTraceFromCheckpoint(second.KernelState)

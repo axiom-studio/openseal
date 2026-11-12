@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -27,11 +28,11 @@ type CatchUpStore interface {
 type CatchUpFixture struct {
 	t            *testing.T
 	store        CatchUpStore
-	service      *ConversationService
+	service      *runtimeconversation.ConversationService
 	conversation *models.Conversation
 	agentID      string
 	now          time.Time
-	catchUp      *conversationCatchUp
+	catchUp      *runtimeconversation.ConversationCatchUp
 }
 
 func ForCatchUpStores(t *testing.T, owner models.ObjectiveOwner, test func(*testing.T, *CatchUpFixture)) {
@@ -41,9 +42,9 @@ func ForCatchUpStores(t *testing.T, owner models.ObjectiveOwner, test func(*test
 		if !ok {
 			t.Fatalf("%T is not an agent session store", store)
 		}
-		service := NewConversationService(store)
+		service := runtimeconversation.NewConversationService(store)
 		seedTestSpace(t, store.(models.SpaceStore), models.Scope{Kind: "tenant", ID: "catch-up"})
-		conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
+		conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
 			Scope: models.Scope{Kind: "tenant", ID: "catch-up"}, Owner: owner, Title: "Catch-up", IdempotencyKey: "catch-up",
 		})
 		if err != nil {
@@ -52,24 +53,24 @@ func ForCatchUpStores(t *testing.T, owner models.ObjectiveOwner, test func(*test
 		test(t, &CatchUpFixture{
 			t: t, store: sessions, service: service, conversation: conversation, agentID: "agent",
 			now:     time.Now().UTC().Truncate(time.Millisecond),
-			catchUp: newConversationCatchUp(service, store, nil),
+			catchUp: runtimeconversation.NewConversationCatchUp(service, store, nil),
 		})
 	})
 }
 
-func (f *CatchUpFixture) post(req PostChannelMessageRequest) *models.ChannelMessage {
+func (f *CatchUpFixture) post(req runtimeconversation.PostChannelMessageRequest) *models.ChannelMessage {
 	f.t.Helper()
 	return conversationThreadStartPost(f.t, f.service, f.conversation, req)
 }
 
 func (f *CatchUpFixture) say(key, content string) *models.ChannelMessage {
 	f.t.Helper()
-	return f.post(PostChannelMessageRequest{IdempotencyKey: key, Content: content, Intent: models.MessageIntentUpdate})
+	return f.post(runtimeconversation.PostChannelMessageRequest{IdempotencyKey: key, Content: content, Intent: models.MessageIntentUpdate})
 }
 
 func (f *CatchUpFixture) answer(key, content string, sender models.ConversationParticipant, runID string) *models.ChannelMessage {
 	f.t.Helper()
-	return f.post(PostChannelMessageRequest{
+	return f.post(runtimeconversation.PostChannelMessageRequest{
 		IdempotencyKey: key, Content: content, Intent: models.MessageIntentUpdate, Sender: sender,
 		References: []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: runID}},
 	})
@@ -125,13 +126,13 @@ func (f *CatchUpFixture) open(threadRoot string) (*models.AgentRun, *models.Agen
 	return run, opened.Session
 }
 
-func (f *CatchUpFixture) request(run *models.AgentRun, session *models.AgentSession, through int64) catchUpRequest {
-	return catchUpRequest{Run: run, Session: session, Conversation: f.conversation, Viewer: f.viewer(), Through: through, Step: 1}
+func (f *CatchUpFixture) request(run *models.AgentRun, session *models.AgentSession, through int64) runtimeconversation.CatchUpRequest {
+	return runtimeconversation.CatchUpRequest{Run: run, Session: session, Conversation: f.conversation, Viewer: f.viewer(), Through: through, Step: 1}
 }
 
-func (f *CatchUpFixture) collect(req catchUpRequest) *catchUpResult {
+func (f *CatchUpFixture) collect(req runtimeconversation.CatchUpRequest) *runtimeconversation.CatchUpResult {
 	f.t.Helper()
-	result, err := f.catchUp.collect(f.t.Context(), req)
+	result, err := f.catchUp.Collect(f.t.Context(), req)
 	if err != nil {
 		f.t.Fatalf("collect: %v", err)
 	}
@@ -139,9 +140,9 @@ func (f *CatchUpFixture) collect(req catchUpRequest) *catchUpResult {
 }
 
 // commit appends result as the step context append and returns the session.
-func (f *CatchUpFixture) commit(run *models.AgentRun, session *models.AgentSession, result *catchUpResult) *models.AgentSession {
+func (f *CatchUpFixture) commit(run *models.AgentRun, session *models.AgentSession, result *runtimeconversation.CatchUpResult) *models.AgentSession {
 	f.t.Helper()
-	part := result.stepContextAppend(session)
+	part := result.StepContextAppend(session)
 	if part == nil {
 		return session
 	}
@@ -231,7 +232,7 @@ func MessageBatchStores(t *testing.T, test func(*testing.T, models.KernelStore))
 func MessageBatchConversation(t testing.TB, store models.ConversationStore, scope models.Scope, id string) *models.Conversation {
 	t.Helper()
 	seedTestSpace(t, store.(models.SpaceStore), scope)
-	conversation, _, err := NewConversationService(store).CreateConversation(context.Background(), CreateConversationRequest{
+	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(context.Background(), runtimeconversation.CreateConversationRequest{
 		ID: id, Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Title: "Batch visibility", IdempotencyKey: id,
 	})
 	if err != nil {
@@ -310,7 +311,7 @@ func ApprovalModeConversation(t *testing.T, store *sqlite.Store) *models.Convers
 func ApprovalModeConversationWithKey(t *testing.T, store *sqlite.Store, key string) *models.Conversation {
 	t.Helper()
 	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "one"})
-	conversation, _, err := NewConversationService(store).CreateConversation(context.Background(), CreateConversationRequest{
+	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(context.Background(), runtimeconversation.CreateConversationRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, Title: "Chat " + key, IdempotencyKey: key,
 	})
 	if err != nil {
@@ -319,9 +320,9 @@ func ApprovalModeConversationWithKey(t *testing.T, store *sqlite.Store, key stri
 	return conversation
 }
 
-func SetApprovalMode(t *testing.T, service *ConversationApprovalModeService, conversation *models.Conversation, mode models.ConversationApprovalMode) *SetConversationApprovalModeResult {
+func SetApprovalMode(t *testing.T, service *runtimeconversation.ConversationApprovalModeService, conversation *models.Conversation, mode models.ConversationApprovalMode) *runtimeconversation.SetConversationApprovalModeResult {
 	t.Helper()
-	result, err := service.SetApprovalMode(context.Background(), SetConversationApprovalModeRequest{
+	result, err := service.SetApprovalMode(context.Background(), runtimeconversation.SetConversationApprovalModeRequest{
 		Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: mode, Actor: ApprovalModeActor,
 	})
 	if err != nil {

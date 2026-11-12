@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -197,21 +198,21 @@ func TestConversationTaskContinuationCatalogAndProofUsePersistedActorAndDeadline
 	}
 	forged := cloneAgentRun(run)
 	forged.Context[ConversationTaskContextKey] = "copied-task-marker"
-	if _, _, err := conversationTaskForReport(t.Context(), store, forged); !errors.Is(err, ErrInvalidConversationTask) {
+	if _, _, err := runtimeconversation.ConversationTaskForReport(t.Context(), store, forged); !errors.Is(err, ErrInvalidConversationTask) {
 		t.Fatalf("copied marker established reporting authority: %v", err)
 	}
 }
 
 func TestConversationTaskContinuationTerminalReportingReusesCanonicalAnswer(t *testing.T) {
 	store, result, _, source := promotedContinuationAuthorityFixture(t, "continuation-answer")
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	conversation, err := service.GetConversation(t.Context(), result.Task.Scope, result.Task.ConversationID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// This is the valid promotion-versus-publication race: the canonical
 	// answer has its exact Run reference, but the earlier lookup had no Task.
-	posted, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+	posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: result.Task.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: result.WorkRun.AssignedAgentID},
 		Intent: MessageIntentAnswer, Content: "The complete release review.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},

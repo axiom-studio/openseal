@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/google/uuid"
 )
@@ -19,22 +20,22 @@ func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
 		ctx := t.Context()
 		run := claimedFailureRun(t, store, "explained")
 		cause := errors.New("the model returned malformed tool arguments")
-		if !modelExplainsFailure(run) || !turnFailureCanBeExplained(cause, "tool_arguments_invalid") {
+		if !conversation.ModelExplainsFailure(run) || !conversation.TurnFailureCanBeExplained(cause, "tool_arguments_invalid") {
 			t.Fatal("an ordinary step failure must be explainable")
 		}
 		activity := NewRunActivityService(store, store)
 		explaining, _, err := activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 			ExpectedRevision: run.Revision, Status: AgentRunStatusRunning, LeaseOwner: run.LeaseOwner,
-			FailureExplanation: beginRunFailureExplanation(run, RunFailureKindExecution, "tool_arguments_invalid", "The model supplied invalid arguments.", cause.Error(), "producer_failed"),
+			FailureExplanation: conversation.BeginRunFailureExplanation(run, conversation.RunFailureKindExecution, "tool_arguments_invalid", "The model supplied invalid arguments.", cause.Error(), "producer_failed"),
 			EventType:          "run.failure_recorded", Summary: "The attempt stopped; the model will explain it",
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !runExplainingFailure(explaining) || explaining.CreditError != nil || explaining.FailureExplanation.StepErrorCode != "producer_failed" {
+		if !conversation.RunExplainingFailure(explaining) || explaining.CreditError != nil || explaining.FailureExplanation.StepErrorCode != "producer_failed" {
 			t.Fatalf("Run is not in explain mode: %+v", explaining.FailureExplanation)
 		}
-		note := failureExplanationNote(explaining.SessionID, explaining.ID, "step-2", explaining.FailureExplanation)
+		note := conversation.FailureExplanationNote(explaining.SessionID, explaining.ID, "step-2", explaining.FailureExplanation)
 		if err := note.Validate(); err != nil {
 			t.Fatal(err)
 		}
@@ -55,7 +56,7 @@ func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
 		// The tool-free step posted its reply.
 		failed, _, err := activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 			ExpectedRevision: explaining.Revision, Status: AgentRunStatusFailed, LeaseOwner: run.LeaseOwner,
-			Error: explaining.FailureExplanation.Message, FailureExplanation: explainedRunFailure(explaining.FailureExplanation),
+			Error: explaining.FailureExplanation.Message, FailureExplanation: conversation.ExplainedRunFailure(explaining.FailureExplanation),
 			Output:    map[string]interface{}{"summary": "I couldn't read that file, so I stopped.", "messageId": "m-1"},
 			EventType: "run.failed", Summary: "Run failed",
 		})
@@ -66,7 +67,7 @@ func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if runExplainingFailure(stored) || stored.FailureExplanation == nil || !stored.FailureExplanation.Explained || stored.FailureExplanation.Code != "tool_arguments_invalid" || stored.Error != "The model supplied invalid arguments." {
+		if conversation.RunExplainingFailure(stored) || stored.FailureExplanation == nil || !stored.FailureExplanation.Explained || stored.FailureExplanation.Code != "tool_arguments_invalid" || stored.Error != "The model supplied invalid arguments." {
 			t.Fatalf("explained failure not persisted: %+v %q", stored.FailureExplanation, stored.Error)
 		}
 		if reply, ok := externalConversationRunReply(ctx, nil, nil, failed); !ok || reply != "I couldn't read that file, so I stopped." {
@@ -80,12 +81,12 @@ func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
 
 func TestNonExplainableFailureFailsWithKernelReply(t *testing.T) {
 	for _, code := range []string{"gateway_credits_exhausted", "provider_unavailable", "budget_exhausted", modelstep.TurnHostContextExceeded, modelstep.RunFailureCodeCompactionFailed, "agent_behavior_fixed", "model_image_input_unsupported"} {
-		if turnFailureCanBeExplained(errors.New("failed"), code) {
+		if conversation.TurnFailureCanBeExplained(errors.New("failed"), code) {
 			t.Fatalf("%s must not get an explanation step", code)
 		}
 	}
 	for _, err := range []error{modelstep.ErrTurnHostUnavailable, ErrBudgetExhausted, context.Canceled, ErrLeaseLost} {
-		if turnFailureCanBeExplained(err, "execution_failed") {
+		if conversation.TurnFailureCanBeExplained(err, "execution_failed") {
 			t.Fatalf("%v must not get an explanation step", err)
 		}
 	}
@@ -94,18 +95,18 @@ func TestNonExplainableFailureFailsWithKernelReply(t *testing.T) {
 		run := claimedFailureRun(t, store, "kernel-reply")
 		failed, _, err := NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 			ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: run.LeaseOwner, Error: "provider down",
-			FailureExplanation: beginRunFailureExplanation(run, RunFailureKindExecution, "provider_unavailable", "The model provider was unavailable.", "upstream 503 SECRET", "host_unavailable"),
+			FailureExplanation: conversation.BeginRunFailureExplanation(run, conversation.RunFailureKindExecution, "provider_unavailable", "The model provider was unavailable.", "upstream 503 SECRET", "host_unavailable"),
 			Output:             map[string]interface{}{"summary": "stale model text"},
 			EventType:          "run.failed", Summary: "Run failed",
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if failed.FailureExplanation.Explained || runExplainingFailure(failed) {
+		if failed.FailureExplanation.Explained || conversation.RunExplainingFailure(failed) {
 			t.Fatalf("unexplained failure marked explained: %+v", failed.FailureExplanation)
 		}
 		reply, ok := externalConversationRunReply(ctx, store, store, failed)
-		if !ok || reply != TerminalFailureReply("provider_unavailable") || strings.Contains(reply, "SECRET") {
+		if !ok || reply != conversation.TerminalFailureReply("provider_unavailable") || strings.Contains(reply, "SECRET") {
 			t.Fatalf("kernel reply = %q %v", reply, ok)
 		}
 		if retry, err := agentrun.NewRunCommandService(store).ConversationRetryEligibility(ctx, failed.Scope, failed.ID); err != nil || !retry.Available || retry.Reason != "" {
@@ -120,7 +121,7 @@ func TestCreditErrorFromTypedFailure(t *testing.T) {
 		run := claimedFailureRun(t, store, "credits")
 		failed, _, err := NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 			ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: run.LeaseOwner, Error: "no credits",
-			FailureExplanation: beginRunFailureExplanation(run, RunFailureKindCredits, "gateway_credits_exhausted", "This workspace has no model credits available.", "", ""),
+			FailureExplanation: conversation.BeginRunFailureExplanation(run, conversation.RunFailureKindCredits, "gateway_credits_exhausted", "This workspace has no model credits available.", "", ""),
 			EventType:          "run.failed", Summary: "Run failed",
 		})
 		if err != nil {

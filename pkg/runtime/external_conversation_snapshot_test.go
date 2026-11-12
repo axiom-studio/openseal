@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -64,12 +65,12 @@ func upgradeSnapshotEndpoint(t *testing.T, store ExternalConversationEndpointSto
 
 func postSnapshotCanonicalReply(t *testing.T, store ConversationStore, endpoint *ExternalConversationEndpoint, item *ExternalConversationInboxItem) {
 	t.Helper()
-	conversations := NewConversationService(store)
+	conversations := runtimeconversation.NewConversationService(store)
 	current, err := conversations.GetConversation(t.Context(), item.Scope, item.ConversationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = conversations.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+	_, err = conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: item.Scope, ConversationID: item.ConversationID, ExpectedRevision: current.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
 		Intent: MessageIntentAnswer, Content: "Canonical answer", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -109,8 +110,8 @@ func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing
 		t.Fatal(err)
 	}
 	seedTestSpace(t, store, item.Scope)
-	conversations := NewConversationService(store)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversations := runtimeconversation.NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		ID: item.ConversationID, Scope: item.Scope, Owner: endpoint.Owner, Title: "Saved provider thread",
 		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
 		IdempotencyKey: "sqlite-snapshot-conversation",
@@ -118,7 +119,7 @@ func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	_, err = conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		ID: item.ChannelMessageID, Scope: item.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "sender"}, Intent: MessageIntentQuestion,
 		Content: item.Event.Text, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,

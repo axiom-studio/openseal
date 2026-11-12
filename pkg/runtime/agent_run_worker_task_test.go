@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -69,7 +70,7 @@ func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTas
 	t.Helper()
 	activity := NewRunActivityService(store, store)
 	control := &ControlExecutor{
-		Portfolio: store, Sessions: store, Activity: activity, Conversations: NewConversationService(store),
+		Portfolio: store, Sessions: store, Activity: activity, Conversations: conversation.NewConversationService(store),
 		Reporting: store, Tasks: NewConversationTaskService(tasks),
 	}
 	dispatcher, err := NewStepToolDispatcher(StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: control})
@@ -134,7 +135,7 @@ func workerTaskPool(t *testing.T, store *sqlite.Store, scope Scope, producer age
 	return workerTaskPoolWith(t, store, scope, workerTaskResolver(t, store, store, producer))
 }
 
-func workerTaskPoolWith(t *testing.T, store *sqlite.Store, scope Scope, resolver TurnRunnerResolver) *AgentRunWorkerPool {
+func workerTaskPoolWith(t *testing.T, store *sqlite.Store, scope Scope, resolver conversation.TurnRunnerResolver) *AgentRunWorkerPool {
 	t.Helper()
 	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
 		Scope: scope, Kind: RunKindConversation, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute,
@@ -161,9 +162,9 @@ func (s *admissionLostTaskStore) CreateConversationTask(context.Context, Convers
 func settledWorkerTaskFixture(t *testing.T, store *sqlite.Store) (*AgentRun, *AgentTurn, *Conversation, *ChannelMessage) {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "worker-task"}
-	conversations := NewConversationService(store)
+	conversations := conversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",
 	})
 	if err != nil {

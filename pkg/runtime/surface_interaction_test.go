@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -40,7 +41,7 @@ type surfaceInteractionFixture struct {
 	ctx           context.Context
 	scope         Scope
 	conversation  *Conversation
-	conversations *ConversationService
+	conversations *runtimeconversation.ConversationService
 }
 
 func newSurfaceInteractionFixture(t *testing.T, store KernelStore) surfaceInteractionFixture {
@@ -48,9 +49,9 @@ func newSurfaceInteractionFixture(t *testing.T, store KernelStore) surfaceIntera
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "cards"}
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
-	conversations := NewConversationService(store.(ConversationStore), models.WithClock(func() time.Time { now = now.Add(time.Second); return now }))
+	conversations := runtimeconversation.NewConversationService(store.(ConversationStore), models.WithClock(func() time.Time { now = now.Add(time.Second); return now }))
 	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "family"}, Title: "Trip", IdempotencyKey: "trip",
 	})
 	if err != nil {
@@ -67,7 +68,7 @@ func (f surfaceInteractionFixture) postCard(t *testing.T, surfaceID string, audi
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := f.conversations.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+	posted, err := f.conversations.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.scope, ConversationID: f.conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "finn"}, Intent: MessageIntentUpdate,
 		Content: "Card " + surfaceID, Audience: audience, IdempotencyKey: "card-" + surfaceID,
@@ -80,7 +81,7 @@ func (f surfaceInteractionFixture) postCard(t *testing.T, surfaceID string, audi
 }
 
 // record fills test defaults: version 1 and the surface's channel card message.
-func (f surfaceInteractionFixture) record(t *testing.T, req RecordSurfaceInteractionRequest) (*SurfaceInteraction, bool, error) {
+func (f surfaceInteractionFixture) record(t *testing.T, req runtimeconversation.RecordSurfaceInteractionRequest) (*SurfaceInteraction, bool, error) {
 	t.Helper()
 	req.Scope, req.ConversationID = f.scope, f.conversation.ID
 	if req.SurfaceArtifactID == "" {
@@ -127,7 +128,7 @@ func TestSurfaceInteractionSingleUseIsUniquePerVersionComponentAndActor(t *testi
 	for _, fixture := range surfaceInteractionStores(t) {
 		t.Run(fixture.name, func(t *testing.T) {
 			f := newSurfaceInteractionFixture(t, fixture.store(t))
-			quiz := RecordSurfaceInteractionRequest{
+			quiz := runtimeconversation.RecordSurfaceInteractionRequest{
 				SurfaceID: "biology-quiz", ComponentID: "q1", Actor: surfaceInteractionUser("ana"),
 				Values: json.RawMessage(`{"choice":"mitochondria"}`), Outcome: json.RawMessage(`{"correct":true}`), IdempotencyKey: "ana-q1",
 			}
@@ -157,7 +158,7 @@ func TestSurfaceInteractionSingleUseIsUniquePerVersionComponentAndActor(t *testi
 				t.Fatalf("reused key = %v", err)
 			}
 			// Other actors, components and versions answer independently.
-			for _, other := range []RecordSurfaceInteractionRequest{
+			for _, other := range []runtimeconversation.RecordSurfaceInteractionRequest{
 				{SurfaceID: "biology-quiz", ComponentID: "q1", Actor: surfaceInteractionUser("ben"), Values: json.RawMessage(`{}`), IdempotencyKey: "ben-q1"},
 				{SurfaceID: "biology-quiz", ComponentID: "q2", Actor: surfaceInteractionUser("ana"), Values: json.RawMessage(`{}`), IdempotencyKey: "ana-q2"},
 				{SurfaceID: "biology-quiz", SurfaceVersion: 2, ComponentID: "q1", Actor: surfaceInteractionUser("ana"), Values: json.RawMessage(`{}`), IdempotencyKey: "ana-q1-v2"},
@@ -184,13 +185,13 @@ func TestSurfaceInteractionRepeatablesDedupeOnKeyAndResolveLastWritePerItem(t *t
 	for _, fixture := range surfaceInteractionStores(t) {
 		t.Run(fixture.name, func(t *testing.T) {
 			f := newSurfaceInteractionFixture(t, fixture.store(t))
-			tick := func(actor, item, key string, checked bool) RecordSurfaceInteractionRequest {
+			tick := func(actor, item, key string, checked bool) runtimeconversation.RecordSurfaceInteractionRequest {
 				values, _ := json.Marshal(map[string]bool{"checked": checked})
-				return RecordSurfaceInteractionRequest{
+				return runtimeconversation.RecordSurfaceInteractionRequest{
 					SurfaceID: "packing", ComponentID: "list", ItemKey: item, Actor: surfaceInteractionUser(actor), Repeatable: true, Values: values, IdempotencyKey: key,
 				}
 			}
-			for _, req := range []RecordSurfaceInteractionRequest{
+			for _, req := range []runtimeconversation.RecordSurfaceInteractionRequest{
 				tick("ana", "passport", "k1", true),
 				tick("ana", "passport", "k2", false),
 				tick("ben", "socks", "k3", true),
@@ -205,7 +206,7 @@ func TestSurfaceInteractionRepeatablesDedupeOnKeyAndResolveLastWritePerItem(t *t
 				t.Fatalf("replay = %#v, %t, %v", replay, replayed, err)
 			}
 			// Another surface in the conversation stays out of this surface's state.
-			if _, _, err := f.record(t, RecordSurfaceInteractionRequest{SurfaceID: "chips", ComponentID: "next", Actor: surfaceInteractionUser("ana"), Repeatable: true,
+			if _, _, err := f.record(t, runtimeconversation.RecordSurfaceInteractionRequest{SurfaceID: "chips", ComponentID: "next", Actor: surfaceInteractionUser("ana"), Repeatable: true,
 				Values: json.RawMessage(`{"chip":"weather"}`), IdempotencyKey: "k5"}); err != nil {
 				t.Fatal(err)
 			}
@@ -233,7 +234,7 @@ func TestSurfaceInteractionRepeatablesDedupeOnKeyAndResolveLastWritePerItem(t *t
 			if _, _, err := f.record(t, invalid); !errors.Is(err, ErrInvalidSurfaceInteraction) {
 				t.Fatalf("invalid values = %v", err)
 			}
-			if _, _, err := f.conversations.RecordSurfaceInteraction(f.ctx, RecordSurfaceInteractionRequest{Scope: f.scope, ConversationID: "missing",
+			if _, _, err := f.conversations.RecordSurfaceInteraction(f.ctx, runtimeconversation.RecordSurfaceInteractionRequest{Scope: f.scope, ConversationID: "missing",
 				SurfaceArtifactID: "a", SurfaceID: "s", SurfaceVersion: 1, ComponentID: "c", Actor: surfaceInteractionUser("ana"), Values: json.RawMessage(`{}`), IdempotencyKey: "k7",
 			}); !errors.Is(err, ErrConversationNotFound) {
 				t.Fatalf("missing conversation = %v", err)
@@ -247,13 +248,13 @@ func TestConversationChangesCarrySurfaceInteractions(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
 			f := newSurfaceInteractionFixture(t, store)
-			changes, err := NewConversationChangeService(store.(ConversationStore), store)
+			changes, err := runtimeconversation.NewConversationChangeService(store.(ConversationStore), store)
 			if err != nil {
 				t.Fatal(err)
 			}
-			list := func(cursor string, limit int) *ConversationChangeSet {
+			list := func(cursor string, limit int) *runtimeconversation.ConversationChangeSet {
 				t.Helper()
-				set, err := changes.ListChanges(f.ctx, ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor, Limit: limit})
+				set, err := changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor, Limit: limit})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -275,7 +276,7 @@ func TestConversationChangesCarrySurfaceInteractions(t *testing.T) {
 				t.Fatalf("JSON fields = %s", encoded)
 			}
 			for _, key := range []string{"vote-ana", "vote-ben", "vote-cy"} {
-				if _, _, err := f.record(t, RecordSurfaceInteractionRequest{SurfaceID: "dinner-poll", ComponentID: "poll", ItemKey: "tacos",
+				if _, _, err := f.record(t, runtimeconversation.RecordSurfaceInteractionRequest{SurfaceID: "dinner-poll", ComponentID: "poll", ItemKey: "tacos",
 					Actor: surfaceInteractionUser(key), Repeatable: true, Values: json.RawMessage(`{"selected":true}`), IdempotencyKey: key}); err != nil {
 					t.Fatal(err)
 				}
@@ -305,8 +306,8 @@ func TestSurfaceInteractionVisibilityFollowsCardMessage(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
 			f := newSurfaceInteractionFixture(t, store)
-			answer := func(actor, surface, key string, repeatable bool) RecordSurfaceInteractionRequest {
-				req := RecordSurfaceInteractionRequest{SurfaceID: surface, ComponentID: "c1", Actor: surfaceInteractionUser(actor),
+			answer := func(actor, surface, key string, repeatable bool) runtimeconversation.RecordSurfaceInteractionRequest {
+				req := runtimeconversation.RecordSurfaceInteractionRequest{SurfaceID: surface, ComponentID: "c1", Actor: surfaceInteractionUser(actor),
 					Repeatable: repeatable, Values: json.RawMessage(`{"pick":1}`), IdempotencyKey: key}
 				if repeatable {
 					req.ItemKey = "tacos"
@@ -317,7 +318,7 @@ func TestSurfaceInteractionVisibilityFollowsCardMessage(t *testing.T) {
 			secretMessage := f.postCard(t, "secret", ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{surfaceInteractionUser("ana")}})
 			secret := answer("ana", "secret", "secret-ana", true)
 			secret.MessageID = secretMessage
-			for _, req := range []RecordSurfaceInteractionRequest{
+			for _, req := range []runtimeconversation.RecordSurfaceInteractionRequest{
 				answer("ben", "quiz", "ben-q1", false),
 				answer("ana", "quiz", "ana-q1", false),
 				answer("ana", "poll", "vote-ana", true),
@@ -334,7 +335,7 @@ func TestSurfaceInteractionVisibilityFollowsCardMessage(t *testing.T) {
 				"ben": {"ben-q1", "ana-q1", "vote-ana", "vote-ben"},
 				"cy":  {"ben-q1", "ana-q1", "vote-ana", "vote-ben"},
 			}
-			changes, err := NewConversationChangeService(store.(ConversationStore), store)
+			changes, err := runtimeconversation.NewConversationChangeService(store.(ConversationStore), store)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -343,7 +344,7 @@ func TestSurfaceInteractionVisibilityFollowsCardMessage(t *testing.T) {
 				if viewerID != "" {
 					viewer = surfaceInteractionViewer(viewerID)
 				}
-				set, err := changes.ListChanges(f.ctx, ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: viewer})
+				set, err := changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: viewer})
 				if err != nil || !reflect.DeepEqual(surfaceInteractionKeys(set.SurfaceInteractions), keys) {
 					t.Fatalf("changes for %q = %v, %v", viewerID, surfaceInteractionKeys(set.SurfaceInteractions), err)
 				}
@@ -410,7 +411,7 @@ func TestConversationChangesAdvancePastHiddenSurfaceInteractions(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
 			f := newSurfaceInteractionFixture(t, store)
-			changes, err := NewConversationChangeService(store.(ConversationStore), store)
+			changes, err := runtimeconversation.NewConversationChangeService(store.(ConversationStore), store)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -418,9 +419,9 @@ func TestConversationChangesAdvancePastHiddenSurfaceInteractions(t *testing.T) {
 			// ana's card goes only to ana, so ben never sees its interactions.
 			anaCard := f.postCard(t, "private", ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{surfaceInteractionUser("ana")}})
 			viewer := surfaceInteractionViewer("ben")
-			list := func(cursor string, limit int) *ConversationChangeSet {
+			list := func(cursor string, limit int) *runtimeconversation.ConversationChangeSet {
 				t.Helper()
-				set, err := changes.ListChanges(f.ctx, ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor, Limit: limit, Viewer: viewer})
+				set, err := changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor, Limit: limit, Viewer: viewer})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -432,7 +433,7 @@ func TestConversationChangesAdvancePastHiddenSurfaceInteractions(t *testing.T) {
 				if req.actor == "ana" {
 					surface, message = "private", anaCard
 				}
-				if _, _, err := f.record(t, RecordSurfaceInteractionRequest{SurfaceID: surface, ComponentID: "q" + string(rune('1'+index)), MessageID: message,
+				if _, _, err := f.record(t, runtimeconversation.RecordSurfaceInteractionRequest{SurfaceID: surface, ComponentID: "q" + string(rune('1'+index)), MessageID: message,
 					Actor: surfaceInteractionUser(req.actor), Values: json.RawMessage(`{}`), IdempotencyKey: req.key}); err != nil {
 					t.Fatal(err)
 				}
@@ -470,18 +471,18 @@ func TestConversationChangesShowOnlyTheViewersOwnOutcomes(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
 			f := newSurfaceInteractionFixture(t, store)
-			changes, err := NewConversationChangeService(store.(ConversationStore), store)
+			changes, err := runtimeconversation.NewConversationChangeService(store.(ConversationStore), store)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, actor := range []string{"ana", "ben"} {
-				if _, _, err := f.record(t, RecordSurfaceInteractionRequest{SurfaceID: "cells", ComponentID: "quiz", Actor: surfaceInteractionUser(actor),
+				if _, _, err := f.record(t, runtimeconversation.RecordSurfaceInteractionRequest{SurfaceID: "cells", ComponentID: "quiz", Actor: surfaceInteractionUser(actor),
 					Values: json.RawMessage(`{"selected":["b"]}`), Outcome: json.RawMessage(`{"correct":true,"correctIds":["b"],"explanation":"Because."}`), IdempotencyKey: actor}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			viewer := ConversationViewer{Participant: surfaceInteractionUser("ana")}
-			set, err := changes.ListChanges(f.ctx, ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: &viewer})
+			set, err := changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: &viewer})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -494,7 +495,7 @@ func TestConversationChangesShowOnlyTheViewersOwnOutcomes(t *testing.T) {
 					t.Fatalf("%s outcome = %s", interaction.ActorID, interaction.Outcome)
 				}
 			}
-			all, err := changes.ListChanges(f.ctx, ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID})
+			all, err := changes.ListChanges(f.ctx, runtimeconversation.ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID})
 			if err != nil || len(all.SurfaceInteractions) != 2 || len(all.SurfaceInteractions[1].Outcome) == 0 {
 				t.Fatalf("stored outcomes changed: %#v, %v", all, err)
 			}

@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -54,13 +55,13 @@ func TestRunbookActionOwnerChecksTheCurrentRoster(t *testing.T) {
 func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 	ctx, store, scope := t.Context(), newTestKernelStore(t), Scope{Kind: "tenant", ID: "task-test"}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
-	service := NewConversationService(store)
+	service := conversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	chat, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
+	chat, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{Scope: scope, ConversationID: chat.ID, ExpectedRevision: chat.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentQuestion, Content: "Check the public forecast every thirty minutes", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "user-request"})
+	posted, err := service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{Scope: scope, ConversationID: chat.ID, ExpectedRevision: chat.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentQuestion, Content: "Check the public forecast every thirty minutes", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "user-request"})
 	if err != nil {
 		t.Fatal(err)
 	}

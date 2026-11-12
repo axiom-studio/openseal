@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // Interaction control tools (section 04 §10): react (inline) and wait
@@ -28,7 +29,7 @@ type reactControlHandler struct{}
 
 func (reactControlHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
-		Description: ConversationReactInstruction,
+		Description: runtimeconversation.ConversationReactInstruction,
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []interface{}{"messageId", "emoji"},
 			"properties": map[string]interface{}{
@@ -45,7 +46,7 @@ func (reactControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 
 func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*reactControlArgs)
-	reaction := TurnReaction{MessageID: strings.TrimSpace(args.MessageID), Emoji: args.Emoji}
+	reaction := runtimeconversation.TurnReaction{MessageID: strings.TrimSpace(args.MessageID), Emoji: args.Emoji}
 	if !validOpaqueIdentifier(reaction.MessageID, 256) || ValidateReactionEmoji(reaction.Emoji) != nil {
 		return x.refuse(ctx, cc, controlErrorResult(ToolResultFailed, "reaction_invalid",
 			"Use one emoji and a message id from this conversation.", nil))
@@ -54,9 +55,9 @@ func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agent
 	if err != nil {
 		return ControlResult{}, err
 	}
-	if len(done) >= MaximumTurnReactions {
+	if len(done) >= runtimeconversation.MaximumTurnReactions {
 		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "reaction_limit",
-			fmt.Sprintf("This reply already added %d reactions, the most one reply may add.", MaximumTurnReactions), nil))
+			fmt.Sprintf("This reply already added %d reactions, the most one reply may add.", runtimeconversation.MaximumTurnReactions), nil))
 	}
 	if err := x.addRunReaction(ctx, cc.Run, reaction); err != nil {
 		if errors.Is(err, ErrLeaseLost) {
@@ -72,7 +73,7 @@ func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agent
 
 // addRunReaction adds the reaction as the Agent answering in the Run's
 // conversation, on a message that Agent can see.
-func (x *ControlExecutor) addRunReaction(ctx context.Context, run *AgentRun, reaction TurnReaction) error {
+func (x *ControlExecutor) addRunReaction(ctx context.Context, run *AgentRun, reaction runtimeconversation.TurnReaction) error {
 	if x.Conversations == nil {
 		return errors.New("conversations are not configured")
 	}
@@ -84,11 +85,11 @@ func (x *ControlExecutor) addRunReaction(ctx context.Context, run *AgentRun, rea
 	if err != nil {
 		return err
 	}
-	agentID := ConversationRunAgentID(conversation, run)
+	agentID := runtimeconversation.ConversationRunAgentID(conversation, run)
 	if agentID == "" {
 		return errors.New("this Run is not the answering Agent of its conversation")
 	}
-	_, err = x.Conversations.AddMessageReaction(ctx, MessageReactionRequest{
+	_, err = x.Conversations.AddMessageReaction(ctx, runtimeconversation.MessageReactionRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, MessageID: reaction.MessageID, Emoji: reaction.Emoji,
 		Actor: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID},
 	})
@@ -110,18 +111,18 @@ func completedRunReactionEntries(ctx context.Context, sessions AgentSessionStore
 // RunReactions returns the reactions this Run added through react, in call
 // order. The conversation final-answer sink uses it for reactions-only
 // replies (reactionEcho).
-func RunReactions(ctx context.Context, sessions AgentSessionStore, run *AgentRun) ([]TurnReaction, error) {
+func RunReactions(ctx context.Context, sessions AgentSessionStore, run *AgentRun) ([]runtimeconversation.TurnReaction, error) {
 	entries, err := completedRunReactionEntries(ctx, sessions, run)
 	if err != nil {
 		return nil, err
 	}
-	reactions := make([]TurnReaction, 0, len(entries))
+	reactions := make([]runtimeconversation.TurnReaction, 0, len(entries))
 	for _, entry := range entries {
 		var args reactControlArgs
 		if err := decodeControlArguments(entry.Tool.Arguments, &args); err != nil {
 			return nil, fmt.Errorf("decode react entry %s: %w", entry.ID, err)
 		}
-		reactions = append(reactions, TurnReaction{MessageID: strings.TrimSpace(args.MessageID), Emoji: args.Emoji})
+		reactions = append(reactions, runtimeconversation.TurnReaction{MessageID: strings.TrimSpace(args.MessageID), Emoji: args.Emoji})
 	}
 	return reactions, nil
 }

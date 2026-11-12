@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
@@ -193,7 +194,7 @@ func (l *RunLoop) Drive(ctx context.Context, claim RunLoopClaim) RunLoopExit {
 	started := l.now()
 	if err := validatePreparedSkillRuntimes(claim.Binding); err != nil {
 		return d.failWithoutStep(ctx, agentrun.LoopFailure{
-			Kind: RunFailureKindExecution, Code: runFailureCodePreparedRuntime,
+			Kind: conversation.RunFailureKindExecution, Code: runFailureCodePreparedRuntime,
 			Message: "The agent's Skill runtime is not valid, so the run could not start.",
 		}, err)
 	}
@@ -224,7 +225,7 @@ func (l *RunLoop) Drive(ctx context.Context, claim RunLoopClaim) RunLoopExit {
 			rejections++
 			if rejections >= maximumFinalRejections {
 				return d.withSteps(d.failWithoutStep(ctx, agentrun.LoopFailure{
-					Kind: RunFailureKindExecution, Code: runFailureCodeFinalRejected,
+					Kind: conversation.RunFailureKindExecution, Code: runFailureCodeFinalRejected,
 					Message: "The agent's final answer was rejected three times in a row, so the run stopped.",
 				}, nil))
 			}
@@ -347,7 +348,7 @@ func (d *drive) fillStepApplication(req *RunTransitionRequest, run *AgentRun, st
 		req.Payload["definitionVersion"] = version
 	}
 	if step.Status == AgentTurnStatusFailed && strings.TrimSpace(step.Error) != "" {
-		req.Payload["stepError"] = boundedTurnFailureText(step.Error)
+		req.Payload["stepError"] = conversation.BoundedTurnFailureText(step.Error)
 	}
 	if st.kernelState != nil {
 		req.Checkpoint = st.kernelState

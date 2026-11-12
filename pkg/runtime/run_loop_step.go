@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -161,7 +162,7 @@ func (s *stepLease) stopHeartbeat() {
 // runStep runs one step: a new row, or the running row reconcile claimed.
 func (d *drive) runStep(ctx context.Context, resumed *resumedStep) stepResult {
 	mode := agentrun.StepModeNormal
-	if runExplainingFailure(d.run) {
+	if conversation.RunExplainingFailure(d.run) {
 		mode = agentrun.StepModeExplainFailure
 	}
 	var step *AgentTurn
@@ -452,7 +453,7 @@ func (d *drive) appendContext(ctx context.Context, st *stepState) (*agentrun.Loo
 	}
 	preparers := d.binding.Preparers
 	if st.mode == agentrun.StepModeExplainFailure {
-		note := failureExplanationNote(d.session.ID, d.run.ID, st.step.ID, d.run.FailureExplanation)
+		note := conversation.FailureExplanationNote(d.session.ID, d.run.ID, st.step.ID, d.run.FailureExplanation)
 		note.Scope, note.Step = d.run.Scope, st.step.Sequence
 		note.Tokens = modelstep.EstimateEntryTokens(note)
 		preparers = []agentrun.StepPreparer{fixedEntriesPreparer{entries: []*SessionEntry{note}}}
@@ -567,7 +568,7 @@ func (d *drive) produce(ctx context.Context, st *stepState) (agentrun.StepOutput
 	}
 	if err := modelstep.ValidateStepOutput(d.binding.Producer.Kind(), out); err != nil {
 		return out, d.fail(ctx, st, agentrun.LoopFailure{
-			Kind: RunFailureKindExecution, Code: StepFailureProducerFailed,
+			Kind: conversation.RunFailureKindExecution, Code: StepFailureProducerFailed,
 			Message: "The agent returned a step the kernel could not accept.", Explainable: true,
 		}, err, StepFailureProducerFailed), true
 	}
@@ -785,7 +786,7 @@ func (d *drive) inlinePhase(ctx context.Context, st *stepState) stepResult {
 	}
 	if st.mode == agentrun.StepModeExplainFailure {
 		return d.fail(ctx, st, agentrun.LoopFailure{
-			Kind: RunFailureKindExecution, Code: StepFailureProducerFailed,
+			Kind: conversation.RunFailureKindExecution, Code: StepFailureProducerFailed,
 			Message: "The agent called tools while explaining a failure.",
 		}, nil, StepFailureProducerFailed)
 	}
@@ -797,7 +798,7 @@ func (d *drive) inlinePhase(ctx context.Context, st *stepState) stepResult {
 func (d *drive) executeTools(ctx context.Context, st *stepState) stepResult {
 	if d.binding.Tools == nil {
 		return d.fail(ctx, st, agentrun.LoopFailure{
-			Kind: RunFailureKindExecution, Code: StepFailureHostConfiguration,
+			Kind: conversation.RunFailureKindExecution, Code: StepFailureHostConfiguration,
 			Message: "The agent called tools, but this run has no tool executor.",
 		}, nil, StepFailureHostConfiguration)
 	}
@@ -814,7 +815,7 @@ func (d *drive) plainTextFinal(ctx context.Context, st *stepState, text string) 
 		text = strings.TrimSpace(text)
 		if text == "" {
 			return d.fail(ctx, st, agentrun.LoopFailure{
-				Kind: RunFailureKindExecution, Code: StepFailureProducerFailed,
+				Kind: conversation.RunFailureKindExecution, Code: StepFailureProducerFailed,
 				Message: "The agent did not explain the failure.",
 			}, nil, StepFailureProducerFailed)
 		}
@@ -869,7 +870,7 @@ func (d *drive) deterministicStep(ctx context.Context, st *stepState, out agentr
 	}
 	if d.session == nil {
 		return d.fail(ctx, st, agentrun.LoopFailure{
-			Kind: RunFailureKindExecution, Code: StepFailureHostConfiguration,
+			Kind: conversation.RunFailureKindExecution, Code: StepFailureHostConfiguration,
 			Message: "The run has tool calls to execute but no session.",
 		}, nil, StepFailureHostConfiguration)
 	}
@@ -1130,13 +1131,13 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 	case errors.As(err, &loopFailure):
 		return d.fail(ctx, st, loopFailure.Failure, err, loopFailure.Failure.Code)
 	case errors.As(err, &hostFailure):
-		code := runFailureCodeOrEmpty(hostFailure.Code)
+		code := conversation.RunFailureCodeOrEmpty(hostFailure.Code)
 		if code == "" {
 			code = StepFailureProducerFailed
 		}
 		return d.fail(ctx, st, agentrun.LoopFailure{
-			Kind: RunFailureKindExecution, Code: code, Message: hostFailure.Error(),
-			Explainable: turnFailureCanBeExplained(err, code),
+			Kind: conversation.RunFailureKindExecution, Code: code, Message: hostFailure.Error(),
+			Explainable: conversation.TurnFailureCanBeExplained(err, code),
 		}, err, code)
 	case errors.Is(err, modelstep.ErrTurnHostConfiguration):
 		message := "The agent's step host is not configured correctly."
@@ -1145,7 +1146,7 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 			message = "The agent's next step could not be prepared from this conversation."
 		}
 		return d.fail(ctx, st, agentrun.LoopFailure{
-			Kind: RunFailureKindExecution, Code: StepFailureHostConfiguration,
+			Kind: conversation.RunFailureKindExecution, Code: StepFailureHostConfiguration,
 			Message: message,
 		}, err, StepFailureHostConfiguration)
 	}
@@ -1154,8 +1155,8 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 		code = "execution_failed"
 	}
 	return d.fail(ctx, st, agentrun.LoopFailure{
-		Kind: RunFailureKindExecution, Code: code, Message: "The requested work did not complete.",
-		Explainable: turnFailureCanBeExplained(err, code),
+		Kind: conversation.RunFailureKindExecution, Code: code, Message: "The requested work did not complete.",
+		Explainable: conversation.TurnFailureCanBeExplained(err, code),
 	}, err, code)
 }
 

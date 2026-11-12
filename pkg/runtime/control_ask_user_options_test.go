@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 func TestAskUserOptionsDecodeLimits(t *testing.T) {
@@ -83,7 +84,7 @@ func TestAskUserOptionsPostedAndAnsweredWithSelectedOptions(t *testing.T) {
 			t.Fatalf("question = %#v", question.Question)
 		}
 
-		answer := f.post(t, PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer,
+		answer := f.post(t, conversation.PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer,
 			Content: "Blog, Pricing", ResolvesMessageID: question.ID, SelectedOptionIDs: []string{"o3", "o1"}, IdempotencyKey: "answer"})
 		if !reflect.DeepEqual(answer.SelectedOptionIDs, []string{"o3", "o1"}) {
 			t.Fatalf("answer = %#v", answer)
@@ -117,7 +118,7 @@ func TestAskUserWithoutOptionsResultHasNoSelectedOptions(t *testing.T) {
 	if question.Question != nil {
 		t.Fatalf("free-text question carries options: %#v", question.Question)
 	}
-	answer := f.post(t, PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer,
+	answer := f.post(t, conversation.PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer,
 		Content: "The pricing page.", ResolvesMessageID: question.ID, IdempotencyKey: "answer"})
 	if _, _, err := f.scheduler.ScheduleMessage(t.Context(), f.run.Scope, f.conversation.ID, answer.ID); err != nil {
 		t.Fatal(err)
@@ -137,7 +138,7 @@ func TestPostChannelMessageRefusesInvalidSelectedOptions(t *testing.T) {
 	f.run = call.park(t, result.Park)
 	question := f.question(t)
 
-	post := func(req PostChannelMessageRequest) error {
+	post := func(req conversation.PostChannelMessageRequest) error {
 		current, err := f.service.GetConversation(t.Context(), f.conversation.Scope, f.conversation.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -147,7 +148,7 @@ func TestPostChannelMessageRefusesInvalidSelectedOptions(t *testing.T) {
 		_, err = f.service.PostChannelMessage(t.Context(), req)
 		return err
 	}
-	for name, req := range map[string]PostChannelMessageRequest{
+	for name, req := range map[string]conversation.PostChannelMessageRequest{
 		"unknown id":           {Content: "Blog", ResolvesMessageID: question.ID, SelectedOptionIDs: []string{"o9"}},
 		"two ids, one allowed": {Content: "Pricing, Docs", ResolvesMessageID: question.ID, SelectedOptionIDs: []string{"o1", "o2"}},
 		"duplicate ids":        {Content: "Pricing", ResolvesMessageID: question.ID, SelectedOptionIDs: []string{"o1", "o1"}},
@@ -160,16 +161,16 @@ func TestPostChannelMessageRefusesInvalidSelectedOptions(t *testing.T) {
 		}
 	}
 	// One option by reply id, and free text with nothing selected, are fine.
-	if err := post(PostChannelMessageRequest{Content: "Docs", ReplyToMessageID: question.ID, SelectedOptionIDs: []string{"o2"}, IdempotencyKey: "ok"}); err != nil {
+	if err := post(conversation.PostChannelMessageRequest{Content: "Docs", ReplyToMessageID: question.ID, SelectedOptionIDs: []string{"o2"}, IdempotencyKey: "ok"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := post(PostChannelMessageRequest{Content: "Something else", ResolvesMessageID: question.ID, IdempotencyKey: "free"}); err != nil {
+	if err := post(conversation.PostChannelMessageRequest{Content: "Something else", ResolvesMessageID: question.ID, IdempotencyKey: "free"}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Options belong only on a question.
 	current, _ := f.service.GetConversation(t.Context(), f.conversation.Scope, f.conversation.ID)
-	_, err := f.service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+	_, err := f.service.PostChannelMessage(t.Context(), conversation.PostChannelMessageRequest{
 		Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
 		Sender: f.trigger.Sender, Intent: MessageIntentAnswer, Content: "Pick one", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 		Question: &ChannelQuestion{Options: []ChannelQuestionOption{{ID: "o1", Label: "A"}, {ID: "o2", Label: "B"}}}, IdempotencyKey: "not-a-question",
@@ -185,9 +186,9 @@ func TestAgentBuilderConversationOriginValidates(t *testing.T) {
 	}
 	store := newTestKernelStore(t)
 	seedTestSpace(t, store, Scope{Kind: "organization", ID: "builder"})
-	service := NewConversationService(store)
+	service := conversation.NewConversationService(store)
 	origin := &ConversationReference{Kind: ConversationReferenceAgentBuilder, ID: "k"}
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: Scope{Kind: "organization", ID: "builder"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "builder-agent"},
 		Title: "New agent", Origin: origin, IdempotencyKey: "agent-builder:k",
 	})

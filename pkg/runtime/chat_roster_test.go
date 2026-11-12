@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -99,9 +100,9 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
 	team := chatRosterTeam(scope, "task-agent")
 	store := teamRosterPortfolio{Store: memory, team: team}
-	conversations := NewConversationService(store)
+	conversations := conversation.NewConversationService(store)
 	seedTestSpace(t, memory, scope)
-	chat, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Team task", IdempotencyKey: "team-task-chat"})
+	chat, _, err := conversations.CreateConversation(ctx, conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Team task", IdempotencyKey: "team-task-chat"})
 	if err != nil {
 		t.Fatal(err)
 	}

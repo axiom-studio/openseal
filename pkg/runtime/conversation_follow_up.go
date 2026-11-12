@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 const maximumConversationFollowUpInstructionBytes = 16000
@@ -68,7 +69,7 @@ func conversationFollowUpRunEligible(ctx context.Context, store PortfolioStore, 
 func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*agentrun.AgentRunCommandResult, error) {
 	switch conversation.Owner.Type {
 	case OwnerTypeAgent:
-		return s.deliverToConversationLane(ctx, conversation, message, conversationAgentRunRequest(conversation, message).ConcurrencyKey)
+		return s.deliverToConversationLane(ctx, conversation, message, runtimeconversation.ConversationAgentRunRequest(conversation, message).ConcurrencyKey)
 	case OwnerTypeTeam:
 		return s.deliverToWorkingMembers(ctx, conversation, message)
 	}
@@ -85,7 +86,7 @@ func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Co
 // a follow-up there (routeTeamMessage).
 func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*agentrun.AgentRunCommandResult, error) {
 	root := externalConversationThreadRoot(conversation, message)
-	if message.Sender.Type != ConversationParticipantUser || len(message.Mentions) > 0 || quotedMessageID(message.Quote) != "" ||
+	if message.Sender.Type != ConversationParticipantUser || len(message.Mentions) > 0 || runtimeconversation.QuotedMessageID(message.Quote) != "" ||
 		(message.Audience.Kind != "" && message.Audience.Kind != ConversationAudienceChannel) ||
 		(message.ReplyToMessageID != "" && message.ReplyToMessageID != root) {
 		return nil, nil
@@ -126,7 +127,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 	if message.Sender.Type != ConversationParticipantUser {
 		return nil, nil
 	}
-	actor, valid := conversationMessageInitiatingUser(conversation, message)
+	actor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, message)
 	if !valid {
 		return nil, nil
 	}
@@ -174,7 +175,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 			if err != nil {
 				return nil, err
 			}
-			if triggerActor, ok := conversationMessageInitiatingUser(conversation, trigger); ok && triggerActor == actor {
+			if triggerActor, ok := runtimeconversation.ConversationMessageInitiatingUser(conversation, trigger); ok && triggerActor == actor {
 				target = run
 				break
 			}
@@ -343,7 +344,7 @@ func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Conte
 	if conversation.Owner.Type != OwnerTypeTeam || message.Sender.Type != ConversationParticipantUser {
 		return nil
 	}
-	actor, valid := conversationMessageInitiatingUser(conversation, message)
+	actor, valid := runtimeconversation.ConversationMessageInitiatingUser(conversation, message)
 	if !valid {
 		return nil
 	}
@@ -372,7 +373,7 @@ func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		if triggerActor, ok := conversationMessageInitiatingUser(conversation, trigger); !ok || triggerActor != actor {
+		if triggerActor, ok := runtimeconversation.ConversationMessageInitiatingUser(conversation, trigger); !ok || triggerActor != actor {
 			continue
 		}
 		if _, err := s.replaceApprovalWithMessage(ctx, run, message); err != nil {

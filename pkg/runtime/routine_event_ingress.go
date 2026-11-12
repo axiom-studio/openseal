@@ -14,6 +14,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/callback"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // Producers of routine events from conversation and callback ingress
@@ -136,7 +137,7 @@ func conversationRoutineEvent(scope Scope, kind RoutineEventKind, sourceRef stri
 	text := strings.ToValidUTF8(event.Text, "")
 	fields := map[string][]string{
 		"sender": {sender},
-		"text":   {truncateUTF8Bytes(text, RoutineEventTextFieldMaxBytes)},
+		"text":   {runtimeconversation.TruncateUTF8Bytes(text, RoutineEventTextFieldMaxBytes)},
 		"bot":    {strconv.FormatBool(event.ParticipantIsBot)},
 	}
 	if senderName != "" {
@@ -174,7 +175,7 @@ func conversationRoutineEvent(scope Scope, kind RoutineEventKind, sourceRef stri
 	}
 	return &RoutineEvent{
 		Scope: scope, ID: routineEventIDOf(event.ID), Kind: kind, SourceRef: sourceRef, OccurredAt: event.OccurredAt.UTC(),
-		Subject: truncateUTF8Bytes(conversation, RoutineEventSubjectMaxBytes),
+		Subject: runtimeconversation.TruncateUTF8Bytes(conversation, RoutineEventSubjectMaxBytes),
 		Summary: routineEventSummary(who + ": " + summary), Fields: fields, Payload: routineEventPayload(payload),
 	}
 }
@@ -267,7 +268,7 @@ func gitHubRoutineEvent(scope Scope, sourceRef string, event EventEnvelope) *Rou
 	}
 	return &RoutineEvent{
 		Scope: scope, ID: routineEventIDOf(event.ID), Kind: RoutineEventGitHub, SourceRef: sourceRef, OccurredAt: event.OccurredAt.UTC(),
-		Subject: truncateUTF8Bytes(strings.ToValidUTF8(event.Subject, ""), RoutineEventSubjectMaxBytes),
+		Subject: runtimeconversation.TruncateUTF8Bytes(strings.ToValidUTF8(event.Subject, ""), RoutineEventSubjectMaxBytes),
 		Summary: routineEventSummary(gitHubRoutineSummary(kind, action, repository, number, title, conclusion)),
 		Fields:  fields, Payload: encoded,
 	}
@@ -382,7 +383,7 @@ func routineEventIDOf(id string) string {
 // routineEventFieldValue is a filterable value: valid UTF-8, trimmed, at most
 // the field value limit.
 func routineEventFieldValue(value string) string {
-	return truncateUTF8Bytes(strings.TrimSpace(strings.ToValidUTF8(value, "")), RoutineEventFieldValueMaxBytes)
+	return runtimeconversation.TruncateUTF8Bytes(strings.TrimSpace(strings.ToValidUTF8(value, "")), RoutineEventFieldValueMaxBytes)
 }
 
 func routineEventOneLine(value string) string {
@@ -391,7 +392,7 @@ func routineEventOneLine(value string) string {
 
 // routineEventSummary is one line of at most 280 bytes.
 func routineEventSummary(value string) string {
-	value = truncateUTF8Bytes(routineEventOneLine(value), RoutineEventSummaryMaxBytes)
+	value = runtimeconversation.TruncateUTF8Bytes(routineEventOneLine(value), RoutineEventSummaryMaxBytes)
 	if !utf8.ValidString(value) || strings.TrimSpace(value) == "" {
 		return "New event"
 	}

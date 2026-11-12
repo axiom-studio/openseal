@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -40,7 +41,7 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 			scope := Scope{Kind: "tenant", ID: "cross-surface"}
 			now := time.Date(2026, 7, 23, 8, 30, 0, 0, time.UTC)
 			seedTestSpace(t, store.(SpaceStore), scope)
-			conversation, _, err := NewConversationService(conversationStore).CreateConversation(ctx, CreateConversationRequest{
+			conversation, _, err := runtimeconversation.NewConversationService(conversationStore).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-gtm"},
 				Title: "Launch coordination", IdempotencyKey: "launch-coordination",
 			})
@@ -104,11 +105,11 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 				}
 			}
 
-			changes, err := NewConversationChangeService(conversationStore, store)
+			changes, err := runtimeconversation.NewConversationChangeService(conversationStore, store)
 			if err != nil {
 				t.Fatal(err)
 			}
-			channel, err := changes.ListChanges(ctx, ConversationChangeRequest{
+			channel, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, ActiveAt: now,
 			})
 			if err != nil {

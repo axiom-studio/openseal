@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -19,10 +20,10 @@ import (
 
 func continuationLifecycleFixture(t *testing.T, store *sqlite.Store, id string) (*AgentRun, *Conversation, *ChannelMessage) {
 	t.Helper()
-	service := NewConversationService(store)
+	service := conversation.NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: id}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: id,
 	})
 	if err != nil {

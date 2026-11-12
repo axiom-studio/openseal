@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -441,7 +442,7 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc agentrun.Con
 	// and place stamping run where the visual is stored (delivery), which
 	// answers retry_final when they fail.
 	if d.Args.Visual != nil {
-		visual := cloneVisual(d.Args.Visual)
+		visual := conversation.CloneVisual(d.Args.Visual)
 		if _, err := presentation.Validate(ctx, visual.Surface(presentation.StateReady), presentation.ValidateOptions{SkipHostChecks: true}); err != nil {
 			prior, countErr := x.priorFinalErrorCodes(ctx, cc)
 			if countErr != nil {
@@ -515,8 +516,8 @@ func (d *finalAnswerDraft) output(mode agentrun.FinalAnswerMode) map[string]inte
 	if d.Args.BroadcastToChannel {
 		output[agentrun.FinalOutputBroadcastKey] = true
 	}
-	if files := handedOverFileIDs(d.Args.Files); len(files) > 0 {
-		output[finalOutputFilesKey] = files
+	if files := conversation.HandedOverFileIDs(d.Args.Files); len(files) > 0 {
+		output[conversation.FinalOutputFilesKey] = files
 	}
 	if d.Visual != nil {
 		output[agentrun.FinalOutputVisualKey] = d.Visual
@@ -830,7 +831,7 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc agentrun.Contro
 		message := fmt.Sprintf("Finish with %s (%s); a plain reply is not accepted in this run.", tool, x.registry().finalToolRequiredFields(tool, cc.Authority))
 		rejection := &finalAnswerRejection{Code: finalToolRequiredCode, Message: message}
 		if prior[finalToolRequiredCode]+1 >= finalPlainTextAttemptsLimit {
-			rejection.Failure = &agentrun.LoopFailure{Kind: RunFailureKindExecution, Code: finalToolRequiredCode,
+			rejection.Failure = &agentrun.LoopFailure{Kind: conversation.RunFailureKindExecution, Code: finalToolRequiredCode,
 				Message: fmt.Sprintf("The agent replied without %s %d times, so the run stopped.", tool, finalPlainTextAttemptsLimit)}
 		}
 		return x.rejectFinal(ctx, cc, &finalAnswerDraft{PlainText: true}, rejection)
@@ -856,7 +857,7 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc agentrun.Contro
 		rejection := &finalAnswerRejection{Code: finalEmptyReplyCode,
 			Message: "An empty reply is not an answer. Write the reply, or call turn_final_answer."}
 		if prior[finalEmptyReplyCode]+1 >= finalEmptyReplyAttemptLimit {
-			rejection.Failure = &agentrun.LoopFailure{Kind: RunFailureKindExecution, Code: finalEmptyReplyCode,
+			rejection.Failure = &agentrun.LoopFailure{Kind: conversation.RunFailureKindExecution, Code: finalEmptyReplyCode,
 				Message: "The agent sent an empty reply three times, so the run stopped."}
 		}
 		return x.rejectFinal(ctx, cc, draft, rejection)

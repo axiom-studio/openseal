@@ -10,6 +10,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -478,13 +479,13 @@ func eventTaskFixture(t *testing.T, store *sqlite.Store) (Scope, CreateRunbookAc
 	if err != nil {
 		t.Fatal(err)
 	}
-	conversations := NewConversationService(store)
+	conversations := conversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	c, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Orders", IdempotencyKey: "chat"})
+	c, _, err := conversations.CreateConversation(ctx, conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Orders", IdempotencyKey: "chat"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{Scope: scope, ConversationID: c.ID, ExpectedRevision: c.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion, Content: "Tell me when an order comes in", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "user-request"})
+	posted, err := conversations.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{Scope: scope, ConversationID: c.ID, ExpectedRevision: c.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion, Content: "Tell me when an order comes in", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "user-request"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,130 @@
+package conversation
+
+import (
+	"encoding/json"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+)
+
+func conversationSectionIDs(sections []models.ModelStepSystemSection) []string {
+	ids := make([]string, 0, len(sections))
+	for _, section := range sections {
+		ids = append(ids, section.ID)
+	}
+	return ids
+}
+
+func TestConversationSystemSectionsStableAcrossRuns(t *testing.T) {
+	conversation := &models.Conversation{ID: "conversation-1", Title: "Launch"}
+	first := &models.AgentRun{ID: "run-1", Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}, Goal: "first", SessionID: "session-1"}
+	second := &models.AgentRun{ID: "run-2", Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}, Goal: "second message", SessionID: "session-1", Revision: 9}
+	a, err := json.Marshal(ConversationSystemSections(conversation, first, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(ConversationSystemSections(conversation, second, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(a) != string(b) {
+		t.Fatalf("sections differ across Runs of one session:\n%s\n%s", a, b)
+	}
+	got := conversationSectionIDs(ConversationSystemSections(conversation, first, false))
+	if strings.Join(got, ",") != "conversation_channel,conversation_attachments" {
+		t.Fatalf("ids = %v", got)
+	}
+}
+
+func TestExternalAndTeamSectionsIncludedByConversationKind(t *testing.T) {
+	external := &models.Conversation{ID: "conversation-1", Origin: &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: "source-1"}}
+	teamRun := &models.AgentRun{ID: "run-1", Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-1"}, AssignedAgentID: "agent-1"}
+	agentRun := &models.AgentRun{ID: "run-2", Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}}
+	cases := []struct {
+		name         string
+		conversation *models.Conversation
+		run          *models.AgentRun
+		spoken       bool
+		want         string
+	}{
+		{"plain", &models.Conversation{ID: "c"}, agentRun, false, "conversation_channel,conversation_attachments"},
+		{"external", external, agentRun, false, "conversation_channel,conversation_attachments,conversation_external_source"},
+		{"team", &models.Conversation{ID: "c"}, teamRun, false, "conversation_channel,conversation_attachments,team_channel"},
+		{"external team spoken", external, teamRun, true, "conversation_channel,conversation_attachments,conversation_external_source,team_channel,spoken_rules"},
+		{"non-external origin", &models.Conversation{ID: "c", Origin: &models.ConversationReference{Kind: models.ConversationReferenceAgentControl, ID: "agent-1"}}, agentRun, false, "conversation_channel,conversation_attachments"},
+	}
+	for _, tc := range cases {
+		sections := ConversationSystemSections(tc.conversation, tc.run, tc.spoken)
+		if got := strings.Join(conversationSectionIDs(sections), ","); got != tc.want {
+			t.Errorf("%s: ids = %s, want %s", tc.name, got, tc.want)
+		}
+		for _, section := range sections {
+			if section.Title == "" || section.Text == "" {
+				t.Errorf("%s: section %q has empty title or text", tc.name, section.ID)
+			}
+		}
+	}
+	sections := ConversationSystemSections(external, teamRun, false)
+	if sections[2].Text != ConversationExternalSourceRules || sections[3].Text != teamChannelRules {
+		t.Fatalf("external/team texts not used: %+v", sections)
+	}
+}
+
+func TestSystemSectionsHaveNoFormWords(t *testing.T) {
+	external := &models.Conversation{ID: "c", Origin: &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: "s"}}
+	teamRun := &models.AgentRun{ID: "run-1", Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-1"}}
+	idPattern := regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)
+	seen := map[string]bool{}
+	for _, section := range ConversationSystemSections(external, teamRun, true) {
+		if !idPattern.MatchString(section.ID) || seen[section.ID] {
+			t.Errorf("section id %q is invalid or repeated", section.ID)
+		}
+		seen[section.ID] = true
+		for _, kernelID := range modelstep.LoopKernelSectionOrder {
+			if section.ID == kernelID {
+				t.Errorf("section id %q collides with a kernel section", section.ID)
+			}
+		}
+		for _, word := range []string{"output.summary", "runOutput", "proposed", "continuationCheckpoint", "Turn", "historyCompaction", "this turn"} {
+			if strings.Contains(section.Text, word) {
+				t.Errorf("section %q contains form word %q", section.ID, word)
+			}
+		}
+	}
+}
+
+func TestSpokenRulesSectionKeepsAuthorityCaveat(t *testing.T) {
+	var spoken *models.ModelStepSystemSection
+	sections := ConversationSystemSections(&models.Conversation{ID: "c"}, &models.AgentRun{ID: "run-1"}, true)
+	for i := range sections {
+		if sections[i].ID == conversationSectionSpoken {
+			spoken = &sections[i]
+		}
+	}
+	if spoken == nil {
+		t.Fatalf("spoken_rules missing: %v", conversationSectionIDs(sections))
+	}
+	if !strings.HasPrefix(spoken.Text, models.SpokenResponseStyleInstruction) {
+		t.Fatalf("spoken_rules does not start with the spoken style: %q", spoken.Text)
+	}
+	if !strings.HasSuffix(spoken.Text, models.SpokenResponseAuthorityInstruction) {
+		t.Fatalf("spoken_rules lost the authority caveat: %q", spoken.Text)
+	}
+	if !strings.Contains(spoken.Text, "not authenticated approval") {
+		t.Fatalf("spoken_rules must say spoken speech is not approval: %q", spoken.Text)
+	}
+	if !strings.Contains(spoken.Text, "call turn_final_answer with silent=true") {
+		t.Fatalf("spoken_rules must name the silent final answer: %q", spoken.Text)
+	}
+	if strings.Contains(spoken.Text, "runOutput") {
+		t.Fatalf("spoken_rules kept the old form wording: %q", spoken.Text)
+	}
+	for _, section := range ConversationSystemSections(&models.Conversation{ID: "c"}, &models.AgentRun{ID: "run-1"}, false) {
+		if section.ID == conversationSectionSpoken {
+			t.Fatal("spoken_rules included for a written reply")
+		}
+	}
+}

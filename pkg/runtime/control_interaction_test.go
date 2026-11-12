@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // interactionFixture is a control fixture whose Run answers in a
@@ -20,15 +21,15 @@ type interactionFixture struct {
 func newInteractionFixture(t *testing.T, calls []agentrun.LoopToolCall) *interactionFixture {
 	t.Helper()
 	f := newControlFixture(t, calls)
-	conversations := NewConversationService(f.store)
+	conversations := runtimeconversation.NewConversationService(f.store)
 	seedTestSpace(t, f.store, f.run.Scope)
-	conversation, _, err := conversations.CreateConversation(f.ctx, CreateConversationRequest{
+	conversation, _, err := conversations.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
 		Scope: f.run.Scope, Owner: f.run.Owner, Title: "Chat", IdempotencyKey: "chat",
 	})
 	if err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}
-	posted, err := conversations.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+	posted, err := conversations.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "maya"},
 		ID:     reactTestMessageID, Intent: MessageIntentQuestion, Content: "Ship it?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -147,12 +148,12 @@ func TestReactOnlyReplyPostsNoMessage(t *testing.T) {
 		t.Fatalf("messages = %d, %v", len(messages), err)
 	}
 	reactions, err := RunReactions(f.ctx, f.store, f.run)
-	if err != nil || len(reactions) != 1 || reactions[0] != (TurnReaction{MessageID: f.message.ID, Emoji: "👍"}) {
+	if err != nil || len(reactions) != 1 || reactions[0] != (runtimeconversation.TurnReaction{MessageID: f.message.ID, Emoji: "👍"}) {
 		t.Fatalf("run reactions = %+v, %v", reactions, err)
 	}
 	// An empty (or emoji-only) final answer after the reaction says nothing
 	// more, so the sink completes without a reply.
-	if !reactionEcho("", reactions) || !reactionEcho("👍", reactions) || reactionEcho("Done", reactions) {
+	if !runtimeconversation.ReactionEcho("", reactions) || !runtimeconversation.ReactionEcho("👍", reactions) || runtimeconversation.ReactionEcho("Done", reactions) {
 		t.Fatal("reaction echo")
 	}
 }

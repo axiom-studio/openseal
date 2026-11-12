@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // A Team message routed to another member still replaces the person's pending
@@ -15,7 +16,7 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 	catalog, scope := cancellationActionCatalog(t)
 	f := newConversationActorFixture(t, scope, "unused")
 	ctx := t.Context()
-	team, _, err := f.service.CreateConversation(ctx, CreateConversationRequest{
+	team, _, err := f.service.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch-team"}, Title: "Launch", IdempotencyKey: "team-chat",
 	})
 	if err != nil {
@@ -30,7 +31,7 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 		created, err := f.scheduler.runs.CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: scope, Kind: RunKindConversation, Owner: team.Owner, AssignedAgentID: agentID,
 			ConcurrencyKey: ConversationRunLane(team.ID, "", agentID), Goal: "Respond to a Team channel message", Source: RunSourceChat,
-			Context:        map[string]interface{}{conversationRunContextConversationID: team.ID, conversationRunContextTriggerID: trigger.ID, conversationRunContextTriggerSeq: trigger.Sequence},
+			Context:        map[string]interface{}{conversationRunContextConversationID: team.ID, conversationRunContextTriggerID: trigger.ID, conversation.ConversationRunContextTriggerSeq: trigger.Sequence},
 			IdempotencyKey: "member-" + agentID + "-" + trigger.ID, Actor: ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
 		})
 		if err != nil {
@@ -48,11 +49,11 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 		member.ParkOnApproval(proposal.Approval.ID)
 		return proposal
 	}
-	ask := f.post(t, PostChannelMessageRequest{Sender: person, IdempotencyKey: "ask"})
+	ask := f.post(t, conversation.PostChannelMessageRequest{Sender: person, IdempotencyKey: "ask"})
 	nova := waiting("nova", ask)
-	other := f.post(t, PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, IdempotencyKey: "ask-b"})
+	other := f.post(t, conversation.PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, IdempotencyKey: "ask-b"})
 	someoneElses := waiting("rex", other)
-	next := f.post(t, PostChannelMessageRequest{Sender: person, IdempotencyKey: "next", Content: "connect my Google account first"})
+	next := f.post(t, conversation.PostChannelMessageRequest{Sender: person, IdempotencyKey: "next", Content: "connect my Google account first"})
 
 	// Routed to iris; nova's approval is the person's, rex's is someone else's.
 	if err := f.scheduler.replaceOtherMemberApprovals(ctx, team, next, "", map[string]bool{"iris": true}); err != nil {
@@ -75,7 +76,7 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 	}
 
 	// A routed member is left to the normal follow-up path.
-	again := f.post(t, PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, IdempotencyKey: "again"})
+	again := f.post(t, conversation.PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, IdempotencyKey: "again"})
 	if err := f.scheduler.replaceOtherMemberApprovals(ctx, team, again, "", map[string]bool{"rex": true}); err != nil {
 		t.Fatal(err)
 	}

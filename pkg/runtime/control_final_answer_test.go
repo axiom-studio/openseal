@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
@@ -455,7 +456,7 @@ func TestDecisionRunPlainTextGetsNoteThenFails(t *testing.T) {
 	// The JSON repair is only for turn_final_answer, which decision Runs lack.
 	result := f.plain("step-4", 4, decision, `{"answer":"accept"}`)
 	if result.Kind != ControlFailed || result.Failure == nil || result.Failure.Code != finalToolRequiredCode ||
-		result.Failure.Kind != RunFailureKindExecution {
+		result.Failure.Kind != conversation.RunFailureKindExecution {
 		t.Fatalf("third plain reply = %#v", result)
 	}
 	requireRejectionNote(t, result, "step-4", finalToolRequiredCode)
@@ -665,7 +666,7 @@ func TestFinalAnswerChecksRunInOrderAndMayFail(t *testing.T) {
 		}
 		if prior["task_completion_revise"] > 0 {
 			return &finalAnswerRejection{Code: "task_completion_rejected", Message: "Still not done.",
-				Failure: &agentrun.LoopFailure{Kind: RunFailureKindTaskCompletion, Code: "task_completion_rejected", Message: "The task result was rejected."}}, nil
+				Failure: &agentrun.LoopFailure{Kind: conversation.RunFailureKindTaskCompletion, Code: "task_completion_rejected", Message: "The task result was rejected."}}, nil
 		}
 		return &finalAnswerRejection{Code: "task_completion_revise", Message: "The task result needs more work: add the totals."}, nil
 	}}

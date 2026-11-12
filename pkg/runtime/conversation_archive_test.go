@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -25,17 +26,17 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
-			service := NewConversationService(store.(ConversationStore))
+			service := conversation.NewConversationService(store.(ConversationStore))
 			ctx := context.Background()
 			scope := Scope{Kind: "tenant", ID: "archive"}
 			seedTestSpace(t, store.(SpaceStore), scope)
 			start := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
-			request := ImportConversationArchiveRequest{
+			request := conversation.ImportConversationArchiveRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
 				Title:          "Imported launch history",
-				Source:         ConversationArchiveSource{System: "legacy-system", ResourceType: "team-chat", ResourceID: "conversation-42"},
+				Source:         conversation.ConversationArchiveSource{System: "legacy-system", ResourceType: "team-chat", ResourceID: "conversation-42"},
 				IdempotencyKey: "legacy-system-team-chat-conversation-42",
-				Messages: []ConversationArchiveMessage{
+				Messages: []conversation.ConversationArchiveMessage{
 					{
 						RecordID: "message-1", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "23"},
 						Intent: MessageIntentQuestion, Content: "Is the launch ready?",
@@ -96,11 +97,11 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 func TestConversationArchiveImportRejectsUnknownReplyAndDuplicateRecords(t *testing.T) {
 	store := newTestKernelStore(t)
 	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "archive"})
-	service := NewConversationService(store)
-	base := ImportConversationArchiveRequest{
+	service := conversation.NewConversationService(store)
+	base := conversation.ImportConversationArchiveRequest{
 		Scope: Scope{Kind: "tenant", ID: "archive"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
-		Title: "Imported history", Source: ConversationArchiveSource{System: "source", ResourceType: "chat", ResourceID: "1"},
-		IdempotencyKey: "archive-1", Messages: []ConversationArchiveMessage{{
+		Title: "Imported history", Source: conversation.ConversationArchiveSource{System: "source", ResourceType: "chat", ResourceID: "1"},
+		IdempotencyKey: "archive-1", Messages: []conversation.ConversationArchiveMessage{{
 			RecordID: "message-1", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "23"},
 			Intent: MessageIntentUpdate, Content: "Status", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 			CreatedAt: time.Now().UTC(), ReplyToRecordID: "missing",

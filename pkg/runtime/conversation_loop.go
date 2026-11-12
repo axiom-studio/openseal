@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // The conversation seams of the RunLoop (run-loop section 05 §7, §13 on
@@ -41,7 +42,7 @@ type ConversationLoopAuthority struct {
 // conversationLoopAuthority computes the §7 flags of an Agent chat Run.
 func (r *ConversationRunTurnRunner) conversationLoopAuthority(ctx context.Context, run *AgentRun) (ConversationLoopAuthority, error) {
 	if r == nil || r.conversations == nil {
-		return ConversationLoopAuthority{}, ErrConversationCoordinationUnavailable
+		return ConversationLoopAuthority{}, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
 	if run == nil {
 		return ConversationLoopAuthority{}, fmt.Errorf("%w: run is required", ErrInvalidAgentRun)
@@ -50,12 +51,12 @@ func (r *ConversationRunTurnRunner) conversationLoopAuthority(ctx context.Contex
 		CanReact: true,
 		Spoken:   run.Context["responseMode"] == "spoken",
 	}
-	_, conversation, trigger, err := conversationWorkOrigin(ctx, r.portfolio, r.conversationStore, run)
+	_, conversation, trigger, err := runtimeconversation.ConversationWorkOrigin(ctx, r.portfolio, r.conversationStore, run)
 	if err != nil {
 		return ConversationLoopAuthority{}, err
 	}
 	authority.CanAskConversationQuestion = conversation != nil && trigger != nil &&
-		run.AssignedAgentID != "" && run.AssignedAgentID == ConversationRunAgentID(conversation, run)
+		run.AssignedAgentID != "" && run.AssignedAgentID == runtimeconversation.ConversationRunAgentID(conversation, run)
 	authority.ExternalChannelReply = externalChannelContext(conversation)
 	if _, authority.ApprovalMode, err = action.RunConversationApprovalMode(ctx, r.portfolio, r.conversationStore, run); err != nil {
 		return ConversationLoopAuthority{}, err
@@ -104,7 +105,7 @@ type conversationLoop struct {
 	runner       *ConversationRunTurnRunner
 	conversation *Conversation
 	trigger      *ChannelMessage
-	catchUp      *conversationCatchUp
+	catchUp      *runtimeconversation.ConversationCatchUp
 	sessions     AgentSessionStore
 	actions      conversationLoopActions
 }
@@ -125,7 +126,7 @@ const replacedApprovalScan = 32
 // conversation Run.
 func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, run *AgentRun, binding *agentrun.TurnRunnerBinding, stores ConversationLoopStores) error {
 	if r == nil || r.conversations == nil {
-		return ErrConversationCoordinationUnavailable
+		return runtimeconversation.ErrConversationCoordinationUnavailable
 	}
 	if binding == nil || stores.Sessions == nil || stores.Actions == nil {
 		return errors.New("conversation loop binding needs a binding, the session log and the action store")
@@ -156,7 +157,7 @@ func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, ru
 	}
 	loop := &conversationLoop{
 		runner: r, conversation: conversation, trigger: trigger,
-		catchUp:  newConversationCatchUp(r.conversations, r.portfolio, r.conversationAttachmentReader()),
+		catchUp:  runtimeconversation.NewConversationCatchUp(r.conversations, r.portfolio, r.conversationAttachmentReader()),
 		sessions: stores.Sessions, actions: stores.Actions,
 	}
 	binding.Session = session
@@ -164,7 +165,7 @@ func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, ru
 	binding.Preparers = append(binding.Preparers, loop)
 	binding.ToolCheck = loop.checkToolCall
 	binding.AfterTool = loop.afterToolEntry
-	binding.Prompt.Sections = append(binding.Prompt.Sections, conversationSystemSections(conversation, run, authority.Spoken)...)
+	binding.Prompt.Sections = append(binding.Prompt.Sections, runtimeconversation.ConversationSystemSections(conversation, run, authority.Spoken)...)
 	binding.Final = conversationObservedFinal{loop: loop, inner: newConversationFinalHandler(r, stores.Sessions, stores.Actions, stores.Activity)}
 	return nil
 }
@@ -216,11 +217,11 @@ func (r *ConversationRunTurnRunner) openConversationLoopSession(ctx context.Cont
 
 // conversationAttachmentReader is the catch-up's attachment reader, nil when
 // the runner has no artifact bytes (message text only).
-func (r *ConversationRunTurnRunner) conversationAttachmentReader() *conversationAttachmentReader {
+func (r *ConversationRunTurnRunner) conversationAttachmentReader() *runtimeconversation.ConversationAttachmentReader {
 	if r.artifacts == nil || r.config.AttachmentContent == nil {
 		return nil
 	}
-	return newConversationAttachmentReader(r.artifacts, r.config.AttachmentContent)
+	return runtimeconversation.NewConversationAttachmentReader(r.artifacts, r.config.AttachmentContent)
 }
 
 // BeforeStep is the conversation preparer (§13 StartRun / BeforeStep).
@@ -254,14 +255,14 @@ func (l *conversationLoop) BeforeStep(ctx context.Context, in agentrun.StepInput
 	if err != nil {
 		return nil, err
 	}
-	result, err := l.catchUp.collect(ctx, catchUpRequest{
+	result, err := l.catchUp.Collect(ctx, runtimeconversation.CatchUpRequest{
 		Run: in.Run, Session: in.Session, Conversation: l.conversation, Viewer: conversationAgentViewer(in.Run), Trigger: l.trigger,
 		Through: steering.ThroughMessageSequence, Step: in.Step.Sequence, InheritedRuns: inherited,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return result.stepContextAppend(in.Session), nil
+	return result.StepContextAppend(in.Session), nil
 }
 
 // chatSession reports whether session reads this chat's channel: the lane
@@ -375,7 +376,7 @@ func (l *conversationLoop) startRun(ctx context.Context, in agentrun.StepInput, 
 		return nil, err
 	}
 	through := max(trigger.Sequence, steering.ThroughMessageSequence)
-	result, err := l.catchUp.collect(ctx, catchUpRequest{
+	result, err := l.catchUp.Collect(ctx, runtimeconversation.CatchUpRequest{
 		Run: run, Session: session, Conversation: conversation, Viewer: viewer, Trigger: trigger,
 		Through: through, Seed: len(existing) == 0 || session.ChannelWatermark == 0 && session.ForkSequence == 0, Step: in.Step.Sequence,
 		InheritedRuns: inherited,
@@ -387,7 +388,7 @@ func (l *conversationLoop) startRun(ctx context.Context, in agentrun.StepInput, 
 	if err != nil {
 		return nil, err
 	}
-	if catchUp := result.stepContextAppend(session); catchUp != nil {
+	if catchUp := result.StepContextAppend(session); catchUp != nil {
 		catchUp.Entries = append(catchUp.Entries, part.Entries...)
 		part = catchUp
 	}
@@ -396,7 +397,7 @@ func (l *conversationLoop) startRun(ctx context.Context, in agentrun.StepInput, 
 
 // runContextNote builds the run_context note of the Run's start, which goes
 // after the catch-up entries of catchUp.
-func (l *conversationLoop) runContextNote(ctx context.Context, in agentrun.StepInput, viewer ConversationViewer, catchUp *catchUpResult) (*agentrun.StepContextAppend, error) {
+func (l *conversationLoop) runContextNote(ctx context.Context, in agentrun.StepInput, viewer ConversationViewer, catchUp *runtimeconversation.CatchUpResult) (*agentrun.StepContextAppend, error) {
 	through := l.trigger.Sequence
 	if catchUp != nil && catchUp.Watermark > through {
 		through = catchUp.Watermark
@@ -408,8 +409,8 @@ func (l *conversationLoop) runContextNote(ctx context.Context, in agentrun.StepI
 	if err != nil {
 		return nil, err
 	}
-	reverseChannelMessages(recent)
-	note, err := l.runner.conversationRunContextNote(ctx, conversationContextInput{
+	runtimeconversation.ReverseChannelMessages(recent)
+	note, err := l.runner.conversationRunContextNote(ctx, runtimeconversation.ConversationContextInput{
 		Run: in.Run, Session: in.Session, Sessions: l.sessions, Conversation: l.conversation, Trigger: l.trigger,
 		Viewer: viewer, Recent: recent, CatchUp: catchUp, Step: in.Step.Sequence,
 	})
@@ -432,7 +433,7 @@ func (l *conversationLoop) markObserved(ctx context.Context, run *AgentRun, sess
 	if l.runner.coordinator == nil || run == nil || !l.chatSession(session) || session.ChannelWatermark <= 0 {
 		return
 	}
-	_ = l.runner.coordinator.markObserved(ctx, l.conversation, conversationAgentViewer(run).Participant, session.ChannelWatermark)
+	_ = l.runner.coordinator.MarkObserved(ctx, l.conversation, conversationAgentViewer(run).Participant, session.ChannelWatermark)
 }
 
 func conversationAgentViewer(run *AgentRun) ConversationViewer {
@@ -532,7 +533,7 @@ func (l *conversationLoop) checkToolCall(ctx context.Context, in agentrun.StepTo
 	if entry == nil || entry.Tool == nil || len(entry.Tool.Directive) > 0 {
 		return "", nil
 	}
-	action, err := selectGovernedAction(in.Binding, entry.Tool.Name, nil)
+	action, err := runtimeconversation.SelectGovernedAction(in.Binding, entry.Tool.Name, nil)
 	if err != nil || action == nil || action.SkillID != RunManagementSkillID {
 		// An unresolvable call is refused by the executor itself.
 		return "", nil

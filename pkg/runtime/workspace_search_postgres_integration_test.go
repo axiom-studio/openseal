@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -23,15 +24,15 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 	t.Cleanup(func() {
 		_ = store.Close()
 	})
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	for _, tenant := range []string{"one", "two"} {
 		scope := Scope{Kind: "tenant", ID: tenant}
 		seedTestSpace(t, store, scope)
-		conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Quorum planning", IdempotencyKey: "plan"})
+		conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Quorum planning", IdempotencyKey: "plan"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = service.PostChannelMessage(ctx, PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion, Content: "Decide the nebula rollout", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "question"})
+		_, err = service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion, Content: "Decide the nebula rollout", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "question"})
 		if err != nil {
 			t.Fatal(err)
 		}

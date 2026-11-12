@@ -12,6 +12,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -73,7 +74,7 @@ func taskCompletionReviewCheck(ctx context.Context, x *ControlExecutor, cc agent
 	}
 	return &finalAnswerRejection{
 		Code: taskCompletionRejectedCode, Message: "The task result still needs more work: " + reason,
-		Failure: &agentrun.LoopFailure{Kind: RunFailureKindTaskCompletion, Code: taskCompletionRejectedCode,
+		Failure: &agentrun.LoopFailure{Kind: conversation.RunFailureKindTaskCompletion, Code: taskCompletionRejectedCode,
 			Message: "Task completion review rejected the revised result: " + reason},
 	}, nil
 }

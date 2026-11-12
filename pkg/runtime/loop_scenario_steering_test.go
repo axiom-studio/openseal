@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // steerClaim claims runID and drives one claim with the fixture's binding,
@@ -363,7 +364,7 @@ func steerPostConcurrently(f *loopFixture, conversationID, text string) error {
 		if err != nil {
 			return err
 		}
-		posted, err := f.convs.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+		posted, err := f.convs.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: f.scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 			Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: loopFixtureUser}, Intent: MessageIntentQuestion,
 			Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -519,7 +520,7 @@ func steerPostAs(f *loopFixture, conversationID string, sender ConversationParti
 	if sender.Type == ConversationParticipantAgent {
 		intent = MessageIntentUpdate
 	}
-	if _, err := f.convs.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+	if _, err := f.convs.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 		Sender: sender, Intent: intent, Content: text, Audience: audience, References: refs,
 		IdempotencyKey: "steer-" + text,

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 const agentRequestProjectionCacheLimit = 10000
@@ -17,7 +18,7 @@ const agentRequestProjectionCacheLimit = 10000
 // projections: conversations never own or advance collaboration state.
 type AgentRequestConversationProjector struct {
 	collaboration *CollaborationService
-	conversations *ConversationService
+	conversations *runtimeconversation.ConversationService
 	mu            sync.Mutex
 	completed     map[string]struct{}
 	completedFIFO []string
@@ -32,7 +33,7 @@ func NewAgentRequestConversationProjector(store interface {
 	}
 	return &AgentRequestConversationProjector{
 		collaboration: NewCollaborationService(store, opts...),
-		conversations: NewConversationService(store, opts...),
+		conversations: runtimeconversation.NewConversationService(store, opts...),
 		completed:     make(map[string]struct{}),
 	}, nil
 }
@@ -136,7 +137,7 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 		intent = MessageIntentEscalation
 		content = "Escalated: " + request.Goal
 	}
-	current, err := p.post(ctx, conversation, PostChannelMessageRequest{
+	current, err := p.post(ctx, conversation, runtimeconversation.PostChannelMessageRequest{
 		Sender: participantForCollaborationParty(request.Requester), SenderDisplayName: displayNameForCollaborationParty(request.Requester),
 		Intent: intent, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 		Mentions: []ConversationParticipant{participantForCollaborationParty(request.Recipient)},
@@ -153,7 +154,7 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 	if request.Clarification != "" {
 		clarificationKey := "agent-request:" + request.ID + ":clarification"
 		clarificationID := stableConversationID(request.Scope, clarificationKey, "message")
-		current, err = p.post(ctx, current, PostChannelMessageRequest{
+		current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 			Sender: participantForAssignedAgent(request), SenderDisplayName: displayNameForAssignedAgent(request),
 			Intent: MessageIntentQuestion, Content: request.Clarification,
 			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: rootID,
@@ -165,7 +166,7 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 			return err
 		}
 		if request.Response != "" {
-			current, err = p.post(ctx, current, PostChannelMessageRequest{
+			current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 				Sender: participantForCollaborationParty(request.Requester), SenderDisplayName: displayNameForCollaborationParty(request.Requester),
 				Intent: MessageIntentAnswer, Content: request.Response,
 				Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: clarificationID,
@@ -179,7 +180,7 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 	}
 
 	if request.AcceptedAt != nil {
-		current, err = p.post(ctx, current, PostChannelMessageRequest{
+		current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 			Sender: participantForAssignedAgent(request), SenderDisplayName: displayNameForAssignedAgent(request),
 			Intent: MessageIntentAcknowledgment, Content: "Accepted: " + request.Goal,
 			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: rootID,
@@ -199,7 +200,7 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 		if requiresReview {
 			completionIntent = MessageIntentProposal
 		}
-		current, err = p.post(ctx, current, PostChannelMessageRequest{
+		current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 			Sender: participantForAssignedAgent(request), SenderDisplayName: displayNameForAssignedAgent(request),
 			Intent: completionIntent, Content: "Completed delegated work: " + request.CompletionSummary,
 			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: rootID,
@@ -216,7 +217,7 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 		if request.Status == AgentRequestStatusFailed {
 			content = "Rejected completed work: " + request.CompletionReviewSummary
 		}
-		current, err = p.post(ctx, current, PostChannelMessageRequest{
+		current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 			Sender:            participantForCollaborationParty(*request.CompletionReviewer),
 			SenderDisplayName: displayNameForCollaborationParty(*request.CompletionReviewer),
 			Intent:            MessageIntentDecision, Content: content,
@@ -231,7 +232,7 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 
 	if request.AcceptedAt == nil && (request.Status == AgentRequestStatusRejected || request.Status == AgentRequestStatusFailed || request.Status == AgentRequestStatusCanceled) {
 		content := collaborationTerminalContent(request)
-		_, err = p.post(ctx, current, PostChannelMessageRequest{
+		_, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 			Sender: participantForAssignedAgent(request), SenderDisplayName: displayNameForAssignedAgent(request),
 			Intent: MessageIntentDecision, Content: content,
 			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: rootID,
@@ -246,7 +247,7 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 func (p *AgentRequestConversationProjector) post(
 	ctx context.Context,
 	conversation *Conversation,
-	request PostChannelMessageRequest,
+	request runtimeconversation.PostChannelMessageRequest,
 ) (*Conversation, error) {
 	request.Scope = conversation.Scope
 	request.ConversationID = conversation.ID

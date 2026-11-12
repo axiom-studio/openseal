@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 type idleScheduleCountingStore struct {
@@ -111,7 +113,7 @@ func TestConversationIdleSchedulingDoesNotTreatDeliveryAsProcessed(t *testing.T)
 		store := kernel.(ConversationStore)
 		conversation := MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "delivered-unread"}, "channel")
 		CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "delivered"})
-		if _, _, err := NewConversationService(store).AdvanceCursor(t.Context(), AdvanceConversationCursorRequest{
+		if _, _, err := runtimeconversation.NewConversationService(store).AdvanceCursor(t.Context(), runtimeconversation.AdvanceConversationCursorRequest{
 			Scope: conversation.Scope, ConversationID: conversation.ID, Participant: idleScheduleParticipant(),
 			DeliveredSequence: 1, ReadSequence: 0,
 		}); err != nil {
@@ -198,8 +200,8 @@ func TestConversationIdleSchedulingHonorsCommittedRoundAndScopedVisibility(t *te
 		idleScheduleAdvanceCursor(t, store, first)
 		second := MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "second"}, "same-channel")
 		CommitChannelMessage(t, store, &second, &ChannelMessage{ID: "coordinated"})
-		service := NewConversationService(store)
-		if _, err := service.CommitConversationRouting(t.Context(), CommitConversationRoutingRequest{
+		service := runtimeconversation.NewConversationService(store)
+		if _, err := service.CommitConversationRouting(t.Context(), runtimeconversation.CommitConversationRoutingRequest{
 			Scope: second.Scope, ConversationID: second.ID, ExpectedRevision: second.Revision,
 			TriggerMessageID: "coordinated", IdempotencyKey: "silent-round",
 		}); err != nil {
@@ -233,7 +235,7 @@ func idleScheduleParticipant() ConversationParticipant {
 
 func idleScheduleAdvanceCursor(t testing.TB, store ConversationStore, conversation *Conversation) {
 	t.Helper()
-	if _, _, err := NewConversationService(store).AdvanceCursor(context.Background(), AdvanceConversationCursorRequest{
+	if _, _, err := runtimeconversation.NewConversationService(store).AdvanceCursor(context.Background(), runtimeconversation.AdvanceConversationCursorRequest{
 		Scope: conversation.Scope, ConversationID: conversation.ID, Participant: idleScheduleParticipant(),
 		DeliveredSequence: conversation.LastSequence, ReadSequence: conversation.LastSequence,
 	}); err != nil {

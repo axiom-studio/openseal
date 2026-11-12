@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -167,7 +168,7 @@ func (p *catalogModelStepPreparer) tools(binding *agentrun.TurnRunnerBinding, se
 	if set.Offered() {
 		harness = append(harness, modelstep.SearchCapabilitiesSpec(), modelstep.LoadCapabilitiesSpec())
 	}
-	names := LoopGovernedToolNames(binding.ModelActions)
+	names := conversation.LoopGovernedToolNames(binding.ModelActions)
 	visibleActions, _, visibleHost, _ := set.Visible()
 	visibleHostOps := map[string]bool{}
 	for _, spec := range visibleHost {
@@ -309,7 +310,7 @@ func (p *catalogModelStepPreparer) stream(ctx context.Context, binding *agentrun
 // the provider tool name of a newly visible action or host tool, "" for
 // instructions and runbooks (run through run_operation).
 func loopCapabilityToolName(actions []capability.ModelAction) func(id string) string {
-	names := LoopGovernedToolNames(actions)
+	names := conversation.LoopGovernedToolNames(actions)
 	return func(id string) string {
 		switch {
 		case strings.HasPrefix(id, capabilityActionPrefix):
@@ -373,7 +374,7 @@ func (p *catalogModelStepPreparer) CapabilityListing(in agentrun.StepInput) mode
 	}
 	listing.Items = append(listing.Items, modelstep.ControlTargetItems(authority)...)
 	if authority.OffersCapabilities() && authority.ApprovalMode != "" {
-		listing.Items = append(listing.Items, modelstep.CapabilityNoteItem{Key: modelstep.CapabilityNoteApprovalKey, Section: modelstep.CapabilityNoteGuidance, Text: approvalModeText(authority.ApprovalMode)})
+		listing.Items = append(listing.Items, modelstep.CapabilityNoteItem{Key: modelstep.CapabilityNoteApprovalKey, Section: modelstep.CapabilityNoteGuidance, Text: conversation.ApprovalModeText(authority.ApprovalMode)})
 	}
 	if p.boundSkill(binding) {
 		listing.Items = append(listing.Items, modelstep.CapabilityNoteItem{Key: "guide:skill_access", Section: modelstep.CapabilityNoteGuidance, Text: modelstep.LoopSkillAccessText})

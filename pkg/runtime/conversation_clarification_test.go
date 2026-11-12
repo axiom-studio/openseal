@@ -8,13 +8,14 @@ import (
 	"testing"
 	"time"
 
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type clarificationStore = askUserTestStore
 type clarificationFixture struct {
 	store        clarificationStore
-	service      *ConversationService
+	service      *runtimeconversation.ConversationService
 	scheduler    *ConversationRunScheduler
 	conversation *Conversation
 	root, child  *AgentRun
@@ -25,9 +26,9 @@ func newClarificationFixture(t *testing.T, store clarificationStore, scopeID str
 	t.Helper()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: scopeID}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"}, Title: "Writing", IdempotencyKey: "writing"})
+	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"}, Title: "Writing", IdempotencyKey: "writing"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +74,7 @@ func (f *clarificationFixture) answer(t *testing.T, target string) *ChannelMessa
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := f.service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: f.root.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision, Sender: f.trigger.Sender, Intent: MessageIntentAnswer, Content: "General readers, conversational tone. Keep it to 1000 characters.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ResolvesMessageID: target, IdempotencyKey: "answer"})
+	posted, err := f.service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: f.root.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision, Sender: f.trigger.Sender, Intent: MessageIntentAnswer, Content: "General readers, conversational tone. Keep it to 1000 characters.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ResolvesMessageID: target, IdempotencyKey: "answer"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,13 +168,13 @@ func TestConversationWorkOriginKeepsOwnerBoundary(t *testing.T) {
 	f := newClarificationFixture(t, newTestKernelStore(t), "context")
 	other := cloneAgentRun(f.child)
 	other.Owner.ID = "another-agent"
-	_, conversation, _, err := conversationWorkOrigin(t.Context(), f.store, f.store, other)
+	_, conversation, _, err := runtimeconversation.ConversationWorkOrigin(t.Context(), f.store, f.store, other)
 	if err != nil || conversation != nil {
 		t.Fatal("other Agent received private conversation")
 	}
 	other = cloneAgentRun(f.child)
 	other.Scope.ID = "other-tenant"
-	_, conversation, _, err = conversationWorkOrigin(t.Context(), f.store, f.store, other)
+	_, conversation, _, err = runtimeconversation.ConversationWorkOrigin(t.Context(), f.store, f.store, other)
 	if err != nil || conversation != nil {
 		t.Fatal("cross-tenant origin resolved")
 	}

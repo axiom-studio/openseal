@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 func TestConversationLoopBindingSetsSeams(t *testing.T) {
@@ -26,7 +27,7 @@ func TestConversationLoopBindingSetsSeams(t *testing.T) {
 		if !authority.CanReact || !authority.CanAskUser || authority.ExternalChannelReply || authority.EffectiveFinalMode() != agentrun.FinalModeDefault {
 			t.Fatalf("authority = %#v", authority)
 		}
-		want := conversationSystemSections(f.conversation, run, false)
+		want := conversation.ConversationSystemSections(f.conversation, run, false)
 		if len(binding.Prompt.Sections) != len(want) || binding.Prompt.Sections[0].ID != want[0].ID {
 			t.Fatalf("prompt sections = %#v", binding.Prompt.Sections)
 		}

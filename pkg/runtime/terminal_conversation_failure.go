@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // ErrRunTerminalReportUndeliverable marks a failure report whose Run and
@@ -76,13 +78,13 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 	if root, _ := run.Context["threadRootMessageId"].(string); root != expectedRoot {
 		return undeliverable("Run thread differs from the trigger thread")
 	}
-	agentID := ConversationRunAgentID(conversation, run)
+	agentID := runtimeconversation.ConversationRunAgentID(conversation, run)
 	if !validOpaqueIdentifier(agentID, 256) {
 		return undeliverable("Run has no Agent to answer")
 	}
 	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
 	if run.Context[ConversationTaskContextKey] != nil {
-		task, source, taskErr := conversationTaskForReport(ctx, store, run)
+		task, source, taskErr := runtimeconversation.ConversationTaskForReport(ctx, store, run)
 		if taskErr != nil {
 			return taskErr
 		}
@@ -114,15 +116,15 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 		// A crash after the post may have left the note unwritten.
 		return appendRunFailedNote(ctx, store, run, saved)
 	}
-	request := PostChannelMessageRequest{
+	request := runtimeconversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID}, Intent: MessageIntentAnswer,
-		Content:  terminalRunFailureReply(ctx, store, store, run),
+		Content:  runtimeconversation.TerminalRunFailureReply(ctx, store, store, run),
 		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
 		BroadcastToChannel: trigger.ThreadRootID == "" || trigger.BroadcastToChannel, ResponseMode: trigger.ResponseMode,
 		References: references, IdempotencyKey: key,
 	}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	posted, err := service.PostChannelMessage(ctx, request)
 	if errors.Is(err, ErrRevisionConflict) {
 		current, getErr := store.GetConversation(ctx, run.Scope, conversationID)
@@ -149,7 +151,7 @@ func runFailedNoteSourceKey(run *AgentRun) string {
 func runFailedNote(run *AgentRun, message *ChannelMessage) *SessionEntry {
 	key := runFailedNoteSourceKey(run)
 	data, _ := json.Marshal(map[string]string{"messageId": message.ID})
-	text := "Your previous attempt (run " + run.ID + ") stopped and the user was told: " + strconv.Quote(boundedTurnFailureText(message.Content))
+	text := "Your previous attempt (run " + run.ID + ") stopped and the user was told: " + strconv.Quote(runtimeconversation.BoundedTurnFailureText(message.Content))
 	return &SessionEntry{
 		ID: SessionEntryID(run.SessionID, key), SessionID: run.SessionID, RunID: run.ID,
 		Type: SessionEntryNote, SourceKey: key,

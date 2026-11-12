@@ -8,6 +8,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -70,9 +71,9 @@ func resolveControlAuthorityForTest(t *testing.T, in ControlAuthorityInput) agen
 func claimedForegroundChatRun(t *testing.T, store *sqlite.Store) *AgentRun {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "control-authority"}
-	conversations := NewConversationService(store)
+	conversations := conversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "control-authority-chat",
 	})
 	if err != nil {

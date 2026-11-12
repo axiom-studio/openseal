@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // An explicit reply to a root Run's question is a clarification attempt, including
@@ -41,11 +42,11 @@ func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.
 			return false, err
 		}
 		if run != nil && run.Kind == RunKindConversation && run.ParentRunID == "" {
-			_, origin, _, err := foregroundConversationWorkOrigin(ctx, s.runStore, s.conversationStore, run)
+			_, origin, _, err := runtimeconversation.ForegroundConversationWorkOrigin(ctx, s.runStore, s.conversationStore, run)
 			if err != nil {
 				return false, err
 			}
-			if origin != nil && origin.ID == conversation.ID && ConversationRunAgentID(conversation, run) == question.Sender.ID {
+			if origin != nil && origin.ID == conversation.ID && runtimeconversation.ConversationRunAgentID(conversation, run) == question.Sender.ID {
 				return true, nil
 			}
 		}

@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -87,12 +88,12 @@ func (h *routineEventHarness) deployOwner() {
 // chat creates a chat with one user request and returns their IDs.
 func (h *routineEventHarness) chat(title string) (string, string) {
 	h.t.Helper()
-	conversations := NewConversationService(h.store)
-	c, _, err := conversations.CreateConversation(h.ctx, CreateConversationRequest{Scope: h.scope, Owner: h.owner, Title: title, IdempotencyKey: "chat:" + title})
+	conversations := conversation.NewConversationService(h.store)
+	c, _, err := conversations.CreateConversation(h.ctx, conversation.CreateConversationRequest{Scope: h.scope, Owner: h.owner, Title: title, IdempotencyKey: "chat:" + title})
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	posted, err := conversations.PostChannelMessage(h.ctx, PostChannelMessageRequest{
+	posted, err := conversations.PostChannelMessage(h.ctx, conversation.PostChannelMessageRequest{
 		Scope: h.scope, ConversationID: c.ID, ExpectedRevision: c.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,
 		Content: "Tell me when an email comes in", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "request:" + title,

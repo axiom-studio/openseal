@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -64,9 +65,9 @@ type skillSetupTaskWaitFixture struct {
 func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *ConversationTaskResult {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "task-sql"}
-	conversations := NewConversationService(store)
+	conversations := conversation.NewConversationService(store)
 	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "task-agent"}, Title: "Task setup", IdempotencyKey: "task-setup-chat",
 	})
 	if err != nil {

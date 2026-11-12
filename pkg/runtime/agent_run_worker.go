@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -103,7 +104,7 @@ type AgentRunWorkerPool struct {
 	conversationTasks    *ConversationTaskService
 	requestInbox         *AgentRequestInboxReconciler
 	reportingStore       ConversationStore
-	resolver             TurnRunnerResolver
+	resolver             conversation.TurnRunnerResolver
 	logger               *zap.SugaredLogger
 	wake                 chan struct{}
 	maintenanceWake      *workqueue.WorkerPollSignal
@@ -148,13 +149,13 @@ func (p *AgentRunWorkerPool) IdleFor(now time.Time) time.Duration {
 	return p.usage.IdleFor(now)
 }
 
-func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
+func NewAgentRunWorkerPool(store KernelStore, resolver conversation.TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
 	return newAgentRunWorkerPool(store, resolver, logger, config, RunLoopMaxStepsPerClaim, opts...)
 }
 
 // newAgentRunWorkerPool is NewAgentRunWorkerPool with the number of steps
 // one claim may run before it yields.
-func newAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, maxStepsPerClaim int, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
+func newAgentRunWorkerPool(store KernelStore, resolver conversation.TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig, maxStepsPerClaim int, opts ...models.ServiceOption) (*AgentRunWorkerPool, error) {
 	if store == nil || resolver == nil {
 		return nil, errors.New("kernel store and turn runner resolver are required")
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
 
@@ -63,7 +64,7 @@ type ConversationRunReconcileResult struct {
 // latency optimization, while ReconcileScope closes the crash gap by advancing
 // a service cursor only after each page has been scheduled idempotently.
 type ConversationRunScheduler struct {
-	conversations  *ConversationService
+	conversations  *runtimeconversation.ConversationService
 	runs           *agentrun.RunCommandService
 	approvals      *action.ApprovalCoordinator
 	config         ConversationRunSchedulerConfig
@@ -94,7 +95,7 @@ func NewConversationRunScheduler(
 		return nil, err
 	}
 	return &ConversationRunScheduler{
-		conversations:     NewConversationService(conversationStore, opts...),
+		conversations:     runtimeconversation.NewConversationService(conversationStore, opts...),
 		runs:              agentrun.NewRunCommandService(runStore, opts...),
 		conversationStore: conversationStore,
 		runStore:          runStore,
@@ -180,7 +181,7 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 }
 
 func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Context, conversation *Conversation, message *ChannelMessage) (CreateAgentRunRequest, error) {
-	request := conversationAgentRunRequest(conversation, message)
+	request := runtimeconversation.ConversationAgentRunRequest(conversation, message)
 	request.Budget = cloneBudgetPolicy(s.config.Budget)
 	if s.sessionContext == nil {
 		return request, nil
@@ -300,7 +301,7 @@ func (s *ConversationRunScheduler) reconcileCanceledConversationRuns(ctx context
 			if err != nil {
 				return err
 			}
-			posted, err := s.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+			posted, err := s.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversationID, ExpectedRevision: current.Revision,
 				Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"},
 				Intent: MessageIntentSystem, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -450,7 +451,7 @@ func (s *ConversationRunScheduler) advanceSchedulerCursor(
 		if cursor != nil {
 			revision = cursor.Revision
 		}
-		_, _, err = s.conversations.AdvanceCursor(ctx, AdvanceConversationCursorRequest{
+		_, _, err = s.conversations.AdvanceCursor(ctx, runtimeconversation.AdvanceConversationCursorRequest{
 			Scope: conversation.Scope, ConversationID: conversation.ID, Participant: participant,
 			ExpectedRevision: revision, DeliveredSequence: sequence, ReadSequence: sequence,
 		})
@@ -481,7 +482,7 @@ func conversationMessageStartsRun(conversation *Conversation, message *ChannelMe
 		return false
 	}
 	// Saved-artifact receipts project completed work; they are not new tasks.
-	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == conversationArtifactReceiptService {
+	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == runtimeconversation.ConversationArtifactReceiptService {
 		return false
 	}
 	// The owning Agent's reply is the projection of the current conversation
@@ -516,7 +517,7 @@ type ConversationRunTurnRunnerConfig struct {
 	// AgentTurns resolves the active prompt-first Agent definition and its
 	// authorized Skills. It runs every Agent turn: Agent-owned channels and
 	// each Team member's child Run, which answers exactly like a 1:1 Agent.
-	AgentTurns TurnRunnerResolver
+	AgentTurns runtimeconversation.TurnRunnerResolver
 	// AttachmentContent supplies tenant-scoped bytes for user-attached text files
 	// and stores the visuals Agents attach to their answers. Attachment content
 	// is projected into the ephemeral model goal, never message state.
@@ -546,7 +547,7 @@ type ConversationRunTurnRunnerConfig struct {
 	// most recent first. They reach the Agent as places in its turn context
 	// (at most MaximumConversationPlaces) so it reuses their ids instead of
 	// searching again. Nil leaves them out.
-	Places func(ctx context.Context, run *AgentRun) []ConversationPlace
+	Places func(ctx context.Context, run *AgentRun) []runtimeconversation.ConversationPlace
 }
 
 func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerConfig, error) {
@@ -569,13 +570,13 @@ func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerC
 // responder, and each member answers on its own lane session exactly like a
 // 1:1 chat.
 type ConversationRunTurnRunner struct {
-	conversations *ConversationService
+	conversations *runtimeconversation.ConversationService
 	portfolio     PortfolioStore
 	runbooks      RunbookActivationStore
 	artifacts     ArtifactStore
-	coordinator   *ConversationCoordinator
+	coordinator   *runtimeconversation.ConversationCoordinator
 	config        ConversationRunTurnRunnerConfig
-	agentTurns    TurnRunnerResolver
+	agentTurns    runtimeconversation.TurnRunnerResolver
 	runs          *agentrun.RunCommandService
 	// The stores of the conversation loop seams (ConversationLoopStores),
 	// taken from the conversation store when it provides them.
@@ -591,19 +592,19 @@ type ConversationRunTurnRunner struct {
 
 func NewConversationRunTurnRunner(
 	conversationStore ConversationStore,
-	coordinator *ConversationCoordinator,
+	coordinator *runtimeconversation.ConversationCoordinator,
 	config ConversationRunTurnRunnerConfig,
 	opts ...models.ServiceOption,
 ) (*ConversationRunTurnRunner, error) {
 	if conversationStore == nil || coordinator == nil {
-		return nil, ErrConversationCoordinationUnavailable
+		return nil, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
 	normalized, err := config.normalize()
 	if err != nil {
 		return nil, err
 	}
 	runner := &ConversationRunTurnRunner{
-		conversations: NewConversationService(conversationStore, opts...), conversationStore: conversationStore, coordinator: coordinator,
+		conversations: runtimeconversation.NewConversationService(conversationStore, opts...), conversationStore: conversationStore, coordinator: coordinator,
 		config: normalized, agentTurns: normalized.AgentTurns, now: models.ClockFrom(opts),
 	}
 	if runs, ok := conversationStore.(RunCommandStore); ok {
@@ -669,7 +670,7 @@ func (r *ConversationRunTurnRunner) conversationRosterMember(ctx context.Context
 	if err != nil {
 		return err
 	}
-	bindings, err := r.coordinator.resolveParticipants(ctx, ConversationParticipantQuery{Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger)})
+	bindings, err := r.coordinator.ResolveParticipants(ctx, runtimeconversation.ConversationParticipantQuery{Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger)})
 	if err != nil {
 		return err
 	}
@@ -695,7 +696,7 @@ func (r *ConversationRunTurnRunner) conversationRosterMember(ctx context.Context
 //     model, one step that starts the member Runs.
 func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 	if r == nil || r.coordinator == nil || r.conversations == nil {
-		return nil, ErrConversationCoordinationUnavailable
+		return nil, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
 	if err := r.validateConversationRun(ctx, run); err != nil {
 		return nil, err
@@ -709,7 +710,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 		}, nil
 	}
 	pinnedRunbook := run.Plan != nil && run.Plan["runbook"] != nil
-	if !pinnedRunbook && !conversationRunHasActingAgent(run) && !runExplainingFailure(run) {
+	if !pinnedRunbook && !conversationRunHasActingAgent(run) && !runtimeconversation.RunExplainingFailure(run) {
 		return &agentrun.TurnRunnerBinding{
 			DefinitionID: "openseal.conversation-router", DefinitionVersion: "1", ModelProvider: "host", Model: "conversation-router",
 			InputContextRefs: []string{conversationRunContextConversationID, conversationRunContextTriggerID},
@@ -717,9 +718,9 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 		}, nil
 	}
 	if r.agentTurns == nil {
-		return nil, ErrConversationCoordinationUnavailable
+		return nil, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
-	if runExplainingFailure(run) {
+	if runtimeconversation.RunExplainingFailure(run) {
 		if err := r.conversationRosterMember(ctx, run); err != nil {
 			return nil, err
 		}
@@ -729,7 +730,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 		return nil, err
 	}
 	if binding == nil || binding.Producer == nil {
-		return nil, ErrConversationCoordinationUnavailable
+		return nil, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
 	if pinnedRunbook {
 		return binding, nil
@@ -786,7 +787,7 @@ func (p teamRoutingStepProducer) Produce(ctx context.Context, in agentrun.StepIn
 
 func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Context, run *AgentRun, conversation *Conversation, triggerID string) (string, ConversationViewer, *ChannelMessage, error) {
 	participantID := run.AssignedAgentID
-	if runExplainingFailure(run) {
+	if runtimeconversation.RunExplainingFailure(run) {
 		if err := r.conversationRosterMember(ctx, run); err != nil {
 			return "", ConversationViewer{}, nil, err
 		}
@@ -805,7 +806,7 @@ func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Con
 	return participantID, viewer, trigger, nil
 }
 
-func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, conversation *Conversation, triggers ...*ChannelMessage) ([]agentConversationActiveRun, error) {
+func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, conversation *Conversation, triggers ...*ChannelMessage) ([]runtimeconversation.AgentConversationActiveRun, error) {
 	if r == nil || r.portfolio == nil || conversation == nil {
 		return nil, nil
 	}
@@ -835,12 +836,12 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 			}
 		}
 	}
-	active := make([]agentConversationActiveRun, 0)
+	active := make([]runtimeconversation.AgentConversationActiveRun, 0)
 	for _, run := range runs {
 		if run == nil || isTerminalAgentRunStatus(run.Status) || !indexed && !relevantRoots[run.RootRunID] || run.Kind == RunKindConversation {
 			continue
 		}
-		active = append(active, agentConversationActiveRun{
+		active = append(active, runtimeconversation.AgentConversationActiveRun{
 			ID: run.ID, RootRunID: run.RootRunID, Entrypoint: run.Entrypoint, Status: run.Status, Goal: run.Goal, Source: run.Source,
 			Revision: run.Revision, AvailableControls: agentrun.ApplicableAgentRunCommands(run),
 		})
@@ -898,7 +899,7 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 				continue
 			}
 		}
-		active = append(active, agentConversationActiveRun{
+		active = append(active, runtimeconversation.AgentConversationActiveRun{
 			ID: work.ID, RootRunID: work.RootRunID, Entrypoint: work.Entrypoint, Status: work.Status, Goal: ConversationTaskGoalSummary(work.Goal), Source: work.Source,
 			Revision: work.Revision, AvailableControls: agentrun.ApplicableAgentRunCommands(work),
 		})
@@ -945,7 +946,7 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 				}
 			}
 		}
-		request := PostChannelMessageRequest{
+		request := runtimeconversation.PostChannelMessageRequest{
 			Scope: run.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
 			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: participantID},
 			Intent: MessageIntentAnswer, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -963,7 +964,7 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 			return result.Message, result.Replayed, nil
 		}
 		if errors.Is(err, ErrMessageConflict) {
-			if saved, replayErr := r.conversations.replayLegacySpokenResponse(ctx, request); replayErr != nil {
+			if saved, replayErr := r.conversations.ReplayLegacySpokenResponse(ctx, request); replayErr != nil {
 				return nil, false, replayErr
 			} else if saved != nil {
 				return saved, true, nil
@@ -1068,7 +1069,7 @@ func (r *ConversationRunTurnRunner) conversationTaskResponseReferences(ctx conte
 
 func permanentConversationRunError(err error) bool {
 	return errors.Is(err, ErrConversationNotFound) || errors.Is(err, ErrChannelMessageNotFound) ||
-		errors.Is(err, ErrNoConversationParticipants) || errors.Is(err, ErrConversationCoordinationUnavailable) ||
+		errors.Is(err, runtimeconversation.ErrNoConversationParticipants) || errors.Is(err, runtimeconversation.ErrConversationCoordinationUnavailable) ||
 		errors.Is(err, ErrInvalidConversation) || errors.Is(err, ErrInvalidAgentRun) || errors.Is(err, ErrMessageConflict)
 }
 
@@ -1139,7 +1140,7 @@ func participationStoppedOutput() map[string]interface{} {
 
 // SetReactionProjector mirrors reactions Agents add to external
 // conversations.
-func (r *ConversationRunTurnRunner) SetReactionProjector(projector MessageReactionProjector) {
+func (r *ConversationRunTurnRunner) SetReactionProjector(projector runtimeconversation.MessageReactionProjector) {
 	if r != nil && r.conversations != nil {
 		r.conversations.SetReactionProjector(projector)
 	}

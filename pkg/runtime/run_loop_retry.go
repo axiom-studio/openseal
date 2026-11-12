@@ -6,6 +6,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // Host retry (D13): a step whose host was unavailable is failed with
@@ -59,7 +60,7 @@ func (d *drive) hostUnavailable(ctx context.Context, st *stepState, cause error)
 	st.produced = false
 	if err := d.finishStep(ctx, st, FinishAgentTurnRequest{
 		Status: AgentTurnStatusFailed, FailureCode: StepFailureHostUnavailable,
-		Error: boundedTurnFailureText(action.SanitizeActionError(cause, nil)),
+		Error: conversation.BoundedTurnFailureText(action.SanitizeActionError(cause, nil)),
 	}); err != nil {
 		return exitResultPtr(d.writeErrorExit(err))
 	}
@@ -72,6 +73,6 @@ func (d *drive) hostUnavailable(ctx context.Context, st *stepState, cause error)
 			"The step host was unavailable; retrying shortly"))
 	}
 	return d.fail(ctx, st, agentrun.LoopFailure{
-		Kind: RunFailureKindExecution, Code: StepFailureHostUnavailable, Message: hostUnavailableMessage,
+		Kind: conversation.RunFailureKindExecution, Code: StepFailureHostUnavailable, Message: hostUnavailableMessage,
 	}, cause, StepFailureHostUnavailable)
 }

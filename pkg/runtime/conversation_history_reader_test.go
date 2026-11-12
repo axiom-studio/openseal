@@ -9,17 +9,18 @@ import (
 	"time"
 	"unicode/utf8"
 
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
 	store := newTestKernelStore(t)
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, store, scope)
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
 	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: owner.ID}}
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "history", IdempotencyKey: "history"})
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "history", IdempotencyKey: "history"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +35,7 @@ func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
 		if i == 2 {
 			audience = ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantUser, ID: "private-user"}}}
 		}
-		result, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "sender"}, Intent: MessageIntentUpdate, Content: content, Audience: audience, IdempotencyKey: fmt.Sprint(i)})
+		result, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "sender"}, Intent: MessageIntentUpdate, Content: content, Audience: audience, IdempotencyKey: fmt.Sprint(i)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,17 +50,17 @@ func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	page, err := ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, ConversationHistoryReadRequest{Limit: 2})
+	page, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{Limit: 2})
 	if err != nil || len(page.Messages) != 2 || page.Messages[1].ID != longID || page.NextBeforeSequence != 2 {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
-	older, err := ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, ConversationHistoryReadRequest{BeforeSequence: page.NextBeforeSequence, Limit: 2})
+	older, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{BeforeSequence: page.NextBeforeSequence, Limit: 2})
 	if err != nil || len(older.Messages) != 1 || older.Messages[0].Sequence != 1 {
 		t.Fatalf("older=%+v err=%v", older, err)
 	}
 	var reconstructed strings.Builder
 	for offset := 0; ; {
-		page, err = ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, ConversationHistoryReadRequest{MessageID: longID, OffsetBytes: offset})
+		page, err = runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{MessageID: longID, OffsetBytes: offset})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,17 +77,17 @@ func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
 	if reconstructed.String() != original {
 		t.Fatal("could not recover exact original")
 	}
-	for _, request := range []ConversationHistoryReadRequest{{MessageID: privateID}, {MessageID: longID, OffsetBytes: 4096}, {OffsetBytes: 1}, {Limit: 11}} {
-		if _, err := ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, request); err == nil {
+	for _, request := range []runtimeconversation.ConversationHistoryReadRequest{{MessageID: privateID}, {MessageID: longID, OffsetBytes: 4096}, {OffsetBytes: 1}, {Limit: 11}} {
+		if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, request); err == nil {
 			t.Fatalf("invalid/private read accepted: %+v", request)
 		}
 	}
 	owner.ID = "other"
-	if _, err := ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, ConversationHistoryReadRequest{}); err == nil {
+	if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{}); err == nil {
 		t.Fatal("foreign owner accepted")
 	}
 	scope.ID = "other"
-	if _, err := ReadConversationHistory(t.Context(), service, scope, conversation.Owner, conversation.ID, viewer, ConversationHistoryReadRequest{}); err == nil {
+	if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{}); err == nil {
 		t.Fatal("foreign tenant accepted")
 	}
 }

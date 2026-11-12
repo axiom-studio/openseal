@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -19,9 +20,9 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "scheduler"}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "engineering"},
 		Title: "Engineering", IdempotencyKey: "engineering-channel",
 	})
@@ -91,9 +92,9 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: "restart"}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
 		Title: "Operations", IdempotencyKey: "operations-channel",
 	})
@@ -139,7 +140,7 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 	if !triggerIDs[first.ID] || !triggerIDs[second.ID] {
 		t.Fatalf("persisted trigger IDs = %#v", triggerIDs)
 	}
-	cursor, err := NewConversationService(verified).GetCursor(ctx, scope, conversation.ID, ConversationParticipant{
+	cursor, err := runtimeconversation.NewConversationService(verified).GetCursor(ctx, scope, conversation.ID, ConversationParticipant{
 		Type: ConversationParticipantService, ID: conversationRunSchedulerParticipant,
 	})
 	if err != nil || cursor == nil || cursor.ReadSequence != 2 || cursor.DeliveredSequence != 2 {
@@ -151,16 +152,16 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "canceled-conversation"}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
 		Title: "Operations", IdempotencyKey: "canceled-channel",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"},
 		Intent: MessageIntentQuestion, Content: "Pause the project.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -219,9 +220,9 @@ func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *
 	store := newTestKernelStore(t)
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "legacy-round"}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "engineering"},
 		Title: "Engineering", IdempotencyKey: "legacy-channel",
 	})
@@ -230,7 +231,7 @@ func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *
 	}
 	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is the release ready?", "legacy-trigger")
 	coordinator := conversationRunTestCoordinator(t, service)
-	if _, err := coordinator.Coordinate(ctx, ConversationRoutingRequest{
+	if _, err := coordinator.Coordinate(ctx, runtimeconversation.ConversationRoutingRequest{
 		Scope: scope, ConversationID: conversation.ID, TriggerMessageID: trigger.ID, IdempotencyKey: "legacy-manual-round",
 	}); err != nil {
 		t.Fatal(err)
@@ -250,17 +251,17 @@ func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *
 }
 
 // conversationRunTestCoordinator routes every unaddressed message to agent-1.
-func conversationRunTestCoordinator(t *testing.T, service *ConversationService) *ConversationCoordinator {
+func conversationRunTestCoordinator(t *testing.T, service *runtimeconversation.ConversationService) *runtimeconversation.ConversationCoordinator {
 	t.Helper()
-	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
-		return []ConversationParticipantBinding{{
+	participants := runtimeconversation.ConversationParticipantSourceFunc(func(context.Context, runtimeconversation.ConversationParticipantQuery) ([]runtimeconversation.ConversationParticipantBinding, error) {
+		return []runtimeconversation.ConversationParticipantBinding{{
 			Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-1"}, SemanticRoles: []string{"developer"},
 		}}, nil
 	})
-	router := ConversationRouterFunc(func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error) {
-		return ConversationRouteDecision{AgentID: "agent-1", Reason: "owns the canary"}, nil
+	router := runtimeconversation.ConversationRouterFunc(func(context.Context, runtimeconversation.ConversationRouteRequest) (runtimeconversation.ConversationRouteDecision, error) {
+		return runtimeconversation.ConversationRouteDecision{AgentID: "agent-1", Reason: "owns the canary"}, nil
 	})
-	coordinator, err := NewConversationCoordinator(service, participants, router, DefaultConversationCoordinatorConfig())
+	coordinator, err := runtimeconversation.NewConversationCoordinator(service, participants, router, runtimeconversation.DefaultConversationCoordinatorConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +270,7 @@ func conversationRunTestCoordinator(t *testing.T, service *ConversationService) 
 
 func postConversationRunTestMessage(
 	t *testing.T,
-	service *ConversationService,
+	service *runtimeconversation.ConversationService,
 	conversation *Conversation,
 	senderType ConversationParticipantType,
 	intent ConversationMessageIntent,
@@ -277,7 +278,7 @@ func postConversationRunTestMessage(
 	key string,
 ) *ChannelMessage {
 	t.Helper()
-	result, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+	result, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: senderType, ID: "sender-" + string(senderType)},
 		Intent: intent, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: key,
@@ -313,7 +314,7 @@ func (r *chatRunResolver) ResolveTurnRunner(_ context.Context, run *AgentRun) (*
 	}, nil
 }
 
-func (f *chatLoopFixture) chatRunner(resolver TurnRunnerResolver, participation bool) *ConversationRunTurnRunner {
+func (f *chatLoopFixture) chatRunner(resolver runtimeconversation.TurnRunnerResolver, participation bool) *ConversationRunTurnRunner {
 	f.t.Helper()
 	runner, err := NewConversationRunTurnRunner(f.store, conversationRunTestCoordinator(f.t, f.service), ConversationRunTurnRunnerConfig{
 		AgentTurns: resolver, RequireParticipationOptIn: participation,
@@ -389,7 +390,7 @@ func TestTeamRoutingRunCompletesWithResponderRunIds(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{team: true}, func(t *testing.T, f *chatLoopFixture) {
 		trigger := f.post("route", "user-1", "Who can check the canary?")
 		commands := agentrun.NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
-		created, err := commands.CreateAgentRun(f.ctx, conversationAgentRunRequest(f.conversation, trigger))
+		created, err := commands.CreateAgentRun(f.ctx, runtimeconversation.ConversationAgentRunRequest(f.conversation, trigger))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -422,7 +423,7 @@ func TestTeamRoutingRunCompletesWithResponderRunIds(t *testing.T) {
 		member := f.run(fmt.Sprint(ids[0]))
 		lane := ConversationRunLane(f.conversation.ID, "", "agent-1")
 		if member.Kind != RunKindConversation || member.AssignedAgentID != "agent-1" || member.ConcurrencyKey != lane ||
-			member.SessionID != conversationSessionID(f.conversation.Scope, lane) || member.Context[teamRoutingRunContextKey] != claimed.ID {
+			member.SessionID != conversationSessionID(f.conversation.Scope, lane) || member.Context[runtimeconversation.TeamRoutingRunContextKey] != claimed.ID {
 			t.Fatalf("member Run = %#v", member)
 		}
 		if len(f.agentMessages()) != 0 {
@@ -478,11 +479,11 @@ func TestConversationRunRefusesAgentBindingWithoutProducer(t *testing.T) {
 			return &agentrun.TurnRunnerBinding{DeploymentID: "agent-1"}, nil
 		}), false)
 		run := f.startRun(f.post("broken", "user-1", "Hello"))
-		if _, err := runner.ResolveTurnRunner(f.ctx, run); !errors.Is(err, ErrConversationCoordinationUnavailable) {
+		if _, err := runner.ResolveTurnRunner(f.ctx, run); !errors.Is(err, runtimeconversation.ErrConversationCoordinationUnavailable) {
 			t.Fatalf("err = %v", err)
 		}
 		withoutResolver := f.chatRunner(nil, false)
-		if _, err := withoutResolver.ResolveTurnRunner(f.ctx, run); !errors.Is(err, ErrConversationCoordinationUnavailable) {
+		if _, err := withoutResolver.ResolveTurnRunner(f.ctx, run); !errors.Is(err, runtimeconversation.ErrConversationCoordinationUnavailable) {
 			t.Fatalf("err without an Agent resolver = %v", err)
 		}
 	})

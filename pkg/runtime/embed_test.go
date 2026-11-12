@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -24,12 +25,12 @@ func testEmbedPermissions() EmbedPermissionPolicy {
 
 func TestEmbedSessionCreatesDistinctCanonicalAgentConversations(t *testing.T) {
 	store := newTestKernelStore(t)
-	service, err := NewEmbedSessionService(store, store)
+	service, err := runtimeconversation.NewEmbedSessionService(store, store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: "1"}
-	installation, err := service.CreateInstallation(t.Context(), CreateEmbedInstallationRequest{
+	installation, err := service.CreateInstallation(t.Context(), runtimeconversation.CreateEmbedInstallationRequest{
 		Scope: scope, DeploymentID: "support-agent", Name: "Support chat", AllowedOrigins: []string{"https://example.com"},
 		Identity: EmbedIdentityPolicy{Mode: EmbedIdentityAnonymous}, Permissions: testEmbedPermissions(),
 	})
@@ -37,22 +38,22 @@ func TestEmbedSessionCreatesDistinctCanonicalAgentConversations(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedTestSpace(t, store, scope)
-	first, err := service.OpenSession(t.Context(), OpenEmbedSessionRequest{PublicRoute: installation.PublicRoute, Origin: "https://example.com"})
+	first, err := service.OpenSession(t.Context(), runtimeconversation.OpenEmbedSessionRequest{PublicRoute: installation.PublicRoute, Origin: "https://example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.OpenSession(t.Context(), OpenEmbedSessionRequest{PublicRoute: installation.PublicRoute, Origin: "https://example.com"})
+	second, err := service.OpenSession(t.Context(), runtimeconversation.OpenEmbedSessionRequest{PublicRoute: installation.PublicRoute, Origin: "https://example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.Session.ID == second.Session.ID || first.Session.ConversationID == second.Session.ConversationID || first.Capability == second.Capability {
 		t.Fatalf("openings shared identity: first=%#v second=%#v", first.Session, second.Session)
 	}
-	conversation, err := NewConversationService(store).GetConversation(t.Context(), scope, first.Session.ConversationID)
+	conversation, err := runtimeconversation.NewConversationService(store).GetConversation(t.Context(), scope, first.Session.ConversationID)
 	if err != nil || conversation.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: "support-agent"}) || conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceEmbedSession {
 		t.Fatalf("canonical conversation = %#v, %v", conversation, err)
 	}
-	if _, _, err := service.Authenticate(t.Context(), installation.PublicRoute, first.Session.ID, first.Capability, "https://evil.example"); !errors.Is(err, ErrEmbedOriginDenied) {
+	if _, _, err := service.Authenticate(t.Context(), installation.PublicRoute, first.Session.ID, first.Capability, "https://evil.example"); !errors.Is(err, runtimeconversation.ErrEmbedOriginDenied) {
 		t.Fatalf("foreign origin error = %v", err)
 	}
 	if _, _, err := service.Authenticate(t.Context(), installation.PublicRoute, first.Session.ID, "wrong", "https://example.com"); !errors.Is(err, ErrEmbedSessionUnauthorized) {
@@ -62,8 +63,8 @@ func TestEmbedSessionCreatesDistinctCanonicalAgentConversations(t *testing.T) {
 
 func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testing.T) {
 	store := newTestKernelStore(t)
-	service, _ := NewEmbedSessionService(store, store)
-	installation, err := service.CreateInstallation(t.Context(), CreateEmbedInstallationRequest{
+	service, _ := runtimeconversation.NewEmbedSessionService(store, store)
+	installation, err := service.CreateInstallation(t.Context(), runtimeconversation.CreateEmbedInstallationRequest{
 		Scope: Scope{Kind: "tenant", ID: "1"}, DeploymentID: "support-agent", Name: "Signed support", AllowedOrigins: []string{"https://app.example.com"},
 		Identity:    EmbedIdentityPolicy{Mode: EmbedIdentitySigned, Issuer: "https://identity.example.com", Audience: "support", KeyID: "support-key", PublicKey: testEmbedPublicKey(), RequiredClaims: []string{"userId"}},
 		Permissions: testEmbedPermissions(),
@@ -71,11 +72,11 @@ func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.OpenSession(t.Context(), OpenEmbedSessionRequest{PublicRoute: installation.PublicRoute, Origin: "https://app.example.com"}); !errors.Is(err, ErrEmbedAuthentication) {
+	if _, err := service.OpenSession(t.Context(), runtimeconversation.OpenEmbedSessionRequest{PublicRoute: installation.PublicRoute, Origin: "https://app.example.com"}); !errors.Is(err, runtimeconversation.ErrEmbedAuthentication) {
 		t.Fatalf("unsigned open error = %v", err)
 	}
 	seedTestSpace(t, store, installation.Scope)
-	opened, err := service.OpenSession(t.Context(), OpenEmbedSessionRequest{
+	opened, err := service.OpenSession(t.Context(), runtimeconversation.OpenEmbedSessionRequest{
 		PublicRoute: installation.PublicRoute, Origin: "https://app.example.com", VerifiedClaims: map[string]interface{}{"userId": "customer-42"},
 	})
 	if err != nil {
@@ -108,8 +109,8 @@ func TestSQLiteEmbedSessionCapabilityAndClaimsSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, _ := NewEmbedSessionService(store, store)
-	installation, err := service.CreateInstallation(t.Context(), CreateEmbedInstallationRequest{
+	service, _ := runtimeconversation.NewEmbedSessionService(store, store)
+	installation, err := service.CreateInstallation(t.Context(), runtimeconversation.CreateEmbedInstallationRequest{
 		Scope: Scope{Kind: "tenant", ID: "7"}, DeploymentID: "support-agent", Name: "Support", AllowedOrigins: []string{"https://app.example.com"},
 		Identity: EmbedIdentityPolicy{Mode: EmbedIdentitySigned, Issuer: "issuer", Audience: "audience", KeyID: "key", PublicKey: testEmbedPublicKey(), RequiredClaims: []string{"userId"}}, Permissions: testEmbedPermissions(),
 	})
@@ -117,7 +118,7 @@ func TestSQLiteEmbedSessionCapabilityAndClaimsSurviveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedTestSpace(t, store, installation.Scope)
-	opened, err := service.OpenSession(t.Context(), OpenEmbedSessionRequest{PublicRoute: installation.PublicRoute, Origin: "https://app.example.com", VerifiedClaims: map[string]interface{}{"userId": "user-7"}})
+	opened, err := service.OpenSession(t.Context(), runtimeconversation.OpenEmbedSessionRequest{PublicRoute: installation.PublicRoute, Origin: "https://app.example.com", VerifiedClaims: map[string]interface{}{"userId": "user-7"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +130,7 @@ func TestSQLiteEmbedSessionCapabilityAndClaimsSurviveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	service, _ = NewEmbedSessionService(reopened, reopened)
+	service, _ = runtimeconversation.NewEmbedSessionService(reopened, reopened)
 	_, session, err := service.Authenticate(t.Context(), installation.PublicRoute, opened.Session.ID, opened.Capability, "https://app.example.com")
 	if err != nil || session.VerifiedClaims["userId"] != "user-7" {
 		t.Fatalf("restarted session = %#v, %v", session, err)

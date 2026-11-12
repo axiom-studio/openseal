@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -19,8 +20,8 @@ func externalConversationFailureReplyFixture(t *testing.T, provider string, stat
 	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, provider, []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
-	conversations := NewConversationService(store)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversations := runtimeconversation.NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "External failure",
 		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
 		IdempotencyKey: "failure-conversation",
@@ -28,7 +29,7 @@ func externalConversationFailureReplyFixture(t *testing.T, provider string, stat
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbound, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	inbound, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "sender"},
 		Intent: MessageIntentQuestion, Content: "Please help",
@@ -109,7 +110,7 @@ func TestExternalConversationFailureReplyIsSafeScopedAndIdempotent(t *testing.T)
 				t.Fatalf("canonical failure messages = %#v, %v", messages, err)
 			}
 			reply := messages[1]
-			if reply.Content != TerminalFailureReply("execution_failed") || reply.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.DeploymentID}) ||
+			if reply.Content != runtimeconversation.TerminalFailureReply("execution_failed") || reply.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.DeploymentID}) ||
 				reply.Scope != item.Scope || reply.ConversationID != item.ConversationID || reply.ThreadRootID != item.ChannelMessageID ||
 				reply.ReplyToMessageID != item.ChannelMessageID || reply.ResolvesMessageID != item.ChannelMessageID ||
 				len(reply.References) != 1 || reply.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: item.RunID}) ||
@@ -175,7 +176,7 @@ func TestExternalConversationFailureReplySupersessionIsThreadLocal(t *testing.T)
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			store, catalog, endpoint, item := externalConversationFailureReplyFixture(t, "slack", AgentRunStatusFailed)
-			conversations := NewConversationService(store)
+			conversations := runtimeconversation.NewConversationService(store)
 			current, _ := conversations.GetConversation(ctx, endpoint.Scope, item.ConversationID)
 			sender := ConversationParticipant{Type: ConversationParticipantUser, ID: "sender"}
 			intent := MessageIntentQuestion
@@ -187,7 +188,7 @@ func TestExternalConversationFailureReplySupersessionIsThreadLocal(t *testing.T)
 			if strings.HasPrefix(scenario, "same-thread") {
 				replyTo = item.ChannelMessageID
 			}
-			_, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+			_, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: endpoint.Scope, ConversationID: item.ConversationID, ExpectedRevision: current.Revision,
 				Sender: sender, Intent: intent, Content: "Follow-up",
 				Audience:         ConversationAudience{Kind: ConversationAudienceChannel},

@@ -7,6 +7,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -28,7 +29,7 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 			run := &AgentRun{
 				ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: owner, AssignedAgentID: "seal", Status: AgentRunStatusRunning,
 				Goal: "Explain the stopped attempt", Context: map[string]interface{}{},
-				FailureExplanation: &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "action_failed", Message: "The image service rejected the request."},
+				FailureExplanation: &RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "action_failed", Message: "The image service rejected the request."},
 			}
 			config := loopBindingTestConfig(t, newTestKernelStore(t), &progressAckStepHost{})
 			config.SkillHosts = SkillHostCapabilityResolverFunc(func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error) {

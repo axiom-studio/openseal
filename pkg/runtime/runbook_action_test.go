@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -68,7 +69,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 		t.Fatal(err)
 	}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: objective.Title,
 		Origin:         &ConversationReference{Kind: ConversationReferenceObjective, ID: objective.ID, Version: objective.Revision},
 		IdempotencyKey: "objective-channel",
@@ -164,7 +165,7 @@ func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *test
 		t.Fatal(err)
 	}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: objective.Title,
 		Origin: &ConversationReference{Kind: ConversationReferenceObjective, ID: objective.ID, Version: objective.Revision}, IdempotencyKey: "objective-channel-exhausted",
 	})
@@ -219,7 +220,7 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 		t.Fatal(err)
 	}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: objective.Title,
 		Origin: &ConversationReference{Kind: ConversationReferenceObjective, ID: objective.ID, Version: objective.Revision}, IdempotencyKey: "objective-channel",
 	})

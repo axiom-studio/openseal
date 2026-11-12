@@ -12,6 +12,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -168,7 +169,7 @@ func (v *AgentBuilderActionValidator) authorizeAgentChange(ctx context.Context, 
 // the person the run acts for.
 func (v *AgentBuilderActionValidator) runSpaceID(ctx context.Context, run *AgentRun) (string, error) {
 	if v.runs != nil && v.conversations != nil {
-		_, conversation, _, err := conversationWorkOrigin(ctx, v.runs, v.conversations, run)
+		_, conversation, _, err := conversation.ConversationWorkOrigin(ctx, v.runs, v.conversations, run)
 		if err != nil {
 			return "", err
 		}

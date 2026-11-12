@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 type foregroundClarificationFixture struct {
 	store        conversationTaskClarificationStore
-	service      *ConversationService
+	service      *conversation.ConversationService
 	scheduler    *ConversationRunScheduler
 	conversation *Conversation
 	trigger      *ChannelMessage
@@ -21,10 +22,10 @@ type foregroundClarificationFixture struct {
 
 func newForegroundClarificationFixture(t *testing.T, store conversationTaskClarificationStore, threaded bool) *foregroundClarificationFixture {
 	t.Helper()
-	f := &foregroundClarificationFixture{store: store, service: NewConversationService(store)}
+	f := &foregroundClarificationFixture{store: store, service: conversation.NewConversationService(store)}
 	var err error
 	seedTestSpace(t, store.(SpaceStore), Scope{Kind: "organization", ID: "foreground-clarification"})
-	f.conversation, _, err = f.service.CreateConversation(t.Context(), CreateConversationRequest{
+	f.conversation, _, err = f.service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: Scope{Kind: "organization", ID: "foreground-clarification"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"},
 		Title: "Browser research", IdempotencyKey: "browser-chat",
 	})
@@ -35,7 +36,7 @@ func newForegroundClarificationFixture(t *testing.T, store conversationTaskClari
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.trigger = f.post(t, PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"},
+	f.trigger = f.post(t, conversation.PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"},
 		Intent: MessageIntentQuestion, Content: "Research the requested page.", RequiresResponse: true, StartThread: threaded, IdempotencyKey: "request"})
 	result, _, err := f.scheduler.ScheduleMessage(t.Context(), f.conversation.Scope, f.conversation.ID, f.trigger.ID)
 	if err != nil || result == nil || result.Run == nil {
@@ -45,7 +46,7 @@ func newForegroundClarificationFixture(t *testing.T, store conversationTaskClari
 	return f
 }
 
-func (f *foregroundClarificationFixture) post(t *testing.T, req PostChannelMessageRequest) *ChannelMessage {
+func (f *foregroundClarificationFixture) post(t *testing.T, req conversation.PostChannelMessageRequest) *ChannelMessage {
 	t.Helper()
 	current, err := f.service.GetConversation(t.Context(), f.conversation.Scope, f.conversation.ID)
 	if err != nil {
@@ -91,7 +92,7 @@ func parkedQuestionKey(run *AgentRun) string {
 	if run == nil || run.WakeCondition == nil {
 		return ""
 	}
-	return conversationClarificationKey(run.ID, run.WakeCondition.Reference)
+	return conversation.ConversationClarificationKey(run.ID, run.WakeCondition.Reference)
 }
 
 func (f *foregroundClarificationFixture) question(t *testing.T) *ChannelMessage {
@@ -138,7 +139,7 @@ func TestForegroundConversationClarificationResumesSameRun(t *testing.T) {
 				if again := f.question(t); again.ID != question.ID {
 					t.Fatal("foreground question duplicated")
 				}
-				req := PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer, Content: "Yes, try it for this page.", RequiresResponse: true, IdempotencyKey: "answer"}
+				req := conversation.PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer, Content: "Yes, try it for this page.", RequiresResponse: true, IdempotencyKey: "answer"}
 				if threaded {
 					req.ReplyToMessageID, req.ResolvesMessageID = question.ID, question.ID
 				}
@@ -199,13 +200,13 @@ func TestForegroundConversationClarificationRejectsForeignAndInactiveAnswers(t *
 				f := newForegroundClarificationFixture(t, store, true)
 				f.ask(t, "Use the alternative browser for this page?", "user_message")
 				question := f.question(t)
-				req := PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer, Content: "Yes", RequiresResponse: true,
+				req := conversation.PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer, Content: "Yes", RequiresResponse: true,
 					ReplyToMessageID: question.ID, ResolvesMessageID: question.ID, IdempotencyKey: "rejected-answer"}
 				switch reason {
 				case "other actor":
 					req.Sender.ID = "other-member"
 				case "other thread":
-					other := f.post(t, PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentUpdate, Content: "Another thread", StartThread: true, IdempotencyKey: "other-thread"})
+					other := f.post(t, conversation.PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentUpdate, Content: "Another thread", StartThread: true, IdempotencyKey: "other-thread"})
 					req.ReplyToMessageID = other.ID
 				case "canceled":
 					result, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: f.run.Scope, RunID: f.run.ID,
@@ -238,7 +239,7 @@ func TestForegroundConversationClarificationReplayKeepsLaterQuestionWaiting(t *t
 		f := newForegroundClarificationFixture(t, store, true)
 		f.ask(t, "Use the alternative browser?", "user_message")
 		question := f.question(t)
-		answer := f.post(t, PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer, Content: "Yes", RequiresResponse: true,
+		answer := f.post(t, conversation.PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer, Content: "Yes", RequiresResponse: true,
 			ReplyToMessageID: question.ID, ResolvesMessageID: question.ID, IdempotencyKey: "answer"})
 		accepted, _, err := f.scheduler.ScheduleMessage(t.Context(), f.run.Scope, f.conversation.ID, answer.ID)
 		if err != nil || accepted == nil {

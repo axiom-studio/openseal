@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -62,7 +63,7 @@ func receiveContextTestEvent(t *testing.T, store *sqlite.Store, endpoint *Extern
 }
 
 func contextTestHistory(event NormalizedExternalConversationEvent) *ExternalConversationContextResult {
-	return &ExternalConversationContextResult{Status: ExternalConversationContextComplete, Messages: []ExternalConversationContextMessage{
+	return &ExternalConversationContextResult{Status: conversation.ExternalConversationContextComplete, Messages: []ExternalConversationContextMessage{
 		{ExternalConversationID: event.ExternalConversationID, ExternalThreadID: event.ExternalThreadID,
 			ExternalMessageID: "earlier-reply", ExternalParticipantID: "human-two", ParticipantDisplayName: "Piyush",
 			Text: "The photo book is my favorite.", OccurredAt: event.OccurredAt.Add(-time.Minute)},
@@ -131,8 +132,8 @@ func TestExternalConversationContextImportsParentAndRepliesBeforeFirstMention(t 
 		trigger.Historical || !trigger.RequiresResponse || trigger.ThreadRootID != parent.ID || trigger.ReplyToMessageID != parent.ID {
 		t.Fatalf("parent/reply/trigger boundaries = %#v / %#v / %#v", parent, reply, trigger)
 	}
-	state := ExternalConversationContextAvailability(trigger, endpoint.ID)
-	if state == nil || state.Status != ExternalConversationContextComplete || state.ImportedMessages != 2 || state.ExternalConversationID != item.Event.ExternalConversationID || state.ExternalThreadID != item.Event.ExternalThreadID {
+	state := conversation.ExternalConversationContextAvailability(trigger, endpoint.ID)
+	if state == nil || state.Status != conversation.ExternalConversationContextComplete || state.ImportedMessages != 2 || state.ExternalConversationID != item.Event.ExternalConversationID || state.ExternalThreadID != item.Event.ExternalThreadID {
 		t.Fatalf("availability = %#v", state)
 	}
 	runs, _ := store.ListAgentRuns(ctx, AgentRunFilter{Scope: endpoint.Scope, Kind: RunKindConversation, Limit: 20})
@@ -210,8 +211,8 @@ func TestExternalConversationContextUnthreadedMentionDoesNotReadWholeChannel(t *
 		t.Fatalf("unthreaded read = %#v, reads=%d, %v", applied, len(host.requests), err)
 	}
 	message, _ := store.GetChannelMessage(t.Context(), endpoint.Scope, applied.ConversationID, applied.ChannelMessageID)
-	state := ExternalConversationContextAvailability(message, endpoint.ID)
-	if state == nil || state.Status != ExternalConversationContextUnavailable || state.ExternalConversationID != "workspace/channel" || state.ExternalThreadID != "" {
+	state := conversation.ExternalConversationContextAvailability(message, endpoint.ID)
+	if state == nil || state.Status != conversation.ExternalConversationContextUnavailable || state.ExternalConversationID != "workspace/channel" || state.ExternalThreadID != "" {
 		t.Fatalf("unthreaded origin = %#v", state)
 	}
 }
@@ -230,8 +231,8 @@ func TestExternalConversationContextReadFailureDoesNotHideTrigger(t *testing.T) 
 	if len(messages) != 1 {
 		t.Fatalf("unexpected history count: %d", len(messages))
 	}
-	state := ExternalConversationContextAvailability(messages[0], endpoint.ID)
-	if state == nil || state.Status != ExternalConversationContextUnavailable || state.ImportedMessages != 0 {
+	state := conversation.ExternalConversationContextAvailability(messages[0], endpoint.ID)
+	if state == nil || state.Status != conversation.ExternalConversationContextUnavailable || state.ImportedMessages != 0 {
 		t.Fatalf("permission gap was reported as empty history: %#v", state)
 	}
 }
@@ -243,15 +244,15 @@ func TestExternalConversationContextPermissionCodeIsSafeAndPreserved(t *testing.
 			now := time.Now().UTC().Truncate(time.Millisecond)
 			receiveContextTestEvent(t, store, endpoint, "permission-context", "mention", "parent", now)
 			worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, &recordingContextHost{
-				result: &ExternalConversationContextResult{Status: ExternalConversationContextUnavailable, ErrorCode: code},
+				result: &ExternalConversationContextResult{Status: conversation.ExternalConversationContextUnavailable, ErrorCode: code},
 			}, false, models.WithClock(func() time.Time { return now }))
 			applied, err := worker.ProcessOne(t.Context(), endpoint.Scope)
 			if err != nil {
 				t.Fatal(err)
 			}
 			message, _ := store.GetChannelMessage(t.Context(), endpoint.Scope, applied.ConversationID, applied.ChannelMessageID)
-			state := ExternalConversationContextAvailability(message, endpoint.ID)
-			if state == nil || state.ErrorCode != normalizeExternalConversationContextErrorCode(code) {
+			state := conversation.ExternalConversationContextAvailability(message, endpoint.ID)
+			if state == nil || state.ErrorCode != conversation.NormalizeExternalConversationContextErrorCode(code) {
 				t.Fatalf("permission availability = %#v", state)
 			}
 			for _, reference := range message.References {
@@ -288,28 +289,28 @@ func TestExternalConversationContextBindingChangeDuringReadDoesNotImportStaleDat
 	if len(messages) != 1 {
 		t.Fatalf("stale binding context was imported: %d messages", len(messages))
 	}
-	state := ExternalConversationContextAvailability(messages[0], endpoint.ID)
-	if state == nil || state.Status != ExternalConversationContextUnavailable {
+	state := conversation.ExternalConversationContextAvailability(messages[0], endpoint.ID)
+	if state == nil || state.Status != conversation.ExternalConversationContextUnavailable {
 		t.Fatalf("stale read availability = %#v", state)
 	}
 }
 
 func TestExternalConversationContextAvailabilityKeepsLongCanonicalOrigin(t *testing.T) {
-	state := &ExternalConversationContextState{Status: ExternalConversationContextComplete, ImportedMessages: 1}
+	state := &conversation.ExternalConversationContextState{Status: conversation.ExternalConversationContextComplete, ImportedMessages: 1}
 	message := &ChannelMessage{ExternalSource: &ExternalMessageSource{ChannelID: strings.Repeat("c", 1024), ThreadID: strings.Repeat("t", 1024)},
 		References: []ConversationReference{externalConversationContextReference("endpoint", state)}}
-	actual := ExternalConversationContextAvailability(message, "endpoint")
+	actual := conversation.ExternalConversationContextAvailability(message, "endpoint")
 	if actual == nil || actual.ExternalConversationID != message.ExternalSource.ChannelID || actual.ExternalThreadID != message.ExternalSource.ThreadID {
 		t.Fatalf("long origin was truncated: %#v", actual)
 	}
 }
 
 func TestExternalConversationContextAvailabilityPrefersCanonicalSource(t *testing.T) {
-	state := &ExternalConversationContextState{Status: ExternalConversationContextComplete,
+	state := &conversation.ExternalConversationContextState{Status: conversation.ExternalConversationContextComplete,
 		ExternalConversationID: "old-channel", ExternalThreadID: "old-thread"}
 	message := &ChannelMessage{ExternalSource: &ExternalMessageSource{ChannelID: "actual-channel", ThreadID: "actual-thread"},
 		References: []ConversationReference{externalConversationContextReference("endpoint", state), *externalConversationContextOriginReference("endpoint", state)}}
-	actual := ExternalConversationContextAvailability(message, "endpoint")
+	actual := conversation.ExternalConversationContextAvailability(message, "endpoint")
 	if actual == nil || actual.ExternalConversationID != "actual-channel" || actual.ExternalThreadID != "actual-thread" {
 		t.Fatalf("marker overrode canonical provenance: %#v", actual)
 	}
@@ -330,7 +331,7 @@ func TestExternalConversationContextRejectsCrossDestinationAndOversizedResults(t
 			case "oversized-message":
 				result.Messages[0].Text = strings.Repeat("x", 64*1024+1)
 			case "oversized-batch":
-				result.Messages = make([]ExternalConversationContextMessage, MaximumExternalConversationContextMessages+1)
+				result.Messages = make([]ExternalConversationContextMessage, conversation.MaximumExternalConversationContextMessages+1)
 			case "oversized-total":
 				for i := 0; i < 5; i++ {
 					message := result.Messages[0]
@@ -352,8 +353,8 @@ func TestExternalConversationContextRejectsCrossDestinationAndOversizedResults(t
 			if len(messages) != 1 {
 				t.Fatalf("unsafe context was partially imported: %d messages", len(messages))
 			}
-			state := ExternalConversationContextAvailability(messages[0], endpoint.ID)
-			if state == nil || state.Status != ExternalConversationContextUnavailable {
+			state := conversation.ExternalConversationContextAvailability(messages[0], endpoint.ID)
+			if state == nil || state.Status != conversation.ExternalConversationContextUnavailable {
 				t.Fatalf("unsafe context availability = %#v", state)
 			}
 		})
@@ -372,7 +373,7 @@ func TestExternalConversationContextFiltersFutureAndDeduplicatesHistory(t *testi
 	trigger.OccurredAt = event.OccurredAt
 	result.Messages = append(result.Messages, future, trigger)
 	messages, status, valid := normalizeExternalConversationContext(result, event)
-	if !valid || status != ExternalConversationContextPartial || len(messages) != 2 || messages[0].ExternalMessageID != "parent" {
+	if !valid || status != conversation.ExternalConversationContextPartial || len(messages) != 2 || messages[0].ExternalMessageID != "parent" {
 		t.Fatalf("normalized history = %#v, %s, %v", messages, status, valid)
 	}
 }

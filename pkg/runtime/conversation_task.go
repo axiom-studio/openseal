@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/google/uuid"
 )
@@ -109,7 +110,7 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 		return nil, taskErr
 	}
 	if existing != nil {
-		verified, sourceReport, err := conversationTaskForReport(ctx, s.store, source)
+		verified, sourceReport, err := conversation.ConversationTaskForReport(ctx, s.store, source)
 		if err != nil {
 			return nil, err
 		}
@@ -358,7 +359,7 @@ func (s *ConversationTaskService) Get(ctx context.Context, req GetConversationTa
 		return nil, agentrun.ErrConversationTaskNotFound
 	}
 	if req.Viewer != nil {
-		_, getErr := NewConversationService(s.store, models.WithClock(s.now)).GetVisibleChannelMessage(ctx, req.Scope, task.ConversationID, task.SourceMessageID, *req.Viewer)
+		_, getErr := conversation.NewConversationService(s.store, models.WithClock(s.now)).GetVisibleChannelMessage(ctx, req.Scope, task.ConversationID, task.SourceMessageID, *req.Viewer)
 		if getErr != nil {
 			if errors.Is(getErr, ErrChannelMessageNotFound) {
 				return nil, agentrun.ErrConversationTaskNotFound

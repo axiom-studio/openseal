@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -61,7 +62,7 @@ func driveExplanation(t *testing.T, store KernelStore, result agentrun.FinalDeli
 	if err != nil || claimed == nil || claimed.ID != created.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	failure := &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "execution_failed", Message: "The report could not be built."}
+	failure := &RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "execution_failed", Message: "The report could not be built."}
 	explaining, _, err := NewRunActivityService(store, store).TransitionRun(ctx, scope, claimed.ID, RunTransitionRequest{
 		Status: AgentRunStatusRunning, ExpectedRevision: claimed.Revision, LeaseOwner: explanationWorker,
 		Actor: ActivityActor{Type: "worker", ID: explanationWorker}, FailureExplanation: failure,
@@ -112,7 +113,7 @@ func TestRunLoopPostedExplanationEndsFailedExplained(t *testing.T) {
 func TestRunLoopUnpostedExplanationEndsFailedUnexplained(t *testing.T) {
 	explanationStores(t, func(t *testing.T, store KernelStore) {
 		exit, run, final := driveExplanation(t, store, agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryFail, Failure: &agentrun.LoopFailure{
-			Kind: RunFailureKindExecution, Code: runFailureCodeFinalDelivery, Message: "The agent's reply could not be posted.",
+			Kind: conversation.RunFailureKindExecution, Code: runFailureCodeFinalDelivery, Message: "The agent's reply could not be posted.",
 		}})
 		if exit.Err != nil || exit.Reason != RunLoopExitFailed || final.calls != 1 {
 			t.Fatalf("exit = %#v, deliveries = %d; want failed", exit, final.calls)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -34,8 +35,8 @@ func newTeamChannelFixture(t *testing.T, operations ...capability.ConversationDe
 	store := newTestKernelStore(t)
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "support-team"}
 	catalog, endpoint := externalConversationEndpointFixtureOwnedBy(t, ctx, store, "slack", operations, owner)
-	conversations := NewConversationService(store)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversations := runtimeconversation.NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: owner, Title: "Support channel",
 		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
 		IdempotencyKey: "team-channel",
@@ -43,7 +44,7 @@ func newTeamChannelFixture(t *testing.T, operations ...capability.ConversationDe
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbound, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	inbound, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "speaker"},
 		Intent: MessageIntentQuestion, Content: "Is the deploy healthy?",
@@ -55,7 +56,7 @@ func newTeamChannelFixture(t *testing.T, operations ...capability.ConversationDe
 	}
 	f := &teamChannelFixture{t: t, store: store, catalog: catalog, endpoint: endpoint, conversation: conversation, inbound: inbound.Message, members: map[string]*AgentRun{}, now: time.Now().UTC()}
 	commands := agentrun.NewRunCommandService(store)
-	routing, err := commands.CreateAgentRun(ctx, conversationAgentRunRequest(conversation, inbound.Message))
+	routing, err := commands.CreateAgentRun(ctx, runtimeconversation.ConversationAgentRunRequest(conversation, inbound.Message))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,7 @@ func newTeamChannelFixture(t *testing.T, operations ...capability.ConversationDe
 	responders := make([]interface{}, 0, len(teamChannelMembers))
 	for _, id := range teamChannelMembers {
 		responder := ConversationResponder{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: id}}
-		created, err := commands.CreateAgentRun(ctx, teamMemberRunRequest(f.routing, conversation, inbound.Message, responder, teamMemberRunKey(f.routing, id)))
+		created, err := commands.CreateAgentRun(ctx, runtimeconversation.TeamMemberRunRequest(f.routing, conversation, inbound.Message, responder, runtimeconversation.TeamMemberRunKey(f.routing, id)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,9 +107,9 @@ func (f *teamChannelFixture) answer(member, text string) *ChannelMessage {
 	f.t.Helper()
 	ctx := f.t.Context()
 	run := f.members[member]
-	conversations := NewConversationService(f.store)
+	conversations := runtimeconversation.NewConversationService(f.store)
 	current, _ := conversations.GetConversation(ctx, f.endpoint.Scope, f.conversation.ID)
-	posted, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	posted, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.endpoint.Scope, ConversationID: f.conversation.ID, ExpectedRevision: current.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: member},
 		Intent: MessageIntentAnswer, Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -186,7 +187,7 @@ func TestExternalTeamChannelRejectsUnverifiedMemberRun(t *testing.T) {
 	f := newTeamChannelFixture(t, capability.ConversationDeliveryMessageSend)
 	ctx := t.Context()
 	// A member Run that the routing Run did not start, listed as a responder.
-	forged, err := agentrun.NewRunCommandService(f.store).CreateAgentRun(ctx, teamMemberRunRequest(f.routing, f.conversation, f.inbound,
+	forged, err := agentrun.NewRunCommandService(f.store).CreateAgentRun(ctx, runtimeconversation.TeamMemberRunRequest(f.routing, f.conversation, f.inbound,
 		ConversationResponder{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-c"}}, "forged-member"))
 	if err != nil {
 		t.Fatal(err)

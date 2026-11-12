@@ -28,6 +28,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -288,7 +289,7 @@ type loopFixture struct {
 	approve  *action.ApprovalCoordinator
 	executor *action.ActionWorker
 	loop     *RunLoop
-	convs    *ConversationService
+	convs    *runtimeconversation.ConversationService
 	workerID string // "loop-worker-1"; crash() switches to "loop-worker-2"
 
 	config     loopFixtureConfig
@@ -369,7 +370,7 @@ func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFi
 	}
 	f.chats = chats
 	clock := models.WithClock(f.clock.Now)
-	f.convs = NewConversationService(chats, clock)
+	f.convs = runtimeconversation.NewConversationService(chats, clock)
 	f.portfolio = NewPortfolioService(f.store, clock)
 	scheduler, err := NewConversationRunScheduler(chats, chats, ConversationRunSchedulerConfig{}, clock)
 	if err != nil {
@@ -396,25 +397,25 @@ func loopFixtureStart() time.Time { return time.Now().UTC().Truncate(time.Second
 
 // coordinator routes every chat message to the fixture's acting Agent: finn,
 // or the first Team member.
-func (f *loopFixture) coordinator() *ConversationCoordinator {
+func (f *loopFixture) coordinator() *runtimeconversation.ConversationCoordinator {
 	f.t.Helper()
 	members := f.config.team
 	if len(members) == 0 {
 		members = []string{loopFixtureAgent}
 	}
-	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
-		bindings := make([]ConversationParticipantBinding, 0, len(members))
+	participants := runtimeconversation.ConversationParticipantSourceFunc(func(context.Context, runtimeconversation.ConversationParticipantQuery) ([]runtimeconversation.ConversationParticipantBinding, error) {
+		bindings := make([]runtimeconversation.ConversationParticipantBinding, 0, len(members))
 		for _, member := range members {
-			bindings = append(bindings, ConversationParticipantBinding{
+			bindings = append(bindings, runtimeconversation.ConversationParticipantBinding{
 				Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: member}, SemanticRoles: []string{"assistant"},
 			})
 		}
 		return bindings, nil
 	})
-	router := ConversationRouterFunc(func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error) {
-		return ConversationRouteDecision{AgentID: members[0], Reason: "the fixture routes to the first member"}, nil
+	router := runtimeconversation.ConversationRouterFunc(func(context.Context, runtimeconversation.ConversationRouteRequest) (runtimeconversation.ConversationRouteDecision, error) {
+		return runtimeconversation.ConversationRouteDecision{AgentID: members[0], Reason: "the fixture routes to the first member"}, nil
 	})
-	coordinator, err := NewConversationCoordinator(f.convs, participants, router, DefaultConversationCoordinatorConfig())
+	coordinator, err := runtimeconversation.NewConversationCoordinator(f.convs, participants, router, runtimeconversation.DefaultConversationCoordinatorConfig())
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -488,7 +489,7 @@ func (f *loopFixture) startChat(text string) (*Conversation, *AgentRun) {
 	if len(f.config.team) > 0 {
 		owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}
 	}
-	conversation, _, err := f.convs.CreateConversation(f.ctx, CreateConversationRequest{
+	conversation, _, err := f.convs.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
 		Scope: f.scope, Owner: owner, Title: "Loop fixture chat", IdempotencyKey: "loop-chat-" + fmt.Sprint(f.clock.Now().UnixNano()),
 	})
 	if err != nil {
@@ -515,7 +516,7 @@ func (f *loopFixture) chatRun(conversation *Conversation, message *ChannelMessag
 		return result.Run
 	}
 	member := f.config.team[0]
-	request := conversationAgentRunRequest(conversation, message)
+	request := runtimeconversation.ConversationAgentRunRequest(conversation, message)
 	request.AssignedAgentID = member
 	threadRoot, _ := request.Context["threadRootMessageId"].(string)
 	request.ConcurrencyKey = ConversationRunLane(conversation.ID, threadRoot, member)
@@ -560,7 +561,7 @@ func (f *loopFixture) post(conversationID, sender, text string) *ChannelMessage 
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	posted, err := f.convs.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+	posted, err := f.convs.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: sender}, Intent: MessageIntentQuestion,
 		Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel},

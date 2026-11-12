@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -903,7 +904,7 @@ func (p *RunbookStepProducer) consumeDelegationResult(checkpoint map[string]inte
 func (p *RunbookStepProducer) failed(checkpoint map[string]interface{}, state runbookExecutionState, message string) agentrun.StepOutput {
 	encodeRunbookState(checkpoint, state)
 	return agentrun.StepOutput{
-		Failure:     &agentrun.LoopFailure{Kind: RunFailureKindExecution, Code: "execution_failed", Message: message},
+		Failure:     &agentrun.LoopFailure{Kind: conversation.RunFailureKindExecution, Code: "execution_failed", Message: message},
 		KernelState: checkpoint,
 	}
 }

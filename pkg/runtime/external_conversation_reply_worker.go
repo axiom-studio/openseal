@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // ExternalConversationReplyWorker projects applied inbox work after its
@@ -17,7 +18,7 @@ import (
 // Both paths converge on the same idempotent Conversation message and outbox.
 type ExternalConversationReplyWorker struct {
 	store         ExternalConversationReplyStore
-	conversations *ConversationService
+	conversations *conversation.ConversationService
 	transport     *ExternalConversationTransportService
 	now           func() time.Time
 }
@@ -47,7 +48,7 @@ func NewExternalConversationReplyWorker(
 		return nil, errors.New("external conversation reply store and adapter resolver are required")
 	}
 	return &ExternalConversationReplyWorker{
-		store: store, conversations: NewConversationService(store, opts...),
+		store: store, conversations: conversation.NewConversationService(store, opts...),
 		transport: NewExternalConversationTransportService(store, resolver, opts...),
 		now:       models.ClockFrom(opts),
 	}, nil
@@ -294,11 +295,11 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		if !ok {
 			return nil, fmt.Errorf("%w: completed conversation Run has no canonical reply output", ErrInvalidExternalConversation)
 		}
-		saved, refErr := runActionArtifactReferences(ctx, w.store, w.store, run)
+		saved, refErr := conversation.RunActionArtifactReferences(ctx, w.store, w.store, run)
 		if refErr != nil {
 			return nil, refErr
 		}
-		artifacts, _ := handedOverArtifacts(saved, run.Output)
+		artifacts, _ := conversation.HandedOverArtifacts(saved, run.Output)
 		if catalog, ok := any(w.store).(ArtifactStore); ok {
 			_ = markRunFiles(ctx, catalog, run.Scope, saved, artifacts)
 		}
@@ -310,7 +311,7 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		if senderID == "" {
 			senderID = endpoint.Owner.ID
 		}
-		posted, postErr := w.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+		posted, postErr := w.conversations.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 			Scope: item.Scope, ConversationID: item.ConversationID, ExpectedRevision: current.Revision,
 			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: senderID},
 			Intent: MessageIntentAnswer, Content: content,
@@ -528,7 +529,7 @@ func canonicalExternalRunReply(message *ChannelMessage, item *ExternalConversati
 	return false
 }
 
-func externalConversationRunReply(ctx context.Context, sessions loopSessionEntryLister, actions ActionCallReader, run *AgentRun) (string, bool) {
+func externalConversationRunReply(ctx context.Context, sessions conversation.LoopSessionEntryLister, actions ActionCallReader, run *AgentRun) (string, bool) {
 	if run == nil {
 		return "", false
 	}
@@ -542,7 +543,7 @@ func externalConversationRunReply(ctx context.Context, sessions loopSessionEntry
 		// Failures may follow partially executed actions. Report only the reply
 		// interruption, without exposing internal errors or guessing whether
 		// those actions had external effects.
-		return terminalRunFailureReply(ctx, sessions, actions, run), true
+		return conversation.TerminalRunFailureReply(ctx, sessions, actions, run), true
 	}
 	if run.Status != AgentRunStatusCompleted {
 		return "", false

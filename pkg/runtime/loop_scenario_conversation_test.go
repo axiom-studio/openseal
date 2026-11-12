@@ -23,6 +23,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -159,7 +160,7 @@ func convAgentAnswer(f *loopFixture, conversationID string) *ChannelMessage {
 	return answers[len(answers)-1]
 }
 
-func convRecord(f *loopFixture, conversationID string, card *ChannelMessage, request RecordSurfaceInteractionRequest) {
+func convRecord(f *loopFixture, conversationID string, card *ChannelMessage, request runtimeconversation.RecordSurfaceInteractionRequest) {
 	f.t.Helper()
 	artifactID := convArtifactOf(f.t, card)
 	request.Scope, request.ConversationID, request.MessageID = f.scope, conversationID, card.ID
@@ -203,7 +204,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 			}
 
 			record := func(actor, component, item, values, key string, repeatable bool) {
-				convRecord(f, conversation.ID, card, RecordSurfaceInteractionRequest{
+				convRecord(f, conversation.ID, card, runtimeconversation.RecordSurfaceInteractionRequest{
 					ComponentID: component, ItemKey: item, Actor: convActor(actor), Repeatable: repeatable,
 					Values: json.RawMessage(values), IdempotencyKey: key,
 				})
@@ -260,7 +261,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 		convDrive(f, run.ID)
 		card := convAgentAnswer(f, conversation.ID)
 		record := func(component, action, item, values, key string) {
-			convRecord(f, conversation.ID, card, RecordSurfaceInteractionRequest{
+			convRecord(f, conversation.ID, card, runtimeconversation.RecordSurfaceInteractionRequest{
 				ComponentID: component, ActionID: action, ItemKey: item, Actor: convActor(loopFixtureUser), Repeatable: true,
 				Values: json.RawMessage(values), IdempotencyKey: key,
 			})
@@ -309,7 +310,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 		convDrive(f, run.ID)
 		card := convAgentAnswer(f, conversation.ID)
 		record := func(actor, component, action, values, key string) {
-			convRecord(f, conversation.ID, card, RecordSurfaceInteractionRequest{
+			convRecord(f, conversation.ID, card, runtimeconversation.RecordSurfaceInteractionRequest{
 				ComponentID: component, ActionID: action, Actor: convActor(actor), Repeatable: true,
 				Values: json.RawMessage(values), IdempotencyKey: key,
 			})
@@ -333,21 +334,21 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 
 	t.Run("places", func(t *testing.T) {
 		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
-		found := map[string][]ConversationPlace{}
-		convRunner(f, ConversationRunTurnRunnerConfig{Places: func(_ context.Context, run *AgentRun) []ConversationPlace {
+		found := map[string][]runtimeconversation.ConversationPlace{}
+		convRunner(f, ConversationRunTurnRunnerConfig{Places: func(_ context.Context, run *AgentRun) []runtimeconversation.ConversationPlace {
 			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 			return found[conversationID]
 		}})
 		// A chat that already found places lists them, capped.
 		conversation, run := f.startChat("Driving directions please")
-		for i := 0; i < MaximumConversationPlaces+5; i++ {
-			found[conversation.ID] = append(found[conversation.ID], ConversationPlace{Place: fmt.Sprintf("place:%012x", i), Name: fmt.Sprintf("Stop %d", i), Lat: 37.4, Lon: -121.9})
+		for i := 0; i < runtimeconversation.MaximumConversationPlaces+5; i++ {
+			found[conversation.ID] = append(found[conversation.ID], runtimeconversation.ConversationPlace{Place: fmt.Sprintf("place:%012x", i), Name: fmt.Sprintf("Stop %d", i), Lat: 37.4, Lon: -121.9})
 		}
 		convDrive(f, run.ID)
 		request := convFirstStep(f, run.ID)
 		section := convSection(convRunContext(f, request), "Places already found in this chat")
 		lines := strings.Split(section, "\n")
-		if len(lines) != MaximumConversationPlaces+1 || lines[1] != "- Stop 0 (place place:000000000000, 37.4,-121.9)" {
+		if len(lines) != runtimeconversation.MaximumConversationPlaces+1 || lines[1] != "- Stop 0 (place place:000000000000, 37.4,-121.9)" {
 			t.Fatalf("places section = %q", section)
 		}
 		// A chat without places has no places section, and the same prompt.
@@ -411,7 +412,7 @@ func convChat(f *loopFixture, owner ObjectiveOwner, origin *ConversationReferenc
 		owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent}
 	}
 	f.clock.Advance(time.Millisecond)
-	conversation, _, err := f.convs.CreateConversation(f.ctx, CreateConversationRequest{
+	conversation, _, err := f.convs.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
 		Scope: f.scope, Owner: owner, Title: "Journey chat", Origin: origin,
 		IdempotencyKey: "conv-chat-" + fmt.Sprint(f.clock.Now().UnixNano()),
 	})
@@ -423,13 +424,13 @@ func convChat(f *loopFixture, owner ObjectiveOwner, origin *ConversationReferenc
 
 // convPost posts a message; edit fills in what the default user question
 // (ana, channel audience) does not say.
-func convPost(f *loopFixture, conversationID, text string, edit func(*PostChannelMessageRequest)) *ChannelMessage {
+func convPost(f *loopFixture, conversationID, text string, edit func(*runtimeconversation.PostChannelMessageRequest)) *ChannelMessage {
 	f.t.Helper()
 	conversation, err := f.convs.GetConversation(f.ctx, f.scope, conversationID)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	request := PostChannelMessageRequest{
+	request := runtimeconversation.PostChannelMessageRequest{
 		Scope: f.scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 		Sender: convActor(loopFixtureUser), Intent: MessageIntentQuestion, Content: text,
 		Audience:       ConversationAudience{Kind: ConversationAudienceChannel},
@@ -636,7 +637,7 @@ func TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone(t *testing.T) {
 		}})
 		team := ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}
 		conversation := convChat(f, team, nil)
-		trigger := convPost(f, conversation.ID, "@finn @scout can you both check the canary?", func(r *PostChannelMessageRequest) {
+		trigger := convPost(f, conversation.ID, "@finn @scout can you both check the canary?", func(r *runtimeconversation.PostChannelMessageRequest) {
 			r.Mentions = []ConversationParticipant{{Type: ConversationParticipantAgent, ID: "finn"}, {Type: ConversationParticipantAgent, ID: "scout"}}
 			r.RequiresResponse = true
 		})
@@ -691,7 +692,7 @@ func TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone(t *testing.T) {
 		// again, catch-up brings the teammate's answer in as a user entry
 		// attributed to that teammate, and skips its own earlier answer.
 		scoutAnswer := convAgentAnswer(f, conversation.ID)
-		again := convPost(f, conversation.ID, "@"+scout.AssignedAgentID+" what did your teammate find?", func(r *PostChannelMessageRequest) {
+		again := convPost(f, conversation.ID, "@"+scout.AssignedAgentID+" what did your teammate find?", func(r *runtimeconversation.PostChannelMessageRequest) {
 			r.Mentions = []ConversationParticipant{{Type: ConversationParticipantAgent, ID: scout.AssignedAgentID}}
 			r.RequiresResponse = true
 		})
@@ -759,23 +760,23 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 		}
 
 		ana := convPost(f, conversation.ID, "ana: the build is green", nil)
-		ben := convPost(f, conversation.ID, "ben: staging looks fine", func(r *PostChannelMessageRequest) { r.Sender = convActor("ben") })
-		routine := convPost(f, conversation.ID, "Nightly report: 0 failures", func(r *PostChannelMessageRequest) {
+		ben := convPost(f, conversation.ID, "ben: staging looks fine", func(r *runtimeconversation.PostChannelMessageRequest) { r.Sender = convActor("ben") })
+		routine := convPost(f, conversation.ID, "Nightly report: 0 failures", func(r *runtimeconversation.PostChannelMessageRequest) {
 			r.Sender = ConversationParticipant{Type: ConversationParticipantService, ID: "routine-nightly"}
 			r.Intent = MessageIntentUpdate
 		})
-		scout := convPost(f, conversation.ID, "scout: I checked the canary", func(r *PostChannelMessageRequest) {
+		scout := convPost(f, conversation.ID, "scout: I checked the canary", func(r *runtimeconversation.PostChannelMessageRequest) {
 			r.Sender = ConversationParticipant{Type: ConversationParticipantAgent, ID: "scout"}
 			r.Intent = MessageIntentAnswer
 		})
 		// finn's own Run posted this (a progress note of the first Run): the
 		// session already holds it.
-		own := convPost(f, conversation.ID, "finn: still on it", func(r *PostChannelMessageRequest) {
+		own := convPost(f, conversation.ID, "finn: still on it", func(r *runtimeconversation.PostChannelMessageRequest) {
 			r.Sender = ConversationParticipant{Type: ConversationParticipantAgent, ID: loopFixtureAgent}
 			r.Intent = MessageIntentUpdate
 			r.References = []ConversationReference{{Kind: ConversationReferenceRun, ID: first.ID}}
 		})
-		private := convPost(f, conversation.ID, "ben, between us", func(r *PostChannelMessageRequest) {
+		private := convPost(f, conversation.ID, "ben, between us", func(r *runtimeconversation.PostChannelMessageRequest) {
 			r.Audience = ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{convActor("ben")}}
 		})
 		trigger := convPost(f, conversation.ID, "What is left?", nil)
@@ -819,12 +820,12 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 		// the thread, and the answer goes back into the thread.
 		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
 		conversation := convChat(f, ObjectiveOwner{}, nil)
-		root := convPost(f, conversation.ID, "Call one started", func(r *PostChannelMessageRequest) {
+		root := convPost(f, conversation.ID, "Call one started", func(r *runtimeconversation.PostChannelMessageRequest) {
 			r.Sender = ConversationParticipant{Type: ConversationParticipantService, ID: "calls"}
 			r.Intent = MessageIntentSystem
 		})
 		outside := convPost(f, conversation.ID, "an unrelated question", nil)
-		inThread := convPost(f, conversation.ID, "first call request", func(r *PostChannelMessageRequest) {
+		inThread := convPost(f, conversation.ID, "first call request", func(r *runtimeconversation.PostChannelMessageRequest) {
 			r.ReplyToMessageID = root.ID
 			r.RequiresResponse = true
 		})
@@ -873,7 +874,7 @@ func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
 			if i%2 == 0 {
 				sender, intent = ConversationParticipant{Type: ConversationParticipantAgent, ID: loopFixtureAgent}, MessageIntentAnswer
 			}
-			messages = append(messages, convPost(f, conversation.ID, fmt.Sprintf("message #%d", i), func(r *PostChannelMessageRequest) {
+			messages = append(messages, convPost(f, conversation.ID, fmt.Sprintf("message #%d", i), func(r *runtimeconversation.PostChannelMessageRequest) {
 				r.Sender, r.Intent = sender, intent
 			}))
 		}
@@ -927,9 +928,9 @@ func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
 		source := func(id, thread string) *ExternalMessageSource {
 			return &ExternalMessageSource{Provider: "telegram", ChannelType: "private", ChannelID: "chat-7", ThreadID: thread, MessageID: id, ParticipantID: "kev"}
 		}
-		earlier := convPost(f, conversation.ID, "my flight is at 9", func(r *PostChannelMessageRequest) { r.ExternalSource = source("chat-7:1", "") })
-		quoted := convPost(f, conversation.ID, "and the hotel is booked", func(r *PostChannelMessageRequest) { r.ExternalSource = source("chat-7:2", "") })
-		reply := convPost(f, conversation.ID, "when should I leave?", func(r *PostChannelMessageRequest) {
+		earlier := convPost(f, conversation.ID, "my flight is at 9", func(r *runtimeconversation.PostChannelMessageRequest) { r.ExternalSource = source("chat-7:1", "") })
+		quoted := convPost(f, conversation.ID, "and the hotel is booked", func(r *runtimeconversation.PostChannelMessageRequest) { r.ExternalSource = source("chat-7:2", "") })
+		reply := convPost(f, conversation.ID, "when should I leave?", func(r *runtimeconversation.PostChannelMessageRequest) {
 			r.ExternalSource = source("chat-7:3", "reply:2")
 			r.ReplyToMessageID = quoted.ID
 			r.RequiresResponse = true
@@ -962,7 +963,7 @@ func convParticipation(f *loopFixture, conversationID string, enabled bool) {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if _, err := f.convs.UpdateConversation(f.ctx, UpdateConversationRequest{
+	if _, err := f.convs.UpdateConversation(f.ctx, runtimeconversation.UpdateConversationRequest{
 		Scope: f.scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision, ParticipationEnabled: &enabled,
 	}); err != nil {
 		f.t.Fatal(err)
@@ -1112,7 +1113,7 @@ func TestSpokenTriggerKeepsItsResponseMode(t *testing.T) {
 		return finalAnswer(args)
 	}}))
 	conversation := convChat(f, ObjectiveOwner{}, nil)
-	spoken := convPost(f, conversation.ID, "when should I leave?", func(r *PostChannelMessageRequest) {
+	spoken := convPost(f, conversation.ID, "when should I leave?", func(r *runtimeconversation.PostChannelMessageRequest) {
 		r.ResponseMode = "spoken"
 		r.RequiresResponse = true
 	})
@@ -1132,7 +1133,7 @@ func TestSpokenTriggerKeepsItsResponseMode(t *testing.T) {
 
 	// A written message in the same chat gets a written reply and the same
 	// lane session, without the spoken section.
-	written := convPost(f, conversation.ID, "and the hotel?", func(r *PostChannelMessageRequest) { r.RequiresResponse = true })
+	written := convPost(f, conversation.ID, "and the hotel?", func(r *runtimeconversation.PostChannelMessageRequest) { r.RequiresResponse = true })
 	next := convDrive(f, convSchedule(f, conversation.ID, written).ID)
 	if next.SessionID != run.SessionID || next.Context["responseMode"] != nil {
 		t.Fatalf("written Run = session %s context %#v", next.SessionID, next.Context)

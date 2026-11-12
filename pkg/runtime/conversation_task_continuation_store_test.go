@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 type conversationContinuationTestStore interface {
@@ -31,9 +32,9 @@ func conversationContinuationFixture(t *testing.T, store conversationContinuatio
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "continuation"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "continuation-agent"}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "Continuation", IdempotencyKey: "continuation"})
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Continuation", IdempotencyKey: "continuation"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,7 @@ func conversationContinuationFixture(t *testing.T, store conversationContinuatio
 	if spoken {
 		mode = "spoken"
 	}
-	posted, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+	posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, Intent: MessageIntentQuestion, Content: "Research this request and save the requested result.",
 		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true, ResponseMode: mode, IdempotencyKey: "continuation-source"})
 	if err != nil {
@@ -131,7 +132,7 @@ func TestConversationTaskContinuationStorePreservesExecutionAndAcknowledgesAtomi
 func TestConversationTaskContinuationStoreFinalAnswerWinsHandoff(t *testing.T) {
 	forConversationContinuationStores(t, func(t *testing.T, store conversationContinuationTestStore, _ func(*testing.T) conversationContinuationTestStore) {
 		source, conversation, trigger := conversationContinuationFixture(t, store, AgentRunStatusRunning, false)
-		_, err := NewConversationService(store).PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: source.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		_, err := runtimeconversation.NewConversationService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: source.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: source.AssignedAgentID}, Intent: MessageIntentAnswer, Content: "The result is complete.",
 			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
 			References: []ConversationReference{{Kind: ConversationReferenceRun, ID: source.ID}}, IdempotencyKey: conversationTaskFinalResponseKey(source)})

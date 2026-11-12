@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -238,7 +239,7 @@ func TestAcceptedRunCreationActionDispatcherPreparesNewWorkAndReplays(t *testing
 	store := newTestKernelStore(t)
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}})
 	seedTestSpace(t, store, activation.Scope)
-	conversation, _, err := NewConversationService(store).CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := conversation.NewConversationService(store).CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: activation.Scope, Owner: activation.Owner, Title: "Review",
 		Origin: &ConversationReference{Kind: ConversationReferenceObjective, ID: activation.ObjectiveID, Version: 1}, IdempotencyKey: "review-channel",
 	})

@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/google/uuid"
 )
 
@@ -61,7 +62,7 @@ func TestExternalTerminalFailurePrefersSavedNormalAnswerOverOlderFailure(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	normal, err := NewConversationService(store).PostChannelMessage(t.Context(), PostChannelMessageRequest{
+	normal, err := runtimeconversation.NewConversationService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}, Intent: MessageIntentAnswer,
 		Content: "The saved normal answer", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: trigger.ID,
@@ -113,14 +114,14 @@ func TestExternalTerminalFailureRejectsReceiptIdentityDrift(t *testing.T) {
 
 func TestExternalTerminalFailureAcknowledgedReceiptCannotRedirectInboxOrigin(t *testing.T) {
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
-	service := NewConversationService(store)
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Original inbox", Origin: &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}, IdempotencyKey: uuid.NewString()})
+	service := runtimeconversation.NewConversationService(store)
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Original inbox", Origin: &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}, IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	post := func(conversation *Conversation) *ChannelMessage {
 		t.Helper()
-		message, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion, Content: "Check this request", RequiresResponse: true, StartThread: true, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: uuid.NewString()})
+		message, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion, Content: "Check this request", RequiresResponse: true, StartThread: true, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: uuid.NewString()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,7 +137,7 @@ func TestExternalTerminalFailureAcknowledgedReceiptCannotRedirectInboxOrigin(t *
 	if count, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 		t.Fatalf("failure delivery before acknowledgment: %d %v", count, err)
 	}
-	foreign, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Different same-owner conversation", IdempotencyKey: uuid.NewString()})
+	foreign, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Different same-owner conversation", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}

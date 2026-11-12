@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -74,7 +75,7 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 		},
 	}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := NewConversationService(store).CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"},
 		Title: "Release coordination", IdempotencyKey: "release-coordination",
 	})
@@ -146,7 +147,7 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 	if _, err = projector.Reconcile(t.Context(), scope); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := NewConversationService(store).ListChannelMessages(t.Context(), ChannelMessageFilter{
+	messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(t.Context(), ChannelMessageFilter{
 		Scope: scope, ConversationID: conversation.ID, Limit: 20,
 	})
 	if err != nil {
@@ -187,7 +188,7 @@ func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "escalation-projection"}
 	store := newTestKernelStore(t)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coordinator"},
 		Title: "Incident coordination", IdempotencyKey: "incident-coordination",
 	})
@@ -244,7 +245,7 @@ func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 	if _, err = projector.Reconcile(ctx, scope); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := NewConversationService(store).ListChannelMessages(ctx, ChannelMessageFilter{
+	messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(ctx, ChannelMessageFilter{
 		Scope: scope, ConversationID: conversation.ID, Limit: 20,
 	})
 	if err != nil {

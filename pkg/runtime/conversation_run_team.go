@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // routeTeamMessage is a Team channel's routing Run: it records who answers the
@@ -16,16 +17,18 @@ import (
 // output, whose responderRunIds the chat client follows.
 func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *AgentRun, conversation *Conversation, triggerID string) (map[string]interface{}, error) {
 	if r.runs == nil || r.coordinator == nil {
-		return nil, ErrConversationCoordinationUnavailable
+		return nil, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
 	trigger, err := r.conversations.GetChannelMessage(ctx, run.Scope, conversation.ID, triggerID)
 	if err != nil {
 		return nil, err
 	}
-	childKey := func(participant ConversationParticipant) string { return teamMemberRunKey(run, participant.ID) }
-	result, err := r.coordinator.coordinateWithChildRuns(ctx, ConversationRoutingRequest{
+	childKey := func(participant ConversationParticipant) string {
+		return runtimeconversation.TeamMemberRunKey(run, participant.ID)
+	}
+	result, err := r.coordinator.CoordinateWithChildRuns(ctx, runtimeconversation.ConversationRoutingRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, TriggerMessageID: triggerID,
-		IdempotencyKey: conversationRoutingKey(run.Scope, conversation.ID, triggerID),
+		IdempotencyKey: runtimeconversation.ConversationRoutingKey(run.Scope, conversation.ID, triggerID),
 	}, childKey)
 	if err != nil {
 		if ctx.Err() != nil || permanentConversationRunError(err) {
@@ -64,7 +67,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 				continue
 			}
 		}
-		created, err := r.runs.CreateAgentRun(ctx, teamMemberRunRequest(run, conversation, trigger, responder, key))
+		created, err := r.runs.CreateAgentRun(ctx, runtimeconversation.TeamMemberRunRequest(run, conversation, trigger, responder, key))
 		if err != nil {
 			return nil, err
 		}
@@ -78,26 +81,26 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 
 // teamMembers lists the members who may answer in the channel, with the
 // names an @mention uses.
-func (r *ConversationRunTurnRunner) teamMembers(ctx context.Context, conversation *Conversation, trigger *ChannelMessage) (conversationTeamRoster, []ConversationParticipantBinding, error) {
-	roster := loadConversationTeamRoster(ctx, r.conversationStore, conversation)
+func (r *ConversationRunTurnRunner) teamMembers(ctx context.Context, conversation *Conversation, trigger *ChannelMessage) (runtimeconversation.ConversationTeamRoster, []runtimeconversation.ConversationParticipantBinding, error) {
+	roster := runtimeconversation.LoadConversationTeamRoster(ctx, r.conversationStore, conversation)
 	if r.coordinator == nil {
 		return roster, nil, nil
 	}
-	bindings, err := r.coordinator.resolveParticipants(ctx, ConversationParticipantQuery{
+	bindings, err := r.coordinator.ResolveParticipants(ctx, runtimeconversation.ConversationParticipantQuery{
 		Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger),
 	})
-	if errors.Is(err, ErrNoConversationParticipants) {
+	if errors.Is(err, runtimeconversation.ErrNoConversationParticipants) {
 		return roster, nil, nil
 	}
 	return roster, bindings, err
 }
 
-func (r *ConversationRunTurnRunner) agentConversationTeamContext(ctx context.Context, run *AgentRun, conversation *Conversation, trigger *ChannelMessage) (*agentConversationTeam, error) {
+func (r *ConversationRunTurnRunner) agentConversationTeamContext(ctx context.Context, run *AgentRun, conversation *Conversation, trigger *ChannelMessage) (*runtimeconversation.AgentConversationTeam, error) {
 	roster, bindings, err := r.teamMembers(ctx, conversation, trigger)
 	if err != nil {
 		return nil, err
 	}
-	return roster.agentTeam(bindings, run.AssignedAgentID), nil
+	return roster.AgentTeam(bindings, run.AssignedAgentID), nil
 }
 
 // handoffMentions finds the teammates an answer @mentions, in the order they
@@ -111,5 +114,5 @@ func (r *ConversationRunTurnRunner) handoffMentions(ctx context.Context, convers
 	if err != nil {
 		return nil, err
 	}
-	return findHandoffMentions(content, sender, roster, bindings), nil
+	return runtimeconversation.FindHandoffMentions(content, sender, roster, bindings), nil
 }

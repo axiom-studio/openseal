@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 func runReportingChannelKey(owner ObjectiveOwner, policy *runbook.ReportingPolicy) string {
@@ -69,7 +70,7 @@ func ensureRunReportingChannel(
 	if store == nil {
 		return nil, errors.New("run reporting requires a conversation store")
 	}
-	channel, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+	channel, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: strings.TrimSpace(policy.Title), CreatedBy: person,
 		IdempotencyKey: runReportingChannelKey(owner, policy),
 	})
@@ -86,8 +87,8 @@ func projectRunReportingStart(
 	if store == nil || channel == nil || run == nil || messageKey == "" || !runReportsMilestone(run, runbook.ReportingStarted) {
 		return nil
 	}
-	service := NewConversationService(store)
-	_, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+	service := conversation.NewConversationService(store)
+	_, err := service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 		Scope: channel.Scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision,
 		Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID},
 		SenderDisplayName: "Agent", Intent: MessageIntentUpdate,
@@ -100,7 +101,7 @@ func projectRunReportingStart(
 		if getErr != nil {
 			return getErr
 		}
-		_, err = service.PostChannelMessage(ctx, PostChannelMessageRequest{
+		_, err = service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 			Scope: latest.Scope, ConversationID: latest.ID, ExpectedRevision: latest.Revision,
 			Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID},
 			SenderDisplayName: "Agent", Intent: MessageIntentUpdate,
@@ -128,13 +129,13 @@ func projectConversationRunbookStart(ctx context.Context, store ConversationStor
 	if conversationID == "" || triggerID == "" {
 		return nil
 	}
-	service := NewConversationService(store)
+	service := conversation.NewConversationService(store)
 	channel, err := service.GetConversation(ctx, source.Scope, conversationID)
 	if err != nil {
 		return err
 	}
 	post := func(current *Conversation) error {
-		_, postErr := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+		_, postErr := service.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{
 			Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
 			Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: source.AssignedAgentID},
 			SenderDisplayName: "Agent", Intent: MessageIntentUpdate,
@@ -163,7 +164,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		return projectFailedConversationReply(ctx, store, run)
 	}
 	if run.Kind == RunKindConversation && run.Context[ConversationTaskContextKey] != nil {
-		task, sourceReport, err := conversationTaskForReport(ctx, store, run)
+		task, sourceReport, err := conversation.ConversationTaskForReport(ctx, store, run)
 		if err != nil {
 			return err
 		}
@@ -193,7 +194,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		milestone = runbook.ReportingFailed
 		content = fmt.Sprintf("%s: %s", terminalRunStatusLabel(run.Status), strings.TrimSpace(run.Goal))
 		if run.Status == AgentRunStatusFailed {
-			content = terminalRunFailureReply(ctx, store, store, run)
+			content = conversation.TerminalRunFailureReply(ctx, store, store, run)
 		}
 	}
 	if task, _ := run.Context[scheduledTaskContextKey].(bool); task && run.Status == AgentRunStatusCompleted {
@@ -204,7 +205,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	if !runReportsMilestone(run, milestone) {
 		return nil
 	}
-	task, sourceTaskReport, taskErr := conversationTaskForReport(ctx, store, run)
+	task, sourceTaskReport, taskErr := conversation.ConversationTaskForReport(ctx, store, run)
 	if taskErr != nil {
 		return taskErr
 	}
@@ -227,7 +228,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 			if sourceRun == nil || sourceRun.Status != AgentRunStatusCompleted {
 				return ErrInvalidConversationTask
 			}
-			verified, sourceReport, err := conversationTaskForReport(ctx, store, sourceRun)
+			verified, sourceReport, err := conversation.ConversationTaskForReport(ctx, store, sourceRun)
 			if err != nil || verified == nil || verified.ID != task.ID || !sourceReport {
 				if err != nil {
 					return err
@@ -268,12 +269,12 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		// chat the routine was created from, not inside the creating thread.
 		replyTo, broadcast = "", false
 	}
-	service := NewConversationService(store)
+	service := conversation.NewConversationService(store)
 	channel, err := service.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
 		return err
 	}
-	request := PostChannelMessageRequest{
+	request := conversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision,
 		Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID},
 		SenderDisplayName: "Agent", Intent: intent, Content: content, ResolvesMessageID: resolvesMessageID,
@@ -292,7 +293,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		_, err = service.PostChannelMessage(ctx, request)
 	}
 	if errors.Is(err, ErrMessageConflict) {
-		if saved, replayErr := service.replayLegacySpokenResponse(ctx, request); replayErr != nil {
+		if saved, replayErr := service.ReplayLegacySpokenResponse(ctx, request); replayErr != nil {
 			return replayErr
 		} else if saved != nil {
 			return nil
@@ -335,7 +336,7 @@ func projectRunReportingStartForRun(ctx context.Context, store ConversationStore
 	if strings.TrimSpace(rootRunID) != run.ID || strings.TrimSpace(conversationID) == "" {
 		return nil
 	}
-	channel, err := NewConversationService(store).GetConversation(ctx, run.Scope, conversationID)
+	channel, err := conversation.NewConversationService(store).GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
 		return err
 	}

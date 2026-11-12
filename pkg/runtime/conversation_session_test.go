@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -39,19 +40,19 @@ func TestConversationSessionIDIsStablePerLane(t *testing.T) {
 	// A 1:1 Agent chat Run, on the channel and on a thread lane.
 	agentChat := &Conversation{ID: "chat", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}}
 	message := &ChannelMessage{ID: "m1", Scope: scope, ConversationID: "chat", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "7"}}
-	request := conversationAgentRunRequest(agentChat, message)
+	request := conversation.ConversationAgentRunRequest(agentChat, message)
 	if request.SessionID == "" || request.SessionID != conversationSessionID(scope, request.ConcurrencyKey) || request.SessionID != ids["base"] {
 		t.Fatalf("agent chat request session = %q, lane %q", request.SessionID, request.ConcurrencyKey)
 	}
 	threaded := &ChannelMessage{ID: "m2", Scope: scope, ConversationID: "chat", ThreadRootID: "root", Sender: message.Sender}
-	if request := conversationAgentRunRequest(agentChat, threaded); request.SessionID != ids["thread"] {
+	if request := conversation.ConversationAgentRunRequest(agentChat, threaded); request.SessionID != ids["thread"] {
 		t.Fatalf("thread request session = %q, want %q", request.SessionID, ids["thread"])
 	}
 
 	// A Team member's Run uses the member's own lane session.
 	team := &Conversation{ID: "chat", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}}
 	routing := &AgentRun{ID: "routing", Scope: scope, Owner: team.Owner, Context: map[string]interface{}{"threadRootMessageId": "root"}}
-	member := teamMemberRunRequest(routing, team, message, ConversationResponder{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-a"}}, "key")
+	member := conversation.TeamMemberRunRequest(routing, team, message, ConversationResponder{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-a"}}, "key")
 	if member.SessionID != ids["thread"] || member.SessionID != conversationSessionID(scope, member.ConcurrencyKey) {
 		t.Fatalf("member request session = %q, want %q", member.SessionID, ids["thread"])
 	}
@@ -61,7 +62,7 @@ func TestTeamRoutingRunHasNoSession(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "sessions"}
 	team := &Conversation{ID: "chat", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}}
 	message := &ChannelMessage{ID: "m1", Scope: scope, ConversationID: "chat", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "7"}}
-	request := conversationAgentRunRequest(team, message)
+	request := conversation.ConversationAgentRunRequest(team, message)
 	if request.AssignedAgentID != "" || request.SessionID != "" {
 		t.Fatalf("routing request = agent %q session %q", request.AssignedAgentID, request.SessionID)
 	}

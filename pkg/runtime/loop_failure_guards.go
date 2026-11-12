@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -106,7 +107,7 @@ func loopErrorStreak(entries []*SessionEntry) int {
 // the error_streak Run failure when its last loopErrorStreakLimit steps all
 // ended in errors, or nil. The executor calls it after every tool entry of a
 // step is terminal and no other guard failed the step.
-func loopErrorStreakFailure(ctx context.Context, store loopSessionEntryLister, scope Scope, sessionID, runID string) (*modelstep.GuardRunFailure, error) {
+func loopErrorStreakFailure(ctx context.Context, store conversation.LoopSessionEntryLister, scope Scope, sessionID, runID string) (*modelstep.GuardRunFailure, error) {
 	if store == nil || sessionID == "" || runID == "" {
 		return nil, errors.New("error streak needs a session store, session and Run")
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -21,10 +22,10 @@ func (s *countingFinalReplyStore) ListChannelMessages(ctx context.Context, filte
 func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 	ctx := t.Context()
 	store := &countingFinalReplyStore{Store: newTestKernelStore(t)}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "17"}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "seal"}, Title: "Busy channel", IdempotencyKey: "busy-final-channel",
 	})
 	if err != nil {
@@ -36,7 +37,7 @@ func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+		posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 			Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "participant"},
 			Intent: MessageIntentUpdate, Content: fmt.Sprintf("Message %d", i), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -48,7 +49,7 @@ func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 		trigger = posted.Message
 	}
 	current, _ := service.GetConversation(ctx, scope, conversation.ID)
-	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "seal"}, Intent: MessageIntentAnswer,
 		Content:  "The image request failed, so I stopped. Your original image is still available.",
@@ -106,7 +107,7 @@ func TestExternalReplyUsesExplainedSummary(t *testing.T) {
 	run := &AgentRun{Status: AgentRunStatusFailed,
 		FailureExplanation: &RunFailureExplanation{Kind: "execution", Code: "execution_failed", Message: "Image generation failed"},
 		Output:             map[string]interface{}{"summary": "The image request failed, so I stopped."}}
-	if reply, ok := externalConversationRunReply(ctx, nil, nil, run); !ok || reply != TerminalFailureReply("execution_failed") {
+	if reply, ok := externalConversationRunReply(ctx, nil, nil, run); !ok || reply != runtimeconversation.TerminalFailureReply("execution_failed") {
 		t.Fatalf("unexplained failure reused model output: %q", reply)
 	}
 	run.FailureExplanation.Explained = true
@@ -114,7 +115,7 @@ func TestExternalReplyUsesExplainedSummary(t *testing.T) {
 		t.Fatalf("model answer replaced: %q, %v", reply, ok)
 	}
 	run.Output["summary"] = "   "
-	if reply, ok := externalConversationRunReply(ctx, nil, nil, run); !ok || reply != TerminalFailureReply("execution_failed") {
+	if reply, ok := externalConversationRunReply(ctx, nil, nil, run); !ok || reply != runtimeconversation.TerminalFailureReply("execution_failed") {
 		t.Fatalf("empty explanation was posted: %q", reply)
 	}
 	run.FailureExplanation, run.Output["summary"] = nil, "model text"

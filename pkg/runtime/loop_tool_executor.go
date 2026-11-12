@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -180,7 +181,7 @@ func (x *claimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding,
 			},
 		}, nil
 	}
-	action, err := selectGovernedAction(binding, name, directive)
+	action, err := conversation.SelectGovernedAction(binding, name, directive)
 	if err != nil {
 		return resolvedLoopTool{}, err
 	}
@@ -899,7 +900,7 @@ func (r *stepToolRun) runCapability(ctx context.Context, i int) error {
 // definition of each new tool exactly as later steps declare it, and the IDs
 // of the instructions and runbooks its result carried.
 func loadKernelPatch(set *modelstep.CapabilitySet, actions []capability.ModelAction, loaded []string) *ToolEntryKernelPatch {
-	names := LoopGovernedToolNames(actions)
+	names := conversation.LoopGovernedToolNames(actions)
 	patch := &ToolEntryKernelPatch{}
 	for _, id := range loaded {
 		if action, ok := set.CatalogAction(id); ok {

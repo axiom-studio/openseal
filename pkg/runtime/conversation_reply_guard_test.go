@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
@@ -35,7 +36,7 @@ func newReplyGuardFixture(t *testing.T, store KernelStore) *replyGuardFixture {
 	}
 	f := &replyGuardFixture{LoopStore: actiontest.NewLoopStore(t, store), conversations: conversations}
 	seedTestSpace(t, store.(SpaceStore), f.Scope)
-	conversation, _, err := NewConversationService(conversations).CreateConversation(f.Ctx, CreateConversationRequest{
+	conversation, _, err := conversation.NewConversationService(conversations).CreateConversation(f.Ctx, conversation.CreateConversationRequest{
 		ID: "chat-" + uuid.NewString()[:8], Scope: f.Scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
 		Title: "Reply guard", IdempotencyKey: "reply-guard-" + uuid.NewString()[:8],
 	})

@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -35,8 +36,8 @@ func newRunProgressWorkerFixtureOn(t *testing.T, store *sqlite.Store, provider s
 	t.Helper()
 	ctx := context.Background()
 	catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, provider, operations)
-	conversations := NewConversationService(store)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversations := runtimeconversation.NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Support thread",
 		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
 		IdempotencyKey: "progress-conversation",
@@ -44,7 +45,7 @@ func newRunProgressWorkerFixtureOn(t *testing.T, store *sqlite.Store, provider s
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbound, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	inbound, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "speaker"},
 		Intent: MessageIntentQuestion, Content: "Can you check this?",

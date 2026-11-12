@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
@@ -437,15 +438,15 @@ func TestLoopRoutineScriptFinalFailureExplainsAndFails(t *testing.T) {
 		t.Fatalf("message = %q", failure.Message)
 	}
 	run.FailureExplanation = failure
-	if !runExplainingFailure(run) {
+	if !conversation.RunExplainingFailure(run) {
 		t.Fatal("the Run is not in explain mode")
 	}
-	note := failureExplanationNote("ses", run.ID, "step_2", failure)
+	note := conversation.FailureExplanationNote("ses", run.ID, "step_2", failure)
 	if note == nil || note.Note.Kind != NoteFailureExplanation || !strings.Contains(note.Note.Text, "This attempt has stopped: The routine's script exited with status 1") {
 		t.Fatalf("note = %#v", note)
 	}
 
-	earlier := &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "execution_failed", Message: "The model provider failed."}
+	earlier := &RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "execution_failed", Message: "The model provider failed."}
 	run.FailureExplanation = earlier
 	if kept := routine.FinalFailure(run, entries); kept == nil || *kept != *earlier {
 		t.Fatalf("kept = %#v", kept)

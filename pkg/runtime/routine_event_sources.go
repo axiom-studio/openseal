@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -144,7 +145,7 @@ func routineConversationSourceLabel(kind RoutineEventKind, name, installationID 
 		}
 	}
 	if len(name) > RoutineEventSourceLabelMax {
-		name = truncateUTF8Bytes(name, RoutineEventSourceLabelMax)
+		name = conversation.TruncateUTF8Bytes(name, RoutineEventSourceLabelMax)
 	}
 	return name
 }
@@ -286,7 +287,7 @@ func routineCallbackSources(ctx context.Context, store interface{}, scope Scope,
 				label += " (GitHub)"
 			}
 			result = append(result, &RoutineEventSourceView{RoutineEventSourceOption: RoutineEventSourceOption{
-				Kind: RoutineEventGitHub, Source: RoutineCallbackSourceRef(registration.ID), Label: truncateUTF8Bytes(label, RoutineEventSourceLabelMax),
+				Kind: RoutineEventGitHub, Source: RoutineCallbackSourceRef(registration.ID), Label: conversation.TruncateUTF8Bytes(label, RoutineEventSourceLabelMax),
 				Available: true, Fields: RoutineEventFilterFields(RoutineEventGitHub), EventTypes: types,
 			}})
 		}
@@ -555,7 +556,7 @@ func pinRoutineEventChannels(trigger *RoutineEventTrigger, field string, channel
 			names = append(names, channel.Name)
 		}
 		if strings.TrimSpace(condition.Label) == "" && !slices.Contains(names, "") {
-			condition.Label = truncateUTF8Bytes(strings.Join(names, ", "), RoutineEventConditionLabelMax)
+			condition.Label = conversation.TruncateUTF8Bytes(strings.Join(names, ", "), RoutineEventConditionLabelMax)
 		}
 	}
 	return nil

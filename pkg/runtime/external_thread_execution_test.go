@@ -6,6 +6,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
@@ -72,19 +73,19 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	if blocked, err := store.ClaimNextAgentRun(ctx, claim); err != nil || blocked != nil {
 		t.Fatalf("thread follow-up created another Run: %#v %v", blocked, err)
 	}
-	conversations := NewConversationService(store)
+	conversations := conversation.NewConversationService(store)
 	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID}}
 	root, _ := first.Context["threadRootMessageId"].(string)
-	page, err := ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{}, root)
+	page, err := conversation.ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, conversation.ConversationHistoryReadRequest{}, root)
 	if err != nil || len(page.Messages) != 2 {
 		t.Fatalf("thread history=%#v %v", page, err)
 	}
 	after := int64(0)
-	forward, err := ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{AfterSequence: &after, Limit: 1}, root)
+	forward, err := conversation.ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, conversation.ConversationHistoryReadRequest{AfterSequence: &after, Limit: 1}, root)
 	if err != nil || len(forward.Messages) != 1 || forward.Messages[0].ID != root || forward.NextAfterSequence == 0 {
 		t.Fatalf("forward thread history=%#v %v", forward, err)
 	}
-	if _, err := ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{MessageID: applied[1].ChannelMessageID}, root); err == nil {
+	if _, err := conversation.ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, conversation.ConversationHistoryReadRequest{MessageID: applied[1].ChannelMessageID}, root); err == nil {
 		t.Fatal("explicit message lookup escaped its thread")
 	}
 	// Explicit cancellation remains available. A later message in the thread

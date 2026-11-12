@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/google/uuid"
 )
 
@@ -28,7 +29,7 @@ type RunLoopCutoverConversations interface {
 	GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error)
 	GetChannelMessage(ctx context.Context, scope Scope, conversationID, messageID string) (*ChannelMessage, error)
 	ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error)
-	PostChannelMessage(ctx context.Context, req PostChannelMessageRequest) (*ChannelMessageCommitResult, error)
+	PostChannelMessage(ctx context.Context, req runtimeconversation.PostChannelMessageRequest) (*ChannelMessageCommitResult, error)
 }
 
 // RunLoopCutoverReport counts what one cutover pass did.
@@ -265,7 +266,7 @@ func (c *runLoopCutover) postMessage(ctx context.Context, run *AgentRun) (bool, 
 		if conversation.Status != ConversationStatusActive || conversation.Owner != run.Owner {
 			return false, nil
 		}
-		result, err := c.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+		result, err := c.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"},
 			Intent: MessageIntentSystem, Content: RunLoopCutoverMessage, Audience: ConversationAudience{Kind: ConversationAudienceChannel},

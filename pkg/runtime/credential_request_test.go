@@ -13,6 +13,7 @@ import (
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -163,18 +164,18 @@ func TestFailedInteractionRequestsAreExplainedInsteadOfFailingTheRun(t *testing.
 	}
 }
 
-func mustConversationChanges(t *testing.T, ctx context.Context, store *sqlite.Store, scope Scope) (*ConversationChangeSet, error) {
+func mustConversationChanges(t *testing.T, ctx context.Context, store *sqlite.Store, scope Scope) (*conversation.ConversationChangeSet, error) {
 	t.Helper()
 	now := time.Now().UTC()
 	seedTestSpace(t, store, scope)
 	if _, _, err := store.CreateConversation(ctx, &Conversation{ID: "chat", Scope: scope, Title: "Amazon order", Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Status: ConversationStatusActive, Revision: 1, CreatedAt: now, UpdatedAt: now}, "chat-key"); err != nil {
 		return nil, err
 	}
-	service, err := NewConversationChangeService(store, store)
+	service, err := conversation.NewConversationChangeService(store, store)
 	if err != nil {
 		return nil, err
 	}
-	return service.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: "chat"})
+	return service.ListChanges(ctx, conversation.ConversationChangeRequest{Scope: scope, ConversationID: "chat"})
 }
 
 // A member asking in a Team chat saves the request to the Team, stamped with

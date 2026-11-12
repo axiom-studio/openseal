@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // Final answer delivery for Agent chat Runs (run-loop section 05 §8, SPEC
@@ -34,7 +35,7 @@ const (
 // nothing and does not use it.
 type conversationFinalHandler struct {
 	runner   *ConversationRunTurnRunner
-	sessions loopSessionEntryLister
+	sessions runtimeconversation.LoopSessionEntryLister
 	actions  ActionCallReader
 	activity activityAppender
 }
@@ -48,7 +49,7 @@ type activityAppender interface {
 // loop binding already holds. sessions and actions read this Run's tool
 // entries and governed calls (reactions, artifact references, prior delivery
 // rejections); activity may be nil (no visual_rejected event).
-func newConversationFinalHandler(runner *ConversationRunTurnRunner, sessions loopSessionEntryLister, actions ActionCallReader, activity activityAppender) *conversationFinalHandler {
+func newConversationFinalHandler(runner *ConversationRunTurnRunner, sessions runtimeconversation.LoopSessionEntryLister, actions ActionCallReader, activity activityAppender) *conversationFinalHandler {
 	return &conversationFinalHandler{runner: runner, sessions: sessions, actions: actions, activity: activity}
 }
 
@@ -62,7 +63,7 @@ func newConversationFinalHandler(runner *ConversationRunTurnRunner, sessions loo
 //   - ErrSteeringArrived (from the reply guard): continue.
 func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.FinalDelivery) (agentrun.FinalDeliveryResult, error) {
 	if h == nil || h.runner == nil || h.runner.conversations == nil {
-		return agentrun.FinalDeliveryResult{}, ErrConversationCoordinationUnavailable
+		return agentrun.FinalDeliveryResult{}, runtimeconversation.ErrConversationCoordinationUnavailable
 	}
 	run := d.Run
 	if run == nil {
@@ -95,14 +96,14 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	guard := d.Guard
 	// 9 (first part). The Run and the files its answer hands over.
 	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
-	artifacts, err := runActionArtifactReferences(ctx, h.sessions, h.actions, run)
+	artifacts, err := runtimeconversation.RunActionArtifactReferences(ctx, h.sessions, h.actions, run)
 	if err != nil {
 		return agentrun.FinalDeliveryResult{}, err
 	}
-	handedOver, unknownFiles := handedOverArtifacts(artifacts, answer.Output)
+	handedOver, unknownFiles := runtimeconversation.HandedOverArtifacts(artifacts, answer.Output)
 	references = append(references, handedOver...)
-	if len(unknownFiles) > 0 && !runExplainingFailure(run) {
-		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: unknownHandedOverFilesText(unknownFiles, artifacts)}, nil
+	if len(unknownFiles) > 0 && !runtimeconversation.RunExplainingFailure(run) {
+		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: runtimeconversation.UnknownHandedOverFilesText(unknownFiles, artifacts)}, nil
 	}
 	// The files the Run saved and does not hand over were made to build its
 	// answer; the catalog remembers that so file lists can leave them out.
@@ -110,9 +111,9 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	_ = markRunFiles(ctx, r.artifacts, run.Scope, artifacts, handedOver)
 
 	// 3. Failure explanation: always a visible text reply, never a visual.
-	if runExplainingFailure(run) {
+	if runtimeconversation.RunExplainingFailure(run) {
 		if content == "" {
-			content = terminalRunFailureReply(ctx, h.sessions, h.actions, run)
+			content = runtimeconversation.TerminalRunFailureReply(ctx, h.sessions, h.actions, run)
 		}
 		message, replayed, err := r.postAgentResponseWithReferences(ctx, run, conversation, trigger, content, references, false, &guard)
 		if errors.Is(err, errConversationParticipationStopped) {
@@ -155,7 +156,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 		if err != nil {
 			return agentrun.FinalDeliveryResult{}, err
 		}
-		if len(reactions) > 0 && visual == nil && reactionEcho(content, reactions) {
+		if len(reactions) > 0 && visual == nil && runtimeconversation.ReactionEcho(content, reactions) {
 			output := maps.Clone(base)
 			output[agentrun.FinalOutputReactedKey] = true
 			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: output}, nil
@@ -170,7 +171,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 		}
 		if prior > 0 {
 			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryFail, Failure: &agentrun.LoopFailure{
-				Kind: RunFailureKindExecution, Code: conversationEmptyAnswerCode, Message: conversationEmptyAnswerFailure,
+				Kind: runtimeconversation.RunFailureKindExecution, Code: conversationEmptyAnswerCode, Message: conversationEmptyAnswerFailure,
 			}}, nil
 		}
 		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: conversationEmptyAnswerText}, nil
@@ -270,7 +271,7 @@ func answerVisualFollowUpKey(run *AgentRun) string {
 // visual and stamps its places. A visual that fails them wraps
 // errInvalidAnswerVisual.
 func (r *ConversationRunTurnRunner) checkAnswerVisual(ctx context.Context, run *AgentRun, visual *presentation.Visual) (*presentation.Visual, error) {
-	checked := cloneVisual(visual)
+	checked := runtimeconversation.CloneVisual(visual)
 	var options presentation.ValidateOptions
 	if r.config.VisualChecks != nil {
 		options = r.config.VisualChecks(run)
@@ -317,7 +318,7 @@ func (h *conversationFinalHandler) visualRejected(ctx context.Context, run *Agen
 
 // runReactions are the reactions this Run added: its completed react tool
 // entries, in entry order.
-func (h *conversationFinalHandler) runReactions(ctx context.Context, run *AgentRun) ([]TurnReaction, error) {
+func (h *conversationFinalHandler) runReactions(ctx context.Context, run *AgentRun) ([]runtimeconversation.TurnReaction, error) {
 	if h.sessions == nil {
 		return nil, nil
 	}
@@ -328,12 +329,12 @@ func (h *conversationFinalHandler) runReactions(ctx context.Context, run *AgentR
 	if err != nil {
 		return nil, err
 	}
-	reactions := make([]TurnReaction, 0, len(entries))
+	reactions := make([]runtimeconversation.TurnReaction, 0, len(entries))
 	for _, entry := range entries {
 		if entry == nil || entry.Tool == nil || len(entry.Tool.Arguments) == 0 {
 			continue
 		}
-		var reaction TurnReaction
+		var reaction runtimeconversation.TurnReaction
 		if json.Unmarshal(entry.Tool.Arguments, &reaction) != nil || strings.TrimSpace(reaction.Emoji) == "" {
 			continue
 		}

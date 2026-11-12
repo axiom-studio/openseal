@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // LastConversationActivity answers what listing each owner's active
@@ -13,21 +15,21 @@ func TestLastConversationActivityMatchesTheOwnerList(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := open(t)
 			ctx := context.Background()
-			service := NewConversationService(store)
+			service := runtimeconversation.NewConversationService(store)
 			scope := Scope{Kind: "tenant", ID: "last-activity"}
 			seedTestSpace(t, store.(SpaceStore), scope)
 			seedTestSpace(t, store.(SpaceStore), Scope{Kind: "tenant", ID: "elsewhere"})
 			person := ConversationParticipant{Type: ConversationParticipantUser, ID: "ana"}
 			create := func(scope Scope, ownerType OwnerType, ownerID, key string, post bool) *Conversation {
 				t.Helper()
-				conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+				conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 					Scope: scope, Owner: ObjectiveOwner{Type: ownerType, ID: ownerID}, Title: key, IdempotencyKey: key,
 				})
 				if err != nil {
 					t.Fatal(err)
 				}
 				if post {
-					posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+					posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 						Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: person,
 						Intent: MessageIntentUpdate, Content: "Hi", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: key + "-1",
 					})
@@ -45,7 +47,7 @@ func TestLastConversationActivityMatchesTheOwnerList(t *testing.T) {
 			create(scope, OwnerTypeAgent, "scout", "scout-empty", false)
 			archived := create(scope, OwnerTypeAgent, "scout", "scout-archived", true)
 			status := ConversationStatusArchived
-			if _, err := service.UpdateConversation(ctx, UpdateConversationRequest{
+			if _, err := service.UpdateConversation(ctx, runtimeconversation.UpdateConversationRequest{
 				Scope: scope, ConversationID: archived.ID, ExpectedRevision: archived.Revision, Status: &status,
 			}); err != nil {
 				t.Fatal(err)

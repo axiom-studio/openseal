@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // externalReactionDeliveryScanPages bounds the outbox pages read to find the
@@ -47,7 +48,7 @@ func (w *ExternalConversationInboxWorker) applyReaction(ctx context.Context, ite
 	if err != nil {
 		return err
 	}
-	request := MessageReactionRequest{
+	request := conversation.MessageReactionRequest{
 		Scope: endpoint.Scope, ConversationID: mapping.ConversationID, MessageID: mapping.ChannelMessageID,
 		Emoji: event.Emoji, Actor: participant.Participant, FromExternal: true,
 	}

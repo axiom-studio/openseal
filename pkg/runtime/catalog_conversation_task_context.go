@@ -7,6 +7,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -108,7 +109,7 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 		}
 	}
 	viewer := ConversationViewer{Participant: actor}
-	if _, err := NewConversationService(store).GetVisibleChannelMessage(ctx, canonical.Scope, conversation.ID, message.ID, viewer); err != nil {
+	if _, err := runtimeconversation.NewConversationService(store).GetVisibleChannelMessage(ctx, canonical.Scope, conversation.ID, message.ID, viewer); err != nil {
 		if errors.Is(err, ErrChannelMessageNotFound) {
 			return nil, nil
 		}
@@ -125,7 +126,7 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 	result.CanStart = foreground && conversation.Status == ConversationStatusActive && canonical.Status == AgentRunStatusRunning &&
 		canonical.AssignedAgentID != "" && canonical.LeaseOwner != "" && canonical.LeaseExpiresAt != nil && canonical.LeaseExpiresAt.After(time.Now()) && !voiceCallStartedMessage(message)
 	if result.CanStart {
-		onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(store), conversation.Scope, conversation.Owner, ConversationRunAgentID(conversation, canonical))
+		onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(store), conversation.Scope, conversation.Owner, runtimeconversation.ConversationRunAgentID(conversation, canonical))
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +145,7 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 	if origin != nil && origin.Mode == ConversationTaskModeIndependent && canonical.ID == origin.WorkRunID {
 		rows = append([]*ConversationTaskResult{{Task: origin, WorkRun: canonical}}, rows...)
 	}
-	proof, err := NewConversationChangeService(store, store)
+	proof, err := runtimeconversation.NewConversationChangeService(store, store)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +155,7 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 			seen[row.Task.ID] || thread != "" && row.Task.ThreadRootID != thread || isTerminalAgentRunStatus(row.WorkRun.Status) {
 			continue
 		}
-		source, err := proof.proveConversationTaskRun(ctx, conversation, row.Task, row.WorkRun, &viewer)
+		source, err := proof.ProveConversationTaskRun(ctx, conversation, row.Task, row.WorkRun, &viewer)
 		if err != nil {
 			return nil, err
 		}

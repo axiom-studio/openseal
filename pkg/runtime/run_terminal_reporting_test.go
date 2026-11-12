@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
@@ -32,13 +33,13 @@ func terminalReportingContractFixture(t *testing.T, fixture runStoreContractFixt
 func terminalReportingContractRun(t *testing.T, store terminalReportingContractStore, scope Scope, at time.Time) (*AgentRun, *Conversation, *ChannelMessage) {
 	t.Helper()
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "report-agent"}
-	conversations := NewConversationService(store)
+	conversations := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := conversations.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "Original request", IdempotencyKey: uuid.NewString()})
+	conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Original request", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	trigger, err := conversations.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+	trigger, err := conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requesting-user"}, Intent: MessageIntentQuestion,
 		Content: "Send me the result here when the work finishes", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: uuid.NewString(),

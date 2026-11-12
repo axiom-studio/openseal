@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -37,13 +38,13 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 	clock := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
 	tick := models.WithClock(func() time.Time { clock = clock.Add(time.Second); return clock })
 	spaces := NewSpaceService(store, tick)
-	conversations := NewConversationService(store, tick)
+	conversations := conversation.NewConversationService(store, tick)
 	scope := Scope{Kind: "tenant", ID: "owner-default-" + strings.ReplaceAll(t.Name(), "/", "-")}
 	const ana, ben, solo, stranger = "7", "8", "", "404"
 	drifter := ObjectiveOwner{Type: OwnerTypeAgent, ID: "drifter"}
 
 	create := func(key string, owner ObjectiveOwner, spaceID, createdBy string) (*Conversation, error) {
-		conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+		conversation, _, err := conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
 			Scope: scope, Owner: owner, Title: "Chat " + key, SpaceID: spaceID, CreatedBy: createdBy, IdempotencyKey: key,
 		})
 		return conversation, err

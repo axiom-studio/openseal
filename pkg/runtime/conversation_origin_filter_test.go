@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -52,14 +53,14 @@ func TestConversationOriginFilter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := open(t)
 			ctx := context.Background()
-			service := NewConversationService(store)
+			service := conversation.NewConversationService(store)
 			scope := Scope{Kind: "tenant", ID: "origin-filter"}
 			builder := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
 			other := ObjectiveOwner{Type: OwnerTypeAgent, ID: "helper"}
 			seedTestSpace(t, store.(SpaceStore), scope)
 			create := func(key string, owner ObjectiveOwner, origin *ConversationReference) {
 				t.Helper()
-				if _, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+				if _, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{
 					Scope: scope, Owner: owner, Title: key, Origin: origin, IdempotencyKey: key,
 				}); err != nil {
 					t.Fatal(err)

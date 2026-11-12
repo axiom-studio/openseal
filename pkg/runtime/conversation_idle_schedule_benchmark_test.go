@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -49,20 +50,20 @@ func (s *idleConversationBenchmarkStore) reportReads(b *testing.B) {
 func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (*idleConversationBenchmarkStore, *ConversationRunScheduler, Scope, []*Conversation) {
 	b.Helper()
 	store := &idleConversationBenchmarkStore{Store: newTestKernelStore(b)}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "idle-scheduler-benchmark"}
 	ctx := b.Context()
 	conversations := make([]*Conversation, 0, count)
 	for index := 0; index < count; index++ {
 		id := fmt.Sprintf("caught-up-%05d", index)
-		conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 			ID: id, Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "benchmark-team"},
 			Title: id, IdempotencyKey: id,
 		})
 		if err != nil {
 			b.Fatal(err)
 		}
-		posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+		posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: scope, ConversationID: id, ExpectedRevision: conversation.Revision,
 			Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "benchmark-user"},
 			Intent: MessageIntentQuestion, Content: "Review this request.", RequiresResponse: true,
@@ -73,7 +74,7 @@ func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (
 		}
 		conversation = posted.Conversation
 		for round := 0; round < historicalRounds; round++ {
-			committed, err := service.CommitConversationRouting(ctx, CommitConversationRoutingRequest{
+			committed, err := service.CommitConversationRouting(ctx, runtimeconversation.CommitConversationRoutingRequest{
 				Scope: scope, ConversationID: id, ExpectedRevision: conversation.Revision,
 				TriggerMessageID: posted.Message.ID, IdempotencyKey: fmt.Sprintf("round-%05d", round),
 			})
@@ -82,7 +83,7 @@ func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (
 			}
 			conversation = committed.Conversation
 		}
-		if _, _, err := service.AdvanceCursor(ctx, AdvanceConversationCursorRequest{
+		if _, _, err := service.AdvanceCursor(ctx, runtimeconversation.AdvanceConversationCursorRequest{
 			Scope: scope, ConversationID: id,
 			Participant:       ConversationParticipant{Type: ConversationParticipantService, ID: conversationRunSchedulerParticipant},
 			DeliveredSequence: conversation.LastSequence, ReadSequence: conversation.LastSequence,

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -24,10 +25,10 @@ func TestChannelTimelineStoresPaginateRootsAndBroadcastsBeforeLimiting(t *testin
 // visibility of their own audience, root and immediate reply target.
 func testChannelTimelineStore(t *testing.T, store ConversationStore) {
 	t.Helper()
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "channel-timeline"}
 	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
 		Title: "Channel timeline", IdempotencyKey: "timeline",
 	})
@@ -40,7 +41,7 @@ func testChannelTimelineStore(t *testing.T, store ConversationStore) {
 	privateAudience := ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantUser, ID: "someone-else"}}}
 	post := func(content, reply string, broadcast bool, audience ConversationAudience) *ChannelMessage {
 		t.Helper()
-		result, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+		result, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 			Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 			Sender: sender, Intent: MessageIntentUpdate, Content: content,
 			ReplyToMessageID: reply, BroadcastToChannel: broadcast, Audience: audience,

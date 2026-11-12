@@ -2,14 +2,16 @@ package runtime
 
 import (
 	"testing"
+
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 func TestLocalConversationThreadScopesFollowUpsAndPreservesIndependentWork(t *testing.T) {
 	store := newTestKernelStore(t)
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "local-threads"}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "local-threads",
 	})
 	if err != nil {
@@ -25,7 +27,7 @@ func TestLocalConversationThreadScopesFollowUpsAndPreservesIndependentWork(t *te
 		if sender == ConversationParticipantService {
 			intent = MessageIntentSystem
 		}
-		result, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+		result, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 			Scope: scope, ConversationID: conversation.ID, ExpectedRevision: latest.Revision,
 			Sender: ConversationParticipant{Type: sender, ID: "user"}, Intent: intent, Content: key,
 			RequiresResponse: sender == ConversationParticipantUser,

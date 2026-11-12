@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // Completion checks of a final answer (section 04 §11.4, SPEC A8/A9). They
@@ -77,7 +78,7 @@ func checkFinalAnswerCompletion(ctx context.Context, x *ControlExecutor, cc agen
 		}
 		return &finalAnswerRejection{Code: finalUnverifiedApprovalCode,
 			Message: "No approval is pending in this Run; say what actually happened.",
-			Failure: &agentrun.LoopFailure{Kind: RunFailureKindExecution, Code: finalUnverifiedApprovalCode,
+			Failure: &agentrun.LoopFailure{Kind: conversation.RunFailureKindExecution, Code: finalUnverifiedApprovalCode,
 				Message: "The agent said an approval was pending when none was, so the run stopped."}}, nil
 	}
 	return nil, nil

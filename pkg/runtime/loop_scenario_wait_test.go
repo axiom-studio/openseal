@@ -20,6 +20,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -403,7 +404,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			}
 
 			// The person answers in the chat; the scheduler resumes the same Run.
-			answer := convPost(f, conversation.ID, "staging", func(r *PostChannelMessageRequest) {
+			answer := convPost(f, conversation.ID, "staging", func(r *runtimeconversation.PostChannelMessageRequest) {
 				r.Intent, r.RequiresResponse = MessageIntentAnswer, true
 			})
 			resumed := convSchedule(f, conversation.ID, answer)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/google/uuid"
 )
 
@@ -19,13 +20,13 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	scope := Scope{Kind: "tenant", ID: "run-failed-" + uuid.NewString()[:8]}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
+	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion,
 		Content: "Check my email", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, StartThread: true,
@@ -60,7 +61,7 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
 	failed, _, err := activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: "w", Error: "provider down",
-		FailureExplanation: beginRunFailureExplanation(run, RunFailureKindExecution, "provider_unavailable", "The model provider was unavailable.", "", ""),
+		FailureExplanation: runtimeconversation.BeginRunFailureExplanation(run, runtimeconversation.RunFailureKindExecution, "provider_unavailable", "The model provider was unavailable.", "", ""),
 		EventType:          "run.failed", Summary: "Run failed",
 	})
 	if err != nil {
@@ -72,7 +73,7 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 		}
 	}
 	reply, err := store.FindChannelMessageByIdempotencyKey(ctx, scope, conversation.ID, terminalConversationFailureReplyKey(failed))
-	if err != nil || reply == nil || reply.Content != TerminalFailureReply("provider_unavailable") {
+	if err != nil || reply == nil || reply.Content != runtimeconversation.TerminalFailureReply("provider_unavailable") {
 		t.Fatalf("kernel reply = %+v %v", reply, err)
 	}
 	notes, err := store.ListAgentSessionEntries(ctx, SessionEntryFilter{Scope: scope, SessionID: run.SessionID, NoteKinds: []NoteKind{NoteRunFailed}})

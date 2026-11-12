@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -49,7 +50,7 @@ func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *ExternalC
 func TestExternalConversationReplyAliasesKeepUserAndBotRepliesInOriginalThread(t *testing.T) {
 	ctx := t.Context()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-	host := &recordingContextHost{result: &ExternalConversationContextResult{Status: ExternalConversationContextUnavailable}}
+	host := &recordingContextHost{result: &ExternalConversationContextResult{Status: runtimeconversation.ExternalConversationContextUnavailable}}
 	worker, err := NewExternalConversationInboxWorker(store, replyAliasDispatcher{}, ExternalConversationInboxWorkerConfig{
 		WorkerID: "reply-alias-worker", ContextHost: host, ContextCatalog: contextHistoryResolver{catalog},
 	})
@@ -61,12 +62,12 @@ func TestExternalConversationReplyAliasesKeepUserAndBotRepliesInOriginalThread(t
 	if reply.ThreadRootID != root.ID || reply.ReplyToMessageID != root.ID {
 		t.Fatalf("reply to user lost root: root=%#v, reply=%#v", root, reply)
 	}
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	conversation, err := service.GetConversation(ctx, endpoint.Scope, root.ConversationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
 		Intent: MessageIntentAnswer, Content: "The image now has a hat.", ReplyToMessageID: reply.ID,

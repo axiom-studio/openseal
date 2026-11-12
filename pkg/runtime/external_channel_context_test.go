@@ -6,6 +6,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // bindChatAgent resolves the chat seams for a Run of agentID's own chat, as
@@ -40,7 +41,7 @@ func TestExternalChannelModelContextExcludesAgentPrivateWork(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
 		scope, owner := f.conversation.Scope, f.conversation.Owner
 		external := func(key, title string) *Conversation {
-			conversation, _, err := f.service.CreateConversation(f.ctx, CreateConversationRequest{
+			conversation, _, err := f.service.CreateConversation(f.ctx, conversation.CreateConversationRequest{
 				Scope: scope, Owner: owner, Title: title, IdempotencyKey: key,
 				Origin: &ConversationReference{Kind: ConversationReferenceExternalSource, ID: "same-slack-app", Version: 1},
 			})
@@ -84,7 +85,7 @@ func TestExternalChannelModelContextExcludesAgentPrivateWork(t *testing.T) {
 			return chatStepText(binding, producer.paths[0])
 		}
 		channel := ask(public, "public-message", "PUBLIC_CHANNEL_QUESTION")
-		if !strings.Contains(channel, "PUBLIC_CHANNEL_QUESTION") || !strings.Contains(channel, ConversationExternalSourceRules) {
+		if !strings.Contains(channel, "PUBLIC_CHANNEL_QUESTION") || !strings.Contains(channel, conversation.ConversationExternalSourceRules) {
 			t.Fatalf("current channel context missing:\n%s", channel)
 		}
 		for _, secret := range []string{"PRIVATE_DM_SECRET", "PRIVATE_OBJECTIVE_SECRET", "private-workflow"} {
@@ -98,7 +99,7 @@ func TestExternalChannelModelContextExcludesAgentPrivateWork(t *testing.T) {
 				t.Fatalf("personal chat lost its private portfolio context %s:\n%s", want, control)
 			}
 		}
-		if strings.Contains(control, ConversationExternalSourceRules) || strings.Contains(control, "PRIVATE_DM_SECRET") {
+		if strings.Contains(control, conversation.ConversationExternalSourceRules) || strings.Contains(control, "PRIVATE_DM_SECRET") {
 			t.Fatalf("personal chat got external channel context:\n%s", control)
 		}
 	})

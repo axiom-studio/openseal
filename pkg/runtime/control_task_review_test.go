@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // taskReviewHost answers review calls with scripted texts, in order.
@@ -110,7 +111,7 @@ func TestTaskReviewReviseOnceThenRejectFails(t *testing.T) {
 	}
 	result := f.settleReviewed("second", host)
 	if result.Kind != ControlFailed || result.Failure == nil || result.Failure.Code != taskCompletionRejectedCode ||
-		result.Failure.Kind != RunFailureKindTaskCompletion || !strings.Contains(result.Failure.Message, "still a plan") ||
+		result.Failure.Kind != conversation.RunFailureKindTaskCompletion || !strings.Contains(result.Failure.Message, "still a plan") ||
 		result.Entry == nil || result.Entry.State != ToolEntryError {
 		t.Fatalf("second = %#v", result)
 	}

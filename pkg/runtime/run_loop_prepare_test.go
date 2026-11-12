@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -183,7 +184,7 @@ func TestPrepareLoadAppendsTools(t *testing.T) {
 	if !reflect.DeepEqual(after.System, before.System) {
 		t.Fatalf("system changed after a load")
 	}
-	if action, ok := LoopGovernedAction(f.binding.ModelActions, "action_gmail_send"); !ok || action.Name != "gmail.send" {
+	if action, ok := conversation.LoopGovernedAction(f.binding.ModelActions, "action_gmail_send"); !ok || action.Name != "gmail.send" {
 		t.Fatalf("LoopGovernedAction = %v %v", action.Name, ok)
 	}
 	if name := loopCapabilityToolName(f.binding.ModelActions)("action:notion.search"); name != "action_notion_search" {
@@ -317,7 +318,7 @@ func TestLoopGovernedToolNamesValidAndUnique(t *testing.T) {
 		{Name: "gmail.send_email"}, {Name: "gmail_send.email"}, {Name: "mcp.server one.tool/x"},
 		{Name: "skill." + strings.Repeat("long", 20)},
 	}
-	names := LoopGovernedToolNames(actions)
+	names := conversation.LoopGovernedToolNames(actions)
 	seen := map[string]bool{}
 	for _, action := range actions {
 		name := names[action.Name]
@@ -325,7 +326,7 @@ func TestLoopGovernedToolNamesValidAndUnique(t *testing.T) {
 			t.Fatalf("tool name %q for %q is invalid or repeated", name, action.Name)
 		}
 		seen[name] = true
-		if back, ok := LoopGovernedAction(actions, name); !ok || back.Name != action.Name {
+		if back, ok := conversation.LoopGovernedAction(actions, name); !ok || back.Name != action.Name {
 			t.Fatalf("%q resolves to %q", name, back.Name)
 		}
 	}

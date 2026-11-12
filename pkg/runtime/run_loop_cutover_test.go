@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
 )
@@ -118,16 +119,16 @@ func cutoverAgentConversationRun(t *testing.T, store cutoverTestStore, key strin
 func cutoverConversationRunFor(t *testing.T, store cutoverTestStore, key string, owner ObjectiveOwner) cutoverLane {
 	t.Helper()
 	ctx := context.Background()
-	service := NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store.(SpaceStore), cutoverScope)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: cutoverScope, Owner: owner,
 		Title: "Operations " + key, IdempotencyKey: "channel-" + key,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: cutoverScope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"},
 		Intent: MessageIntentQuestion, Content: "Check the canary " + key, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
@@ -161,7 +162,7 @@ func claimCutoverRun(t *testing.T, store cutoverTestStore, run *AgentRun) *Agent
 
 func cutoverMessages(t *testing.T, store cutoverTestStore, conversationID string) []*ChannelMessage {
 	t.Helper()
-	messages, err := NewConversationService(store).ListChannelMessages(context.Background(), ChannelMessageFilter{Scope: cutoverScope, ConversationID: conversationID})
+	messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(context.Background(), ChannelMessageFilter{Scope: cutoverScope, ConversationID: conversationID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +177,7 @@ func cutoverMessages(t *testing.T, store cutoverTestStore, conversationID string
 
 func runCutover(t *testing.T, store cutoverTestStore) RunLoopCutoverReport {
 	t.Helper()
-	report, err := RunLoopCutover(context.Background(), store, NewConversationService(store))
+	report, err := RunLoopCutover(context.Background(), store, runtimeconversation.NewConversationService(store))
 	if err != nil {
 		t.Fatalf("cutover: %v", err)
 	}
@@ -361,7 +362,7 @@ func TestCutoverIdempotent(t *testing.T) {
 				wg.Add(1)
 				go func(i int) {
 					defer wg.Done()
-					reports[i], errs[i] = RunLoopCutover(ctx, store, NewConversationService(store))
+					reports[i], errs[i] = RunLoopCutover(ctx, store, runtimeconversation.NewConversationService(store))
 				}(i)
 			}
 			wg.Wait()
@@ -415,9 +416,11 @@ func (s *failingCutoverStore) UpdateAgentRunWithEvent(ctx context.Context, run *
 }
 
 // failingCutoverConversations refuses to post.
-type failingCutoverConversations struct{ *ConversationService }
+type failingCutoverConversations struct {
+	*runtimeconversation.ConversationService
+}
 
-func (failingCutoverConversations) PostChannelMessage(context.Context, PostChannelMessageRequest) (*ChannelMessageCommitResult, error) {
+func (failingCutoverConversations) PostChannelMessage(context.Context, runtimeconversation.PostChannelMessageRequest) (*ChannelMessageCommitResult, error) {
 	return nil, errCutoverTestFailure
 }
 
@@ -440,13 +443,13 @@ func TestCutoverFailsClosed(t *testing.T) {
 				"list":   {cutoverTestStore: store, failList: true},
 				"update": {cutoverTestStore: store, failUpdate: true},
 			} {
-				if _, err := RunLoopCutover(ctx, broken, NewConversationService(store)); !errors.Is(err, errCutoverTestFailure) {
+				if _, err := RunLoopCutover(ctx, broken, runtimeconversation.NewConversationService(store)); !errors.Is(err, errCutoverTestFailure) {
 					t.Fatalf("%s failure: cutover err = %v", name, err)
 				}
 			}
 			// A message that cannot be posted stops the pass before the Run
 			// is canceled, so the next start posts it.
-			if _, err := RunLoopCutover(ctx, store, failingCutoverConversations{NewConversationService(store)}); !errors.Is(err, errCutoverTestFailure) {
+			if _, err := RunLoopCutover(ctx, store, failingCutoverConversations{runtimeconversation.NewConversationService(store)}); !errors.Is(err, errCutoverTestFailure) {
 				t.Fatalf("post failure: cutover err = %v", err)
 			}
 			if run := requireRunStatus(t, store, running.ID, AgentRunStatusRunning); run.Engine != "" {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // This is a reporting affordance only. The projector retrieves the canonical
@@ -30,7 +32,7 @@ func FindConversationTaskResultMessage(ctx context.Context, store ConversationSt
 		}
 		return message, nil
 	}
-	verified, sourceReport, err := conversationTaskForReport(ctx, store, run)
+	verified, sourceReport, err := conversation.ConversationTaskForReport(ctx, store, run)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +133,7 @@ func projectConversationTaskContinuationResult(ctx context.Context, store Conver
 	if source == nil {
 		return ErrChannelMessageNotFound
 	}
-	service := NewConversationService(store)
+	service := conversation.NewConversationService(store)
 	channel, err := service.GetConversation(ctx, task.Scope, task.ConversationID)
 	if err != nil {
 		return err
@@ -142,7 +144,7 @@ func projectConversationTaskContinuationResult(ctx context.Context, store Conver
 	if sender.ID == "" {
 		sender = ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"}
 	}
-	request := PostChannelMessageRequest{
+	request := conversation.PostChannelMessageRequest{
 		Scope: task.Scope, ConversationID: task.ConversationID, ExpectedRevision: channel.Revision,
 		Sender: sender, SenderDisplayName: "Agent", Intent: MessageIntentAnswer, Content: content,
 		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: source.ID, ResolvesMessageID: source.ID,
@@ -167,7 +169,7 @@ func conversationTaskReportContent(ctx context.Context, store ConversationStore,
 		return task.Acknowledgment
 	}
 	if run.Status == AgentRunStatusFailed {
-		return terminalRunFailureReply(ctx, store, store, run)
+		return conversation.TerminalRunFailureReply(ctx, store, store, run)
 	}
 	if run.Status == AgentRunStatusCompleted {
 		for _, key := range []string{"report", "summary"} {

@@ -21,6 +21,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -191,7 +192,7 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 				t.Fatal("the loop posted a reply for an unexplained failure")
 			}
 			reply := portReportFailure(f, conversation.ID, failed)
-			if want := terminalRunFailureReply(f.ctx, f.raw, f.raw, failed); reply.Content != want || strings.Contains(reply.Content, "restarting") {
+			if want := runtimeconversation.TerminalRunFailureReply(f.ctx, f.raw, f.raw, failed); reply.Content != want || strings.Contains(reply.Content, "restarting") {
 				t.Fatalf("reply = %q, want the kernel reply %q", reply.Content, want)
 			}
 		})
@@ -243,7 +244,7 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 			if steps := f.model.calls(ModelStepPurposeStep); len(steps) != 7 || steps[6].Attempt != 1 {
 				t.Fatalf("step calls = %d, want 5 lookups and two attempts of the sixth step", len(steps))
 			}
-			if reply := portReportFailure(f, conversation.ID, failed); reply.Content != terminalRunFailureReply(f.ctx, f.raw, f.raw, failed) {
+			if reply := portReportFailure(f, conversation.ID, failed); reply.Content != runtimeconversation.TerminalRunFailureReply(f.ctx, f.raw, f.raw, failed) {
 				t.Fatalf("reply = %q", reply.Content)
 			}
 		})
@@ -398,7 +399,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 				return finalAnswer(map[string]any{"answer": "", "silent": true})
 			}}))
 			conversation := convChat(f, ObjectiveOwner{}, nil)
-			spoken := convPost(f, conversation.ID, "mm, nice weather", func(r *PostChannelMessageRequest) {
+			spoken := convPost(f, conversation.ID, "mm, nice weather", func(r *runtimeconversation.PostChannelMessageRequest) {
 				r.ResponseMode = "spoken"
 				r.RequiresResponse = true
 			})

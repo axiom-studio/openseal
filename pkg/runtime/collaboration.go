@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/google/uuid"
 )
@@ -1414,13 +1415,13 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 // same chat: the recipient answers there as an ordinary chat Run, in its own
 // lane, with the whole conversation, exactly as if the message reached it first.
 func collaborationChatPlacement(source *AgentRun, assignedAgent string, context map[string]interface{}) string {
-	for _, key := range []string{conversationRunContextConversationID, conversationRunContextTriggerID, conversationRunContextTriggerSeq, "threadRootMessageId", "responseMode"} {
+	for _, key := range []string{conversationRunContextConversationID, conversationRunContextTriggerID, conversation.ConversationRunContextTriggerSeq, "threadRootMessageId", "responseMode"} {
 		if value, ok := source.Context[key]; ok {
 			context[key] = value
 		}
 	}
 	if from := strings.TrimSpace(source.AssignedAgentID); from != "" {
-		context[collaborationHandedOffByContextKey] = from
+		context[conversation.CollaborationHandedOffByContextKey] = from
 	}
 	conversationID, _ := context[conversationRunContextConversationID].(string)
 	root, _ := context["threadRootMessageId"].(string)

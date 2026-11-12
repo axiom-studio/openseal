@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -94,15 +95,15 @@ func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
 		t.Fatal(err)
 	}
-	conversations := NewConversationService(store)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversations := runtimeconversation.NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack mention",
 		IdempotencyKey: "installation-wide-origin",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	reply, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
 		Intent: MessageIntentAnswer, Content: "Canonical answer",
@@ -139,14 +140,14 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
-	conversations := NewConversationService(store)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversations := runtimeconversation.NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack progress", IdempotencyKey: "typing-retry",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	message, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+	message, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
 		Intent: MessageIntentAcknowledgment, Content: "Checking now.",
@@ -204,8 +205,8 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 		t.Run(provider, func(t *testing.T) {
 			ctx := context.Background()
 			store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, provider)
-			conversations := NewConversationService(store)
-			conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+			conversations := runtimeconversation.NewConversationService(store)
+			conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 				Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "External support",
 				Origin: &ConversationReference{
 					Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision,
@@ -215,7 +216,7 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 			if err != nil {
 				t.Fatal(err)
 			}
-			reply, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+			reply, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 				Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
 				Intent: MessageIntentAnswer, Content: "Canonical answer",

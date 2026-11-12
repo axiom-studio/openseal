@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 
 	"github.com/axiom-studio/openseal/pkg/validation"
 )
@@ -31,8 +32,8 @@ type StartAgentBuilderResult struct {
 // AgentBuilderConversationWriter creates and posts to conversations. The
 // Engine implements it and schedules the builder's Run on post.
 type AgentBuilderConversationWriter interface {
-	CreateConversation(context.Context, CreateConversationRequest) (*Conversation, bool, error)
-	PostChannelMessage(context.Context, PostChannelMessageRequest) (*ChannelMessageCommitResult, error)
+	CreateConversation(context.Context, runtimeconversation.CreateConversationRequest) (*Conversation, bool, error)
+	PostChannelMessage(context.Context, runtimeconversation.PostChannelMessageRequest) (*ChannelMessageCommitResult, error)
 }
 
 // StartAgentBuilderConversation creates (or replays) the builder conversation
@@ -65,7 +66,7 @@ func StartAgentBuilderConversation(ctx context.Context, writer AgentBuilderConve
 	if err := parameters.Validate(); err != nil {
 		return nil, err
 	}
-	conversation, conversationReplayed, err := writer.CreateConversation(ctx, CreateConversationRequest{
+	conversation, conversationReplayed, err := writer.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope:          req.Scope,
 		Owner:          ObjectiveOwner{Type: OwnerTypeAgent, ID: AgentBuilderDeploymentID},
 		Title:          agentBuilderConversationTitle(parameters),
@@ -77,7 +78,7 @@ func StartAgentBuilderConversation(ctx context.Context, writer AgentBuilderConve
 	if err != nil {
 		return nil, err
 	}
-	posted, err := writer.PostChannelMessage(ctx, PostChannelMessageRequest{
+	posted, err := writer.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: req.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: req.Requester, Intent: MessageIntentUpdate, Content: prompt,
 		Audience:          ConversationAudience{Kind: ConversationAudienceChannel},

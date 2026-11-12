@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -413,8 +414,8 @@ func conversationTaskBenchmarkPost(t testing.TB, store ConversationTaskKernelSto
 	if err != nil || conversation == nil {
 		t.Fatalf("benchmark conversation: %v", err)
 	}
-	service := NewConversationService(store, models.WithClock(func() time.Time { return at }))
-	_, err = service.PostChannelMessage(context.Background(), PostChannelMessageRequest{ID: id, Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, Intent: MessageIntentQuestion, Content: "Review the requested result", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: reply, RequiresResponse: true, IdempotencyKey: "benchmark-message-" + id})
+	service := runtimeconversation.NewConversationService(store, models.WithClock(func() time.Time { return at }))
+	_, err = service.PostChannelMessage(context.Background(), runtimeconversation.PostChannelMessageRequest{ID: id, Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, Intent: MessageIntentQuestion, Content: "Review the requested result", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: reply, RequiresResponse: true, IdempotencyKey: "benchmark-message-" + id})
 	if err != nil {
 		t.Fatal(err)
 	}

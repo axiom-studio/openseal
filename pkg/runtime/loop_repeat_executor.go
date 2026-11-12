@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -111,7 +112,7 @@ type loopRepeatGovernedCall struct {
 
 // loopRepeatSessionStore is the part of AgentSessionStore the guard uses.
 type loopRepeatSessionStore interface {
-	loopSessionEntryLister
+	conversation.LoopSessionEntryLister
 	AppendAgentSessionEntries(ctx context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error)
 	TransitionToolEntry(ctx context.Context, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error)
 }

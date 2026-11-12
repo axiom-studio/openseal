@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -134,7 +135,7 @@ func TestRetryClearsFailureExplanation(t *testing.T) {
 				t.Cleanup(func() { _ = db.Close() })
 				store = db
 			}
-			service, failed := failedReplyFixtureWithFailure(t, store, beginRunFailureExplanation(nil, RunFailureKindCredits, "gateway_credits_exhausted", "No credits.", "", ""))
+			service, failed := failedReplyFixtureWithFailure(t, store, conversation.BeginRunFailureExplanation(nil, conversation.RunFailureKindCredits, "gateway_credits_exhausted", "No credits.", "", ""))
 			if failed.FailureExplanation == nil || failed.CreditError == nil {
 				t.Fatalf("fixture lacks its typed failure: %+v %+v", failed.FailureExplanation, failed.CreditError)
 			}
@@ -147,7 +148,7 @@ func TestRetryClearsFailureExplanation(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, run := range []*AgentRun{result.Run, stored} {
-				if run.FailureExplanation != nil || run.CreditError != nil || run.Status != AgentRunStatusQueued || runExplainingFailure(run) {
+				if run.FailureExplanation != nil || run.CreditError != nil || run.Status != AgentRunStatusQueued || conversation.RunExplainingFailure(run) {
 					t.Fatalf("retry kept the failure: %+v %+v %s", run.FailureExplanation, run.CreditError, run.Status)
 				}
 			}

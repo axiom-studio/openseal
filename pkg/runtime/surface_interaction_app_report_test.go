@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // An app reports results as repeatable interactions on the app artifact
@@ -19,7 +20,7 @@ func TestAppReportsAreRepeatableInteractionsOnTheAppArtifact(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			posted, err := f.conversations.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+			posted, err := f.conversations.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: f.scope, ConversationID: f.conversation.ID, ExpectedRevision: conversation.Revision,
 				Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "finn"}, Intent: MessageIntentUpdate,
 				Content: "Here's your times tables app.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "app-message",
@@ -32,17 +33,17 @@ func TestAppReportsAreRepeatableInteractionsOnTheAppArtifact(t *testing.T) {
 			if err != nil || rule.SingleUse || rule.Shared || rule.ItemKeyed || !rule.NotifyAgent {
 				t.Fatalf("rule = %#v, %v", rule, err)
 			}
-			report := func(key, values string) RecordSurfaceInteractionRequest {
+			report := func(key, values string) runtimeconversation.RecordSurfaceInteractionRequest {
 				if _, err := presentation.ValidateAppReport(json.RawMessage(values)); err != nil {
 					t.Fatal(err)
 				}
-				return RecordSurfaceInteractionRequest{
+				return runtimeconversation.RecordSurfaceInteractionRequest{
 					SurfaceArtifactID: app, SurfaceID: app, SurfaceVersion: 3, MessageID: posted.Message.ID,
 					ComponentID: presentation.AppReportComponentID, ActionID: presentation.AppReportAction, Actor: surfaceInteractionUser("ana"),
 					Repeatable: !rule.SingleUse, Values: json.RawMessage(values), IdempotencyKey: key,
 				}
 			}
-			for _, req := range []RecordSurfaceInteractionRequest{
+			for _, req := range []runtimeconversation.RecordSurfaceInteractionRequest{
 				report("r1", `{"values":{"score":7,"of":10},"summary":"Scored 7 out of 10"}`),
 				report("r2", `{"values":{"score":8,"of":10},"summary":"Scored 8 out of 10"}`),
 			} {

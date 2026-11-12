@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 type askUserTestStore interface {
@@ -95,7 +96,7 @@ func newAskUserCallWithArguments(t *testing.T, store askUserTestStore, claimed *
 		store: store, worker: worker, run: run, session: session,
 		step:  &AgentTurn{ID: stepID, RunID: run.ID, Sequence: sequence, Status: AgentTurnStatusCompleted},
 		entry: appended.Entries[1],
-		exec:  &ControlExecutor{Portfolio: store, Sessions: sessions, Conversations: NewConversationService(store)},
+		exec:  &ControlExecutor{Portfolio: store, Sessions: sessions, Conversations: conversation.NewConversationService(store)},
 	}
 }
 
@@ -285,7 +286,7 @@ func TestAskUserResumeWithoutAnswerRepostsAndReparks(t *testing.T) {
 	if err != nil || resumed.Resolved || resumed.Park == nil || resumed.Park.Wake.Reference != entry.ID {
 		t.Fatalf("resume = %#v %v", resumed, err)
 	}
-	key := conversationClarificationKey(f.run.ID, entry.ID)
+	key := conversation.ConversationClarificationKey(f.run.ID, entry.ID)
 	question, err := store.FindChannelMessageByIdempotencyKey(t.Context(), f.run.Scope, f.conversation.ID, key)
 	if err != nil || question == nil || question.Content != askUserTestQuestion {
 		t.Fatalf("question not posted on resume: %#v %v", question, err)
@@ -309,12 +310,12 @@ func TestAskUserQuestionReconcilerRepostsFromEntry(t *testing.T) {
 	forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
 		f := claimedForegroundRun(t, store)
 		call := newAskUserCall(t, store, f.run, "foreground-worker", askUserTestQuestion)
-		call.exec.Conversations = NewConversationService(conflictingQuestionStore{store})
+		call.exec.Conversations = conversation.NewConversationService(conflictingQuestionStore{store})
 		result := call.settle(t)
 		if result.Kind != ControlParked {
 			t.Fatalf("settle = %#v", result)
 		}
-		key := conversationClarificationKey(f.run.ID, call.entry.ID)
+		key := conversation.ConversationClarificationKey(f.run.ID, call.entry.ID)
 		if q, _ := store.FindChannelMessageByIdempotencyKey(t.Context(), f.run.Scope, f.conversation.ID, key); q != nil {
 			t.Fatal("question posted despite conflicts")
 		}
@@ -335,7 +336,7 @@ func TestAskUserAnswerFromOtherActorIgnored(t *testing.T) {
 	parked, call := askUserParked(t, store, f.run, "foreground-worker", askUserTestQuestion)
 	f.run = parked
 	question := f.question(t)
-	foreign := f.post(t, PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "someone-else"},
+	foreign := f.post(t, conversation.PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "someone-else"},
 		Intent: MessageIntentAnswer, Content: "Use the admin page.", ResolvesMessageID: question.ID, IdempotencyKey: "foreign-answer"})
 	// An explicit reply to the question is a clarification attempt, but a
 	// foreign actor's answer wakes nothing and starts nothing.

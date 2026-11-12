@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // An event routine occurrence, and a Run under one, is manual whatever the
@@ -15,7 +16,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
 	conversation := ApprovalModeConversation(t, store)
-	service := NewConversationApprovalModeService(store)
+	service := runtimeconversation.NewConversationApprovalModeService(store)
 	coordinator := action.NewActionCoordinator(store, store, ApprovalModeCatalog(t), action.NewDefaultActionPolicy(), nil)
 	scope := conversation.Scope
 

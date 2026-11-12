@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -34,7 +35,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	if _, _, err := store.PutSpaceMember(ctx, scope, &SpaceMember{SpaceID: seeded.ID, Type: SpaceMemberAgent, ID: "helper", AddedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
 	})
 	if err != nil {

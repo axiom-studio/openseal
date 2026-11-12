@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -86,7 +87,7 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.
 			return exitResultPtr(d.writeErrorExit(err))
 		case err != nil:
 			return d.fail(ctx, st, agentrun.LoopFailure{
-				Kind: RunFailureKindExecution, Code: runFailureCodeFinalDelivery,
+				Kind: conversation.RunFailureKindExecution, Code: runFailureCodeFinalDelivery,
 				Message: "The agent's reply could not be posted.",
 			}, err, "")
 		}
@@ -104,7 +105,7 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.
 			// transition below.
 			break
 		}
-		failure := agentrun.LoopFailure{Kind: RunFailureKindExecution, Code: runFailureCodeFinalDelivery, Message: "The agent's reply could not be posted."}
+		failure := agentrun.LoopFailure{Kind: conversation.RunFailureKindExecution, Code: runFailureCodeFinalDelivery, Message: "The agent's reply could not be posted."}
 		if result.Failure != nil {
 			failure = *result.Failure
 		}
@@ -152,7 +153,7 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.
 	case explaining && d.run.FailureExplanation != nil:
 		req.Status = AgentRunStatusFailed
 		req.Error = d.run.FailureExplanation.Message
-		req.FailureExplanation = explainedRunFailure(d.run.FailureExplanation)
+		req.FailureExplanation = conversation.ExplainedRunFailure(d.run.FailureExplanation)
 		req.Summary = finalExplainedSummary
 		explained = true
 	case status == AgentRunStatusFailed:
@@ -160,9 +161,9 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.
 		// failure's explanation; otherwise terminal reporting posts the
 		// kernel reply.
 		message := strings.TrimSpace(final.Answer)
-		explanation := beginRunFailureExplanation(d.run, RunFailureKindExecution, "execution_failed", message, "", "")
+		explanation := conversation.BeginRunFailureExplanation(d.run, conversation.RunFailureKindExecution, "execution_failed", message, "", "")
 		if message != "" && d.binding.Final != nil {
-			explanation = explainedRunFailure(explanation)
+			explanation = conversation.ExplainedRunFailure(explanation)
 			explained = true
 		}
 		req.Status = AgentRunStatusFailed
@@ -352,7 +353,7 @@ func (d *drive) publishFinalOutput(ctx context.Context, st *stepState, final *ag
 func (d *drive) fail(ctx context.Context, st *stepState, failure agentrun.LoopFailure, cause error, stepCode string) stepResult {
 	causeText := ""
 	if cause != nil {
-		causeText = boundedTurnFailureText(action.SanitizeActionError(cause, nil))
+		causeText = conversation.BoundedTurnFailureText(action.SanitizeActionError(cause, nil))
 	}
 	if stepCode == "" {
 		stepCode = failure.Code
@@ -360,18 +361,18 @@ func (d *drive) fail(ctx context.Context, st *stepState, failure agentrun.LoopFa
 	if st != nil && !st.finished {
 		errText := causeText
 		if errText == "" {
-			errText = boundedTurnFailureText(failure.Message)
+			errText = conversation.BoundedTurnFailureText(failure.Message)
 		}
 		if err := d.finishStep(ctx, st, FinishAgentTurnRequest{
-			Status: AgentTurnStatusFailed, FailureCode: runFailureCodeOrEmpty(stepCode), Error: errText,
+			Status: AgentTurnStatusFailed, FailureCode: conversation.RunFailureCodeOrEmpty(stepCode), Error: errText,
 		}); err != nil {
 			return exitResultPtr(d.writeErrorExit(err))
 		}
 	}
 	run := d.run
-	explanation := beginRunFailureExplanation(run, failure.Kind, failure.Code, failure.Message, causeText, stepCode)
-	explain := st != nil && run.FailureExplanation == nil && failure.Explainable && modelExplainsFailure(run) &&
-		d.binding.Final != nil && d.session != nil && !noModelTurnFailureCode(failure.Code) && !noModelTurnFailureCode(stepCode)
+	explanation := conversation.BeginRunFailureExplanation(run, failure.Kind, failure.Code, failure.Message, causeText, stepCode)
+	explain := st != nil && run.FailureExplanation == nil && failure.Explainable && conversation.ModelExplainsFailure(run) &&
+		d.binding.Final != nil && d.session != nil && !conversation.NoModelTurnFailureCode(failure.Code) && !conversation.NoModelTurnFailureCode(stepCode)
 	if explain {
 		updated, err := d.commitRun(ctx, st, RunTransitionRequest{
 			Status: AgentRunStatusRunning, FailureExplanation: explanation,

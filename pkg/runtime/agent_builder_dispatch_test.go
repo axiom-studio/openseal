@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -37,7 +38,7 @@ func (s *agentBuilderDispatchStore) GetApproval(ctx context.Context, scope Scope
 type agentBuilderTestProvisioner struct {
 	agents        *kernelagent.Registry
 	spaces        *SpaceService
-	conversations *ConversationService
+	conversations *conversation.ConversationService
 	created       int
 	putErr        error
 }
@@ -62,7 +63,7 @@ func (p *agentBuilderTestProvisioner) CreateAgentDeploymentInSpace(ctx context.C
 }
 
 func (p *agentBuilderTestProvisioner) EnsureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment) (*Conversation, error) {
-	conversation, _, err := p.conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := p.conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID},
 		Title: "Agent control", Origin: &ConversationReference{Kind: ConversationReferenceAgentControl, ID: "agent-" + deployment.ID},
 		IdempotencyKey: "agent-control:" + deployment.ID,
@@ -135,7 +136,7 @@ func newAgentBuilderDispatchFixture(t *testing.T) *agentBuilderDispatchFixture {
 		t.Fatal(err)
 	}
 	base.run = run
-	provision := &agentBuilderTestProvisioner{agents: base.agents, spaces: base.spaces, conversations: NewConversationService(store)}
+	provision := &agentBuilderTestProvisioner{agents: base.agents, spaces: base.spaces, conversations: conversation.NewConversationService(store)}
 	dispatcher, err := newTestAgentBuilderDispatcher(store, base.agents, base.teams, base.catalog, provision, recorder, nil)
 	if err != nil {
 		t.Fatal(err)

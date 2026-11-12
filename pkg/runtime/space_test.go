@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -64,7 +65,7 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	clock := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
 	tick := models.WithClock(func() time.Time { clock = clock.Add(time.Second); return clock })
 	spaces := NewSpaceService(store, tick)
-	conversations := NewConversationService(store, tick)
+	conversations := conversation.NewConversationService(store, tick)
 	scope := Scope{Kind: "tenant", ID: "spaces-" + strings.ReplaceAll(t.Name(), "/", "-")}
 
 	const owner = "7"
@@ -129,7 +130,7 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	}
 
 	create := func(key string, conversationOwner ObjectiveOwner, spaceID string) (*Conversation, error) {
-		conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+		conversation, _, err := conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
 			Scope: scope, Owner: conversationOwner, Title: "Chat " + key, SpaceID: spaceID, CreatedBy: owner, IdempotencyKey: key,
 		})
 		return conversation, err
@@ -184,7 +185,7 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	}
 
 	title := "Renamed"
-	updated, err := conversations.UpdateConversation(ctx, UpdateConversationRequest{Scope: scope, ConversationID: inWork.ID, ExpectedRevision: inWork.Revision, Title: &title})
+	updated, err := conversations.UpdateConversation(ctx, conversation.UpdateConversationRequest{Scope: scope, ConversationID: inWork.ID, ExpectedRevision: inWork.Revision, Title: &title})
 	if err != nil || updated.SpaceID != work.ID {
 		t.Fatalf("update keeps space: %+v %v", updated, err)
 	}
@@ -275,7 +276,7 @@ func assertSpaceOrder(t *testing.T, spaces *SpaceService, scope Scope, ids ...st
 	}
 }
 
-func assertSpaceConversations(t *testing.T, conversations *ConversationService, scope Scope, spaceID string, ids ...string) {
+func assertSpaceConversations(t *testing.T, conversations *conversation.ConversationService, scope Scope, spaceID string, ids ...string) {
 	t.Helper()
 	listed, err := conversations.ListConversations(context.Background(), ConversationFilter{Scope: scope, SpaceID: spaceID})
 	if err != nil {
@@ -308,7 +309,7 @@ func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 	agentOnly := Scope{Kind: "tenant", ID: "agents-only"}
 	// The conversation needs a space to be created; the rewind below drops it.
 	seedTestSpace(t, store, scope)
-	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
 	})
 	if err != nil {
@@ -361,7 +362,7 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	if _, _, err := store.PutSpaceMember(ctx, scope, &SpaceMember{SpaceID: seeded.ID, Type: SpaceMemberAgent, ID: "helper", AddedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
 	})
 	if err != nil {

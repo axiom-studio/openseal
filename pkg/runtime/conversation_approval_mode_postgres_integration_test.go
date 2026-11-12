@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
@@ -19,7 +20,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	dsn := pgSchema.DSN
 	scope := Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 	})
 	if err != nil {
@@ -49,8 +50,8 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT payload->>'approvalMode' FROM `+pgSchema.Table("conversations")).Scan(&raw); err != nil || raw != "auto" {
 		t.Fatalf("migrated approval mode = %q, %v", raw, err)
 	}
-	service := NewConversationApprovalModeService(reopened)
-	result, err := service.SetApprovalMode(ctx, SetConversationApprovalModeRequest{
+	service := runtimeconversation.NewConversationApprovalModeService(reopened)
+	result, err := service.SetApprovalMode(ctx, runtimeconversation.SetConversationApprovalModeRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalManual, Actor: ApprovalModeActor,
 	})
 	if err != nil {
@@ -60,19 +61,19 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	if err != nil || stored.ApprovalMode != ConversationApprovalManual || stored.Revision != conversation.Revision+1 {
 		t.Fatalf("stored conversation = %#v, %v", stored, err)
 	}
-	events, err := reopened.ListActivity(ctx, ActivityFilter{Scope: scope, AgentID: "assistant", EventTypes: []string{ConversationApprovalModeChangedEvent}, Descending: true})
+	events, err := reopened.ListActivity(ctx, ActivityFilter{Scope: scope, AgentID: "assistant", EventTypes: []string{runtimeconversation.ConversationApprovalModeChangedEvent}, Descending: true})
 	if err != nil || len(events) != 1 || events[0].ID != result.Event.ID || events[0].Payload["from"] != "auto" {
 		t.Fatalf("approval mode events = %#v, %v", events, err)
 	}
-	changes, err := NewConversationChangeService(reopened, reopened)
+	changes, err := runtimeconversation.NewConversationChangeService(reopened, reopened)
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	set, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(set.Activity) != 1 || set.Activity[0].Payload["to"] != "manual" || set.Conversation.ApprovalMode != ConversationApprovalManual {
 		t.Fatalf("change set = %#v, %v", set, err)
 	}
-	if _, err := service.SetApprovalMode(ctx, SetConversationApprovalModeRequest{
+	if _, err := service.SetApprovalMode(ctx, runtimeconversation.SetConversationApprovalModeRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalSkip, Actor: ApprovalModeActor,
 	}); !errors.Is(err, ErrRevisionConflict) {
 		t.Fatalf("stale revision error = %v", err)

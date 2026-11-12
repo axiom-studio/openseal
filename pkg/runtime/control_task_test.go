@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -72,9 +73,9 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...ModelT
 	}
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "start-task-" + uuid.NewString()[:8]}
-	conversations := NewConversationService(store)
+	conversations := conversation.NewConversationService(store)
 	seedTestSpace(t, store.(SpaceStore), scope)
-	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+	conversation, _, err := conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "start-task-chat",
 	})
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -408,13 +409,13 @@ func TestRoutineEventArchivedChatPausesOnlyThatRoutine(t *testing.T) {
 	}
 	h.offer(broken, 2)
 	h.offer(healthy, 1)
-	conversations := NewConversationService(h.store)
+	conversations := conversation.NewConversationService(h.store)
 	chat, err := conversations.GetConversation(h.ctx, h.scope, brokenChat)
 	if err != nil {
 		t.Fatal(err)
 	}
 	archived := ConversationStatusArchived
-	if _, err := conversations.UpdateConversation(h.ctx, UpdateConversationRequest{
+	if _, err := conversations.UpdateConversation(h.ctx, conversation.UpdateConversationRequest{
 		Scope: h.scope, ConversationID: chat.ID, ExpectedRevision: chat.Revision, Status: &archived,
 	}); err != nil {
 		t.Fatal(err)

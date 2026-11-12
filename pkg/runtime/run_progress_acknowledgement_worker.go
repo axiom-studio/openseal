@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -68,7 +69,7 @@ type RunProgressAcknowledgementWorker struct {
 	store         RunProgressAcknowledgementStore
 	resolver      ExternalConversationAdapterResolver
 	renderer      agentrun.RunProgressAcknowledgementRenderer
-	conversations *ConversationService
+	conversations *runtimeconversation.ConversationService
 	transport     *ExternalConversationTransportService
 	config        RunProgressAcknowledgementWorkerConfig
 	now           func() time.Time
@@ -89,7 +90,7 @@ func NewRunProgressAcknowledgementWorker(
 		return nil, err
 	}
 	return &RunProgressAcknowledgementWorker{
-		store: store, resolver: resolver, renderer: renderer, conversations: NewConversationService(store, opts...),
+		store: store, resolver: resolver, renderer: renderer, conversations: runtimeconversation.NewConversationService(store, opts...),
 		transport: NewExternalConversationTransportService(store, resolver, opts...), config: normalized, now: models.ClockFrom(opts),
 	}, nil
 }
@@ -290,7 +291,7 @@ func (w *RunProgressAcknowledgementWorker) post(ctx context.Context, item *Exter
 		if acknowledgement.SourceEventID != "" {
 			references = append(references, ConversationReference{Kind: ConversationReferenceActivity, ID: acknowledgement.SourceEventID})
 		}
-		posted, err := w.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+		posted, err := w.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: item.Scope, ConversationID: item.ConversationID, ExpectedRevision: conversation.Revision,
 			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID},
 			Intent: MessageIntentAcknowledgment, Content: acknowledgement.Text,
@@ -440,10 +441,10 @@ func sentenceCount(value string) int {
 // model credential, and personality; OpenSeal accepts no proposals from this
 // auxiliary invocation.
 type TurnRunnerProgressAcknowledgementRenderer struct {
-	resolver TurnRunnerResolver
+	resolver runtimeconversation.TurnRunnerResolver
 }
 
-func NewTurnRunnerProgressAcknowledgementRenderer(resolver TurnRunnerResolver) (*TurnRunnerProgressAcknowledgementRenderer, error) {
+func NewTurnRunnerProgressAcknowledgementRenderer(resolver runtimeconversation.TurnRunnerResolver) (*TurnRunnerProgressAcknowledgementRenderer, error) {
 	if resolver == nil {
 		return nil, errors.New("Run progress acknowledgement Turn resolver is required")
 	}

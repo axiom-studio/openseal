@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -134,7 +135,7 @@ func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *Agen
 		// builder's identity, with no tools (spec-openseal §3.3).
 		return r.agentTrial(ctx, trial)
 	}
-	if runExplainingFailure(run) {
+	if conversation.RunExplainingFailure(run) {
 		// The explanation step is tool-free: no Skill is activated or
 		// prepared, so a broken Skill cannot block the answer.
 		r.explaining = true

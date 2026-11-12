@@ -3,6 +3,8 @@ package runtime
 import (
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 func TestAskUserAnswerResumesWithAnswerAndConsumesIntervention(t *testing.T) {
@@ -13,7 +15,7 @@ func TestAskUserAnswerResumesWithAnswerAndConsumesIntervention(t *testing.T) {
 		question := f.question(t)
 
 		// Not answered yet: the resume re-parks on the same entry.
-		answer := f.post(t, PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer,
+		answer := f.post(t, conversation.PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentAnswer,
 			Content: "The pricing page.", ResolvesMessageID: question.ID, IdempotencyKey: "answer"})
 		resumed, _, err := f.scheduler.ScheduleMessage(t.Context(), f.run.Scope, f.conversation.ID, answer.ID)
 		if err != nil || resumed == nil || resumed.Run.ID != f.run.ID || resumed.Run.Status != AgentRunStatusQueued {

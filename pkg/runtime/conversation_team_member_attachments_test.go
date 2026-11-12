@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
 
 // A Team member's chat step gets the message's attachments exactly as a 1:1
@@ -31,7 +32,7 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.runner = f.newRunner(ConversationRunTurnRunnerConfig{AttachmentContent: &TextContent{text: content}})
-			posted, err := f.service.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+			posted, err := f.service.PostChannelMessage(f.ctx, conversation.PostChannelMessageRequest{
 				Scope: f.conversation.Scope, ConversationID: f.conversation.ID, ExpectedRevision: f.conversation.Revision,
 				Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,
 				Content: "What does the attached file total?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},

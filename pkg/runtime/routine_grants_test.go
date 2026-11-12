@@ -11,6 +11,7 @@ import (
 
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -268,7 +269,7 @@ func (f *routineGrantFixtureState) reviewEverything(t *testing.T, activation *Ru
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewConversationApprovalModeService(f.store).SetApprovalMode(t.Context(), SetConversationApprovalModeRequest{Scope: f.run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalManual, Actor: ActivityActor{Type: "user", ID: "user"}}); err != nil {
+	if _, err := runtimeconversation.NewConversationApprovalModeService(f.store).SetApprovalMode(t.Context(), runtimeconversation.SetConversationApprovalModeRequest{Scope: f.run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalManual, Actor: ActivityActor{Type: "user", ID: "user"}}); err != nil {
 		t.Fatal(err)
 	}
 }

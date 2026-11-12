@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/validation"
 )
@@ -333,7 +334,7 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		request, err := ResolveTeamHandoffRequest(ctx, store, run, trigger)
+		request, err := runtimeconversation.ResolveTeamHandoffRequest(ctx, store, run, trigger)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -360,7 +361,7 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if ConversationRunAgentID(conversation, run) != run.AssignedAgentID {
+	if runtimeconversation.ConversationRunAgentID(conversation, run) != run.AssignedAgentID {
 		return nil, nil, nil, errors.New("scheduled task creation requires a chat whose roster includes this Agent")
 	}
 	if task.AppID != "" {
