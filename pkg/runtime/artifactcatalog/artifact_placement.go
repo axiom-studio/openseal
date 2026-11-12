@@ -1,27 +1,29 @@
-package runtime
+package artifactcatalog
 
 import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ArtifactPlacement records where an artifact was made: the chat whose run
 // produced it and the space that chat lives in. Either reader may be nil;
 // placement then fills only what it can.
 type ArtifactPlacement struct {
-	Runs          ArtifactRunReader
-	Conversations ArtifactConversationReader
+	Runs          models.ArtifactRunReader
+	Conversations models.ArtifactConversationReader
 }
 
 // NewStoreArtifactPlacement places artifacts from whichever run and
 // conversation lookups the store supports.
 func NewStoreArtifactPlacement(store any) ArtifactPlacement {
 	var placement ArtifactPlacement
-	if runs, ok := store.(ArtifactRunReader); ok {
+	if runs, ok := store.(models.ArtifactRunReader); ok {
 		placement.Runs = runs
 	}
-	if conversations, ok := store.(ArtifactConversationReader); ok {
+	if conversations, ok := store.(models.ArtifactConversationReader); ok {
 		placement.Conversations = conversations
 	}
 	return placement
@@ -32,7 +34,7 @@ func NewStoreArtifactPlacement(store any) ArtifactPlacement {
 // the conversationId an app keeps in its metadata. The space is the chat's
 // space at creation. A run or chat that no longer exists leaves the field
 // empty; it does not fail the registration.
-func (p ArtifactPlacement) Place(ctx context.Context, artifact *Artifact) error {
+func (p ArtifactPlacement) Place(ctx context.Context, artifact *models.Artifact) error {
 	if artifact == nil {
 		return nil
 	}
@@ -45,7 +47,7 @@ func (p ArtifactPlacement) Place(ctx context.Context, artifact *Artifact) error 
 		provenance.ConversationID = conversationID
 	}
 	if provenance.ConversationID == "" {
-		if conversationID, _ := artifact.Metadata["conversationId"].(string); validOpaqueIdentifier(strings.TrimSpace(conversationID), 128) {
+		if conversationID, _ := artifact.Metadata["conversationId"].(string); models.IsValidOpaqueIdentifier(strings.TrimSpace(conversationID), 128) {
 			provenance.ConversationID = strings.TrimSpace(conversationID)
 		}
 	}
@@ -53,7 +55,7 @@ func (p ArtifactPlacement) Place(ctx context.Context, artifact *Artifact) error 
 		return nil
 	}
 	conversation, err := p.Conversations.GetConversation(ctx, artifact.Scope, provenance.ConversationID)
-	if errors.Is(err, ErrConversationNotFound) || (err == nil && conversation == nil) {
+	if errors.Is(err, models.ErrConversationNotFound) || (err == nil && conversation == nil) {
 		return nil
 	}
 	if err != nil {
@@ -63,26 +65,26 @@ func (p ArtifactPlacement) Place(ctx context.Context, artifact *Artifact) error 
 	return nil
 }
 
-func (p ArtifactPlacement) runConversationID(ctx context.Context, scope Scope, runID string) (string, error) {
+func (p ArtifactPlacement) runConversationID(ctx context.Context, scope models.Scope, runID string) (string, error) {
 	run, err := p.Runs.GetAgentRun(ctx, scope, runID)
-	if errors.Is(err, ErrRunNotFound) || (err == nil && run == nil) {
+	if errors.Is(err, models.ErrRunNotFound) || (err == nil && run == nil) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
 	}
-	if id := runContextConversationID(run); id != "" {
+	if id := models.RunContextConversationID(run); id != "" {
 		return id, nil
 	}
 	if run.RootRunID == "" || run.RootRunID == run.ID {
 		return "", nil
 	}
 	root, err := p.Runs.GetAgentRun(ctx, scope, run.RootRunID)
-	if errors.Is(err, ErrRunNotFound) || (err == nil && root == nil) {
+	if errors.Is(err, models.ErrRunNotFound) || (err == nil && root == nil) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
 	}
-	return runContextConversationID(root), nil
+	return models.RunContextConversationID(root), nil
 }

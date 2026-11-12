@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -34,18 +35,18 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 		t.Run(factory.name, func(t *testing.T) {
 			store, closeStore := factory.open(t)
 			defer closeStore()
-			catalog := NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }))
+			catalog := artifactcatalog.NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }))
 			ctx := context.Background()
 			artifact := validCatalogArtifact("research-report", 1)
 
-			created, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: artifact, ExpectedLatestVersion: 0})
+			created, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact, ExpectedLatestVersion: 0})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if created.Replayed || created.Artifact.Classification != ArtifactClassificationInternal || created.Artifact.Fingerprint == "" {
 				t.Fatalf("created = %#v", created)
 			}
-			replayed, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: artifact, ExpectedLatestVersion: 0})
+			replayed, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact, ExpectedLatestVersion: 0})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -55,7 +56,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 
 			changed := validCatalogArtifact("research-report", 1)
 			changed.Name = "silently replaced.pdf"
-			if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: changed, ExpectedLatestVersion: 0}); !errors.Is(err, ErrArtifactImmutable) {
+			if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: changed, ExpectedLatestVersion: 0}); !errors.Is(err, ErrArtifactImmutable) {
 				t.Fatalf("immutable replacement error = %v", err)
 			}
 
@@ -66,7 +67,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 				Relation: EvidenceRelationDerivedFrom, TargetKind: EvidenceTargetArtifact,
 				TargetRef: "research-report:1", Summary: "Editorial revision",
 			})
-			if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: second, ExpectedLatestVersion: 1}); err != nil {
+			if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: second, ExpectedLatestVersion: 1}); err != nil {
 				t.Fatal(err)
 			}
 			latest, err := catalog.Get(ctx, artifact.Scope, artifact.ID, 0)
@@ -94,11 +95,11 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 			}
 
 			otherScope := Scope{Kind: "tenant", ID: "other"}
-			if _, err := catalog.Get(ctx, otherScope, artifact.ID, 0); !errors.Is(err, ErrArtifactNotFound) {
+			if _, err := catalog.Get(ctx, otherScope, artifact.ID, 0); !errors.Is(err, artifactcatalog.ErrArtifactNotFound) {
 				t.Fatalf("cross-scope lookup error = %v", err)
 			}
 			gap := validCatalogArtifact("research-report", 4)
-			if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: gap, ExpectedLatestVersion: 2}); !errors.Is(err, ErrArtifactVersionConflict) {
+			if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: gap, ExpectedLatestVersion: 2}); !errors.Is(err, ErrArtifactVersionConflict) {
 				t.Fatalf("version gap error = %v", err)
 			}
 		})
@@ -107,7 +108,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 
 func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
 	store := newTestKernelStore(t)
-	catalog := NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }))
+	catalog := artifactcatalog.NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }))
 	artifact := validCatalogArtifact("game-log", 1)
 	var created atomic.Int32
 	var wait sync.WaitGroup
@@ -116,7 +117,7 @@ func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			result, err := catalog.Register(context.Background(), RegisterArtifactRequest{Artifact: artifact, ExpectedLatestVersion: 0})
+			result, err := catalog.Register(context.Background(), artifactcatalog.RegisterArtifactRequest{Artifact: artifact, ExpectedLatestVersion: 0})
 			if err != nil {
 				errorsSeen <- err
 				return
@@ -137,7 +138,7 @@ func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
 }
 
 func TestArtifactCatalogRejectsSecretsSignedURLsAndInvalidEvidence(t *testing.T) {
-	catalog := NewArtifactCatalog(newTestKernelStore(t))
+	catalog := artifactcatalog.NewArtifactCatalog(newTestKernelStore(t))
 	tests := []struct {
 		name   string
 		mutate func(*Artifact)
@@ -157,7 +158,7 @@ func TestArtifactCatalogRejectsSecretsSignedURLsAndInvalidEvidence(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			artifact := validCatalogArtifact("unsafe-"+test.name, 1)
 			test.mutate(artifact)
-			if _, err := catalog.Register(context.Background(), RegisterArtifactRequest{Artifact: artifact}); !errors.Is(err, ErrInvalidArtifactRecord) {
+			if _, err := catalog.Register(context.Background(), artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); !errors.Is(err, ErrInvalidArtifactRecord) {
 				t.Fatalf("error = %v", err)
 			}
 		})
@@ -170,8 +171,8 @@ func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog := NewArtifactCatalog(store)
-	created, err := catalog.Register(context.Background(), RegisterArtifactRequest{Artifact: validCatalogArtifact("restart-report", 1)})
+	catalog := artifactcatalog.NewArtifactCatalog(store)
+	created, err := catalog.Register(context.Background(), artifactcatalog.RegisterArtifactRequest{Artifact: validCatalogArtifact("restart-report", 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +184,7 @@ func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	loaded, err := NewArtifactCatalog(reopened).Get(context.Background(), created.Artifact.Scope, created.Artifact.ID, 1)
+	loaded, err := artifactcatalog.NewArtifactCatalog(reopened).Get(context.Background(), created.Artifact.Scope, created.Artifact.ID, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +205,7 @@ func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 	}
 	defer sqlite.Close()
 	stamp := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
-	catalog := NewArtifactCatalog(sqlite, models.WithClock(func() time.Time { return stamp }))
+	catalog := artifactcatalog.NewArtifactCatalog(sqlite, models.WithClock(func() time.Time { return stamp }))
 	for i := 0; i < 125; i++ {
 		artifact := validCatalogArtifact(fmt.Sprintf("artifact-%03d", i), 1)
 		if i%2 == 0 {
@@ -214,7 +215,7 @@ func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 			artifact.Type = "slides"
 			artifact.MediaType = "text/html"
 		}
-		if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: artifact}); err != nil {
+		if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -223,7 +224,7 @@ func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 	latest := validCatalogArtifact("artifact-000", 2)
 	latest.ContentRef = "object-store:artifact-000-v2"
 	latest.Digest = digestFor("artifact-000-v2")
-	if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: latest, ExpectedLatestVersion: 1}); err != nil {
+	if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: latest, ExpectedLatestVersion: 1}); err != nil {
 		t.Fatal(err)
 	}
 	owner := &ObjectiveOwner{Type: OwnerTypeAgent, ID: "alice"}

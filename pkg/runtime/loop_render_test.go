@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
 // ---------------------------------------------------------------------------
@@ -162,7 +164,7 @@ func (s *renderArtifacts) GetArtifact(_ context.Context, scope Scope, id string,
 	s.gets++
 	a, ok := s.artifacts[fmt.Sprintf("%s@%d", id, version)]
 	if !ok || a.Scope != scope {
-		return nil, ErrArtifactNotFound
+		return nil, artifactcatalog.ErrArtifactNotFound
 	}
 	return a, nil
 }
@@ -175,7 +177,7 @@ func (c renderContent) Put(context.Context, ArtifactContentWrite) (ArtifactStore
 func (c renderContent) Open(_ context.Context, _ Scope, ref string) (io.ReadCloser, error) {
 	data, ok := c[ref]
 	if !ok {
-		return nil, ErrArtifactNotFound
+		return nil, artifactcatalog.ErrArtifactNotFound
 	}
 	return io.NopCloser(bytes.NewReader(data)), nil
 }

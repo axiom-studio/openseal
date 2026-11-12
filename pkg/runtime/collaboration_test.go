@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -573,7 +574,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 			if err != nil || child.AssignedAgentID != "marketing" {
 				t.Fatalf("persisted child = %#v, %v", child, err)
 			}
-			_, err = NewArtifactCatalog(store).Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{
+			_, err = artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &Artifact{
 				ID: "artifact-launch-brief", Version: 1, Scope: scope, Name: "launch-brief.md",
 				Type: "document", MediaType: "text/markdown", ContentRef: "artifact-store:launch-brief-v1",
 				Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SizeBytes: 2048,
@@ -1014,7 +1015,7 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 			Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "marketing-editor"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
 		},
 	} {
-		if _, err := NewArtifactCatalog(store).Register(ctx, RegisterArtifactRequest{Artifact: artifact}); err != nil {
+		if _, err := artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1057,7 +1058,7 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	}
 	unregistered := base
 	unregistered.Artifacts = []ArtifactReference{{ID: "missing", Version: 1, RequirementName: "brief"}}
-	if _, err := service.CompleteAgentRequest(ctx, unregistered); !errors.Is(err, ErrArtifactNotFound) {
+	if _, err := service.CompleteAgentRequest(ctx, unregistered); !errors.Is(err, artifactcatalog.ErrArtifactNotFound) {
 		t.Fatalf("unregistered artifact error = %v", err)
 	}
 	completed, err := service.CompleteAgentRequest(ctx, base)
@@ -1196,7 +1197,7 @@ func TestTerminalChildCompletesArtifactBearingRequestFromRegisteredOutput(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewArtifactCatalog(store).Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{
+	_, err = artifactcatalog.NewArtifactCatalog(store).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &Artifact{
 		ID: "launch-report", Version: 1, Scope: scope, Name: "launch-report.pdf", Type: "report", MediaType: "application/pdf",
 		ContentRef: "artifact-store:launch-report", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		SizeBytes: 4096, Classification: ArtifactClassificationInternal,

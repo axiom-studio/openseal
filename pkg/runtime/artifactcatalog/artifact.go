@@ -1,4 +1,4 @@
-package runtime
+package artifactcatalog
 
 import (
 	"context"
@@ -18,22 +18,22 @@ var (
 )
 
 type RegisterArtifactRequest struct {
-	Artifact              *Artifact `json:"artifact"`
-	ExpectedLatestVersion int64     `json:"expectedLatestVersion"`
+	Artifact              *models.Artifact `json:"artifact"`
+	ExpectedLatestVersion int64            `json:"expectedLatestVersion"`
 }
 
 type ArtifactRegistrationResult struct {
-	Artifact *Artifact `json:"artifact"`
-	Replayed bool      `json:"replayed"`
+	Artifact *models.Artifact `json:"artifact"`
+	Replayed bool             `json:"replayed"`
 }
 
 type ArtifactCatalog struct {
-	store     ArtifactStore
+	store     models.ArtifactStore
 	placement ArtifactPlacement
 	now       func() time.Time
 }
 
-func NewArtifactCatalog(store ArtifactStore, opts ...models.ServiceOption) *ArtifactCatalog {
+func NewArtifactCatalog(store models.ArtifactStore, opts ...models.ServiceOption) *ArtifactCatalog {
 	return &ArtifactCatalog{store: store, now: models.ClockFrom(opts)}
 }
 
@@ -48,20 +48,20 @@ func (c *ArtifactCatalog) Register(ctx context.Context, req RegisterArtifactRequ
 	if c == nil || c.store == nil {
 		return nil, errors.New("artifact catalog is not configured")
 	}
-	artifact := cloneArtifact(req.Artifact)
+	artifact := models.CloneArtifact(req.Artifact)
 	if artifact == nil {
-		return nil, fmt.Errorf("%w: artifact is required", ErrInvalidArtifactRecord)
+		return nil, fmt.Errorf("%w: artifact is required", models.ErrInvalidArtifactRecord)
 	}
-	normalizeArtifact(artifact)
+	models.NormalizeArtifact(artifact)
 	if err := c.placement.Place(ctx, artifact); err != nil {
 		return nil, err
 	}
 	if artifact.Classification == "" {
-		artifact.Classification = ArtifactClassificationInternal
+		artifact.Classification = models.ArtifactClassificationInternal
 	}
 	artifact.CreatedAt = c.now().UTC()
 	if artifact.Version != req.ExpectedLatestVersion+1 {
-		return nil, fmt.Errorf("%w: version %d must follow expected latest %d", ErrArtifactVersionConflict, artifact.Version, req.ExpectedLatestVersion)
+		return nil, fmt.Errorf("%w: version %d must follow expected latest %d", models.ErrArtifactVersionConflict, artifact.Version, req.ExpectedLatestVersion)
 	}
 	fingerprint, err := artifactFingerprint(artifact)
 	if err != nil {
@@ -79,7 +79,7 @@ func (c *ArtifactCatalog) Register(ctx context.Context, req RegisterArtifactRequ
 		return replayArtifact(existing, fingerprint)
 	}
 	if err := c.store.CreateArtifactVersion(ctx, artifact, req.ExpectedLatestVersion); err != nil {
-		if errors.Is(err, ErrArtifactVersionConflict) || errors.Is(err, ErrArtifactImmutable) {
+		if errors.Is(err, models.ErrArtifactVersionConflict) || errors.Is(err, models.ErrArtifactImmutable) {
 			existing, loadErr := c.store.GetArtifact(ctx, artifact.Scope, artifact.ID, artifact.Version)
 			if loadErr == nil && existing != nil {
 				return replayArtifact(existing, fingerprint)
@@ -87,10 +87,10 @@ func (c *ArtifactCatalog) Register(ctx context.Context, req RegisterArtifactRequ
 		}
 		return nil, err
 	}
-	return &ArtifactRegistrationResult{Artifact: cloneArtifact(artifact)}, nil
+	return &ArtifactRegistrationResult{Artifact: models.CloneArtifact(artifact)}, nil
 }
 
-func (c *ArtifactCatalog) Get(ctx context.Context, scope Scope, id string, version int64) (*Artifact, error) {
+func (c *ArtifactCatalog) Get(ctx context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
 	if c == nil || c.store == nil {
 		return nil, errors.New("artifact catalog is not configured")
 	}
@@ -107,7 +107,7 @@ func (c *ArtifactCatalog) Get(ctx context.Context, scope Scope, id string, versi
 	return artifact, nil
 }
 
-func (c *ArtifactCatalog) List(ctx context.Context, filter ArtifactFilter) ([]*Artifact, error) {
+func (c *ArtifactCatalog) List(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
 	if c == nil || c.store == nil {
 		return nil, errors.New("artifact catalog is not configured")
 	}
@@ -137,14 +137,14 @@ func (c *ArtifactCatalog) List(ctx context.Context, filter ArtifactFilter) ([]*A
 // behind an opaque content reference are currently available without exposing
 // a storage path or credential.
 type ArtifactContentInspector interface {
-	Available(context.Context, Scope, string) (bool, error)
+	Available(context.Context, models.Scope, string) (bool, error)
 }
 
 // ArtifactContentDeleter removes bytes after portable retention policy says
 // they are due. Deletion must be idempotent so multiple workers and retries
 // remain safe.
 type ArtifactContentDeleter interface {
-	Delete(context.Context, Scope, string) (bool, error)
+	Delete(context.Context, models.Scope, string) (bool, error)
 }
 
 // ArtifactContentResolver optionally provides an authorized, short-lived
@@ -155,9 +155,9 @@ type ArtifactContentResolver interface {
 }
 
 type ArtifactContentResolutionRequest struct {
-	Scope      Scope
+	Scope      models.Scope
 	ContentRef string
-	Actor      ActivityActor
+	Actor      models.ActivityActor
 	Purpose    string
 	TTL        time.Duration
 }
@@ -169,15 +169,15 @@ type ArtifactContentResolution struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-func replayArtifact(existing *Artifact, fingerprint string) (*ArtifactRegistrationResult, error) {
+func replayArtifact(existing *models.Artifact, fingerprint string) (*ArtifactRegistrationResult, error) {
 	if existing.Fingerprint != fingerprint {
-		return nil, ErrArtifactImmutable
+		return nil, models.ErrArtifactImmutable
 	}
-	return &ArtifactRegistrationResult{Artifact: cloneArtifact(existing), Replayed: true}, nil
+	return &ArtifactRegistrationResult{Artifact: models.CloneArtifact(existing), Replayed: true}, nil
 }
 
-func artifactFingerprint(artifact *Artifact) (string, error) {
-	copy := cloneArtifact(artifact)
+func artifactFingerprint(artifact *models.Artifact) (string, error) {
+	copy := models.CloneArtifact(artifact)
 	copy.Fingerprint = ""
 	copy.CreatedAt = time.Time{}
 	copy.ContentAvailability = ""
