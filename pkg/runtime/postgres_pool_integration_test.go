@@ -38,7 +38,7 @@ func TestPostgresPoolBudgetBoundsConcurrentConnectionsAndExposesWaits(t *testing
 		go func() {
 			defer group.Done()
 			<-start
-			_, queryErr := pgSchema.db.ExecContext(ctx, `SELECT pg_sleep(0.1)`)
+			_, queryErr := store.db.ExecContext(ctx, `SELECT pg_sleep(0.1)`)
 			errorsFound <- queryErr
 		}()
 	}
