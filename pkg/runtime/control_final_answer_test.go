@@ -636,12 +636,24 @@ func TestFinalOutputPublisherValidatesExtensionFields(t *testing.T) {
 	}
 }
 
+func TestBuiltinFinalAnswerChecksRunCompletionBeforeTaskReview(t *testing.T) {
+	var names []string
+	for _, check := range builtinFinalAnswerChecks() {
+		names = append(names, check.Name)
+	}
+	if !reflect.DeepEqual(names, []string{"completion", "task_completion_review"}) {
+		t.Fatalf("checks = %v", names)
+	}
+}
+
 func TestFinalAnswerChecksRunInOrderAndMayFail(t *testing.T) {
-	saved := finalAnswerChecks
-	defer func() { finalAnswerChecks = saved }()
-	finalAnswerChecks = nil
 	var order []string
-	registerFinalAnswerCheck(finalAnswerCheck{Order: finalCheckOrderTaskReview, Name: "review", Check: func(ctx context.Context, x *ControlExecutor, cc ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
+	completion := finalAnswerCheck{Name: "completion", Check: func(ctx context.Context, x *ControlExecutor, cc ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
+		order = append(order, "completion")
+		d.Output["checked"] = true
+		return nil, nil
+	}}
+	review := finalAnswerCheck{Name: "review", Check: func(ctx context.Context, x *ControlExecutor, cc ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
 		order = append(order, "review")
 		prior, err := x.priorFinalErrorCodes(ctx, cc)
 		if err != nil {
@@ -652,13 +664,9 @@ func TestFinalAnswerChecksRunInOrderAndMayFail(t *testing.T) {
 				Failure: &LoopFailure{Kind: RunFailureKindTaskCompletion, Code: "task_completion_rejected", Message: "The task result was rejected."}}, nil
 		}
 		return &finalAnswerRejection{Code: "task_completion_revise", Message: "The task result needs more work: add the totals."}, nil
-	}})
-	registerFinalAnswerCheck(finalAnswerCheck{Order: finalCheckOrderCompletion, Name: "completion", Check: func(ctx context.Context, x *ControlExecutor, cc ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
-		order = append(order, "completion")
-		d.Output["checked"] = true
-		return nil, nil
-	}})
+	}}
 	f := newFinalFixture(t, finalCall("first", `{"answer":"x"}`), finalCall("second", `{"answer":"x"}`))
+	f.exec.finalChecks = []finalAnswerCheck{completion, review}
 	requireRejected(t, f, f.settleFinal("first", ControlAuthority{}), "first", "task_completion_revise")
 	result := f.settleFinal("second", ControlAuthority{})
 	if result.Kind != ControlFailed || result.Failure.Code != "task_completion_rejected" || result.Entry.State != ToolEntryError {
@@ -667,12 +675,6 @@ func TestFinalAnswerChecksRunInOrderAndMayFail(t *testing.T) {
 	if !reflect.DeepEqual(order, []string{"completion", "review", "completion", "review"}) {
 		t.Fatalf("order = %v", order)
 	}
-	defer func() {
-		if recover() == nil {
-			t.Fatal("duplicate check name accepted")
-		}
-	}()
-	registerFinalAnswerCheck(finalAnswerCheck{Order: 1, Name: "review", Check: finalAnswerChecks[0].Check})
 }
 
 func TestFinalAnswerTakesOneSkillRefSentAsAString(t *testing.T) {

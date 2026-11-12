@@ -257,7 +257,7 @@ func TestFinalAnswerSchemaStableAcrossSkillRefs(t *testing.T) {
 	more.ForkTargets = append(more.ForkTargets, HostedAgentTarget{ID: "agent-3"})
 	more.Operations = append(more.Operations, HostedRunbookOperation{Entrypoint: "audit", Name: "Audit"})
 	for _, name := range []ControlToolName{ControlToolDelegate, ControlToolFork, ControlToolRunOperation} {
-		handler := controlHandlers[name]
+		handler := newControlRegistry(builtinControlTools()...)[name]
 		if mustJSON(t, handler.spec(targets)) != mustJSON(t, handler.spec(more)) {
 			t.Fatalf("%s changes with its targets", name)
 		}

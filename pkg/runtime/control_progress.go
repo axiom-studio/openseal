@@ -32,10 +32,6 @@ type reportProgressArgs struct {
 
 type reportProgressHandler struct{}
 
-func init() {
-	registerControlHandler(ControlToolReportProgress, reportProgressHandler{})
-}
-
 func (reportProgressHandler) spec(a ControlAuthority) ControlToolSpec {
 	if a.TaskWork {
 		return ControlToolSpec{

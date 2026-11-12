@@ -33,7 +33,9 @@ type StepToolDispatcherConfig struct {
 	// Coordinator records the refused row of a governed repeat refusal.
 	Coordinator *ActionCoordinator
 	Governed    *GovernedToolExecutor
-	Control     *ControlExecutor
+	// Control runs the control calls. One built without its own tools gets
+	// every tool of the run loop (loopControlRegistry) here.
+	Control *ControlExecutor
 	// Host runs host tool calls; nil means this host runs none.
 	Host *HostToolDispatcher
 	// Output keeps governed results over the 64 KiB cap as chat files
@@ -57,6 +59,9 @@ func NewStepToolDispatcher(cfg StepToolDispatcherConfig) (*StepToolDispatcher, e
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = zap.NewNop().Sugar()
+	}
+	if cfg.Control != nil {
+		cfg.Control.useTools(loopControlRegistry())
 	}
 	return &StepToolDispatcher{cfg: cfg}, nil
 }

@@ -23,10 +23,6 @@ import (
 // checks (completion checks, evidence review, task review: CTL-15/16) →
 // FinalOutputPublisher.ValidateFinalAnswer → finalAnswerPark.
 
-func init() {
-	registerControlHandler(ControlToolFinalAnswer, finalAnswerHandler{})
-}
-
 // Final answer error codes (stable; the model sees them in the tool result).
 const (
 	finalSilentInvalidCode      = "silent_invalid"
@@ -383,33 +379,21 @@ type finalAnswerRejection struct {
 	Failure *LoopFailure
 }
 
-// finalAnswerCheck is one registered completion check. CTL-15 (completion
-// checks, evidence grounding) and CTL-16 (task completion review) register
-// theirs from their own files' init(), with these orders.
+// finalAnswerCheck is one completion check of an accepted final answer.
 type finalAnswerCheck struct {
-	Order int
 	Name  string
 	Check func(ctx context.Context, x *ControlExecutor, cc ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error)
 }
 
-const (
-	finalCheckOrderCompletion = 100 // §11.4 1-3: URLs, external claims, approval claims
-	finalCheckOrderTaskReview = 300 // §11.6: task completion review
-)
-
-var finalAnswerChecks []finalAnswerCheck
-
-func registerFinalAnswerCheck(check finalAnswerCheck) {
-	if check.Check == nil || strings.TrimSpace(check.Name) == "" {
-		panic("register final answer check without a name or function")
+// builtinFinalAnswerChecks are the checks every final answer passes, in the
+// order they run: CTL-15 completion checks (§11.4 1-3: URLs, external
+// claims, approval claims; control_final_checks.go), then CTL-16 task
+// completion review (§11.6; control_task_review.go).
+func builtinFinalAnswerChecks() []finalAnswerCheck {
+	return []finalAnswerCheck{
+		{Name: "completion", Check: checkFinalAnswerCompletion},
+		{Name: "task_completion_review", Check: taskCompletionReviewCheck},
 	}
-	for _, existing := range finalAnswerChecks {
-		if existing.Name == check.Name {
-			panic(fmt.Sprintf("final answer check %q registered twice", check.Name))
-		}
-	}
-	finalAnswerChecks = append(finalAnswerChecks, check)
-	sort.SliceStable(finalAnswerChecks, func(i, j int) bool { return finalAnswerChecks[i].Order < finalAnswerChecks[j].Order })
 }
 
 // acceptFinalAnswer runs the pipeline on a decoded final. It returns
@@ -482,7 +466,7 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc ControlConte
 	}
 	d.Output = d.output(mode)
 	// 6-8. Completion checks, evidence review, task review.
-	for _, check := range finalAnswerChecks {
+	for _, check := range x.finalAnswerChecks() {
 		rejection, err := check.Check(ctx, x, cc, d)
 		if err != nil {
 			return ControlResult{}, fmt.Errorf("final answer check %s: %w", check.Name, err)
@@ -850,7 +834,7 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc ControlContext,
 		if err != nil {
 			return ControlResult{}, err
 		}
-		message := fmt.Sprintf("Finish with %s (%s); a plain reply is not accepted in this run.", tool, finalToolRequiredFields(tool, cc.Authority))
+		message := fmt.Sprintf("Finish with %s (%s); a plain reply is not accepted in this run.", tool, x.registry().finalToolRequiredFields(tool, cc.Authority))
 		rejection := &finalAnswerRejection{Code: finalToolRequiredCode, Message: message}
 		if prior[finalToolRequiredCode]+1 >= finalPlainTextAttemptsLimit {
 			rejection.Failure = &LoopFailure{Kind: RunFailureKindExecution, Code: finalToolRequiredCode,
@@ -900,11 +884,11 @@ func finalToolRequired(mode FinalAnswerMode) ControlToolName {
 	return ""
 }
 
-func finalToolRequiredFields(tool ControlToolName, a ControlAuthority) string {
+func (r controlRegistry) finalToolRequiredFields(tool ControlToolName, a ControlAuthority) string {
 	if tool == ControlToolFinalAnswer {
 		return strings.Join(finalRequiredFields(a), ", ")
 	}
-	h, ok := controlHandlers[tool]
+	h, ok := r[tool]
 	if !ok {
 		return "its required fields"
 	}

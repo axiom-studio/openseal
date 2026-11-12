@@ -13,8 +13,8 @@ import (
 // Kernel control tools (section 04 §3). The model calls them like any other
 // tool; the kernel executes them inline, under the claim, inside the RunLoop.
 // This file owns the tool names, the advertised order, the phase rules and the
-// dispatcher. Each tool's schema, settle and resume live in its own file and
-// register here through registerControlHandler.
+// dispatcher. Each tool's schema, settle and resume live in its own file;
+// builtinControlTools lists them.
 
 // controlToolOrder is the stable advertised order (SPEC §5.1, prompt cache):
 // the final tool of the Run's mode first, then progress, interaction, task
@@ -346,11 +346,39 @@ type controlResumer interface {
 
 type controlRegistry map[ControlToolName]controlHandler
 
-// controlHandlers is the process registry, filled by each tool file's init().
-var controlHandlers = controlRegistry{}
+// controlTool names the handler of one control tool.
+type controlTool struct {
+	name    ControlToolName
+	handler controlHandler
+}
 
-func registerControlHandler(name ControlToolName, h controlHandler) {
-	controlHandlers.register(name, h)
+// newControlRegistry builds the registry of tools. It panics on an unknown
+// tool name or a tool listed twice: the lists are fixed in code.
+func newControlRegistry(tools ...controlTool) controlRegistry {
+	r := controlRegistry{}
+	for _, tool := range tools {
+		r.register(tool.name, tool.handler)
+	}
+	return r
+}
+
+// builtinControlTools are the control tools every Run kind shares. The
+// kernel-only runbook tools are added by the run loop (loopControlRegistry).
+func builtinControlTools() []controlTool {
+	return []controlTool{
+		{name: ControlToolAskUser, handler: askUserHandler{}},
+		{name: ControlToolDelegate, handler: delegateHandler{}},
+		{name: ControlToolDelegateReply, handler: delegateReplyHandler{}},
+		{name: ControlToolFinalAnswer, handler: finalAnswerHandler{}},
+		{name: ControlToolFork, handler: forkHandler{}},
+		{name: ControlToolReact, handler: reactControlHandler{}},
+		{name: ControlToolWait, handler: waitControlHandler{}},
+		{name: ControlToolRunOperation, handler: operationHandler{}},
+		{name: ControlToolReportProgress, handler: reportProgressHandler{}},
+		{name: ControlToolRequestDecision, handler: requestDecisionHandler{}},
+		{name: ControlToolCompletionReview, handler: completionReviewHandler{}},
+		{name: ControlToolStartTask, handler: startTaskHandler{}},
+	}
 }
 
 func (r controlRegistry) register(name ControlToolName, h controlHandler) {
@@ -386,7 +414,7 @@ func (r controlRegistry) specs(a ControlAuthority) []ControlToolSpec {
 // ControlToolSpecs lists the control tools offered under a in the stable
 // advertised order (SPEC §5.1).
 func ControlToolSpecs(a ControlAuthority) []ControlToolSpec {
-	return controlHandlers.specs(a)
+	return loopControlRegistry().specs(a)
 }
 
 // ControlModelStepTools is ControlToolSpecs as harness tools of a model step.
@@ -412,14 +440,34 @@ type ControlExecutor struct {
 	Reporting     ConversationStore // projectConversationRunbookStart / runbookSourceMessage
 	Now           func() time.Time
 
-	handlers controlRegistry // nil = controlHandlers (tests inject their own)
+	// handlers are the tools x runs; nil runs builtinControlTools.
+	// NewStepToolDispatcher gives an executor without its own the run loop's
+	// tools (useTools). Tests set their own.
+	handlers controlRegistry
+	// finalChecks run on every accepted final answer, in order; nil runs
+	// builtinFinalAnswerChecks. Tests set their own.
+	finalChecks []finalAnswerCheck
 }
 
 func (x *ControlExecutor) registry() controlRegistry {
 	if x.handlers != nil {
 		return x.handlers
 	}
-	return controlHandlers
+	return newControlRegistry(builtinControlTools()...)
+}
+
+// useTools makes x run tools when it was built without its own.
+func (x *ControlExecutor) useTools(tools controlRegistry) {
+	if x.handlers == nil {
+		x.handlers = tools
+	}
+}
+
+func (x *ControlExecutor) finalAnswerChecks() []finalAnswerCheck {
+	if x.finalChecks != nil {
+		return x.finalChecks
+	}
+	return builtinFinalAnswerChecks()
 }
 
 func (x *ControlExecutor) now() time.Time {

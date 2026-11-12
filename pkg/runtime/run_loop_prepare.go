@@ -62,14 +62,20 @@ type catalogModelStepPreparerConfig struct {
 
 type catalogModelStepPreparer struct {
 	config   catalogModelStepPreparerConfig
-	controls controlRegistry // the process registry; tests substitute their own
+	controls controlRegistry // loopControlRegistry; tests substitute their own
 }
 
 var _ ModelStepPreparer = (*catalogModelStepPreparer)(nil)
 
 func newCatalogModelStepPreparer(config catalogModelStepPreparerConfig) *catalogModelStepPreparer {
 	config.Render.ImageInput = config.ImageInput
-	return &catalogModelStepPreparer{config: config, controls: controlHandlers}
+	return &catalogModelStepPreparer{config: config, controls: loopControlRegistry()}
+}
+
+// loopControlRegistry is every control tool a Run loop runs: the built-in
+// tools and the kernel-only runbook tools.
+func loopControlRegistry() controlRegistry {
+	return newControlRegistry(append(builtinControlTools(), runbookControlTools()...)...)
 }
 
 // CapabilitySet is the visible capability set of the step: the binding's

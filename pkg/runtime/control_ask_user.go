@@ -65,8 +65,6 @@ func (a *askUserArgs) selectedLabels(ids []string) []string {
 
 type askUserHandler struct{}
 
-func init() { registerControlHandler(ControlToolAskUser, askUserHandler{}) }
-
 func (askUserHandler) spec(ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Ask the person who asked one concrete question and wait for their answer. " +

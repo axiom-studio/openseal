@@ -18,11 +18,6 @@ import (
 // Output is exactly the structured decision; the loop completes the Run with
 // that Output through the binding's (non-conversation) final handler.
 
-func init() {
-	registerControlHandler(ControlToolRequestDecision, requestDecisionHandler{})
-	registerControlHandler(ControlToolCompletionReview, completionReviewHandler{})
-}
-
 const (
 	requestDecisionInvalidCode = "decision_invalid"
 	// maximumRequestDecisionMessageRunes bounds the reason / question

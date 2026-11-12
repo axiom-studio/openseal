@@ -68,11 +68,6 @@ type delegateHandler struct{}
 
 type delegateReplyHandler struct{}
 
-func init() {
-	registerControlHandler(ControlToolDelegate, delegateHandler{})
-	registerControlHandler(ControlToolDelegateReply, delegateReplyHandler{})
-}
-
 // spec carries no Agent list: the eligible Agents are in the capabilities
 // note (capability_note.go), so a new Agent never changes the tool, and the
 // handler resolves agentId against the claim's targets.

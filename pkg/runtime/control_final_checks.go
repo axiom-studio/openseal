@@ -20,10 +20,6 @@ import (
 //     external operation.
 //  3. An approval claim is refused once; the second one fails the Run.
 
-func init() {
-	registerFinalAnswerCheck(finalAnswerCheck{Order: finalCheckOrderCompletion, Name: "completion", Check: checkFinalAnswerCompletion})
-}
-
 // Completion check error codes (stable; the model sees them).
 const (
 	finalUnsupportedURLCode     = "unsupported_url"

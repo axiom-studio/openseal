@@ -29,8 +29,6 @@ type startTaskArgs struct {
 
 type startTaskHandler struct{}
 
-func init() { registerControlHandler(ControlToolStartTask, startTaskHandler{}) }
-
 func (startTaskHandler) spec(ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Start one durable background task for substantial requested work and reply with a brief acknowledgment. " +

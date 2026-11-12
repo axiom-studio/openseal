@@ -13,11 +13,6 @@ import (
 // Interaction control tools (section 04 §10): react (inline) and wait
 // (settle, timer). ask_user lives in control_ask_user.go.
 
-func init() {
-	registerControlHandler(ControlToolReact, reactControlHandler{})
-	registerControlHandler(ControlToolWait, waitControlHandler{})
-}
-
 // ---------------------------------------------------------------------------
 // react
 

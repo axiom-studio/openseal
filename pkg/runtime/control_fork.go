@@ -58,8 +58,6 @@ type ForkSpec struct {
 
 type forkHandler struct{}
 
-func init() { registerControlHandler(ControlToolFork, forkHandler{}) }
-
 func (forkHandler) spec(a ControlAuthority) ControlToolSpec {
 	branch := map[string]interface{}{
 		"goal": map[string]interface{}{

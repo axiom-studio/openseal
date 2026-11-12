@@ -37,8 +37,6 @@ type operationArgs struct {
 
 type operationHandler struct{}
 
-func init() { registerControlHandler(ControlToolRunOperation, operationHandler{}) }
-
 // spec carries no operation list: the operations and their input schemas are
 // in the capabilities note, and the handler authorizes the entrypoint.
 func (operationHandler) spec(a ControlAuthority) ControlToolSpec {

@@ -351,7 +351,7 @@ func TestRequestFinalToolSchemas(t *testing.T) {
 		t.Fatalf("review enum = %#v", enum)
 	}
 	// The plain-text note names the tool's required fields.
-	if got := finalToolRequiredFields(ControlToolRequestDecision, ControlAuthority{FinalMode: FinalModeDecision}); got != "decision, message" {
+	if got := newControlRegistry(builtinControlTools()...).finalToolRequiredFields(ControlToolRequestDecision, ControlAuthority{FinalMode: FinalModeDecision}); got != "decision, message" {
 		t.Fatalf("required fields = %q", got)
 	}
 }
