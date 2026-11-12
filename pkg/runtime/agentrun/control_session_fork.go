@@ -23,7 +23,7 @@ type SessionForkRef struct {
 }
 
 // childSessionRequest is the ChildSessionRequest of the child Run ownerRunID
-// acting as agentID, with an optional seed entry (controlChildSeed).
+// acting as agentID, with an optional seed entry (ControlChildSeed).
 func (r *SessionForkRef) childSessionRequest(scope models.Scope, ownerRunID, agentID string, seed *models.SessionEntry) models.ChildSessionRequest {
 	return models.ChildSessionRequest{
 		Scope: scope, ParentSessionID: r.ParentSessionID, ForkSequence: r.ForkSequence,
@@ -64,7 +64,7 @@ func controlForkPoint(cc ControlContext) string {
 	return ""
 }
 
-// controlChildSessionFork is the session fork of a child Run acting as
+// ControlChildSessionFork is the session fork of a child Run acting as
 // childAgentID: only a same-Agent child inherits the parent path (DI-5);
 // another Agent never sees the source Agent's private context.
 func ControlChildSessionFork(cc ControlContext, childAgentID string) *SessionForkRef {
@@ -94,7 +94,7 @@ func ControlChildSeedText(run *models.AgentRun) (string, bool) {
 	return text, ok
 }
 
-// controlChildSeed is the seed entry of run's session (childSessionSeed with
+// ControlChildSeed is the seed entry of run's session (childSessionSeed with
 // the brief's goal kind); nil when the Run has no control-tool brief.
 func ControlChildSeed(run *models.AgentRun) (*models.SessionEntry, error) {
 	kind, text, ok := controlChildSeedBrief(run)

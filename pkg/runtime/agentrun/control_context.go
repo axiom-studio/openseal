@@ -84,7 +84,7 @@ func (cc ControlContext) LeaseGuard(now time.Time) models.AgentRunLeaseGuard {
 	return models.AgentRunLeaseGuard{WorkerID: cc.WorkerID, Now: now}
 }
 
-// offersCapabilities is false for decision and review Runs: they are offered
+// OffersCapabilities is false for decision and review Runs: they are offered
 // only their own final tool, no capability, host or governed tool.
 func (a ControlAuthority) OffersCapabilities() bool {
 	mode := a.EffectiveFinalMode()

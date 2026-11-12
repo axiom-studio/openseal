@@ -10,7 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-// prepareAcceptedChildRun separates continuation of an already accepted method
+// PrepareAcceptedChildRun separates continuation of an already accepted method
 // from admission of a new method. Caller context is never an execution pin.
 func PrepareAcceptedChildRun(ctx context.Context, parent *models.AgentRun, request *models.CreateAgentRunRequest, preparer models.AcceptedRunExecutionPreparer, inherit bool) error {
 	if parent == nil || request == nil || request.Scope != parent.Scope {
@@ -57,7 +57,7 @@ func PrepareAcceptedChildRun(ctx context.Context, parent *models.AgentRun, reque
 	return nil
 }
 
-// requestedAcceptedChildEntrypoint reads only the requested target method.
+// RequestedAcceptedChildEntrypoint reads only the requested target method.
 // triggerInput describes the source method and cannot select a target method.
 func RequestedAcceptedChildEntrypoint(values map[string]interface{}) (string, error) {
 	entrypoint := ""

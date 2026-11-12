@@ -25,7 +25,7 @@ var runActionHistoryStatuses = []models.ActionCallStatus{
 // runActionHistoryPage is the largest page every ActionStore honors.
 const runActionHistoryPage = 500
 
-// listAllRunActionHistory pages through the Run's terminal calls, oldest
+// ListAllRunActionHistory pages through the Run's terminal calls, oldest
 // first, until a short page; Runs are unbounded, so one page is not enough.
 func ListAllRunActionHistory(ctx context.Context, store models.ActionStore, scope models.Scope, runID string) ([]*models.ActionCall, error) {
 	var all []*models.ActionCall
@@ -44,7 +44,7 @@ func ListAllRunActionHistory(ctx context.Context, store models.ActionStore, scop
 	}
 }
 
-// newRunActionHistory memoizes the paged ActionStore.ListActionCalls{Scope, RunID,
+// NewRunActionHistory memoizes the paged ActionStore.ListActionCalls{Scope, RunID,
 // Status: terminal} per Propose; VM-origin calls are filtered out.
 func NewRunActionHistory(store models.ActionStore, scope models.Scope, runID string) RunActionHistory {
 	return &storeRunActionHistory{store: store, scope: scope, runID: runID}
