@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -60,7 +61,7 @@ func (h *externalConversationIngressHostStub) NormalizeExternalConversation(
 
 func TestExternalConversationIngressUsesExactSkillAdapterAndPersistsVerifiedEvents(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	now := time.Now().UTC()
 	host := &externalConversationIngressHostStub{result: &ExternalConversationIngressHostResult{
 		StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(`{"ok":true}`),
@@ -113,7 +114,7 @@ func TestExternalConversationIngressRejectsSensitiveForwardedHeaders(t *testing.
 
 func TestExternalConversationPublicIngressResolvesAuthoritativeScopeFromOpaqueRoute(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	host := &externalConversationIngressHostStub{result: &ExternalConversationIngressHostResult{
 		StatusCode: http.StatusOK,
 		Events: []models.NormalizedExternalConversationEvent{{
@@ -144,7 +145,7 @@ func TestExternalConversationPublicIngressResolvesAuthoritativeScopeFromOpaqueRo
 
 func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	previousRevision := endpoint.Revision
 	endpoint.InstallationID = "T123"
 	endpoint.ApplicationID = "A123"
@@ -252,7 +253,7 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 
 func TestExternalConversationGatewayRoutesInstallationWideEndpointFromAnyAddress(t *testing.T) {
 	ctx := context.Background()
-	store, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, _, endpoint := endpointFixture(t, ctx, "slack")
 	previousRevision := endpoint.Revision
 	endpoint.InstallationID = "T123"
 	endpoint.ApplicationID = "A123"
@@ -286,7 +287,7 @@ func TestExternalConversationGatewayRoutesInstallationWideEndpointFromAnyAddress
 
 func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	previousRevision := endpoint.Revision
 	endpoint.InstallationID = "T-shared"
 	endpoint.ApplicationID = "A-shared"
@@ -345,7 +346,7 @@ func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
 
 func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCrossTenantAmbiguity(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, first := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, first := endpointFixture(t, ctx, "slack")
 	configureRoute := func(endpoint *models.ExternalConversationEndpoint, installation, application, address string) {
 		t.Helper()
 		previousRevision := endpoint.Revision
@@ -459,7 +460,7 @@ func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCr
 
 func TestRegisteredConversationGatewayReturnsVerificationResponseBeforeEndpointsExist(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	catalog := skill.NewCatalog()
 	definition := skillbindingtest.SlackConversationSkillDefinition()
 	if err := catalog.Register(ctx, definition); err != nil {
@@ -502,7 +503,7 @@ func TestRegisteredConversationGatewayReturnsVerificationResponseBeforeEndpoints
 
 func TestConversationGatewayUsesCurrentReviewedBindingAfterSetupSave(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	endpoint.InstallationID, endpoint.ApplicationID = "T123", ""
 	endpoint.Revision++
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, endpoint.Revision-1); err != nil {

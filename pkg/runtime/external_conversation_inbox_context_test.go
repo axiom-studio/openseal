@@ -12,7 +12,7 @@ import (
 
 func TestInstallationWideInboxKeepsChannelAndDMContextsSeparate(t *testing.T) {
 	ctx := t.Context()
-	store, _, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
+	store, _, endpoint := endpointFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
 	endpoint.InstallationWide = true
 	worker := &ExternalConversationInboxWorker{store: store, conversations: runtimeconversation.NewConversationService(store), now: time.Now}
 	seen := make(map[string]string)

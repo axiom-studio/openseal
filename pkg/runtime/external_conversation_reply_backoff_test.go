@@ -31,7 +31,7 @@ func appliedReplyItem(endpoint *models.ExternalConversationEndpoint, id, endpoin
 
 func TestExternalConversationReplyWorkerBacksOffAndStopsFailingItems(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
+	store, catalog, endpoint := endpointFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend,
 	})
 	runs := agentrun.NewRunCommandService(store)
@@ -118,7 +118,7 @@ func TestExternalConversationReplyWorkerBacksOffAndStopsFailingItems(t *testing.
 
 func TestExternalConversationReplyProgressIsCompareAndSet(t *testing.T) {
 	ctx := context.Background()
-	store, _, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
+	store, _, endpoint := endpointFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend,
 	})
 	now := time.Now().UTC()
@@ -191,7 +191,7 @@ func TestExternalConversationReplyProgressDurableStores(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			ctx := t.Context()
 			store := testCase.open(t)
-			_, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
+			_, endpoint := endpointFixtureOn(t, ctx, store, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			for _, id := range []string{"done", "backoff", "due"} {
 				if _, _, err := store.ReceiveExternalConversationEvent(ctx, appliedReplyItem(endpoint, id, endpoint.ID, "run-"+id, now)); err != nil {

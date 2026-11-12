@@ -14,7 +14,7 @@ import (
 
 func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
+	store, catalog, endpoint := endpointFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
 	conversations := runtimeconversation.NewConversationService(store)
@@ -143,7 +143,7 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 
 func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "webchat")
+	store, catalog, endpoint := endpointFixture(t, ctx, "webchat")
 	conversations := runtimeconversation.NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Web chat",

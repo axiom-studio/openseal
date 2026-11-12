@@ -44,8 +44,8 @@ func (s *approvalNotificationConflictStore) CommitChannelMessage(ctx context.Con
 
 func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheckpoint(t *testing.T) {
 	ctx := t.Context()
-	store, db := newTestSQLiteStore(t)
-	catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, "slack", []skill.ConversationDeliveryOperation{
+	store, db := newFileStore(t)
+	catalog, endpoint := endpointFixtureOn(t, ctx, store, "slack", []skill.ConversationDeliveryOperation{
 		skill.ConversationDeliveryMessageSend, skill.ConversationDeliveryMessageUpdate,
 	})
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
@@ -314,7 +314,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 
 func TestApprovalNotificationAlwaysCreatesAgentApprovalConversation(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []skill.ConversationDeliveryOperation{
+	store, catalog, endpoint := endpointFixtureWithOperations(t, ctx, "slack", []skill.ConversationDeliveryOperation{
 		skill.ConversationDeliveryMessageSend,
 	})
 	now := time.Date(2026, 8, 24, 21, 0, 0, 0, time.UTC)
@@ -444,7 +444,7 @@ func registerApprovalNotificationCallback(
 
 func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
 	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
@@ -515,7 +515,7 @@ func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses
 
 func TestApprovalNotificationReusesConversationAfterEndpointRename(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
 	worker := NewApprovalNotificationWorker(store, NewExternalConversationTransportService(store, catalog), catalog)
 
@@ -542,7 +542,7 @@ func TestApprovalNotificationReusesConversationAfterEndpointRename(t *testing.T)
 
 func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []skill.ConversationDeliveryOperation{
+	store, catalog, endpoint := endpointFixtureWithOperations(t, ctx, "slack", []skill.ConversationDeliveryOperation{
 		skill.ConversationDeliveryMessageSend, skill.ConversationDeliveryMessageUpdate,
 	})
 	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)

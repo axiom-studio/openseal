@@ -76,13 +76,13 @@ func contextTestHistory(event models.NormalizedExternalConversationEvent) *Exter
 	}}
 }
 
-func newContextTestWorker(t *testing.T, store *sqlite.Store, resolver ExternalConversationAdapterResolver, host ExternalConversationContextHost, crash bool, opts ...models.ServiceOption) (*ExternalConversationInboxWorker, *crashAfterExternalConversationDispatch) {
+func newContextTestWorker(t *testing.T, store *sqlite.Store, resolver ExternalConversationAdapterResolver, host ExternalConversationContextHost, crash bool, opts ...models.ServiceOption) (*ExternalConversationInboxWorker, *crashAfterDispatch) {
 	t.Helper()
 	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatcher := &crashAfterExternalConversationDispatch{next: NewCanonicalExternalConversationDispatcher(scheduler), crashOnce: crash}
+	dispatcher := &crashAfterDispatch{next: NewCanonicalExternalConversationDispatcher(scheduler), crashOnce: crash}
 	worker, err := NewExternalConversationInboxWorker(store, dispatcher, ExternalConversationInboxWorkerConfig{
 		WorkerID: "context-worker", BaseRetry: time.Second, MaximumRetry: time.Minute,
 		ContextHost: host, ContextCatalog: resolver,
@@ -95,7 +95,7 @@ func newContextTestWorker(t *testing.T, store *sqlite.Store, resolver ExternalCo
 
 func TestExternalConversationContextImportsParentAndRepliesBeforeFirstMention(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	item := receiveContextTestEvent(t, store, endpoint, "first-mention", "current-mention", "original-parent", now)
 	host := &recordingContextHost{result: contextTestHistory(item.Event)}
@@ -154,7 +154,7 @@ func TestExternalConversationContextImportsParentAndRepliesBeforeFirstMention(t 
 
 func TestExternalConversationContextRefreshesMissingRepliesAndKeepsThreadsSeparate(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	first := receiveContextTestEvent(t, store, endpoint, "first-thread-first-mention", "mention-one", "parent-one", now)
 	host := &recordingContextHost{result: contextTestHistory(first.Event)}
@@ -204,7 +204,7 @@ func TestExternalConversationContextRefreshesMissingRepliesAndKeepsThreadsSepara
 }
 
 func TestExternalConversationContextUnthreadedMentionDoesNotReadWholeChannel(t *testing.T) {
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
+	store, catalog, endpoint := endpointFixture(t, t.Context(), "slack")
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	receiveContextTestEvent(t, store, endpoint, "unthreaded-mention", "mention", "", now)
 	host := &recordingContextHost{err: errors.New("must not read the entire channel")}
@@ -221,7 +221,7 @@ func TestExternalConversationContextUnthreadedMentionDoesNotReadWholeChannel(t *
 }
 
 func TestExternalConversationContextReadFailureDoesNotHideTrigger(t *testing.T) {
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, t.Context(), "webchat")
+	store, catalog, endpoint := endpointFixture(t, t.Context(), "webchat")
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	receiveContextTestEvent(t, store, endpoint, "unavailable-context", "mention", "parent", now)
 	host := &recordingContextHost{err: errors.New("read permission unavailable")}
@@ -243,7 +243,7 @@ func TestExternalConversationContextReadFailureDoesNotHideTrigger(t *testing.T) 
 func TestExternalConversationContextPermissionCodeIsSafeAndPreserved(t *testing.T) {
 	for _, code := range []string{"missing_scope", "not_in_channel", "raw-secret-or-provider-response"} {
 		t.Run(code, func(t *testing.T) {
-			store, catalog, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
+			store, catalog, endpoint := endpointFixture(t, t.Context(), "slack")
 			now := time.Now().UTC().Truncate(time.Millisecond)
 			receiveContextTestEvent(t, store, endpoint, "permission-context", "mention", "parent", now)
 			worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, &recordingContextHost{
@@ -269,7 +269,7 @@ func TestExternalConversationContextPermissionCodeIsSafeAndPreserved(t *testing.
 
 func TestExternalConversationContextBindingChangeDuringReadDoesNotImportStaleData(t *testing.T) {
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := endpointFixture(t, ctx, "slack")
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	item := receiveContextTestEvent(t, store, endpoint, "binding-changed-during-read", "mention", "parent", now)
 	host := &recordingContextHost{result: contextTestHistory(item.Event), afterRead: func() {
@@ -322,7 +322,7 @@ func TestExternalConversationContextAvailabilityPrefersCanonicalSource(t *testin
 func TestExternalConversationContextRejectsCrossDestinationAndOversizedResults(t *testing.T) {
 	for _, name := range []string{"other-channel", "other-thread", "oversized-message", "oversized-batch", "oversized-total", "conflicting-duplicate"} {
 		t.Run(name, func(t *testing.T) {
-			store, catalog, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
+			store, catalog, endpoint := endpointFixture(t, t.Context(), "slack")
 			now := time.Now().UTC().Truncate(time.Millisecond)
 			item := receiveContextTestEvent(t, store, endpoint, "isolated-context", "mention", "parent", now)
 			result := contextTestHistory(item.Event)
@@ -382,7 +382,7 @@ func TestExternalConversationContextFiltersFutureAndDeduplicatesHistory(t *testi
 }
 
 func TestExternalConversationContextRequiresFeatureDeclaration(t *testing.T) {
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
+	store, catalog, endpoint := endpointFixture(t, t.Context(), "slack")
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	receiveContextTestEvent(t, store, endpoint, "no-history-feature", "mention", "parent", now)
 	host := &recordingContextHost{err: errors.New("must not be called")}

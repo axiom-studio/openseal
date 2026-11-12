@@ -12,6 +12,7 @@ import (
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -111,7 +112,7 @@ func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedTestSpace(t, store, item.Scope)
+	conversationtest.SeedSpace(t, store, item.Scope)
 	conversations := runtimeconversation.NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		ID: item.ConversationID, Scope: item.Scope, Owner: endpoint.Owner, Title: "Saved provider thread",

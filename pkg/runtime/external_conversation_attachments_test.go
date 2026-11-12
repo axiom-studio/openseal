@@ -48,7 +48,7 @@ func (h *externalFileHost) ReadExternalConversationAttachment(_ context.Context,
 }
 func fileConversationFixture(t *testing.T) (*sqlite.Store, *skill.Catalog, *models.ExternalConversationEndpoint) {
 	t.Helper()
-	store, original, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
+	store, original, endpoint := endpointFixture(t, t.Context(), "slack")
 	bound, err := original.ResolveConversationAdapterBinding(t.Context(), skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID)
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func (h *checkpointConversationHost) DeliverExternalConversation(_ context.Conte
 	return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: "file:F-uploaded"}, nil
 }
 func TestExternalConversationDeliveryPersistsCheckpointAcrossWorkerRestart(t *testing.T) {
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
+	store, catalog, endpoint := endpointFixture(t, t.Context(), "slack")
 	conversations := runtimeconversation.NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "files", IdempotencyKey: "checkpoint"})
 	if err != nil {

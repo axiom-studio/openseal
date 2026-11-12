@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -22,7 +23,7 @@ import (
 func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 	for _, provider := range []string{"slack", "webchat"} {
 		t.Run(provider, func(t *testing.T) {
-			store, db := newTestSQLiteStore(t)
+			store, db := newFileStore(t)
 			fixture := newRunProgressWorkerFixtureOn(t, store, provider, []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryMessageUpdate, capability.ConversationDeliveryTypingIndicator})
 			storetest.RewriteRowPayload(t, db, "agent_runs", fixture.run.Scope, fixture.run.ID, func(run *models.AgentRun) {
 				run.Context = map[string]interface{}{"conversationId": fixture.conversation.ID, "triggerMessageId": fixture.inbound.ID}
@@ -139,7 +140,7 @@ func TestPendingSetupProjectionIsTenantScoped(t *testing.T) {
 		models.SkillSetupRequestStore
 		ListPendingSkillSetupRequests(context.Context, models.Scope, int, int) ([]*models.SkillSetupRequest, error)
 	}
-	for _, store := range []pendingStore{newTestKernelStore(t), sqlite} {
+	for _, store := range []pendingStore{conversationtest.NewStore(t), sqlite} {
 		request := skillbindingtest.SkillSetupRequest()
 		if err := store.SaveSkillSetupRequest(t.Context(), request, 0); err != nil {
 			t.Fatal(err)

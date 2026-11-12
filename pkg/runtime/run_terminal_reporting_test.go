@@ -11,6 +11,7 @@ import (
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -23,7 +24,7 @@ type terminalReportingContractStore interface {
 	models.ConversationStore
 }
 
-func terminalReportingContractFixture(t *testing.T, fixture runStoreContractFixture) terminalReportingContractStore {
+func terminalReportingContractFixture(t *testing.T, fixture runStoreFixture) terminalReportingContractStore {
 	t.Helper()
 	store, ok := fixture.store.(terminalReportingContractStore)
 	if !ok {
@@ -36,7 +37,7 @@ func terminalReportingContractRun(t *testing.T, store terminalReportingContractS
 	t.Helper()
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "report-agent"}
 	conversations := runtimeconversation.NewConversationService(store)
-	seedTestSpace(t, store.(models.SpaceStore), scope)
+	conversationtest.SeedSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Original request", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
@@ -114,9 +115,9 @@ func terminalReportingContractAssertMessage(t *testing.T, store models.Conversat
 }
 
 func TestTerminalRunReportingContractCommitCrashRestartRecovery(t *testing.T) {
-	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
+	forEachRunStore(t, func(t *testing.T, fixture runStoreFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := runStoreContractEpoch
+		now := runStoreEpoch
 		run, conversation, trigger := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-restart"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		intent, err := store.GetRunTerminalReport(t.Context(), run.Scope, run.ID, run.Status)
@@ -147,9 +148,9 @@ func TestTerminalRunReportingContractCommitCrashRestartRecovery(t *testing.T) {
 }
 
 func TestTerminalRunReportingContractCrashAfterPostBeforeAck(t *testing.T) {
-	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
+	forEachRunStore(t, func(t *testing.T, fixture runStoreFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := runStoreContractEpoch
+		now := runStoreEpoch
 		run, conversation, trigger := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-ack-crash"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		claims, err := store.ClaimRunTerminalReports(t.Context(), models.RunTerminalReportingClaim{WorkerID: "dead-worker", Now: now, LeaseDuration: time.Minute, Limit: 1})
@@ -198,9 +199,9 @@ func (s *terminalReportingConflictStore) CommitChannelMessage(ctx context.Contex
 }
 
 func TestTerminalRunReportingContractConflictBackoffAndActiveScopeGate(t *testing.T) {
-	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
+	forEachRunStore(t, func(t *testing.T, fixture runStoreFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := runStoreContractEpoch
+		now := runStoreEpoch
 		run, conversation, trigger := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-retry"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		conflicted := &terminalReportingConflictStore{terminalReportingContractStore: store, remaining: 2}
@@ -239,9 +240,9 @@ func TestTerminalRunReportingContractConflictBackoffAndActiveScopeGate(t *testin
 }
 
 func TestTerminalRunReportingContractConcurrentFastpathAndDurableRetry(t *testing.T) {
-	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
+	forEachRunStore(t, func(t *testing.T, fixture runStoreFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := runStoreContractEpoch
+		now := runStoreEpoch
 		run, conversation, trigger := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-concurrent"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		var group sync.WaitGroup
@@ -284,7 +285,7 @@ func TestTerminalRunReportingContractConcurrentFastpathAndDurableRetry(t *testin
 }
 
 func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
-	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
+	forEachRunStore(t, func(t *testing.T, fixture runStoreFixture) {
 		store := terminalReportingContractFixture(t, fixture)
 		cases := []struct {
 			name       string
@@ -311,8 +312,8 @@ func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
 			{name: "unicode-blank-destination", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, mutate: func(r *models.AgentRun) {
 				r.Context[models.ConversationRunConversationIDContextKey] = "\t\u2000\u3000\n"
 			}},
-			{name: "fraction-at-second-boundary", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: runStoreContractEpoch.Add(999999 * time.Microsecond)},
-			{name: "fraction-with-offset", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: runStoreContractEpoch.Add(999999 * time.Microsecond).In(time.FixedZone("IST", 19800))},
+			{name: "fraction-at-second-boundary", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: runStoreEpoch.Add(999999 * time.Microsecond)},
+			{name: "fraction-with-offset", status: models.AgentRunStatusCompleted, milestones: []string{"completed"}, want: true, at: runStoreEpoch.Add(999999 * time.Microsecond).In(time.FixedZone("IST", 19800))},
 		}
 		for _, test := range cases {
 			t.Run(test.name, func(t *testing.T) {
@@ -321,7 +322,7 @@ func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
 					ID: id, RootRunID: id, Scope: models.Scope{Kind: "tenant", ID: "report-eligibility"}, Kind: models.RunKindAgentWork,
 					Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "report-agent"}, AssignedAgentID: "report-agent",
 					Goal: "Report completed work", Source: models.RunSourceSchedule, Status: test.status, Revision: 1,
-					CreatedAt: runStoreContractEpoch, UpdatedAt: runStoreContractEpoch,
+					CreatedAt: runStoreEpoch, UpdatedAt: runStoreEpoch,
 					Context: map[string]interface{}{models.RunReportingRootRunIDContextKey: id, models.ConversationRunConversationIDContextKey: "original-chat", models.ConversationRunTriggerIDContextKey: "original-message", models.RunReportingMilestonesContextKey: test.milestones},
 				}
 				if test.mutate != nil {
@@ -330,7 +331,7 @@ func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
 				if !test.at.IsZero() {
 					run.CreatedAt, run.UpdatedAt = test.at, test.at
 				}
-				_, err := store.CreateAgentRunWithEvent(t.Context(), run, &models.ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: id, EventType: "run.completed", Summary: "Imported durable completion", CreatedAt: runStoreContractEpoch})
+				_, err := store.CreateAgentRunWithEvent(t.Context(), run, &models.ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: id, EventType: "run.completed", Summary: "Imported durable completion", CreatedAt: runStoreEpoch})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -348,9 +349,9 @@ func TestTerminalRunReportingContractAtomicInsertEligibility(t *testing.T) {
 }
 
 func TestTerminalRunReportingContractImmutableSnapshotScopedClaimsAndFencing(t *testing.T) {
-	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
+	forEachRunStore(t, func(t *testing.T, fixture runStoreFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := runStoreContractEpoch
+		now := runStoreEpoch
 		first, _, _ := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-first"}, now)
 		second, _, _ := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-second"}, now)
 		first = terminalReportingContractComplete(t, store, first, now)
@@ -401,9 +402,9 @@ func TestTerminalRunReportingContractImmutableSnapshotScopedClaimsAndFencing(t *
 }
 
 func TestTerminalRunReportingContractFailedTerminalCommitRollsBackIntent(t *testing.T) {
-	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
+	forEachRunStore(t, func(t *testing.T, fixture runStoreFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := runStoreContractEpoch
+		now := runStoreEpoch
 		run, _, _ := terminalReportingContractRun(t, store, models.Scope{Kind: "tenant", ID: "report-atomic-failure"}, now)
 		activity := runtimeactivity.NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
 		running, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: run.Revision, Status: models.AgentRunStatusRunning})

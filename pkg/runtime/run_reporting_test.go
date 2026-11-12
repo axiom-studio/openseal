@@ -6,17 +6,18 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 )
 
 func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "conversation-runbook-start"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-42"}
 	service := conversation.NewConversationService(store)
-	seedTestSpace(t, store, scope)
+	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: "Agent work", IdempotencyKey: "agent-work-channel",
 	})

@@ -19,7 +19,7 @@ import (
 func externalConversationFailureReplyFixture(t *testing.T, provider string, status models.AgentRunStatus) (*sqlite.Store, *skill.Catalog, *models.ExternalConversationEndpoint, *models.ExternalConversationInboxItem) {
 	t.Helper()
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, provider, []capability.ConversationDeliveryOperation{
+	store, catalog, endpoint := endpointFixtureWithOperations(t, ctx, provider, []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
 	conversations := runtimeconversation.NewConversationService(store)

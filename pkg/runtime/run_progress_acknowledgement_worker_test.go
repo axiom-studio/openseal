@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -29,15 +30,15 @@ type runProgressWorkerFixture struct {
 
 func newRunProgressWorkerFixture(t *testing.T, provider string, operations []capability.ConversationDeliveryOperation) runProgressWorkerFixture {
 	t.Helper()
-	return newRunProgressWorkerFixtureOn(t, newTestKernelStore(t), provider, operations)
+	return newRunProgressWorkerFixtureOn(t, conversationtest.NewStore(t), provider, operations)
 }
 
 // newRunProgressWorkerFixtureOn builds the fixture in store, so a test can
-// pass a store it also holds its own connection to (newTestSQLiteStore).
+// pass a store it also holds its own connection to (newFileStore).
 func newRunProgressWorkerFixtureOn(t *testing.T, store *sqlite.Store, provider string, operations []capability.ConversationDeliveryOperation) runProgressWorkerFixture {
 	t.Helper()
 	ctx := context.Background()
-	catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, provider, operations)
+	catalog, endpoint := endpointFixtureOn(t, ctx, store, provider, operations)
 	conversations := runtimeconversation.NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Support thread",

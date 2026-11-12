@@ -30,7 +30,7 @@ type routineReportFixture struct {
 func newRoutineReportFixture(t *testing.T, threadID string, mapSource bool) *routineReportFixture {
 	t.Helper()
 	ctx := t.Context()
-	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
+	store, catalog, endpoint := endpointFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend,
 	})
 	conversations := runtimeconversation.NewConversationService(store)

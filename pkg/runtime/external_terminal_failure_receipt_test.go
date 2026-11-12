@@ -10,15 +10,16 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/google/uuid"
 )
 
 func TestExternalTerminalFailureUsesCapturedRevisionAfterMetadataUpdate(t *testing.T) {
-	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
+	forEachRunStore(t, func(t *testing.T, fixture runStoreFixture) {
 		store := terminalReportingContractFixture(t, fixture)
-		now := runStoreContractEpoch
+		now := runStoreEpoch
 		first, _, trigger := conversationruntest.TerminalFailureConversation(t, store, now, false)
 		first = conversationruntest.FailTerminalConversation(t, store, first, now, "provider_rate_limited")
 		for _, acknowledged := range []bool{false, true} {
@@ -54,8 +55,8 @@ func TestExternalTerminalFailureUsesCapturedRevisionAfterMetadataUpdate(t *testi
 }
 
 func TestExternalTerminalFailurePrefersSavedNormalAnswerOverOlderFailure(t *testing.T) {
-	store := newTestKernelStore(t)
-	now := runStoreContractEpoch
+	store := conversationtest.NewStore(t)
+	now := runStoreEpoch
 	run, conversation, trigger := conversationruntest.TerminalFailureConversation(t, store, now, false)
 	run = conversationruntest.FailTerminalConversation(t, store, run, now, "provider_rate_limited")
 	if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, run); err != nil {
@@ -116,7 +117,7 @@ func TestExternalTerminalFailureRejectsReceiptIdentityDrift(t *testing.T) {
 }
 
 func TestExternalTerminalFailureAcknowledgedReceiptCannotRedirectInboxOrigin(t *testing.T) {
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, t.Context(), "slack")
+	store, catalog, endpoint := endpointFixture(t, t.Context(), "slack")
 	service := runtimeconversation.NewConversationService(store)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Original inbox", Origin: &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}, IdempotencyKey: uuid.NewString()})
 	if err != nil {
