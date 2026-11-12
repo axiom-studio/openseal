@@ -46,6 +46,9 @@ func terminalFailureConversationFixture(t *testing.T, store terminalReportingCon
 	return created.Run, posted.Conversation, posted.Message
 }
 
+// failTerminalConversation fails run with code, which must already be a
+// classified reply code (TerminalFailureReply's vocabulary), as the loop
+// records it.
 func failTerminalConversation(t *testing.T, store terminalReportingContractStore, run *AgentRun, at time.Time, code string) *AgentRun {
 	t.Helper()
 	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return at }))
@@ -56,7 +59,7 @@ func failTerminalConversation(t *testing.T, store terminalReportingContractStore
 	failed, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: running.Revision, Status: AgentRunStatusFailed,
 		Error:              "private-provider-diagnostic token=NEVER-PUBLISH",
-		FailureExplanation: &RunFailureExplanation{Kind: "execution", Code: terminalFailureCode(code), Message: "The requested work did not complete."},
+		FailureExplanation: &RunFailureExplanation{Kind: "execution", Code: code, Message: "The requested work did not complete."},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +273,7 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
 		run, _, trigger := terminalFailureConversationFixture(t, store, now, false)
-		run = failTerminalConversation(t, store, run, now, "gateway_credits_exhausted")
+		run = failTerminalConversation(t, store, run, now, "workspace_credits_exhausted")
 		if run.CreditError == nil || run.CreditError.Code != RunCreditErrorWorkspaceCreditsExhausted {
 			t.Fatalf("credit stop is not typed on the Run: %#v", run.CreditError)
 		}
