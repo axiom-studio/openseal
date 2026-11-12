@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/models"
@@ -131,7 +132,7 @@ func (v *RunActionValidator) ValidateActionProposal(ctx context.Context, input A
 	if target.Revision != revision {
 		return nil, models.ErrRevisionConflict
 	}
-	if !slicesContainsRunCommand(applicableAgentRunCommands(target), input.Bound.Action.Name) {
+	if !slices.Contains(applicableAgentRunCommands(target), input.Bound.Action.Name) {
 		return nil, fmt.Errorf("%w: cannot %s %s Run", models.ErrInvalidRunTransition, input.Bound.Action.Name, target.Status)
 	}
 	return map[string]interface{}{
@@ -216,13 +217,4 @@ func applicableAgentRunCommands(run *models.AgentRun) []string {
 		return []string{models.RunActionResume, models.RunActionCancel}
 	}
 	return []string{models.RunActionPause, models.RunActionCancel}
-}
-
-func slicesContainsRunCommand(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }

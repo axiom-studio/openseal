@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 )
@@ -45,7 +46,7 @@ func TestActiveConversationRunsIncludeOnlyExactIndependentTaskThreadAndActor(t *
 	}
 	runner := &ConversationRunTurnRunner{portfolio: store}
 	active, err := runner.activeConversationRuns(t.Context(), conversation, trigger)
-	if err != nil || len(active) != 1 || active[0].Revision < 1 || !slicesContainsRunCommand(active[0].AvailableControls, RunActionCancel) {
+	if err != nil || len(active) != 1 || active[0].Revision < 1 || !slices.Contains(active[0].AvailableControls, RunActionCancel) {
 		t.Fatalf("task controls absent from authoritative thread snapshot: %#v %v", active, err)
 	}
 	// Provider channels scope controls to their exact thread; ordinary app

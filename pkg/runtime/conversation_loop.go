@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -546,7 +547,7 @@ func (l *conversationLoop) checkToolCall(ctx context.Context, in StepToolsInput,
 		return "", err
 	}
 	for _, run := range active {
-		if run.ID == runID && slicesContainsRunCommand(run.AvailableControls, action.Action) {
+		if run.ID == runID && slices.Contains(run.AvailableControls, action.Action) {
 			return "", nil
 		}
 	}
