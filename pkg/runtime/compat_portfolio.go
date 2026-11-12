@@ -1,5 +1,8 @@
-// Re-exports of declarations moved to github.com/axiom-studio/openseal/pkg/runtime/portfolio,
-// kept so that importers of github.com/axiom-studio/openseal/pkg/runtime continue to compile.
+// Temporary compatibility for the pkg/runtime split. New code imports
+// pkg/runtime/portfolio. Remove once in-flight branches have landed.
+//
+// Re-exports of declarations moved to pkg/runtime/portfolio, kept so that
+// importers of pkg/runtime continue to compile.
 
 package runtime
 

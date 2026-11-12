@@ -1,5 +1,8 @@
-// Unexported forwarders for declarations moved to github.com/axiom-studio/openseal/pkg/runtime/portfolio,
-// kept so that code in github.com/axiom-studio/openseal/pkg/runtime keeps its old names.
+// Temporary compatibility for the pkg/runtime split. Remove once the
+// runtime code that calls these has moved to its own package.
+//
+// Unexported forwarders for declarations moved to pkg/runtime/portfolio,
+// kept so that code in pkg/runtime keeps its old names.
 
 package runtime
 
