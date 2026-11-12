@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -376,7 +377,7 @@ func (s *ExternalConversationTransportService) resolveActiveEndpoint(ctx context
 		resolved.Binding.SkillID != ref.SkillID || resolved.Binding.SourceIdentity != ref.SourceIdentity ||
 		resolved.Binding.Revision < ref.BindingRevision ||
 		resolved.Adapter.Provider != endpoint.Provider ||
-		!containsConversationEndpointMode(resolved.Adapter.EndpointModes, endpoint.Mode) {
+		!slices.Contains(resolved.Adapter.EndpointModes, endpoint.Mode) {
 		return nil, nil, fmt.Errorf("%w: current Skill adapter binding is unavailable or incompatible", ErrExternalConversationConflict)
 	}
 	return endpoint, resolved, nil

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -499,7 +500,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 		t.Fatalf("current conversation binding = %#v, %v", resolvedAfterAmendment, resolveErr)
 	}
 	if resolvedAfterAmendment.Adapter.Provider != endpoint.Provider ||
-		!containsConversationEndpointMode(resolvedAfterAmendment.Adapter.EndpointModes, endpoint.Mode) {
+		!slices.Contains(resolvedAfterAmendment.Adapter.EndpointModes, endpoint.Mode) {
 		t.Fatalf("current adapter is incompatible: provider %q/%q modes %#v/%q", resolvedAfterAmendment.Adapter.Provider, endpoint.Provider, resolvedAfterAmendment.Adapter.EndpointModes, endpoint.Mode)
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)

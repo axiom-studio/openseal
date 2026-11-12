@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -237,7 +238,7 @@ func (s *ExternalConversationEndpointService) resolveAdapter(ctx context.Context
 		return nil, fmt.Errorf("%w: resolve exact Skill adapter: %v", ErrInvalidExternalConversation, err)
 	}
 	if (endpoint.Provider != "" && resolved.Adapter.Provider != endpoint.Provider) ||
-		!containsConversationEndpointMode(resolved.Adapter.EndpointModes, endpoint.Mode) {
+		!slices.Contains(resolved.Adapter.EndpointModes, endpoint.Mode) {
 		return nil, fmt.Errorf("%w: exact Skill adapter does not match endpoint", ErrInvalidExternalConversation)
 	}
 	return resolved, nil

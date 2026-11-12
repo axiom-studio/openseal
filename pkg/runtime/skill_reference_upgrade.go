@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -168,7 +169,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 			continue
 		}
 		adapter, ok := target.ConversationAdapters[endpoint.Adapter.AdapterID]
-		if !ok || adapter.Provider != endpoint.Provider || !containsConversationEndpointMode(adapter.EndpointModes, endpoint.Mode) ||
+		if !ok || adapter.Provider != endpoint.Provider || !slices.Contains(adapter.EndpointModes, endpoint.Mode) ||
 			endpoint.Policy.Validate(endpoint.Mode, adapter.Features) != nil {
 			return nil, fmt.Errorf("%w: conversation endpoint %s is incompatible with target adapter %s", models.ErrSkillReferenceUpgradeInvalid, endpoint.ID, endpoint.Adapter.AdapterID)
 		}
@@ -871,13 +872,4 @@ func cloneUpgradeBinding(value *skill.Binding) *skill.Binding {
 	var copy skill.Binding
 	_ = json.Unmarshal(payload, &copy)
 	return &copy
-}
-
-func containsConversationEndpointMode(values []capability.ConversationEndpointMode, wanted capability.ConversationEndpointMode) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
 }
