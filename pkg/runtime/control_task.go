@@ -50,11 +50,21 @@ func (startTaskHandler) spec(ControlAuthority) ControlToolSpec {
 }
 
 func (startTaskHandler) decode(raw json.RawMessage) (interface{}, error) {
-	value, err := decodeControlInto[startTaskArgs](raw)
+	args, err := parseStartTaskArgs(raw)
 	if err != nil {
 		return nil, err
 	}
-	args := value.(*startTaskArgs)
+	return args, nil
+}
+
+// parseStartTaskArgs strictly decodes and checks the arguments of a
+// conversation_start_task call: a trimmed goal and acknowledgment within
+// their limits.
+func parseStartTaskArgs(raw json.RawMessage) (*startTaskArgs, error) {
+	args := &startTaskArgs{}
+	if err := decodeControlArguments(raw, args); err != nil {
+		return nil, err
+	}
 	args.Goal = strings.TrimSpace(args.Goal)
 	args.Acknowledgment = strings.TrimSpace(args.Acknowledgment)
 	if args.Goal == "" || len(args.Goal) > maximumStartTaskGoalBytes || !utf8.ValidString(args.Goal) {
@@ -74,11 +84,11 @@ func startTaskArguments(entry *SessionEntry) *startTaskArgs {
 		entry.Tool.ArgumentsError != "" {
 		return nil
 	}
-	value, err := (startTaskHandler{}).decode(entry.Tool.Arguments)
+	args, err := parseStartTaskArgs(entry.Tool.Arguments)
 	if err != nil {
 		return nil
 	}
-	return value.(*startTaskArgs)
+	return args
 }
 
 // startTaskKey is the idempotency key of the task an entry starts (§3.4).

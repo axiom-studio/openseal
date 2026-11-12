@@ -96,11 +96,20 @@ func (askUserHandler) spec(ControlAuthority) ControlToolSpec {
 }
 
 func (askUserHandler) decode(raw json.RawMessage) (interface{}, error) {
-	value, err := decodeControlInto[askUserArgs](raw)
+	args, err := parseAskUserArgs(raw)
 	if err != nil {
 		return nil, err
 	}
-	args := value.(*askUserArgs)
+	return args, nil
+}
+
+// parseAskUserArgs strictly decodes and checks the arguments of an ask_user
+// call: a trimmed question and, when given, distinct trimmed options.
+func parseAskUserArgs(raw json.RawMessage) (*askUserArgs, error) {
+	args := &askUserArgs{}
+	if err := decodeControlArguments(raw, args); err != nil {
+		return nil, err
+	}
 	question := strings.TrimSpace(args.Question)
 	if question == "" {
 		return nil, errors.New("question must not be empty")
@@ -141,11 +150,11 @@ func askUserEntryArgs(entry *SessionEntry) *askUserArgs {
 	if entry == nil || entry.Type != SessionEntryTool || entry.Tool == nil || entry.Tool.Name != string(ControlToolAskUser) {
 		return nil
 	}
-	value, err := (askUserHandler{}).decode(entry.Tool.Arguments)
+	args, err := parseAskUserArgs(entry.Tool.Arguments)
 	if err != nil {
 		return nil
 	}
-	return value.(*askUserArgs)
+	return args
 }
 
 // askUserQuestion is the posted text of an ask_user entry: its trimmed
