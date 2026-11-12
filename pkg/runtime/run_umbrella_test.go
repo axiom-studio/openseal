@@ -13,10 +13,10 @@ import (
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
-// umbrellaCatalog serves the Team and Agent fixtures of resolverCatalog and
+// umbrellaCatalog serves the Team and Agent fixtures of bindingCatalog and
 // activates Skills through a real catalog.
 type umbrellaCatalog struct {
-	*resolverCatalog
+	*bindingCatalog
 	skills *skill.Catalog
 }
 
@@ -68,7 +68,7 @@ func newUmbrellaFixture(t *testing.T) (*umbrellaCatalog, Scope) {
 			Credentials: map[string]skill.CredentialReference{"access": {Kind: "oauth2", ID: "drive-" + deploymentID}},
 		}}}, nil
 	})
-	return &umbrellaCatalog{skills: catalog, resolverCatalog: &resolverCatalog{
+	return &umbrellaCatalog{skills: catalog, bindingCatalog: &bindingCatalog{
 		deployment: &kernelagent.AgentDeployment{ID: "member", Scope: skillScope, DefinitionID: "member", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive},
 		definition: &kernelagent.AgentDefinition{ID: "member", Version: "1", Purpose: "Help", SystemPrompt: "Help.", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelExternal}},
 		teamDeployment: &kernelteam.Deployment{
@@ -81,7 +81,7 @@ func newUmbrellaFixture(t *testing.T) (*umbrellaCatalog, Scope) {
 
 func umbrellaRunActions(t *testing.T, catalog *umbrellaCatalog, run *AgentRun) []string {
 	t.Helper()
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, bindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}

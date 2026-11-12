@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -115,7 +116,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	if task.SourceRun.Status != AgentRunStatusCompleted || task.WorkRun.ParentRunID != "" {
 		t.Fatal("fixture must be independent work whose source already completed")
 	}
-	claim := conversationTaskAdmissionClaim(time.Now().UTC().Add(time.Second), 0)
+	claim := storetest.ConversationTaskAdmissionClaim(time.Now().UTC().Add(time.Second), 0)
 	claim.WorkerID = "setup-worker"
 	run, err := store.ClaimNextAgentRun(t.Context(), claim)
 	if err != nil || run == nil || run.ID != task.WorkRun.ID {

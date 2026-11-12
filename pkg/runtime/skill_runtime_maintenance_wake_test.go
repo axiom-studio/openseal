@@ -13,7 +13,7 @@ import (
 
 func TestSkillRuntimeMaintenanceResolverErrorParksBeforeStartingTurn(t *testing.T) {
 	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
-		request := skillRuntimeMaintenanceEmptyRequest()
+		request := workerMaintenanceRequest()
 		request.Now = time.Now().UTC()
 		request.LeaseDuration = 2 * time.Minute
 		gate, err := store.(models.SkillRuntimeMaintenanceStore).AcquireSkillRuntimeMaintenance(t.Context(), request)
@@ -41,7 +41,7 @@ func TestSkillRuntimeMaintenanceResolverErrorParksBeforeStartingTurn(t *testing.
 		if err != nil || parked.Status != models.AgentRunStatusWaitingForDependency || parked.Error != "" || parked.Goal != run.Goal || parked.WakeCondition == nil || parked.WakeCondition.Reference != request.SkillID || parked.BudgetUsage.Turns != 0 {
 			t.Fatalf("runner resolution maintenance lost work: %#v %v", parked, err)
 		}
-		if _, err := store.(models.SkillRuntimeMaintenanceStore).CompleteSkillRuntimeMaintenance(t.Context(), skillRuntimeMaintenanceCompletion(gate, request.Now.Add(time.Second))); err != nil {
+		if _, err := store.(models.SkillRuntimeMaintenanceStore).CompleteSkillRuntimeMaintenance(t.Context(), workerMaintenanceCompletion(gate, request.Now.Add(time.Second))); err != nil {
 			t.Fatal(err)
 		}
 		result, err := agentrun.NewAgentRunWakeService(store, store).WakeDueTimers(t.Context(), request.Scope, request.Now.Add(2*time.Second))

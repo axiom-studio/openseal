@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimecontrol "github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
@@ -169,7 +170,7 @@ func settledWorkerTaskFixture(t *testing.T, store *sqlite.Store) (*models.AgentR
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "worker-task"}
 	conversations := conversation.NewConversationService(store)
-	seedTestSpace(t, store, scope)
+	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",
 	})
@@ -224,7 +225,7 @@ func workerTaskProposal() workerTaskProposalText {
 // without calling the model again: the task is admitted once, the source Run
 // completes with the acknowledgment, and the tool entry completes.
 func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	source, step, conversation, _ := settledWorkerTaskFixture(t, store)
 	expireRunLease(t, store, source)
 
@@ -270,7 +271,7 @@ func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
 // claim it (the first worker is gone).
 func expireRunLease(t *testing.T, store *sqlite.Store, run *models.AgentRun) {
 	t.Helper()
-	current := getStoredRun(t, store, run.Scope, run.ID)
+	current := workerStoredRun(t, store, run.Scope, run.ID)
 	past := time.Now().UTC().Add(-time.Second)
 	current.LeaseExpiresAt = &past
 	current.Revision++

@@ -14,7 +14,7 @@ import (
 )
 
 func TestAcceptedRunRecoveryPreservesUnprovableLegacyWorkWithoutAutomaticRetriesAcrossStores(t *testing.T) {
-	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
+	forWorkerRunStores(t, func(t *testing.T, fixture workerRunStoreFixture) {
 		store := fixture.store.(models.KernelStore)
 		scope := models.Scope{Kind: "tenant", ID: "legacy-recovery"}
 		original, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
@@ -25,7 +25,7 @@ func TestAcceptedRunRecoveryPreservesUnprovableLegacyWorkWithoutAutomaticRetries
 		if err != nil {
 			t.Fatal(err)
 		}
-		deployment, definition := acceptedMethodFixture(scope)
+		deployment, definition := workerAcceptedMethodFixture(scope)
 		catalog := &resolverCatalog{deployment: deployment, definition: definition, activation: &skill.ActivationSnapshot{SnapshotID: "live", Scope: skill.ScopeReference(scope), DeploymentID: deployment.ID}}
 		resolver := TurnRunnerResolverFunc(func(ctx context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			binding, err := ResolveLoopBinding(ctx, catalog, run, loopBindingTestConfig(t, store, nil))

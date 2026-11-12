@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -126,7 +127,7 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Team member task start = %v", err)
 	}
-	work, err := store.ClaimNextAgentRun(ctx, conversationTaskAdmissionClaim(time.Now().UTC().Add(time.Second), 0))
+	work, err := store.ClaimNextAgentRun(ctx, storetest.ConversationTaskAdmissionClaim(time.Now().UTC().Add(time.Second), 0))
 	if err != nil || work == nil || work.ID != task.WorkRun.ID {
 		t.Fatalf("claim Team task: %#v %v", work, err)
 	}

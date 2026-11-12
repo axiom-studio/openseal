@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -25,7 +26,7 @@ func continuationLifecycleFixture(t *testing.T, store *sqlite.Store, id string) 
 	t.Helper()
 	service := conversation.NewConversationService(store)
 	scope := models.Scope{Kind: "tenant", ID: id}
-	seedTestSpace(t, store, scope)
+	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: id,
 	})
@@ -47,11 +48,11 @@ func backdateContinuationLifecycleRun(t *testing.T, store *sqlite.Store, db *sql
 	t.Helper()
 	storetest.ExecSQL(t, db, `UPDATE agent_runs SET created_at = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, createdAt, run.Scope.Kind, run.Scope.ID, run.ID)
 	storetest.RewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(stored *models.AgentRun) { stored.CreatedAt = createdAt })
-	return getStoredRun(t, store, run.Scope, run.ID)
+	return workerStoredRun(t, store, run.Scope, run.ID)
 }
 
 func TestConversationTaskContinuationReconcilesQueuedRunFromCreationTime(t *testing.T) {
-	store, db := newTestSQLiteStore(t)
+	store, db := newWorkerSQLiteStore(t)
 	run, conversation, _ := continuationLifecycleFixture(t, store, "queued-continuation")
 	now := time.Now().UTC()
 	run = backdateContinuationLifecycleRun(t, store, db, run, now.Add(-models.ConversationTaskForegroundTimeout))
@@ -85,7 +86,7 @@ func TestAgentRunWorkerKeepsForegroundDuringSlowResolution(t *testing.T) {
 func testAgentRunWorkerKeepsForegroundPastDeadline(t *testing.T, resolving bool) {
 	t.Helper()
 	synctest.Test(t, func(t *testing.T) {
-		store := newTestKernelStore(t)
+		store := conversationtest.NewStore(t)
 		run, conversation, trigger := continuationLifecycleFixture(t, store, "slow-foreground")
 		claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: run.Scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 		if err != nil || claimed == nil {
@@ -180,7 +181,7 @@ func (p *promotionTurnPublisher) PublishTurnOutput(ctx context.Context, run *mod
 }
 
 func TestAgentRunWorkerContinuationAbsorbsNativeTaskProposal(t *testing.T) {
-	store, db := newTestSQLiteStore(t)
+	store, db := newWorkerSQLiteStore(t)
 	run, conversation, _ := continuationLifecycleFixture(t, store, "native-continuation")
 	run = backdateContinuationLifecycleRun(t, store, db, run, time.Now().Add(-models.ConversationTaskForegroundTimeout-time.Second))
 	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: run.Scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
@@ -223,7 +224,7 @@ func TestAgentRunWorkerKeepsForegroundDuringSlowTurn(t *testing.T) {
 
 func TestAgentRunWorkerKeepsQueuedForegroundPastDeadlineWithSaturatedLimiter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		store := newTestKernelStore(t)
+		store := conversationtest.NewStore(t)
 		run, conversation, trigger := continuationLifecycleFixture(t, store, "limited-foreground")
 		var modelCalls atomic.Int32
 		pool := workerTaskPool(t, store, run.Scope, &workerTaskProducer{reply: func(context.Context, int, agentrun.StepInput) (agentrun.StepOutput, error) {
@@ -254,7 +255,7 @@ func TestAgentRunWorkerKeepsQueuedForegroundPastDeadlineWithSaturatedLimiter(t *
 func TestConversationRunReconcilerKeepsAgedRunsForeground(t *testing.T) {
 	for _, status := range []models.AgentRunStatus{models.AgentRunStatusQueued, models.AgentRunStatusRunning} {
 		t.Run(string(status), func(t *testing.T) {
-			store, db := newTestSQLiteStore(t)
+			store, db := newWorkerSQLiteStore(t)
 			run, conversation, trigger := continuationLifecycleFixture(t, store, "reconcile-foreground")
 			run = backdateContinuationLifecycleRun(t, store, db, run, time.Now().Add(-time.Minute))
 			if status == models.AgentRunStatusRunning {

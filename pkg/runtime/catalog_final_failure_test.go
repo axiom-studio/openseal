@@ -17,7 +17,7 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 	for _, owner := range []ObjectiveOwner{{Type: OwnerTypeAgent, ID: "seal"}, {Type: OwnerTypeTeam, ID: "team"}} {
 		t.Run(string(owner.Type), func(t *testing.T) {
 			scope := Scope{Kind: "tenant", ID: "11"}
-			catalog := &resolverCatalog{
+			catalog := &bindingCatalog{
 				deployment: &kernelagent.AgentDeployment{
 					ID: "seal", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "seal",
 					ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
@@ -32,7 +32,7 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 				Goal: "Explain the stopped attempt", Context: map[string]interface{}{},
 				FailureExplanation: &RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "action_failed", Message: "The image service rejected the request."},
 			}
-			config := loopBindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{})
+			config := bindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{})
 			config.SkillHosts = SkillHostCapabilityResolverFunc(func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error) {
 				t.Fatal("failure explanation attempted runtime preparation")
 				return nil, nil

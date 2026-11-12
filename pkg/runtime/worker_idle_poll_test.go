@@ -302,7 +302,7 @@ func TestAgentRunWorkerObservesTimerDeadlineWithoutWaitingForFallback(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer := &workerLoopProducer{steps: 1, wakeIn: 30 * time.Millisecond}
+	producer := &timerStepProducer{steps: 1, wakeIn: 30 * time.Millisecond}
 	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return &agentrun.TurnRunnerBinding{DefinitionID: "agent", DefinitionVersion: "1", Producer: producer}, nil
 	}), nil, AgentRunWorkerConfig{Scope: scope, PollInterval: time.Hour})

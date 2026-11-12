@@ -11,6 +11,7 @@ import (
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimecollaboration "github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -22,7 +23,7 @@ import (
 // activity filters the finalizer asks for.
 type terminalFinalizerStore struct {
 	*sqlite.Store
-	actions         actionCallRecords
+	actions         workerActionCalls
 	activityFilters []models.ActivityFilter
 }
 
@@ -37,7 +38,7 @@ func (s *terminalFinalizerStore) ListActivity(ctx context.Context, filter models
 
 func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *testing.T) {
 	ctx := context.Background()
-	store := &terminalFinalizerStore{Store: newTestKernelStore(t)}
+	store := &terminalFinalizerStore{Store: conversationtest.NewStore(t)}
 	catalog := skill.NewCatalog()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	definition := &skill.Definition{
@@ -137,7 +138,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 
 func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t *testing.T) {
 	ctx := context.Background()
-	store := &terminalFinalizerStore{Store: newTestKernelStore(t)}
+	store := &terminalFinalizerStore{Store: conversationtest.NewStore(t)}
 	catalog := skill.NewCatalog()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	definition := &skill.Definition{
@@ -200,7 +201,7 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 
 func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	start := time.Date(2026, 7, 31, 8, 0, 0, 0, time.UTC)
 	for index := range 205 {
@@ -259,7 +260,7 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 
 func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "canceled-child"}
 	portfolio := portfolio.NewPortfolioService(store)
 	parent, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
@@ -315,7 +316,7 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 
 func TestTerminalRunReconciliationCancelsOrphanedDescendantsAfterRestart(t *testing.T) {
 	ctx := t.Context()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "terminal-cascade"}
 	service := agentrun.NewRunCommandService(store)
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}

@@ -16,15 +16,9 @@ type conversationTaskAdmissionTestStore = storetest.ConversationTaskAdmissionSto
 
 func forConversationTaskAdmissionStores(t *testing.T, test func(*testing.T, conversationTaskAdmissionTestStore)) {
 	t.Helper()
-	forConversationTaskSQLStores(t, func(t *testing.T, fixture conversationTaskSQLTestFixture) {
+	forWorkerTaskStores(t, func(t *testing.T, fixture workerTaskStoreFixture) {
 		test(t, fixture.store.(conversationTaskAdmissionTestStore))
 	})
-}
-
-// conversationTaskAdmissionClaim is storetest.ConversationTaskAdmissionClaim
-// for the runtime tests that call it by this name.
-func conversationTaskAdmissionClaim(now time.Time, reserve int) models.AgentRunClaim {
-	return storetest.ConversationTaskAdmissionClaim(now, reserve)
 }
 
 func assertTaskAdmissionBlocked(t *testing.T, decision *models.AgentRunAdmissionDecision, id string, reason models.AgentRunAdmissionReason, limit int) {
@@ -72,7 +66,7 @@ func TestConversationTaskForegroundReserveLeavesFourthSlotForConversation(t *tes
 		if err := store.CreateAgentRun(t.Context(), foreground); err != nil {
 			t.Fatal(err)
 		}
-		claim := conversationTaskAdmissionClaim(now, 0)
+		claim := storetest.ConversationTaskAdmissionClaim(now, 0)
 		claim.Kind = models.RunKindConversation
 		claimed, err := store.ClaimNextAgentRun(t.Context(), claim)
 		if err != nil || claimed == nil || claimed.ID != foreground.ID {
@@ -102,7 +96,7 @@ func TestConversationTaskForegroundReserveSerializesConcurrentClaims(t *testing.
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				claim := conversationTaskAdmissionClaim(now, 1)
+				claim := storetest.ConversationTaskAdmissionClaim(now, 1)
 				claim.WorkerID = fmt.Sprintf("worker-%d", i)
 				run, err := store.ClaimNextAgentRun(t.Context(), claim)
 				if err != nil {
@@ -130,7 +124,7 @@ func TestConversationTaskForegroundReserveAllowsThirdTaskAfterForeground(t *test
 		for i := range tasks {
 			tasks[i] = storetest.CreateConversationTaskAdmissionTask(t, store, fmt.Sprintf("order-%d", i))
 		}
-		claim := conversationTaskAdmissionClaim(time.Now().Add(time.Second), 1)
+		claim := storetest.ConversationTaskAdmissionClaim(time.Now().Add(time.Second), 1)
 		for i := 0; i < 2; i++ {
 			run, err := store.ClaimNextAgentRun(t.Context(), claim)
 			if err != nil || run == nil {
@@ -161,7 +155,7 @@ func TestConversationTaskForegroundReserveCoversPersistedForks(t *testing.T) {
 		// A waiting task parent does not count as a live claim. Its verified forks do.
 		root := models.CloneAgentRun(task.WorkRun)
 		root.Status, root.Revision = models.AgentRunStatusWaitingForDependency, root.Revision+1
-		updateConversationTaskSQLRun(t, store, root, task.WorkRun.Revision)
+		storetest.UpdateRun(t, store, root, task.WorkRun.Revision)
 		parent := root
 		for i := 0; i < 4; i++ {
 			child := models.CloneAgentRun(task.WorkRun)
@@ -176,7 +170,7 @@ func TestConversationTaskForegroundReserveCoversPersistedForks(t *testing.T) {
 			}
 			parent = child
 		}
-		decision, err := store.ClaimNextAgentRunWithDecision(t.Context(), conversationTaskAdmissionClaim(time.Now().Add(time.Second), 1))
+		decision, err := store.ClaimNextAgentRunWithDecision(t.Context(), storetest.ConversationTaskAdmissionClaim(time.Now().Add(time.Second), 1))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,11 +195,11 @@ func TestConversationTaskForegroundReserveRejectsForgedAuthority(t *testing.T) {
 				if scenario == "source" {
 					candidate.Context[models.ConversationRunTriggerIDContextKey] = "other-source"
 					candidate.Revision++
-					updateConversationTaskSQLRun(t, store, candidate, result.WorkRun.Revision)
+					storetest.UpdateRun(t, store, candidate, result.WorkRun.Revision)
 				} else if scenario != "actor" {
 					root := models.CloneAgentRun(result.WorkRun)
 					root.Status, root.Revision = models.AgentRunStatusWaitingForDependency, root.Revision+1
-					updateConversationTaskSQLRun(t, store, root, result.WorkRun.Revision)
+					storetest.UpdateRun(t, store, root, result.WorkRun.Revision)
 					candidate.ID, candidate.ParentRunID, candidate.Source = "candidate-"+scenario, root.ID, models.RunSourceFork
 					candidate.ConcurrencyKey = "fork:" + candidate.ID
 					switch scenario {
@@ -224,7 +218,7 @@ func TestConversationTaskForegroundReserveRejectsForgedAuthority(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				claim := conversationTaskAdmissionClaim(time.Now().Add(time.Second), 1)
+				claim := storetest.ConversationTaskAdmissionClaim(time.Now().Add(time.Second), 1)
 				claim.AssignedAgentID = candidate.AssignedAgentID
 				decision, err := store.ClaimNextAgentRunWithDecision(t.Context(), claim)
 				if err != nil {
@@ -240,7 +234,7 @@ func TestConversationTaskForegroundReservePreservesOrdinaryAndDefaultPolicy(t *t
 	forConversationTaskAdmissionStores(t, func(t *testing.T, store conversationTaskAdmissionTestStore) {
 		for i := 0; i < 4; i++ {
 			task := storetest.CreateConversationTaskAdmissionTask(t, store, fmt.Sprintf("default-%d", i))
-			claim := conversationTaskAdmissionClaim(time.Now().Add(time.Second), 0)
+			claim := storetest.ConversationTaskAdmissionClaim(time.Now().Add(time.Second), 0)
 			run, err := store.ClaimNextAgentRun(t.Context(), claim)
 			if err != nil || run == nil || run.ID != task.WorkRun.ID {
 				t.Fatalf("zero reserve claim %d: %#v %v", i, run, err)
@@ -258,7 +252,7 @@ func TestConversationTaskForegroundReservePreservesOrdinaryAndDefaultPolicy(t *t
 				t.Fatal(err)
 			}
 		}
-		claim := conversationTaskAdmissionClaim(time.Now(), 1)
+		claim := storetest.ConversationTaskAdmissionClaim(time.Now(), 1)
 		for i := 0; i < 4; i++ {
 			run, err := store.ClaimNextAgentRun(t.Context(), claim)
 			if err != nil || run == nil {
@@ -274,7 +268,7 @@ func TestConversationTaskForegroundReservePreservesOrdinaryAndDefaultPolicy(t *t
 }
 
 func TestConversationTaskForegroundReserveZeroDoesNotReadTaskProof(t *testing.T) {
-	claim := conversationTaskAdmissionClaim(time.Now(), 0)
+	claim := storetest.ConversationTaskAdmissionClaim(time.Now(), 0)
 	lookup := models.ConversationTaskAdmissionLookup{Task: func(context.Context, models.Scope, string) (*models.ConversationTask, error) {
 		panic("zero reserve read task proof")
 	}}

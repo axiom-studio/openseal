@@ -266,9 +266,9 @@ func TestConversationTaskContinuationFailureUsesSanitizedReply(t *testing.T) {
 func promotedContinuationFixture(t *testing.T, id string) (*sqlite.Store, *models.ConversationTaskResult, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
 	store, db := newTestSQLiteStore(t)
-	run, conversation, message := continuationLifecycleFixture(t, store, id)
+	run, conversation, message := continuationRunFixture(t, store, id)
 	now := time.Now().UTC()
-	run = backdateContinuationLifecycleRun(t, store, db, run, now.Add(-models.ConversationTaskForegroundTimeout-time.Second))
+	run = backdateContinuationRun(t, store, db, run, now.Add(-models.ConversationTaskForegroundTimeout-time.Second))
 	result, err := store.PromoteConversationTask(t.Context(), models.ConversationTaskPromotionRequest{Scope: run.Scope, RunID: run.ID, Now: now})
 	if err != nil || result == nil {
 		t.Fatalf("promote continuation: %#v %v", result, err)

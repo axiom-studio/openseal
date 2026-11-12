@@ -13,12 +13,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun/agentruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
 )
 
 func TestAgentRunWorkerDependencyRepairPreservesTypedJoinAny(t *testing.T) {
-	forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+	forWorkerDependencyStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
 		fixture := agentruntest.NewDependencyFixtureWithPolicy(t, store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureWait})
 		finishOwnedDependencyRepairChild(t, fixture, "alpha")
 		pool := newDependencyRepairTestPool(t, store, fixture.Scope)
@@ -32,7 +33,7 @@ func TestAgentRunWorkerDependencyRepairPreservesTypedJoinAny(t *testing.T) {
 }
 
 func TestAgentRunWorkerFinalizerRecoversWinnerCommitBeforeLoserCancellation(t *testing.T) {
-	forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+	forWorkerDependencyStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
 		fixture := agentruntest.NewDependencyFixtureWithPolicy(t, store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureWait})
 		winner := finishOwnedDependencyRepairChild(t, fixture, "alpha")
 		// Persist only fan-in to represent the durable state after a process
@@ -62,7 +63,7 @@ func TestAgentRunWorkerFinalizerRecoversWinnerCommitBeforeLoserCancellation(t *t
 }
 
 func TestAgentRunWorkerTerminalSourceFinalizerRecoversRemainingOwnedChild(t *testing.T) {
-	forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+	forWorkerDependencyStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
 		fixture := agentruntest.NewDependencyFixtureWithPolicy(t, store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureWait})
 		winner := finishOwnedDependencyRepairChild(t, fixture, "alpha")
 		if _, err := fixture.Coordinator().ReconcileRunDependencyGroup(t.Context(), fixture.Request(t)); err != nil {
@@ -108,7 +109,7 @@ func finishOwnedDependencyRepairChild(t *testing.T, fixture *agentruntest.Depend
 }
 
 func TestAgentRunWorkerDependencyRetirementLeavesIndependentTargetsUntouched(t *testing.T) {
-	forDependencyRetirementStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
+	forWorkerDependencyStores(t, func(t *testing.T, store agentruntest.DependencyStore) {
 		fixture := agentruntest.NewDependencyFixtureWithPolicy(t, store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureWait})
 		fixture.FinishChild(t, "alpha", models.AgentRunStatusCompleted)
 		fixture.TerminateSource(t, models.AgentRunStatusCanceled)
@@ -139,7 +140,7 @@ func (s *dependencyRepairReadCountingStore) ListAgentRuns(ctx context.Context, f
 }
 
 func TestAgentRunWorkerIdleDependencyMetadataDoesNotHydrateRunsOrHistory(t *testing.T) {
-	store := &dependencyRepairReadCountingStore{Store: newTestKernelStore(t)}
+	store := &dependencyRepairReadCountingStore{Store: conversationtest.NewStore(t)}
 	fixture := agentruntest.NewDependencyFixtureWithPolicy(t, store.Store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureWait})
 	pool := newDependencyRepairTestPool(t, store, fixture.Scope)
 	for range 5 {

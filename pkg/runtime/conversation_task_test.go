@@ -10,14 +10,16 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
 	service := conversationrun.NewConversationTaskService(store)
 	req := conversationruntest.TaskStartRequest(t, store, source, turn)
@@ -81,7 +83,7 @@ func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
 func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) {
 	for _, cancel := range []bool{false, true} {
 		t.Run(map[bool]string{false: "lease expired", true: "source cancelled"}[cancel], func(t *testing.T) {
-			store := newTestKernelStore(t)
+			store := conversationtest.NewStore(t)
 			source, turn, conversation, _ := settledWorkerTaskFixture(t, store)
 			if cancel {
 				_, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: source.Scope, RunID: source.ID, ExpectedRevision: source.Revision, Kind: agentrun.AgentRunCommandCancel, Actor: models.ActivityActor{Type: "user", ID: "sender-user"}, Summary: "Cancel pending foreground"})
@@ -103,7 +105,7 @@ func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) 
 }
 
 func TestConversationTaskTransfersOnlyRemainingSourceBudget(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	source, turn, _, _ := settledWorkerTaskFixture(t, store)
 	previous := source.Revision
 	source.Budget = &models.BudgetPolicy{MaxAttempts: 10, MaxTurns: 10, MaxInputTokens: 60000, MaxOutputTokens: 40000, MaxTotalTokens: 100000, MaxCostMicros: 1000000, MaxDurationMS: 600000, MaxActions: 10}
@@ -112,7 +114,7 @@ func TestConversationTaskTransfersOnlyRemainingSourceBudget(t *testing.T) {
 	source.Deadline = &deadline
 	source.Revision++
 	source.UpdatedAt = time.Now()
-	updateConversationTaskSQLRun(t, store, source, previous)
+	storetest.UpdateRun(t, store, source, previous)
 	result, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
@@ -138,10 +140,10 @@ func TestConversationTaskTransfersOnlyRemainingSourceBudget(t *testing.T) {
 func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T) {
 	for _, threaded := range []bool{false, true} {
 		t.Run(map[bool]string{false: "directed question", true: "private thread"}[threaded], func(t *testing.T) {
-			store := newTestKernelStore(t)
+			store := conversationtest.NewStore(t)
 			service := runtimeconversation.NewConversationService(store)
 			scope := models.Scope{Kind: "tenant", ID: "private-task"}
-			seedTestSpace(t, store, scope)
+			conversationtest.SeedSpace(t, store, scope)
 			conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Private question", IdempotencyKey: "private-task"})
 			if err != nil {
 				t.Fatal(err)
@@ -222,7 +224,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 }
 
 func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
 	first, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, source, turn))
 	if err != nil {

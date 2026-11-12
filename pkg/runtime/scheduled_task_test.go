@@ -404,8 +404,8 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 	}
 	runs, _ := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: source.Scope, ObjectiveID: a.ObjectiveID, Limit: 10})
 	run := runs[0]
-	c := &resolverCatalog{deployment: &kernelagent.AgentDeployment{ID: run.AssignedAgentID, DefinitionID: "researcher", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}, definition: &kernelagent.AgentDefinition{ID: "researcher", Version: "1", Purpose: "Research", SystemPrompt: "Use current tools"}, activation: &skill.ActivationSnapshot{SnapshotID: "live", Scope: skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, DeploymentID: run.AssignedAgentID, Skills: []skill.ActivatedSkill{{SkillID: "browser", SkillVersion: "1", Actions: []capability.ModelAction{{Name: "browser.read", SkillID: "browser", Version: "1", Action: "read"}}}}}}
-	config := loopBindingTestConfig(t, store, &modelsteptest.RecordingStepHost{})
+	c := &bindingCatalog{deployment: &kernelagent.AgentDeployment{ID: run.AssignedAgentID, DefinitionID: "researcher", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}, definition: &kernelagent.AgentDefinition{ID: "researcher", Version: "1", Purpose: "Research", SystemPrompt: "Use current tools"}, activation: &skill.ActivationSnapshot{SnapshotID: "live", Scope: skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, DeploymentID: run.AssignedAgentID, Skills: []skill.ActivatedSkill{{SkillID: "browser", SkillVersion: "1", Actions: []capability.ModelAction{{Name: "browser.read", SkillID: "browser", Version: "1", Action: "read"}}}}}}
+	config := bindingTestConfig(t, store, &modelsteptest.RecordingStepHost{})
 	b, err := ResolveLoopBinding(t.Context(), c, run, config)
 	if err != nil || len(b.ModelActions) != 1 {
 		t.Fatalf("live authority=%#v,%v", b, err)
