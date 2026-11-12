@@ -41,7 +41,7 @@ const (
 	CapabilityNoteUnavailable = "unavailable"
 	CapabilityNoteGuidance    = "guidance"
 
-	// capabilityNoteApprovalKey is the conversation's approval mode, a
+	// CapabilityNoteApprovalKey is the conversation's approval mode, a
 	// guidance paragraph: a changed mode shows as the new paragraph.
 	CapabilityNoteApprovalKey = "guide:approval_mode"
 )
@@ -68,7 +68,7 @@ const (
 	capabilityNoteNoCatalog    = "Every capability you can use is declared as a tool; nothing needs loading."
 )
 
-// capabilityNoteItem is one line (or guidance paragraph) of the listing. Key
+// CapabilityNoteItem is one line (or guidance paragraph) of the listing. Key
 // is unique in a listing and names the item in a "no longer available" line.
 type CapabilityNoteItem struct {
 	Key     string
@@ -76,7 +76,7 @@ type CapabilityNoteItem struct {
 	Text    string
 }
 
-// capabilityListing is the current listing of one step.
+// CapabilityListing is the current listing of one step.
 type CapabilityListing struct {
 	Mode  string
 	Items []CapabilityNoteItem
@@ -302,7 +302,7 @@ func ensureCapabilityNote(ctx context.Context, store capabilityNoteAppender, in 
 // ---------------------------------------------------------------------------
 // The catalog preparer's listing
 
-// controlTargetItems are the Agents delegate and fork accept and the
+// ControlTargetItems are the Agents delegate and fork accept and the
 // operations run_operation starts. Their tools carry no list or enum, so a
 // new Agent or operation never changes a tool definition; each handler
 // validates the target it is given.

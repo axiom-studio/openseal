@@ -78,6 +78,8 @@ type runActivityCompactionBudget struct {
 	now      func() time.Time
 }
 
+// NewRunActivityCompactionBudget reserves and settles compaction calls on
+// the run's budget through run activity.
 func NewRunActivityCompactionBudget(runs models.AgentRunReader, activity *activity.RunActivityService, now func() time.Time) compactionBudget {
 	if now == nil {
 		now = time.Now
@@ -171,7 +173,7 @@ func addModelStepUsage(total, delta models.ModelStepUsage) models.ModelStepUsage
 // rejection that forced an overflow compaction.
 type compactionPressureKey struct{}
 
-// withCompactionPressure attaches the context failure's pressure for Compact
+// WithCompactionPressure attaches the context failure's pressure for Compact
 // (force). The loop passes TurnHostFailure.ContextPressure: when the path has
 // no known window, the overflow compaction sizes its calls from it.
 func WithCompactionPressure(ctx context.Context, pressure *HostedContextPressure) context.Context {
@@ -263,7 +265,7 @@ func (c *LoopCompactor) CompactIfNeeded(ctx context.Context, in agentrun.StepInp
 
 // Compact compacts now: force=true is the overflow compaction after a length
 // rejection (the loop attaches the rejection's pressure with
-// withCompactionPressure), force=false a threshold compaction without the
+// WithCompactionPressure), force=false a threshold compaction without the
 // Due check.
 func (c *LoopCompactor) Compact(ctx context.Context, in agentrun.StepInput, force bool) (models.ModelStepUsage, error) {
 	if force {

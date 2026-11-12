@@ -7,7 +7,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
-// validateStepOutput checks a producer's output against its kind.
+// ValidateStepOutput checks a producer's output against its kind.
 func ValidateStepOutput(kind models.StepProducerKind, out agentrun.StepOutput) error {
 	if err := out.Usage.Validate(); err != nil {
 		return agentrun.InvalidStepOutputf("%v", err)

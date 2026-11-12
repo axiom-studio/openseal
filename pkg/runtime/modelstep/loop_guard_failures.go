@@ -22,7 +22,7 @@ const (
 	runFailureMessageCompactionFailed = "The conversation could not be compacted to fit the model's context."
 )
 
-// guardRunFailure is one guard failure as the loop reports it. Explainable
+// GuardRunFailure is one guard failure as the loop reports it. Explainable
 // failures get the loop's one tool-free explanation step before the Run ends;
 // the context failures do not, because no model call can fit.
 type GuardRunFailure struct {
@@ -51,7 +51,7 @@ var guardRunFailures = map[string]GuardRunFailure{
 	},
 }
 
-// guardRunFailureFor returns the guard failure for code, or false when code
+// GuardRunFailureFor returns the guard failure for code, or false when code
 // is not a guard failure code.
 func GuardRunFailureFor(code string) (GuardRunFailure, bool) {
 	failure, ok := guardRunFailures[code]

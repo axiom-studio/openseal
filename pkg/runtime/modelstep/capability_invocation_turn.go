@@ -108,7 +108,7 @@ func (p *CapabilityInvocationStepProducer) Produce(ctx context.Context, in agent
 	}}, nil
 }
 
-// producerGovernedToolCall builds a deterministic producer's governed tool
+// ProducerGovernedToolCall builds a deterministic producer's governed tool
 // call pinned to the selected binding and Skill version.
 func ProducerGovernedToolCall(id string, selected *capability.ModelAction, arguments map[string]interface{}, directive *agentrun.ToolCallDirective) (agentrun.LoopToolCall, error) {
 	raw, err := json.Marshal(arguments)
@@ -128,7 +128,7 @@ func producerCallMatches(call *models.ActionCall, selected *capability.ModelActi
 	return call.SkillID == selected.SkillID && call.SkillVersion == selected.Version && call.Action == selected.Action
 }
 
-// producerToolResult returns the latest terminal tool entry the Run recorded
+// ProducerToolResult returns the latest terminal tool entry the Run recorded
 // for toolCallID on its session path, with the ActionCall behind it (nil when
 // the call was refused before any row existed). It returns nil, nil, nil when
 // the producer has not asked for that call yet. An entry that is still open
@@ -178,6 +178,8 @@ func ProducerToolResult(ctx context.Context, calls models.ActionCallReader, run 
 	return result, call, nil
 }
 
+// IsTerminalApprovalActionStatus reports whether an action call in status
+// has finished, so its approval can no longer change.
 func IsTerminalApprovalActionStatus(status models.ActionCallStatus) bool {
 	switch status {
 	case models.ActionCallStatusSucceeded, models.ActionCallStatusFailed, models.ActionCallStatusDenied,

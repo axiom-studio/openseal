@@ -23,7 +23,7 @@ type SurfacedLoad struct {
 	Tools   []models.SurfacedTool
 }
 
-// surfacedTool freezes a step tool definition.
+// NewSurfacedTool freezes a step tool definition.
 func NewSurfacedTool(capabilityID string, tool models.ModelStepTool) models.SurfacedTool {
 	return models.SurfacedTool{
 		Capability: capabilityID, Name: tool.Name, Description: tool.Description,
@@ -146,7 +146,7 @@ func carriedToolsAfter(previous *models.CompactionEntry, summarized []*models.Se
 	return models.CloneSurfacedTools(carried)
 }
 
-// applySurfaces completes the step's tools with the loaded group of the
+// ApplySurfaces completes the step's tools with the loaded group of the
 // rendered path: tools carried over the compaction (and the rare load whose
 // entry did not render) are callable from the start; every other surfaced
 // tool carries the id of its load entry, which lists it in Surfaces. base

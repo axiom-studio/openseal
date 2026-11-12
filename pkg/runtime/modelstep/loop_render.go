@@ -85,7 +85,7 @@ type renderActionCalls interface {
 	GetActionCall(ctx context.Context, scope models.Scope, actionID string) (*models.ActionCall, error)
 }
 
-// sessionRenderOptions are the sources and binding facts of one render.
+// SessionRenderOptions are the sources and binding facts of one render.
 type SessionRenderOptions struct {
 	// ImageInput is true when the bound model accepts image input (the
 	// catalog modality the binding resolved). When false no image bytes are
@@ -96,7 +96,7 @@ type SessionRenderOptions struct {
 	Actions    renderActionCalls
 }
 
-// projectSessionPath renders path in model step order. A store error other
+// ProjectSessionPath renders path in model step order. A store error other
 // than a missing artifact or call is returned; a missing or mismatched image
 // renders as text.
 func ProjectSessionPath(ctx context.Context, path *models.AgentSessionPath, opts SessionRenderOptions) ([]models.SessionEntryView, error) {

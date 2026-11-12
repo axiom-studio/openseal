@@ -25,7 +25,7 @@ type GovernedToolInput struct {
 	ReviewSummary     string // reviewContext.summary or _reviewSummary, trimmed
 }
 
-// governedInputDirective is the governance part of a deterministic
+// GovernedInputDirective is the governance part of a deterministic
 // producer's tool call directive (ToolCallDirective's Summary,
 // ExternalOperation, ReviewContext and EvidenceRefs). With a directive the raw input is the
 // plain action arguments, never the review envelope.
@@ -179,7 +179,7 @@ func cloneExternalOperationIdentity(operation *activity.ExternalOperationIdentit
 	return &cloned
 }
 
-// narrationSummary is the step's narration cut to its first sentence: up to
+// NarrationSummary is the step's narration cut to its first sentence: up to
 // the first line break or sentence end, at most 600 runes. It names a
 // governed call that carries no review summary of its own.
 func NarrationSummary(narration string) string {

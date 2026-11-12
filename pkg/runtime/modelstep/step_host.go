@@ -209,6 +209,8 @@ func remainingBudgetDimension(limit, used, allocated int64) int64 {
 	return remaining
 }
 
+// ResolveHostedAgentTarget resolves reference to the canonical ID of one
+// eligible Agent.
 func ResolveHostedAgentTarget(reference string, eligible []agentrun.HostedAgentTarget) (string, error) {
 	reference = strings.TrimSpace(reference)
 	for _, target := range eligible {
@@ -238,6 +240,7 @@ func ResolveHostedAgentTarget(reference string, eligible []agentrun.HostedAgentT
 	return "", fmt.Errorf("Agent %q is not eligible; use canonical ID %s", reference, strings.Join(ids, ", "))
 }
 
+// CloneHostedCredentialReference copies reference.
 func CloneHostedCredentialReference(reference *capability.CredentialReference) *capability.CredentialReference {
 	if reference == nil {
 		return nil

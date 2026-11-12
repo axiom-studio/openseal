@@ -34,7 +34,7 @@ const (
 	capabilityNotLoadedReason   = "too large to load together; load it on its own"
 )
 
-// capabilityLoadingText is the system section of a deferred capability set.
+// CapabilityLoadingText is the system section of a deferred capability set.
 // It names no capability and does not depend on the catalog's size, so it is
 // the same for every deferred claim; what can be loaded is in the
 // capabilities note.

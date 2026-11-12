@@ -315,6 +315,8 @@ func modelStepLimits(result models.ModelStepResult) *models.AssistantModelLimits
 	return limits
 }
 
+// TurnUsageFromModelStep is the turn usage of one model step; attempts
+// after the first count as repairs.
 func TurnUsageFromModelStep(usage models.ModelStepUsage) models.TurnUsage {
 	repairs := 0
 	if usage.Attempts > 1 {

@@ -54,7 +54,7 @@ func (e *ControlBudgetInsufficientError) ToolError() map[string]interface{} {
 	return map[string]interface{}{"error": e.Code(), "message": e.Message()}
 }
 
-// controlRunBudget projects the capacity visible to the step stepID of run.
+// ControlRunBudget projects the capacity visible to the step stepID of run.
 // The step's own reservation is reported separately and is not subtracted
 // from Remaining. An unbounded Run has no budget (nil, nil).
 func ControlRunBudget(run *models.AgentRun, stepID string) (*HostedRunBudget, error) {
@@ -114,7 +114,7 @@ func controlMinimumChildBudget(policy models.BudgetPolicy) models.BudgetPolicy {
 	}
 }
 
-// controlChildBudgetFloor rejects an allocation below budget.MinimumChild in
+// ControlChildBudgetFloor rejects an allocation below budget.MinimumChild in
 // any bounded dimension.
 func ControlChildBudgetFloor(allocation *models.BudgetPolicy, budget *HostedRunBudget) error {
 	if budget == nil {
@@ -183,7 +183,7 @@ func controlChildBudgetCapacity(allocations []*models.BudgetPolicy, budget *Host
 	return nil
 }
 
-// controlTaskBudget is the budget of a conversation task started by a bounded
+// ControlTaskBudget is the budget of a conversation task started by a bounded
 // Run: every bounded dimension inherits the remaining capacity. An unbounded
 // Run (nil budget) starts an unbounded task (empty policy).
 func ControlTaskBudget(budget *HostedRunBudget) *models.BudgetPolicy {
@@ -211,7 +211,7 @@ func ControlTaskBudget(budget *HostedRunBudget) *models.BudgetPolicy {
 	return completed
 }
 
-// controlBranchBudgets allocates the budgets of n child Runs that the step
+// ControlBranchBudgets allocates the budgets of n child Runs that the step
 // stepID of run starts together. Unbounded Runs (the prod default) give every
 // child a nil, unbounded budget. A bounded Run gives each child the minimum
 // child budget and fails with *ControlBudgetInsufficientError when its

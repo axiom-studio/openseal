@@ -26,7 +26,7 @@ const (
 	LoadCapabilitiesTool   = "load_capabilities"
 	SearchCapabilitiesTool = "search_capabilities"
 
-	// pinnedCapabilitySkillID is the platform Skill whose instructions and
+	// PinnedCapabilitySkillID is the platform Skill whose instructions and
 	// actions are always visible, like a coding agent's built-in tools. It
 	// equals builtin.SkillID.
 	PinnedCapabilitySkillID = "openseal.builtin"
@@ -264,6 +264,7 @@ func (s *CapabilitySet) discoveryID(id string) string {
 	return id
 }
 
+// Known reports whether id is a capability in the authorized catalog.
 func (s *CapabilitySet) Known(id string) bool {
 	_, prompt := s.prompts[id]
 	_, action := s.actions[id]
@@ -591,7 +592,7 @@ func (s *CapabilitySet) capabilityGroups() []capabilityGroup {
 	return result
 }
 
-// directoryLines are the directory lines bounded by SummaryBytes, keyed by
+// DirectoryLines are the directory lines bounded by SummaryBytes, keyed by
 // group; the remainder is counted and found by search.
 func (s *CapabilitySet) DirectoryLines() []CapabilityNoteItem {
 	groups := s.capabilityGroups()
@@ -625,7 +626,7 @@ func (s *CapabilitySet) DirectoryLines() []CapabilityNoteItem {
 	return items
 }
 
-// catalogLines are the full listing, one line per catalog ID.
+// CatalogLines are the full listing, one line per catalog ID.
 func (s *CapabilitySet) CatalogLines() []CapabilityNoteItem {
 	items := make([]CapabilityNoteItem, 0, len(s.entries))
 	for _, entry := range s.entries {
@@ -639,13 +640,13 @@ func (s *CapabilitySet) CatalogLines() []CapabilityNoteItem {
 	return items
 }
 
-// catalogAction is the authorized governed action with capability id id.
+// CatalogAction is the authorized governed action with capability id id.
 func (s *CapabilitySet) CatalogAction(id string) (capability.ModelAction, bool) {
 	action, ok := s.actions[id]
 	return action, ok
 }
 
-// catalogHostTool is the authorized host tool with capability id id.
+// CatalogHostTool is the authorized host tool with capability id id.
 func (s *CapabilitySet) CatalogHostTool(id string) (HostToolSpec, bool) {
 	spec, ok := s.hostTools[id]
 	return spec, ok

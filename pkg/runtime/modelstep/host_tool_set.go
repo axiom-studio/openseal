@@ -21,7 +21,7 @@ type ChatWorkspaces interface {
 	PrepareChatWorkspace(ctx context.Context, run *models.AgentRun) (conversationID string, err error)
 }
 
-// prepareChatWorkspace resolves a claim's chat Workspace. A nil resolver, a
+// PrepareChatWorkspace resolves a claim's chat Workspace. A nil resolver, a
 // Run with no chat, or a resolver error gives nil (no host tools); the error is
 // returned for the caller to log and never fails the claim.
 func PrepareChatWorkspace(ctx context.Context, resolver ChatWorkspaces, run *models.AgentRun) (*workspace.Authority, error) {
@@ -99,6 +99,7 @@ func LookupHostTool(specs []HostToolSpec, name string) (HostToolSpec, bool) {
 	return HostToolSpec{}, false
 }
 
+// HostToolName is the model-facing tool name of a host operation.
 func HostToolName(operation string) string {
 	return strings.ReplaceAll(operation, ".", "_")
 }

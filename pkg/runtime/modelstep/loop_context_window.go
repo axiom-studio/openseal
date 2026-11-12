@@ -106,7 +106,7 @@ const (
 	estimatedImageTokens   int64 = 1600
 )
 
-// estimateEntryTokens is what the loop and the tool executor pass as
+// EstimateEntryTokens is what the loop and the tool executor pass as
 // SessionEntry.Tokens on append and as ToolEntryTransitionRequest.Tokens on a
 // terminal transition. Unlike EstimateSessionEntryTokens it counts what the
 // provider reads: text, tool calls, reasoning text and result blocks, never

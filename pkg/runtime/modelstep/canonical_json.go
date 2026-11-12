@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-// canonicalJSONValue round-trips value through JSON with UseNumber and
+// CanonicalJSONValue round-trips value through JSON with UseNumber and
 // normalizes the result (nulls dropped from objects, numbers canonical).
 func CanonicalJSONValue(value interface{}) (interface{}, error) {
 	raw, err := json.Marshal(value)
@@ -76,7 +76,7 @@ func canonicalJSONNumber(number json.Number) (json.Number, error) {
 	return json.Number(strconv.FormatFloat(value, 'g', -1, 64)), nil
 }
 
-// encodeCanonicalJSON encodes a normalized value: encoding/json sorts map keys;
+// EncodeCanonicalJSON encodes a normalized value: encoding/json sorts map keys;
 // HTML escaping is off so strings stay as the model sent them.
 func EncodeCanonicalJSON(value interface{}) ([]byte, error) {
 	var buffer bytes.Buffer
@@ -88,7 +88,7 @@ func EncodeCanonicalJSON(value interface{}) ([]byte, error) {
 	return bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), nil
 }
 
-// toolResultDigest = hex(sha256(canonical JSON {"status": Status, "content":
+// ToolResultDigest = hex(sha256(canonical JSON {"status": Status, "content":
 // Content})) over the stored ToolResult. For governed calls the stored content
 // carries the action error code, so "the same error" is "the same result".
 // The per-call action reference (a json part's top-level "evidenceRef", an

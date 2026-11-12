@@ -293,6 +293,7 @@ func hostToolFailureResult(write bool, readMessage string) (models.ToolEntryStat
 	return models.ToolEntryError, HostToolErrorResult(models.ToolResultFailed, readMessage)
 }
 
+// HostToolErrorResult is a failed tool result carrying message as its error.
 func HostToolErrorResult(status models.ToolResultStatus, message string) *models.ToolResult {
 	value, _ := json.Marshal(map[string]string{"error": message})
 	return &models.ToolResult{Status: status, IsError: true, Content: []models.ContentPart{{Type: models.ContentPartJSON, Value: value}}}
