@@ -70,7 +70,7 @@ func skillSetupConversationOrigin(ctx context.Context, store models.KernelStore,
 	if conversation == nil || conversation.Status != models.ConversationStatusActive || conversation.Owner != task.Owner {
 		return "", "", denied
 	}
-	onRoster, err := models.AgentOnChatRoster(ctx, teamRosterReader(store), conversation.Scope, conversation.Owner, member)
+	onRoster, err := models.AgentOnChatRoster(ctx, models.TeamRosterReaderOf(store), conversation.Scope, conversation.Owner, member)
 	if err != nil {
 		return "", "", err
 	}
@@ -153,7 +153,7 @@ func conversationTaskSetupOrigin(ctx context.Context, store models.ConversationT
 	if conversation == nil || conversation.Status != models.ConversationStatusActive || conversation.Scope != task.Scope || conversation.Owner != task.Owner {
 		return nil, models.ErrInvalidSkillSetup
 	}
-	onRoster, err := models.AgentOnChatRoster(ctx, teamRosterReader(store), conversation.Scope, conversation.Owner, task.TargetAgentID)
+	onRoster, err := models.AgentOnChatRoster(ctx, models.TeamRosterReaderOf(store), conversation.Scope, conversation.Owner, task.TargetAgentID)
 	if err != nil {
 		return nil, err
 	}

@@ -410,7 +410,7 @@ func (d *SkillBindingActionDispatcher) UseAgentRegistry(agents *kernelagent.Regi
 
 // roster reads the Team and Agent deployments RunUmbrella checks.
 func (d *SkillBindingActionDispatcher) roster() models.TeamRosterReader {
-	return teamRosterReader(d.store)
+	return models.TeamRosterReaderOf(d.store)
 }
 
 func NewSkillBindingActionDispatcher(store models.KernelStore, catalog *skill.Catalog, fallback agentrun.ActionDispatcher, discovery ...skill.DiscoveryProvider) (*SkillBindingActionDispatcher, error) {

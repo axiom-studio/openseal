@@ -866,6 +866,11 @@ func startTaskArguments(entry *models.SessionEntry) *startTaskArgs {
 	return models.StartTaskEntryArgs(entry)
 }
 
+// teamRosterReader forwards to models.TeamRosterReaderOf.
+func teamRosterReader(store any) models.TeamRosterReader {
+	return models.TeamRosterReaderOf(store)
+}
+
 // startTaskKey forwards to models.StartTaskKey.
 func startTaskKey(entryID string) string {
 	return models.StartTaskKey(entryID)

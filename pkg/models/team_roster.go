@@ -9,6 +9,12 @@ import (
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
+// TeamRosterReaderOf returns store's Team deployment reader, or nil.
+func TeamRosterReaderOf(store any) TeamRosterReader {
+	teams, _ := store.(TeamRosterReader)
+	return teams
+}
+
 // AgentOnChatRoster reports whether agentID is on the roster of the chat
 // owned by owner: the owner of an Agent's chat, or a member of the owning
 // Team's current active deployment. An empty agent, an unknown owner, a
