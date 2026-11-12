@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"strings"
@@ -708,7 +709,7 @@ func applyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 		return result, err
 	}
 	current.State = record.State
-	current.Result = cloneMap(record.Result)
+	current.Result = maps.Clone(record.Result)
 	current.Artifacts = cloneArtifactReferences(record.Artifacts)
 	current.Error = strings.TrimSpace(record.Error)
 	current.Revision++
@@ -782,7 +783,7 @@ func applyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 }
 
 func dependencyGroupOutput(existing map[string]interface{}, group *RunDependencyGroup, edge *RunDependency, evaluation RunDependencyEvaluation) map[string]interface{} {
-	output := cloneMap(existing)
+	output := maps.Clone(existing)
 	if output == nil {
 		output = make(map[string]interface{})
 	}
@@ -806,7 +807,7 @@ func dependencyGroupOutput(existing map[string]interface{}, group *RunDependency
 	}
 	dependencies[edge.ID] = map[string]interface{}{
 		"id": edge.ID, "kind": edge.Kind, "state": edge.State, "required": edge.Required,
-		"targetRunId": edge.TargetRunID, "requestId": edge.RequestID, "result": cloneMap(edge.Result),
+		"targetRunId": edge.TargetRunID, "requestId": edge.RequestID, "result": maps.Clone(edge.Result),
 		"artifacts": cloneArtifactReferences(edge.Artifacts), "error": edge.Error,
 	}
 	groupResult["id"] = group.ID
@@ -875,7 +876,7 @@ func cloneRunDependency(in *RunDependency) *RunDependency {
 		return nil
 	}
 	out := *in
-	out.Result = cloneMap(in.Result)
+	out.Result = maps.Clone(in.Result)
 	out.Artifacts = cloneArtifactReferences(in.Artifacts)
 	return &out
 }

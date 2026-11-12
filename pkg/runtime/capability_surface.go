@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"maps"
 	"sort"
 	"strings"
 )
@@ -51,11 +52,11 @@ func cloneJSONObject(in map[string]interface{}) map[string]interface{} {
 	}
 	encoded, err := json.Marshal(in)
 	if err != nil {
-		return cloneMap(in)
+		return maps.Clone(in)
 	}
 	var out map[string]interface{}
 	if json.Unmarshal(encoded, &out) != nil {
-		return cloneMap(in)
+		return maps.Clone(in)
 	}
 	return out
 }

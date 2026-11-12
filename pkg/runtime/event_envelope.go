@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -100,6 +101,6 @@ func eventContext(event EventEnvelope) map[string]interface{} {
 	return map[string]interface{}{
 		"id": event.ID, "type": event.Type, "source": event.Source, "subject": event.Subject,
 		"severity": event.Severity, "occurredAt": event.OccurredAt.UTC().Format(time.RFC3339Nano),
-		"attributes": cloneMap(event.Attributes), "payload": cloneMap(event.Payload),
+		"attributes": maps.Clone(event.Attributes), "payload": maps.Clone(event.Payload),
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"strings"
@@ -2799,12 +2800,12 @@ func cloneAgentRequest(in *AgentRequest) *AgentRequest {
 		decision := *in.AssignmentDecision
 		out.AssignmentDecision = &decision
 	}
-	out.AcceptanceCriteria = cloneMap(in.AcceptanceCriteria)
+	out.AcceptanceCriteria = maps.Clone(in.AcceptanceCriteria)
 	out.ArtifactRequirements = cloneArtifactRequirements(in.ArtifactRequirements)
-	out.AcceptanceEvidence = cloneMap(in.AcceptanceEvidence)
+	out.AcceptanceEvidence = maps.Clone(in.AcceptanceEvidence)
 	out.Artifacts = cloneArtifactReferences(in.Artifacts)
-	out.SharedContext = cloneMap(in.SharedContext)
-	out.ChildCheckpoint = cloneMap(in.ChildCheckpoint)
+	out.SharedContext = maps.Clone(in.SharedContext)
+	out.ChildCheckpoint = maps.Clone(in.ChildCheckpoint)
 	out.ConversationRefs = append([]string(nil), in.ConversationRefs...)
 	if in.ResolvedAt != nil {
 		resolved := *in.ResolvedAt
@@ -2853,7 +2854,7 @@ func cloneArtifactRequirements(in []ArtifactRequirement) []ArtifactRequirement {
 	result := make([]ArtifactRequirement, len(in))
 	for index, requirement := range in {
 		result[index] = requirement
-		result[index].Schema = cloneMap(requirement.Schema)
+		result[index].Schema = maps.Clone(requirement.Schema)
 	}
 	return result
 }
@@ -2862,7 +2863,7 @@ func cloneArtifactReferences(in []ArtifactReference) []ArtifactReference {
 	result := make([]ArtifactReference, len(in))
 	for index, artifact := range in {
 		result[index] = artifact
-		result[index].Metadata = cloneMap(artifact.Metadata)
+		result[index].Metadata = maps.Clone(artifact.Metadata)
 		result[index].EvidenceRefs = append([]string(nil), artifact.EvidenceRefs...)
 	}
 	return result

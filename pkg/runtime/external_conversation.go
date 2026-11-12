@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -1022,7 +1023,7 @@ func cloneExternalConversationEndpoint(value *ExternalConversationEndpoint) *Ext
 		return nil
 	}
 	copy := *value
-	copy.Configuration = cloneMap(value.Configuration)
+	copy.Configuration = maps.Clone(value.Configuration)
 	if value.RetiredAt != nil {
 		retiredAt := *value.RetiredAt
 		copy.RetiredAt = &retiredAt
@@ -1036,7 +1037,7 @@ func cloneExternalConversationInboxItem(value *ExternalConversationInboxItem) *E
 	}
 	copy := *value
 	copy.Event.Attachments = append([]ExternalConversationAttachment(nil), value.Event.Attachments...)
-	copy.Event.Attributes = cloneMap(value.Event.Attributes)
+	copy.Event.Attributes = maps.Clone(value.Event.Attributes)
 	copy.Event.Source = cloneExternalMessageSource(value.Event.Source)
 	return &copy
 }
@@ -1062,8 +1063,8 @@ func cloneExternalConversationDelivery(value *ExternalConversationDelivery) *Ext
 		return nil
 	}
 	copy := *value
-	copy.Parameters = cloneMap(value.Parameters)
-	copy.Progress = cloneMap(value.Progress)
+	copy.Parameters = maps.Clone(value.Parameters)
+	copy.Progress = maps.Clone(value.Progress)
 	if value.Correlation != nil {
 		correlation := *value.Correlation
 		copy.Correlation = &correlation

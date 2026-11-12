@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 )
@@ -206,7 +207,7 @@ func applyDependencyGroupReconciliation(group *RunDependencyGroup, edges []*RunD
 		}
 		resolved, err := applyRunDependencyResolution(result.Group, result.Dependencies, result.Source, RunDependencyResolutionRecord{
 			Scope: record.Scope, GroupID: group.ID, DependencyID: edge.ID, ExpectedDependencyRevision: edge.Revision,
-			State: state, Result: map[string]interface{}{"branchId": edge.ID, "checkpoint": cloneMap(target.Checkpoint), "output": cloneMap(target.Output)},
+			State: state, Result: map[string]interface{}{"branchId": edge.ID, "checkpoint": maps.Clone(target.Checkpoint), "output": maps.Clone(target.Output)},
 			Error: message, Actor: record.Actor, Visibility: record.Visibility, OccurredAt: record.OccurredAt,
 		})
 		if err != nil {

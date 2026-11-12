@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"sort"
 	"strings"
@@ -510,6 +511,6 @@ func cloneEmbedSession(value *EmbedSession) *EmbedSession {
 		return nil
 	}
 	copy := *value
-	copy.VerifiedClaims = cloneMap(value.VerifiedClaims)
+	copy.VerifiedClaims = maps.Clone(value.VerifiedClaims)
 	return &copy
 }

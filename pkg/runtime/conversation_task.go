@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"time"
@@ -643,7 +644,7 @@ func validateConversationTaskSourceUpdate(current *AgentRun, record Conversation
 	expected.Context[runReportingContextRootRunID] = current.ID
 	expected.Context[runReportingContextMilestones] = []interface{}{"completed", "failed"}
 	expected.Status = proposed.Status
-	expected.Output = cloneMap(proposed.Output)
+	expected.Output = maps.Clone(proposed.Output)
 	expected.Error = proposed.Error
 	expected.WakeCondition = proposed.WakeCondition
 	expected.CompletedAt = proposed.CompletedAt

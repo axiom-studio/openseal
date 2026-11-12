@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"sort"
 	"strings"
@@ -497,8 +498,8 @@ func cloneArtifact(in *Artifact) *Artifact {
 		owner := *in.Provenance.Owner
 		out.Provenance.Owner = &owner
 	}
-	out.Metadata = cloneMap(in.Metadata)
-	out.MetadataSchema = cloneMap(in.MetadataSchema)
+	out.Metadata = maps.Clone(in.Metadata)
+	out.MetadataSchema = maps.Clone(in.MetadataSchema)
 	out.Evidence = append([]EvidenceLink(nil), in.Evidence...)
 	return &out
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/mail"
 	"regexp"
 	"strings"
@@ -176,7 +177,7 @@ func normalizeRoutineGrants(values []RoutineGrant, allowEmptyLabels bool) ([]Rou
 		if value.ToOwnerOnly && len(destinations) > 0 {
 			return nil, fmt.Errorf("routine grant %s is limited either to the owner or to destinations, not both", action)
 		}
-		grants = append(grants, RoutineGrant{Action: action, Label: label, ToOwnerOnly: value.ToOwnerOnly, ToDestinations: destinations, ToolArguments: cloneMap(value.ToolArguments)})
+		grants = append(grants, RoutineGrant{Action: action, Label: label, ToOwnerOnly: value.ToOwnerOnly, ToDestinations: destinations, ToolArguments: maps.Clone(value.ToolArguments)})
 	}
 	return grants, nil
 }
@@ -216,7 +217,7 @@ func cloneRoutineGrants(values []RoutineGrant) []RoutineGrant {
 	}
 	grants := append([]RoutineGrant(nil), values...)
 	for index := range grants {
-		grants[index].ToolArguments = cloneMap(grants[index].ToolArguments)
+		grants[index].ToolArguments = maps.Clone(grants[index].ToolArguments)
 		grants[index].ToDestinations = append([]string(nil), grants[index].ToDestinations...)
 		if len(grants[index].ToDestinations) == 0 {
 			grants[index].ToDestinations = nil

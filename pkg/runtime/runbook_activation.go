@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -849,8 +850,8 @@ func cloneRunbookActivation(value *RunbookActivation) *RunbookActivation {
 	}
 	clone := *value
 	clone.Task = cloneScheduledAgentTask(value.Task)
-	clone.Input = cloneMap(value.Input)
-	clone.Policy = cloneMap(value.Policy)
+	clone.Input = maps.Clone(value.Input)
+	clone.Policy = maps.Clone(value.Policy)
 	clone.Budget = cloneBudgetPolicy(value.Budget)
 	if value.NextOccurrenceBase != nil {
 		base := *value.NextOccurrenceBase
