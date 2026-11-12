@@ -78,7 +78,7 @@ func (f *catchUpFixture) viewer() ConversationViewer {
 }
 
 func (f *catchUpFixture) laneSessionID(threadRoot string) string {
-	return conversationLaneSessionID(f.conversation.Scope, f.conversation.ID, threadRoot, f.agentID)
+	return conversationSessionID(f.conversation.Scope, ConversationRunLane(f.conversation.ID, threadRoot, f.agentID))
 }
 
 // run stores a Run bound to sessionID and, when claim is set, claims it under
@@ -273,7 +273,7 @@ func TestCatchUpKeepsTaskReportFromChildSessionAsYouElsewhere(t *testing.T) {
 func TestCatchUpAttributesTeammateAnswerAsUser(t *testing.T) {
 	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, func(t *testing.T, f *catchUpFixture) {
 		run, session := f.open("")
-		teammateRun := f.run(conversationLaneSessionID(f.conversation.Scope, f.conversation.ID, "", "rio"), false)
+		teammateRun := f.run(conversationSessionID(f.conversation.Scope, ConversationRunLane(f.conversation.ID, "", "rio")), false)
 		question := f.say("question", "who is coming?")
 		answer := f.post(PostChannelMessageRequest{
 			IdempotencyKey: "rio-answer", Content: "Kim and Lee.", Intent: MessageIntentUpdate, SenderDisplayName: "Rio",

@@ -39,7 +39,9 @@ func TestAResultReadBackFromJSONBStillFitsItsCap(t *testing.T) {
 		t.Fatalf("fixture: compact %d, spaced %d, cap %d", len(compact), len(spaced), MaxToolResultContentBytes)
 	}
 	result := &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartJSON, Value: spaced}}}
-	if err := validateToolResultForState(ToolEntryCompleted, result, ErrInvalidSessionEntry); err != nil {
+	entry := &SessionEntry{ID: "read-back", Type: SessionEntryTool, State: ToolEntryCompleted, StepID: "step-a", ToolCallID: "c1",
+		Tool: &ToolEntry{Name: "lookup", SideEffect: ToolSideEffectRead, Result: result}}
+	if err := entry.Validate(); err != nil {
 		t.Fatalf("a result that fit when written is refused when read: %v", err)
 	}
 

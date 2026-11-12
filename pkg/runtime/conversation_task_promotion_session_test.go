@@ -112,7 +112,8 @@ func TestPromotionRebindsRunToChildSession(t *testing.T) {
 		note := chatEntries[2]
 		if note.Type != SessionEntryNote || note.Note == nil || note.Note.Kind != NoteTaskPromoted || note.RunID != run.ID ||
 			note.SourceKey != TaskPromotedSourceKey(run.ID) || note.ID != SessionEntryID(chat.ID, TaskPromotedSourceKey(run.ID)) ||
-			note.Sequence != 3 || note.Note.Text != conversationTaskPromotedText(trigger.ID, accepted.Task.ID) {
+			note.Sequence != 3 || note.Note.Text != "Your work on message "+trigger.ID+" continues in background task "+accepted.Task.ID+
+			"; its result will be posted in this chat when it finishes." {
 			t.Fatalf("task_promoted note: %#v", note)
 		}
 		var data map[string]string

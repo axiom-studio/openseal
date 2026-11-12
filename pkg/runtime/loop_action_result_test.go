@@ -32,7 +32,9 @@ func requireGovernedResult(t *testing.T, state ToolEntryState, result *ToolResul
 	if len(result.Content) == 0 || result.Content[0].Type != ContentPartJSON || string(result.Content[0].Value) != wantJSON {
 		t.Fatalf("content = %#v\nwant json %s", result.Content, wantJSON)
 	}
-	if err := validateToolResultForState(state, result, ErrInvalidSessionEntry); err != nil {
+	entry := &SessionEntry{ID: "governed", Type: SessionEntryTool, State: state, StepID: "step-1", ToolCallID: "call-1",
+		Tool: &ToolEntry{Name: "governed", SideEffect: ToolSideEffectWrite, Result: result}}
+	if err := entry.Validate(); err != nil {
 		t.Fatalf("result invalid for %s: %v", state, err)
 	}
 }

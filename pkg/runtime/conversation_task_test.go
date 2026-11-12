@@ -161,7 +161,7 @@ func ensureStartTaskToolEntry(t *testing.T, store taskStartFixtureStore, source 
 	thread, _ := current.Context["threadRootMessageId"].(string)
 	if current.SessionID == "" {
 		// A hand-built source Run: bind it to its lane session first.
-		current.SessionID = conversationLaneSessionID(current.Scope, conversationID, thread, current.AssignedAgentID)
+		current.SessionID = conversationSessionID(current.Scope, ConversationRunLane(conversationID, thread, current.AssignedAgentID))
 		current.UpdatedAt = now
 		current.Revision++
 		updateConversationTaskSQLRun(t, store, current, current.Revision-1)

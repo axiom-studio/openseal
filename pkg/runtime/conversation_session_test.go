@@ -27,12 +27,13 @@ func TestConversationSessionIDIsStablePerLane(t *testing.T) {
 		}
 		seen[id] = name
 	}
-	if got := conversationLaneSessionID(scope, "chat", "root", "agent-a"); got != ids["thread"] {
-		t.Fatalf("lane session id = %s, want %s", got, ids["thread"])
-	}
-	if session := conversationLaneSession(scope, "chat", "root", "agent-a"); session.ID != ids["thread"] ||
-		session.LaneKey != "chat:thread:root:agent:agent-a" || session.Validate() != nil {
-		t.Fatalf("lane session = %+v (%v)", session, session.Validate())
+	// Before its row exists, a chat Run on the thread lane resolves to the
+	// lane's in-memory session, and only under the lane's own id.
+	threadRun := &AgentRun{ID: "thread-run", Scope: scope, AssignedAgentID: "agent-a", SessionID: ids["thread"],
+		Context: map[string]interface{}{conversationRunContextConversationID: "chat", "threadRootMessageId": "root"}}
+	if session, err := conversationRunSession(context.Background(), newTestKernelStore(t), threadRun); err != nil || session == nil ||
+		session.ID != ids["thread"] || session.LaneKey != "chat:thread:root:agent:agent-a" || session.Validate() != nil {
+		t.Fatalf("lane session = %+v, %v", session, err)
 	}
 
 	// A 1:1 Agent chat Run, on the channel and on a thread lane.
@@ -64,14 +65,20 @@ func TestTeamRoutingRunHasNoSession(t *testing.T) {
 	if request.AssignedAgentID != "" || request.SessionID != "" {
 		t.Fatalf("routing request = agent %q session %q", request.AssignedAgentID, request.SessionID)
 	}
-	if id := conversationLaneSessionID(scope, "chat", "", ""); id != "" {
-		t.Fatalf("routing lane session id = %q", id)
-	}
 	run := &AgentRun{ID: "routing", Scope: scope, Kind: RunKindConversation, Owner: team.Owner,
 		ConcurrencyKey: request.ConcurrencyKey, Context: request.Context}
-	session, err := conversationRunSession(context.Background(), newTestKernelStore(t), run)
+	store := newTestKernelStore(t)
+	session, err := conversationRunSession(context.Background(), store, run)
 	if err != nil || session != nil {
 		t.Fatalf("routing run session = %+v, %v", session, err)
+	}
+	// An agentless lane has no session id, so a routing Run that claims the
+	// id such a lane would have gets no lane session.
+	claimed := &AgentRun{ID: "routing", Scope: scope, Kind: RunKindConversation, Owner: team.Owner,
+		SessionID: conversationSessionID(scope, ConversationRunLane("chat", "", "")),
+		Context:   map[string]interface{}{conversationRunContextConversationID: "chat"}}
+	if session, err := conversationRunSession(context.Background(), store, claimed); !errors.Is(err, ErrInvalidAgentRun) || session != nil {
+		t.Fatalf("routing lane session = %+v, %v", session, err)
 	}
 }
 

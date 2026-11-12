@@ -124,8 +124,15 @@ func TestConversationTaskContinuationAdmitsOriginalDelegatedAuthorityOnly(t *tes
 	}
 	err = store.prepareConversationTaskAdmissionConn(t.Context(), conn, &claim, []*AgentRun{child})
 	conn.Close()
-	if err != nil || !claim.ConversationTaskRuns[child.ID] {
-		t.Fatalf("original delegate bypassed background reserve: %#v %v", claim.ConversationTaskRuns, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// With every agent slot reserved for the foreground, task work is held
+	// back by task capacity: the delegate counts as task work.
+	claim.ConversationTaskForegroundReserve = claim.MaxActiveForAgent
+	if _, decision := evaluateAgentRunAdmission([]*AgentRun{child}, nil, claim); len(decision.Blocks) != 1 ||
+		decision.Blocks[0].RunID != child.ID || decision.Blocks[0].Reason != AgentRunAdmissionReasonTaskCapacity {
+		t.Fatalf("original delegate bypassed background reserve: %#v", decision)
 	}
 	for _, mutate := range []func(*AgentRun){
 		func(run *AgentRun) { run.AssignedAgentID = "foreign-agent" },

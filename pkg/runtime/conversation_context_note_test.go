@@ -243,7 +243,7 @@ func TestRunContextBoundedTo32KiB(t *testing.T) {
 	if !strings.Contains(text, "Reply to message m1 from Kev (user kev).") || !strings.Contains(text, "- Home (place p1, 1,2)") {
 		t.Fatalf("small sections lost: %q", text[:200])
 	}
-	if !strings.Contains(text, "Active work:\n- run run-000") || !strings.Contains(text, " more)") || note.Note.Validate() != nil {
+	if !strings.Contains(text, "Active work:\n- run run-000") || !strings.Contains(text, " more)") || note.Validate() != nil {
 		t.Fatalf("active work was not truncated with a count")
 	}
 	// Active work is cut first: the objectives that fit stay whole.

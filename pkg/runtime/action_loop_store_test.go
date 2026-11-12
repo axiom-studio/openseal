@@ -303,7 +303,8 @@ func TestRefusedStatusValidatesWithDuplicateOf(t *testing.T) {
 	if err := failed.Validate(); err == nil {
 		t.Fatal("a non-refused duplicate validated without an external operation digest")
 	}
-	if !validActionCallStatus(ActionCallStatusRefused) || externalOperationProtects(ActionCallStatusRefused) {
+	// refused.Validate passing above shows refused is a valid status.
+	if externalOperationProtects(ActionCallStatusRefused) {
 		t.Fatal("refused must be a valid status that never protects an external operation")
 	}
 	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {

@@ -547,7 +547,8 @@ type actionRuntimeMaintenanceObservationStore struct {
 
 func (s *actionRuntimeMaintenanceObservationStore) GetSkillRuntimeMaintenance(ctx context.Context, scope Scope, skillID string) (*SkillRuntimeMaintenance, error) {
 	if s.active && scope == s.gate.Scope && skillID == s.gate.SkillID {
-		return cloneSkillRuntimeMaintenance(s.gate), nil
+		gate := *s.gate
+		return &gate, nil
 	}
 	return s.maintenance.GetSkillRuntimeMaintenance(ctx, scope, skillID)
 }
