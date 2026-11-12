@@ -362,3 +362,5 @@ func TestRunbookAuditPlacesDelegatedChildUnderVisit(t *testing.T) {
 		t.Fatalf("unassigned children=%#v", result.UnassignedChildren)
 	}
 }
+
+func timePointer(value time.Time) *time.Time { return &value }

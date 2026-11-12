@@ -4,21 +4,24 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
+	"github.com/google/uuid"
 )
 
 func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
-	store := newTestKernelStore(t)
-	parent := openTestConversationSession(t, store, "r1")
-	if _, err := testAppend(store, parent.ID, "r1", storetest.UserSessionEntry("p1", "a"), storetest.UserSessionEntry("p2", "b")); err != nil {
+	store := newForkTestStore(t)
+	parent := openForkTestSession(t, store, "r1")
+	if _, err := appendForkTestEntries(store, parent.ID, "r1", storetest.UserSessionEntry("p1", "a"), storetest.UserSessionEntry("p2", "b")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testAppend(store, parent.ID, "r1", storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", models.ToolEntryPending)); err != nil {
+	if _, err := appendForkTestEntries(store, parent.ID, "r1", storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", models.ToolEntryPending)); err != nil {
 		t.Fatal(err)
 	}
-	path, err := store.LoadAgentSessionPath(context.Background(), testSessionScope, parent.ID)
+	path, err := store.LoadAgentSessionPath(context.Background(), forkTestScope, parent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +37,7 @@ func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 	if assistant == nil || tool == nil || assistant.Sequence != 3 {
 		t.Fatalf("path = %+v", path.Entries)
 	}
-	run := testStoredSessionRun(t, store, "r1")
+	run := storedForkTestRun(t, store, "r1")
 	run.AssignedAgentID = "agent-a"
 	cc := ControlContext{Run: run, Session: path.Session, Path: path, Assistant: assistant, Entry: tool}
 
@@ -49,25 +52,25 @@ func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 	// The child session made from the ref renders the parent up to, not
 	// including, the forking assistant entry, then its seed.
 	child := &models.AgentRun{
-		ID: "child", Scope: testSessionScope, Goal: "Compare the two vendors", Source: models.RunSourceFork,
+		ID: "child", Scope: forkTestScope, Goal: "Compare the two vendors", Source: models.RunSourceFork,
 		Checkpoint: map[string]interface{}{"forkChild": map[string]interface{}{"sourceRunId": "r1"}},
 	}
 	seed, err := controlChildSeed(child)
 	if err != nil || seed == nil || seed.User.GoalKind != "fork_branch" {
 		t.Fatalf("seed = %+v, %v", seed, err)
 	}
-	txReq, err := models.NewChildSession(ref.childSessionRequest(testSessionScope, "child", "agent-a", seed))
+	txReq, err := models.NewChildSession(ref.childSessionRequest(forkTestScope, "child", "agent-a", seed))
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := forkTestSession(t, store, "r1", txReq)
+	created, err := createForkChildSession(t, store, "r1", txReq)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if created.ForkEntryID != "p2" || created.ForkSequence != 2 {
 		t.Fatalf("child session = %+v", created)
 	}
-	childPath, err := store.LoadAgentSessionPath(context.Background(), testSessionScope, created.ID)
+	childPath, err := store.LoadAgentSessionPath(context.Background(), forkTestScope, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,4 +207,113 @@ func TestControlChildSeedTextKinds(t *testing.T) {
 			t.Fatalf("run %+v seed = %+v, %v", run, seed, err)
 		}
 	}
+}
+
+// The session fork test's own store fixtures. They are copies of the
+// session store test helpers (agent_session_store_test.go,
+// agent_session_test.go, kernel_store_test.go) so the fork test can live
+// with the fork code in its own package.
+
+var (
+	forkTestScope = models.Scope{Kind: "org", ID: "o1"}
+	forkTestNow   = time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+)
+
+func forkTestLease() *models.AgentRunLeaseGuard {
+	return &models.AgentRunLeaseGuard{WorkerID: "w1", Now: forkTestNow}
+}
+
+// newForkTestStore returns an empty in-memory kernel store that is closed
+// when the test ends.
+func newForkTestStore(t testing.TB) *sqlite.Store {
+	t.Helper()
+	store, err := sqlite.NewInMemorySQLiteStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}
+
+// openForkTestSession creates the running Run runID bound to the c1 lane of
+// agent-a and opens that conversation session under the Run's lease.
+func openForkTestSession(t *testing.T, store *sqlite.Store, runID string) *models.AgentSession {
+	t.Helper()
+	sessionID := models.ConversationAgentSessionID(forkTestScope, models.ConversationRunLane("c1", "", "agent-a"))
+	expires := forkTestNow.Add(time.Minute)
+	run := &models.AgentRun{
+		ID: runID, Scope: forkTestScope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-a"}, Goal: "session test",
+		Status: models.AgentRunStatusRunning, Revision: 1, SessionID: sessionID,
+		LeaseOwner: "w1", LeaseExpiresAt: &expires, CreatedAt: forkTestNow, UpdatedAt: forkTestNow,
+	}
+	if err := store.CreateAgentRun(context.Background(), run); err != nil {
+		t.Fatalf("create run %s: %v", run.ID, err)
+	}
+	opened, err := store.OpenConversationAgentSession(context.Background(), models.OpenConversationAgentSessionRequest{
+		Scope: forkTestScope, ConversationID: "c1", AgentID: "agent-a", RunID: runID, Lease: *forkTestLease(), Now: forkTestNow,
+	})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	return opened.Session
+}
+
+func appendForkTestEntries(store *sqlite.Store, sessionID, runID string, entries ...*models.SessionEntry) (*models.AppendAgentSessionEntriesResult, error) {
+	return store.AppendAgentSessionEntries(context.Background(), models.AppendAgentSessionEntriesRequest{
+		Scope: forkTestScope, SessionID: sessionID, RunID: runID, Lease: forkTestLease(), Entries: entries, Now: forkTestNow,
+	})
+}
+
+func storedForkTestRun(t *testing.T, store *sqlite.Store, runID string) *models.AgentRun {
+	t.Helper()
+	run, err := store.GetAgentRun(context.Background(), forkTestScope, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return run
+}
+
+// createForkChildSession creates the queued Run session.OwnerRunID under
+// the source Run and the Run's session in one dependency-group create, the
+// store command a delegation's same-Agent fork goes through. The source must
+// own session.ParentSessionID. Only same-Agent children fork a session, so
+// both Runs are recorded as assigned to session.AgentID.
+func createForkChildSession(t *testing.T, store *sqlite.Store, sourceRunID string, session models.CreateRunAgentSessionTxRequest) (*models.AgentSession, error) {
+	t.Helper()
+	source := storedForkTestRun(t, store, sourceRunID)
+	expires := forkTestNow.Add(time.Minute)
+	child := &models.AgentRun{
+		ID: session.OwnerRunID, Scope: forkTestScope, ParentRunID: source.ID, RootRunID: source.RootRunID,
+		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: session.AgentID, Goal: "session test", Status: models.AgentRunStatusQueued, Revision: 1,
+		LeaseOwner: "w1", LeaseExpiresAt: &expires, CreatedAt: forkTestNow, UpdatedAt: forkTestNow,
+	}
+	groupID := "fork-" + child.ID
+	waiting := models.CloneAgentRun(source)
+	waiting.AssignedAgentID = session.AgentID
+	waiting.Status = models.AgentRunStatusWaitingForDependency
+	waiting.WakeCondition = &models.WakeCondition{Type: "run_dependencies", Reference: groupID}
+	waiting.Revision++
+	waiting.UpdatedAt = forkTestNow
+	sealed := forkTestNow
+	result, err := store.CreateRunDependencyGroup(context.Background(), models.RunDependencyGroupCreateRecord{
+		Group: &models.RunDependencyGroup{
+			ID: groupID, Scope: forkTestScope, SourceRunID: source.ID, Policy: models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast},
+			ExpectedCount: 1, Status: models.RunDependencyGroupWaiting, Revision: 1, CreatedAt: forkTestNow, UpdatedAt: forkTestNow, SealedAt: &sealed,
+		},
+		Dependencies: []*models.RunDependency{{
+			ID: "branch-" + child.ID, Scope: forkTestScope, GroupID: groupID, SourceRunID: source.ID, TargetRunID: child.ID,
+			Kind: models.RunDependencyKindRun, State: models.RunDependencyStateRunning, Required: true, Revision: 1, CreatedAt: forkTestNow, UpdatedAt: forkTestNow,
+		}},
+		TargetRuns: []*models.AgentRun{child}, SourceRun: waiting, ExpectedSourceRevision: source.Revision,
+		Event: &models.ActivityEvent{
+			ID: uuid.NewString(), Scope: forkTestScope, RunID: source.ID, EventType: "run.forked", Severity: models.ActivitySeverityInfo,
+			Summary: "Forked a child Run", Actor: models.ActivityActor{Type: "worker", ID: "w1"}, Visibility: models.ActivityVisibilityScope,
+			CorrelationID: groupID, CreatedAt: forkTestNow,
+		},
+		ChildSessions: []models.CreateRunAgentSessionTxRequest{session},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.ChildSessions[0], nil
 }

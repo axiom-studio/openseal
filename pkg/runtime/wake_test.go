@@ -121,8 +121,9 @@ func TestWakeSignalsRequeueRunsExactlyOnce(t *testing.T) {
 
 func TestWakeConditionHonorsDueTimeReferenceAndPredicate(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	wakeAt := now
 	condition := &models.WakeCondition{
-		Type: "timer", WakeAt: timePointer(now), Reference: "review",
+		Type: "timer", WakeAt: &wakeAt, Reference: "review",
 		Predicate: map[string]interface{}{"approved": true},
 	}
 	if wakeConditionMatches(condition, WakeSignal{
@@ -185,5 +186,3 @@ func TestWakeSignalSurvivesSQLiteRestart(t *testing.T) {
 		t.Fatalf("sleeping run was not woken after restart: %#v", result)
 	}
 }
-
-func timePointer(value time.Time) *time.Time { return &value }
