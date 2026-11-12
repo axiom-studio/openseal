@@ -14,6 +14,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// Postgres store test: it moves to store/postgres in U2.8. It runs the
+// session conformance suite (agent_session_conformance_test.go, for
+// storetest) and the entry helpers of agent_session_test.go.
+
 // newAgentSessionPostgresStores opens n PostgresStores (replicas) on one fresh
 // schema. The schema is dropped when the test ends.
 func newAgentSessionPostgresStores(t *testing.T, n int) []*PostgresStore {

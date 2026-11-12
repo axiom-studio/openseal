@@ -11,6 +11,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// Postgres store test (outbox triggers and migrations): it moves to
+// store/postgres in U2.8. It seeds its Runs through NewPortfolioService,
+// which a store package cannot import: the move seeds them with the store's
+// CreateAgentRun instead.
+
 func newWorkSignalPostgresStore(t *testing.T, schema string) (context.Context, *PostgresStore) {
 	t.Helper()
 	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")

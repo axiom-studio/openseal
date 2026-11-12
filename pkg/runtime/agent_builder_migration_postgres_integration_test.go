@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// Postgres store test (schema migrations): it moves to store/postgres in
+// U2.8, with its fixture from agent_builder_migration_fixture_test.go
+// (storetest). It seeds its Run through NewPortfolioService, which a store
+// package cannot import: the move seeds it with the store's CreateAgentRun
+// instead.
+
 // seedPostgresChangeSets turns a current PostgreSQL schema back into a v75
 // one: the change-set table, its indexes and outbox triggers, the agent_runs
 // outbox functions with the authoring CASE, a running workforce_authoring

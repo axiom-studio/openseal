@@ -9,6 +9,9 @@ import (
 	"testing"
 )
 
+// Postgres store test (schema migrations): it moves to store/postgres in
+// U2.8.
+
 func newAgentSessionMigrationStore(t *testing.T, prefix string) (*PostgresStore, string, string) {
 	t.Helper()
 	pgSchema := newTestPostgresSchema(t, prefix)
