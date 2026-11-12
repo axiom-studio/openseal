@@ -274,7 +274,9 @@ func approvalMentions(text, value string) bool {
 	return value != "" && strings.Contains(strings.ToLower(text), strings.ToLower(value))
 }
 
-// Public prose never humanizes a tool identifier.
+// ApprovalNamesIdentifier reports whether text names one of identifiers,
+// ignoring case and separators. Public prose never humanizes a tool
+// identifier.
 func ApprovalNamesIdentifier(text string, identifiers ...string) bool {
 	normalized := approvalIdentifierGap.ReplaceAllString(strings.ToLower(text), " ")
 	for _, identifier := range identifiers {

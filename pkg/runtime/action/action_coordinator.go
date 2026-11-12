@@ -494,7 +494,7 @@ func (c *ActionCoordinator) createLoopProposal(ctx context.Context, req ProposeA
 	return result, nil
 }
 
-// actionBudgetExhaustedReason is the denial reason of a loop call refused for
+// ActionBudgetExhaustedReason is the denial reason of a loop call refused for
 // action budget; replays recognize the denial by it.
 const ActionBudgetExhaustedReason = "run action budget is exhausted"
 
@@ -814,6 +814,8 @@ func (c *ActionCoordinator) enrichApprovalPreview(
 	return result
 }
 
+// SanitizePersistedApprovalValue copies value with every field whose name looks
+// sensitive replaced by [REDACTED], as approvals store proposed arguments.
 func SanitizePersistedApprovalValue(value interface{}) interface{} {
 	switch typed := value.(type) {
 	case map[string]interface{}:

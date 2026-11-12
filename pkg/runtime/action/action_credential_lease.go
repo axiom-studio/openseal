@@ -156,6 +156,8 @@ func cloneActionCredentialLeaseSignature(value models.ActionCredentialLeaseSigna
 	return value
 }
 
+// CloneSignedActionCredentialLease copies a signed lease, including its
+// credential references and signature.
 func CloneSignedActionCredentialLease(value *models.SignedActionCredentialLease) *models.SignedActionCredentialLease {
 	if value == nil {
 		return nil

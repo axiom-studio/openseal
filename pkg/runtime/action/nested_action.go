@@ -229,7 +229,7 @@ func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionR
 	return &NestedActionResult{Call: proposal.Call, Approval: proposal.Approval, Created: proposal.Created}, nil
 }
 
-// actionDeploymentForSelection is the deployment whose bindings authorize the
+// ActionDeploymentForSelection is the deployment whose bindings authorize the
 // selected action: the action's own owner, else the binding's action
 // deployment (a Team member Run resolves Team actions against the Team), else
 // the Run's deployment.
@@ -269,7 +269,7 @@ func (c *ActionCoordinator) GetNested(ctx context.Context, scope models.Scope, r
 	return result, nil
 }
 
-// preparedRuntimeForAction is the activation-time runtime prepared for the
+// PreparedRuntimeForAction is the activation-time runtime prepared for the
 // selected action's exact binding, if any.
 func PreparedRuntimeForAction(binding *agentrun.TurnRunnerBinding, selected *capability.ModelAction) *skill.PreparedRuntime {
 	for runtimeIndex := range binding.PreparedRuntimes {
@@ -284,7 +284,7 @@ func PreparedRuntimeForAction(binding *agentrun.TurnRunnerBinding, selected *cap
 	return nil
 }
 
-// selectTurnModelAction resolves a proposal exactly by name and, when the
+// SelectTurnModelAction resolves a proposal exactly by name and, when the
 // proposal carries one, binding. A name exposed twice is refused even when the
 // proposal names a binding: a catalog with duplicate names is itself invalid.
 func SelectTurnModelAction(actions []capability.ModelAction, request activity.TurnAction) (*capability.ModelAction, error) {

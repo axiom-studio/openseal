@@ -35,7 +35,7 @@ func (e *ActionProposalRejection) Error() string { return e.Message }
 
 func (e *ActionProposalRejection) Unwrap() error { return e.Cause }
 
-// rejectProposal turns err into a model-visible rejection with code. It is
+// RejectProposal turns err into a model-visible rejection with code. It is
 // nil-safe and keeps an existing rejection unchanged.
 func RejectProposal(code string, err error) error {
 	if err == nil {

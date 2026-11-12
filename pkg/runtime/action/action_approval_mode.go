@@ -28,6 +28,7 @@ func ApprovalModeAllowsAction(mode models.ConversationApprovalMode, review skill
 	}
 }
 
+// ConversationReader reads the conversation a Run acts for.
 type ConversationReader interface {
 	GetConversation(ctx context.Context, scope models.Scope, conversationID string) (*models.Conversation, error)
 }
@@ -83,7 +84,7 @@ func RunConversationApprovalMode(ctx context.Context, runs models.AgentRunReader
 	return conversationID, ConversationApprovalModeOrDefault(conversation.ApprovalMode), nil
 }
 
-// routineEventOccurrenceRun reports whether run is an event routine
+// IsRoutineEventOccurrenceRun reports whether run is an event routine
 // occurrence or runs under one. Child Runs inherit routineEventBatchId from
 // their source (inheritRoutineEventBatch), so this reads only run.Context and
 // never the store.
@@ -91,6 +92,8 @@ func IsRoutineEventOccurrenceRun(run *models.AgentRun) bool {
 	return run != nil && models.RoutineEventBatchID(run) != ""
 }
 
+// ConversationApprovalModeOrDefault is mode, or the default approval mode when
+// a conversation has none.
 func ConversationApprovalModeOrDefault(mode models.ConversationApprovalMode) models.ConversationApprovalMode {
 	if mode == "" {
 		return models.DefaultConversationApprovalMode

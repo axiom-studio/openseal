@@ -30,6 +30,8 @@ func invalidApprovalReviewContext(message string) error {
 	return &approvalReviewValidationError{cause: errors.New(message)}
 }
 
+// ValidateApprovalReviewContext checks the review envelope of a governed call
+// when it has one: a summary, and every text and list within its bounds.
 func ValidateApprovalReviewContext(review *activity.ApprovalReviewContext) error {
 	if review == nil {
 		return nil
@@ -61,6 +63,8 @@ func ValidateApprovalReviewContext(review *activity.ApprovalReviewContext) error
 	return nil
 }
 
+// CloneApprovalReviewContext copies review, including its consequences and
+// facts.
 func CloneApprovalReviewContext(review *activity.ApprovalReviewContext) *activity.ApprovalReviewContext {
 	if review == nil {
 		return nil
@@ -154,7 +158,7 @@ func intentApprovalReviewContext(preview map[string]interface{}, operation *acti
 	return review
 }
 
-// reviewedActionReviewContextJSONSchema is the review envelope schema of a
+// ReviewedActionReviewContextJSONSchema is the review envelope schema of a
 // reviewed (external or destructive) governed tool: the approval card shows
 // the exact content, so content is required alongside the summary.
 func ReviewedActionReviewContextJSONSchema() map[string]interface{} {
@@ -163,7 +167,7 @@ func ReviewedActionReviewContextJSONSchema() map[string]interface{} {
 	return schema
 }
 
-// validateReviewedActionReviewContext checks the review envelope of a
+// ValidateReviewedActionReviewContext checks the review envelope of a
 // reviewed governed call: present, valid, and carrying its exact content.
 func ValidateReviewedActionReviewContext(review *activity.ApprovalReviewContext) error {
 	if review == nil {

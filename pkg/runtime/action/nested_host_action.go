@@ -269,6 +269,9 @@ func (c *ActionCoordinator) FinishNestedHostAction(ctx context.Context, outcome 
 	return result.Call, nil
 }
 
+// BoundActionToolTransport is the tool endpoint a bound action runs on: the
+// action's own transport, else its Skill's. Other transport kinds are an
+// error.
 func BoundActionToolTransport(bound *skill.BoundAction) (string, error) {
 	if bound == nil || bound.Definition == nil {
 		return "", errors.New("bound action is required")

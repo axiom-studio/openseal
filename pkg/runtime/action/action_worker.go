@@ -755,6 +755,8 @@ func boundedChallengeKinds(raw interface{}) []string {
 	return values
 }
 
+// SanitizeActionError is err's message with every credential value redacted,
+// cut to 1 KiB.
 func SanitizeActionError(err error, credentials map[string]string) string {
 	if err == nil {
 		return ""

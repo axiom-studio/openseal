@@ -378,6 +378,9 @@ func isObjectiveAction(bound *skill.BoundAction) bool {
 	return false
 }
 
+// ConversationObjectiveOrigin is the Objective the Run's conversation was
+// started from, or "" when the Run has no conversation or it has another
+// origin.
 func ConversationObjectiveOrigin(ctx context.Context, store models.ConversationStore, run *models.AgentRun) (string, error) {
 	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 	if strings.TrimSpace(conversationID) == "" {
