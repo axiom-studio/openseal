@@ -245,7 +245,7 @@ func TestSQLiteTeamMembersMigrationReplacesRoleSlots(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := sqliteTeamMembersMigration(tx).down(); err != nil {
+		if err := sqliteTeamMembersMigration(tx).Down(); err != nil {
 			t.Fatal(err)
 		}
 		if err := tx.Commit(); err != nil {

@@ -13,7 +13,7 @@ func migrateConnectOnceSQLite(db *sql.DB) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := (connectOnceMigration{db: tx, table: func(name string) string { return name }, sqlite: true}).run(context.Background()); err != nil {
+	if err := (connectOnceMigration{DB: tx, Table: func(name string) string { return name }, SQLite: true}).Run(context.Background()); err != nil {
 		return err
 	}
 	return tx.Commit()

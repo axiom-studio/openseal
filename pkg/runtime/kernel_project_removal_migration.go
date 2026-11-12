@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // kernelProjectRemovalMigrationVersion removes kernel Projects and the
@@ -23,7 +25,7 @@ func (s *PostgresStore) migrateRemoveKernelProjects(ctx context.Context, tx *sql
 		`DROP FUNCTION IF EXISTS ` + s.table("admit_project_skill_references") + `() CASCADE`,
 		`DROP FUNCTION IF EXISTS ` + s.table("project_skill_references") + `() CASCADE`,
 	}
-	for _, table := range retiredKernelProjectTables {
+	for _, table := range sqlstore.RetiredKernelProjectTables {
 		statements = append(statements, `DROP TABLE IF EXISTS `+s.table(table)+` CASCADE`)
 	}
 	statements = append(statements,

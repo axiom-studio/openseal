@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // legacyEventWaitsMigrationVersion drops the durable event wait tables: the
@@ -18,7 +20,7 @@ func (s *PostgresStore) migrateRemoveEventWaits(ctx context.Context, tx *sql.Tx)
 	if err != nil || applied {
 		return err
 	}
-	for _, table := range legacyEventWaitTables {
+	for _, table := range sqlstore.LegacyEventWaitTables {
 		if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+s.table(table)+` CASCADE`); err != nil {
 			return err
 		}

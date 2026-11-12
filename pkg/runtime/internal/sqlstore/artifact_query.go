@@ -1,0 +1,126 @@
+package sqlstore
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+)
+
+// artifactListQuery applies the common catalog filters and page boundaries in
+// SQL so a user-visible page does not load and sort every tenant artifact.
+// Evidence and retention queries keep the exact Go filter until those nested
+// fields have a portable indexed representation.
+func ArtifactListQuery(filter models.ArtifactFilter, table, workingTable string, postgres bool) (string, []any) {
+	args := make([]any, 0, 12)
+	bind := func(value any) string {
+		args = append(args, value)
+		if postgres {
+			return fmt.Sprintf("$%d", len(args))
+		}
+		return "?"
+	}
+	where := []string{"a.scope_kind = " + bind(filter.Scope.Kind), "a.scope_id = " + bind(filter.Scope.ID)}
+	if filter.ID != "" {
+		where = append(where, "a.id = "+bind(filter.ID))
+	}
+	if filter.Owner != nil {
+		ownerType, ownerID := "json_extract(a.payload, '$.provenance.owner.type')", "json_extract(a.payload, '$.provenance.owner.id')"
+		if postgres {
+			ownerType, ownerID = "a.payload->'provenance'->'owner'->>'type'", "a.payload->'provenance'->'owner'->>'id'"
+		}
+		where = append(where, ownerType+" = "+bind(string(filter.Owner.Type)), ownerID+" = "+bind(filter.Owner.ID))
+	}
+	addStrings := func(column string, values []string) {
+		if len(values) == 0 {
+			return
+		}
+		placeholders := make([]string, 0, len(values))
+		for _, value := range values {
+			placeholders = append(placeholders, bind(strings.TrimSpace(value)))
+		}
+		where = append(where, column+" IN ("+strings.Join(placeholders, ", ")+")")
+	}
+	addStrings("a.type", filter.Types)
+	addStrings("a.media_type", filter.MediaTypes)
+	if len(filter.Classifications) > 0 {
+		values := make([]string, len(filter.Classifications))
+		for i, value := range filter.Classifications {
+			values[i] = string(value)
+		}
+		addStrings("a.classification", values)
+	}
+	if filter.ProducerRunID != "" {
+		where = append(where, "a.producer_run_id = "+bind(filter.ProducerRunID))
+	}
+	if filter.ProducerRequestID != "" {
+		where = append(where, "a.producer_request_id = "+bind(filter.ProducerRequestID))
+	}
+	provenanceField := func(name string) string {
+		if postgres {
+			return "a.payload->'provenance'->>'" + name + "'"
+		}
+		return "json_extract(a.payload, '$.provenance." + name + "')"
+	}
+	if filter.ConversationID != "" {
+		where = append(where, provenanceField("conversationId")+" = "+bind(filter.ConversationID))
+	}
+	if filter.SpaceID != "" {
+		where = append(where, provenanceField("spaceId")+" = "+bind(filter.SpaceID))
+	}
+	if filter.Files == models.ArtifactFilesResults || filter.Files == models.ArtifactFilesWorking {
+		marked := "EXISTS (SELECT 1 FROM " + workingTable + " w WHERE w.scope_kind = a.scope_kind AND w.scope_id = a.scope_id AND w.id = a.id)"
+		if filter.Files == models.ArtifactFilesResults {
+			marked = "NOT " + marked
+		}
+		where = append(where, marked)
+	}
+	if filter.LatestOnly {
+		where = append(where, "NOT EXISTS (SELECT 1 FROM "+table+" newer WHERE newer.scope_kind = a.scope_kind AND newer.scope_id = a.scope_id AND newer.id = a.id AND newer.version > a.version)")
+	}
+	query := "SELECT a.payload FROM " + table + " a WHERE " + strings.Join(where, " AND ") +
+		" ORDER BY a.created_at DESC, a.id ASC, a.version DESC LIMIT " + bind(filter.Limit) + " OFFSET " + bind(filter.Offset)
+	return query, args
+}
+
+func QueryArtifactPage(ctx context.Context, db *sql.DB, query string, args []any) ([]*models.Artifact, error) {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]*models.Artifact, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		artifact, err := DecodeArtifact(payload)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, artifact)
+	}
+	return result, rows.Err()
+}
+
+// workingArtifactIDs reads a scope's working files for the list paths that
+// filter in Go.
+func WorkingArtifactIDs(ctx context.Context, db *sql.DB, query string, scope models.Scope) (map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, query, scope.Kind, scope.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids[id] = true
+	}
+	return ids, rows.Err()
+}

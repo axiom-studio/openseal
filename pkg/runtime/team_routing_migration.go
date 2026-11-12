@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // Migrations 24 and 25 rewrote the retired Team coordination policy. Fresh
@@ -15,10 +17,10 @@ const (
 )
 
 func (s *PostgresStore) migrateTeamRouting(ctx context.Context, tx *sql.Tx) error {
-	for _, path := range teamCoordinationPaths {
-		if _, err := tx.ExecContext(ctx, `UPDATE `+s.table(path.table)+`
-			SET payload = payload #- '`+path.postgres+`'
-			WHERE payload #> '`+path.postgres+`' IS NOT NULL`); err != nil {
+	for _, path := range sqlstore.TeamCoordinationPaths {
+		if _, err := tx.ExecContext(ctx, `UPDATE `+s.table(path.Table)+`
+			SET payload = payload #- '`+path.Postgres+`'
+			WHERE payload #> '`+path.Postgres+`' IS NOT NULL`); err != nil {
 			return err
 		}
 	}
@@ -33,9 +35,9 @@ func (s *PostgresStore) migrateTeamRouting(ctx context.Context, tx *sql.Tx) erro
 
 // rollbackTeamRouting removes the routing fields an older kernel does not know.
 func (s *PostgresStore) rollbackTeamRouting(ctx context.Context, tx *sql.Tx) error {
-	for _, path := range teamCoordinationPaths {
-		routing := path.postgres[:len(path.postgres)-len("coordination}")] + "routing}"
-		if _, err := tx.ExecContext(ctx, `UPDATE `+s.table(path.table)+`
+	for _, path := range sqlstore.TeamCoordinationPaths {
+		routing := path.Postgres[:len(path.Postgres)-len("coordination}")] + "routing}"
+		if _, err := tx.ExecContext(ctx, `UPDATE `+s.table(path.Table)+`
 			SET payload = payload #- '`+routing+`'
 			WHERE payload #> '`+routing+`' IS NOT NULL`); err != nil {
 			return err

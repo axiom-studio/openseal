@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // legacyEventSourcesMigrationVersion drops the event source subscriptions,
@@ -17,7 +19,7 @@ func (s *PostgresStore) migrateRemoveEventSources(ctx context.Context, tx *sql.T
 	if err != nil || applied {
 		return err
 	}
-	for _, table := range legacyEventSourceTables {
+	for _, table := range sqlstore.LegacyEventSourceTables {
 		if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+s.table(table)); err != nil {
 			return err
 		}

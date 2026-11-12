@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -31,13 +32,13 @@ func TestTeamRoutingSQLiteMigrationRemovesCoordinationPolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, path := range teamCoordinationPaths {
+	for _, path := range sqlstore.TeamCoordinationPaths {
 		var remaining int
-		if err = db.QueryRow(`SELECT COUNT(*) FROM `+path.table+` WHERE json_type(payload, ?) IS NOT NULL`, path.sqlite).Scan(&remaining); err != nil {
+		if err = db.QueryRow(`SELECT COUNT(*) FROM `+path.Table+` WHERE json_type(payload, ?) IS NOT NULL`, path.SQLite).Scan(&remaining); err != nil {
 			t.Fatal(err)
 		}
 		if remaining != 0 {
-			t.Fatalf("%s still has %d coordination policies", path.table, remaining)
+			t.Fatalf("%s still has %d coordination policies", path.Table, remaining)
 		}
 	}
 	var notes string

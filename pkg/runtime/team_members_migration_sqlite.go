@@ -7,8 +7,8 @@ import (
 
 func sqliteTeamMembersMigration(tx *sql.Tx) teamMembersMigration {
 	return teamMembersMigration{
-		ctx: context.Background(), db: tx, table: func(name string) string { return name }, placeholder: func(int) string { return "?" },
-		exists: func(table string) (bool, error) {
+		Ctx: context.Background(), DB: tx, Table: func(name string) string { return name }, Placeholder: func(int) string { return "?" },
+		Exists: func(table string) (bool, error) {
 			var count int
 			err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count)
 			return count > 0, err
@@ -24,7 +24,7 @@ func migrateTeamMembersSQLite(db *sql.DB) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := sqliteTeamMembersMigration(tx).up(); err != nil {
+	if err := sqliteTeamMembersMigration(tx).Up(); err != nil {
 		return err
 	}
 	return tx.Commit()

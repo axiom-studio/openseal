@@ -13,8 +13,8 @@ const teamMembersMigrationVersion int64 = 85
 
 func (s *PostgresStore) teamMembersMigration(ctx context.Context, tx *sql.Tx) teamMembersMigration {
 	return teamMembersMigration{
-		ctx: ctx, db: tx, table: s.table, placeholder: func(n int) string { return fmt.Sprintf("$%d", n) },
-		exists: func(table string) (bool, error) {
+		Ctx: ctx, DB: tx, Table: s.table, Placeholder: func(n int) string { return fmt.Sprintf("$%d", n) },
+		Exists: func(table string) (bool, error) {
 			var relation sql.NullString
 			err := tx.QueryRowContext(ctx, `SELECT to_regclass($1)`, s.table(table)).Scan(&relation)
 			return relation.Valid, err
@@ -28,7 +28,7 @@ func (s *PostgresStore) migrateTeamMembers(ctx context.Context, tx *sql.Tx) erro
 	if err != nil || applied {
 		return err
 	}
-	if err := s.teamMembersMigration(ctx, tx).up(); err != nil {
+	if err := s.teamMembersMigration(ctx, tx).Up(); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version, name)
@@ -38,5 +38,5 @@ func (s *PostgresStore) migrateTeamMembers(ctx context.Context, tx *sql.Tx) erro
 
 // rollbackTeamMembers restores role slots for a kernel that requires them.
 func (s *PostgresStore) rollbackTeamMembers(ctx context.Context, tx *sql.Tx) error {
-	return s.teamMembersMigration(ctx, tx).down()
+	return s.teamMembersMigration(ctx, tx).Down()
 }

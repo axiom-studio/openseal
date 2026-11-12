@@ -1,0 +1,32 @@
+package sqlstore
+
+import (
+	"database/sql"
+	"math"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+)
+
+func ConversationForegroundPageSize(limit, offset int) int {
+	if offset > math.MaxInt-limit {
+		return math.MaxInt
+	}
+	return offset + limit
+}
+
+func ScanConversationForegroundRuns(rows *sql.Rows) ([]*models.AgentRun, error) {
+	runs := make([]*models.AgentRun, 0)
+	for rows.Next() {
+		var payload, id string
+		var createdAt interface{}
+		if err := rows.Scan(&payload, &createdAt, &id); err != nil {
+			return nil, err
+		}
+		run, err := DecodeAgentRun(payload)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	return runs, rows.Err()
+}

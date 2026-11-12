@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"database/sql"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 // migrateRemoveKernelProjectsSQLite mirrors PostgreSQL migration 77. Every
@@ -14,7 +16,7 @@ func migrateRemoveKernelProjectsSQLite(db *sql.DB) error {
 		return err
 	}
 	defer tx.Rollback()
-	for _, table := range retiredKernelProjectTables {
+	for _, table := range sqlstore.RetiredKernelProjectTables {
 		if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+table); err != nil {
 			return err
 		}

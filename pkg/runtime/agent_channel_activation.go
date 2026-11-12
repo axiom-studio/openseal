@@ -8,10 +8,6 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 )
 
-type endpointUpdateExecutor interface {
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
-}
-
 // channelActivationCommit joins the endpoint CAS to the registry's activation
 // transaction. Separate databases and unknown stores fail closed rather than
 // activating a definition whose channel could not be materialized.
