@@ -13,9 +13,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Postgres store test (outbox triggers and migrations): it moves to
-// store/postgres in U2.8. It writes its Runs with the store's CreateAgentRun
-// (storetest.QueuedAgentRun), since a store package cannot import runtime.
+// Store test (outbox triggers and migrations). It writes its Runs with the
+// store's CreateAgentRun (storetest.QueuedAgentRun).
 
 func newWorkSignalPostgresStore(t *testing.T, schema string) (context.Context, *PostgresStore) {
 	t.Helper()

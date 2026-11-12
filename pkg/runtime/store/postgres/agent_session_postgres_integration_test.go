@@ -16,8 +16,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Postgres store test: it moves to store/postgres in U2.8. It runs the
-// session conformance suite and the entry helpers of storetest.
+// Store test: it runs storetest's session conformance suite and checks
+// what only replicas of one Postgres database can show.
 
 // newAgentSessionPostgresStores opens n PostgresStores (replicas) on one fresh
 // schema. The schema is dropped when the test ends.

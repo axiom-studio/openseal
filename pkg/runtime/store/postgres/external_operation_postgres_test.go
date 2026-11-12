@@ -7,9 +7,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-// Store test: externalOperationLockKey is the Postgres store's advisory lock
-// key, so this file moves to store/postgres with external_operation_postgres.go
-// (U2.8).
+// Store test: externalOperationLockKey is the store's advisory lock key.
 
 func TestExternalOperationLockKeyIsStablePrintableAndScopeSeparated(t *testing.T) {
 	digest := models.SHA256DigestString("stable operation")

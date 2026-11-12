@@ -18,8 +18,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Postgres store test: it moves to store/postgres in U2.8. The contract it
-// runs is in skill_definition_identity_probe_contract_test.go (storetest).
+// Store test: it runs storetest.RunSkillDefinitionIdentityProbeContract.
 
 func TestPostgresSkillDefinitionIdentityProbeUsesLiveIndexedMetadata(t *testing.T) {
 	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")

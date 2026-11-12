@@ -15,9 +15,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Postgres store test: it reads the store's own routine event queries and
-// tables, so it moves to the Postgres store package with the store. Its
-// contract (runRoutineEventStoreContract) must move to storetest first.
+// Store test: it runs storetest.RunRoutineEventContract and reads the
+// store's own routine event queries and tables.
 
 func openPostgresRoutineEventStore(t *testing.T) *PostgresStore {
 	t.Helper()

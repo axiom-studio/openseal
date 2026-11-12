@@ -2,8 +2,7 @@ package postgres
 
 import "testing"
 
-// Store test: writesRows belongs to the Postgres work outbox connection, so
-// this file moves to store/postgres with work_outbox_postgres.go (U2.8).
+// Store test: writesRows belongs to the work outbox connection.
 
 func TestWritesRows(t *testing.T) {
 	for query, writes := range map[string]bool{

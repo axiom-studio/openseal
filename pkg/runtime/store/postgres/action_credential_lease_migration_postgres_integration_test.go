@@ -9,8 +9,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-// Store test: rolls back and reapplies the Postgres store's credential lease
-// migration, so this file moves to store/postgres (U2.8).
+// Store test: rolls back and reapplies the store's credential lease
+// migration.
 
 func TestPostgresActionCredentialLeaseMigrationRollsBackAndReapplies(t *testing.T) {
 	ctx := context.Background()

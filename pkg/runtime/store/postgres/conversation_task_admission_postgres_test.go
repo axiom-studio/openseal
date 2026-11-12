@@ -11,8 +11,7 @@ import (
 	"github.com/lib/pq"
 )
 
-// Postgres store test: it reads the plan of the store's own admission query,
-// so it moves to the Postgres store package with the store.
+// Store test: it reads the plan of the store's own admission query.
 
 func TestConversationTaskForegroundReservePostgresIndexedAdmissionPlan(t *testing.T) {
 	store, _ := openTestPostgresStore(t, "openseal_task_sql_")
