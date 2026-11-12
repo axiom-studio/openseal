@@ -608,7 +608,7 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 		if !beforeOK || !afterOK {
 			continue
 		}
-		if upgradeRiskRank(after.Risk) > upgradeRiskRank(before.Risk) {
+		if after.Risk.Rank() > before.Risk.Rank() {
 			findings = append(findings, SkillReferenceUpgradeFinding{
 				Code: "risk_increased", Subject: name, From: string(before.Risk), To: string(after.Risk), Message: fmt.Sprintf("%s risk changes from %s to %s", name, before.Risk, after.Risk),
 			})
@@ -848,23 +848,6 @@ func compatibleUpgradeInputSchema(before, after map[string]interface{}) bool {
 		}
 	}
 	return reflect.DeepEqual(oldRest, newRest)
-}
-
-func upgradeRiskRank(value capability.RiskLevel) int {
-	switch value {
-	case capability.RiskLevelRead:
-		return 0
-	case capability.RiskLevelWrite:
-		return 1
-	case capability.RiskLevelExternal:
-		return 2
-	case capability.RiskLevelProduction:
-		return 3
-	case capability.RiskLevelDestructive:
-		return 4
-	default:
-		return -1
-	}
 }
 
 func skillReferenceUpgradeDigest(plan *SkillReferenceUpgradePlan) (string, error) {

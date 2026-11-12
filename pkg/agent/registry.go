@@ -399,7 +399,7 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	if !isSubset(changedFields, allowedFields) {
 		return nil, fmt.Errorf("amendment changes fields outside the definition policy: changed=%v allowed=%v", changedFields, allowedFields)
 	}
-	riskWidening := riskRank(candidate.Authority.MaximumRisk) > riskRank(base.Authority.MaximumRisk) || candidate.Authority.MaxConcurrentRuns > base.Authority.MaxConcurrentRuns || !isSubset(candidate.Authority.AllowedSkillIDs, base.Authority.AllowedSkillIDs)
+	riskWidening := candidate.Authority.MaximumRisk.Rank() > base.Authority.MaximumRisk.Rank() || candidate.Authority.MaxConcurrentRuns > base.Authority.MaxConcurrentRuns || !isSubset(candidate.Authority.AllowedSkillIDs, base.Authority.AllowedSkillIDs)
 	if riskWidening && len(base.Amendments.ApproverPrincipals) == 0 {
 		return nil, errors.New("risk-widening amendments require eligible approver principals")
 	}

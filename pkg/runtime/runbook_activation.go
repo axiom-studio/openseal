@@ -636,22 +636,5 @@ func runbookActionRequiresApproval(definition *kernelagent.AgentDefinition, skil
 	if threshold == "" {
 		return true
 	}
-	return runbookRiskRank(action.Risk) >= runbookRiskRank(threshold)
-}
-
-func runbookRiskRank(risk capability.RiskLevel) int {
-	switch risk {
-	case capability.RiskLevelRead:
-		return 1
-	case capability.RiskLevelWrite:
-		return 2
-	case capability.RiskLevelExternal:
-		return 3
-	case capability.RiskLevelProduction:
-		return 4
-	case capability.RiskLevelDestructive:
-		return 5
-	default:
-		return 0
-	}
+	return action.Risk.Rank() >= threshold.Rank()
 }

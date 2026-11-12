@@ -352,7 +352,7 @@ func CheckCurrentActionCredentialBinding(lease ActionCredentialLease, call *Acti
 		binding.DeploymentID != lease.BindingOwnerID || binding.ID != lease.BindingID || binding.Revision != lease.BindingRevision ||
 		binding.SkillID != lease.SkillID || binding.SkillVersion != lease.SkillVersion ||
 		!slices.Contains(binding.AllowedActions, lease.Action) ||
-		riskLevelRank(call.Risk) < 0 || riskLevelRank(binding.MaximumRisk) < riskLevelRank(call.Risk) ||
+		call.Risk.Rank() < 0 || binding.MaximumRisk.Rank() < call.Risk.Rank() ||
 		!credentialReferencesContainExact(binding.Credentials, call.CredentialRefs) {
 		return ErrActionCredentialLeaseMismatch
 	}
@@ -374,23 +374,6 @@ func credentialReferencesContainExact(available, selected map[string]skill.Crede
 		}
 	}
 	return true
-}
-
-func riskLevelRank(value skill.RiskLevel) int {
-	switch value {
-	case skill.RiskLevelRead:
-		return 0
-	case skill.RiskLevelWrite:
-		return 1
-	case skill.RiskLevelExternal:
-		return 2
-	case skill.RiskLevelProduction:
-		return 3
-	case skill.RiskLevelDestructive:
-		return 4
-	default:
-		return -1
-	}
 }
 
 type CreateActionCredentialLeaseRequest struct {

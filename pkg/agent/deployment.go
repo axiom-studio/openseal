@@ -133,7 +133,7 @@ func validateDeploymentPlacement(d *AgentDeployment) error {
 }
 
 func validateNarrowing(definition *AgentDefinition, deployment *AgentDeployment) error {
-	if deployment.Restrictions.MaximumRisk != nil && riskRank(*deployment.Restrictions.MaximumRisk) > riskRank(definition.Authority.MaximumRisk) {
+	if deployment.Restrictions.MaximumRisk != nil && (*deployment.Restrictions.MaximumRisk).Rank() > definition.Authority.MaximumRisk.Rank() {
 		return errors.New("deployment maximum risk cannot widen definition authority")
 	}
 	if deployment.Restrictions.MaxConcurrentRuns != nil && *deployment.Restrictions.MaxConcurrentRuns > definition.Authority.MaxConcurrentRuns {

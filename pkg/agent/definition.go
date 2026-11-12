@@ -269,23 +269,6 @@ func validRisk(value capability.RiskLevel) bool {
 	}
 }
 
-func riskRank(value capability.RiskLevel) int {
-	switch value {
-	case capability.RiskLevelRead:
-		return 0
-	case capability.RiskLevelWrite:
-		return 1
-	case capability.RiskLevelExternal:
-		return 2
-	case capability.RiskLevelProduction:
-		return 3
-	case capability.RiskLevelDestructive:
-		return 4
-	default:
-		return -1
-	}
-}
-
 func validateNoSecrets(value interface{}, path string) error {
 	switch typed := value.(type) {
 	case map[string]interface{}:

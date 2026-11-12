@@ -26,13 +26,13 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 			!catalogDiagnosticReferencePattern.MatchString(constraint.ID) || !authorityConstraintVersionPattern.MatchString(constraint.Version) {
 			return errors.New("authority constraint requires a valid id and version")
 		}
-		if constraint.MaximumRisk != "" && riskRank(constraint.MaximumRisk) < 0 {
+		if constraint.MaximumRisk != "" && constraint.MaximumRisk.Rank() < 0 {
 			return errors.New("authority constraint maximum risk is invalid")
 		}
-		if constraint.RequireApprovalAt != "" && riskRank(constraint.RequireApprovalAt) < 0 {
+		if constraint.RequireApprovalAt != "" && constraint.RequireApprovalAt.Rank() < 0 {
 			return errors.New("authority constraint approval risk is invalid")
 		}
-		if constraint.MaximumRisk != "" && constraint.RequireApprovalAt != "" && riskRank(constraint.RequireApprovalAt) > riskRank(constraint.MaximumRisk) {
+		if constraint.MaximumRisk != "" && constraint.RequireApprovalAt != "" && constraint.RequireApprovalAt.Rank() > constraint.MaximumRisk.Rank() {
 			return errors.New("authority constraint approval risk cannot exceed maximum risk")
 		}
 	}
@@ -40,7 +40,7 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 		if strings.TrimSpace(id) == "" || strings.TrimSpace(skill.ID) == "" || id != skill.ID {
 			return errors.New("Skill catalog keys must match non-empty Skill ids")
 		}
-		if skill.MaximumRisk != "" && riskRank(skill.MaximumRisk) < 0 {
+		if skill.MaximumRisk != "" && skill.MaximumRisk.Rank() < 0 {
 			return fmt.Errorf("Skill %s maximum risk is invalid", id)
 		}
 		if skill.HostedModelInputTokens < 0 {
@@ -51,10 +51,10 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 			if action != strings.TrimSpace(action) || action == "" || !actions[action] {
 				return fmt.Errorf("Skill %s action risk references an undeclared action", id)
 			}
-			if riskRank(risk) < 0 {
+			if risk.Rank() < 0 {
 				return fmt.Errorf("Skill %s action %s risk is invalid", id, action)
 			}
-			if skill.MaximumRisk != "" && riskRank(risk) > riskRank(skill.MaximumRisk) {
+			if skill.MaximumRisk != "" && risk.Rank() > skill.MaximumRisk.Rank() {
 				return fmt.Errorf("Skill %s action %s risk exceeds the Skill maximum", id, action)
 			}
 		}
@@ -288,21 +288,4 @@ func stringSet(values []string) map[string]bool {
 		}
 	}
 	return result
-}
-
-func riskRank(value capability.RiskLevel) int {
-	switch value {
-	case capability.RiskLevelRead:
-		return 0
-	case capability.RiskLevelWrite:
-		return 1
-	case capability.RiskLevelExternal:
-		return 2
-	case capability.RiskLevelProduction:
-		return 3
-	case capability.RiskLevelDestructive:
-		return 4
-	default:
-		return -1
-	}
 }

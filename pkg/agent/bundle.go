@@ -578,7 +578,7 @@ func (b *Bundle) Validate() error {
 		if strings.TrimSpace(declaredSkills[id].VersionConstraint) != identity.Version {
 			return fmt.Errorf("agent bundle Skill %s exact identity does not match its manifest version", id)
 		}
-		if !validRisk(requirement.Policy.MaximumRisk) || riskRank(requirement.Policy.MaximumRisk) > riskRank(definition.Authority.MaximumRisk) {
+		if !validRisk(requirement.Policy.MaximumRisk) || requirement.Policy.MaximumRisk.Rank() > definition.Authority.MaximumRisk.Rank() {
 			return fmt.Errorf("agent bundle Skill %s policy exceeds Agent risk authority", id)
 		}
 		allowedActions := map[string]bool{}

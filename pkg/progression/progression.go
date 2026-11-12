@@ -366,7 +366,7 @@ func validateDefinitionOutcomes(criteria []workforce.EvaluationCriterion, outcom
 }
 
 func validateAgentCeiling(candidate *agent.AgentDefinition, ceiling AgentPolicyCeiling) error {
-	if riskRank(ceiling.MaximumRisk) < 0 || ceiling.MaxConcurrentRuns < 1 || riskRank(candidate.Authority.MaximumRisk) > riskRank(ceiling.MaximumRisk) || candidate.Authority.MaxConcurrentRuns > ceiling.MaxConcurrentRuns || !subset(candidate.Authority.AllowedSkillIDs, ceiling.AllowedSkillIDs) {
+	if ceiling.MaximumRisk.Rank() < 0 || ceiling.MaxConcurrentRuns < 1 || candidate.Authority.MaximumRisk.Rank() > ceiling.MaximumRisk.Rank() || candidate.Authority.MaxConcurrentRuns > ceiling.MaxConcurrentRuns || !subset(candidate.Authority.AllowedSkillIDs, ceiling.AllowedSkillIDs) {
 		return ErrPolicyCeiling
 	}
 	for name, amount := range candidate.Authority.BudgetCeilings {
@@ -379,14 +379,14 @@ func validateAgentCeiling(candidate *agent.AgentDefinition, ceiling AgentPolicyC
 }
 
 func validateTeamCeiling(candidate *team.Definition, ceiling TeamPolicyCeiling) error {
-	if riskRank(ceiling.MaximumRisk) < 0 || ceiling.MaximumDelegationDepth < 0 || ceiling.MaximumConcurrency < 0 || riskRank(candidate.Approvals.MaximumRisk) > riskRank(ceiling.MaximumRisk) || candidate.Delegation.MaximumDepth > ceiling.MaximumDelegationDepth || candidate.Delegation.MaximumConcurrent > ceiling.MaximumConcurrency || candidate.SharedContext.AllowMemberWrite && !ceiling.AllowSharedWrite {
+	if ceiling.MaximumRisk.Rank() < 0 || ceiling.MaximumDelegationDepth < 0 || ceiling.MaximumConcurrency < 0 || candidate.Approvals.MaximumRisk.Rank() > ceiling.MaximumRisk.Rank() || candidate.Delegation.MaximumDepth > ceiling.MaximumDelegationDepth || candidate.Delegation.MaximumConcurrent > ceiling.MaximumConcurrency || candidate.SharedContext.AllowMemberWrite && !ceiling.AllowSharedWrite {
 		return ErrPolicyCeiling
 	}
 	return nil
 }
 
 func agentAuthorityWidened(base, candidate *agent.AgentDefinition) bool {
-	if riskRank(candidate.Authority.MaximumRisk) > riskRank(base.Authority.MaximumRisk) || candidate.Authority.MaxConcurrentRuns > base.Authority.MaxConcurrentRuns || !subset(candidate.Authority.AllowedSkillIDs, base.Authority.AllowedSkillIDs) {
+	if candidate.Authority.MaximumRisk.Rank() > base.Authority.MaximumRisk.Rank() || candidate.Authority.MaxConcurrentRuns > base.Authority.MaxConcurrentRuns || !subset(candidate.Authority.AllowedSkillIDs, base.Authority.AllowedSkillIDs) {
 		return true
 	}
 	for name, amount := range candidate.Authority.BudgetCeilings {
@@ -398,27 +398,12 @@ func agentAuthorityWidened(base, candidate *agent.AgentDefinition) bool {
 }
 
 func teamAuthorityWidened(base, candidate *team.Definition) bool {
-	if riskRank(candidate.Approvals.MaximumRisk) > riskRank(base.Approvals.MaximumRisk) || candidate.Delegation.MaximumDepth > base.Delegation.MaximumDepth || candidate.Delegation.MaximumConcurrent > base.Delegation.MaximumConcurrent || candidate.SharedContext.AllowMemberWrite && !base.SharedContext.AllowMemberWrite {
+	if candidate.Approvals.MaximumRisk.Rank() > base.Approvals.MaximumRisk.Rank() || candidate.Delegation.MaximumDepth > base.Delegation.MaximumDepth || candidate.Delegation.MaximumConcurrent > base.Delegation.MaximumConcurrent || candidate.SharedContext.AllowMemberWrite && !base.SharedContext.AllowMemberWrite {
 		return true
 	}
 	return false
 }
 
-func riskRank(value capability.RiskLevel) int {
-	switch value {
-	case capability.RiskLevelRead:
-		return 0
-	case capability.RiskLevelWrite:
-		return 1
-	case capability.RiskLevelExternal:
-		return 2
-	case capability.RiskLevelProduction:
-		return 3
-	case capability.RiskLevelDestructive:
-		return 4
-	}
-	return -1
-}
 func subset(values, allowed []string) bool {
 	set := make(map[string]bool, len(allowed))
 	for _, value := range allowed {

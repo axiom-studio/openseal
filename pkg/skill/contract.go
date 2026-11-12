@@ -1691,7 +1691,7 @@ func validateBindingAgainstDefinition(binding *Binding, definition *Definition) 
 		if !ok {
 			return fmt.Errorf("binding action %s does not exist", name)
 		}
-		if riskRank(action.Risk) > riskRank(binding.MaximumRisk) {
+		if action.Risk.Rank() > binding.MaximumRisk.Rank() {
 			return fmt.Errorf("binding action %s exceeds maximum risk", name)
 		}
 		for _, requirement := range action.Credentials {
@@ -1842,24 +1842,7 @@ func validateScopeAndDeployment(scope ScopeReference, deploymentID string) error
 	return nil
 }
 
-func validRisk(value RiskLevel) bool { return riskRank(value) >= 0 }
-func riskRank(value RiskLevel) int {
-	switch value {
-	case RiskLevelRead:
-		return 0
-	case RiskLevelWrite:
-		return 1
-	case RiskLevelExternal:
-		return 2
-	case RiskLevelProduction:
-		return 3
-	case RiskLevelDestructive:
-		return 4
-	default:
-		return -1
-	}
-}
-
+func validRisk(value RiskLevel) bool { return value.Rank() >= 0 }
 func validSideEffect(value SideEffect) bool {
 	return value == SideEffectNone || value == SideEffectRead || value == SideEffectWrite || value == SideEffectExternal || value == SideEffectDestructive
 }

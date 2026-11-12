@@ -107,24 +107,7 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 }
 
 func actionRiskBelowApprovalThreshold(action, threshold capability.RiskLevel) bool {
-	return actionRiskRank(action) >= 0 && actionRiskRank(threshold) >= 0 && actionRiskRank(action) < actionRiskRank(threshold)
-}
-
-func actionRiskRank(value capability.RiskLevel) int {
-	switch value {
-	case capability.RiskLevelRead:
-		return 0
-	case capability.RiskLevelWrite:
-		return 1
-	case capability.RiskLevelExternal:
-		return 2
-	case capability.RiskLevelProduction:
-		return 3
-	case capability.RiskLevelDestructive:
-		return 4
-	default:
-		return -1
-	}
+	return action.Rank() >= 0 && threshold.Rank() >= 0 && action.Rank() < threshold.Rank()
 }
 
 func (e *Engine) defaultSideEffectPolicy() runtime.ActionPolicyEvaluator {

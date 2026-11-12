@@ -330,7 +330,7 @@ func (r *Registry) ProposeAmendment(ctx context.Context, req ProposeAmendmentReq
 	if !stringSubset(changedFields, base.Amendments.AllowedFields) {
 		return nil, errors.New("team amendment changes fields outside the definition policy")
 	}
-	riskWidening := riskRank(candidate.Approvals.MaximumRisk) > riskRank(base.Approvals.MaximumRisk) ||
+	riskWidening := candidate.Approvals.MaximumRisk.Rank() > base.Approvals.MaximumRisk.Rank() ||
 		candidate.Delegation.MaximumConcurrent > base.Delegation.MaximumConcurrent || candidate.Delegation.MaximumDepth > base.Delegation.MaximumDepth ||
 		candidate.SharedContext.AllowMemberWrite && !base.SharedContext.AllowMemberWrite
 	if riskWidening && len(base.Amendments.ApproverPrincipals) == 0 {
@@ -603,7 +603,7 @@ func PrepareDefinition(definition *Definition, createdAt time.Time) (*Definition
 }
 
 func validateNarrowing(definition *Definition, deployment *Deployment) error {
-	if deployment.Restrictions.MaximumRisk != "" && riskRank(deployment.Restrictions.MaximumRisk) > riskRank(definition.Approvals.MaximumRisk) {
+	if deployment.Restrictions.MaximumRisk != "" && deployment.Restrictions.MaximumRisk.Rank() > definition.Approvals.MaximumRisk.Rank() {
 		return errors.New("team deployment risk cannot widen definition authority")
 	}
 	if deployment.Restrictions.MaximumConcurrency > 0 && definition.Delegation.MaximumConcurrent > 0 &&
@@ -611,23 +611,6 @@ func validateNarrowing(definition *Definition, deployment *Deployment) error {
 		return errors.New("team deployment concurrency cannot widen definition authority")
 	}
 	return nil
-}
-
-func riskRank(risk capability.RiskLevel) int {
-	switch risk {
-	case capability.RiskLevelRead:
-		return 0
-	case capability.RiskLevelWrite:
-		return 1
-	case capability.RiskLevelExternal:
-		return 2
-	case capability.RiskLevelProduction:
-		return 3
-	case capability.RiskLevelDestructive:
-		return 4
-	default:
-		return -1
-	}
 }
 
 func normalizedStrings(values []string) []string {

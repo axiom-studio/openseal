@@ -16,6 +16,25 @@ const (
 	RiskLevelDestructive RiskLevel = "destructive"
 )
 
+// Rank orders risk levels from read (0) to destructive (4). A level that is
+// not one of these ranks -1.
+func (r RiskLevel) Rank() int {
+	switch r {
+	case RiskLevelRead:
+		return 0
+	case RiskLevelWrite:
+		return 1
+	case RiskLevelExternal:
+		return 2
+	case RiskLevelProduction:
+		return 3
+	case RiskLevelDestructive:
+		return 4
+	default:
+		return -1
+	}
+}
+
 type SideEffect string
 
 const (
