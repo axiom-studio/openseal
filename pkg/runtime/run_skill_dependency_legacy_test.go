@@ -9,6 +9,7 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -86,7 +87,7 @@ func TestLegacyRunSkillDependencyBackfillPagesWithoutRewritingHistoryAcrossStore
 		if postgres {
 			insert = `INSERT INTO ` + runs + `(scope_kind,scope_id,id,root_run_id,assigned_agent_id,status,created_at,available_at,queue_entered_at,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$7,$7,$8::jsonb)`
 		}
-		count := legacyRunSkillDependencyBatch + 7
+		count := sqlstore.LegacyRunSkillDependencyBatch + 7
 		for i := 0; i < count; i++ {
 			run := &AgentRun{ID: fmt.Sprintf("legacy-%04d", i), RootRunID: fmt.Sprintf("legacy-%04d", i), Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Status: AgentRunStatusPaused, Entrypoint: "manual", Context: map[string]interface{}{"runbookDefinitionId": "reader-method", "runbookDefinitionVersion": "1"}}
 			payload, _ := json.Marshal(run)
@@ -118,7 +119,7 @@ func TestLegacyRunSkillDependencyBackfillPagesWithoutRewritingHistoryAcrossStore
 		if err := tx.QueryRowContext(t.Context(), `SELECT payload FROM `+runs+` WHERE id='legacy-0000'`).Scan(&before); err != nil {
 			t.Fatal(err)
 		}
-		if err := backfillLegacyRunSkillDependencies(t.Context(), tx, runs, deployments, definitions, dependencies, postgres); err != nil {
+		if err := sqlstore.BackfillLegacyRunSkillDependencies(t.Context(), tx, runs, deployments, definitions, dependencies, postgres); err != nil {
 			t.Fatal(err)
 		}
 		var projected int
@@ -130,7 +131,7 @@ func TestLegacyRunSkillDependencyBackfillPagesWithoutRewritingHistoryAcrossStore
 			t.Fatalf("legacy historical Run was rewritten: %v", err)
 		}
 		if !postgres {
-			rows, err := tx.QueryContext(t.Context(), `EXPLAIN QUERY PLAN SELECT scope_kind,scope_id,id FROM agent_runs WHERE status IN (`+unfinishedSkillRunSQL+`) AND (scope_kind,scope_id,id)>('tenant','legacy-backfill','legacy-0000') ORDER BY scope_kind,scope_id,id LIMIT 1000`)
+			rows, err := tx.QueryContext(t.Context(), `EXPLAIN QUERY PLAN SELECT scope_kind,scope_id,id FROM agent_runs WHERE status IN (`+sqlstore.UnfinishedSkillRunSQL+`) AND (scope_kind,scope_id,id)>('tenant','legacy-backfill','legacy-0000') ORDER BY scope_kind,scope_id,id LIMIT 1000`)
 			if err != nil {
 				t.Fatal(err)
 			}

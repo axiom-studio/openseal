@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -236,7 +237,7 @@ func TestConversationMessageBatchSQLiteQueriesExactIDsOnceAndClones(t *testing.T
 	otherTenant := channelMessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "two"}, "channel")
 	channelMessageBatchCommit(t, store, &otherTenant, &ChannelMessage{ID: "shared"})
 	reader := &countedChannelMessageSQLReader{db: sqlDB}
-	selected, err := getChannelMessageBatchSQL(t.Context(), reader, "channel_messages", scope, conversation.ID, []string{"shared", "missing", "shared"}, false)
+	selected, err := sqlstore.GetChannelMessageBatch(t.Context(), reader, "channel_messages", scope, conversation.ID, []string{"shared", "missing", "shared"}, false)
 	if err != nil || reader.queries != 1 || len(selected) != 1 || selected[0].Scope != scope || selected[0].ConversationID != conversation.ID {
 		t.Fatalf("exact scoped batch query = %#v, %v; reads=%d", selected, err, reader.queries)
 	}
@@ -249,7 +250,7 @@ func TestConversationMessageBatchSQLiteQueriesExactIDsOnceAndClones(t *testing.T
 		t.Fatalf("unbounded SQL batch accepted: %v", err)
 	}
 	reader.queries = 0
-	empty, err := getChannelMessageBatchSQL(t.Context(), reader, "channel_messages", scope, conversation.ID, nil, false)
+	empty, err := sqlstore.GetChannelMessageBatch(t.Context(), reader, "channel_messages", scope, conversation.ID, nil, false)
 	if err != nil || len(empty) != 0 || reader.queries != 0 {
 		t.Fatalf("empty batch performed a database read: %#v %v %d", empty, err, reader.queries)
 	}

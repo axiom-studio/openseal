@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -326,7 +327,7 @@ func TestSQLiteSpaceAccessBackfill(t *testing.T) {
 	if _, err := sqlDB.Exec(`UPDATE spaces SET is_default = 0, position = 1 WHERE id = ?`, work.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sqlDB.Exec(`INSERT INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, 'Default', 'tidepool', 0, 1, 'everyone', ?, ?, ?)`,
+	if _, err := sqlDB.Exec(`INSERT INTO spaces (`+sqlstore.SpaceColumns+`) VALUES (?, ?, ?, 'Default', 'tidepool', 0, 1, 'everyone', ?, ?, ?)`,
 		storetest.LegacyDefaultSpaceID(scope), scope.Kind, scope.ID, storetest.LegacyDefaultSpaceOwner, work.CreatedAt.Add(-time.Hour), work.CreatedAt.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}

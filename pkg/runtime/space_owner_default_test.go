@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -284,7 +285,7 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		if row.owner == storetest.LegacyDefaultSpaceOwner {
 			access = SpaceAccessEveryone
 		}
-		if _, err := sqlDB.Exec(`INSERT INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, ?, 'tidepool', ?, ?, ?, ?, ?, ?)`,
+		if _, err := sqlDB.Exec(`INSERT INTO spaces (`+sqlstore.SpaceColumns+`) VALUES (?, ?, ?, ?, 'tidepool', ?, ?, ?, ?, ?, ?)`,
 			row.id, row.scope.Kind, row.scope.ID, "Space "+row.id, position, row.isDefault, access, row.owner, row.createdAt, row.createdAt); err != nil {
 			t.Fatalf("insert %s: %v", row.id, err)
 		}

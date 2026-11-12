@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -456,7 +457,7 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				gate := &SkillRuntimeMaintenance{Scope: f.scope, SkillID: "release", OperationID: "upgrade-release", Owner: "controller", Active: true, Revision: 1}
 				wrapped := &loopMaintenanceStore{KernelStore: store, gate: gate, active: boundary != "after_catalog"}
 				if boundary == "before_claim" {
-					if err := writeSkillRuntimeMaintenance(t.Context(), backend.db, "skill_runtime_maintenance", gate, false); err != nil {
+					if err := sqlstore.WriteSkillRuntimeMaintenance(t.Context(), backend.db, "skill_runtime_maintenance", gate, false); err != nil {
 						t.Fatal(err)
 					}
 				}

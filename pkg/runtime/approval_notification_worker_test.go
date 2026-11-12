@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -644,7 +645,7 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 // Review facts reach approval cards only through the proposal's reviewContext;
 // a model checkpoint left on an old approval row is never projected.
 func TestApprovalNotificationPayloadHasNoCheckpointProjection(t *testing.T) {
-	approval, err := decodeApproval(`{"id":"approval-1","scope":{"kind":"tenant","id":"one"},"runId":"run","actionCallId":"call","status":"pending",
+	approval, err := sqlstore.DecodeApproval(`{"id":"approval-1","scope":{"kind":"tenant","id":"one"},"runId":"run","actionCallId":"call","status":"pending",
 		"risk":"external","summary":"Post the reviewed comment","revision":1,
 		"proposedAction":{"skillId":"browser","action":"comment","reviewContext":{"summary":"Post the reviewed comment","content":"The exact comment."}},
 		"continuationCheckpoint":{"state":{"commentDraft":"A stale draft"},"output":{"postURL":"https://forum.example/42"}}}`)

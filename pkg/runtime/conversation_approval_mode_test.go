@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -107,7 +108,7 @@ func TestNewConversationsDefaultToAutoApprovalMode(t *testing.T) {
 	if conversation.ApprovalMode != ConversationApprovalAuto {
 		t.Fatalf("new conversation approval mode = %q", conversation.ApprovalMode)
 	}
-	legacy, err := decodeConversation(`{"id":"legacy","scope":{"kind":"tenant","id":"one"},"owner":{"type":"agent","id":"a"},"title":"t","status":"active","revision":1}`)
+	legacy, err := sqlstore.DecodeConversation(`{"id":"legacy","scope":{"kind":"tenant","id":"one"},"owner":{"type":"agent","id":"a"},"title":"t","status":"active","revision":1}`)
 	if err != nil || legacy.ApprovalMode != ConversationApprovalAuto {
 		t.Fatalf("legacy conversation approval mode = %#v, %v", legacy, err)
 	}

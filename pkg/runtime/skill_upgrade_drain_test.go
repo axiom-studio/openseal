@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -335,7 +336,7 @@ func cloneUpgradeTestDefinition(t *testing.T, value *skill.Definition) *skill.De
 
 func TestSkillUpgradePostgresUsageSQLIsMetadataOnlyAndScoped(t *testing.T) {
 	filter := SkillRuntimeUsageFilter{Scope: Scope{Kind: "tenant", ID: "one"}, SkillID: "skill", SkillVersion: "1", DeploymentID: "agent", BindingID: "account"}
-	query, args := skillRuntimeUsageQuery(filter, `"kernel"."action_calls"`, `"kernel"."agent_runs"`, true)
+	query, args := sqlstore.SkillRuntimeUsageQuery(filter, `"kernel"."action_calls"`, `"kernel"."agent_runs"`, true)
 	if len(args) != 6 || strings.Contains(query, "payload") || strings.Contains(query, "?") {
 		t.Fatalf("invalid PostgreSQL scoped probe: %s %#v", query, args)
 	}
