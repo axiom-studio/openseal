@@ -392,7 +392,7 @@ func TestLoopTestkitHasNoCheckpointAccess(t *testing.T) {
 		"_open" + "seal",
 		"_at" + "las",
 	}
-	exempt := map[string]bool{"loop_scenario_child_test.go": true}
+	exempt := map[string]bool{"loop_scenario_child_fixture_test.go": true}
 	var files []string
 	for _, pattern := range []string{"looptest/*.go", "loop_testkit_test.go", "loop_scenario_*_test.go", "runworker/loop_scenario_*_test.go"} {
 		matches, err := filepath.Glob(pattern)
