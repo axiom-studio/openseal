@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -173,8 +174,8 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	canceled, err := NewRunCommandService(store).CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: scope, RunID: scheduled.Run.ID, ExpectedRevision: scheduled.Run.Revision, Kind: AgentRunCommandCancel,
+	canceled, err := agentrun.NewRunCommandService(store).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+		Scope: scope, RunID: scheduled.Run.ID, ExpectedRevision: scheduled.Run.Revision, Kind: agentrun.AgentRunCommandCancel,
 		Actor: ActivityActor{Type: "user", ID: "user-1"}, Summary: "Cancel the proposal",
 	})
 	if err != nil || canceled.Run.Status != AgentRunStatusCanceled {
@@ -296,19 +297,19 @@ func conversationRunRoundKey(scope Scope, conversationID, triggerID string) stri
 // control authority of the speaking Agent. It records the Runs it resolves.
 type chatRunResolver struct {
 	store    chatLoopStore
-	producer StepProducer
+	producer agentrun.StepProducer
 	actions  []capability.ModelAction
 	resolved []*AgentRun
 }
 
-func (r *chatRunResolver) ResolveTurnRunner(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+func (r *chatRunResolver) ResolveTurnRunner(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 	r.resolved = append(r.resolved, cloneAgentRun(run))
-	return &TurnRunnerBinding{
+	return &agentrun.TurnRunnerBinding{
 		DeploymentID: run.AssignedAgentID, DefinitionID: "agent-definition", DefinitionVersion: "7",
 		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model",
 		ModelActions: append([]capability.ModelAction(nil), r.actions...),
-		Producer:     r.producer, Preparers: []StepPreparer{newRunStartPreparer(r.store, r.store)},
-		Authority: ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
+		Producer:     r.producer, Preparers: []agentrun.StepPreparer{newRunStartPreparer(r.store, r.store)},
+		Authority: agentrun.ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
 	}, nil
 }
 
@@ -387,7 +388,7 @@ func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
 func TestTeamRoutingRunCompletesWithResponderRunIds(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{team: true}, func(t *testing.T, f *chatLoopFixture) {
 		trigger := f.post("route", "user-1", "Who can check the canary?")
-		commands := NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
+		commands := agentrun.NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
 		created, err := commands.CreateAgentRun(f.ctx, conversationAgentRunRequest(f.conversation, trigger))
 		if err != nil {
 			t.Fatal(err)
@@ -473,8 +474,8 @@ func TestConversationRunPinnedRunbookKeepsAgentBindingWithoutChatSeams(t *testin
 
 func TestConversationRunRefusesAgentBindingWithoutProducer(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		runner := f.chatRunner(TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-			return &TurnRunnerBinding{DeploymentID: "agent-1"}, nil
+		runner := f.chatRunner(TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+			return &agentrun.TurnRunnerBinding{DeploymentID: "agent-1"}, nil
 		}), false)
 		run := f.startRun(f.post("broken", "user-1", "Hello"))
 		if _, err := runner.ResolveTurnRunner(f.ctx, run); !errors.Is(err, ErrConversationCoordinationUnavailable) {

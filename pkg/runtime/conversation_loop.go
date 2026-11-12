@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // The conversation seams of the RunLoop (run-loop section 05 §7, §13 on
@@ -65,10 +67,10 @@ func (r *ConversationRunTurnRunner) conversationLoopAuthority(ctx context.Contex
 // rights are the intersection of both, so a Deterministic, decision or
 // review authority, which offers neither, never gains them. Voice calls
 // (no task start) and the spoken final mode are ResolveControlAuthority's.
-func (a ConversationLoopAuthority) apply(authority ControlAuthority) ControlAuthority {
+func (a ConversationLoopAuthority) apply(authority agentrun.ControlAuthority) agentrun.ControlAuthority {
 	authority.CanAskUser = authority.CanAskUser && a.CanAskConversationQuestion
 	authority.CanReact = authority.CanReact && a.CanReact
-	if mode := authority.finalMode(); mode != FinalModeDefault && mode != FinalModeSpoken {
+	if mode := authority.EffectiveFinalMode(); mode != agentrun.FinalModeDefault && mode != FinalModeSpoken {
 		return authority
 	}
 	authority.ExternalChannelReply = authority.ExternalChannelReply || a.ExternalChannelReply
@@ -106,7 +108,7 @@ type conversationLoop struct {
 	actions      conversationLoopActions
 }
 
-var _ StepPreparer = (*conversationLoop)(nil)
+var _ agentrun.StepPreparer = (*conversationLoop)(nil)
 
 // recentRunContextMessages is how many visible messages the run_context note
 // reads for card state and reactions.
@@ -120,7 +122,7 @@ const replacedApprovalScan = 32
 // binding (§13). binding holds the Agent's own resolution (model, actions,
 // operations, control authority, the run-start preparer); run is the claimed
 // conversation Run.
-func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, run *AgentRun, binding *TurnRunnerBinding, stores ConversationLoopStores) error {
+func (r *ConversationRunTurnRunner) bindConversationLoop(ctx context.Context, run *AgentRun, binding *agentrun.TurnRunnerBinding, stores ConversationLoopStores) error {
 	if r == nil || r.conversations == nil {
 		return ErrConversationCoordinationUnavailable
 	}
@@ -174,7 +176,7 @@ type conversationObservedFinal struct {
 	inner *conversationFinalHandler
 }
 
-func (f conversationObservedFinal) Deliver(ctx context.Context, d FinalDelivery) (FinalDeliveryResult, error) {
+func (f conversationObservedFinal) Deliver(ctx context.Context, d agentrun.FinalDelivery) (agentrun.FinalDeliveryResult, error) {
 	if d.Run != nil && d.Run.SessionID != "" {
 		if session, err := f.loop.sessions.GetAgentSession(ctx, d.Run.Scope, d.Run.SessionID); err == nil {
 			f.loop.markObserved(ctx, d.Run, session)
@@ -221,7 +223,7 @@ func (r *ConversationRunTurnRunner) conversationAttachmentReader() *conversation
 }
 
 // BeforeStep is the conversation preparer (§13 StartRun / BeforeStep).
-func (l *conversationLoop) BeforeStep(ctx context.Context, in StepInput, steering SteeringPlan) (*StepContextAppend, error) {
+func (l *conversationLoop) BeforeStep(ctx context.Context, in agentrun.StepInput, steering agentrun.SteeringPlan) (*agentrun.StepContextAppend, error) {
 	if in.Run == nil || in.Session == nil || in.Step == nil {
 		return nil, fmt.Errorf("%w: the conversation preparer needs a run, a session and a step", ErrInvalidAgentRun)
 	}
@@ -238,7 +240,7 @@ func (l *conversationLoop) BeforeStep(ctx context.Context, in StepInput, steerin
 	if output, replaced, err := l.replacedTeamApproval(ctx, in.Run); err != nil {
 		return nil, err
 	} else if replaced {
-		return &StepContextAppend{EarlyFinal: &LoopFinal{Status: AgentRunStatusCompleted, Output: output}}, nil
+		return &agentrun.StepContextAppend{EarlyFinal: &agentrun.LoopFinal{Status: AgentRunStatusCompleted, Output: output}}, nil
 	}
 	if !l.chatSession(in.Session) || steering.ThroughMessageSequence <= in.Session.ChannelWatermark {
 		// Nothing the steering plan covers is past what the session holds.
@@ -339,7 +341,7 @@ func promotionEntryOf(run *AgentRun, entry *SessionEntry) bool {
 
 // startRun is §13 StartRun: the trigger as the Agent sees it, participation,
 // then the catch-up and the run_context note.
-func (l *conversationLoop) startRun(ctx context.Context, in StepInput, steering SteeringPlan) (*StepContextAppend, error) {
+func (l *conversationLoop) startRun(ctx context.Context, in agentrun.StepInput, steering agentrun.SteeringPlan) (*agentrun.StepContextAppend, error) {
 	r, run, session := l.runner, in.Run, in.Session
 	conversation, err := r.conversations.GetConversation(ctx, run.Scope, l.conversation.ID)
 	if err != nil {
@@ -353,7 +355,7 @@ func (l *conversationLoop) startRun(ctx context.Context, in StepInput, steering 
 		return nil, err
 	}
 	if r.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
-		return &StepContextAppend{EarlyFinal: &LoopFinal{Status: AgentRunStatusCompleted, Output: participationStoppedOutput()}}, nil
+		return &agentrun.StepContextAppend{EarlyFinal: &agentrun.LoopFinal{Status: AgentRunStatusCompleted, Output: participationStoppedOutput()}}, nil
 	}
 	l.conversation, l.trigger = conversation, trigger
 	if !l.chatSession(session) {
@@ -393,7 +395,7 @@ func (l *conversationLoop) startRun(ctx context.Context, in StepInput, steering 
 
 // runContextNote builds the run_context note of the Run's start, which goes
 // after the catch-up entries of catchUp.
-func (l *conversationLoop) runContextNote(ctx context.Context, in StepInput, viewer ConversationViewer, catchUp *catchUpResult) (*StepContextAppend, error) {
+func (l *conversationLoop) runContextNote(ctx context.Context, in agentrun.StepInput, viewer ConversationViewer, catchUp *catchUpResult) (*agentrun.StepContextAppend, error) {
 	through := l.trigger.Sequence
 	if catchUp != nil && catchUp.Watermark > through {
 		through = catchUp.Watermark
@@ -413,7 +415,7 @@ func (l *conversationLoop) runContextNote(ctx context.Context, in StepInput, vie
 	if err != nil {
 		return nil, err
 	}
-	part := &StepContextAppend{}
+	part := &agentrun.StepContextAppend{}
 	if note != nil {
 		part.Entries = append(part.Entries, note)
 	}
@@ -525,7 +527,7 @@ func replacedTeamApproval(run *AgentRun, messageID string) (map[string]interface
 
 // checkToolCall is the binding's ToolCheck (§7): a run-control call must
 // name active work of this chat that accepts the command now.
-func (l *conversationLoop) checkToolCall(ctx context.Context, in StepToolsInput, entry *SessionEntry) (string, error) {
+func (l *conversationLoop) checkToolCall(ctx context.Context, in agentrun.StepToolsInput, entry *SessionEntry) (string, error) {
 	if entry == nil || entry.Tool == nil || len(entry.Tool.Directive) > 0 {
 		return "", nil
 	}
@@ -565,7 +567,7 @@ func runCommandParticiple(action string) string {
 
 // afterToolEntry is the binding's AfterTool (§8.4). Files a call saves are
 // not posted as they are made: the final answer hands over the finished ones.
-func (l *conversationLoop) afterToolEntry(ctx context.Context, in StepToolsInput, entry *SessionEntry) error {
+func (l *conversationLoop) afterToolEntry(ctx context.Context, in agentrun.StepToolsInput, entry *SessionEntry) error {
 	l.markObserved(ctx, in.Run, in.Session)
 	return nil
 }

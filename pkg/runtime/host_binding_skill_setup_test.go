@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -36,7 +37,7 @@ func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
 		t.Fatal(err)
 	}
 	setup := func(callID, skillID string, run *AgentRun) (map[string]interface{}, error) {
-		return dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: callID, Scope: scope, RunID: run.ID},
+		return dispatcher.requestSkillSetup(ctx, agentrun.ActionDispatchInput{Call: &ActionCall{ID: callID, Scope: scope, RunID: run.ID},
 			Arguments: map[string]interface{}{"kind": "configure", "skillId": skillID, "skillVersion": "latest", "reason": "File a ticket"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	}
 	_, err = setup("call-linear", "linear", run)

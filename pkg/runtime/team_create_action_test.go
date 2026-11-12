@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -110,7 +111,7 @@ func (f *teamCreateFixture) proposeTeam(t *testing.T, arguments map[string]inter
 	t.Helper()
 	ctx := context.Background()
 	bound := f.teamBound(t, "finn")
-	input := ActionProposalValidationInput{Run: f.run, Bound: bound, Arguments: arguments}
+	input := agentrun.ActionProposalValidationInput{Run: f.run, Bound: bound, Arguments: arguments}
 	resolved, handled, err := f.teamValidator.ResolveActionProposalArguments(ctx, input)
 	if err != nil {
 		return nil, nil, err
@@ -137,7 +138,7 @@ func (f *teamCreateFixture) executeTeam(t *testing.T, callID string, arguments m
 		ID: call.ApprovalID, Scope: f.scope, RunID: f.run.ID, ActionCallID: callID,
 		Status: ApprovalStatusApproved, DecisionBy: &decider,
 	}
-	return f.dispatcher.DispatchAction(context.Background(), ActionDispatchInput{
+	return f.dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
 		Call: call, Run: f.run, Bound: f.teamBound(t, "finn"), Arguments: arguments,
 	})
 }
@@ -240,7 +241,7 @@ func TestTeamCreateRefusals(t *testing.T) {
 
 	// The schema refuses duplicates; the validator refuses them on its own
 	// too, as it also runs at execution.
-	input := ActionProposalValidationInput{
+	input := agentrun.ActionProposalValidationInput{
 		Run: f.run, Bound: f.teamBound(t, "finn"),
 		Arguments: with("members", []interface{}{"researcher", " researcher"}),
 	}

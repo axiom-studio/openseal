@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -31,7 +32,7 @@ func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *test
 			return nil, err
 		}
 		return SignActionCredentialLease(ctx, *lease, signer)
-	}), ActionDispatcherFunc(func(_ context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+	}), ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		if len(input.Credentials) != 0 || input.CredentialLease == nil || input.CredentialLease.Lease.ActionCallID != proposal.Call.ID || input.CredentialReferences["token"] != proposal.Call.CredentialRefs["token"] {
 			t.Fatalf("opaque dispatch input = %#v", input)
 		}
@@ -51,7 +52,7 @@ func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *test
 }
 
 type toolTransportActionCatalog struct {
-	ActionExecutionCatalog
+	agentrun.ActionExecutionCatalog
 	endpoint string
 }
 
@@ -74,7 +75,7 @@ func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
 	current := now.Add(2 * time.Second)
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "raw-secret-value"}, nil
-	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		attempts++
 		if attempts == 1 {
 			return nil, errors.New("provider rejected raw-secret-value")

@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -51,14 +51,14 @@ func closeTerminalRunInteractionRequests(ctx context.Context, store models.Actio
 	return errors.Join(errs...)
 }
 
-func interactionRequestID(call *models.ActionCall, key string) string {
+func InteractionRequestID(call *models.ActionCall, key string) string {
 	value, _ := call.Output[key].(map[string]interface{})
 	id, _ := value["id"].(string)
 	return strings.TrimSpace(id)
 }
 
 func dismissRunCredentialRequest(ctx context.Context, store models.CredentialRequestStore, run *models.AgentRun, call *models.ActionCall) error {
-	id := interactionRequestID(call, "credentialRequest")
+	id := InteractionRequestID(call, "credentialRequest")
 	if id == "" {
 		return nil
 	}
@@ -78,7 +78,7 @@ func dismissRunCredentialRequest(ctx context.Context, store models.CredentialReq
 }
 
 func dismissRunSkillSetupRequest(ctx context.Context, store models.SkillSetupRequestStore, run *models.AgentRun, call *models.ActionCall) error {
-	id := interactionRequestID(call, "setupRequest")
+	id := InteractionRequestID(call, "setupRequest")
 	if id == "" {
 		return nil
 	}

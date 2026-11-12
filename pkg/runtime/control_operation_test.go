@@ -8,12 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
 const operationTestWorker = "operation-worker"
 
-var operationTestEngage = HostedRunbookOperation{
+var operationTestEngage = agentrun.HostedRunbookOperation{
 	DefinitionID: "def-engage", DefinitionVersion: "3", Entrypoint: "engage-now",
 	Name: "Engage accounts", Description: "Send the reviewed engagement sequence.",
 	InputSchema: map[string]interface{}{
@@ -36,7 +37,7 @@ type operationCall struct {
 	assistant *SessionEntry
 	entry     *SessionEntry
 	exec      *ControlExecutor
-	authority ControlAuthority
+	authority agentrun.ControlAuthority
 }
 
 func newOperationCall(t *testing.T, store forkTestStore, setup func(scope Scope, req *CreateAgentRunRequest)) *operationCall {
@@ -70,14 +71,14 @@ func newOperationCall(t *testing.T, store forkTestStore, setup func(scope Scope,
 	if conversations, ok := store.(ConversationStore); ok {
 		reporting = conversations
 	}
-	forks := NewRunForkCoordinator(store)
+	forks := agentrun.NewRunForkCoordinator(store)
 	forks.SetAcceptedRunExecutionPreparer(&acceptedCreationTestPreparer{
 		id: operationTestEngage.DefinitionID, version: operationTestEngage.DefinitionVersion,
 	})
 	return &operationCall{
 		t: t, ctx: ctx, store: store, sessions: store, scope: scope, run: claimed, session: opened.Session,
 		exec:      &ControlExecutor{Portfolio: store, Sessions: store, Forks: forks, Reporting: reporting},
-		authority: ControlAuthority{Operations: []HostedRunbookOperation{operationTestEngage}},
+		authority: agentrun.ControlAuthority{Operations: []agentrun.HostedRunbookOperation{operationTestEngage}},
 	}
 }
 
@@ -114,10 +115,10 @@ func (c *operationCall) addCall(n int64, arguments string) {
 	c.step = &AgentTurn{ID: stepID, RunID: c.run.ID, Sequence: n, Status: AgentTurnStatusCompleted}
 }
 
-func (c *operationCall) context() ControlContext {
-	return NewControlContext(StepToolsInput{
+func (c *operationCall) context() agentrun.ControlContext {
+	return NewControlContext(agentrun.StepToolsInput{
 		Run: c.run, Step: c.step, Session: c.session, WorkerID: operationTestWorker,
-		Binding: &TurnRunnerBinding{Authority: c.authority}, Assistant: c.assistant,
+		Binding: &agentrun.TurnRunnerBinding{Authority: c.authority}, Assistant: c.assistant,
 	}, c.entry)
 }
 
@@ -291,7 +292,7 @@ func TestRunOperationTwiceInOneRunCreatesTwoChildren(t *testing.T) {
 			child.Goal != "Run Engage accounts" || child.SessionID != "" {
 			t.Fatalf("child = %#v", child)
 		}
-		invocation, _ := child.Context[RunbookInvocationContextKey].(map[string]interface{})
+		invocation, _ := child.Context[agentrun.RunbookInvocationContextKey].(map[string]interface{})
 		if child.Context["account"] != "acme" || invocation["summary"] != "Run Engage accounts" ||
 			child.Context["runbookDefinitionId"] != "def-engage" || child.Context["runbookDefinitionVersion"] != "3" {
 			t.Fatalf("child context = %#v", child.Context)
@@ -335,7 +336,7 @@ func TestRunOperationPostsStartedMessagePerChild(t *testing.T) {
 		req.Context[conversationRunContextTriggerID] = trigger.ID
 	})
 	first := c.startOperation(1, `{"entrypoint":"engage-now","arguments":{"account":"acme"}}`)
-	invocation, _ := c.getRun(first).Context[RunbookInvocationContextKey].(map[string]interface{})
+	invocation, _ := c.getRun(first).Context[agentrun.RunbookInvocationContextKey].(map[string]interface{})
 	if source, _ := invocation["sourceMessage"].(map[string]interface{}); source["messageId"] != trigger.ID {
 		t.Fatalf("invocation = %#v", invocation)
 	}
@@ -429,8 +430,8 @@ func TestRunOperationResumeWhileChildRunsReparks(t *testing.T) {
 }
 
 func TestRunOperationsListedInCapabilitiesNoteInOrder(t *testing.T) {
-	second := HostedRunbookOperation{Entrypoint: "report", Name: "Weekly report", Description: "Summarize the week"}
-	authority := ControlAuthority{Operations: []HostedRunbookOperation{operationTestEngage, second}}
+	second := agentrun.HostedRunbookOperation{Entrypoint: "report", Name: "Weekly report", Description: "Summarize the week"}
+	authority := agentrun.ControlAuthority{Operations: []agentrun.HostedRunbookOperation{operationTestEngage, second}}
 	specs := builtinControlSpecs(authority)
 	var spec *ControlToolSpec
 	for i := range specs {
@@ -450,7 +451,7 @@ func TestRunOperationsListedInCapabilitiesNoteInOrder(t *testing.T) {
 	if _, enum := entrypoint["enum"]; enum || strings.Contains(spec.Description, "engage-now") {
 		t.Fatalf("run_operation lists its operations: %v %s", entrypoint, spec.Description)
 	}
-	for _, s := range builtinControlSpecs(ControlAuthority{}) {
+	for _, s := range builtinControlSpecs(agentrun.ControlAuthority{}) {
 		if s.Name == ControlToolRunOperation {
 			t.Fatal("run_operation offered with no operations")
 		}

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -14,16 +15,16 @@ type budgetPlanningProducer struct {
 	plan  BudgetUsage
 	err   error
 	calls int
-	seen  StepInput
+	seen  agentrun.StepInput
 }
 
 func (p *budgetPlanningProducer) Kind() StepProducerKind { return StepProducerModel }
 
-func (p *budgetPlanningProducer) Produce(context.Context, StepInput) (StepOutput, error) {
-	return StepOutput{}, errors.New("not produced in budget tests")
+func (p *budgetPlanningProducer) Produce(context.Context, agentrun.StepInput) (agentrun.StepOutput, error) {
+	return agentrun.StepOutput{}, errors.New("not produced in budget tests")
 }
 
-func (p *budgetPlanningProducer) PlanStepBudget(_ context.Context, in StepInput) (BudgetUsage, error) {
+func (p *budgetPlanningProducer) PlanStepBudget(_ context.Context, in agentrun.StepInput) (BudgetUsage, error) {
 	p.calls++
 	p.seen = in
 	return p.plan, p.err
@@ -33,8 +34,8 @@ type deterministicBudgetProducer struct{}
 
 func (deterministicBudgetProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
-func (deterministicBudgetProducer) Produce(context.Context, StepInput) (StepOutput, error) {
-	return StepOutput{}, nil
+func (deterministicBudgetProducer) Produce(context.Context, agentrun.StepInput) (agentrun.StepOutput, error) {
+	return agentrun.StepOutput{}, nil
 }
 
 type stepBudgetFixture struct {
@@ -85,10 +86,10 @@ func (f *stepBudgetFixture) begin() *AgentTurn {
 	return step
 }
 
-func (f *stepBudgetFixture) reserve(binding *TurnRunnerBinding) (*AgentRun, *BudgetAdmission) {
+func (f *stepBudgetFixture) reserve(binding *agentrun.TurnRunnerBinding) (*AgentRun, *BudgetAdmission) {
 	f.t.Helper()
 	run, admission, err := reserveStepBudget(f.t.Context(), f.activity, f.now, f.run, f.step, binding,
-		StepInput{Binding: binding, Mode: StepModeNormal, WorkerID: "worker"}, "worker")
+		agentrun.StepInput{Binding: binding, Mode: agentrun.StepModeNormal, WorkerID: "worker"}, "worker")
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -133,7 +134,7 @@ func (f *stepBudgetFixture) eventTypes() []string {
 func TestRunLoopBudgetReservationPerStep(t *testing.T) {
 	f := newStepBudgetFixture(t, &BudgetPolicy{MaxTurns: 2, MaxInputTokens: 1000})
 	producer := &budgetPlanningProducer{plan: BudgetUsage{InputTokens: 100, Turns: 5}}
-	binding := &TurnRunnerBinding{Producer: producer, BudgetReservation: BudgetUsage{InputTokens: 20}}
+	binding := &agentrun.TurnRunnerBinding{Producer: producer, BudgetReservation: BudgetUsage{InputTokens: 20}}
 
 	run, admission := f.reserve(binding)
 	if admission != nil {
@@ -214,7 +215,7 @@ func TestRunLoopBudgetUnboundedRunReservesNothing(t *testing.T) {
 	f := newStepBudgetFixture(t, nil)
 	producer := &budgetPlanningProducer{plan: BudgetUsage{InputTokens: 1 << 40}}
 	before := f.run.Revision
-	run, admission := f.reserve(&TurnRunnerBinding{Producer: producer})
+	run, admission := f.reserve(&agentrun.TurnRunnerBinding{Producer: producer})
 	if admission != nil || run.Revision != before || len(run.BudgetReservations) != 0 || producer.calls != 0 {
 		t.Fatalf("unbounded run: admission=%#v run=%#v calls=%d", admission, run, producer.calls)
 	}
@@ -225,7 +226,7 @@ func TestRunLoopBudgetUnboundedRunReservesNothing(t *testing.T) {
 
 func TestRunLoopBudgetDeterministicProducerReservesFloor(t *testing.T) {
 	f := newStepBudgetFixture(t, &BudgetPolicy{MaxTurns: 3, MaxActions: 4})
-	run, admission := f.reserve(&TurnRunnerBinding{Producer: deterministicBudgetProducer{}, BudgetReservation: BudgetUsage{Actions: 1}})
+	run, admission := f.reserve(&agentrun.TurnRunnerBinding{Producer: deterministicBudgetProducer{}, BudgetReservation: BudgetUsage{Actions: 1}})
 	if admission != nil || run.BudgetReservations[f.step.ID].Usage != (BudgetUsage{Turns: 1, Actions: 1}) {
 		t.Fatalf("admission=%#v reservations=%#v", admission, run.BudgetReservations)
 	}
@@ -237,7 +238,7 @@ func TestRunLoopBudgetDeterministicProducerReservesFloor(t *testing.T) {
 func TestRunLoopBudgetAdmissionRefusesStep(t *testing.T) {
 	f := newStepBudgetFixture(t, &BudgetPolicy{MaxInputTokens: 10})
 	before := *f.run
-	run, admission := f.reserve(&TurnRunnerBinding{Producer: deterministicBudgetProducer{}, BudgetReservation: BudgetUsage{InputTokens: 11}})
+	run, admission := f.reserve(&agentrun.TurnRunnerBinding{Producer: deterministicBudgetProducer{}, BudgetReservation: BudgetUsage{InputTokens: 11}})
 	if admission == nil || admission.TurnID != f.step.ID || !admission.EvaluatedAt.Equal(f.now) ||
 		admission.Dimension != "input_tokens" || admission.Reason != BudgetAdmissionReservation || admission.Remaining != 10 {
 		t.Fatalf("admission = %#v", admission)
@@ -268,19 +269,19 @@ func TestRunLoopBudgetPlannerAdmission(t *testing.T) {
 	f := newStepBudgetFixture(t, &BudgetPolicy{MaxInputTokens: 100})
 	want := BudgetAdmission{Reason: BudgetAdmissionHostedInput, Dimension: "input_tokens", Required: 500, Remaining: 100}
 	producer := &budgetPlanningProducer{err: &BudgetAdmissionError{Admission: want}}
-	_, admission := f.reserve(&TurnRunnerBinding{Producer: producer})
+	_, admission := f.reserve(&agentrun.TurnRunnerBinding{Producer: producer})
 	if admission == nil || admission.Dimension != "input_tokens" || admission.Required != 500 || admission.TurnID != f.step.ID {
 		t.Fatalf("admission = %#v", admission)
 	}
 
 	producer.err = ErrBudgetExhausted
-	_, admission = f.reserve(&TurnRunnerBinding{Producer: producer})
+	_, admission = f.reserve(&agentrun.TurnRunnerBinding{Producer: producer})
 	if admission == nil || admission.Dimension != "unknown" || admission.Reason != BudgetAdmissionHostedInput {
 		t.Fatalf("bare exhaustion admission = %#v", admission)
 	}
 
 	producer.err = errors.New("planner broke")
-	if _, _, err := reserveStepBudget(t.Context(), f.activity, f.now, f.run, f.step, &TurnRunnerBinding{Producer: producer}, StepInput{}, "worker"); err == nil || !strings.Contains(err.Error(), "planner broke") {
+	if _, _, err := reserveStepBudget(t.Context(), f.activity, f.now, f.run, f.step, &agentrun.TurnRunnerBinding{Producer: producer}, agentrun.StepInput{}, "worker"); err == nil || !strings.Contains(err.Error(), "planner broke") {
 		t.Fatalf("planner error = %v", err)
 	}
 }

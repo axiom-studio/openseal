@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -217,7 +218,7 @@ func TestActionRuntimeMaintenanceObservedAfterClaimDefersWithoutFailure(t *testi
 				worker := NewActionWorker(wrapped, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 					credentialCalls++
 					return map[string]string{"token": "secret"}, nil
-				}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+				}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 					dispatches++
 					return map[string]interface{}{"providerResult": "delivered"}, nil
 				}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
@@ -274,7 +275,7 @@ func TestActionRuntimeMaintenanceVerifiedReleaseUsesFreshVersion(t *testing.T) {
 		dispatches := 0
 		worker := NewActionWorker(kernel, fixture.catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 			return map[string]string{"token": "secret"}, nil
-		}), ActionDispatcherFunc(func(_ context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+		}), ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			dispatches++
 			if input.Bound.Definition.Version != "1.1.0" || input.Bound.Binding.SourceIdentity != gate.SourceIdentity || input.Call.BindingRevision != binding.Revision {
 				t.Fatalf("released action used stale executable authority: %#v", input)
@@ -471,7 +472,7 @@ func actionRuntimeMaintenanceWorker(kernel KernelStore, fixture *actionBindingFe
 	worker := NewActionWorker(kernel, &actionLifecycleCountingCatalog{ActionExecutionCatalog: fixture.catalog, calls: catalogCalls}, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		(*credentialCalls)++
 		return map[string]string{"token": "secret"}, nil
-	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		(*dispatches)++
 		return map[string]interface{}{"providerResult": "delivered"}, nil
 	}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
@@ -539,7 +540,7 @@ func (s *actionRuntimeMaintenanceObservationStore) GetSkillRuntimeMaintenance(ct
 }
 
 type actionRuntimeMaintenanceCatalog struct {
-	ActionExecutionCatalog
+	agentrun.ActionExecutionCatalog
 	calls        *int
 	afterResolve func()
 }

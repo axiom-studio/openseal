@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"time"
@@ -43,7 +43,7 @@ type ControlAuthority struct {
 	RoutineOccurrence bool
 }
 
-func (a ControlAuthority) finalMode() FinalAnswerMode {
+func (a ControlAuthority) EffectiveFinalMode() FinalAnswerMode {
 	if a.FinalMode == "" {
 		return FinalModeDefault
 	}
@@ -73,20 +73,20 @@ type ControlContext struct {
 	Arguments interface{}
 }
 
-func (cc ControlContext) toolName() models.ControlToolName {
+func (cc ControlContext) ToolName() models.ControlToolName {
 	if cc.Entry == nil || cc.Entry.Tool == nil {
 		return ""
 	}
 	return models.ControlToolName(cc.Entry.Tool.Name)
 }
 
-func (cc ControlContext) lease(now time.Time) models.AgentRunLeaseGuard {
+func (cc ControlContext) LeaseGuard(now time.Time) models.AgentRunLeaseGuard {
 	return models.AgentRunLeaseGuard{WorkerID: cc.WorkerID, Now: now}
 }
 
 // offersCapabilities is false for decision and review Runs: they are offered
 // only their own final tool, no capability, host or governed tool.
-func (a ControlAuthority) offersCapabilities() bool {
-	mode := a.finalMode()
+func (a ControlAuthority) OffersCapabilities() bool {
+	mode := a.EffectiveFinalMode()
 	return mode != FinalModeDecision && mode != FinalModeReview
 }

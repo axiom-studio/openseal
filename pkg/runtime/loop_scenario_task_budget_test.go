@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -66,7 +67,7 @@ func TestLoopTaskAuthorityRequiresChildBudget(t *testing.T) {
 				return act("", call(string(ControlToolStartTask), map[string]any{"goal": "Compile the quarterly report", "acknowledgment": ack}))
 			}},
 		))
-		c.authority = func(run *AgentRun, a *ControlAuthority) {
+		c.authority = func(run *AgentRun, a *agentrun.ControlAuthority) {
 			if run.Kind == RunKindConversation && run.Context[ConversationTaskContextKey] == nil {
 				conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 				a.TaskStart = &HostedConversationTaskContext{ConversationID: conversationID, CanStart: true}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -89,7 +90,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolvedObjective, handled, err := objectiveValidator.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{
+	resolvedObjective, handled, err := objectiveValidator.ResolveActionProposalArguments(ctx, agentrun.ActionProposalValidationInput{
 		Run: conversationRun, Bound: objectiveBound, Arguments: map[string]interface{}{"goal": "Scan more communities"},
 	})
 	if err != nil || !handled {
@@ -105,7 +106,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolvedRunbook, handled, err := runbookValidator.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{
+	resolvedRunbook, handled, err := runbookValidator.ResolveActionProposalArguments(ctx, agentrun.ActionProposalValidationInput{
 		Run: conversationRun, Bound: runbookBound, Arguments: map[string]interface{}{"reason": "User requested an off-cycle run"},
 	})
 	if err != nil || !handled {
@@ -114,7 +115,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 	if resolvedRunbook["activationId"] != activation.ID {
 		t.Fatalf("resolved Runbook arguments = %#v", resolvedRunbook)
 	}
-	preview, err := runbookValidator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: conversationRun, Bound: runbookBound, Arguments: resolvedRunbook})
+	preview, err := runbookValidator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: conversationRun, Bound: runbookBound, Arguments: resolvedRunbook})
 	if err != nil || preview["activationId"] != activation.ID || preview["objectiveId"] != objective.ID {
 		t.Fatalf("Runbook preview=%#v err=%v", preview, err)
 	}
@@ -123,7 +124,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 		t.Fatal(err)
 	}
 	call := &ActionCall{ID: "action-start-hourly", Scope: scope, RunID: conversationRun.ID, DeploymentID: owner.ID}
-	result, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: call, Run: conversationRun, Bound: runbookBound, Arguments: resolvedRunbook})
+	result, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: call, Run: conversationRun, Bound: runbookBound, Arguments: resolvedRunbook})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 	if started == nil || started.ObjectiveID != objective.ID || started.Source != RunSourceManual || result["replayed"] != false {
 		t.Fatalf("Runbook start result = %#v", result)
 	}
-	replayed, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: call, Run: conversationRun, Bound: runbookBound, Arguments: resolvedRunbook})
+	replayed, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: call, Run: conversationRun, Bound: runbookBound, Arguments: resolvedRunbook})
 	if err != nil || replayed["replayed"] != true {
 		t.Fatalf("Runbook replay = %#v err=%v", replayed, err)
 	}
@@ -183,7 +184,7 @@ func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, handled, err := validator.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{
+	resolved, handled, err := validator.ResolveActionProposalArguments(ctx, agentrun.ActionProposalValidationInput{
 		Run: conversationRun, Bound: bound, Arguments: map[string]interface{}{"reason": "User requested an off-cycle run"},
 	})
 	if err != nil || !handled || resolved["activationId"] != activation.ID {
@@ -236,13 +237,13 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 	definition := RunbookManagementSkill()
 	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: owner.ID}, Action: definition.Actions[RunbookActionReplaceSchedule]}
 	validator, _ := NewRunbookActionValidator(store)
-	resolved, handled, err := validator.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{
+	resolved, handled, err := validator.ResolveActionProposalArguments(ctx, agentrun.ActionProposalValidationInput{
 		Run: conversationRun, Bound: bound, Arguments: map[string]interface{}{"maximumOccurrences": float64(5), "reason": "Run five hourly acceptance cycles"},
 	})
 	if err != nil || !handled || resolved["activationId"] != source.ID {
 		t.Fatalf("resolve replacement: resolved=%#v handled=%v err=%v", resolved, handled, err)
 	}
-	preview, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: conversationRun, Bound: bound, Arguments: resolved})
+	preview, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: conversationRun, Bound: bound, Arguments: resolved})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +253,7 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 	}
 	dispatcher, _ := NewRunbookActionDispatcher(store, nil)
 	call := &ActionCall{ID: "replace-five-hour-schedule", Scope: scope, RunID: conversationRun.ID, DeploymentID: owner.ID}
-	result, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: call, Run: conversationRun, Bound: bound, Arguments: resolved})
+	result, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: call, Run: conversationRun, Bound: bound, Arguments: resolved})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,18 +272,18 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 	if unchanged == nil || unchanged.Status != RunbookActivationRetired || unchanged.Revision != source.Revision || unchanged.Trigger.Schedule.MaximumOccurrences != 7 {
 		t.Fatalf("retired source was mutated: %#v", unchanged)
 	}
-	replayed, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: call, Run: conversationRun, Bound: bound, Arguments: resolved})
+	replayed, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: call, Run: conversationRun, Bound: bound, Arguments: resolved})
 	if err != nil || replayed["replayed"] != true || replayed["activation"].(*RunbookActivation).ID != replacement.ID {
 		t.Fatalf("replacement replay = %#v err=%v", replayed, err)
 	}
 	delayedCall := &ActionCall{ID: "delayed-duplicate-conversation-action", Scope: scope, RunID: conversationRun.ID, DeploymentID: owner.ID}
-	delayed, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: delayedCall, Run: conversationRun, Bound: bound, Arguments: resolved})
+	delayed, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: delayedCall, Run: conversationRun, Bound: bound, Arguments: resolved})
 	if err != nil || delayed["replayed"] != true || delayed["activation"].(*RunbookActivation).ID != replacement.ID {
 		t.Fatalf("replacement from distinct ActionCall did not converge = %#v err=%v", delayed, err)
 	}
 	conflicting := maps.Clone(resolved)
 	conflicting["maximumOccurrences"] = float64(6)
-	if _, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: &ActionCall{ID: "conflicting-replacement", Scope: scope, RunID: conversationRun.ID, DeploymentID: owner.ID}, Run: conversationRun, Bound: bound, Arguments: conflicting}); !errors.Is(err, ErrRunbookActivationIdempotency) {
+	if _, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: &ActionCall{ID: "conflicting-replacement", Scope: scope, RunID: conversationRun.ID, DeploymentID: owner.ID}, Run: conversationRun, Bound: bound, Arguments: conflicting}); !errors.Is(err, ErrRunbookActivationIdempotency) {
 		t.Fatalf("conflicting replacement error = %v, want %v", err, ErrRunbookActivationIdempotency)
 	}
 	activations, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, Owner: &owner})
@@ -312,7 +313,7 @@ func TestRunbookScheduleReplacementRejectsActiveOrForeignActivation(t *testing.T
 	definition := RunbookManagementSkill()
 	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: rowan.ID}, Action: definition.Actions[RunbookActionReplaceSchedule]}
 	validator, _ := NewRunbookActionValidator(store)
-	_, err = validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+	_, err = validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 		Run: &AgentRun{Scope: scope, Owner: rowan, AssignedAgentID: rowan.ID}, Bound: bound,
 		Arguments: map[string]interface{}{"activationId": foreign.ID, "maximumOccurrences": float64(5), "reason": "Try foreign work"},
 	})
@@ -343,7 +344,7 @@ func TestRunbookStartRejectsActivationOwnedByAnotherAgent(t *testing.T) {
 	definition := RunbookManagementSkill()
 	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: rowan.ID}, Action: definition.Actions[RunbookActionStart]}
 	validator, _ := NewRunbookActionValidator(store)
-	_, err = validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+	_, err = validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 		Run: run, Bound: bound, Arguments: map[string]interface{}{"activationId": activation.ID, "reason": "Try foreign work"},
 	})
 	if err == nil {

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -88,7 +89,7 @@ func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			replayed, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: executed.Call, Bound: bound, Arguments: executed.Call.Arguments})
+			replayed, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: executed.Call, Bound: bound, Arguments: executed.Call.Arguments})
 			if err != nil || replayed["created"] != false {
 				t.Fatalf("idempotent replay = %#v, %v", replayed, err)
 			}
@@ -181,7 +182,7 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 		t.Fatalf("paused = %#v, %v", paused, err)
 	}
 	bound, _ := catalog.Resolve(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, ObjectiveManagementSkillID, ObjectiveManagementSkillVersion, ObjectiveActionPause)
-	if _, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: executed.Call, Bound: bound, Arguments: executed.Call.Arguments}); err != nil {
+	if _, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: executed.Call, Bound: bound, Arguments: executed.Call.Arguments}); err != nil {
 		t.Fatalf("approved replay = %v", err)
 	}
 	pausedAgain, _ := portfolio.GetObjective(ctx, scope, objective.ID)

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -59,8 +60,8 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 		if !marked || !validOpaqueIdentifier(marker, 128) {
 			return nil, nil
 		}
-		task, taskErr := persistedTaskWorkOrigin(ctx, store, canonical)
-		if errors.Is(taskErr, ErrConversationTaskNotFound) || errors.Is(taskErr, ErrInvalidConversationTask) {
+		task, taskErr := agentrun.PersistedTaskWorkOrigin(ctx, store, canonical)
+		if errors.Is(taskErr, agentrun.ErrConversationTaskNotFound) || errors.Is(taskErr, ErrInvalidConversationTask) {
 			return nil, nil
 		}
 		if taskErr != nil {
@@ -98,7 +99,7 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 		if err != nil {
 			return nil, err
 		}
-		valid, err := VerifyConversationTaskWorkRun(ctx, store, origin, root)
+		valid, err := agentrun.VerifyConversationTaskWorkRun(ctx, store, origin, root)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +164,7 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 		seen[row.Task.ID] = true
 		result.Tasks = append(result.Tasks, ConversationTaskSnapshot{
 			TaskID: row.Task.ID, Mode: row.Task.Mode, WorkRunID: row.WorkRun.ID, Goal: ConversationTaskGoalSummary(row.Task.Goal),
-			Status: row.WorkRun.Status, Revision: row.WorkRun.Revision, AvailableControls: applicableAgentRunCommands(row.WorkRun), CreatedAt: row.Task.CreatedAt,
+			Status: row.WorkRun.Status, Revision: row.WorkRun.Revision, AvailableControls: agentrun.ApplicableAgentRunCommands(row.WorkRun), CreatedAt: row.Task.CreatedAt,
 		})
 		if len(result.Tasks) == 10 {
 			break

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -98,7 +99,7 @@ func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
 		t.Fatalf("decision runs = %#v, %v", runs, err)
 	}
 	run := runs[0]
-	inbox, _ := run.Context[AgentRequestInboxContextKey].(map[string]interface{})
+	inbox, _ := run.Context[agentrun.AgentRequestInboxContextKey].(map[string]interface{})
 	if run.Source != RunSourceRequestDecision || run.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: "recipient"}) ||
 		run.AssignedAgentID != "recipient" || fmt.Sprint(inbox["requestId"]) != request.ID ||
 		run.Budget == nil || run.Budget.MaxTurns != 12 {
@@ -131,7 +132,7 @@ func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *te
 	// idempotency fingerprint no longer matches the current enriched input,
 	// but its authoritative request lineage remains unchanged.
 	rewriteRowPayload(t, db, "agent_runs", request.Scope, runs[0].ID, func(persisted *AgentRun) {
-		inbox := persisted.Context[AgentRequestInboxContextKey].(map[string]interface{})
+		inbox := persisted.Context[agentrun.AgentRequestInboxContextKey].(map[string]interface{})
 		delete(inbox, "clarificationQuestion")
 		delete(inbox, "clarificationResponse")
 		delete(inbox, "artifactRequirements")
@@ -280,11 +281,11 @@ func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing
 		t.Fatal(err)
 	}
 	key := fmt.Sprintf("agent-request-decision:%s:%d:%s", request.ID, request.Revision, "recipient")
-	if _, err := NewRunCommandService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+	if _, err := agentrun.NewRunCommandService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: request.Scope, Kind: RunKindAgentWork, ParentRunID: otherSource.ID,
 		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "recipient"}, AssignedAgentID: "recipient",
 		ConcurrencyKey: "unrelated", Goal: "Unrelated review", Source: RunSourceRequestDecision,
-		Context: map[string]interface{}{AgentRequestInboxContextKey: map[string]interface{}{
+		Context: map[string]interface{}{agentrun.AgentRequestInboxContextKey: map[string]interface{}{
 			"requestId": "another-request", "requestRevision": int64(1),
 		}},
 		IdempotencyKey: key, Actor: ActivityActor{Type: "system", ID: "test"},

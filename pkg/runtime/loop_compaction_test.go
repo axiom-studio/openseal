@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
@@ -66,7 +67,7 @@ func summaryHostFailure(code string) func(ModelStepRequest) (ModelStepResult, er
 // fakeStepRequests renders the path the way the step would send it.
 type fakeStepRequests struct{}
 
-func (fakeStepRequests) PrepareModelStep(_ context.Context, in StepInput) (ModelStepRequest, error) {
+func (fakeStepRequests) PrepareModelStep(_ context.Context, in agentrun.StepInput) (ModelStepRequest, error) {
 	var views []SessionEntryView
 	if in.Path.Compaction != nil {
 		views = append(views, testEntryView(in.Path.Compaction))
@@ -196,15 +197,15 @@ func (fx *compactionFixture) history(limits bool) {
 	fx.add(fx.user("u5", 3000))
 }
 
-func (fx *compactionFixture) input() StepInput {
+func (fx *compactionFixture) input() agentrun.StepInput {
 	fx.T.Helper()
 	fx.step++
 	run := fx.Run(fx.runID)
 	path := fx.Path(fx.sessionID)
-	return StepInput{
+	return agentrun.StepInput{
 		Run: run, Step: &AgentTurn{ID: fmt.Sprintf("step-now-%d", fx.step), Scope: fx.Scope, RunID: fx.runID, Sequence: int64(10 + fx.step), Status: AgentTurnStatusRunning},
-		Session: path.Session, Path: path, Binding: &TurnRunnerBinding{Model: "claude-x"},
-		Mode: StepModeNormal, WorkerID: storetest.SessionWorker,
+		Session: path.Session, Path: path, Binding: &agentrun.TurnRunnerBinding{Model: "claude-x"},
+		Mode: agentrun.StepModeNormal, WorkerID: storetest.SessionWorker,
 	}
 }
 
@@ -711,14 +712,14 @@ func TestCompactionModelPrefersStepThenBindingThenNewest(t *testing.T) {
 		{"newest after change", "", "auto", "resolved"},
 	}
 	for _, tc := range cases {
-		in := StepInput{Step: &AgentTurn{Model: tc.step}, Binding: &TurnRunnerBinding{Model: tc.binding}, Path: path}
+		in := agentrun.StepInput{Step: &AgentTurn{Model: tc.step}, Binding: &agentrun.TurnRunnerBinding{Model: tc.binding}, Path: path}
 		if got := compactionModel(in); got != tc.want {
 			t.Fatalf("%s: model = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 	stale := windowPath(nil, windowAssistant("a1", 1, "old", 10, 0),
 		&SessionEntry{ID: "mc", Sequence: 2, Type: SessionEntryModelChange, ModelChange: &ModelChangeEntry{Provider: "anthropic", Model: "new"}})
-	if got := compactionModel(StepInput{Step: &AgentTurn{}, Binding: &TurnRunnerBinding{Model: "auto"}, Path: stale}); got != "auto" {
+	if got := compactionModel(agentrun.StepInput{Step: &AgentTurn{}, Binding: &agentrun.TurnRunnerBinding{Model: "auto"}, Path: stale}); got != "auto" {
 		t.Fatalf("model after a change = %q, want the binding's", got)
 	}
 }

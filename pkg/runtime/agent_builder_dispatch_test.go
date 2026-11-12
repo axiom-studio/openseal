@@ -10,6 +10,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -146,7 +147,7 @@ var agentBuilderApprover = ApprovalPrincipal{Type: "user", ID: "person-1"}
 func (f *agentBuilderDispatchFixture) resolve(t *testing.T, action string, arguments map[string]interface{}) map[string]interface{} {
 	t.Helper()
 	ctx := context.Background()
-	input := ActionProposalValidationInput{Run: f.run, Bound: f.bound(t, action), Arguments: arguments}
+	input := agentrun.ActionProposalValidationInput{Run: f.run, Bound: f.bound(t, action), Arguments: arguments}
 	resolved, handled, err := f.validator.ResolveActionProposalArguments(ctx, input)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +176,7 @@ func (f *agentBuilderDispatchFixture) execute(t *testing.T, action, callID strin
 			Status: ApprovalStatusApproved, DecisionBy: &decider,
 		}
 	}
-	return f.dispatcher.DispatchAction(context.Background(), ActionDispatchInput{
+	return f.dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
 		Call: call, Run: f.run, Bound: f.bound(t, action), Arguments: arguments,
 	})
 }
@@ -623,7 +624,7 @@ func TestAgentBuilderListAgents(t *testing.T) {
 
 func TestAgentBuilderDispatcherPassesOtherActionsOn(t *testing.T) {
 	f := newAgentBuilderDispatchFixture(t)
-	fallback := ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	fallback := ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"fallback": true}, nil
 	})
 	dispatcher, err := newTestAgentBuilderDispatcher(f.store, f.agents, f.teams, f.catalog, f.provision, nil, fallback)
@@ -632,11 +633,11 @@ func TestAgentBuilderDispatcherPassesOtherActionsOn(t *testing.T) {
 	}
 	other := *f.bound(t, AgentActionTryAgent)
 	other.Action.Name = AgentActionAmendBehavior
-	result, err := dispatcher.DispatchAction(context.Background(), ActionDispatchInput{Bound: &other})
+	result, err := dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{Bound: &other})
 	if err != nil || result["fallback"] != true {
 		t.Fatalf("amend_behavior = %#v, %v", result, err)
 	}
-	result, err = dispatcher.DispatchAction(context.Background(), ActionDispatchInput{})
+	result, err = dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{})
 	if err != nil || result["fallback"] != true {
 		t.Fatalf("other action = %#v, %v", result, err)
 	}
@@ -738,7 +739,7 @@ func TestAgentBuilderCreatedAgentKeepsGrantRiskInTeams(t *testing.T) {
 	memberRun := &AgentRun{Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-x"}, AssignedAgentID: deployment.ID}
 	teamBinding := &skill.Binding{Scope: f.reference(), DeploymentID: "team-x", SkillID: "acme.notes", SkillVersion: "1.0.0"}
 	allowsRisk := func(risk capability.RiskLevel) bool {
-		_, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+		_, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 			Run: memberRun, Bound: &skill.BoundAction{Binding: teamBinding, Action: capability.Action{Name: "write_note", Risk: risk}},
 		})
 		return err == nil
@@ -822,7 +823,7 @@ func (c builderTeamAuthorityCatalog) GetTeamDefinition(context.Context, string, 
 // newTestAgentBuilderDispatcher builds a dispatcher over its own installer.
 func newTestAgentBuilderDispatcher(
 	store KernelStore, agents *kernelagent.Registry, teams *kernelteam.Registry, catalog *skill.Catalog,
-	provision AgentProvisioner, host AgentBuilderHost, fallback ActionDispatcher,
+	provision AgentProvisioner, host AgentBuilderHost, fallback agentrun.ActionDispatcher,
 ) (*AgentBuilderActionDispatcher, error) {
 	installer, err := NewAgentInstaller(store, agents, teams, catalog, provision, host)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -108,7 +109,7 @@ func NewTeamCreateActionValidator(
 
 // ResolveActionProposalArguments fills spaceId with the Run's conversation
 // space, else Default.
-func (v *TeamCreateActionValidator) ResolveActionProposalArguments(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+func (v *TeamCreateActionValidator) ResolveActionProposalArguments(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error) {
 	if !isTeamCreateAction(input.Bound) {
 		return nil, false, nil
 	}
@@ -130,7 +131,7 @@ func (v *TeamCreateActionValidator) ResolveActionProposalArguments(ctx context.C
 }
 
 // ValidateActionProposal returns the create_team card preview.
-func (v *TeamCreateActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (v *TeamCreateActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if !isTeamCreateAction(input.Bound) {
 		return nil, nil
 	}
@@ -329,7 +330,7 @@ func teamMembersMaximumRisk(members []resolvedTeamMember) capability.RiskLevel {
 
 // createTeam runs an approved create_team. Ids come from the call, so a
 // retry or a crash-resumed execution converges on the same Team.
-func (d *AgentBuilderActionDispatcher) createTeam(ctx context.Context, input ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBuilderActionDispatcher) createTeam(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	approval, err := approvedAgentBuilderCheckpoint(ctx, d.store, call)
 	if err != nil {

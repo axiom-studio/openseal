@@ -5,11 +5,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // progressFixture is a control fixture running the real turn_report_progress
 // handler with an activity service.
-func progressFixture(t *testing.T, calls ...LoopToolCall) *controlFixture {
+func progressFixture(t *testing.T, calls ...agentrun.LoopToolCall) *controlFixture {
 	t.Helper()
 	f := newControlFixture(t, calls)
 	registry := controlRegistry{}
@@ -19,7 +21,7 @@ func progressFixture(t *testing.T, calls ...LoopToolCall) *controlFixture {
 	return f
 }
 
-func progressSpec(t *testing.T, authority ControlAuthority) ControlToolSpec {
+func progressSpec(t *testing.T, authority agentrun.ControlAuthority) ControlToolSpec {
 	t.Helper()
 	for _, spec := range builtinControlSpecs(authority) {
 		if spec.Name == ControlToolReportProgress {
@@ -30,8 +32,8 @@ func progressSpec(t *testing.T, authority ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{}
 }
 
-func progressCall(id, args string) LoopToolCall {
-	return LoopToolCall{ID: id, Name: string(ControlToolReportProgress), Arguments: json.RawMessage(args)}
+func progressCall(id, args string) agentrun.LoopToolCall {
+	return agentrun.LoopToolCall{ID: id, Name: string(ControlToolReportProgress), Arguments: json.RawMessage(args)}
 }
 
 func (f *controlFixture) progressEvents() []*ActivityEvent {
@@ -67,7 +69,7 @@ func TestReportProgressEmitsCommentary(t *testing.T) {
 		progressCall("bad", `{"summary":"x","destination":"slack"}`),
 		progressCall("long", `{"summary":"`+strings.Repeat("é", 601)+`"}`),
 	)
-	authority := ControlAuthority{CanReportProgress: true}
+	authority := agentrun.ControlAuthority{CanReportProgress: true}
 	spec := progressSpec(t, authority)
 	if spec.Phase != ControlPhaseInline {
 		t.Fatalf("phase = %s", spec.Phase)
@@ -114,7 +116,7 @@ func TestReportProgressEmitsCommentary(t *testing.T) {
 	}
 	// Not offered without the authority.
 	other := progressFixture(t, progressCall("p", `{"summary":"hi"}`))
-	result, err = other.exec.Inline(other.ctx, other.context("p", ControlAuthority{}))
+	result, err = other.exec.Inline(other.ctx, other.context("p", agentrun.ControlAuthority{}))
 	if err != nil || result.Entry.State != ToolEntryError || len(other.progressEvents()) != 0 {
 		t.Fatalf("unoffered = %#v, %v", result, err)
 	}
@@ -125,7 +127,7 @@ func TestReportProgressTaskWorkActivityOnly(t *testing.T) {
 		progressCall("commentary", `{"summary":"Drafting the summary.","destination":"commentary"}`),
 		progressCall("default", `{"summary":"Pulled the account history."}`),
 	)
-	authority := ControlAuthority{CanReportProgress: true, TaskWork: true}
+	authority := agentrun.ControlAuthority{CanReportProgress: true, TaskWork: true}
 	spec := progressSpec(t, authority)
 	props, _ := spec.InputSchema["properties"].(map[string]interface{})
 	if props == nil || !reflect.DeepEqual(props["destination"].(map[string]interface{})["enum"], []string{"activity"}) ||
@@ -156,7 +158,7 @@ func TestReportProgressRejectsRepeat(t *testing.T) {
 		progressCall("again", `{"summary":" Found the duplicate charge. ","destination":"activity"}`),
 		progressCall("new", `{"summary":"Refund is pending approval."}`),
 	)
-	authority := ControlAuthority{CanReportProgress: true}
+	authority := agentrun.ControlAuthority{CanReportProgress: true}
 	result, err := f.exec.Inline(f.ctx, f.context("first", authority))
 	if err != nil {
 		t.Fatalf("first: %v", err)

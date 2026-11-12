@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"bytes"
@@ -67,7 +67,7 @@ func controlForkPoint(cc ControlContext) string {
 // controlChildSessionFork is the session fork of a child Run acting as
 // childAgentID: only a same-Agent child inherits the parent path (DI-5);
 // another Agent never sees the source Agent's private context.
-func controlChildSessionFork(cc ControlContext, childAgentID string) *SessionForkRef {
+func ControlChildSessionFork(cc ControlContext, childAgentID string) *SessionForkRef {
 	childAgentID = strings.TrimSpace(childAgentID)
 	if cc.Run == nil || childAgentID == "" || childAgentID != cc.Run.AssignedAgentID {
 		return nil
@@ -96,7 +96,7 @@ func ControlChildSeedText(run *models.AgentRun) (string, bool) {
 
 // controlChildSeed is the seed entry of run's session (childSessionSeed with
 // the brief's goal kind); nil when the Run has no control-tool brief.
-func controlChildSeed(run *models.AgentRun) (*models.SessionEntry, error) {
+func ControlChildSeed(run *models.AgentRun) (*models.SessionEntry, error) {
 	kind, text, ok := controlChildSeedBrief(run)
 	if !ok {
 		return nil, nil

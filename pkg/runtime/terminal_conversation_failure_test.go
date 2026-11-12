@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -33,7 +34,7 @@ func terminalFailureConversationFixture(t *testing.T, store terminalReportingCon
 	if err != nil {
 		t.Fatal(err)
 	}
-	commands := NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
+	commands := agentrun.NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
 	created, err := commands.CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: RunKindConversation, Source: RunSourceChat,
 		Goal: "Check the recent email request", ConcurrencyKey: conversation.ID + ":thread:" + posted.Message.ID,
@@ -133,8 +134,8 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 		if err != nil || len(claims) != 1 {
 			t.Fatalf("first attempt claim: %#v %v", claims, err)
 		}
-		commands := NewRunCommandService(store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
-		retry, err := commands.RetryConversationRun(t.Context(), AgentRunCommandRequest{Scope: first.Scope, RunID: first.ID, ExpectedRevision: first.Revision, Actor: ActivityActor{Type: "user", ID: "kev"}})
+		commands := agentrun.NewRunCommandService(store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
+		retry, err := commands.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: first.Scope, RunID: first.ID, ExpectedRevision: first.Revision, Actor: ActivityActor{Type: "user", ID: "kev"}})
 		if err != nil || retry.Run.ID != first.ID {
 			t.Fatalf("explicit safe retry stopped working: %#v %v", retry, err)
 		}
@@ -283,7 +284,7 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 		if message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, terminalConversationFailureReplyKey(run)); message != nil || !errors.Is(err, ErrChannelMessageNotFound) && err != nil {
 			t.Fatalf("an application chat received a failure answer for a credit stop: %#v %v", message, err)
 		}
-		retry, err := NewRunCommandService(store).RetryConversationRun(t.Context(), AgentRunCommandRequest{Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Actor: ActivityActor{Type: "user", ID: "kev"}})
+		retry, err := agentrun.NewRunCommandService(store).RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Actor: ActivityActor{Type: "user", ID: "kev"}})
 		if err != nil || retry.Run.CreditError != nil || retry.Run.Status != AgentRunStatusQueued {
 			t.Fatalf("retry after adding credits kept the credit stop: %#v %v", retry, err)
 		}

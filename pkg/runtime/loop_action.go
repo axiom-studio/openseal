@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"go.uber.org/zap"
 )
 
@@ -21,7 +22,7 @@ type GovernedToolCall struct {
 	// Step is the running step row; its id is the call's TurnID.
 	Step     *AgentTurn
 	WorkerID string
-	Binding  *TurnRunnerBinding
+	Binding  *agentrun.TurnRunnerBinding
 	// ToolCallID is the provider tool call id (LoopToolCall.ID).
 	ToolCallID string
 	// Name is the tool name, capability.ModelAction.Name.
@@ -29,7 +30,7 @@ type GovernedToolCall struct {
 	// Arguments are the tool input as stored on the tool entry.
 	Arguments json.RawMessage
 	// Directive is set by deterministic producers only.
-	Directive *ToolCallDirective
+	Directive *agentrun.ToolCallDirective
 	// Narration is the step's assistant text; "" for deterministic producers.
 	Narration string
 
@@ -131,7 +132,7 @@ func NewGovernedToolExecutor(config GovernedToolExecutorConfig) (*GovernedToolEx
 }
 
 // IsGoverned reports whether name is a governed action of the binding.
-func (x *GovernedToolExecutor) IsGoverned(binding *TurnRunnerBinding, name string) bool {
+func (x *GovernedToolExecutor) IsGoverned(binding *agentrun.TurnRunnerBinding, name string) bool {
 	if binding == nil || name == "" {
 		return false
 	}
@@ -146,7 +147,7 @@ func (x *GovernedToolExecutor) IsGoverned(binding *TurnRunnerBinding, name strin
 // loopIdempotencyKey is stable for one tool call of one step, so a crash
 // replay of the same call reuses its ActionCall and never collapses two
 // different calls.
-func loopIdempotencyKey(stepID, toolCallID string, directive *ToolCallDirective) string {
+func loopIdempotencyKey(stepID, toolCallID string, directive *agentrun.ToolCallDirective) string {
 	if directive != nil && strings.TrimSpace(directive.IdempotencyKey) != "" {
 		return strings.TrimSpace(directive.IdempotencyKey)
 	}
@@ -154,7 +155,7 @@ func loopIdempotencyKey(stepID, toolCallID string, directive *ToolCallDirective)
 }
 
 // governedDirective is the governance part of a producer directive.
-func governedDirective(directive *ToolCallDirective) *governedInputDirective {
+func governedDirective(directive *agentrun.ToolCallDirective) *governedInputDirective {
 	if directive == nil {
 		return nil
 	}
@@ -553,11 +554,11 @@ func supersedingMessageTime(run *AgentRun, approval *ApprovalCheckpoint) (time.T
 
 // GovernedBudgetExhaustion is the loop's budget exit for an outcome denied
 // because the Run's action budget is used up; nil otherwise.
-func GovernedBudgetExhaustion(outcome GovernedToolOutcome) *BudgetExhaustion {
+func GovernedBudgetExhaustion(outcome GovernedToolOutcome) *agentrun.BudgetExhaustion {
 	if !outcome.BudgetExhausted {
 		return nil
 	}
-	return &BudgetExhaustion{Summary: governedBudgetExhaustedReason, Dimensions: []string{"actions"}, ActionCallID: outcome.ActionCallID}
+	return &agentrun.BudgetExhaustion{Summary: governedBudgetExhaustedReason, Dimensions: []string{"actions"}, ActionCallID: outcome.ActionCallID}
 }
 
 // ActionProposalObserver projects a committed governed ActionCall into other

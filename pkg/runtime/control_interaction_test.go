@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // interactionFixture is a control fixture whose Run answers in a
@@ -15,7 +17,7 @@ type interactionFixture struct {
 	clock        time.Time
 }
 
-func newInteractionFixture(t *testing.T, calls []LoopToolCall) *interactionFixture {
+func newInteractionFixture(t *testing.T, calls []agentrun.LoopToolCall) *interactionFixture {
 	t.Helper()
 	f := newControlFixture(t, calls)
 	conversations := NewConversationService(f.store)
@@ -43,9 +45,9 @@ func newInteractionFixture(t *testing.T, calls []LoopToolCall) *interactionFixtu
 	return fx
 }
 
-func reactCall(id, messageID, emoji string) LoopToolCall {
+func reactCall(id, messageID, emoji string) agentrun.LoopToolCall {
 	raw, _ := json.Marshal(map[string]string{"messageId": messageID, "emoji": emoji})
-	return LoopToolCall{ID: id, Name: string(ControlToolReact), Arguments: raw}
+	return agentrun.LoopToolCall{ID: id, Name: string(ControlToolReact), Arguments: raw}
 }
 
 func controlResultValue(t *testing.T, entry *SessionEntry) map[string]interface{} {
@@ -64,10 +66,10 @@ func controlResultValue(t *testing.T, entry *SessionEntry) map[string]interface{
 // appended before the message is posted.
 const reactTestMessageID = "msg-ship"
 
-var reactAuthority = ControlAuthority{CanReact: true}
+var reactAuthority = agentrun.ControlAuthority{CanReact: true}
 
 func TestReactAddsReactionAsAnsweringAgent(t *testing.T) {
-	f := newInteractionFixture(t, []LoopToolCall{reactCall("r1", reactTestMessageID, "👀")})
+	f := newInteractionFixture(t, []agentrun.LoopToolCall{reactCall("r1", reactTestMessageID, "👀")})
 	result, err := f.exec.Inline(f.ctx, f.context("r1", reactAuthority))
 	if err != nil || result.Kind != ControlContinue {
 		t.Fatalf("inline = %#v, %v", result, err)
@@ -91,7 +93,7 @@ func TestReactAddsReactionAsAnsweringAgent(t *testing.T) {
 }
 
 func TestReactInvalidOrUnknownMessageIsError(t *testing.T) {
-	f := newInteractionFixture(t, []LoopToolCall{
+	f := newInteractionFixture(t, []agentrun.LoopToolCall{
 		reactCall("bad-emoji", reactTestMessageID, "ok"),
 		reactCall("bad-id", "", "👍"),
 		reactCall("unknown", "no-such-message", "👍"),
@@ -109,7 +111,7 @@ func TestReactInvalidOrUnknownMessageIsError(t *testing.T) {
 
 func TestReactFourthInRunRefused(t *testing.T) {
 	emojis := []string{"👀", "👍", "✅", "🎉"}
-	var calls []LoopToolCall
+	var calls []agentrun.LoopToolCall
 	for i, emoji := range emojis {
 		calls = append(calls, reactCall("r"+string(rune('1'+i)), reactTestMessageID, emoji))
 	}
@@ -136,7 +138,7 @@ func TestReactFourthInRunRefused(t *testing.T) {
 }
 
 func TestReactOnlyReplyPostsNoMessage(t *testing.T) {
-	f := newInteractionFixture(t, []LoopToolCall{reactCall("r1", reactTestMessageID, "👍")})
+	f := newInteractionFixture(t, []agentrun.LoopToolCall{reactCall("r1", reactTestMessageID, "👍")})
 	if _, err := f.exec.Inline(f.ctx, f.context("r1", reactAuthority)); err != nil {
 		t.Fatal(err)
 	}
@@ -156,8 +158,8 @@ func TestReactOnlyReplyPostsNoMessage(t *testing.T) {
 }
 
 func TestReactNotOfferedOutsideConversation(t *testing.T) {
-	f := newInteractionFixture(t, []LoopToolCall{reactCall("r1", reactTestMessageID, "👍")})
-	if _, err := f.exec.Inline(f.ctx, f.context("r1", ControlAuthority{})); err != nil {
+	f := newInteractionFixture(t, []agentrun.LoopToolCall{reactCall("r1", reactTestMessageID, "👍")})
+	if _, err := f.exec.Inline(f.ctx, f.context("r1", agentrun.ControlAuthority{})); err != nil {
 		t.Fatal(err)
 	}
 	if value := controlResultValue(t, f.stored("r1")); value["error"] != "tool_not_available" {
@@ -165,12 +167,12 @@ func TestReactNotOfferedOutsideConversation(t *testing.T) {
 	}
 }
 
-func waitCall(id string, seconds int) LoopToolCall {
+func waitCall(id string, seconds int) agentrun.LoopToolCall {
 	raw, _ := json.Marshal(map[string]int{"seconds": seconds})
-	return LoopToolCall{ID: id, Name: string(ControlToolWait), Arguments: raw}
+	return agentrun.LoopToolCall{ID: id, Name: string(ControlToolWait), Arguments: raw}
 }
 
-var waitAuthority = ControlAuthority{CanWait: true}
+var waitAuthority = agentrun.ControlAuthority{CanWait: true}
 
 func (f *interactionFixture) settleWait(t *testing.T, callID string) ControlResult {
 	t.Helper()
@@ -183,7 +185,7 @@ func (f *interactionFixture) settleWait(t *testing.T, callID string) ControlResu
 }
 
 func TestWaitSleepsAndResumesElapsed(t *testing.T) {
-	f := newInteractionFixture(t, []LoopToolCall{waitCall("w", 90)})
+	f := newInteractionFixture(t, []agentrun.LoopToolCall{waitCall("w", 90)})
 	result := f.settleWait(t, "w")
 	wakeAt := f.clock.Add(90 * time.Second)
 	if result.Kind != ControlParked || result.Park == nil || result.Park.Committed ||
@@ -217,7 +219,7 @@ func TestWaitSleepsAndResumesElapsed(t *testing.T) {
 }
 
 func TestWaitWokenEarlyBySteering(t *testing.T) {
-	f := newInteractionFixture(t, []LoopToolCall{waitCall("w", 600)})
+	f := newInteractionFixture(t, []agentrun.LoopToolCall{waitCall("w", 600)})
 	f.settleWait(t, "w")
 	f.clock = f.clock.Add(100 * time.Second)
 	f.run.PendingInterventions = append(f.run.PendingInterventions, AgentRunIntervention{
@@ -235,7 +237,7 @@ func TestWaitWokenEarlyBySteering(t *testing.T) {
 }
 
 func TestWaitSecondsOutOfRangeIsArgumentsError(t *testing.T) {
-	f := newInteractionFixture(t, []LoopToolCall{waitCall("zero", 0), waitCall("long", maximumWaitSeconds+1)})
+	f := newInteractionFixture(t, []agentrun.LoopToolCall{waitCall("zero", 0), waitCall("long", maximumWaitSeconds+1)})
 	for _, callID := range []string{"zero", "long"} {
 		result, err := f.exec.Settle(f.ctx, f.context(callID, waitAuthority))
 		if err != nil || result.Kind != ControlContinue {

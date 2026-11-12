@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testing.T) {
@@ -32,7 +33,7 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	runResult, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+	runResult, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: endpoint.Scope, Kind: RunKindConversation, Owner: endpoint.Owner,
 		AssignedAgentID: endpoint.DeploymentID, Goal: "Respond", Source: RunSourceEvent,
 		IdempotencyKey: "reply-worker-run",
@@ -158,7 +159,7 @@ func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	runResult, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+	runResult, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: endpoint.Scope, Kind: RunKindConversation, Owner: endpoint.Owner,
 		AssignedAgentID: endpoint.DeploymentID, Goal: "Respond", Source: RunSourceEvent,
 		IdempotencyKey: "direct-reply-run",

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
@@ -46,12 +47,12 @@ func terminalReportingContractRun(t *testing.T, store terminalReportingContractS
 		t.Fatal(err)
 	}
 	key := uuid.NewString()
-	commands := NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
+	commands := agentrun.NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
 	created, err := commands.CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Report the completed background work", Source: RunSourceSchedule, IdempotencyKey: key,
 		Context: map[string]interface{}{
 			conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.Message.ID,
-			runReportingContextRootRunID: runIDForIdempotencyKey(scope, key), runReportingContextMilestones: []string{"completed", "failed"}, scheduledTaskContextKey: true,
+			runReportingContextRootRunID: agentrun.RunIDForIdempotencyKey(scope, key), runReportingContextMilestones: []string{"completed", "failed"}, scheduledTaskContextKey: true,
 		},
 	})
 	if err != nil {

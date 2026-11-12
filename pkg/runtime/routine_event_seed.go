@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"go.uber.org/zap"
 )
 
@@ -430,7 +431,7 @@ func loopRunSessionSeed(run *AgentRun) (*SessionEntry, error) {
 	if _, trial := run.Context[AgentTrialContextKey]; trial {
 		return agentTrialSessionSeed(run)
 	}
-	seed, err := controlChildSeed(run)
+	seed, err := agentrun.ControlChildSeed(run)
 	if err != nil || seed != nil {
 		return seed, err
 	}

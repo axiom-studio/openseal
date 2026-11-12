@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Promote changes only the conversation Run's presentation and execution lane.
@@ -120,7 +122,7 @@ func canonicalConversationTaskContinuation(ctx context.Context, store interface{
 	if !ok {
 		return nil, ErrInvalidConversationTask
 	}
-	verified, err := VerifyConversationTaskWorkRun(ctx, proof, task, run)
+	verified, err := agentrun.VerifyConversationTaskWorkRun(ctx, proof, task, run)
 	if err != nil {
 		return nil, err
 	}

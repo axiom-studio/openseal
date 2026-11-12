@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -52,7 +53,7 @@ func (s *countingActionPoolStore) GetAgentRun(ctx context.Context, scope Scope, 
 func TestActionWorkerPoolCoalescesIdleClaimsBeforeHydration(t *testing.T) {
 	store := &countingActionPoolStore{Store: newTestKernelStore(t)}
 	pool, err := NewActionWorkerPool(store, skill.NewCatalog(), nil,
-		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return nil, errors.New("unexpected idle dispatch")
 		}), nil, ActionWorkerConfig{Scope: Scope{Kind: "tenant", ID: "idle"}, Concurrency: 8, PollInterval: 20 * time.Millisecond})
 	if err != nil {
@@ -73,7 +74,7 @@ func TestActionWorkerPoolWakeSurvivesEmptyClaimRace(t *testing.T) {
 	store := &countingActionPoolStore{Store: newTestKernelStore(t), entered: make(chan struct{}), release: make(chan struct{})}
 	catalog, scope := governedActionCatalog(t)
 	dispatched := make(chan struct{}, 1)
-	pool := newTestActionPool(t, store, catalog, scope, time.Hour, 1, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	pool := newTestActionPool(t, store, catalog, scope, time.Hour, 1, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatched <- struct{}{}
 		return map[string]interface{}{"ok": true}, nil
 	}))
@@ -104,7 +105,7 @@ func TestActionWorkerPoolRecoversMissedWakeAndRestart(t *testing.T) {
 			if scenario != "missed_wake" {
 				interval = time.Hour
 			}
-			pool := newTestActionPool(t, store, catalog, scope, interval, 2, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+			pool := newTestActionPool(t, store, catalog, scope, interval, 2, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				dispatched <- struct{}{}
 				return map[string]interface{}{"ok": true}, nil
 			}))
@@ -149,7 +150,7 @@ func TestActionWorkerPoolHandsOffClaimBeforeProviderAndDrainsBacklog(t *testing.
 	}
 	started, completed := make(chan struct{}, calls), make(chan struct{}, calls)
 	release := make(chan struct{})
-	pool := newTestActionPool(t, store, catalog, scope, time.Hour, 2, ActionDispatcherFunc(func(ctx context.Context, _ ActionDispatchInput) (map[string]interface{}, error) {
+	pool := newTestActionPool(t, store, catalog, scope, time.Hour, 2, ActionDispatcherFunc(func(ctx context.Context, _ agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		started <- struct{}{}
 		select {
 		case <-ctx.Done():
@@ -179,7 +180,7 @@ func TestActionWorkerPoolHandsOffClaimBeforeProviderAndDrainsBacklog(t *testing.
 	}
 }
 
-func newTestActionPool(t *testing.T, store KernelStore, catalog *skill.Catalog, scope Scope, interval time.Duration, concurrency int, dispatcher ActionDispatcher) *ActionWorkerPool {
+func newTestActionPool(t *testing.T, store KernelStore, catalog *skill.Catalog, scope Scope, interval time.Duration, concurrency int, dispatcher agentrun.ActionDispatcher) *ActionWorkerPool {
 	t.Helper()
 	pool, err := NewActionWorkerPool(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "test-secret"}, nil
@@ -246,7 +247,7 @@ func TestActionWorkerPoolBacksOffAfterClaimedRunHydrationFailure(t *testing.T) {
 	for range 20 {
 		createActionPoolWork(t, store.Store, catalog, scope)
 	}
-	pool := newTestActionPool(t, store, catalog, scope, 50*time.Millisecond, 1, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	pool := newTestActionPool(t, store, catalog, scope, 50*time.Millisecond, 1, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return nil, errors.New("hydration failure must prevent dispatch")
 	}))
 	pool.Start(t.Context())
@@ -269,7 +270,7 @@ func TestActionWorkerPoolSerializesStopBeforeConcurrentRestart(t *testing.T) {
 	catalog, scope := governedActionCatalog(t)
 	createActionPoolWork(t, store, catalog, scope)
 	entered, stopping, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	pool := newTestActionPool(t, store, catalog, scope, time.Hour, 1, ActionDispatcherFunc(func(ctx context.Context, _ ActionDispatchInput) (map[string]interface{}, error) {
+	pool := newTestActionPool(t, store, catalog, scope, time.Hour, 1, ActionDispatcherFunc(func(ctx context.Context, _ agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		close(entered)
 		<-ctx.Done()
 		close(stopping)
@@ -349,8 +350,8 @@ func TestAgentRunWorkerObservesTimerDeadlineWithoutWaitingForFallback(t *testing
 		t.Fatal(err)
 	}
 	producer := &workerLoopProducer{steps: 1, wakeIn: 30 * time.Millisecond}
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DefinitionID: "agent", DefinitionVersion: "1", Producer: producer}, nil
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		return &agentrun.TurnRunnerBinding{DefinitionID: "agent", DefinitionVersion: "1", Producer: producer}, nil
 	}), nil, AgentRunWorkerConfig{Scope: scope, PollInterval: time.Hour})
 	if err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -285,7 +286,7 @@ func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
 	for _, mutate := range []func(*GetConversationTaskRequest){func(r *GetConversationTaskRequest) { r.Scope.ID = "foreign" }, func(r *GetConversationTaskRequest) { r.AuthenticatedActor.ID = "foreign" }, func(r *GetConversationTaskRequest) { r.ThreadRootID = "foreign" }} {
 		r := GetConversationTaskRequest{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, TaskID: accepted.Task.ID, AuthenticatedActor: trigger.Sender}
 		mutate(&r)
-		if _, err := service.Get(t.Context(), r); !errors.Is(err, ErrConversationTaskNotFound) {
+		if _, err := service.Get(t.Context(), r); !errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 			t.Fatalf("task leaked canonical scope: %v", err)
 		}
 	}
@@ -297,7 +298,7 @@ func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) 
 			store := newTestKernelStore(t)
 			source, turn, conversation, _ := settledWorkerTaskFixture(t, store)
 			if cancel {
-				_, err := NewRunCommandService(store).CommandAgentRun(t.Context(), AgentRunCommandRequest{Scope: source.Scope, RunID: source.ID, ExpectedRevision: source.Revision, Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "sender-user"}, Summary: "Cancel pending foreground"})
+				_, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: source.Scope, RunID: source.ID, ExpectedRevision: source.Revision, Kind: agentrun.AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "sender-user"}, Summary: "Cancel pending foreground"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -491,18 +492,18 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 		t.Fatal("independent requests shared an execution lane")
 	}
 	cancelSource := post("cancel-task", "Stop only the documentation review.")
-	definition := RunManagementSkill()
+	definition := agentrun.RunManagementSkill()
 	bound := &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: "agent"}, Action: definition.Actions[RunActionCancel]}
-	validator, _ := NewRunActionValidator(store)
-	args, _, err := validator.ResolveActionProposalArguments(t.Context(), ActionProposalValidationInput{Run: cancelSource, Bound: bound, Arguments: map[string]interface{}{"runId": second.WorkRun.ID, "reason": "User requested cancellation"}})
+	validator, _ := agentrun.NewRunActionValidator(store)
+	args, _, err := validator.ResolveActionProposalArguments(t.Context(), agentrun.ActionProposalValidationInput{Run: cancelSource, Bound: bound, Arguments: map[string]interface{}{"runId": second.WorkRun.ID, "reason": "User requested cancellation"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: cancelSource, Bound: bound, Arguments: args}); err != nil {
+	if _, err := validator.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: cancelSource, Bound: bound, Arguments: args}); err != nil {
 		t.Fatal(err)
 	}
-	dispatcher, _ := NewRunActionDispatcher(store, nil)
-	if _, err := dispatcher.DispatchAction(t.Context(), ActionDispatchInput{Run: cancelSource, Bound: bound, Call: &ActionCall{Scope: source.Scope, Arguments: args}}); err != nil {
+	dispatcher, _ := agentrun.NewRunActionDispatcher(store, nil)
+	if _, err := dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: cancelSource, Bound: bound, Call: &ActionCall{Scope: source.Scope, Arguments: args}}); err != nil {
 		t.Fatal(err)
 	}
 	cancelled, _ := store.GetAgentRun(t.Context(), source.Scope, second.WorkRun.ID)

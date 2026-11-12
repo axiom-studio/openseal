@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -33,7 +34,7 @@ func TestActionWorkerLifecyclePreservesCompletedDispatchAcrossRunChanges(t *test
 				f := newLoopWorkerFixture(t, store, &BudgetPolicy{MaxActions: 10})
 				call := f.propose("deploy-1", "deploy")
 				var changed *AgentRun
-				worker := f.worker(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+				worker := f.worker(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 					f.setRunStatus(testCase.status)
 					changed = f.run
 					if testCase.fail {
@@ -354,7 +355,7 @@ func actionLifecycleEvent(call *ActionCall, id, eventType string, now time.Time)
 }
 
 type actionLifecycleCountingCatalog struct {
-	ActionExecutionCatalog
+	agentrun.ActionExecutionCatalog
 	calls *int
 }
 

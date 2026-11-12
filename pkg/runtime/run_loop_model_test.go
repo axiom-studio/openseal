@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 type modelProducerTestHost struct {
@@ -43,7 +45,7 @@ type modelProducerTestPreparer struct {
 	req   ModelStepRequest
 }
 
-func (p *modelProducerTestPreparer) PrepareModelStep(context.Context, StepInput) (ModelStepRequest, error) {
+func (p *modelProducerTestPreparer) PrepareModelStep(context.Context, agentrun.StepInput) (ModelStepRequest, error) {
 	p.calls++
 	return p.req, nil
 }
@@ -75,7 +77,7 @@ type modelProducerFixture struct {
 	store    *modelProducerTestStore
 	producer *ModelStepProducer
 	render   *renderFixture
-	in       StepInput
+	in       agentrun.StepInput
 }
 
 func newModelProducerFixture(t *testing.T) *modelProducerFixture {
@@ -105,15 +107,15 @@ func newModelProducerFixture(t *testing.T) *modelProducerFixture {
 	}
 	f.producer = producer
 	run := &AgentRun{ID: "run-1", Scope: testSessionScope, AssignedAgentID: "agent-1", SessionID: "lane", Status: AgentRunStatusRunning}
-	f.in = StepInput{
+	f.in = agentrun.StepInput{
 		Run: run, Step: &AgentTurn{ID: "step-1", Sequence: 1}, Session: f.store.path.Session,
-		Path: f.store.path, Binding: &TurnRunnerBinding{DefinitionID: "def-1", DefinitionVersion: "1"},
-		Mode: StepModeNormal, WorkerID: "worker-1",
+		Path: f.store.path, Binding: &agentrun.TurnRunnerBinding{DefinitionID: "def-1", DefinitionVersion: "1"},
+		Mode: agentrun.StepModeNormal, WorkerID: "worker-1",
 	}
 	return f
 }
 
-func (f *modelProducerFixture) produce(t *testing.T, ctx context.Context, in StepInput) (ModelStepRequest, StepOutput) {
+func (f *modelProducerFixture) produce(t *testing.T, ctx context.Context, in agentrun.StepInput) (ModelStepRequest, agentrun.StepOutput) {
 	t.Helper()
 	out, err := f.producer.Produce(ctx, in)
 	if err != nil {
@@ -220,7 +222,7 @@ func TestModelStepProducerRequestShape(t *testing.T) {
 func TestModelStepProducerExplainPurposeHasNoTools(t *testing.T) {
 	f := newModelProducerFixture(t)
 	in := f.in
-	in.Mode = StepModeExplainFailure
+	in.Mode = agentrun.StepModeExplainFailure
 	req, out := f.produce(t, context.Background(), in)
 	if req.Purpose != ModelStepPurposeExplanation {
 		t.Fatalf("purpose = %q", req.Purpose)

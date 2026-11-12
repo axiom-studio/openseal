@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -46,19 +47,19 @@ const (
 // Agent.
 type AgentBuilderActionDispatcher struct {
 	*AgentInstaller
-	fallback ActionDispatcher
+	fallback agentrun.ActionDispatcher
 }
 
 // NewAgentBuilderActionDispatcher wraps fallback, which receives every other
 // action. Every dispatcher of an Engine shares its one installer.
-func NewAgentBuilderActionDispatcher(installer *AgentInstaller, fallback ActionDispatcher) (*AgentBuilderActionDispatcher, error) {
+func NewAgentBuilderActionDispatcher(installer *AgentInstaller, fallback agentrun.ActionDispatcher) (*AgentBuilderActionDispatcher, error) {
 	if installer == nil {
 		return nil, errors.New("agent builder dispatcher requires the agent installer")
 	}
 	return &AgentBuilderActionDispatcher{AgentInstaller: installer, fallback: fallback}, nil
 }
 
-func (d *AgentBuilderActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+func (d *AgentBuilderActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	if !isAgentBuilderDispatchedAction(input.Bound) {
 		if d == nil || d.fallback == nil {
 			return nil, errors.New("action dispatcher does not support this action")
@@ -215,7 +216,7 @@ func agentDeploymentDisplayName(deployment *kernelagent.AgentDeployment, definit
 	return definition.DisplayName
 }
 
-func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	approval, err := approvedAgentBuilderCheckpoint(ctx, d.store, call)
 	if err != nil {
@@ -285,7 +286,7 @@ func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input Ac
 	})
 }
 
-func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	approval, err := approvedAgentBuilderCheckpoint(ctx, d.store, call)
 	if err != nil {

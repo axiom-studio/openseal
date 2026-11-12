@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -382,8 +383,8 @@ func (c *ApprovalCoordinator) planResolution(ctx context.Context, req ResolveApp
 	}
 	updatedRun := cloneAgentRun(run)
 	if denied && updatedRun.Budget != nil {
-		if _, reserved := updatedRun.BudgetReservations[actionBudgetReservationID(call.ID)]; reserved {
-			if err := releaseRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID)); err != nil {
+		if _, reserved := updatedRun.BudgetReservations[agentrun.ActionBudgetReservationID(call.ID)]; reserved {
+			if err := releaseRunBudgetReservation(updatedRun, agentrun.ActionBudgetReservationID(call.ID)); err != nil {
 				return nil, nil, err
 			}
 		}

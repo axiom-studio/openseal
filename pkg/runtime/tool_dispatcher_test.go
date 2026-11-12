@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
 )
@@ -44,7 +45,7 @@ Publish the requested release.
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := dispatcher.DispatchAction(context.Background(), ActionDispatchInput{
+	output, err := dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
 		Call: &ActionCall{ID: "call", RunID: "run", PreparedRuntime: &skill.PreparedRuntime{
 			PreparationID: "sha256:" + strings.Repeat("a", 64), RuntimeID: "oci://runtime.test/publisher@sha256:" + strings.Repeat("b", 64),
 			Revision: "sha256:" + strings.Repeat("c", 64), Adapter: "oci-builder/v1", OperatingSystem: "linux", Architecture: "amd64", Executables: []string{"publisher"},
@@ -94,7 +95,7 @@ func TestToolActionDispatcherUsesOnlyBoundDefinitionIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := ActionDispatchInput{
+	input := agentrun.ActionDispatchInput{
 		Bound:     &skill.BoundAction{Definition: definition, Action: definition.Actions["run"], Binding: binding},
 		Arguments: spoofed,
 	}
@@ -159,7 +160,7 @@ func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{
+	_, err = dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{
 		Call: call, Run: run, Bound: bound, Arguments: map[string]interface{}{},
 		CredentialLease: envelope, CredentialReferences: cloneCredentialReferences(call.CredentialRefs),
 	})
@@ -174,7 +175,7 @@ func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *tes
 		t.Fatal("tool invocation aliases the caller's signed envelope")
 	}
 
-	_, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{
+	_, err = dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{
 		Call: call, Run: run, Bound: bound, Arguments: map[string]interface{}{}, Credentials: map[string]string{"reddit": "plaintext"},
 		CredentialLease: envelope, CredentialReferences: cloneCredentialReferences(call.CredentialRefs),
 	})
@@ -182,7 +183,7 @@ func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *tes
 		t.Fatalf("mixed plaintext and opaque authority was accepted: %v", err)
 	}
 
-	_, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{
+	_, err = dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{
 		Call: call, Run: run, Bound: bound, Arguments: map[string]interface{}{}, CredentialLease: envelope,
 		CredentialReferences: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "opaque://tenant-7/other"}},
 	})
@@ -194,7 +195,7 @@ func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *tes
 	otherDefinition := *definition
 	otherDefinition.Transport.Endpoint = "other_tool"
 	otherBound.Definition = &otherDefinition
-	_, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{
+	_, err = dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{
 		Call: call, Run: run, Bound: &otherBound, Arguments: map[string]interface{}{}, CredentialLease: envelope,
 		CredentialReferences: cloneCredentialReferences(call.CredentialRefs),
 	})
@@ -217,7 +218,7 @@ func TestToolActionDispatcherSeparatesTeamAuthorityFromAgentExecution(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = dispatcher.DispatchAction(context.Background(), ActionDispatchInput{
+	_, err = dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
 		Run:   &AgentRun{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "researcher-agent"},
 		Bound: &skill.BoundAction{Definition: definition, Action: definition.Actions["run"], Binding: binding}, Arguments: map[string]interface{}{},
 	})
@@ -228,7 +229,7 @@ func TestToolActionDispatcherSeparatesTeamAuthorityFromAgentExecution(t *testing
 		t.Fatalf("Team authority and execution placement were conflated: %#v", invocation)
 	}
 
-	_, err = dispatcher.DispatchAction(context.Background(), ActionDispatchInput{
+	_, err = dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
 		Run:   &AgentRun{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "other-team"}, AssignedAgentID: "researcher-agent"},
 		Bound: &skill.BoundAction{Definition: definition, Action: definition.Actions["run"], Binding: binding}, Arguments: map[string]interface{}{},
 	})
@@ -251,7 +252,7 @@ func TestToolActionDispatcherSeparatesBindingConfigFromModelArguments(t *testing
 		t.Fatal(err)
 	}
 	binding := &skill.Binding{Config: map[string]interface{}{"url": "fixed"}}
-	_, err = dispatcher.DispatchAction(context.Background(), ActionDispatchInput{
+	_, err = dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
 		Bound:     &skill.BoundAction{Definition: definition, Action: definition.Actions["run"], Binding: binding},
 		Arguments: map[string]interface{}{"url": "model-controlled"},
 	})

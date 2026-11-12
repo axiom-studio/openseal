@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -87,7 +88,7 @@ func NewTeamSkillActionValidator(catalog TeamSkillAuthorityCatalog) (*TeamSkillA
 	return &TeamSkillActionValidator{catalog: catalog}, nil
 }
 
-func (v *TeamSkillActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (v *TeamSkillActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if input.Run == nil || input.Bound == nil || input.Bound.Binding == nil {
 		return nil, nil
 	}
@@ -133,10 +134,10 @@ func (v *TeamSkillActionValidator) ValidateActionProposal(ctx context.Context, i
 // tool is invoked.
 type TeamSkillActionDispatcher struct {
 	validator *TeamSkillActionValidator
-	next      ActionDispatcher
+	next      agentrun.ActionDispatcher
 }
 
-func NewTeamSkillActionDispatcher(catalog TeamSkillAuthorityCatalog, next ActionDispatcher) (*TeamSkillActionDispatcher, error) {
+func NewTeamSkillActionDispatcher(catalog TeamSkillAuthorityCatalog, next agentrun.ActionDispatcher) (*TeamSkillActionDispatcher, error) {
 	if next == nil {
 		return nil, errors.New("next action dispatcher is required")
 	}
@@ -147,11 +148,11 @@ func NewTeamSkillActionDispatcher(catalog TeamSkillAuthorityCatalog, next Action
 	return &TeamSkillActionDispatcher{validator: validator, next: next}, nil
 }
 
-func (d *TeamSkillActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+func (d *TeamSkillActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	if d == nil || d.validator == nil || d.next == nil {
 		return nil, errors.New("Team Skill action dispatcher is not configured")
 	}
-	if _, err := d.validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+	if _, err := d.validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 		Run: input.Run, Bound: input.Bound, Arguments: input.Arguments,
 	}); err != nil {
 		return nil, fmt.Errorf("revalidate Team Skill authority before dispatch: %w", err)

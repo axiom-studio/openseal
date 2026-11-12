@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -17,12 +18,12 @@ func TestAcceptedRunInheritanceSameMethodForkRetainsPinAndBranchCheckpoint(t *te
 		preparer := &acceptedRunInheritancePreparer{prepare: func(*CreateAgentRunRequest) error {
 			return errors.New("active deployment has changed and new admission refuses the old method")
 		}}
-		coordinator := NewRunForkCoordinator(kernel)
+		coordinator := agentrun.NewRunForkCoordinator(kernel)
 		coordinator.SetAcceptedRunExecutionPreparer(preparer)
 		spoof := *pin
 		spoof.DefinitionVersion, spoof.RunbookVersion = "unaccepted", "unaccepted"
 		request := acceptedRunInheritanceForkRequest(parent)
-		request.Branches = []RunForkBranch{
+		request.Branches = []agentrun.RunForkBranch{
 			{ID: "first", Goal: "Continue first accepted branch", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "read"}}, Budget: &BudgetPolicy{MaxTurns: 2}},
 			{ID: "second", AssignedAgentID: parent.AssignedAgentID, Entrypoint: parent.Entrypoint, Goal: "Continue second accepted branch", Context: map[string]interface{}{AcceptedRunExecutionContextKey: &spoof, "branchInput": "preserved"}, Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "read-new"}}, Budget: &BudgetPolicy{MaxTurns: 3}},
 		}
@@ -78,7 +79,7 @@ func TestAcceptedRunInheritanceRejectsUnpreparedOrInvalidForkBeforeAtomicWrite(t
 						parent, _ := newAcceptedRunInheritanceParent(t, kernel, true)
 						beforeEvents := acceptedRunInheritanceEvents(t, kernel, parent)
 						wrapped := &acceptedRunInheritanceWriteStore{acceptedRunInheritanceStore: kernel}
-						coordinator := NewRunForkCoordinator(wrapped)
+						coordinator := agentrun.NewRunForkCoordinator(wrapped)
 						preparer := rejection.preparer()
 						if preparer != nil {
 							coordinator.SetAcceptedRunExecutionPreparer(preparer)
@@ -115,7 +116,7 @@ func TestAcceptedRunInheritancePreparesDifferentAgentOrMethodBeforeForkPersisten
 			forAcceptedRunInheritanceStores(t, func(t *testing.T, kernel acceptedRunInheritanceStore) {
 				parent, parentPin := newAcceptedRunInheritanceParent(t, kernel, true)
 				wrapped := &acceptedRunInheritanceWriteStore{acceptedRunInheritanceStore: kernel}
-				coordinator := NewRunForkCoordinator(wrapped)
+				coordinator := agentrun.NewRunForkCoordinator(wrapped)
 				request := acceptedRunInheritanceForkRequest(parent)
 				request.Branches[0].AssignedAgentID, request.Branches[0].Entrypoint = parent.AssignedAgentID, parent.Entrypoint
 				request.Branches[0].Context = map[string]interface{}{AcceptedRunExecutionContextKey: parentPin, "input": "retained"}
@@ -221,7 +222,7 @@ func TestAcceptedRunInheritanceDelegationPreparesRequestedEntrypointAndInboxProp
 				service := NewCollaborationService(wrapped)
 				shared := map[string]interface{}{"input": "retained", AcceptedRunExecutionContextKey: parentPin}
 				if delivery.invocation {
-					shared[RunbookInvocationContextKey] = map[string]interface{}{"entrypoint": "inspect", "summary": "Requested target method"}
+					shared[agentrun.RunbookInvocationContextKey] = map[string]interface{}{"entrypoint": "inspect", "summary": "Requested target method"}
 				} else {
 					shared["runbookEntrypoint"] = "inspect"
 				}
@@ -283,10 +284,10 @@ func TestAcceptedRunInheritanceReasonOnlyForkAndGenericDelegationStayUnpinned(t 
 	forAcceptedRunInheritanceStores(t, func(t *testing.T, kernel acceptedRunInheritanceStore) {
 		parent, parentPin := newAcceptedRunInheritanceParent(t, kernel, true)
 		preparer := &acceptedRunInheritancePreparer{prepare: func(*CreateAgentRunRequest) error { return ErrAcceptedRunExecution }}
-		coordinator := NewRunForkCoordinator(kernel)
+		coordinator := agentrun.NewRunForkCoordinator(kernel)
 		coordinator.SetAcceptedRunExecutionPreparer(preparer)
 		request := acceptedRunInheritanceForkRequest(parent)
-		request.Branches = []RunForkBranch{
+		request.Branches = []agentrun.RunForkBranch{
 			{ID: "reason", Goal: "Reason over evidence", Mode: runbook.DelegateReason, Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 2}},
 			{ID: "generic", AssignedAgentID: "other-agent", Goal: "Generic child work", Context: map[string]interface{}{AcceptedRunExecutionContextKey: parentPin}, Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 2}},
 		}
@@ -323,7 +324,7 @@ func TestAcceptedRunInheritanceHelperClonesCallerContextAndDependencies(t *testi
 	forAcceptedRunInheritanceStores(t, func(t *testing.T, kernel acceptedRunInheritanceStore) {
 		parent, pin := newAcceptedRunInheritanceParent(t, kernel, false)
 		request := CreateAgentRunRequest{Scope: parent.Scope, AssignedAgentID: parent.AssignedAgentID, Entrypoint: parent.Entrypoint, Context: parent.Context}
-		if err := prepareAcceptedChildRun(t.Context(), parent, &request, nil, true); err != nil {
+		if err := agentrun.PrepareAcceptedChildRun(t.Context(), parent, &request, nil, true); err != nil {
 			t.Fatal(err)
 		}
 		mutateAcceptedRunInheritanceDependency(t, request.Context, "mutated-child")
@@ -470,10 +471,10 @@ func newAcceptedRunInheritanceParent(t *testing.T, kernel KernelStore, claimed b
 	return parent, pin
 }
 
-func acceptedRunInheritanceForkRequest(parent *AgentRun) CreateRunForkRequest {
-	return CreateRunForkRequest{Scope: parent.Scope, SourceRunID: parent.ID, ExpectedSourceRevision: parent.Revision, WorkerID: "accepted-worker", ForkID: uuid.NewString(),
+func acceptedRunInheritanceForkRequest(parent *AgentRun) agentrun.CreateRunForkRequest {
+	return agentrun.CreateRunForkRequest{Scope: parent.Scope, SourceRunID: parent.ID, ExpectedSourceRevision: parent.Revision, WorkerID: "accepted-worker", ForkID: uuid.NewString(),
 		Policy:                 RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Branches:               []RunForkBranch{{ID: "branch", Goal: "Execute accepted work", Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 2}}},
+		Branches:               []agentrun.RunForkBranch{{ID: "branch", Goal: "Execute accepted work", Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 2}}},
 		ContinuationCheckpoint: map[string]interface{}{"committed": "preserved", "waiting": "fan-in"}}
 }
 

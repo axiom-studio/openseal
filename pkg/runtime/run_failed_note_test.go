@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -35,7 +36,7 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	}
 	trigger := posted.Message
 	lane := ConversationRunLane(conversation.ID, trigger.ID, owner.ID)
-	created, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: RunKindConversation, Source: RunSourceChat,
 		Goal: "Check my email", ConcurrencyKey: lane, SessionID: ConversationAgentSessionID(scope, lane),
 		Context:        map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID, "threadRootMessageId": trigger.ID},

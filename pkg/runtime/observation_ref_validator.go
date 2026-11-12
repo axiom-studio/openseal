@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 const observationRefSchemaExtension = "x-openseal-observationRef"
@@ -25,7 +27,7 @@ func (e observationAdvanceRecoveryError) actionAdvanceRecovery() (string, bool) 
 	return "", true
 }
 
-func (ObservationRefActionProposalValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (ObservationRefActionProposalValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if input.Bound == nil || input.Bound.Action.InputSchema == nil {
 		return nil, nil
 	}
@@ -87,7 +89,7 @@ func (ObservationRefActionProposalValidator) ValidateActionProposal(ctx context.
 // latestSkillActionCall returns the newest terminal call of skillID in the
 // Run's history, or nil. Scoping to the Skill keeps the observation check
 // correct when unrelated reads ran after the observation.
-func latestSkillActionCall(ctx context.Context, history RunActionHistory, skillID string) (*ActionCall, error) {
+func latestSkillActionCall(ctx context.Context, history agentrun.RunActionHistory, skillID string) (*ActionCall, error) {
 	if history == nil {
 		return nil, nil
 	}

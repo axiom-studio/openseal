@@ -2,12 +2,14 @@ package runtime
 
 import (
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestSkillBindingTargetSetupRequestIsOwnedByTheTarget(t *testing.T) {
 	f := newSkillTargetFixture(t)
 	run := f.chatRun(t, "finn")
-	result, err := f.dispatch(t, run, "setup", SkillActionRequestSetup, map[string]interface{}{
+	result, err := f.dispatch(t, run, "setup", agentrun.SkillActionRequestSetup, map[string]interface{}{
 		"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Read communities", SkillActionTargetAgentArgument: "researcher",
 	})
 	if err != nil || result["setupRequest"] == nil {

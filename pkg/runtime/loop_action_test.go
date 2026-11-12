@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -35,17 +36,17 @@ type governedFixture struct {
 	clock     time.Time
 	run       *AgentRun
 	step      *AgentTurn
-	binding   *TurnRunnerBinding
+	binding   *agentrun.TurnRunnerBinding
 	executor  *GovernedToolExecutor
 	actions   *ActionCoordinator
 	approvals *ApprovalCoordinator
 	worker    *ActionWorker
 	// policy maps a Skill action to its decision; allow by default.
 	policy      map[string]ActionPolicyDecision
-	dispatch    func(ActionDispatchInput) (map[string]interface{}, error)
+	dispatch    func(agentrun.ActionDispatchInput) (map[string]interface{}, error)
 	dispatches  int
 	validations int
-	validate    func(ActionProposalValidationInput) error
+	validate    func(agentrun.ActionProposalValidationInput) error
 	observed    int
 }
 
@@ -62,7 +63,7 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 	f := &governedFixture{
 		t: t, ctx: context.Background(), store: store, scope: scope, start: start, clock: start.Add(time.Second),
 		step: &AgentTurn{ID: governedStep, Scope: scope}, policy: map[string]ActionPolicyDecision{},
-		dispatch: func(ActionDispatchInput) (map[string]interface{}, error) {
+		dispatch: func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"providerResult": "delivered"}, nil
 		},
 	}
@@ -86,7 +87,7 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 			return decision, nil
 		}
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-	}), []ActionProposalValidator{proposalValidatorFunc(func(_ context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+	}), []ActionProposalValidator{proposalValidatorFunc(func(_ context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 		f.validations++
 		if f.validate != nil {
 			return nil, f.validate(input)
@@ -98,7 +99,7 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 	f.worker = NewActionWorker(store, catalog,
 		CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 			return map[string]string{"token": "loop-secret"}, nil
-		}), ActionDispatcherFunc(func(_ context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+		}), ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			f.dispatches++
 			return f.dispatch(input)
 		}), models.WithClock(now))
@@ -109,7 +110,7 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.binding = &TurnRunnerBinding{DeploymentID: "release-agent", ModelActions: []capability.ModelAction{
+	f.binding = &agentrun.TurnRunnerBinding{DeploymentID: "release-agent", ModelActions: []capability.ModelAction{
 		governedModelAction(governedDeploy, "deploy", capability.SideEffectExternal, capability.RiskLevelProduction),
 		governedModelAction(governedStatus, "status", capability.SideEffectRead, capability.RiskLevelRead),
 	}}
@@ -629,7 +630,7 @@ func TestGovernedResumeReplayDoesNotRevalidate(t *testing.T) {
 		}
 		// The observation the call relied on changed since: a fresh proposal
 		// would now be rejected.
-		f.validate = func(ActionProposalValidationInput) error { return errors.New("the observation is stale") }
+		f.validate = func(agentrun.ActionProposalValidationInput) error { return errors.New("the observation is stale") }
 		replay := f.execute(f.call("tool-1", governedDeploy, deployArguments("production")))
 		resumed := f.resume(f.call("tool-1", governedDeploy, deployArguments("production")), governedEntry("tool-1", "", ToolEntryAwaitingApproval))
 		for _, got := range []GovernedToolOutcome{replay, resumed} {
@@ -650,7 +651,7 @@ func TestGovernedResumeReplayDoesNotRevalidate(t *testing.T) {
 func TestGovernedCardSettledWhileHeldRequeuesAfterPark(t *testing.T) {
 	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
-		f.dispatch = func(ActionDispatchInput) (map[string]interface{}, error) {
+		f.dispatch = func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"requiresHuman": true, "challenges": []interface{}{"captcha"}}, nil
 		}
 		outcome := f.execute(f.call("tool-1", governedStatus, statusArguments()))
@@ -729,7 +730,7 @@ func TestLoopIdempotencyKey(t *testing.T) {
 	if got := loopIdempotencyKey("step-3", "call_9", nil); got != "loop:step-3:call_9" {
 		t.Fatalf("model key = %q", got)
 	}
-	if got := loopIdempotencyKey("step-3", "call_9", &ToolCallDirective{IdempotencyKey: " runbook:op-1 "}); got != "runbook:op-1" {
+	if got := loopIdempotencyKey("step-3", "call_9", &agentrun.ToolCallDirective{IdempotencyKey: " runbook:op-1 "}); got != "runbook:op-1" {
 		t.Fatalf("directive key = %q", got)
 	}
 }

@@ -13,6 +13,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	inferschema "github.com/invopop/jsonschema"
 )
@@ -73,12 +74,12 @@ func SkillManagementSkill() *skill.Definition {
 		Name: "Skills", Description: "Propose governed changes to the Skill access of this chat's Agent or Team.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: SkillManagementEndpoint},
 		Actions: map[string]skill.Action{
-			SkillActionDiscoverBinding:   skillDiscoveryAction(),
-			SkillActionRequestSetup:      skillSetupAction(),
-			SkillActionRequestCredential: credentialRequestAction(),
-			SkillActionListSetupRequests: skillListSetupRequestsAction(),
-			SkillActionFindApps:          findAppsAction(),
-			SkillActionRequestConnection: requestConnectionAction(),
+			SkillActionDiscoverBinding:            skillDiscoveryAction(),
+			agentrun.SkillActionRequestSetup:      skillSetupAction(),
+			agentrun.SkillActionRequestCredential: credentialRequestAction(),
+			SkillActionListSetupRequests:          skillListSetupRequestsAction(),
+			SkillActionFindApps:                   findAppsAction(),
+			agentrun.SkillActionRequestConnection: requestConnectionAction(),
 			SkillActionUpsertBinding: skillManagementAction(
 				SkillActionUpsertBinding,
 				"Propose enabling or updating configuration on an exact registered Skill for this chat's Agent or Team. An existing binding retains its exact Skill ID, source and version and its saved account; use the canonical Skill reference upgrade flow before changing executable versions. This action never adds, changes or removes an account: when a Skill needs one, or a person must authorize it, call request_setup instead. With targetAgentId, the change applies to that Agent.",
@@ -315,7 +316,7 @@ func (v *SkillBindingActionValidator) UseAgentRegistry(agents *kernelagent.Regis
 	}
 }
 
-func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if !isSkillBindingAction(input.Bound) {
 		return nil, nil
 	}
@@ -335,7 +336,7 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 		"resourceType": "skill_binding", "operation": input.Bound.Action.Name, "deploymentId": member,
 	}
 	switch input.Bound.Action.Name {
-	case SkillActionRequestSetup, SkillActionRequestCredential, SkillActionRequestConnection:
+	case agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestCredential, agentrun.SkillActionRequestConnection:
 		// Invalid interaction arguments are explained by the model from the
 		// action result; they never block the proposal or end the Run.
 		return nil, nil
@@ -393,7 +394,7 @@ type SkillBindingActionDispatcher struct {
 	store     KernelStore
 	catalog   *skill.Catalog
 	discovery skill.DiscoveryProvider
-	fallback  ActionDispatcher
+	fallback  agentrun.ActionDispatcher
 	apps      *AppCatalogRef
 	agents    *kernelagent.Registry
 }
@@ -409,7 +410,7 @@ func (d *SkillBindingActionDispatcher) UseAgentRegistry(agents *kernelagent.Regi
 // roster reads the Team and Agent deployments RunUmbrella checks.
 func (d *SkillBindingActionDispatcher) roster() TeamRosterReader { return teamRosterReader(d.store) }
 
-func NewSkillBindingActionDispatcher(store KernelStore, catalog *skill.Catalog, fallback ActionDispatcher, discovery ...skill.DiscoveryProvider) (*SkillBindingActionDispatcher, error) {
+func NewSkillBindingActionDispatcher(store KernelStore, catalog *skill.Catalog, fallback agentrun.ActionDispatcher, discovery ...skill.DiscoveryProvider) (*SkillBindingActionDispatcher, error) {
 	if store == nil || catalog == nil {
 		return nil, errors.New("kernel store and skill catalog are required")
 	}
@@ -426,7 +427,7 @@ func NewSkillBindingActionDispatcher(store KernelStore, catalog *skill.Catalog, 
 	return &SkillBindingActionDispatcher{store: store, catalog: catalog, discovery: provider, fallback: fallback}, nil
 }
 
-func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	if !isSkillBindingAction(input.Bound) {
 		if d == nil || d.fallback == nil {
 			return nil, errors.New("action dispatcher does not support this action")
@@ -482,12 +483,12 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 	}
 	scope := skill.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}
 	switch input.Bound.Action.Name {
-	case SkillActionRequestSetup, SkillActionRequestCredential, SkillActionRequestConnection:
+	case agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestCredential, agentrun.SkillActionRequestConnection:
 		var result map[string]interface{}
 		switch input.Bound.Action.Name {
-		case SkillActionRequestSetup:
+		case agentrun.SkillActionRequestSetup:
 			result, err = d.requestSkillSetup(ctx, input, run, member, umbrella, owner)
-		case SkillActionRequestConnection:
+		case agentrun.SkillActionRequestConnection:
 			result, err = d.requestConnection(ctx, input, run, member, umbrella, owner)
 		default:
 			result, err = d.requestCredential(ctx, input, run, member, umbrella)
@@ -819,7 +820,7 @@ func isTargetedSkillBindingAction(bound *skill.BoundAction, arguments map[string
 // skillActionTargetable reports the actions that accept targetAgentId.
 func skillActionTargetable(action string) bool {
 	switch action {
-	case SkillActionDiscoverBinding, SkillActionUpsertBinding, SkillActionDisableBinding, SkillActionRequestSetup, SkillActionRequestConnection:
+	case SkillActionDiscoverBinding, SkillActionUpsertBinding, SkillActionDisableBinding, agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestConnection:
 		return true
 	}
 	return false
@@ -1044,5 +1045,5 @@ func isSkillBindingAction(bound *skill.BoundAction) bool {
 			return false
 		}
 	}
-	return bound.Action.Name == SkillActionListSetupRequests || bound.Action.Name == SkillActionRequestSetup || bound.Action.Name == SkillActionRequestCredential || bound.Action.Name == SkillActionRequestConnection || bound.Action.Name == SkillActionFindApps || bound.Action.Name == SkillActionDiscoverBinding || bound.Action.Name == SkillActionUpsertBinding || bound.Action.Name == SkillActionDisableBinding
+	return bound.Action.Name == SkillActionListSetupRequests || bound.Action.Name == agentrun.SkillActionRequestSetup || bound.Action.Name == agentrun.SkillActionRequestCredential || bound.Action.Name == agentrun.SkillActionRequestConnection || bound.Action.Name == SkillActionFindApps || bound.Action.Name == SkillActionDiscoverBinding || bound.Action.Name == SkillActionUpsertBinding || bound.Action.Name == SkillActionDisableBinding
 }

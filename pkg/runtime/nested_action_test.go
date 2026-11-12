@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -25,7 +26,7 @@ type nestedActionFixture struct {
 	catalog     *skill.Catalog
 	coordinator *ActionCoordinator
 	clock       func() time.Time // the coordinator's clock
-	binding     *TurnRunnerBinding
+	binding     *agentrun.TurnRunnerBinding
 	closeTurn   func()
 }
 
@@ -97,7 +98,7 @@ func newNestedActionFixtureWith(t *testing.T, store KernelStore, definition *ski
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding := &TurnRunnerBinding{DeploymentID: "agent"}
+	binding := &agentrun.TurnRunnerBinding{DeploymentID: "agent"}
 	for _, action := range offered {
 		if offer(action) {
 			binding.ModelActions = append(binding.ModelActions, action)
@@ -185,7 +186,7 @@ func (f *nestedActionFixture) request(capability, key string) NestedActionReques
 }
 
 func (f *nestedActionFixture) worker(t *testing.T) *ActionWorker {
-	worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(_ context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+	worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		if input.Call.Origin != ActionOriginVM || input.Run == nil || input.Run.Status != AgentRunStatusRunning {
 			t.Fatalf("nested dispatch input = %#v", input)
 		}
@@ -305,7 +306,7 @@ func TestNestedActionRequiresTheRunsRunningStep(t *testing.T) {
 			if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-2")); !errors.Is(err, ErrNestedTurnNotActive) {
 				t.Fatalf("finished step err = %v", err)
 			}
-			worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+			worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				t.Fatal("a nested call of a finished step was dispatched")
 				return nil, nil
 			}), models.WithClock(func() time.Time { return f.now.Add(2 * time.Second) }))

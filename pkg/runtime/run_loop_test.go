@@ -19,6 +19,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // ---------------------------------------------------------------------------
@@ -26,7 +27,7 @@ import (
 
 // runClaimWith claims the Run, lets mutate adjust the resolved binding (a
 // compactor, a deterministic producer) and drives one claim.
-func (f *loopFixture) runClaimWith(ctx context.Context, runID string, mutate func(*TurnRunnerBinding)) (RunLoopExit, *AgentRun) {
+func (f *loopFixture) runClaimWith(ctx context.Context, runID string, mutate func(*agentrun.TurnRunnerBinding)) (RunLoopExit, *AgentRun) {
 	f.t.Helper()
 	claimed := f.claim(runID)
 	binding := f.binding(claimed)
@@ -43,7 +44,7 @@ func (f *loopFixture) runClaimWith(ctx context.Context, runID string, mutate fun
 // withLoopCompactor attaches the production compactor the catalog resolver
 // builds: the step host, the session store, the step's own preparer as the
 // request builder and the Run activity budget.
-func (f *loopFixture) withLoopCompactor(binding *TurnRunnerBinding) {
+func (f *loopFixture) withLoopCompactor(binding *agentrun.TurnRunnerBinding) {
 	f.t.Helper()
 	built, ok := binding.Compactor.(*LoopCompactor)
 	if !ok {
@@ -200,7 +201,7 @@ func TestRunLoopNarrationRecordedBeforeTools(t *testing.T) {
 		))
 		run := f.startRun(RunKindAgentWork, "Check issue 4")
 		var checked atomic.Bool
-		f.dispatch.on("lookup", func(in ActionDispatchInput) (map[string]interface{}, error) {
+		f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			checked.Store(true)
 			step := f.runningStep(run.ID)
 			if step == nil {
@@ -415,7 +416,7 @@ type afterInlineTools struct {
 	after func()
 }
 
-func (x afterInlineTools) ExecuteStepTools(ctx context.Context, in StepToolsInput) (StepToolsOutcome, error) {
+func (x afterInlineTools) ExecuteStepTools(ctx context.Context, in agentrun.StepToolsInput) (agentrun.StepToolsOutcome, error) {
 	out, err := x.claimToolExecutor.ExecuteStepTools(ctx, in)
 	if x.after != nil {
 		x.after()
@@ -437,7 +438,7 @@ func TestRunLoopParkReplanSupersededByMessage(t *testing.T) {
 		))
 		conversation, run := f.startChat("close issue 8")
 		posted := false
-		exit, done := f.runClaimWith(f.ctx, run.ID, func(b *TurnRunnerBinding) {
+		exit, done := f.runClaimWith(f.ctx, run.ID, func(b *agentrun.TurnRunnerBinding) {
 			b.Tools = afterInlineTools{claimToolExecutor: b.Tools.(*claimToolExecutor), after: func() {
 				if !posted {
 					posted = true
@@ -581,7 +582,7 @@ func TestRunLoopHostUnavailableRetriesThenFails(t *testing.T) {
 
 // bigLookup answers lookups with about 3300 tokens. With five of them the
 // overflow cut keeps the last two and a half steps and summarizes the rest.
-func bigLookup(in ActionDispatchInput) (map[string]interface{}, error) {
+func bigLookup(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	id, _ := in.Arguments["id"].(string)
 	return map[string]interface{}{"id": id, "status": "open", "notes": strings.Repeat("history of issue "+id+" ", 700)}, nil
 }
@@ -774,7 +775,7 @@ func TestRunLoopBudgetExhaustionPausesAfterStep(t *testing.T) {
 		f := newLoopFixture(t, store, withRules(lookupRule("lookup", 0, purposeIs(ModelStepPurposeStep), nil)))
 		run := f.startBoundedRun("Check issues", BudgetPolicy{MaxTurns: 2})
 		var reserved []string
-		f.dispatch.on("lookup", func(in ActionDispatchInput) (map[string]interface{}, error) {
+		f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			step := f.runningStep(run.ID)
 			current := f.mustRun(run.ID)
 			if step == nil {
@@ -868,8 +869,8 @@ func TestRunLoopCanceledRunDiscardsOutput(t *testing.T) {
 		f = newLoopFixture(t, store, withRules(&modelRule{name: "canceled meanwhile",
 			before: func(ctx context.Context, v stepView) error {
 				current := f.mustRun(v.Request().RunID)
-				_, err := NewRunCommandService(f.chats).CommandAgentRun(ctx, AgentRunCommandRequest{
-					Scope: f.scope, RunID: current.ID, ExpectedRevision: current.Revision, Kind: AgentRunCommandCancel,
+				_, err := agentrun.NewRunCommandService(f.chats).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+					Scope: f.scope, RunID: current.ID, ExpectedRevision: current.Revision, Kind: agentrun.AgentRunCommandCancel,
 					Actor: ActivityActor{Type: "user", ID: loopFixtureUser}, Summary: "Stop",
 				})
 				return err
@@ -884,7 +885,7 @@ func TestRunLoopCanceledRunDiscardsOutput(t *testing.T) {
 		}
 		f.mustStatus(canceled, AgentRunStatusCanceled)
 		steps := f.sortedSteps(run.ID)
-		if len(steps) != 1 || steps[0].Status != AgentTurnStatusCanceled || steps[0].FailureCode != StepFailureRunEnded {
+		if len(steps) != 1 || steps[0].Status != AgentTurnStatusCanceled || steps[0].FailureCode != agentrun.StepFailureRunEnded {
 			t.Fatalf("steps = %#v", steps)
 		}
 		if assistants := f.entriesOfType(run.ID, string(SessionEntryAssistant)); len(assistants) != 0 {
@@ -962,30 +963,30 @@ type scriptedRunbookProducer struct {
 
 func (p *scriptedRunbookProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
-func (p *scriptedRunbookProducer) Produce(ctx context.Context, in StepInput) (StepOutput, error) {
+func (p *scriptedRunbookProducer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	p.steps = append(p.steps, maps.Clone(in.Run.Checkpoint))
 	if p.park {
-		return StepOutput{
-			Park:        &LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: &WakeCondition{Type: "user_message"}, Summary: "Waiting for the requester"},
+		return agentrun.StepOutput{
+			Park:        &agentrun.LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: &WakeCondition{Type: "user_message"}, Summary: "Waiting for the requester"},
 			KernelState: map[string]interface{}{"phase": "waiting"},
 		}, nil
 	}
 	result, _, err := producerToolResult(ctx, p.f.raw, in.Run, in.Path, scriptedLookupCallID)
 	if err != nil {
-		return StepOutput{}, err
+		return agentrun.StepOutput{}, err
 	}
 	if result == nil {
 		call, err := producerGovernedToolCall(scriptedLookupCallID, &p.lookup, map[string]interface{}{"id": "5"},
-			&ToolCallDirective{IdempotencyKey: "scripted:" + in.Run.ID + ":lookup", Summary: "Look up issue 5"})
+			&agentrun.ToolCallDirective{IdempotencyKey: "scripted:" + in.Run.ID + ":lookup", Summary: "Look up issue 5"})
 		if err != nil {
-			return StepOutput{}, err
+			return agentrun.StepOutput{}, err
 		}
-		return StepOutput{ToolCalls: []LoopToolCall{call}, KernelState: map[string]interface{}{"phase": "lookup"}}, nil
+		return agentrun.StepOutput{ToolCalls: []agentrun.LoopToolCall{call}, KernelState: map[string]interface{}{"phase": "lookup"}}, nil
 	}
 	p.result = result
 	title, _ := result.Output["title"].(string)
-	return StepOutput{
-		Final:       &LoopFinal{Answer: title + " is open.", Output: map[string]interface{}{"title": title}},
+	return agentrun.StepOutput{
+		Final:       &agentrun.LoopFinal{Answer: title + " is open.", Output: map[string]interface{}{"title": title}},
 		KernelState: map[string]interface{}{"phase": "done"},
 	}, nil
 }
@@ -1006,7 +1007,7 @@ func TestRunLoopDeterministicProducerKernelState(t *testing.T) {
 		f := newLoopFixture(t, store)
 		producer := f.scriptedRunbook(false)
 		run := f.startRun(RunKindAgentWork, "Run the issue runbook")
-		exit, done := f.runClaimWith(f.ctx, run.ID, func(b *TurnRunnerBinding) { b.Producer = producer })
+		exit, done := f.runClaimWith(f.ctx, run.ID, func(b *agentrun.TurnRunnerBinding) { b.Producer = producer })
 		if exit.Reason != RunLoopExitFinal || exit.Err != nil || exit.Steps != 2 {
 			t.Fatalf("exit = %s after %d steps (%v), want final after 2", exit.Reason, exit.Steps, exit.Err)
 		}
@@ -1041,7 +1042,7 @@ func TestRunLoopDeterministicParkUsesLoopTransition(t *testing.T) {
 		f := newLoopFixture(t, store)
 		producer := f.scriptedRunbook(true)
 		run := f.startRun(RunKindAgentWork, "Wait for the requester")
-		exit, parked := f.runClaimWith(f.ctx, run.ID, func(b *TurnRunnerBinding) { b.Producer = producer })
+		exit, parked := f.runClaimWith(f.ctx, run.ID, func(b *agentrun.TurnRunnerBinding) { b.Producer = producer })
 		if exit.Reason != RunLoopExitParked || exit.Err != nil {
 			t.Fatalf("exit = %s (%v), want parked", exit.Reason, exit.Err)
 		}

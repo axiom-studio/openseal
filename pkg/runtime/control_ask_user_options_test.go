@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestAskUserOptionsDecodeLimits(t *testing.T) {
@@ -48,7 +50,7 @@ func TestAskUserOptionsDecodeLimits(t *testing.T) {
 		plain.(*askUserArgs).ChannelQuestion() != nil {
 		t.Fatalf("empty options = %#v %v", plain, err)
 	}
-	spec := (askUserHandler{}).Spec(ControlAuthority{})
+	spec := (askUserHandler{}).Spec(agentrun.ControlAuthority{})
 	properties := spec.InputSchema["properties"].(map[string]interface{})
 	for _, key := range []string{"options", "allowMultiple", "allowOther"} {
 		if properties[key] == nil {

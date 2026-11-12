@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -191,7 +192,7 @@ func setupTaskRun(f *guardFixture) {
 }
 
 func (f *guardFixture) requestSetup(id, requestID string) *SessionEntry {
-	return f.add(id, SkillManagementSkillID, SkillActionRequestSetup, ActionCallStatusSucceeded, map[string]interface{}{
+	return f.add(id, SkillManagementSkillID, agentrun.SkillActionRequestSetup, ActionCallStatusSucceeded, map[string]interface{}{
 		"setupRequest": map[string]interface{}{"id": requestID, "status": "pending", "runId": f.run.ID, "actionCallId": id},
 	}, "", nil)
 }

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // try_agent runs a drafted profile as a bounded child Run of the builder:
@@ -36,12 +38,12 @@ const (
 // agentTrialRunID is the child Run id of a try_agent call; a replay of the
 // call finds the same child.
 func agentTrialRunID(parentRunID, callID string) string {
-	return stableForkIdentifier(parentRunID, callID, "trial")
+	return agentrun.StableForkIdentifier(parentRunID, callID, "trial")
 }
 
 // tryAgent starts the trial child Run and returns at once; the parent parks
 // on the agent_trial card.
-func (d *AgentBuilderActionDispatcher) tryAgent(ctx context.Context, input ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBuilderActionDispatcher) tryAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	args, err := resolveAgentTry(ctx, d.host, call.Scope, input.Arguments)
 	if err != nil {

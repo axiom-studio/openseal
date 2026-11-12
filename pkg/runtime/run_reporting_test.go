@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
@@ -49,7 +51,7 @@ func TestRoutineOccurrenceSilentPostsNothing(t *testing.T) {
 	run := f.occurrence("quiet-occurrence", true)
 	run.Context[RoutineEventBatchContextKey] = "batch-1"
 	run.Context[RoutineEventHeaderContextKey] = "New email from Ana Ruiz: Invoice #4411"
-	run.Output = map[string]interface{}{finalOutputSilentKey: true}
+	run.Output = map[string]interface{}{agentrun.FinalOutputSilentKey: true}
 	if err := f.worker.project(t.Context(), run); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +68,7 @@ func TestRoutineOccurrenceSilentPostsNothing(t *testing.T) {
 
 	failed := f.occurrence("failed-occurrence", true)
 	failed.Status = AgentRunStatusCanceled
-	failed.Output = map[string]interface{}{finalOutputSilentKey: true}
+	failed.Output = map[string]interface{}{agentrun.FinalOutputSilentKey: true}
 	if err := f.worker.project(t.Context(), failed); err != nil {
 		t.Fatal(err)
 	}

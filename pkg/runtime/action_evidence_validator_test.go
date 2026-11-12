@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -41,8 +42,8 @@ func (f *runHistoryFixture) add(call ActionCall) {
 	storetest.SeedActionCall(f.t, f.store, &call)
 }
 
-func (f *runHistoryFixture) history() RunActionHistory {
-	return newRunActionHistory(f.store, f.scope, "run")
+func (f *runHistoryFixture) history() agentrun.RunActionHistory {
+	return agentrun.NewRunActionHistory(f.store, f.scope, "run")
 }
 
 func fillEvidenceAction() *skill.BoundAction {
@@ -51,8 +52,8 @@ func fillEvidenceAction() *skill.BoundAction {
 	}}
 }
 
-func validateEvidence(history RunActionHistory, arguments map[string]interface{}) error {
-	_, err := RequiredActionEvidenceValidator{}.ValidateActionProposal(context.Background(), ActionProposalValidationInput{
+func validateEvidence(history agentrun.RunActionHistory, arguments map[string]interface{}) error {
+	_, err := RequiredActionEvidenceValidator{}.ValidateActionProposal(context.Background(), agentrun.ActionProposalValidationInput{
 		Run: &AgentRun{ID: "run"}, Bound: fillEvidenceAction(), Arguments: arguments, History: history,
 	})
 	return err

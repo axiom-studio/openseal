@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Crash-resume scenarios of the run loop (D14, SPEC §3.7, section 02 §8).
@@ -65,21 +66,21 @@ type resumeProducer struct {
 
 func (p *resumeProducer) Kind() StepProducerKind { return StepProducerModel }
 
-func (p *resumeProducer) Produce(_ context.Context, in StepInput) (StepOutput, error) {
+func (p *resumeProducer) Produce(_ context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	p.mu.Lock()
 	call := len(p.steps)
 	p.steps = append(p.steps, in.Step.ID)
 	before := p.before
 	if call >= len(p.replies) {
 		p.mu.Unlock()
-		return StepOutput{}, fmt.Errorf("resume producer: no reply for call %d", call+1)
+		return agentrun.StepOutput{}, fmt.Errorf("resume producer: no reply for call %d", call+1)
 	}
 	reply := *p.replies[call]
 	p.mu.Unlock()
 	if before != nil {
 		before(call)
 	}
-	return StepOutput{Assistant: &reply, ModelProvider: string(reply.Provider), Model: reply.Model}, nil
+	return agentrun.StepOutput{Assistant: &reply, ModelProvider: string(reply.Provider), Model: reply.Model}, nil
 }
 
 func (p *resumeProducer) calls() []string {
@@ -115,7 +116,7 @@ type resumeTools struct {
 	beforeSettle  func() error
 }
 
-func (x *resumeTools) plan(_ *TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, _ []LoopToolCall) ([]*SessionEntry, error) {
+func (x *resumeTools) plan(_ *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, _ []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 	var entries []*SessionEntry
 	for _, call := range assistant.Assistant.ToolCalls {
 		entries = append(entries, &SessionEntry{
@@ -127,7 +128,7 @@ func (x *resumeTools) plan(_ *TurnRunnerBinding, session *AgentSession, step *Ag
 	return entries, nil
 }
 
-func (x *resumeTools) complete(ctx context.Context, in StepToolsInput, entry *SessionEntry) error {
+func (x *resumeTools) complete(ctx context.Context, in agentrun.StepToolsInput, entry *SessionEntry) error {
 	now := x.h.clock.Now()
 	_, err := x.h.sessions().TransitionToolEntry(ctx, ToolEntryTransitionRequest{
 		Scope: in.Run.Scope, EntryID: entry.ID, RunID: in.Run.ID, Lease: AgentRunLeaseGuard{WorkerID: in.WorkerID, Now: now},
@@ -137,12 +138,12 @@ func (x *resumeTools) complete(ctx context.Context, in StepToolsInput, entry *Se
 	return err
 }
 
-func (x *resumeTools) finalAnswer(entry *SessionEntry) *FinalAnswer {
+func (x *resumeTools) finalAnswer(entry *SessionEntry) *agentrun.FinalAnswer {
 	var args struct {
 		Answer string `json:"answer"`
 	}
 	_ = json.Unmarshal(entry.Tool.Arguments, &args)
-	return &FinalAnswer{
+	return &agentrun.FinalAnswer{
 		StepID: entry.StepID, ToolEntryID: entry.ID, ToolCallID: entry.ToolCallID, Answer: args.Answer,
 		Output: map[string]interface{}{"summary": args.Answer},
 	}
@@ -150,57 +151,57 @@ func (x *resumeTools) finalAnswer(entry *SessionEntry) *FinalAnswer {
 
 // run settles entries in order: the final tool ends the walk (inline: as a
 // settle-phase call; resumed: with its answer).
-func (x *resumeTools) run(ctx context.Context, in StepToolsInput, entries []*SessionEntry, inline bool) (StepToolsOutcome, error) {
+func (x *resumeTools) run(ctx context.Context, in agentrun.StepToolsInput, entries []*SessionEntry, inline bool) (agentrun.StepToolsOutcome, error) {
 	for _, entry := range entries {
 		if entry == nil || entry.Tool == nil || !entry.State.Open() {
 			continue
 		}
 		if isFinalControlTool(ControlToolName(entry.Tool.Name)) {
 			if inline {
-				return StepToolsOutcome{SettlePending: true}, nil
+				return agentrun.StepToolsOutcome{SettlePending: true}, nil
 			}
-			return StepToolsOutcome{Final: x.finalAnswer(entry)}, nil
+			return agentrun.StepToolsOutcome{Final: x.finalAnswer(entry)}, nil
 		}
 		if err := x.complete(ctx, in, entry); err != nil {
-			return StepToolsOutcome{}, err
+			return agentrun.StepToolsOutcome{}, err
 		}
 	}
-	return StepToolsOutcome{}, nil
+	return agentrun.StepToolsOutcome{}, nil
 }
 
-func (x *resumeTools) ExecuteStepTools(ctx context.Context, in StepToolsInput) (StepToolsOutcome, error) {
+func (x *resumeTools) ExecuteStepTools(ctx context.Context, in agentrun.StepToolsInput) (agentrun.StepToolsOutcome, error) {
 	x.mu.Lock()
 	x.executeCalls++
 	hook := x.beforeExecute
 	x.mu.Unlock()
 	if hook != nil {
 		if err := hook(); err != nil {
-			return StepToolsOutcome{}, err
+			return agentrun.StepToolsOutcome{}, err
 		}
 	}
 	return x.run(ctx, in, in.Entries, true)
 }
 
-func (x *resumeTools) SettleStep(ctx context.Context, in StepToolsInput) (StepToolsOutcome, error) {
+func (x *resumeTools) SettleStep(ctx context.Context, in agentrun.StepToolsInput) (agentrun.StepToolsOutcome, error) {
 	x.mu.Lock()
 	x.settleCalls++
 	hook := x.beforeSettle
 	x.mu.Unlock()
 	if hook != nil {
 		if err := hook(); err != nil {
-			return StepToolsOutcome{}, err
+			return agentrun.StepToolsOutcome{}, err
 		}
 	}
 	entries, err := x.h.sessions().ListAgentSessionEntries(ctx, SessionEntryFilter{
 		Scope: in.Run.Scope, StepID: in.Step.ID, Types: []SessionEntryType{SessionEntryTool},
 	})
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	return x.run(ctx, in, entries, false)
 }
 
-func (x *resumeTools) ResumeOpenTools(ctx context.Context, in StepToolsInput) (StepToolsOutcome, error) {
+func (x *resumeTools) ResumeOpenTools(ctx context.Context, in agentrun.StepToolsInput) (agentrun.StepToolsOutcome, error) {
 	x.mu.Lock()
 	x.resumeCalls++
 	var ids []string
@@ -212,7 +213,9 @@ func (x *resumeTools) ResumeOpenTools(ctx context.Context, in StepToolsInput) (S
 	return x.run(ctx, in, in.Entries, false)
 }
 
-func (x *resumeTools) ReplanPark(context.Context, StepToolsInput) (*LoopPark, error) { return nil, nil }
+func (x *resumeTools) ReplanPark(context.Context, agentrun.StepToolsInput) (*agentrun.LoopPark, error) {
+	return nil, nil
+}
 
 func (x *resumeTools) counts() (execute, settle, resume int) {
 	x.mu.Lock()
@@ -230,7 +233,7 @@ type resumeFinal struct {
 	afterPost func()
 }
 
-func (f *resumeFinal) Deliver(_ context.Context, d FinalDelivery) (FinalDeliveryResult, error) {
+func (f *resumeFinal) Deliver(_ context.Context, d agentrun.FinalDelivery) (agentrun.FinalDeliveryResult, error) {
 	f.mu.Lock()
 	f.calls++
 	if f.posted == nil {
@@ -247,7 +250,7 @@ func (f *resumeFinal) Deliver(_ context.Context, d FinalDelivery) (FinalDelivery
 	if hook != nil && !replayed {
 		hook()
 	}
-	return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: map[string]interface{}{
+	return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: map[string]interface{}{
 		"summary": answer, "messageId": "message-" + d.Run.ID, "replayed": replayed,
 	}}, nil
 }
@@ -294,8 +297,8 @@ func newResumeHarness(t *testing.T, raw KernelStore, budget *BudgetPolicy, stepL
 	h.runID = run.ID
 	loop, err := NewRunLoop(h.store, nil, nil, RunLoopConfig{
 		StepLeaseDuration: stepLease, Now: h.clock.Now, PlanToolEntries: h.tools.plan,
-		PlainTextFinal: func(_ context.Context, cc ControlContext, text string) (ControlResult, error) {
-			return ControlResult{Kind: ControlFinal, Final: &FinalAnswer{
+		PlainTextFinal: func(_ context.Context, cc agentrun.ControlContext, text string) (ControlResult, error) {
+			return ControlResult{Kind: ControlFinal, Final: &agentrun.FinalAnswer{
 				StepID: cc.Step.ID, PlainText: true, Answer: text, Output: map[string]interface{}{"summary": text},
 			}}, nil
 		},
@@ -334,7 +337,7 @@ func (h *resumeHarness) drive(worker string) RunLoopExit {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	return h.loop.Drive(ctx, RunLoopClaim{Run: claimed, WorkerID: worker, Binding: &TurnRunnerBinding{
+	return h.loop.Drive(ctx, RunLoopClaim{Run: claimed, WorkerID: worker, Binding: &agentrun.TurnRunnerBinding{
 		Producer: h.producer, Session: session, Tools: h.tools, Final: h.final,
 	}})
 }

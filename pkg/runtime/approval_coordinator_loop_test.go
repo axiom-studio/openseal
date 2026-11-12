@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -70,7 +71,7 @@ func (f *loopStoreFixture) proposeLoopApproval(id string, opts loopApprovalOptio
 	if opts.reserveBudget {
 		current := f.currentRun()
 		reserved := cloneAgentRun(current)
-		if err := reserveRunBudget(reserved, BudgetReservation{ID: actionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: f.now}); err != nil {
+		if err := reserveRunBudget(reserved, BudgetReservation{ID: agentrun.ActionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: f.now}); err != nil {
 			f.t.Fatal(err)
 		}
 		reserved.Revision++
@@ -294,7 +295,7 @@ func TestLoopHeldApprovalDecisionBumpsRunRevision(t *testing.T) {
 		if final.Revision != after.Revision+1 || final.Status != AgentRunStatusRunning || final.LeaseOwner != loopStoreWorker {
 			t.Fatalf("held reject Run = %#v", final)
 		}
-		if _, still := final.BudgetReservations[actionBudgetReservationID("rejected")]; still || len(final.BudgetReservations) != 1 {
+		if _, still := final.BudgetReservations[agentrun.ActionBudgetReservationID("rejected")]; still || len(final.BudgetReservations) != 1 {
 			t.Fatalf("held reject kept its reservation: %#v", final.BudgetReservations)
 		}
 	})
@@ -387,8 +388,8 @@ func TestLoopPausedParkedApprovalResolvesToPausedQueued(t *testing.T) {
 				f := newLoopStoreFixture(t, store)
 				_, approval := f.proposeLoopApproval("push", loopApprovalOptions{})
 				f.parkOn(approval.ID)
-				paused, err := NewRunCommandService(store).CommandAgentRun(f.ctx, AgentRunCommandRequest{
-					Scope: f.scope, RunID: f.run.ID, ExpectedRevision: f.run.Revision, Kind: AgentRunCommandPause,
+				paused, err := agentrun.NewRunCommandService(store).CommandAgentRun(f.ctx, agentrun.AgentRunCommandRequest{
+					Scope: f.scope, RunID: f.run.ID, ExpectedRevision: f.run.Revision, Kind: agentrun.AgentRunCommandPause,
 					Actor: ActivityActor{Type: "user", ID: "operator"},
 				})
 				if err != nil || paused.Run.Status != AgentRunStatusPaused || paused.Run.PausedFrom != AgentRunStatusWaitingForApproval {

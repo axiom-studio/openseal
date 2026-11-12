@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -114,7 +115,7 @@ func NewTeamMemberActionValidator(teams *kernelteam.Registry) (*TeamMemberAction
 	return &TeamMemberActionValidator{teams: teams}, nil
 }
 
-func (v *TeamMemberActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (v *TeamMemberActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if !isTeamMemberAction(input.Bound) {
 		return nil, nil
 	}
@@ -147,17 +148,17 @@ func (v *TeamMemberActionValidator) ValidateActionProposal(ctx context.Context, 
 type TeamMemberActionDispatcher struct {
 	store    KernelStore
 	teams    *kernelteam.Registry
-	fallback ActionDispatcher
+	fallback agentrun.ActionDispatcher
 }
 
-func NewTeamMemberActionDispatcher(store KernelStore, teams *kernelteam.Registry, fallback ActionDispatcher) (*TeamMemberActionDispatcher, error) {
+func NewTeamMemberActionDispatcher(store KernelStore, teams *kernelteam.Registry, fallback agentrun.ActionDispatcher) (*TeamMemberActionDispatcher, error) {
 	if store == nil || teams == nil {
 		return nil, errors.New("kernel store and team registry are required")
 	}
 	return &TeamMemberActionDispatcher{store: store, teams: teams, fallback: fallback}, nil
 }
 
-func (d *TeamMemberActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+func (d *TeamMemberActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	if !isTeamMemberAction(input.Bound) {
 		if d == nil || d.fallback == nil {
 			return nil, errors.New("action dispatcher does not support this action")

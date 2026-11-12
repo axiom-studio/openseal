@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -53,7 +54,7 @@ func newTeamChannelFixture(t *testing.T, operations ...capability.ConversationDe
 		t.Fatal(err)
 	}
 	f := &teamChannelFixture{t: t, store: store, catalog: catalog, endpoint: endpoint, conversation: conversation, inbound: inbound.Message, members: map[string]*AgentRun{}, now: time.Now().UTC()}
-	commands := NewRunCommandService(store)
+	commands := agentrun.NewRunCommandService(store)
 	routing, err := commands.CreateAgentRun(ctx, conversationAgentRunRequest(conversation, inbound.Message))
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +186,7 @@ func TestExternalTeamChannelRejectsUnverifiedMemberRun(t *testing.T) {
 	f := newTeamChannelFixture(t, capability.ConversationDeliveryMessageSend)
 	ctx := t.Context()
 	// A member Run that the routing Run did not start, listed as a responder.
-	forged, err := NewRunCommandService(f.store).CreateAgentRun(ctx, teamMemberRunRequest(f.routing, f.conversation, f.inbound,
+	forged, err := agentrun.NewRunCommandService(f.store).CreateAgentRun(ctx, teamMemberRunRequest(f.routing, f.conversation, f.inbound,
 		ConversationResponder{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-c"}}, "forged-member"))
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +216,7 @@ func (s routingOverride) GetAgentRun(ctx context.Context, scope Scope, id string
 
 func TestExternalTeamChannelForwardsMemberProgress(t *testing.T) {
 	f := newTeamChannelFixture(t, capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryMessageUpdate, capability.ConversationDeliveryTypingIndicator)
-	worker, err := NewRunProgressAcknowledgementWorker(f.store, f.catalog, RunProgressAcknowledgementRendererFunc(func(context.Context, RunProgressAcknowledgementRequest) (string, error) {
+	worker, err := NewRunProgressAcknowledgementWorker(f.store, f.catalog, RunProgressAcknowledgementRendererFunc(func(context.Context, agentrun.RunProgressAcknowledgementRequest) (string, error) {
 		t.Fatal("commentary must not render progress")
 		return "", nil
 	}), RunProgressAcknowledgementWorkerConfig{})

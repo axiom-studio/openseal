@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // governedToolPrefix starts every governed tool name, so actions never collide
@@ -66,7 +67,7 @@ func LoopGovernedAction(actions []capability.ModelAction, toolName string) (capa
 // binding offers no such action. A name exposed twice and a directive whose
 // pinned Skill version the binding no longer authorizes
 // (ErrRunSkillDependencyUnavailable) are Go errors, as on the selector.
-func selectGovernedAction(binding *TurnRunnerBinding, name string, directive *ToolCallDirective) (*capability.ModelAction, error) {
+func selectGovernedAction(binding *agentrun.TurnRunnerBinding, name string, directive *agentrun.ToolCallDirective) (*capability.ModelAction, error) {
 	if binding == nil {
 		return nil, nil
 	}

@@ -10,6 +10,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -107,7 +108,7 @@ func TestAcceptedRunExecutionResolverKeepsOriginalDefinitionAndChecksLiveGrants(
 	if !ok || !slices.Contains(binding.InputContextRefs, "runbook:"+original.Runbook.ID+"@"+original.Runbook.Version) || slices.Contains(binding.InputContextRefs, "runbook:"+latest.Runbook.ID+"@"+latest.Runbook.Version) {
 		t.Fatalf("resolver did not recover exact accepted implementation: %#v %v", binding.Producer, binding.InputContextRefs)
 	}
-	out, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step", Sequence: 1}, Binding: binding, Path: &AgentSessionPath{}})
+	out, err := producer.Produce(t.Context(), agentrun.StepInput{Run: run, Step: &AgentTurn{ID: "step", Sequence: 1}, Binding: binding, Path: &AgentSessionPath{}})
 	if err != nil || out.Park == nil || out.Park.Status != AgentRunStatusSleeping || len(out.ToolCalls) != 0 {
 		t.Fatalf("original waiting method was silently replaced by latest ending method: %#v %v", out, err)
 	}

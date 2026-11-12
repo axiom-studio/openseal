@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -30,7 +31,7 @@ func BenchmarkActionWorkerIdleClaims(b *testing.B) {
 				for range b.N {
 					store := &countingActionPoolStore{Store: newTestKernelStore(b)}
 					catalog := skill.NewCatalog()
-					dispatcher := ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+					dispatcher := ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 						return nil, errors.New("idle benchmark cannot dispatch")
 					})
 					scope := Scope{Kind: "tenant", ID: "idle-benchmark"}

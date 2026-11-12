@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -38,18 +39,18 @@ func newTestRunbookProducer(t *testing.T, definition *runbook.Definition, entryp
 
 // runbookInput is the StepInput of step sequence of run, with binding and
 // the Run's session path.
-func runbookInput(run *AgentRun, sequence int64, binding *TurnRunnerBinding, path *AgentSessionPath) StepInput {
+func runbookInput(run *AgentRun, sequence int64, binding *agentrun.TurnRunnerBinding, path *AgentSessionPath) agentrun.StepInput {
 	if binding == nil {
-		binding = &TurnRunnerBinding{}
+		binding = &agentrun.TurnRunnerBinding{}
 	}
 	if path == nil {
 		path = &AgentSessionPath{}
 	}
-	return StepInput{Run: run, Step: &AgentTurn{ID: fmt.Sprintf("step-%d", sequence), Sequence: sequence}, Binding: binding, Path: path, Mode: StepModeNormal}
+	return agentrun.StepInput{Run: run, Step: &AgentTurn{ID: fmt.Sprintf("step-%d", sequence), Sequence: sequence}, Binding: binding, Path: path, Mode: agentrun.StepModeNormal}
 }
 
 // produceRunbook runs one step and checks it is a valid deterministic output.
-func produceRunbook(t *testing.T, producer *RunbookStepProducer, in StepInput) StepOutput {
+func produceRunbook(t *testing.T, producer *RunbookStepProducer, in agentrun.StepInput) agentrun.StepOutput {
 	t.Helper()
 	out, err := producer.Produce(t.Context(), in)
 	if err != nil {
@@ -77,7 +78,7 @@ func TestRunbookProducerFailsOnUnsuccessfulOrRefusedAction(t *testing.T) {
 		"fetch": {Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "web", SkillVersion: "1", Action: "fetch", ResultPath: "/steps/fetch", Next: "done"}},
 		"done":  {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 	}}
-	binding := &TurnRunnerBinding{ModelActions: []capability.ModelAction{webFetchAction()}}
+	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{webFetchAction()}}
 	for _, item := range []struct {
 		name   string
 		call   *ActionCall
@@ -119,7 +120,7 @@ func TestRunbookProducerFailsActionNodeWithoutAuthorizedBinding(t *testing.T) {
 		"done":  {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 	}}
 	producer := newTestRunbookProducer(t, definition, "manual", nil)
-	binding := &TurnRunnerBinding{ModelActions: []capability.ModelAction{webFetchAction()}}
+	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{webFetchAction()}}
 	out := produceRunbook(t, producer, runbookInput(&AgentRun{ID: "run-1"}, 1, binding, nil))
 	if out.Failure == nil || !strings.Contains(out.Failure.Message, "not authorized") || len(out.ToolCalls) != 0 {
 		t.Fatalf("out=%#v", out)
@@ -148,23 +149,23 @@ func TestRunbookProducerThreadsActionOutputAcrossBrowserLifecycle(t *testing.T) 
 	}
 	calls := fixedActionCalls{}
 	producer := newTestRunbookProducer(t, definition, "daily", calls)
-	binding := &TurnRunnerBinding{ModelActions: []capability.ModelAction{
+	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{
 		{Name: "browser_start", SkillID: "browser", Version: "1", Action: "start"},
 		{Name: "browser_navigate", SkillID: "browser", Version: "1", Action: "navigate"},
 		{Name: "browser_close", SkillID: "browser", Version: "1", Action: "close"},
 	}}
 	run := &AgentRun{ID: "run-browser", Context: map[string]interface{}{}}
 	path := &AgentSessionPath{}
-	step := func(sequence int64) StepOutput {
+	step := func(sequence int64) agentrun.StepOutput {
 		out := produceRunbook(t, producer, runbookInput(run, sequence, binding, path))
 		run.Checkpoint = out.KernelState
 		return out
 	}
-	complete := func(call LoopToolCall, id string, output map[string]interface{}) {
+	complete := func(call agentrun.LoopToolCall, id string, output map[string]interface{}) {
 		calls[id] = &ActionCall{ID: id, RunID: run.ID, Status: ActionCallStatusSucceeded, Output: output}
 		appendRunbookToolResult(path, run.ID, call.ID, ToolEntryCompleted, id)
 	}
-	arguments := func(call LoopToolCall) map[string]interface{} {
+	arguments := func(call agentrun.LoopToolCall) map[string]interface{} {
 		var value map[string]interface{}
 		if err := json.Unmarshal(call.Arguments, &value); err != nil {
 			t.Fatal(err)
@@ -203,7 +204,7 @@ func TestRunbookProducerExposesKernelRunIdentityToActionArguments(t *testing.T) 
 		"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 	}}
 	producer := newTestRunbookProducer(t, definition, "start", nil)
-	binding := &TurnRunnerBinding{ModelActions: []capability.ModelAction{{Name: "browser_start", SkillID: "browser", Version: "1", Action: "start"}}}
+	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{{Name: "browser_start", SkillID: "browser", Version: "1", Action: "start"}}}
 	run := &AgentRun{ID: "run-123", RootRunID: "root-456", ObjectiveID: "objective-789", Checkpoint: map[string]interface{}{
 		"runtime": map[string]interface{}{"runId": "spoofed"},
 	}}
@@ -310,9 +311,9 @@ func TestRunbookProducerWaitsOnceAndResumesFromCheckpoint(t *testing.T) {
 }
 
 func TestRunbookKernelToolsAreNeverOffered(t *testing.T) {
-	everything := ControlAuthority{
+	everything := agentrun.ControlAuthority{
 		ForkAllowed: true, CanWait: true, CanAskUser: true, CanReact: true, CanReportProgress: true,
-		DelegateTargets: []HostedAgentTarget{{ID: "a"}}, Operations: []HostedRunbookOperation{{Entrypoint: "x"}},
+		DelegateTargets: []agentrun.HostedAgentTarget{{ID: "a"}}, Operations: []agentrun.HostedRunbookOperation{{Entrypoint: "x"}},
 	}
 	for _, spec := range ControlToolSpecs(everything) {
 		if spec.Name == ControlToolRunbookFork || spec.Name == ControlToolRunbookDelegate {
@@ -366,7 +367,7 @@ func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runboo
 	store := newTestKernelStore(t)
 	f := &runbookLoopFixture{t: t, ctx: context.Background(), store: store, scope: Scope{Kind: "tenant", ID: "runbook-loop"}}
 	collaboration := NewCollaborationService(store)
-	f.control = &ControlExecutor{Portfolio: store, Sessions: store, Forks: NewRunForkCoordinator(store), Collaboration: collaboration}
+	f.control = &ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration}
 	tools, err := NewStepToolDispatcher(StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: f.control})
 	if err != nil {
 		t.Fatal(err)
@@ -374,7 +375,7 @@ func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runboo
 	f.tools = tools
 	f.producer = newTestRunbookProducer(t, definition, "manual", store)
 	loop, err := NewRunLoop(store, nil, nil, RunLoopConfig{
-		PlanToolEntries: func(binding *TurnRunnerBinding, session *AgentSession, step *AgentTurn, _ *SessionEntry, calls []LoopToolCall) ([]*SessionEntry, error) {
+		PlanToolEntries: func(binding *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, _ *SessionEntry, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 			return PlanToolCallEntries(binding, &AgentRun{ID: step.RunID, Scope: step.Scope}, step, session.ID, calls)
 		},
 		PlainTextFinal: f.control.PlainTextFinal,
@@ -433,7 +434,7 @@ func (f *runbookLoopFixture) drive(wantIDs ...string) (string, RunLoopExit) {
 		session = opened.Session
 	}
 	claimed = f.run(claimed.ID)
-	binding := &TurnRunnerBinding{Producer: f.producer, Session: session, Tools: f.tools.ForClaim(LoopToolClaim{})}
+	binding := &agentrun.TurnRunnerBinding{Producer: f.producer, Session: session, Tools: f.tools.ForClaim(LoopToolClaim{})}
 	return claimed.ID, f.loop.Drive(f.ctx, RunLoopClaim{Run: claimed, WorkerID: runbookLoopWorker, Binding: binding})
 }
 
@@ -484,13 +485,13 @@ func TestRunbookForkSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T) {
 		entries[0].ToolCallID != state.PendingCall || len(entries[0].Tool.Directive) == 0 {
 		t.Fatalf("fork entry=%#v", entries)
 	}
-	groupID := stableForkIdentifier(source.ID, "fork", "group")
+	groupID := agentrun.StableForkIdentifier(source.ID, "fork", "group")
 	if waiting.WakeCondition.Reference != groupID {
 		t.Fatalf("wake=%#v want group %s", waiting.WakeCondition, groupID)
 	}
 	children := map[string]string{}
 	for _, branch := range []string{"a", "b"} {
-		childID := stableForkIdentifier(source.ID, "fork", "child:"+branch)
+		childID := agentrun.StableForkIdentifier(source.ID, "fork", "child:"+branch)
 		children[childID] = branch
 		if child := f.run(childID); child.Checkpoint["forkChild"] == nil || child.Budget == nil {
 			t.Fatalf("child %s=%#v", branch, child)
@@ -634,8 +635,8 @@ func TestRunbookJoinAnyForkJoinsFirstChildThroughTheLoopAndCancelsTheOther(t *te
 	if waiting := f.run(source.ID); waiting.Status != AgentRunStatusWaitingForDependency {
 		t.Fatalf("source=%#v", waiting)
 	}
-	fastID := stableForkIdentifier(source.ID, "fork", "child:fast")
-	slowID := stableForkIdentifier(source.ID, "fork", "child:slow")
+	fastID := agentrun.StableForkIdentifier(source.ID, "fork", "child:fast")
+	slowID := agentrun.StableForkIdentifier(source.ID, "fork", "child:slow")
 	// Both children are queued; whichever is claimed first, the slow one
 	// parks on its timer and the fast one completes.
 	for range 2 {

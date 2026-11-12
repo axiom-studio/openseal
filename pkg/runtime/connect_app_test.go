@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/mcp"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -47,7 +48,7 @@ func connectAppFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Cat
 		t.Fatal(err)
 	}
 	if err := catalog.Bind(ctx, &skill.Binding{ID: "app-actions", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent",
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, AllowedActions: []string{SkillActionFindApps, SkillActionRequestConnection}, MaximumRisk: skill.RiskLevelRead}); err != nil {
+		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, AllowedActions: []string{SkillActionFindApps, agentrun.SkillActionRequestConnection}, MaximumRisk: skill.RiskLevelRead}); err != nil {
 		t.Fatal(err)
 	}
 	connected := &atomic.Bool{}
@@ -90,7 +91,7 @@ func TestFindAppsRunsThroughTheActionWorker(t *testing.T) {
 
 func TestRequestConnectionParksTheRunOnOneConnectCard(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope, connected := connectAppFixture(t)
-	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, SkillActionRequestConnection, map[string]interface{}{"app": "linear", "reason": "Connect Linear so I can list your issues"})
+	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestConnection, map[string]interface{}{"app": "linear", "reason": "Connect Linear so I can list your issues"})
 	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["setupRequest"] == nil {
 		t.Fatalf("request_connection: %#v", executed.Call)
@@ -114,13 +115,13 @@ func TestRequestConnectionParksTheRunOnOneConnectCard(t *testing.T) {
 		t.Fatalf("change set: %#v %v", changes, err)
 	}
 	// Asking again in the conversation shows the same card, never a second one.
-	again, err := dispatchSkillManagementAction(t, ctx, catalog, dispatcher, parked, SkillActionRequestConnection, "again", map[string]interface{}{"app": "linear"})
+	again, err := dispatchSkillManagementAction(t, ctx, catalog, dispatcher, parked, agentrun.SkillActionRequestConnection, "again", map[string]interface{}{"app": "linear"})
 	if card, _ := again["setupRequest"].(map[string]interface{}); err != nil || card["id"] != request.ID {
 		t.Fatalf("second card: %#v %v", again, err)
 	}
 	// Once connected for the run, the result is the app's tools.
 	connected.Store(true)
-	done, err := dispatchSkillManagementAction(t, ctx, catalog, dispatcher, parked, SkillActionRequestConnection, "after", map[string]interface{}{"app": "linear"})
+	done, err := dispatchSkillManagementAction(t, ctx, catalog, dispatcher, parked, agentrun.SkillActionRequestConnection, "after", map[string]interface{}{"app": "linear"})
 	if err != nil || done["setupRequest"] != nil || done["refused"] != nil {
 		t.Fatalf("connected app: %#v %v", done, err)
 	}
@@ -138,6 +139,6 @@ func dispatchSkillManagementAction(t *testing.T, ctx context.Context, catalog *s
 	if err != nil {
 		t.Fatal(err)
 	}
-	return dispatcher.DispatchAction(ctx, ActionDispatchInput{Run: run, Bound: bound, Arguments: arguments,
+	return dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Run: run, Bound: bound, Arguments: arguments,
 		Call: &ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: "agent"}})
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -126,7 +127,7 @@ func TestExternalTerminalFailureAcknowledgedReceiptCannotRedirectInboxOrigin(t *
 		return message.Message
 	}
 	trigger := post(conversation)
-	created, err := NewRunCommandService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID, Kind: RunKindConversation, Source: RunSourceEvent, Goal: "Respond", Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID, "threadRootMessageId": trigger.ID}, IdempotencyKey: uuid.NewString()})
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID, Kind: RunKindConversation, Source: RunSourceEvent, Goal: "Respond", Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID, "threadRootMessageId": trigger.ID}, IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}

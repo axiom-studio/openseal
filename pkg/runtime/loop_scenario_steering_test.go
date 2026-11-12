@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // steerClaim claims runID and drives one claim with the fixture's binding,
@@ -115,7 +117,7 @@ func steerConversationRuns(f *loopFixture, conversationID string) []*AgentRun {
 // steerLookup answers lookup with the issue's status: 6815 is open, 6816 is
 // closed.
 func steerLookup(f *loopFixture) {
-	f.dispatch.on("lookup", func(in ActionDispatchInput) (map[string]interface{}, error) {
+	f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		id, _ := in.Arguments["id"].(string)
 		status := "open"
 		if id == "6816" {

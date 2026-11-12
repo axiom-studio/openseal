@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -37,7 +38,7 @@ func externalConversationFailureReplyFixture(t *testing.T, provider string, stat
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: endpoint.Scope, Kind: RunKindConversation, Owner: endpoint.Owner,
 		AssignedAgentID: endpoint.DeploymentID, Goal: "Respond", Source: RunSourceEvent,
 		IdempotencyKey: "failure-run", Actor: ActivityActor{Type: "service", ID: "test"},
@@ -211,7 +212,7 @@ func TestExternalConversationFailureReplySupersessionIsThreadLocal(t *testing.T)
 func TestExternalConversationFailedStatusWaitsForReplyProjection(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, endpoint, item := externalConversationFailureReplyFixture(t, "slack", AgentRunStatusFailed)
-	worker, err := NewRunProgressAcknowledgementWorker(store, catalog, RunProgressAcknowledgementRendererFunc(func(context.Context, RunProgressAcknowledgementRequest) (string, error) {
+	worker, err := NewRunProgressAcknowledgementWorker(store, catalog, RunProgressAcknowledgementRendererFunc(func(context.Context, agentrun.RunProgressAcknowledgementRequest) (string, error) {
 		t.Fatal("failed status should not trigger a model call")
 		return "", nil
 	}), RunProgressAcknowledgementWorkerConfig{})

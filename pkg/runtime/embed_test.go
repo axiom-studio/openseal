@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -90,9 +91,9 @@ func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testin
 	authority := context["authority"].(map[string]interface{})
 	// The action authority gate reads the session authority from the Run.
 	allows := func(action string) bool {
-		run := &AgentRun{Context: map[string]interface{}{RunContextSessionKey: map[string]interface{}{"authority": authority}}}
+		run := &AgentRun{Context: map[string]interface{}{agentrun.RunContextSessionKey: map[string]interface{}{"authority": authority}}}
 		bound := &skill.BoundAction{Binding: &skill.Binding{ID: "crm"}, Action: skill.Action{Name: action, Risk: skill.RiskLevelRead}}
-		_, err := EmbedSessionActionAuthorityValidator{}.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: run, Bound: bound})
+		_, err := EmbedSessionActionAuthorityValidator{}.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: run, Bound: bound})
 		return err == nil
 	}
 	if !allows("lookup") || allows("delete") {

@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -528,7 +529,7 @@ type fakeStepHost struct {
 	*fakeHostTools
 }
 
-var _ StepHost = fakeStepHost{}
+var _ agentrun.StepHost = fakeStepHost{}
 
 // ---------------------------------------------------------------------------
 // Store matrix (§3.3)

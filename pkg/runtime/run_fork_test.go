@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -34,20 +35,20 @@ func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
+			claimed, err := agentrun.NewAgentRunScheduler(store).ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
 			if err != nil || claimed == nil || claimed.ID != source.ID {
 				t.Fatalf("claim=%#v error=%v", claimed, err)
 			}
-			request := CreateRunForkRequest{
+			request := agentrun.CreateRunForkRequest{
 				Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision, WorkerID: "worker", ForkID: "research-wave",
 				Policy: RunDependencyPolicy{Mode: FanInModeAny, FailureMode: DependencyFailureWait},
-				Branches: []RunForkBranch{
+				Branches: []agentrun.RunForkBranch{
 					{ID: "forums", Goal: "Research forums", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "forums"}}},
 					{ID: "reviews", Goal: "Research reviews", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "reviews"}}},
 				},
 				ContinuationCheckpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "join", "waiting": "research-wave"}},
 			}
-			coordinator := NewRunForkCoordinator(store)
+			coordinator := agentrun.NewRunForkCoordinator(store)
 			created, err := coordinator.Create(t.Context(), request)
 			if err != nil || created.DependencyGroup.Replayed || len(created.Children) != 2 {
 				t.Fatalf("created=%#v error=%v", created, err)
@@ -78,14 +79,14 @@ func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
+	claimed, err := agentrun.NewAgentRunScheduler(store).ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewRunForkCoordinator(store).Create(t.Context(), CreateRunForkRequest{
+	_, err = agentrun.NewRunForkCoordinator(store).Create(t.Context(), agentrun.CreateRunForkRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision, WorkerID: "worker", ForkID: "bounded",
 		Policy:   RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Branches: []RunForkBranch{{ID: "a", Goal: "A", Checkpoint: map[string]interface{}{}}, {ID: "b", Goal: "B", Checkpoint: map[string]interface{}{}}},
+		Branches: []agentrun.RunForkBranch{{ID: "a", Goal: "A", Checkpoint: map[string]interface{}{}}, {ID: "b", Goal: "B", Checkpoint: map[string]interface{}{}}},
 	})
 	if err == nil {
 		t.Fatal("budgeted fork accepted implicit unbounded child allocations")
@@ -94,15 +95,15 @@ func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
 	if listErr != nil || len(children) != 0 {
 		t.Fatalf("implicit allocation created children=%#v error=%v", children, listErr)
 	}
-	request := CreateRunForkRequest{
+	request := agentrun.CreateRunForkRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision, WorkerID: "worker", ForkID: "bounded",
 		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Branches: []RunForkBranch{
+		Branches: []agentrun.RunForkBranch{
 			{ID: "a", Goal: "A", Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 6}},
 			{ID: "b", Goal: "B", Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 6}},
 		},
 	}
-	if _, err = NewRunForkCoordinator(store).Create(t.Context(), request); err == nil {
+	if _, err = agentrun.NewRunForkCoordinator(store).Create(t.Context(), request); err == nil {
 		t.Fatal("fork accepted child allocations beyond the parent ceiling")
 	}
 	children, listErr = store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: source.ID, Limit: 10})
@@ -111,7 +112,7 @@ func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
 	}
 	request.Branches[0].Budget.MaxTurns = 4
 	request.Branches[1].Budget.MaxTurns = 4
-	created, err := NewRunForkCoordinator(store).Create(t.Context(), request)
+	created, err := agentrun.NewRunForkCoordinator(store).Create(t.Context(), request)
 	if err != nil || len(created.Children) != 2 || len(created.DependencyGroup.Source.BudgetAllocations) != 2 {
 		t.Fatalf("bounded fork=%#v error=%v", created, err)
 	}
@@ -127,22 +128,22 @@ func TestRunForkCoordinatorCarriesCallableRunbookEntrypoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{
+	claimed, err := agentrun.NewAgentRunScheduler(store).ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{
 		Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator := NewRunForkCoordinator(store)
+	coordinator := agentrun.NewRunForkCoordinator(store)
 	coordinator.SetAcceptedRunExecutionPreparer(&acceptedRunInheritancePreparer{prepare: func(request *CreateAgentRunRequest) error {
 		setAcceptedRunInheritancePin(request)
 		return nil
 	}})
-	created, err := coordinator.Create(t.Context(), CreateRunForkRequest{
+	created, err := coordinator.Create(t.Context(), agentrun.CreateRunForkRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision,
 		WorkerID: "worker", ForkID: "runbook-collect",
 		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Branches: []RunForkBranch{{
+		Branches: []agentrun.RunForkBranch{{
 			ID: "operation", Goal: "Collect evidence", AssignedAgentID: "agent", Entrypoint: "collect",
 			Context: map[string]interface{}{"release": "2.0.0"}, Checkpoint: map[string]interface{}{},
 		}},
@@ -166,20 +167,20 @@ func TestRunForkCoordinatorDoesNotTransferPrivateContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
+	claimed, err := agentrun.NewAgentRunScheduler(store).ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := CreateRunForkRequest{
+	request := agentrun.CreateRunForkRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision, WorkerID: "worker", ForkID: "research-wave",
 		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Branches: []RunForkBranch{
+		Branches: []agentrun.RunForkBranch{
 			{ID: "forums", AssignedAgentID: "researcher-a", Goal: "Research forums", Context: map[string]interface{}{"product": "A"}, Checkpoint: map[string]interface{}{}},
 			{ID: "reviews", AssignedAgentID: "researcher-b", Goal: "Research reviews", Context: map[string]interface{}{"product": "B"}, Checkpoint: map[string]interface{}{}},
 		},
 		ContinuationCheckpoint: map[string]interface{}{},
 	}
-	created, err := NewRunForkCoordinator(store).Create(t.Context(), request)
+	created, err := agentrun.NewRunForkCoordinator(store).Create(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}

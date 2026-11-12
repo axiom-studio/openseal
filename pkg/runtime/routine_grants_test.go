@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -82,7 +83,7 @@ func (f *routineGrantFixtureState) withGrants(grants ...map[string]interface{}) 
 
 func (f *routineGrantFixtureState) resolve(t *testing.T, args map[string]interface{}) (map[string]interface{}, error) {
 	t.Helper()
-	resolved, handled, err := f.validator.ResolveActionProposalArguments(t.Context(), ActionProposalValidationInput{Run: f.run, Bound: f.bound, Arguments: args})
+	resolved, handled, err := f.validator.ResolveActionProposalArguments(t.Context(), agentrun.ActionProposalValidationInput{Run: f.run, Bound: f.bound, Arguments: args})
 	if !handled {
 		t.Fatal("create_task arguments were not resolved")
 	}
@@ -99,7 +100,7 @@ func (f *routineGrantFixtureState) createRoutine(t *testing.T, grants ...map[str
 	if err := f.catalog.ValidateInput(t.Context(), f.bound, resolved); err != nil {
 		t.Fatalf("resolved brief breaks the create_task contract: %v", err)
 	}
-	preview, err := f.validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: f.run, Bound: f.bound, Arguments: resolved})
+	preview, err := f.validator.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: f.run, Bound: f.bound, Arguments: resolved})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +195,7 @@ func TestApprovedBriefGrantsArePersistedOnTheRoutine(t *testing.T) {
 	// (here, missing labels never filled by the catalog) cannot be stored.
 	unresolved := f.withGrants(map[string]interface{}{"action": "mail.note"})
 	d, _ := NewRunbookActionDispatcher(f.store, nil)
-	if _, err := d.DispatchAction(t.Context(), ActionDispatchInput{Run: f.run, Bound: f.bound, Call: &ActionCall{ID: "unapproved", Scope: f.run.Scope, RunID: f.run.ID, DeploymentID: f.run.AssignedAgentID, IdempotencyKey: "unapproved"}, Arguments: unresolved}); err == nil {
+	if _, err := d.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: f.run, Bound: f.bound, Call: &ActionCall{ID: "unapproved", Scope: f.run.Scope, RunID: f.run.ID, DeploymentID: f.run.AssignedAgentID, IdempotencyKey: "unapproved"}, Arguments: unresolved}); err == nil {
 		t.Fatal("dispatch stored a grant without an approved label")
 	}
 }

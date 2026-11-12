@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -94,7 +95,7 @@ type nestedActionAuthority struct {
 	runID    string
 	workerID string
 	run      *AgentRun
-	binding  *TurnRunnerBinding
+	binding  *agentrun.TurnRunnerBinding
 }
 
 type nestedActionTurns struct {
@@ -107,7 +108,7 @@ func nestedActionTurnKey(scope Scope, turnID string) string {
 }
 
 // open records the step's authority until the returned function is called.
-func (t *nestedActionTurns) open(run *AgentRun, turn *AgentTurn, binding *TurnRunnerBinding) func() {
+func (t *nestedActionTurns) open(run *AgentRun, turn *AgentTurn, binding *agentrun.TurnRunnerBinding) func() {
 	if t == nil || run == nil || turn == nil || binding == nil || turn.RunID != run.ID || turn.LeaseOwner == "" {
 		return func() {}
 	}
@@ -141,7 +142,7 @@ func (t *nestedActionTurns) lookup(scope Scope, turnID string) *nestedActionAuth
 // calls until the returned function is called. The run loop calls it when a
 // step begins and closes it when the step ends, so nested calls and their
 // bounds are scoped to one step.
-func (c *ActionCoordinator) OpenNestedActionTurn(run *AgentRun, turn *AgentTurn, binding *TurnRunnerBinding) func() {
+func (c *ActionCoordinator) OpenNestedActionTurn(run *AgentRun, turn *AgentTurn, binding *agentrun.TurnRunnerBinding) func() {
 	if c == nil {
 		return func() {}
 	}
@@ -157,7 +158,7 @@ func (c *ActionCoordinator) ProposeNested(ctx context.Context, req NestedActionR
 	return c.proposeNested(ctx, req, "", nil)
 }
 
-func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionRequest, execution ActionExecution, choose func(*TurnRunnerBinding) (*capability.ModelAction, error)) (*NestedActionResult, error) {
+func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionRequest, execution ActionExecution, choose func(*agentrun.TurnRunnerBinding) (*capability.ModelAction, error)) (*NestedActionResult, error) {
 	if c == nil {
 		return nil, errors.New("action coordinator is not configured")
 	}
@@ -231,7 +232,7 @@ func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionR
 // selected action: the action's own owner, else the binding's action
 // deployment (a Team member Run resolves Team actions against the Team), else
 // the Run's deployment.
-func actionDeploymentForSelection(binding *TurnRunnerBinding, selected *capability.ModelAction) string {
+func actionDeploymentForSelection(binding *agentrun.TurnRunnerBinding, selected *capability.ModelAction) string {
 	if selected != nil {
 		if deploymentID := strings.TrimSpace(selected.DeploymentID); deploymentID != "" {
 			return deploymentID
@@ -269,7 +270,7 @@ func (c *ActionCoordinator) GetNested(ctx context.Context, scope Scope, runID, a
 
 // preparedRuntimeForAction is the activation-time runtime prepared for the
 // selected action's exact binding, if any.
-func preparedRuntimeForAction(binding *TurnRunnerBinding, selected *capability.ModelAction) *skill.PreparedRuntime {
+func preparedRuntimeForAction(binding *agentrun.TurnRunnerBinding, selected *capability.ModelAction) *skill.PreparedRuntime {
 	for runtimeIndex := range binding.PreparedRuntimes {
 		prepared := &binding.PreparedRuntimes[runtimeIndex]
 		if prepared.DeploymentID == selected.DeploymentID && prepared.BindingID == selected.BindingID && prepared.BindingRevision == selected.BindingRevision &&

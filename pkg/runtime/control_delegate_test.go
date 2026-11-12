@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -20,7 +21,7 @@ type delegateTestStore interface {
 
 const delegateWorker = "worker-delegate"
 
-var delegateTargets = []HostedAgentTarget{{ID: "specialist", DisplayName: "Specialist", Purpose: "Analyses releases"}}
+var delegateTargets = []agentrun.HostedAgentTarget{{ID: "specialist", DisplayName: "Specialist", Purpose: "Analyses releases"}}
 
 // delegateFixture is one claimed source Run of Agent "manager" whose session
 // holds steps calling control tools.
@@ -141,10 +142,10 @@ func (f *delegateFixture) call(tool ControlToolName, arguments interface{}) {
 	f.entry = appended.Entries[1]
 }
 
-func (f *delegateFixture) context() ControlContext {
-	return NewControlContext(StepToolsInput{
+func (f *delegateFixture) context() agentrun.ControlContext {
+	return NewControlContext(agentrun.StepToolsInput{
 		Run: f.run, Step: f.step, Session: f.session, WorkerID: delegateWorker,
-		Binding: &TurnRunnerBinding{Authority: ControlAuthority{AgentID: "manager", DelegateTargets: delegateTargets}},
+		Binding: &agentrun.TurnRunnerBinding{Authority: agentrun.ControlAuthority{AgentID: "manager", DelegateTargets: delegateTargets}},
 	}, f.entry)
 }
 
@@ -286,7 +287,7 @@ func TestDelegateParksWaitingForAgentDecision(t *testing.T) {
 	result, request := f.delegate()
 	if request.Recipient != (CollaborationParty{Type: OwnerTypeAgent, ID: "specialist"}) || request.Status != AgentRequestStatusPending ||
 		request.AcceptancePolicy != AgentRequestAcceptanceRecipientReview || request.Goal != "Analyze the release" ||
-		request.SharedContext["release"] != "2026.07" || request.SharedContext[DelegationModeContextKey] != "reason" ||
+		request.SharedContext["release"] != "2026.07" || request.SharedContext[agentrun.DelegationModeContextKey] != "reason" ||
 		len(request.ChildCheckpoint) != 0 || request.IdempotencyKey != delegationIdempotencyKey(f.run.ID, "delegate-"+f.entry.ID) {
 		t.Fatalf("request = %#v", request)
 	}

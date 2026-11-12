@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 
 // prepareAcceptedChildRun separates continuation of an already accepted method
 // from admission of a new method. Caller context is never an execution pin.
-func prepareAcceptedChildRun(ctx context.Context, parent *models.AgentRun, request *models.CreateAgentRunRequest, preparer models.AcceptedRunExecutionPreparer, inherit bool) error {
+func PrepareAcceptedChildRun(ctx context.Context, parent *models.AgentRun, request *models.CreateAgentRunRequest, preparer models.AcceptedRunExecutionPreparer, inherit bool) error {
 	if parent == nil || request == nil || request.Scope != parent.Scope {
 		return models.ErrAcceptedRunExecution
 	}
@@ -59,7 +59,7 @@ func prepareAcceptedChildRun(ctx context.Context, parent *models.AgentRun, reque
 
 // requestedAcceptedChildEntrypoint reads only the requested target method.
 // triggerInput describes the source method and cannot select a target method.
-func requestedAcceptedChildEntrypoint(values map[string]interface{}) (string, error) {
+func RequestedAcceptedChildEntrypoint(values map[string]interface{}) (string, error) {
 	entrypoint := ""
 	read := func(value interface{}) error {
 		text, ok := value.(string)

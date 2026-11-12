@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Completion checks of a final answer (section 04 §11.4, SPEC A8/A9). They
@@ -33,7 +35,7 @@ const (
 // accepting the backslash would append the next line to the URL.
 var hostedTurnURLPattern = regexp.MustCompile(`https?://[^\s<>"'\\]+`)
 
-func checkFinalAnswerCompletion(ctx context.Context, x *ControlExecutor, cc ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
+func checkFinalAnswerCompletion(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
 	content := d.checkedText()
 	if d.Args.Silent || d.ReactionsOnly {
 		content = ""
@@ -75,7 +77,7 @@ func checkFinalAnswerCompletion(ctx context.Context, x *ControlExecutor, cc Cont
 		}
 		return &finalAnswerRejection{Code: finalUnverifiedApprovalCode,
 			Message: "No approval is pending in this Run; say what actually happened.",
-			Failure: &LoopFailure{Kind: RunFailureKindExecution, Code: finalUnverifiedApprovalCode,
+			Failure: &agentrun.LoopFailure{Kind: RunFailureKindExecution, Code: finalUnverifiedApprovalCode,
 				Message: "The agent said an approval was pending when none was, so the run stopped."}}, nil
 	}
 	return nil, nil
@@ -126,7 +128,7 @@ func finalAnswerURLs(content string, d *finalAnswerDraft) []string {
 // \u0026, and the answer cites the URL as read. Model-authored text is not evidence: assistant entries, the final
 // tool's own arguments and results, and final_rejection notes (which quote the
 // refused URL) are left out.
-func (x *ControlExecutor) finalEvidenceCorpus(ctx context.Context, cc ControlContext) (string, error) {
+func (x *ControlExecutor) finalEvidenceCorpus(ctx context.Context, cc agentrun.ControlContext) (string, error) {
 	var b strings.Builder
 	b.WriteString(cc.Run.Goal)
 	b.WriteByte('\n')
@@ -229,7 +231,7 @@ func writeStringLeaves(b *strings.Builder, value interface{}) {
 }
 
 // controlSessionPath is the step's session path: cc.Path, else loaded.
-func (x *ControlExecutor) controlSessionPath(ctx context.Context, cc ControlContext) (*AgentSessionPath, error) {
+func (x *ControlExecutor) controlSessionPath(ctx context.Context, cc agentrun.ControlContext) (*AgentSessionPath, error) {
 	if cc.Path != nil {
 		return cc.Path, nil
 	}
@@ -245,7 +247,7 @@ func (x *ControlExecutor) controlSessionPath(ctx context.Context, cc ControlCont
 
 // runHasExternalReceipt: some succeeded ActionCall of this Run carries an
 // external operation receipt.
-func (x *ControlExecutor) runHasExternalReceipt(ctx context.Context, cc ControlContext) (bool, error) {
+func (x *ControlExecutor) runHasExternalReceipt(ctx context.Context, cc agentrun.ControlContext) (bool, error) {
 	actions, ok := x.Portfolio.(loopActionCallLister)
 	if !ok {
 		return false, errors.New("control executor portfolio is not an action store; the external claim check needs the Run's calls")

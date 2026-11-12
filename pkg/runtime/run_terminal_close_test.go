@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -38,12 +39,12 @@ func terminalCloseStores() []struct {
 
 // claimedTerminalCloseRun creates a Run and claims it as worker "loop-worker",
 // so it is running under a live lease.
-func claimedTerminalCloseRun(t *testing.T, store terminalCloseTestStore, key string) (*RunCommandService, *AgentRun) {
+func claimedTerminalCloseRun(t *testing.T, store terminalCloseTestStore, key string) (*agentrun.RunCommandService, *AgentRun) {
 	t.Helper()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "close"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
-	service := NewRunCommandService(store)
+	service := agentrun.NewRunCommandService(store)
 	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, ConcurrencyKey: "agent-1:" + key, Goal: "Do the work",
 		Source: RunSourceManual, IdempotencyKey: key, Actor: ActivityActor{Type: "user", ID: "7"},
@@ -60,16 +61,16 @@ func claimedTerminalCloseRun(t *testing.T, store terminalCloseTestStore, key str
 	return service, claimed
 }
 
-func cancelTerminalCloseRun(t *testing.T, store terminalCloseTestStore, service *RunCommandService, runID string) *AgentRun {
+func cancelTerminalCloseRun(t *testing.T, store terminalCloseTestStore, service *agentrun.RunCommandService, runID string) *AgentRun {
 	t.Helper()
 	ctx := context.Background()
 	current, err := store.GetAgentRun(ctx, Scope{Kind: "tenant", ID: "close"}, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
+	result, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 		Scope: current.Scope, RunID: current.ID, ExpectedRevision: current.Revision,
-		Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "7"},
+		Kind: agentrun.AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "7"},
 	})
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
@@ -145,7 +146,7 @@ func assertStepEndedByRun(t *testing.T, store terminalCloseTestStore, scope Scop
 	if err != nil {
 		t.Fatal(err)
 	}
-	if step.Status != AgentTurnStatusCanceled || step.FailureCode != StepFailureRunEnded || step.CompletedAt == nil ||
+	if step.Status != AgentTurnStatusCanceled || step.FailureCode != agentrun.StepFailureRunEnded || step.CompletedAt == nil ||
 		step.LeaseOwner != "" || step.LeaseExpiresAt != nil || step.Error == "" {
 		t.Fatalf("step %s after cancel = %#v", stepID, step)
 	}

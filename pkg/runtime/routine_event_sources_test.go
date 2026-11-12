@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -158,13 +159,13 @@ func (f *eventRoutineFixture) validate(t *testing.T, run *AgentRun, action strin
 	if err := f.catalog.ValidateInput(t.Context(), bound, args); err != nil {
 		t.Fatalf("arguments break the %s contract: %v", action, err)
 	}
-	return f.validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args})
+	return f.validator.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args})
 }
 
 func (f *eventRoutineFixture) dispatch(t *testing.T, run *AgentRun, action string, args map[string]interface{}, callID string) (map[string]interface{}, error) {
 	t.Helper()
 	bound := f.boundAction(t, action)
-	result, err := f.dispatcher.DispatchAction(t.Context(), ActionDispatchInput{Run: run, Bound: bound, Call: &ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID, IdempotencyKey: callID}, Arguments: args})
+	result, err := f.dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: bound, Call: &ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID, IdempotencyKey: callID}, Arguments: args})
 	if err != nil {
 		return nil, err
 	}

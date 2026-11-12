@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // streamChatHost is a provider chat: sends post messages, updates edit them
@@ -66,7 +67,7 @@ func newAnswerStreamFixture(t *testing.T, operations ...capability.ConversationD
 	}
 	fixture.clock = fixture.now
 	var err error
-	fixture.progress, err = NewRunProgressAcknowledgementWorker(fixture.store, fixture.catalog, RunProgressAcknowledgementRendererFunc(func(context.Context, RunProgressAcknowledgementRequest) (string, error) {
+	fixture.progress, err = NewRunProgressAcknowledgementWorker(fixture.store, fixture.catalog, RunProgressAcknowledgementRendererFunc(func(context.Context, agentrun.RunProgressAcknowledgementRequest) (string, error) {
 		return "", errors.New("streaming must not render progress")
 	}), RunProgressAcknowledgementWorkerConfig{}, fixture.clockOption())
 	if err != nil {

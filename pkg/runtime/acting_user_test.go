@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestAgentRunReplayActingUser(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	service := NewRunCommandService(store)
+	service := agentrun.NewRunCommandService(store)
 	scope := Scope{Kind: "tenant", ID: "1"}
 	request := func(key, actingUser string) CreateAgentRunRequest {
 		return CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // The final chain (SPEC §3.3) and failure with explanation (SPEC §3.5).
@@ -34,7 +36,7 @@ const (
 // publication, and FinishTurn completed comes just before the terminal
 // transition (§7.2). A crash in between resumes the recorded step, which
 // re-delivers idempotently instead of calling the model again (D14).
-func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnswer, status AgentRunStatus) stepResult {
+func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.FinalAnswer, status AgentRunStatus) stepResult {
 	if final == nil {
 		return d.stepError(ctx, st, errors.New("final chain without a final answer"), StepFailureProducerFailed)
 	}
@@ -43,7 +45,7 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 			return exitResultPtr(d.writeErrorExit(err))
 		}
 	}
-	explaining := st.mode == StepModeExplainFailure
+	explaining := st.mode == agentrun.StepModeExplainFailure
 	// 2. Pending setup: park without posting.
 	if final.Park != nil && !final.Park.Deliver {
 		return d.park(ctx, st, final.Park.Park)
@@ -66,9 +68,9 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 	}
 	count := len(run.PendingInterventions)
 	// 3. Deliver.
-	result := FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: final.Output}
+	result := agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: final.Output}
 	if d.binding.Final != nil {
-		delivered, err := d.binding.Final.Deliver(ctx, FinalDelivery{
+		delivered, err := d.binding.Final.Deliver(ctx, agentrun.FinalDelivery{
 			Run: cloneAgentRun(run), Step: cloneAgentTurn(st.current()), Answer: *final,
 			Guard: ReplyRunGuard{
 				Scope: run.Scope, RunID: run.ID, WorkerID: d.workerID,
@@ -77,11 +79,11 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 		})
 		switch {
 		case errors.Is(err, ErrSteeringArrived):
-			delivered = FinalDeliveryResult{Kind: FinalDeliveryContinue}
+			delivered = agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryContinue}
 		case err != nil && isLeaseLoss(err):
 			return exitResultPtr(d.writeErrorExit(err))
 		case err != nil:
-			return d.fail(ctx, st, LoopFailure{
+			return d.fail(ctx, st, agentrun.LoopFailure{
 				Kind: RunFailureKindExecution, Code: runFailureCodeFinalDelivery,
 				Message: "The agent's reply could not be posted.",
 			}, err, "")
@@ -89,27 +91,27 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 		result = delivered
 	}
 	switch result.Kind {
-	case FinalDeliveryContinue:
+	case agentrun.FinalDeliveryContinue:
 		return d.supersedeFinal(ctx, st, final)
-	case FinalDeliveryRetryFinal:
+	case agentrun.FinalDeliveryRetryFinal:
 		return d.rejectDeliveredFinal(ctx, st, final, result.RejectionText)
-	case FinalDeliveryFail:
+	case agentrun.FinalDeliveryFail:
 		if explaining && d.run.FailureExplanation != nil && (result.Failure == nil || len(result.Output) > 0) {
 			// §8.2 step 3: the explanation is posted. The Run ends failed
 			// with Explained=true and the post's output in the terminal
 			// transition below.
 			break
 		}
-		failure := LoopFailure{Kind: RunFailureKindExecution, Code: runFailureCodeFinalDelivery, Message: "The agent's reply could not be posted."}
+		failure := agentrun.LoopFailure{Kind: RunFailureKindExecution, Code: runFailureCodeFinalDelivery, Message: "The agent's reply could not be posted."}
 		if result.Failure != nil {
 			failure = *result.Failure
 		}
 		return d.fail(ctx, st, failure, nil, "")
-	case FinalDeliveryPark:
+	case agentrun.FinalDeliveryPark:
 		if final.Park == nil {
 			return d.stepError(ctx, st, errors.New("final delivery parked without a final park"), StepFailureProducerFailed)
 		}
-	case FinalDeliveryComplete, "":
+	case agentrun.FinalDeliveryComplete, "":
 	default:
 		return d.stepError(ctx, st, fmt.Errorf("unknown final delivery kind %q", result.Kind), StepFailureProducerFailed)
 	}
@@ -134,7 +136,7 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 	}); err != nil {
 		return d.stepError(ctx, st, err, "")
 	}
-	if result.Kind == FinalDeliveryPark {
+	if result.Kind == agentrun.FinalDeliveryPark {
 		return d.park(ctx, st, final.Park.Park)
 	}
 	// 6. FinishTurn completed (a tool final finished above), then the
@@ -192,17 +194,17 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 // finishLoopFinal ends the Run with a deterministic producer's (or a
 // preparer's early) final result through the final chain (§5.5 -> §7.2); a
 // failed result is delivered too and ends the Run failed.
-func (d *drive) finishLoopFinal(ctx context.Context, st *stepState, final *LoopFinal) stepResult {
+func (d *drive) finishLoopFinal(ctx context.Context, st *stepState, final *agentrun.LoopFinal) stepResult {
 	status := AgentRunStatus("")
 	if final.Status == AgentRunStatusFailed {
 		status = AgentRunStatusFailed
 	}
-	return d.finishFinal(ctx, st, &FinalAnswer{StepID: st.step.ID, Answer: final.Answer, Output: maps.Clone(final.Output)}, status)
+	return d.finishFinal(ctx, st, &agentrun.FinalAnswer{StepID: st.step.ID, Answer: final.Answer, Output: maps.Clone(final.Output)}, status)
 }
 
 // supersedeFinal discards a final answer because new guidance arrived: the
 // final tool entry gets an error result and the next step reads the guidance.
-func (d *drive) supersedeFinal(ctx context.Context, st *stepState, final *FinalAnswer) stepResult {
+func (d *drive) supersedeFinal(ctx context.Context, st *stepState, final *agentrun.FinalAnswer) stepResult {
 	if err := d.closeFinalEntry(ctx, final, ToolEntryError, &ToolResult{
 		Status: ToolResultSuperseded, IsError: true, Content: []ContentPart{{Type: ContentPartText, Text: finalSupersededText}},
 	}); err != nil {
@@ -214,7 +216,7 @@ func (d *drive) supersedeFinal(ctx context.Context, st *stepState, final *FinalA
 // rejectDeliveredFinal records a delivery-time rejection (retry_final): an
 // error result on the final tool entry, or a final_rejection note for plain
 // text. It counts toward maximumFinalRejections.
-func (d *drive) rejectDeliveredFinal(ctx context.Context, st *stepState, final *FinalAnswer, text string) stepResult {
+func (d *drive) rejectDeliveredFinal(ctx context.Context, st *stepState, final *agentrun.FinalAnswer, text string) stepResult {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		text = "The answer could not be delivered; correct it and answer again."
@@ -249,7 +251,7 @@ func (d *drive) rejectDeliveredFinal(ctx context.Context, st *stepState, final *
 
 // closeFinalEntry moves the final tool entry (if the answer came from one) to
 // a terminal state. An entry already terminal is left as it is (replay).
-func (d *drive) closeFinalEntry(ctx context.Context, final *FinalAnswer, to ToolEntryState, result *ToolResult) error {
+func (d *drive) closeFinalEntry(ctx context.Context, final *agentrun.FinalAnswer, to ToolEntryState, result *ToolResult) error {
 	if final == nil || final.ToolEntryID == "" {
 		return nil
 	}
@@ -286,7 +288,7 @@ func (d *drive) closeFinalEntry(ctx context.Context, final *FinalAnswer, to Tool
 // publishFinalOutput publishes the host extension fields of the final tool
 // call through the binding's FinalOutputPublisher. A failure pauses the Run
 // (turn.output_publication_failed); done is then true.
-func (d *drive) publishFinalOutput(ctx context.Context, st *stepState, final *FinalAnswer) (map[string]interface{}, stepResult, bool) {
+func (d *drive) publishFinalOutput(ctx context.Context, st *stepState, final *agentrun.FinalAnswer) (map[string]interface{}, stepResult, bool) {
 	publisher := d.binding.FinalOutput
 	if publisher == nil || final.ToolEntryID == "" {
 		return nil, stepResult{}, false
@@ -318,7 +320,7 @@ func (d *drive) publishFinalOutput(ctx context.Context, st *stepState, final *Fi
 	if stepID == "" {
 		stepID = entry.StepID
 	}
-	published, err := publisher.PublishFinalOutput(ctx, FinalOutputPublication{
+	published, err := publisher.PublishFinalOutput(ctx, agentrun.FinalOutputPublication{
 		Run: cloneAgentRun(d.run), StepID: stepID, ToolCallID: final.ToolCallID, Fields: fields,
 	})
 	if err == nil {
@@ -345,7 +347,7 @@ func (d *drive) publishFinalOutput(ctx context.Context, st *stepState, final *Fi
 // is the tool-free explanation. Any other failure (including one during the
 // explanation) ends the Run failed with Explained=false, and terminal
 // reporting posts the kernel reply.
-func (d *drive) fail(ctx context.Context, st *stepState, failure LoopFailure, cause error, stepCode string) stepResult {
+func (d *drive) fail(ctx context.Context, st *stepState, failure agentrun.LoopFailure, cause error, stepCode string) stepResult {
 	causeText := ""
 	if cause != nil {
 		causeText = boundedTurnFailureText(sanitizeActionError(cause, nil))

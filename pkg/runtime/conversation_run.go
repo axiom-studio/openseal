@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 const (
@@ -61,7 +62,7 @@ type ConversationRunReconcileResult struct {
 // a service cursor only after each page has been scheduled idempotently.
 type ConversationRunScheduler struct {
 	conversations  *ConversationService
-	runs           *RunCommandService
+	runs           *agentrun.RunCommandService
 	approvals      *ApprovalCoordinator
 	config         ConversationRunSchedulerConfig
 	sessionContext ConversationSessionContextResolver
@@ -92,7 +93,7 @@ func NewConversationRunScheduler(
 	}
 	return &ConversationRunScheduler{
 		conversations:     NewConversationService(conversationStore, opts...),
-		runs:              NewRunCommandService(runStore, opts...),
+		runs:              agentrun.NewRunCommandService(runStore, opts...),
 		conversationStore: conversationStore,
 		runStore:          runStore,
 		approvals:         NewApprovalCoordinator(runStore, runStore, nil, opts...),
@@ -112,7 +113,7 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 	scope Scope,
 	conversationID string,
 	messageID string,
-) (*AgentRunCommandResult, bool, error) {
+) (*agentrun.AgentRunCommandResult, bool, error) {
 	if s == nil || s.conversations == nil || s.runs == nil {
 		return nil, false, errors.New("conversation run scheduler is not configured")
 	}
@@ -131,7 +132,7 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 	if err != nil {
 		return nil, false, err
 	}
-	current, err := s.runStore.GetAgentRun(ctx, conversation.Scope, runIDForIdempotencyKey(conversation.Scope, request.IdempotencyKey))
+	current, err := s.runStore.GetAgentRun(ctx, conversation.Scope, agentrun.RunIDForIdempotencyKey(conversation.Scope, request.IdempotencyKey))
 	if err != nil {
 		return nil, false, err
 	}
@@ -139,7 +140,7 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 		// Existing imported runs retain their original receipt and execution key.
 		// Replaying an event must not recreate or cancel already accepted work.
 		if externalChannelContext(conversation) {
-			return &AgentRunCommandResult{Run: current}, true, nil
+			return &agentrun.AgentRunCommandResult{Run: current}, true, nil
 		}
 		result, err := s.runs.CreateAgentRun(ctx, request)
 		return result, true, err
@@ -158,7 +159,7 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	ctx context.Context,
 	conversation *Conversation,
 	message *ChannelMessage,
-) (*AgentRunCommandResult, bool, error) {
+) (*agentrun.AgentRunCommandResult, bool, error) {
 	if resumed, handled, err := s.resumeConversationAnswer(ctx, conversation, message); err != nil || handled {
 		return resumed, resumed != nil && resumed.Event == nil, err
 	}
@@ -190,7 +191,7 @@ func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Conte
 		if err := ValidateCredentialFreeContext(session); err != nil {
 			return CreateAgentRunRequest{}, err
 		}
-		request.Context[RunContextSessionKey] = session
+		request.Context[agentrun.RunContextSessionKey] = session
 	}
 	return request, nil
 }
@@ -573,7 +574,7 @@ type ConversationRunTurnRunner struct {
 	coordinator   *ConversationCoordinator
 	config        ConversationRunTurnRunnerConfig
 	agentTurns    TurnRunnerResolver
-	runs          *RunCommandService
+	runs          *agentrun.RunCommandService
 	// The stores of the conversation loop seams (ConversationLoopStores),
 	// taken from the conversation store when it provides them.
 	sessions AgentSessionStore
@@ -604,7 +605,7 @@ func NewConversationRunTurnRunner(
 		config: normalized, agentTurns: normalized.AgentTurns, now: models.ClockFrom(opts),
 	}
 	if runs, ok := conversationStore.(RunCommandStore); ok {
-		runner.runs = NewRunCommandService(runs, opts...)
+		runner.runs = agentrun.NewRunCommandService(runs, opts...)
 		runner.runStore = runs
 	}
 	if portfolio, ok := conversationStore.(PortfolioStore); ok {
@@ -690,7 +691,7 @@ func (r *ConversationRunTurnRunner) conversationRosterMember(ctx context.Context
 //     conversation seams on top (bindConversationLoop);
 //  5. a Team channel's routing Run gets the routing producer: no session, no
 //     model, one step that starts the member Runs.
-func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 	if r == nil || r.coordinator == nil || r.conversations == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
@@ -700,14 +701,14 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 	if stopped, err := r.participationStopped(ctx, run); err != nil {
 		return nil, err
 	} else if stopped {
-		return &TurnRunnerBinding{
+		return &agentrun.TurnRunnerBinding{
 			DefinitionID: "openseal.conversation-coordinator", DefinitionVersion: "1", ModelProvider: "host", Model: "participation-disabled",
 			Producer: conversationOutputProducer{output: participationStoppedOutput()},
 		}, nil
 	}
 	pinnedRunbook := run.Plan != nil && run.Plan["runbook"] != nil
 	if !pinnedRunbook && !conversationRunHasActingAgent(run) && !runExplainingFailure(run) {
-		return &TurnRunnerBinding{
+		return &agentrun.TurnRunnerBinding{
 			DefinitionID: "openseal.conversation-router", DefinitionVersion: "1", ModelProvider: "host", Model: "conversation-router",
 			InputContextRefs: []string{conversationRunContextConversationID, conversationRunContextTriggerID},
 			Producer:         teamRoutingStepProducer{runner: r},
@@ -746,8 +747,8 @@ type conversationOutputProducer struct {
 
 func (conversationOutputProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
-func (p conversationOutputProducer) Produce(context.Context, StepInput) (StepOutput, error) {
-	return StepOutput{Final: &LoopFinal{Status: AgentRunStatusCompleted, Output: maps.Clone(p.output)}}, nil
+func (p conversationOutputProducer) Produce(context.Context, agentrun.StepInput) (agentrun.StepOutput, error) {
+	return agentrun.StepOutput{Final: &agentrun.LoopFinal{Status: AgentRunStatusCompleted, Output: maps.Clone(p.output)}}, nil
 }
 
 // teamRoutingStepProducer is a Team channel's routing Run (section 05 §2): one
@@ -760,25 +761,25 @@ type teamRoutingStepProducer struct {
 
 func (teamRoutingStepProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
-func (p teamRoutingStepProducer) Produce(ctx context.Context, in StepInput) (StepOutput, error) {
+func (p teamRoutingStepProducer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	run := in.Run
 	if err := p.runner.validateConversationRun(ctx, run); err != nil {
-		return StepOutput{}, err
+		return agentrun.StepOutput{}, err
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
 	conversation, err := p.runner.conversations.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
-		return StepOutput{}, err
+		return agentrun.StepOutput{}, err
 	}
 	if conversation.Owner != run.Owner {
-		return StepOutput{}, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
+		return agentrun.StepOutput{}, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
 	}
 	output, err := p.runner.routeTeamMessage(ctx, run, conversation, triggerID)
 	if err != nil {
-		return StepOutput{}, err
+		return agentrun.StepOutput{}, err
 	}
-	return StepOutput{Final: &LoopFinal{Status: AgentRunStatusCompleted, Output: output}}, nil
+	return agentrun.StepOutput{Final: &agentrun.LoopFinal{Status: AgentRunStatusCompleted, Output: output}}, nil
 }
 
 func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Context, run *AgentRun, conversation *Conversation, triggerID string) (string, ConversationViewer, *ChannelMessage, error) {
@@ -839,7 +840,7 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 		}
 		active = append(active, agentConversationActiveRun{
 			ID: run.ID, RootRunID: run.RootRunID, Entrypoint: run.Entrypoint, Status: run.Status, Goal: run.Goal, Source: run.Source,
-			Revision: run.Revision, AvailableControls: applicableAgentRunCommands(run),
+			Revision: run.Revision, AvailableControls: agentrun.ApplicableAgentRunCommands(run),
 		})
 	}
 	if len(triggers) == 0 || triggers[0] == nil {
@@ -887,7 +888,7 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 			if !ok {
 				continue
 			}
-			verified, err := VerifyConversationTaskWorkRun(ctx, proof, task, work)
+			verified, err := agentrun.VerifyConversationTaskWorkRun(ctx, proof, task, work)
 			if err != nil {
 				return nil, err
 			}
@@ -897,7 +898,7 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 		}
 		active = append(active, agentConversationActiveRun{
 			ID: work.ID, RootRunID: work.RootRunID, Entrypoint: work.Entrypoint, Status: work.Status, Goal: ConversationTaskGoalSummary(work.Goal), Source: work.Source,
-			Revision: work.Revision, AvailableControls: applicableAgentRunCommands(work),
+			Revision: work.Revision, AvailableControls: agentrun.ApplicableAgentRunCommands(work),
 		})
 		seen[work.ID] = true
 	}

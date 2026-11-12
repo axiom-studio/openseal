@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -176,7 +177,7 @@ func TestDependencyRetirementPausedSourceKeepsResultsUntilNormalResume(t *testin
 		t.Run(name, func(t *testing.T) {
 			forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
 				fixture := newDependencyRetirementFixture(t, store)
-				fixture.command(t, AgentRunCommandPause)
+				fixture.command(t, agentrun.AgentRunCommandPause)
 				fixture.assertWaitingWork(t, 1, false)
 				paused := fixture.snapshot(t).source
 				for _, branch := range []string{"alpha", "beta"} {
@@ -212,7 +213,7 @@ func TestDependencyRetirementPausedSourceKeepsResultsUntilNormalResume(t *testin
 					}
 				}
 				request := fixture.request(t)
-				fixture.command(t, AgentRunCommandResume)
+				fixture.command(t, agentrun.AgentRunCommandResume)
 				resumed := fixture.snapshot(t)
 				if resumed.source.Status != AgentRunStatusQueued || resumed.source.WakeCondition != nil || resumed.source.PausedWakeCondition != nil || !reflect.DeepEqual(resumed.source.Output, joined.source.Output) {
 					t.Fatalf("normal resume restored a completed wait or lost output: %#v", resumed.source)
@@ -298,7 +299,7 @@ func TestDependencyRetirementWaitingScanIsBoundedScopedAndUsesExactKeyset(t *tes
 			}
 		}
 		retired := fixtures[1]
-		retired.command(t, AgentRunCommandCancel)
+		retired.command(t, agentrun.AgentRunCommandCancel)
 		if _, err := retired.coordinator().ReconcileRunDependencyGroup(t.Context(), retired.request(t)); err != nil {
 			t.Fatal(err)
 		}
@@ -404,7 +405,7 @@ func TestDependencyRetirementSourceCancellationBetweenReadAndCommitIsFenced(t *t
 		var canceled *AgentRun
 		var before dependencyRetirementSnapshot
 		wrapped := &dependencyRetirementCancelBeforeStore{dependencyRetirementStore: store, before: func() {
-			canceled = fixture.command(t, AgentRunCommandCancel)
+			canceled = fixture.command(t, agentrun.AgentRunCommandCancel)
 			before = fixture.snapshot(t)
 		}}
 		coordinator := NewDependencyCoordinator(wrapped, models.WithClock(func() time.Time { return fixture.now.Add(10 * time.Second) }))
@@ -428,7 +429,7 @@ func TestDependencyRetirementDirectResolutionCannotReviveCanceledSource(t *testi
 	forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
 		fixture := newDependencyRetirementFixture(t, store)
 		child := fixture.finishChild(t, "alpha", AgentRunStatusCompleted)
-		fixture.command(t, AgentRunCommandCancel)
+		fixture.command(t, agentrun.AgentRunCommandCancel)
 		before := fixture.snapshot(t)
 		result := fixture.resolveChild(t, "alpha", child)
 		after := fixture.snapshot(t)
@@ -551,18 +552,18 @@ func newDependencyRetirementFixtureWithPolicy(t *testing.T, store dependencyReti
 	}
 	fixture.sourceID = source.ID
 	schedulerClock := func() time.Time { return fixture.now.Add(time.Second) }
-	scheduler := NewAgentRunScheduler(store, models.WithClock(func() time.Time { return schedulerClock() }))
-	claimed, err := scheduler.ClaimNext(t.Context(), AgentRunClaimRequest{Scope: fixture.scope, WorkerID: "source-worker", LeaseDuration: time.Minute})
+	scheduler := agentrun.NewAgentRunScheduler(store, models.WithClock(func() time.Time { return schedulerClock() }))
+	claimed, err := scheduler.ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: fixture.scope, WorkerID: "source-worker", LeaseDuration: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != source.ID {
 		t.Fatalf("claim source=%#v, %v", claimed, err)
 	}
-	forks := NewRunForkCoordinator(store, models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
-	branches := []RunForkBranch{
+	forks := agentrun.NewRunForkCoordinator(store, models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
+	branches := []agentrun.RunForkBranch{
 		{ID: "alpha", Goal: "Branch alpha", Checkpoint: map[string]interface{}{"branch": "alpha"}, Budget: &BudgetPolicy{MaxTurns: 2}},
 		{ID: "beta", Goal: "Branch beta", Checkpoint: map[string]interface{}{"branch": "beta"}, Budget: &BudgetPolicy{MaxTurns: 2}},
 	}
 	if policy.Mode == FanInModeQuorum {
-		branches = append(branches, RunForkBranch{ID: "gamma", Goal: "Branch gamma", Checkpoint: map[string]interface{}{"branch": "gamma"}, Budget: &BudgetPolicy{MaxTurns: 2}})
+		branches = append(branches, agentrun.RunForkBranch{ID: "gamma", Goal: "Branch gamma", Checkpoint: map[string]interface{}{"branch": "gamma"}, Budget: &BudgetPolicy{MaxTurns: 2}})
 	}
 	var group *RunDependencyResult
 	if policy.Mode == FanInModeQuorum {
@@ -585,8 +586,8 @@ func newDependencyRetirementFixtureWithPolicy(t *testing.T, store dependencyReti
 			Policy: policy, Dependencies: dependencies, Actor: ActivityActor{Type: "worker", ID: "source-worker"},
 		})
 	} else {
-		var created *RunForkResult
-		created, err = forks.Create(t.Context(), CreateRunForkRequest{
+		var created *agentrun.RunForkResult
+		created, err = forks.Create(t.Context(), agentrun.CreateRunForkRequest{
 			Scope: fixture.scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision, WorkerID: "source-worker", ForkID: "retirement-wave",
 			Policy: policy, Branches: branches, ContinuationCheckpoint: map[string]interface{}{"committed": "preserve", "continuation": "join"},
 		})
@@ -606,7 +607,7 @@ func newDependencyRetirementFixtureWithPolicy(t *testing.T, store dependencyReti
 	}
 	schedulerClock = func() time.Time { return fixture.now.Add(3 * time.Second) }
 	for range len(branches) {
-		child, err := scheduler.ClaimNext(t.Context(), AgentRunClaimRequest{Scope: fixture.scope, WorkerID: "child-worker", LeaseDuration: time.Minute})
+		child, err := scheduler.ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{Scope: fixture.scope, WorkerID: "child-worker", LeaseDuration: time.Minute})
 		if err != nil || child == nil || child.ParentRunID != source.ID {
 			t.Fatalf("claim child=%#v, %v", child, err)
 		}
@@ -688,14 +689,14 @@ func (f *dependencyRetirementFixture) resolveChild(t *testing.T, branch string, 
 	return result
 }
 
-func (f *dependencyRetirementFixture) command(t *testing.T, kind AgentRunCommandKind) *AgentRun {
+func (f *dependencyRetirementFixture) command(t *testing.T, kind agentrun.AgentRunCommandKind) *AgentRun {
 	t.Helper()
 	source, err := f.store.GetAgentRun(t.Context(), f.scope, f.sourceID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	commands := NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now.Add(5 * time.Second) }))
-	result, err := commands.CommandAgentRun(t.Context(), AgentRunCommandRequest{Scope: f.scope, RunID: f.sourceID, ExpectedRevision: source.Revision, Kind: kind, Actor: ActivityActor{Type: "user", ID: "operator"}})
+	commands := agentrun.NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now.Add(5 * time.Second) }))
+	result, err := commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: f.scope, RunID: f.sourceID, ExpectedRevision: source.Revision, Kind: kind, Actor: ActivityActor{Type: "user", ID: "operator"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +711,7 @@ func (f *dependencyRetirementFixture) command(t *testing.T, kind AgentRunCommand
 func (f *dependencyRetirementFixture) terminateSource(t *testing.T, status AgentRunStatus) {
 	t.Helper()
 	if status == AgentRunStatusCanceled {
-		f.command(t, AgentRunCommandCancel)
+		f.command(t, agentrun.AgentRunCommandCancel)
 		return
 	}
 	service := NewRunActivityService(f.store, f.store, models.WithClock(func() time.Time { return f.now.Add(5 * time.Second) }))

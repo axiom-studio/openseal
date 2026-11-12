@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func (f *eventRoutineFixture) slackEvent(channels ...string) map[string]interface{} {
@@ -81,7 +82,7 @@ func TestCreateTaskEventTriggerResolves(t *testing.T) {
 	if err := f.catalog.ValidateInput(t.Context(), f.bound, both); err == nil {
 		t.Fatal("contract accepted a schedule and an event")
 	}
-	if _, err := f.validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: f.run, Bound: f.bound, Arguments: both}); err == nil {
+	if _, err := f.validator.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: f.run, Bound: f.bound, Arguments: both}); err == nil {
 		t.Fatal("a routine with two triggers was accepted")
 	}
 }

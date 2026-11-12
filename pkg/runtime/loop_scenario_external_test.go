@@ -22,6 +22,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -58,7 +59,7 @@ type externalChat struct {
 // "team" withTeam) and moves the loop fixture into the endpoint's scope.
 // renderer is the progress worker's acknowledgement renderer; nil refuses to
 // render.
-func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, operations []capability.ConversationDeliveryOperation, renderer RunProgressAcknowledgementRenderer, opts ...loopOption) *externalLoopFixture {
+func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, operations []capability.ConversationDeliveryOperation, renderer agentrun.RunProgressAcknowledgementRenderer, opts ...loopOption) *externalLoopFixture {
 	t.Helper()
 	ext, ok := store.(externalLoopStore)
 	if !ok {
@@ -81,7 +82,7 @@ func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, op
 		t.Fatal(err)
 	}
 	if renderer == nil {
-		renderer = RunProgressAcknowledgementRendererFunc(func(context.Context, RunProgressAcknowledgementRequest) (string, error) {
+		renderer = RunProgressAcknowledgementRendererFunc(func(context.Context, agentrun.RunProgressAcknowledgementRequest) (string, error) {
 			return "", errors.New("this scenario renders no progress acknowledgement")
 		})
 	}
@@ -641,10 +642,10 @@ func TestProgressAcknowledgementIsOneToolFreeStepWithoutSession(t *testing.T) {
 // lateProgressAckRenderer lets the renderer be built after the fixture (it
 // needs the fixture's scripted model).
 type lateProgressAckRenderer struct {
-	inner RunProgressAcknowledgementRenderer
+	inner agentrun.RunProgressAcknowledgementRenderer
 }
 
-func (r *lateProgressAckRenderer) RenderRunProgressAcknowledgement(ctx context.Context, request RunProgressAcknowledgementRequest) (string, error) {
+func (r *lateProgressAckRenderer) RenderRunProgressAcknowledgement(ctx context.Context, request agentrun.RunProgressAcknowledgementRequest) (string, error) {
 	if r.inner == nil {
 		return "", errors.New("progress acknowledgement renderer is not built yet")
 	}

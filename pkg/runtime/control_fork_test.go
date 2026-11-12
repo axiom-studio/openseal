@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -37,7 +38,7 @@ type forkCall struct {
 	step      *AgentTurn
 	entry     *SessionEntry
 	exec      *ControlExecutor
-	authority ControlAuthority
+	authority agentrun.ControlAuthority
 }
 
 func forkStores(t *testing.T, fn func(t *testing.T, store forkTestStore)) {
@@ -128,17 +129,17 @@ func newForkCall(t *testing.T, store forkTestStore, budget *BudgetPolicy, argume
 		t: t, ctx: ctx, store: store, sessions: sessions, scope: scope, run: run, session: session,
 		user: userStored, assistant: appended.Entries[0], entry: appended.Entries[1],
 		step: &AgentTurn{ID: stepID, RunID: run.ID, Sequence: 1, Status: AgentTurnStatusCompleted},
-		exec: &ControlExecutor{Portfolio: store, Sessions: sessions, Forks: NewRunForkCoordinator(store)},
-		authority: ControlAuthority{ForkAllowed: true, ForkTargets: []HostedAgentTarget{
+		exec: &ControlExecutor{Portfolio: store, Sessions: sessions, Forks: agentrun.NewRunForkCoordinator(store)},
+		authority: agentrun.ControlAuthority{ForkAllowed: true, ForkTargets: []agentrun.HostedAgentTarget{
 			{ID: "agent-b", DisplayName: "Researcher"},
 		}},
 	}
 }
 
-func (c *forkCall) context() ControlContext {
-	return NewControlContext(StepToolsInput{
+func (c *forkCall) context() agentrun.ControlContext {
+	return NewControlContext(agentrun.StepToolsInput{
 		Run: c.run, Step: c.step, Session: c.session, WorkerID: forkTestWorker,
-		Binding: &TurnRunnerBinding{Authority: c.authority}, Assistant: c.assistant,
+		Binding: &agentrun.TurnRunnerBinding{Authority: c.authority}, Assistant: c.assistant,
 	}, c.entry)
 }
 
@@ -274,7 +275,7 @@ func TestForkParksSourceAndCreatesAgentWorkChildren(t *testing.T) {
 		}
 		meta := c.meta()
 		if meta.Kind != ControlToolFork || meta.ForkID != "fork-"+c.entry.ID || len(meta.ChildRunIDs) != 2 ||
-			meta.GroupID != stableForkIdentifier(c.run.ID, meta.ForkID, "group") || result.Park.Wake.Reference != meta.GroupID {
+			meta.GroupID != agentrun.StableForkIdentifier(c.run.ID, meta.ForkID, "group") || result.Park.Wake.Reference != meta.GroupID {
 			t.Fatalf("meta = %#v", meta)
 		}
 		stored := c.storedEntry()
@@ -423,7 +424,7 @@ func TestForkCrashBeforeCreateResettlesOnce(t *testing.T) {
 	forkStores(t, func(t *testing.T, store forkTestStore) {
 		c := newForkCall(t, store, nil, twoBranchFork)
 		crashing := &crashingForkStore{forkTestStore: store, crashes: 1}
-		c.exec.Forks = NewRunForkCoordinator(crashing)
+		c.exec.Forks = agentrun.NewRunForkCoordinator(crashing)
 		if _, err := c.exec.Settle(c.ctx, c.context()); !errors.Is(err, context.Canceled) {
 			t.Fatalf("crashed settle error = %v", err)
 		}
@@ -620,8 +621,8 @@ func TestForkResumeWhileGroupWaitsReparks(t *testing.T) {
 }
 
 func TestForkSpecSameWithAndWithoutTargets(t *testing.T) {
-	self := forkHandler{}.Spec(ControlAuthority{ForkAllowed: true})
-	targets := forkHandler{}.Spec(ControlAuthority{ForkAllowed: true, ForkTargets: []HostedAgentTarget{{ID: "agent-b"}}})
+	self := forkHandler{}.Spec(agentrun.ControlAuthority{ForkAllowed: true})
+	targets := forkHandler{}.Spec(agentrun.ControlAuthority{ForkAllowed: true, ForkTargets: []agentrun.HostedAgentTarget{{ID: "agent-b"}}})
 	if !reflect.DeepEqual(self, targets) {
 		t.Fatal("fork targets changed the fork tool")
 	}

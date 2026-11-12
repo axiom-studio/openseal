@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Task context is a lookup hint. Only the canonical immutable task aggregate,
@@ -42,7 +44,7 @@ func skillSetupConversationOrigin(ctx context.Context, store KernelStore, run *A
 	if canonical == nil || canonical.Scope != run.Scope || canonical.ID != run.ID || canonical.AssignedAgentID != member || canonical.Owner != run.Owner {
 		return "", "", denied
 	}
-	task, err := persistedTaskWorkOrigin(ctx, store, canonical)
+	task, err := agentrun.PersistedTaskWorkOrigin(ctx, store, canonical)
 	if err != nil {
 		return "", "", err
 	}
@@ -53,7 +55,7 @@ func skillSetupConversationOrigin(ctx context.Context, store KernelStore, run *A
 	if err != nil {
 		return "", "", err
 	}
-	verified, err := VerifyConversationTaskWorkRun(ctx, proof, task, root)
+	verified, err := agentrun.VerifyConversationTaskWorkRun(ctx, proof, task, root)
 	if err != nil {
 		return "", "", err
 	}
@@ -127,7 +129,7 @@ func conversationTaskSetupOrigin(ctx context.Context, store ConversationTaskProo
 		return nil, ErrInvalidSkillSetup
 	}
 	task, err := store.FindConversationTaskByWorkRunID(ctx, run.Scope, run.ID)
-	if errors.Is(err, ErrConversationTaskNotFound) {
+	if errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 		return nil, nil
 	}
 	if err != nil || task == nil {
@@ -136,7 +138,7 @@ func conversationTaskSetupOrigin(ctx context.Context, store ConversationTaskProo
 	if task.Mode != ConversationTaskModeIndependent || task.TargetAgentID == "" || task.TargetAgentID != run.AssignedAgentID {
 		return nil, ErrInvalidSkillSetup
 	}
-	valid, err := VerifyConversationTaskWorkRun(ctx, store, task, run)
+	valid, err := agentrun.VerifyConversationTaskWorkRun(ctx, store, task, run)
 	if err != nil {
 		return nil, err
 	}
@@ -162,5 +164,5 @@ func conversationTaskSetupOrigin(ctx context.Context, store ConversationTaskProo
 
 func taskSetupActionMatches(call *ActionCall, run *AgentRun, deploymentID string) bool {
 	return call != nil && run != nil && call.Scope == run.Scope && call.RunID == run.ID &&
-		call.DeploymentID == deploymentID && call.SkillID == SkillManagementSkillID && call.Action == SkillActionRequestSetup
+		call.DeploymentID == deploymentID && call.SkillID == SkillManagementSkillID && call.Action == agentrun.SkillActionRequestSetup
 }

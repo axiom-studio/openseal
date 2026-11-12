@@ -5,6 +5,7 @@ import (
 	"maps"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -59,7 +60,7 @@ func TestDelegatedAgentRunWorksWithoutAnyConnection(t *testing.T) {
 		"delegated plain binding":   {delegated, &skill.Binding{Scope: skillScope, ID: "notes", DeploymentID: "member"}, true},
 		"delegated owner's binding": {delegated, &skill.Binding{Scope: skillScope, ID: "notes", DeploymentID: "other"}, false},
 	} {
-		_, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: test.run, Bound: &skill.BoundAction{Binding: test.binding}})
+		_, err := validator.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: test.run, Bound: &skill.BoundAction{Binding: test.binding}})
 		if (err == nil) != test.ok {
 			t.Errorf("%s: err = %v", name, err)
 		}
@@ -76,37 +77,37 @@ func TestOnlyTheActingPersonSteersARun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commands := NewRunCommandService(store)
-	command := func(kind AgentRunCommandKind, actor ActivityActor) error {
+	commands := agentrun.NewRunCommandService(store)
+	command := func(kind agentrun.AgentRunCommandKind, actor ActivityActor) error {
 		current, err := store.GetAgentRun(t.Context(), scope, run.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		instruction := ""
-		if kind == AgentRunCommandIntervene {
+		if kind == agentrun.AgentRunCommandIntervene {
 			instruction = "Do it differently"
 		}
-		_, err = commands.CommandAgentRun(t.Context(), AgentRunCommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: kind, Actor: actor, Instruction: instruction, Summary: "steer"})
+		_, err = commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: kind, Actor: actor, Instruction: instruction, Summary: "steer"})
 		return err
 	}
 	other := ActivityActor{Type: "user", ID: "8"}
-	for _, kind := range []AgentRunCommandKind{AgentRunCommandIntervene, AgentRunCommandResolveHumanIntervention, AgentRunCommandResume, AgentRunCommandRetry} {
-		if err := command(kind, other); !errors.Is(err, ErrRunCommandNotAuthorized) {
+	for _, kind := range []agentrun.AgentRunCommandKind{agentrun.AgentRunCommandIntervene, agentrun.AgentRunCommandResolveHumanIntervention, agentrun.AgentRunCommandResume, agentrun.AgentRunCommandRetry} {
+		if err := command(kind, other); !errors.Is(err, agentrun.ErrRunCommandNotAuthorized) {
 			t.Errorf("%s by another user: err = %v", kind, err)
 		}
 		for _, allowed := range []ActivityActor{{Type: "user", ID: "7"}, {Type: "system", ID: "kernel"}, {Type: "agent", ID: "agent"}} {
-			if err := command(kind, allowed); errors.Is(err, ErrRunCommandNotAuthorized) {
+			if err := command(kind, allowed); errors.Is(err, agentrun.ErrRunCommandNotAuthorized) {
 				t.Errorf("%s by %#v refused", kind, allowed)
 			}
 		}
 	}
-	if err := command(AgentRunCommandIntervene, ActivityActor{Type: "user", ID: "7"}); err != nil {
+	if err := command(agentrun.AgentRunCommandIntervene, ActivityActor{Type: "user", ID: "7"}); err != nil {
 		t.Fatalf("the acting person's guidance: %v", err)
 	}
-	if err := command(AgentRunCommandPause, other); err != nil {
+	if err := command(agentrun.AgentRunCommandPause, other); err != nil {
 		t.Fatalf("another user's pause: %v", err)
 	}
-	if err := command(AgentRunCommandCancel, other); err != nil {
+	if err := command(agentrun.AgentRunCommandCancel, other); err != nil {
 		t.Fatalf("another user's cancel: %v", err)
 	}
 
@@ -118,7 +119,7 @@ func TestOnlyTheActingPersonSteersARun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := commands.CommandAgentRun(t.Context(), AgentRunCommandRequest{Scope: scope, RunID: nobody.ID, ExpectedRevision: nobody.Revision, Kind: AgentRunCommandIntervene, Actor: other, Instruction: "Do it", Summary: "steer"}); err != nil {
+	if _, err := commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: scope, RunID: nobody.ID, ExpectedRevision: nobody.Revision, Kind: agentrun.AgentRunCommandIntervene, Actor: other, Instruction: "Do it", Summary: "steer"}); err != nil {
 		t.Fatalf("guidance on a run without a person: %v", err)
 	}
 }
@@ -135,11 +136,11 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	dispatcher, _ := NewRunbookActionDispatcher(store, nil)
 	dispatcher.SetChatFiles(files)
 	dispatch := func(as *AgentRun, b *skill.BoundAction, arguments map[string]interface{}, callID string) (map[string]interface{}, error) {
-		return dispatcher.DispatchAction(ctx, ActionDispatchInput{Run: as, Bound: b, Call: &ActionCall{ID: callID, Scope: as.Scope, RunID: as.ID, DeploymentID: as.AssignedAgentID, IdempotencyKey: callID}, Arguments: arguments})
+		return dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Run: as, Bound: b, Call: &ActionCall{ID: callID, Scope: as.Scope, RunID: as.ID, DeploymentID: as.AssignedAgentID, IdempotencyKey: callID}, Arguments: arguments})
 	}
 	proposed := maps.Clone(args)
 	proposed["script"] = map[string]interface{}{"path": "scripts/weekly.py", "command": "python3 scripts/weekly.py"}
-	resolved, _, err := validator.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{Run: run, Bound: bound, Arguments: proposed})
+	resolved, _, err := validator.ResolveActionProposalArguments(ctx, agentrun.ActionProposalValidationInput{Run: run, Bound: bound, Arguments: proposed})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,11 +187,11 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	files.write(conversationID, "scripts/weekly.py", routineScriptDigestOf("b"))
 	current, _ := store.GetRunbookActivation(ctx, run.Scope, activation.ID)
 	repinBound := &skill.BoundAction{Definition: bound.Definition, Binding: bound.Binding, Action: RunbookManagementSkill().Actions[RunbookActionSetScript]}
-	repin, _, err := validator.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{Run: run, Bound: repinBound, Arguments: map[string]interface{}{"activationId": activation.ID, "expectedRevision": float64(current.Revision)}})
+	repin, _, err := validator.ResolveActionProposalArguments(ctx, agentrun.ActionProposalValidationInput{Run: run, Bound: repinBound, Arguments: map[string]interface{}{"activationId": activation.ID, "expectedRevision": float64(current.Revision)}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: intruder, Bound: repinBound, Arguments: repin}); !errors.Is(err, ErrRoutineNotCreator) {
+	if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: intruder, Bound: repinBound, Arguments: repin}); !errors.Is(err, ErrRoutineNotCreator) {
 		t.Fatalf("another person's script proposal: %v", err)
 	}
 	if _, err := dispatch(intruder, repinBound, repin, "intruder-repin"); !errors.Is(err, ErrRoutineNotCreator) {

@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -73,7 +73,7 @@ func (s *RunCommandService) FindCreatedAgentRun(ctx context.Context, req models.
 	if err != nil {
 		return nil, err
 	}
-	current, err := s.store.GetAgentRun(ctx, req.Scope, runIDForIdempotencyKey(req.Scope, key))
+	current, err := s.store.GetAgentRun(ctx, req.Scope, RunIDForIdempotencyKey(req.Scope, key))
 	if err != nil || current == nil {
 		return nil, err
 	}
@@ -99,7 +99,7 @@ func (s *RunCommandService) CreateAgentRun(ctx context.Context, req models.Creat
 	keyHash := ""
 	if key != "" {
 		keyHash = models.SHA256DigestString(key)
-		runID = runIDForIdempotencyKey(req.Scope, key)
+		runID = RunIDForIdempotencyKey(req.Scope, key)
 		current, err := s.store.GetAgentRun(ctx, req.Scope, runID)
 		if err != nil {
 			return nil, err
@@ -143,7 +143,7 @@ func (s *RunCommandService) CreateAgentRun(ctx context.Context, req models.Creat
 	return &AgentRunCommandResult{Run: run, Event: persisted}, nil
 }
 
-func runIDForIdempotencyKey(scope models.Scope, key string) string {
+func RunIDForIdempotencyKey(scope models.Scope, key string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(scope.Kind+"\x00"+scope.ID+"\x00"+models.SHA256DigestString(strings.TrimSpace(key)))).String()
 }
 
@@ -436,8 +436,8 @@ func (s *RunCommandService) cancelWaitingApprovalRun(ctx context.Context, curren
 
 	updatedRun := models.CloneAgentRun(current)
 	if updatedRun.Budget != nil {
-		if _, reserved := updatedRun.BudgetReservations[actionBudgetReservationID(call.ID)]; reserved {
-			if err := models.ReleaseRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID)); err != nil {
+		if _, reserved := updatedRun.BudgetReservations[ActionBudgetReservationID(call.ID)]; reserved {
+			if err := models.ReleaseRunBudgetReservation(updatedRun, ActionBudgetReservationID(call.ID)); err != nil {
 				return nil, err
 			}
 		}

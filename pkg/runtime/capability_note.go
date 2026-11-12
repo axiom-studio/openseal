@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // The capabilities note (cache-stable capability loading). What an Agent can
@@ -92,7 +94,7 @@ type capabilityNoteData struct {
 // capabilityListingSource builds the listing of a step. The catalog preparer
 // implements it; a preparer without a catalog does not.
 type capabilityListingSource interface {
-	CapabilityListing(in StepInput) capabilityListing
+	CapabilityListing(in agentrun.StepInput) capabilityListing
 }
 
 func capabilityItemDigest(text string) string {
@@ -265,7 +267,7 @@ type capabilityNoteAppender interface {
 // ensureCapabilityNote appends the capabilities note the step's path needs
 // (none when it already shows the listing). It runs right before the step's
 // model request is rendered, after the step's context and any compaction.
-func ensureCapabilityNote(ctx context.Context, store capabilityNoteAppender, in StepInput, path *AgentSessionPath, listing capabilityListing, now time.Time) (bool, error) {
+func ensureCapabilityNote(ctx context.Context, store capabilityNoteAppender, in agentrun.StepInput, path *AgentSessionPath, listing capabilityListing, now time.Time) (bool, error) {
 	text, data := capabilityNoteText(listing, latestCapabilityNote(path))
 	if text == "" {
 		return false, nil
@@ -303,10 +305,10 @@ func ensureCapabilityNote(ctx context.Context, store capabilityNoteAppender, in 
 // operations run_operation starts. Their tools carry no list or enum, so a
 // new Agent or operation never changes a tool definition; each handler
 // validates the target it is given.
-func controlTargetItems(a ControlAuthority) []capabilityNoteItem {
+func controlTargetItems(a agentrun.ControlAuthority) []capabilityNoteItem {
 	var items []capabilityNoteItem
 	seen := map[string]bool{}
-	addAgents := func(targets []HostedAgentTarget) {
+	addAgents := func(targets []agentrun.HostedAgentTarget) {
 		for _, target := range targets {
 			if target.ID == "" || seen[target.ID] {
 				continue
@@ -337,7 +339,7 @@ func controlTargetItems(a ControlAuthority) []capabilityNoteItem {
 }
 
 // operationDescriptionLine is one operation's line of the capabilities note.
-func operationDescriptionLine(op HostedRunbookOperation) string {
+func operationDescriptionLine(op agentrun.HostedRunbookOperation) string {
 	schema := []byte(`{"type":"object"}`)
 	if len(op.InputSchema) > 0 {
 		if encoded, err := json.Marshal(op.InputSchema); err == nil {

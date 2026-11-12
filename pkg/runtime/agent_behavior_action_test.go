@@ -12,6 +12,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -234,7 +235,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	replayed, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: executed.Call, Bound: bound, Arguments: executed.Call.Arguments})
+	replayed, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: executed.Call, Bound: bound, Arguments: executed.Call.Arguments})
 	if err != nil || replayed["replayed"] != true {
 		t.Fatalf("replay = %#v, %v", replayed, err)
 	}
@@ -409,7 +410,7 @@ func TestAgentBehaviorActionRejectsForeignStaleAndInvalidChanges(t *testing.T) {
 		agents := agentBehaviorActionRegistry(t, ctx, scope, nil)
 		validator, _ := NewAgentBehaviorActionValidator(agents)
 		bound := agentBehaviorBoundAction("another-agent")
-		_, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+		_, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 			Run: baseRun, Bound: bound,
 			Arguments: map[string]interface{}{"expectedDeploymentRevision": 1, "personality": "Curious", "rationale": "Improve"},
 		})
@@ -447,7 +448,7 @@ func TestAgentBehaviorActionRejectsForeignStaleAndInvalidChanges(t *testing.T) {
 			if testCase.mutateRun != nil {
 				testCase.mutateRun(&run)
 			}
-			if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+			if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 				Run: &run, Bound: agentBehaviorBoundAction("researcher"), Arguments: testCase.arguments,
 			}); err == nil {
 				t.Fatal("invalid Agent behavior action reached approval")
@@ -472,7 +473,7 @@ func TestAgentBehaviorActionRejectsForeignStaleAndInvalidChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 		validator, _ := NewAgentBehaviorActionValidator(agents)
-		preview, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+		preview, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 			Run: baseRun, Bound: agentBehaviorBoundAction("researcher"),
 			Arguments: map[string]interface{}{"expectedDeploymentRevision": 2, "personality": "Analytical", "rationale": "Improve"},
 		})

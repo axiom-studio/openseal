@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // The chat binding offers the run-control actions whether or not the chat
@@ -14,9 +15,9 @@ import (
 // (conversation_loop.go checkToolCall).
 func TestConversationRunBindingOffersRunControlWithAndWithoutActiveWork(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		definition := RunManagementSkill()
+		definition := agentrun.RunManagementSkill()
 		cancel := capability.ModelAction{
-			Name: "openseal.runs.cancel", SkillID: RunManagementSkillID, Version: RunManagementSkillVersion,
+			Name: "openseal.runs.cancel", SkillID: RunManagementSkillID, Version: agentrun.RunManagementSkillVersion,
 			Action: RunActionCancel, InputSchema: definition.Actions[RunActionCancel].InputSchema,
 		}
 		other := capability.ModelAction{Name: "openseal.objectives.create", SkillID: "openseal.objectives", Version: "1.0.0", Action: "create"}

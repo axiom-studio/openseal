@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -221,7 +222,7 @@ func TestLoopProposeBudgetExhaustedDenies(t *testing.T) {
 			first.Run.Status != AgentRunStatusRunning || first.Run.LeaseOwner != loopProposeWorker {
 			t.Fatalf("first proposal = %#v", first)
 		}
-		if _, ok := first.Run.BudgetReservations[actionBudgetReservationID(first.Call.ID)]; !ok {
+		if _, ok := first.Run.BudgetReservations[agentrun.ActionBudgetReservationID(first.Call.ID)]; !ok {
 			t.Fatalf("budget was not reserved: %#v", first.Run.BudgetReservations)
 		}
 		reserved, err := store.GetAgentRun(f.ctx, f.scope, f.run.ID)
@@ -243,7 +244,7 @@ func TestLoopProposeBudgetExhaustedDenies(t *testing.T) {
 
 type failingProposalValidator struct{ err error }
 
-func (v failingProposalValidator) ValidateActionProposal(_ context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (v failingProposalValidator) ValidateActionProposal(_ context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if input.History == nil {
 		return nil, errors.New("validator got no Run action history")
 	}
@@ -417,7 +418,7 @@ func TestLoopProposeRequiresLiveLeaseOfRunningRun(t *testing.T) {
 func TestLoopProposeValidatorsReadRunActionHistory(t *testing.T) {
 	store := newTestKernelStore(t)
 	var seen []*ActionCall
-	f := newLoopProposeFixture(t, store, nil, proposalValidatorFunc(func(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+	f := newLoopProposeFixture(t, store, nil, proposalValidatorFunc(func(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 		calls, err := input.History.Calls(ctx)
 		seen = calls
 		return nil, err
@@ -454,7 +455,7 @@ func TestRunActionHistoryListsTerminalNonVMCallsNewestFirst(t *testing.T) {
 	add("waiting", "run", ActionOriginLoop, ActionCallStatusWaitingApproval, 0)
 	add("vm", "run", ActionOriginVM, ActionCallStatusSucceeded, 4*time.Minute)
 	add("other-run", "other", ActionOriginLoop, ActionCallStatusSucceeded, 5*time.Minute)
-	history := newRunActionHistory(store, scope, "run")
+	history := agentrun.NewRunActionHistory(store, scope, "run")
 	calls, err := history.Calls(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -491,7 +492,7 @@ func TestRunActionHistoryPagesPastStorePageLimits(t *testing.T) {
 			Status: ActionCallStatusSucceeded, CreatedAt: created, UpdatedAt: completed, CompletedAt: &completed,
 		})
 	}
-	calls, err := newRunActionHistory(store, scope, "run").Calls(context.Background())
+	calls, err := agentrun.NewRunActionHistory(store, scope, "run").Calls(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,8 +549,8 @@ func TestLoopProposePersonCredentialApproverIsActingUser(t *testing.T) {
 }
 
 // proposalValidatorFunc adapts a function to ActionProposalValidator.
-type proposalValidatorFunc func(context.Context, ActionProposalValidationInput) (map[string]interface{}, error)
+type proposalValidatorFunc func(context.Context, agentrun.ActionProposalValidationInput) (map[string]interface{}, error)
 
-func (f proposalValidatorFunc) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (f proposalValidatorFunc) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	return f(ctx, input)
 }

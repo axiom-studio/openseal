@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Per-step budget (D12). A bounded Run reserves capacity for every step
@@ -46,7 +48,7 @@ type runTransitioner interface {
 // step (stepBudgetAdmissionFinish) and pauses the Run (stepBudgetPause). An
 // unbounded Run, or a reservation equal to the one already held for the step,
 // is returned unchanged with no write.
-func reserveStepBudget(ctx context.Context, runs runTransitioner, now time.Time, run *AgentRun, step *AgentTurn, binding *TurnRunnerBinding, in StepInput, workerID string) (*AgentRun, *BudgetAdmission, error) {
+func reserveStepBudget(ctx context.Context, runs runTransitioner, now time.Time, run *AgentRun, step *AgentTurn, binding *agentrun.TurnRunnerBinding, in agentrun.StepInput, workerID string) (*AgentRun, *BudgetAdmission, error) {
 	if run == nil || step == nil {
 		return nil, nil, errors.New("step budget reservation requires a Run and a step")
 	}
@@ -62,7 +64,7 @@ func reserveStepBudget(ctx context.Context, runs runTransitioner, now time.Time,
 	if binding != nil {
 		usage = binding.BudgetReservation
 	}
-	var producer StepProducer
+	var producer agentrun.StepProducer
 	if binding != nil {
 		producer = binding.Producer
 	}

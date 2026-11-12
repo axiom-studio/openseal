@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -71,7 +72,7 @@ func NewAgentBehaviorActionValidator(agents *kernelagent.Registry, endpoints ...
 	return result, nil
 }
 
-func (v *AgentBehaviorActionValidator) ResolveActionProposalArguments(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+func (v *AgentBehaviorActionValidator) ResolveActionProposalArguments(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error) {
 	if !isAgentMutationAction(input.Bound) {
 		return nil, false, nil
 	}
@@ -112,7 +113,7 @@ func (v *AgentBehaviorActionValidator) ResolveActionProposalArguments(ctx contex
 	return arguments, true, nil
 }
 
-func (v *AgentBehaviorActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (v *AgentBehaviorActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if !isAgentMutationAction(input.Bound) {
 		return nil, nil
 	}
@@ -161,10 +162,10 @@ type AgentBehaviorActionDispatcher struct {
 	store     KernelStore
 	agents    *kernelagent.Registry
 	endpoints *ExternalConversationEndpointService
-	fallback  ActionDispatcher
+	fallback  agentrun.ActionDispatcher
 }
 
-func NewAgentBehaviorActionDispatcher(store KernelStore, agents *kernelagent.Registry, fallback ActionDispatcher, endpoints ...*ExternalConversationEndpointService) (*AgentBehaviorActionDispatcher, error) {
+func NewAgentBehaviorActionDispatcher(store KernelStore, agents *kernelagent.Registry, fallback agentrun.ActionDispatcher, endpoints ...*ExternalConversationEndpointService) (*AgentBehaviorActionDispatcher, error) {
 	if store == nil || agents == nil {
 		return nil, errors.New("kernel store and agent registry are required")
 	}
@@ -175,7 +176,7 @@ func NewAgentBehaviorActionDispatcher(store KernelStore, agents *kernelagent.Reg
 	return result, nil
 }
 
-func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	if !isAgentManagementAction(input.Bound) {
 		if d == nil || d.fallback == nil {
 			return nil, errors.New("action dispatcher does not support this action")
@@ -356,7 +357,7 @@ func (d *AgentBehaviorActionDispatcher) listChannels(ctx context.Context, scope 
 	return map[string]interface{}{"resourceType": "agent_channels", "channels": channels}, nil
 }
 
-func (d *AgentBehaviorActionDispatcher) configureChannel(ctx context.Context, input ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBehaviorActionDispatcher) configureChannel(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
 	args, deployment, definition, endpoint, candidate, changes, err := resolveAgentChannelAction(ctx, d.agents, d.endpoints, run, input.Arguments)
 	if errors.Is(err, kernelagent.ErrRevisionConflict) {
 		return d.replayedChannelResult(ctx, input.Call, run)

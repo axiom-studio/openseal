@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Claim reconciliation and crash resume (D14, SPEC §3.7, section 02 §8).
@@ -168,9 +170,9 @@ func (d *drive) resumePlainFinal(ctx context.Context, row *AgentTurn) (*RunLoopE
 // finishedStepState is the loop's view of a finished step an earlier claim
 // left unapplied: the final chain and the Run writes treat it as finished.
 func (d *drive) finishedStepState(ctx context.Context, row *AgentTurn) *stepState {
-	mode := StepModeNormal
+	mode := agentrun.StepModeNormal
 	if runExplainingFailure(d.run) {
-		mode = StepModeExplainFailure
+		mode = agentrun.StepModeExplainFailure
 	}
 	return &stepState{
 		lease: &stepLease{turn: row}, step: row, mode: mode, started: d.l.now(),

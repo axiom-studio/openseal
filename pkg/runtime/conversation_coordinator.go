@@ -10,6 +10,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -201,7 +202,7 @@ func (c *ConversationCoordinator) coordinateWithChildRuns(ctx context.Context, r
 	}
 	if childRunKey != nil {
 		for index := range responders {
-			responders[index].RunID = runIDForIdempotencyKey(req.Scope, childRunKey(responders[index].Participant))
+			responders[index].RunID = agentrun.RunIDForIdempotencyKey(req.Scope, childRunKey(responders[index].Participant))
 		}
 	}
 	for range 3 {

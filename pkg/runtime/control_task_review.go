@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Task completion review (section 04 §11.6), moved from cortex
@@ -53,7 +54,7 @@ type taskReviewVerdict struct {
 	Reason   string `json:"reason"`
 }
 
-func taskCompletionReviewCheck(ctx context.Context, x *ControlExecutor, cc ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
+func taskCompletionReviewCheck(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
 	task, err := x.reviewedConversationTask(ctx, cc)
 	if err != nil || task == nil {
 		return nil, err
@@ -71,7 +72,7 @@ func taskCompletionReviewCheck(ctx context.Context, x *ControlExecutor, cc Contr
 	}
 	return &finalAnswerRejection{
 		Code: taskCompletionRejectedCode, Message: "The task result still needs more work: " + reason,
-		Failure: &LoopFailure{Kind: RunFailureKindTaskCompletion, Code: taskCompletionRejectedCode,
+		Failure: &agentrun.LoopFailure{Kind: RunFailureKindTaskCompletion, Code: taskCompletionRejectedCode,
 			Message: "Task completion review rejected the revised result: " + reason},
 	}, nil
 }
@@ -80,7 +81,7 @@ func taskCompletionReviewCheck(ctx context.Context, x *ControlExecutor, cc Contr
 // nil when the Run is not reviewed: not task work, a fork child of task work
 // (it carries the task hint but is not the task's work Run and finishes its
 // own partial goal), or a continuation task (the conversation owns it).
-func (x *ControlExecutor) reviewedConversationTask(ctx context.Context, cc ControlContext) (*ConversationTask, error) {
+func (x *ControlExecutor) reviewedConversationTask(ctx context.Context, cc agentrun.ControlContext) (*ConversationTask, error) {
 	if !backgroundTaskRun(cc.Run) {
 		return nil, nil
 	}
@@ -105,7 +106,7 @@ func (x *ControlExecutor) reviewedConversationTask(ctx context.Context, cc Contr
 // reviewTaskCompletion runs the review call: one tool-free, sessionless model
 // call (Purpose acknowledgement: in-memory entries, no step row, no session
 // entry) with the review instructions as its only system text.
-func (x *ControlExecutor) reviewTaskCompletion(ctx context.Context, cc ControlContext, task *ConversationTask, candidate string) (bool, string, error) {
+func (x *ControlExecutor) reviewTaskCompletion(ctx context.Context, cc agentrun.ControlContext, task *ConversationTask, candidate string) (bool, string, error) {
 	if cc.Binding == nil || cc.Binding.Host == nil {
 		return false, "", errors.New("task completion review needs the binding's step host")
 	}
@@ -173,7 +174,7 @@ func decodeTaskReviewVerdict(req ModelStepRequest, result ModelStepResult) (task
 // taskReviewInput is the goal (the task's full accepted goal, not the Run's
 // display goal), the candidate and this Run's terminal tool results (newest
 // taskReviewMaxToolResults, oldest first, each at most 2 KiB).
-func (x *ControlExecutor) taskReviewInput(ctx context.Context, cc ControlContext, task *ConversationTask, candidate string) (taskReviewInput, error) {
+func (x *ControlExecutor) taskReviewInput(ctx context.Context, cc agentrun.ControlContext, task *ConversationTask, candidate string) (taskReviewInput, error) {
 	entries, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID,
 		States:     []ToolEntryState{ToolEntryCompleted, ToolEntryError, ToolEntryInterrupted},
@@ -202,7 +203,7 @@ func (x *ControlExecutor) taskReviewInput(ctx context.Context, cc ControlContext
 	return taskReviewInput{Goal: task.Goal, CandidateAnswer: cutUTF8(candidate, taskReviewMaxCandidateBytes), ToolResults: results}, nil
 }
 
-func (x *ControlExecutor) taskReviewRequest(cc ControlContext, payload string) ModelStepRequest {
+func (x *ControlExecutor) taskReviewRequest(cc agentrun.ControlContext, payload string) ModelStepRequest {
 	anchor := "plain:"
 	if cc.Step != nil {
 		anchor += cc.Step.ID
@@ -231,7 +232,7 @@ func (x *ControlExecutor) taskReviewRequest(cc ControlContext, payload string) M
 
 // bindingModelCredential is the model credential the binding's model producer
 // sends with its steps (nil when the binding has none: the host's default).
-func bindingModelCredential(binding *TurnRunnerBinding) *capability.CredentialReference {
+func bindingModelCredential(binding *agentrun.TurnRunnerBinding) *capability.CredentialReference {
 	producer, _ := binding.Producer.(*ModelStepProducer)
 	if producer == nil {
 		return nil

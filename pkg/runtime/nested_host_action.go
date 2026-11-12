@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -84,7 +85,7 @@ func (c *ActionCoordinator) ProposeNestedHost(ctx context.Context, req NestedHos
 	return c.proposeNested(ctx, NestedActionRequest{
 		Scope: req.Scope, RunID: req.RunID, TurnID: req.TurnID, Capability: skillID + "/" + action, Arguments: req.Arguments,
 		Origin: ActionOriginVM, OriginRef: req.OriginRef, IdempotencyKey: req.IdempotencyKey, Summary: req.Summary,
-	}, ActionExecutionHost, func(binding *TurnRunnerBinding) (*capability.ModelAction, error) {
+	}, ActionExecutionHost, func(binding *agentrun.TurnRunnerBinding) (*capability.ModelAction, error) {
 		return selectOfferedSkillAction(binding.ModelActions, skillID, action)
 	})
 }

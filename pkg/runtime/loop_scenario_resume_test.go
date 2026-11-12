@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // resumeTrapStore sits over the fixture's crash store and kills the worker
@@ -384,7 +386,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 				return finalAnswer(map[string]any{"answer": fmt.Sprintf("%d issues looked up.", len(v.ToolResultsSinceUser()))})
 			}},
 		))
-		f.dispatch.on("lookup", func(in ActionDispatchInput) (map[string]interface{}, error) {
+		f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			id, _ := in.Arguments["id"].(string)
 			blocked := false
 			if id == "2" {

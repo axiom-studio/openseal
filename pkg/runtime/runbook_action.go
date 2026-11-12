@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -178,7 +179,7 @@ func NewRunbookActionValidator(store runbookActionStore) (*RunbookActionValidato
 	return &RunbookActionValidator{store: store}, nil
 }
 
-func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error) {
 	if !isRunbookAction(input.Bound) {
 		return nil, false, nil
 	}
@@ -261,7 +262,7 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 	return arguments, true, nil
 }
 
-func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if !isRunbookAction(input.Bound) {
 		return nil, nil
 	}
@@ -301,7 +302,7 @@ func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, inp
 
 type RunbookActionDispatcher struct {
 	store             runbookActionStore
-	fallback          ActionDispatcher
+	fallback          agentrun.ActionDispatcher
 	routineTeams      RoutineTeamCatalog
 	executionPreparer AcceptedRunExecutionPreparer
 	chatFiles         ChatFileResolver
@@ -336,14 +337,14 @@ func (d *RunbookActionDispatcher) SetRoutineTeams(teams RoutineTeamCatalog) {
 	}
 }
 
-func NewRunbookActionDispatcher(store runbookActionStore, fallback ActionDispatcher) (*RunbookActionDispatcher, error) {
+func NewRunbookActionDispatcher(store runbookActionStore, fallback agentrun.ActionDispatcher) (*RunbookActionDispatcher, error) {
 	if store == nil {
 		return nil, errors.New("Runbook action store is required")
 	}
 	return &RunbookActionDispatcher{store: store, fallback: fallback}, nil
 }
 
-func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	if !isRunbookAction(input.Bound) {
 		if d == nil || d.fallback == nil {
 			return nil, errors.New("action dispatcher does not support this action")

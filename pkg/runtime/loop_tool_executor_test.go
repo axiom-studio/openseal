@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	"github.com/google/uuid"
@@ -30,7 +31,7 @@ type toolExecFixture struct {
 	host     *scriptedHost
 	control  *ControlExecutor
 	handlers map[ControlToolName]*fakeControlHandler
-	binding  *TurnRunnerBinding
+	binding  *agentrun.TurnRunnerBinding
 }
 
 // fakeLoopControls fakes every control tool of the run loop, except the
@@ -48,7 +49,7 @@ func fakeLoopControls(real ...controlTool) (controlRegistry, map[ControlToolName
 }
 
 // newToolExecFixture fakes the control tools, except the tools in real.
-func newToolExecFixture(t *testing.T, authority ControlAuthority, real ...controlTool) *toolExecFixture {
+func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real ...controlTool) *toolExecFixture {
 	t.Helper()
 	ctx := context.Background()
 	store := newTestKernelStore(t)
@@ -84,7 +85,7 @@ func newToolExecFixture(t *testing.T, authority ControlAuthority, real ...contro
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.binding = &TurnRunnerBinding{Authority: authority}
+	f.binding = &agentrun.TurnRunnerBinding{Authority: authority}
 	f.binding.Tools = dispatcher.ForClaim(LoopToolClaim{Workspace: workspace.ChatAuthority("chat-1")})
 	return f
 }
@@ -110,7 +111,7 @@ type toolStep struct {
 func appendToolStep(t *testing.T, ctx context.Context, store interface {
 	AgentSessionStore
 	AgentTurnStore
-}, run *AgentRun, binding *TurnRunnerBinding, worker, stepID string, status AgentTurnStatus, now time.Time, calls ...ModelToolCall) toolStep {
+}, run *AgentRun, binding *agentrun.TurnRunnerBinding, worker, stepID string, status AgentTurnStatus, now time.Time, calls ...ModelToolCall) toolStep {
 	t.Helper()
 	turn, err := store.CreateAgentTurn(ctx, &AgentTurn{
 		ID: stepID, Scope: run.Scope, RunID: run.ID, Status: status, Producer: StepProducerModel, Revision: 1,
@@ -143,8 +144,8 @@ func (f *toolExecFixture) step(stepID string, status AgentTurnStatus, calls ...M
 	return appendToolStep(f.t, f.ctx, f.store, f.run, f.binding, toolExecWorker, stepID, status, f.now, calls...)
 }
 
-func (f *toolExecFixture) input(step toolStep) StepToolsInput {
-	return StepToolsInput{
+func (f *toolExecFixture) input(step toolStep) agentrun.StepToolsInput {
+	return agentrun.StepToolsInput{
 		Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: toolExecWorker,
 		Assistant: step.assistant, Entries: step.entries,
 	}
@@ -238,7 +239,7 @@ func (h *scriptedHost) orderNow() []string {
 }
 
 func TestReadAfterWriteSeesWrite(t *testing.T) {
-	f := newToolExecFixture(t, ControlAuthority{})
+	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	step := f.step("step-1", AgentTurnStatusRunning,
 		toolCall("call-w", "workspace_write_file", `{"path":"notes.md","content":"fresh"}`),
 		toolCall("call-r", "workspace_read_file", `{"path":"notes.md"}`),
@@ -250,7 +251,7 @@ func TestReadAfterWriteSeesWrite(t *testing.T) {
 	// Hold the write: the read must not start until it finished.
 	f.host.gate, f.host.gateOp = make(chan struct{}), workspace.OperationWriteFile
 	done := make(chan struct{})
-	var out StepToolsOutcome
+	var out agentrun.StepToolsOutcome
 	var err error
 	go func() {
 		defer close(done)
@@ -288,7 +289,7 @@ func TestReadAfterWriteSeesWrite(t *testing.T) {
 }
 
 func TestReadsRunConcurrentlyBound4(t *testing.T) {
-	f := newToolExecFixture(t, ControlAuthority{})
+	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	f.host.gate = make(chan struct{})
 	var calls []ModelToolCall
 	for i := 0; i < 6; i++ {
@@ -296,7 +297,7 @@ func TestReadsRunConcurrentlyBound4(t *testing.T) {
 	}
 	step := f.step("step-1", AgentTurnStatusRunning, calls...)
 	done := make(chan struct{})
-	var out StepToolsOutcome
+	var out agentrun.StepToolsOutcome
 	var err error
 	go func() {
 		defer close(done)
@@ -330,7 +331,7 @@ func TestReadsRunConcurrentlyBound4(t *testing.T) {
 }
 
 func TestSecondSettleCallRefused(t *testing.T) {
-	f := newToolExecFixture(t, ControlAuthority{CanWait: true, CanAskUser: true})
+	f := newToolExecFixture(t, agentrun.ControlAuthority{CanWait: true, CanAskUser: true})
 	step := f.step("step-1", AgentTurnStatusRunning,
 		toolCall("call-wait", "wait", `{"goal":"a"}`),
 		toolCall("call-ask", "ask_user", `{"goal":"b"}`),
@@ -368,7 +369,7 @@ func TestSecondSettleCallRefused(t *testing.T) {
 }
 
 func TestUnofferedToolIsError(t *testing.T) {
-	f := newToolExecFixture(t, ControlAuthority{})
+	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	step := f.step("step-1", AgentTurnStatusRunning,
 		toolCall("call-unknown", "made_up_tool", `{}`),
 		toolCall("call-fork", "control_fork", `{"goal":"x"}`),
@@ -402,7 +403,7 @@ func TestUnofferedToolIsError(t *testing.T) {
 }
 
 func TestPlanToolEntriesRefusesUnusableArguments(t *testing.T) {
-	f := newToolExecFixture(t, ControlAuthority{})
+	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	call := toolCall("call-bad", "workspace_read_file", `{}`)
 	call.ArgumentsError = "unexpected end of JSON input"
 	step := f.step("step-1", AgentTurnStatusRunning, call)
@@ -425,7 +426,7 @@ type committedForkHandler struct {
 	settles int
 }
 
-func (h *committedForkHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (h *committedForkHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	h.settles++
 	key := "fork-" + cc.Entry.ID
 	h.groups[key]++
@@ -443,7 +444,7 @@ func (h *committedForkHandler) Run(ctx context.Context, x *ControlExecutor, cc C
 		return ControlResult{}, err
 	}
 	entry := moved.Entry
-	return ControlResult{Kind: ControlParked, Entry: entry, Park: &LoopPark{
+	return ControlResult{Kind: ControlParked, Entry: entry, Park: &agentrun.LoopPark{
 		Status: AgentRunStatusWaitingForDependency, Wake: &WakeCondition{Type: "run_dependencies", Reference: key},
 		Summary: "Waiting for the branches", Committed: true,
 	}}, nil
@@ -456,7 +457,7 @@ func (h *committedForkHandler) Run(ctx context.Context, x *ControlExecutor, cc C
 // CTL-6b).
 func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
 	fork := &committedForkHandler{groups: map[string]int{}}
-	f := newToolExecFixture(t, ControlAuthority{ForkAllowed: true}, newControlTool(ControlToolFork, fork))
+	f := newToolExecFixture(t, agentrun.ControlAuthority{ForkAllowed: true}, newControlTool(ControlToolFork, fork))
 	// Step 1 asked for a fork; the step finished and was applied, then the
 	// worker died before the settle phase created the group.
 	step := f.step("step-1", AgentTurnStatusCompleted, toolCall("call-fork", "control_fork", `{"goal":"split"}`))
@@ -476,7 +477,7 @@ func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
 	}
 	run := f.currentRun()
 	run.LastAppliedTurn = step.turn.Sequence
-	out, err := f.binding.Tools.ResumeOpenTools(f.ctx, StepToolsInput{Run: run, Step: next, Binding: f.binding, WorkerID: toolExecWorker})
+	out, err := f.binding.Tools.ResumeOpenTools(f.ctx, agentrun.StepToolsInput{Run: run, Step: next, Binding: f.binding, WorkerID: toolExecWorker})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +494,7 @@ func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
 }
 
 // governedToolExecutor wires a claim tool executor over a governed fixture.
-func governedToolExecutor(t *testing.T, f *governedFixture) (LoopToolExecutor, AgentSessionStore) {
+func governedToolExecutor(t *testing.T, f *governedFixture) (agentrun.LoopToolExecutor, AgentSessionStore) {
 	t.Helper()
 	sessions, ok := f.store.(AgentSessionStore)
 	if !ok {
@@ -522,7 +523,7 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
 		var deployed []string
-		f.dispatch = func(input ActionDispatchInput) (map[string]interface{}, error) {
+		f.dispatch = func(input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			environment, _ := input.Arguments["environment"].(string)
 			deployed = append(deployed, environment)
 			return map[string]interface{}{"providerResult": "delivered"}, nil
@@ -538,7 +539,7 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 			// A read after the skipped write must not overtake it.
 			ModelToolCall{ID: "call-check", Name: governedStatus, Arguments: json.RawMessage(`{"environment":"check"}`)},
 		)
-		in := StepToolsInput{Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker, Assistant: step.assistant, Entries: step.entries}
+		in := agentrun.StepToolsInput{Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker, Assistant: step.assistant, Entries: step.entries}
 		out, err := tools.ExecuteStepTools(f.ctx, in)
 		if err != nil {
 			t.Fatal(err)
@@ -581,7 +582,7 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resumed, err := tools.ResumeOpenTools(f.ctx, StepToolsInput{Run: f.currentRun(), Step: next, Binding: f.binding, WorkerID: governedWorker2})
+		resumed, err := tools.ResumeOpenTools(f.ctx, agentrun.StepToolsInput{Run: f.currentRun(), Step: next, Binding: f.binding, WorkerID: governedWorker2})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -611,14 +612,14 @@ func TestReplanParkNilWhenHeldApprovalDecided(t *testing.T) {
 		}{sessions, f.store}, f.run, f.binding, governedWorker, governedStep, AgentTurnStatusRunning, f.clock,
 			ModelToolCall{ID: "call-prod", Name: governedDeploy, Arguments: deployArguments("production")},
 		)
-		out, err := tools.ExecuteStepTools(f.ctx, StepToolsInput{
+		out, err := tools.ExecuteStepTools(f.ctx, agentrun.StepToolsInput{
 			Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker, Assistant: step.assistant, Entries: step.entries,
 		})
 		if err != nil || out.Park == nil {
 			t.Fatalf("outcome = %#v, %v", out, err)
 		}
 		// Still pending: the re-plan parks on the same approval.
-		park, err := tools.ReplanPark(f.ctx, StepToolsInput{Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker})
+		park, err := tools.ReplanPark(f.ctx, agentrun.StepToolsInput{Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker})
 		if err != nil || park == nil || park.Status != AgentRunStatusWaitingForApproval || park.Wake.Reference != out.Park.Wake.Reference {
 			t.Fatalf("replan while pending = %#v, %v", park, err)
 		}
@@ -629,7 +630,7 @@ func TestReplanParkNilWhenHeldApprovalDecided(t *testing.T) {
 		}
 		f.advance(time.Second)
 		f.decide(entry.Tool.Wait.ApprovalID, ApprovalDecisionApprove, "")
-		park, err = tools.ReplanPark(f.ctx, StepToolsInput{Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker})
+		park, err = tools.ReplanPark(f.ctx, agentrun.StepToolsInput{Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker})
 		if err != nil || park != nil {
 			t.Fatalf("replan after the decision = %#v, %v", park, err)
 		}
@@ -637,7 +638,7 @@ func TestReplanParkNilWhenHeldApprovalDecided(t *testing.T) {
 }
 
 func TestRepeatedReadRefusedByExecutor(t *testing.T) {
-	f := newToolExecFixture(t, ControlAuthority{})
+	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	var last toolStep
 	for n := 1; n <= 3; n++ {
 		last = f.step(fmt.Sprintf("step-%d", n), AgentTurnStatusCompleted, toolCall(fmt.Sprintf("call-%d", n), "workspace_read_file", `{"path":"same.md"}`))
@@ -657,7 +658,7 @@ func TestRepeatedReadRefusedByExecutor(t *testing.T) {
 
 // resumeNextStep runs ResumeOpenTools from a fresh step after step was
 // appended (and finished and applied) but never went through phase 8.
-func (f *toolExecFixture) resumeNextStep(step toolStep) StepToolsOutcome {
+func (f *toolExecFixture) resumeNextStep(step toolStep) agentrun.StepToolsOutcome {
 	f.t.Helper()
 	next, err := f.store.CreateAgentTurn(f.ctx, &AgentTurn{
 		ID: "step-next", Scope: f.scope, RunID: f.run.ID, Status: AgentTurnStatusRunning, Producer: StepProducerModel, Revision: 1,
@@ -668,7 +669,7 @@ func (f *toolExecFixture) resumeNextStep(step toolStep) StepToolsOutcome {
 	}
 	run := f.currentRun()
 	run.LastAppliedTurn = step.turn.Sequence
-	out, err := f.binding.Tools.ResumeOpenTools(f.ctx, StepToolsInput{Run: run, Step: next, Binding: f.binding, WorkerID: toolExecWorker})
+	out, err := f.binding.Tools.ResumeOpenTools(f.ctx, agentrun.StepToolsInput{Run: run, Step: next, Binding: f.binding, WorkerID: toolExecWorker})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -676,7 +677,7 @@ func (f *toolExecFixture) resumeNextStep(step toolStep) StepToolsOutcome {
 }
 
 func TestResumeUncheckedStepRefusesSecondSettleCall(t *testing.T) {
-	f := newToolExecFixture(t, ControlAuthority{CanWait: true, CanAskUser: true})
+	f := newToolExecFixture(t, agentrun.ControlAuthority{CanWait: true, CanAskUser: true})
 	// The worker died between the append and phase 8.
 	step := f.step("step-1", AgentTurnStatusCompleted,
 		toolCall("call-wait", "wait", `{"goal":"a"}`),
@@ -696,9 +697,9 @@ func TestResumeUncheckedStepRefusesSecondSettleCall(t *testing.T) {
 }
 
 func TestResumeUncheckedStepAppliesToolCheck(t *testing.T) {
-	f := newToolExecFixture(t, ControlAuthority{})
+	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	checked := 0
-	f.binding.ToolCheck = func(ctx context.Context, in StepToolsInput, entry *SessionEntry) (string, error) {
+	f.binding.ToolCheck = func(ctx context.Context, in agentrun.StepToolsInput, entry *SessionEntry) (string, error) {
 		checked++
 		return "Not in this conversation.", nil
 	}

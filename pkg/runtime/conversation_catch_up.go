@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Catch-up of channel messages (run-loop section 05 §4). A chat session holds
@@ -285,7 +287,7 @@ func catchUpHistoryOmittedNote(req catchUpRequest, result *catchUpResult) *Sessi
 // step's context append: the history_omitted note, then the message entries,
 // with the watermark CAS from session's watermark. It is nil when there is
 // nothing to write.
-func (r *catchUpResult) stepContextAppend(session *AgentSession) *StepContextAppend {
+func (r *catchUpResult) stepContextAppend(session *AgentSession) *agentrun.StepContextAppend {
 	if r == nil || session == nil || (len(r.Entries) == 0 && r.HistoryOmitted == nil && r.Watermark <= session.ChannelWatermark) {
 		return nil
 	}
@@ -295,5 +297,5 @@ func (r *catchUpResult) stepContextAppend(session *AgentSession) *StepContextApp
 	}
 	entries = append(entries, r.Entries...)
 	expected := session.ChannelWatermark
-	return &StepContextAppend{Entries: entries, ExpectedChannelWatermark: &expected, ChannelWatermark: max(r.Watermark, expected)}
+	return &agentrun.StepContextAppend{Entries: entries, ExpectedChannelWatermark: &expected, ChannelWatermark: max(r.Watermark, expected)}
 }

@@ -7,6 +7,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -89,11 +90,11 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	validator.SetRoutineTeams(teams)
-	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args}); err == nil {
+	if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args}); err == nil {
 		t.Fatal("routine from an Agent off the Team roster accepted")
 	}
 	team.Roster = append(team.Roster, kernelteam.RosterAssignment{ID: "researcher", AgentDeploymentID: "researcher"})
-	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args}); err != nil {
+	if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args}); err != nil {
 		t.Fatalf("member routine proposal = %v", err)
 	}
 	dispatcher, err := NewRunbookActionDispatcher(store, nil)
@@ -102,7 +103,7 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 	}
 	dispatcher.SetRoutineTeams(teams)
 	call := &ActionCall{ID: "create-routine", Scope: scope, RunID: run.ID, DeploymentID: "researcher", IdempotencyKey: "create-routine"}
-	if _, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Run: run, Bound: bound, Call: call, Arguments: args}); err != nil {
+	if _, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Run: run, Bound: bound, Call: call, Arguments: args}); err != nil {
 		t.Fatalf("member routine dispatch = %v", err)
 	}
 	activations, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, Owner: &owner})

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -18,7 +19,7 @@ var portableAgentSessionID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}
 // Skills opt in field-by-field through the portable schema extensions.
 type KernelResolvedActionArgumentResolver struct{}
 
-func (KernelResolvedActionArgumentResolver) ResolveActionProposalArguments(_ context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+func (KernelResolvedActionArgumentResolver) ResolveActionProposalArguments(_ context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error) {
 	if input.Bound == nil || input.Bound.Action.InputSchema == nil {
 		return nil, false, nil
 	}
@@ -53,7 +54,7 @@ func (KernelResolvedActionArgumentResolver) ResolveActionProposalArguments(_ con
 	return resolved, handled, nil
 }
 
-func (KernelResolvedActionArgumentResolver) ValidateActionProposal(context.Context, ActionProposalValidationInput) (map[string]interface{}, error) {
+func (KernelResolvedActionArgumentResolver) ValidateActionProposal(context.Context, agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	return nil, nil
 }
 

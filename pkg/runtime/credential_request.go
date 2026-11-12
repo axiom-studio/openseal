@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -22,7 +23,7 @@ type credentialRequestArguments struct {
 }
 
 func credentialRequestAction() skill.Action {
-	return skill.Action{Name: SkillActionRequestCredential,
+	return skill.Action{Name: agentrun.SkillActionRequestCredential,
 		Description: "Ask the user to save a credential in their vault through a durable in-chat card, for example when the live browser reports no_matching_login (no saved login for the current site), no_payment_card, or spend_cap_exceeded. Use kind website_login with website set to the exact page origin the browser reported (for example https://www.amazon.in), or kind payment_card to add a card or raise its spend cap. The reason is shown to the user, for example \"Add your amazon.in login so I can sign in and finish the order\". This action never accepts or returns secret values; never ask for passwords, card numbers or codes in chat. A pending request pauses this work until the user saves the credential or dismisses the card; then continue (retry the sign-in or card fill) or explain the dismissal. If the result is refused, explain the reason to the user and do not repeat the same request.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
@@ -70,7 +71,7 @@ func decodeCredentialRequestArguments(arguments map[string]interface{}) (credent
 	return a, nil
 }
 
-func (d *SkillBindingActionDispatcher) requestCredential(ctx context.Context, input ActionDispatchInput, run *AgentRun, member string, umbrella ObjectiveOwner) (map[string]interface{}, error) {
+func (d *SkillBindingActionDispatcher) requestCredential(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun, member string, umbrella ObjectiveOwner) (map[string]interface{}, error) {
 	a, err := decodeCredentialRequestArguments(input.Arguments)
 	if err != nil {
 		return nil, err
@@ -131,7 +132,7 @@ func credentialRequestResult(r *CredentialRequest) (map[string]interface{}, erro
 // pendingCredentialRequestFromAction returns the request a succeeded
 // request_credential call created when it is still waiting for the user.
 func pendingCredentialRequestFromAction(ctx context.Context, store interface{}, call *ActionCall) *CredentialRequest {
-	if call == nil || call.Status != ActionCallStatusSucceeded || call.SkillID != SkillManagementSkillID || call.Action != SkillActionRequestCredential {
+	if call == nil || call.Status != ActionCallStatusSucceeded || call.SkillID != SkillManagementSkillID || call.Action != agentrun.SkillActionRequestCredential {
 		return nil
 	}
 	value, ok := call.Output["credentialRequest"].(map[string]interface{})
@@ -184,7 +185,7 @@ func (e *interactionRequestRefusal) Error() string { return e.message }
 func refuseInteraction(message string) error { return &interactionRequestRefusal{message: message} }
 
 func isInteractionRequestAction(name string) bool {
-	return name == SkillActionRequestSetup || name == SkillActionRequestCredential || name == SkillActionRequestConnection
+	return name == agentrun.SkillActionRequestSetup || name == agentrun.SkillActionRequestCredential || name == agentrun.SkillActionRequestConnection
 }
 
 // interactionRequestRefusalResult turns any failure to create an in-chat

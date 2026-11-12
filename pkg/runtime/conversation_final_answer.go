@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Final answer delivery for Agent chat Runs (run-loop section 05 §8, SPEC
@@ -59,35 +60,35 @@ func newConversationFinalHandler(runner *ConversationRunTurnRunner, sessions loo
 //     answer came back a second time;
 //   - retry_final: an is_error result the model corrects in its next step;
 //   - ErrSteeringArrived (from the reply guard): continue.
-func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery) (FinalDeliveryResult, error) {
+func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.FinalDelivery) (agentrun.FinalDeliveryResult, error) {
 	if h == nil || h.runner == nil || h.runner.conversations == nil {
-		return FinalDeliveryResult{}, ErrConversationCoordinationUnavailable
+		return agentrun.FinalDeliveryResult{}, ErrConversationCoordinationUnavailable
 	}
 	run := d.Run
 	if run == nil {
-		return FinalDeliveryResult{}, ErrInvalidAgentRun
+		return agentrun.FinalDeliveryResult{}, ErrInvalidAgentRun
 	}
 	r := h.runner
 	answer := d.Answer
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
 	if !conversationRunHasActingAgent(run) || conversationID == "" || triggerID == "" {
-		return FinalDeliveryResult{}, fmt.Errorf("%w: chat delivery needs an acting Agent, a conversation and a trigger", ErrInvalidAgentRun)
+		return agentrun.FinalDeliveryResult{}, fmt.Errorf("%w: chat delivery needs an acting Agent, a conversation and a trigger", ErrInvalidAgentRun)
 	}
 	// 2. Participation.
 	if stopped, err := r.participationStopped(ctx, run); err != nil {
-		return FinalDeliveryResult{}, err
+		return agentrun.FinalDeliveryResult{}, err
 	} else if stopped {
 		return participationStoppedDelivery(), nil
 	}
 	conversation, err := r.conversations.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
-		return FinalDeliveryResult{}, err
+		return agentrun.FinalDeliveryResult{}, err
 	}
 	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}}
 	trigger, err := r.conversations.GetVisibleChannelMessage(ctx, run.Scope, conversation.ID, triggerID, viewer)
 	if err != nil {
-		return FinalDeliveryResult{}, err
+		return agentrun.FinalDeliveryResult{}, err
 	}
 	base := map[string]interface{}{"conversationId": conversation.ID, "triggerMessageId": trigger.ID}
 	content := strings.TrimSpace(answer.Answer)
@@ -96,12 +97,12 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
 	artifacts, err := runActionArtifactReferences(ctx, h.sessions, h.actions, run)
 	if err != nil {
-		return FinalDeliveryResult{}, err
+		return agentrun.FinalDeliveryResult{}, err
 	}
 	handedOver, unknownFiles := handedOverArtifacts(artifacts, answer.Output)
 	references = append(references, handedOver...)
 	if len(unknownFiles) > 0 && !runExplainingFailure(run) {
-		return FinalDeliveryResult{Kind: FinalDeliveryRetryFinal, RejectionText: unknownHandedOverFilesText(unknownFiles, artifacts)}, nil
+		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: unknownHandedOverFilesText(unknownFiles, artifacts)}, nil
 	}
 	// The files the Run saved and does not hand over were made to build its
 	// answer; the catalog remembers that so file lists can leave them out.
@@ -118,28 +119,28 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 			return participationStoppedDelivery(), nil
 		}
 		if err != nil {
-			return FinalDeliveryResult{}, err
+			return agentrun.FinalDeliveryResult{}, err
 		}
 		output := withConversationOutput(base, message, replayed)
 		output[finalOutputSummaryKey] = content
-		return FinalDeliveryResult{Kind: FinalDeliveryFail, Output: output}, nil
+		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryFail, Output: output}, nil
 	}
 
 	// A kernel final (a deterministic producer's or a preparer's early
 	// result) carries its own Run output; it posts only an answer it has.
 	kernelFinal := !answer.PlainText && answer.ToolEntryID == ""
 	if kernelFinal && content == "" {
-		return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: maps.Clone(answer.Output)}, nil
+		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: maps.Clone(answer.Output)}, nil
 	}
 
 	// 4. Silent.
 	if answer.Silent() {
 		if trigger.ResponseMode != "spoken" {
-			return FinalDeliveryResult{Kind: FinalDeliveryRetryFinal, RejectionText: conversationSilentNotSpokenText}, nil
+			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: conversationSilentNotSpokenText}, nil
 		}
 		output := maps.Clone(base)
-		output[finalOutputSilentKey] = true
-		return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: output}, nil
+		output[agentrun.FinalOutputSilentKey] = true
+		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: output}, nil
 	}
 
 	// 6. Reactions only (also an answer that only repeats the reacted emoji).
@@ -152,12 +153,12 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 	if visual == nil {
 		reactions, err := h.runReactions(ctx, run)
 		if err != nil {
-			return FinalDeliveryResult{}, err
+			return agentrun.FinalDeliveryResult{}, err
 		}
 		if len(reactions) > 0 && visual == nil && reactionEcho(content, reactions) {
 			output := maps.Clone(base)
-			output[finalOutputReactedKey] = true
-			return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: output}, nil
+			output[agentrun.FinalOutputReactedKey] = true
+			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: output}, nil
 		}
 	}
 
@@ -165,14 +166,14 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 	if content == "" {
 		prior, err := h.priorDeliveryRejections(ctx, run, answer, func(text string) bool { return text == conversationEmptyAnswerText })
 		if err != nil {
-			return FinalDeliveryResult{}, err
+			return agentrun.FinalDeliveryResult{}, err
 		}
 		if prior > 0 {
-			return FinalDeliveryResult{Kind: FinalDeliveryFail, Failure: &LoopFailure{
+			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryFail, Failure: &agentrun.LoopFailure{
 				Kind: RunFailureKindExecution, Code: conversationEmptyAnswerCode, Message: conversationEmptyAnswerFailure,
 			}}, nil
 		}
-		return FinalDeliveryResult{Kind: FinalDeliveryRetryFinal, RejectionText: conversationEmptyAnswerText}, nil
+		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: conversationEmptyAnswerText}, nil
 	}
 
 	// 9 (second part). The visual, after the host checks.
@@ -189,17 +190,17 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 		}
 		if checkErr != nil {
 			if !errors.Is(checkErr, errInvalidAnswerVisual) {
-				return FinalDeliveryResult{}, checkErr
+				return agentrun.FinalDeliveryResult{}, checkErr
 			}
 			prior, err := h.priorDeliveryRejections(ctx, run, answer, func(text string) bool {
 				return strings.HasPrefix(text, conversationVisualRejectedText)
 			})
 			if err != nil {
-				return FinalDeliveryResult{}, err
+				return agentrun.FinalDeliveryResult{}, err
 			}
 			reason := strings.TrimSpace(strings.TrimPrefix(checkErr.Error(), errInvalidAnswerVisual.Error()+":"))
 			if prior == 0 {
-				return FinalDeliveryResult{Kind: FinalDeliveryRetryFinal,
+				return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal,
 					RejectionText: conversationVisualRejectedText + reason + ". Fix the visual or leave it out."}, nil
 			}
 			// The second rejected visual in the Run never costs the answer.
@@ -213,7 +214,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 		return participationStoppedDelivery(), nil
 	}
 	if err != nil {
-		return FinalDeliveryResult{}, err
+		return agentrun.FinalDeliveryResult{}, err
 	}
 	if visualRejection != "" {
 		h.visualRejected(ctx, run, d.Step, guard.WorkerID, visualRejection)
@@ -224,27 +225,27 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 	if output == nil {
 		output = map[string]interface{}{}
 	}
-	delete(output, finalOutputVisualKey)
+	delete(output, agentrun.FinalOutputVisualKey)
 	delete(output, finalOutputVisualRejectionKey)
 	for key, value := range withConversationOutput(base, message, replayed) {
 		output[key] = value
 	}
 	output[finalOutputSummaryKey] = content
 	if answer.BroadcastToChannel() {
-		output[finalOutputBroadcastKey] = true
+		output[agentrun.FinalOutputBroadcastKey] = true
 	} else {
-		delete(output, finalOutputBroadcastKey)
+		delete(output, agentrun.FinalOutputBroadcastKey)
 	}
-	kind := FinalDeliveryComplete
+	kind := agentrun.FinalDeliveryComplete
 	if answer.Park != nil && answer.Park.Deliver {
 		// OTP: the answer asks for the code; the Run waits for the reply.
-		kind = FinalDeliveryPark
+		kind = agentrun.FinalDeliveryPark
 	}
-	return FinalDeliveryResult{Kind: kind, Output: output}, nil
+	return agentrun.FinalDeliveryResult{Kind: kind, Output: output}, nil
 }
 
-func participationStoppedDelivery() FinalDeliveryResult {
-	return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: maps.Clone(participationStoppedOutput())}
+func participationStoppedDelivery() agentrun.FinalDeliveryResult {
+	return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: maps.Clone(participationStoppedOutput())}
 }
 
 func withConversationOutput(base map[string]interface{}, message *ChannelMessage, replayed bool) map[string]interface{} {
@@ -344,7 +345,7 @@ func (h *conversationFinalHandler) runReactions(ctx context.Context, run *AgentR
 // priorDeliveryRejections counts this Run's earlier final attempts that
 // delivery rejected with a text matching match: final tool entries in error
 // and final_rejection notes. The answer being delivered is not counted.
-func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, run *AgentRun, answer FinalAnswer, match func(string) bool) (int, error) {
+func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, run *AgentRun, answer agentrun.FinalAnswer, match func(string) bool) (int, error) {
 	if h.sessions == nil {
 		return 0, nil
 	}
@@ -384,7 +385,7 @@ func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, 
 	return count, nil
 }
 
-const FinalModeSpoken FinalAnswerMode = "spoken" // conversation responseMode == "spoken"
+const FinalModeSpoken agentrun.FinalAnswerMode = "spoken" // conversation responseMode == "spoken"
 
 const finalOutputSummaryKey = "summary"
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -131,7 +132,7 @@ func TestRoutineEventDispatcherBatchReplay(t *testing.T) {
 		t.Fatalf("pass = %#v", result)
 	}
 	runs := h.eventRuns(activation)
-	if len(runs) != 1 || runs[0].ID != runIDForIdempotencyKey(h.scope, routineEventIdempotencyKey(claimed.ID)) {
+	if len(runs) != 1 || runs[0].ID != agentrun.RunIDForIdempotencyKey(h.scope, routineEventIdempotencyKey(claimed.ID)) {
 		t.Fatalf("runs = %#v", runs)
 	}
 	batch, _ := h.batchOf(runs[0])

@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 type RunbookScheduleResult struct {
@@ -121,7 +122,7 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 		}
 		base := activation.NextOccurrenceBase.UTC()
 		idempotencyKey := fmt.Sprintf("runbook-schedule:%s:%s", activation.ID, base.Format(time.RFC3339Nano))
-		runID := runIDForIdempotencyKey(scope, idempotencyKey)
+		runID := agentrun.RunIDForIdempotencyKey(scope, idempotencyKey)
 		existing, err := s.store.GetAgentRun(ctx, scope, runID)
 		if err != nil {
 			return result, err

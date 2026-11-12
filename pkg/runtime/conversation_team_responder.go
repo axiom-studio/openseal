@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 const (
@@ -41,7 +43,7 @@ func teamMemberRunRequest(routing *AgentRun, conversation *Conversation, trigger
 		// The client's link from the routing Run to the answers it started.
 		teamRoutingRunContextKey: routing.ID,
 	}
-	for _, copied := range []string{"threadRootMessageId", "responseMode", "voiceCallStarted", RunContextSessionKey} {
+	for _, copied := range []string{"threadRootMessageId", "responseMode", "voiceCallStarted", agentrun.RunContextSessionKey} {
 		if value, ok := routing.Context[copied]; ok {
 			context[copied] = value
 		}

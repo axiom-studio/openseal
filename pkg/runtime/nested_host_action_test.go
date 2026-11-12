@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -76,7 +77,7 @@ func (f *nestedActionFixture) hostIssuer(t *testing.T, issued *atomic.Int64) Act
 
 // refusingWorker fails the test if it dispatches anything.
 func (f *nestedActionFixture) refusingWorker(t *testing.T, at time.Time) *ActionWorker {
-	worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		t.Fatal("an action worker dispatched a host call")
 		return nil, nil
 	}), models.WithClock(func() time.Time { return at }))

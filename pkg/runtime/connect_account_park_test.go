@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -25,7 +26,7 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(_ context.Context, req CredentialResolutionRequest) (map[string]string, error) {
 		resolutions = append(resolutions, req)
 		return map[string]string{"google": "token"}, nil
-	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		return map[string]interface{}{"sent": true}, nil
 	}))

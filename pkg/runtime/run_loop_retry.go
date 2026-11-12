@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Host retry (D13): a step whose host was unavailable is failed with
@@ -68,7 +70,7 @@ func (d *drive) hostUnavailable(ctx context.Context, st *stepState, cause error)
 		return exitResult(d.requeue(ctx, st, hostRetryAvailableAt(st.step, retries), runRequeueReasonHostUnavailable,
 			"The step host was unavailable; retrying shortly"))
 	}
-	return d.fail(ctx, st, LoopFailure{
+	return d.fail(ctx, st, agentrun.LoopFailure{
 		Kind: RunFailureKindExecution, Code: StepFailureHostUnavailable, Message: hostUnavailableMessage,
 	}, cause, StepFailureHostUnavailable)
 }

@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 )
@@ -89,7 +90,7 @@ func testAgentRunWorkerKeepsForegroundPastDeadline(t *testing.T, resolving bool)
 		var releaseOnce sync.Once
 		closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
 		var modelCalls atomic.Int32
-		producer := &workerTaskProducer{reply: func(ctx context.Context, _ int, _ StepInput) (StepOutput, error) {
+		producer := &workerTaskProducer{reply: func(ctx context.Context, _ int, _ agentrun.StepInput) (agentrun.StepOutput, error) {
 			modelCalls.Add(1)
 			if !resolving {
 				entered <- ctx
@@ -98,7 +99,7 @@ func testAgentRunWorkerKeepsForegroundPastDeadline(t *testing.T, resolving bool)
 			return answerStep("Reviewed release"), ctx.Err()
 		}}
 		resolve := workerTaskResolver(t, store, store, producer)
-		pool := workerTaskPoolWith(t, store, run.Scope, TurnRunnerResolverFunc(func(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		pool := workerTaskPoolWith(t, store, run.Scope, TurnRunnerResolverFunc(func(ctx context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			if resolving {
 				entered <- ctx
 				<-release
@@ -183,16 +184,16 @@ func TestAgentRunWorkerContinuationAbsorbsNativeTaskProposal(t *testing.T) {
 	}
 	modelCalls := 0
 	proposal := workerTaskProposal()
-	pool := workerTaskPool(t, store, run.Scope, &workerTaskProducer{reply: func(ctx context.Context, call int, in StepInput) (StepOutput, error) {
+	pool := workerTaskPool(t, store, run.Scope, &workerTaskProducer{reply: func(ctx context.Context, call int, in agentrun.StepInput) (agentrun.StepOutput, error) {
 		modelCalls = call
 		if call == 1 {
 			if _, err := store.PromoteConversationTask(ctx, ConversationTaskPromotionRequest{Scope: run.Scope, RunID: run.ID, Now: time.Now()}); err != nil {
-				return StepOutput{}, err
+				return agentrun.StepOutput{}, err
 			}
 			return startTaskStep(proposal.goal, proposal.ack), nil
 		}
 		if in.Run.ID != run.ID || in.Step.Sequence != 2 {
-			return StepOutput{}, errors.New("continuation lost original Run or step lineage")
+			return agentrun.StepOutput{}, errors.New("continuation lost original Run or step lineage")
 		}
 		return answerStep("Release review complete"), nil
 	}})
@@ -220,9 +221,9 @@ func TestAgentRunWorkerKeepsQueuedForegroundPastDeadlineWithSaturatedLimiter(t *
 		store := newTestKernelStore(t)
 		run, conversation, trigger := continuationLifecycleFixture(t, store, "limited-foreground")
 		var modelCalls atomic.Int32
-		pool := workerTaskPool(t, store, run.Scope, &workerTaskProducer{reply: func(context.Context, int, StepInput) (StepOutput, error) {
+		pool := workerTaskPool(t, store, run.Scope, &workerTaskProducer{reply: func(context.Context, int, agentrun.StepInput) (agentrun.StepOutput, error) {
 			modelCalls.Add(1)
-			return StepOutput{}, errors.New("worker should remain queued behind limiter")
+			return agentrun.StepOutput{}, errors.New("worker should remain queued behind limiter")
 		}})
 		limiter, err := workqueue.NewWorkerLimiter(1)
 		if err != nil {

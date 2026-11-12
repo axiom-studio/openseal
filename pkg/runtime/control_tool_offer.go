@@ -1,13 +1,15 @@
 package runtime
 
+import "github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+
 // controlToolOffered is the authority rule for each tool. Decision and review
 // Runs are offered only their own final tool, whatever else is set.
-func controlToolOffered(name ControlToolName, a ControlAuthority) bool {
-	mode := a.finalMode()
-	if mode == FinalModeDecision {
+func controlToolOffered(name ControlToolName, a agentrun.ControlAuthority) bool {
+	mode := a.EffectiveFinalMode()
+	if mode == agentrun.FinalModeDecision {
 		return name == ControlToolRequestDecision
 	}
-	if mode == FinalModeReview {
+	if mode == agentrun.FinalModeReview {
 		return name == ControlToolCompletionReview
 	}
 	switch name {

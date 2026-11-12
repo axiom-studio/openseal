@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
@@ -88,7 +89,7 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	}
 	// Explicit cancellation remains available. A later message in the thread
 	// of a terminal Run starts a new Run rather than reviving the old one.
-	if _, err := NewRunCommandService(store).CommandAgentRun(ctx, AgentRunCommandRequest{Scope: endpoint.Scope, RunID: a.ID, ExpectedRevision: a.Revision, Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "human"}}); err != nil {
+	if _, err := agentrun.NewRunCommandService(store).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: endpoint.Scope, RunID: a.ID, ExpectedRevision: a.Revision, Kind: agentrun.AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "human"}}); err != nil {
 		t.Fatal(err)
 	}
 	canceled, _ := store.GetAgentRun(ctx, endpoint.Scope, a.ID)

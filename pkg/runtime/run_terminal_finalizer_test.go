@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
@@ -99,7 +100,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 		t.Fatal(err)
 	}
 	dispatches := 0
-	finalizer := NewActionRunTerminalFinalizer(store, catalog, ActionDispatcherFunc(func(_ context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+	finalizer := agentrun.NewActionRunTerminalFinalizer(store, catalog, ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		if input.Bound.Action.Name != "release" || input.Arguments["sessionId"] != "agent-session" ||
 			input.Run.ID != terminal.ID {
@@ -171,7 +172,7 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 	}
 	store.actions.put(&ActionCall{ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: binding.ID, BindingRevision: 1, SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Output: map[string]interface{}{"sessionId": "old-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	dispatches := 0
-	finalizer := NewActionRunTerminalFinalizer(store, catalog, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	finalizer := agentrun.NewActionRunTerminalFinalizer(store, catalog, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		return map[string]interface{}{"released": true}, nil
 	}), models.WithClock(func() time.Time { return now.Add(time.Second) }))
@@ -215,7 +216,7 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 	pool := &AgentRunWorkerPool{
 		config:    AgentRunWorkerConfig{Scope: scope},
 		portfolio: store, now: time.Now,
-		runFinalizer: RunTerminalFinalizerFunc(func(_ context.Context, run *AgentRun) error {
+		runFinalizer: agentrun.RunTerminalFinalizerFunc(func(_ context.Context, run *AgentRun) error {
 			if seen[run.ID] {
 				return nil
 			}
@@ -280,8 +281,8 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	canceled, err := NewRunCommandService(store).CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: scope, RunID: accepted.Child.ID, ExpectedRevision: accepted.Child.Revision, Kind: AgentRunCommandCancel,
+	canceled, err := agentrun.NewRunCommandService(store).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+		Scope: scope, RunID: accepted.Child.ID, ExpectedRevision: accepted.Child.Revision, Kind: agentrun.AgentRunCommandCancel,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +313,7 @@ func TestTerminalRunReconciliationCancelsOrphanedDescendantsAfterRestart(t *test
 	ctx := t.Context()
 	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "terminal-cascade"}
-	service := NewRunCommandService(store)
+	service := agentrun.NewRunCommandService(store)
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
 	parentResult, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "parent", Source: RunSourceSchedule,
@@ -345,7 +346,7 @@ func TestTerminalRunReconciliationCancelsOrphanedDescendantsAfterRestart(t *test
 	// state and must repair descendants without relying on the original worker.
 	pool := &AgentRunWorkerPool{
 		config: AgentRunWorkerConfig{Scope: scope}, portfolio: store,
-		runCommands: NewRunCommandService(store), logger: zap.NewNop().Sugar(), now: time.Now,
+		runCommands: agentrun.NewRunCommandService(store), logger: zap.NewNop().Sugar(), now: time.Now,
 	}
 	pool.finalizeTerminalRun(ctx, failed)
 	child, err := store.GetAgentRun(ctx, scope, childResult.Run.ID)

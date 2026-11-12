@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestConversationLoopBindingSetsSeams(t *testing.T) {
@@ -21,7 +23,7 @@ func TestConversationLoopBindingSetsSeams(t *testing.T) {
 			t.Fatalf("the run-start preparer must stay first: %T", binding.Preparers[0])
 		}
 		authority := binding.Authority
-		if !authority.CanReact || !authority.CanAskUser || authority.ExternalChannelReply || authority.finalMode() != FinalModeDefault {
+		if !authority.CanReact || !authority.CanAskUser || authority.ExternalChannelReply || authority.EffectiveFinalMode() != agentrun.FinalModeDefault {
 			t.Fatalf("authority = %#v", authority)
 		}
 		want := conversationSystemSections(f.conversation, run, false)
@@ -39,13 +41,13 @@ func TestConversationLoopBindingSetsSeams(t *testing.T) {
 		// (Deterministic, decision, review) does not gain one, and a decision
 		// or review authority gets no chat flags.
 		chat := ConversationLoopAuthority{CanAskConversationQuestion: true, CanReact: true, ExternalChannelReply: true, ApprovalMode: ConversationApprovalAuto}
-		if got := chat.apply(ControlAuthority{AgentID: "agent-1"}); got.CanAskUser || got.CanReact || !got.ExternalChannelReply || got.ApprovalMode != ConversationApprovalAuto {
+		if got := chat.apply(agentrun.ControlAuthority{AgentID: "agent-1"}); got.CanAskUser || got.CanReact || !got.ExternalChannelReply || got.ApprovalMode != ConversationApprovalAuto {
 			t.Fatalf("deterministic authority = %#v", got)
 		}
-		if got := chat.apply(ControlAuthority{AgentID: "agent-1", FinalMode: FinalModeDecision}); got.CanAskUser || got.CanReact || got.ExternalChannelReply || got.ApprovalMode != "" {
+		if got := chat.apply(agentrun.ControlAuthority{AgentID: "agent-1", FinalMode: agentrun.FinalModeDecision}); got.CanAskUser || got.CanReact || got.ExternalChannelReply || got.ApprovalMode != "" {
 			t.Fatalf("decision authority = %#v", got)
 		}
-		if got := (ConversationLoopAuthority{}).apply(ControlAuthority{CanAskUser: true, CanReact: true}); got.CanAskUser || got.CanReact {
+		if got := (ConversationLoopAuthority{}).apply(agentrun.ControlAuthority{CanAskUser: true, CanReact: true}); got.CanAskUser || got.CanReact {
 			t.Fatalf("a chat without the ask right kept it: %#v", got)
 		}
 	})

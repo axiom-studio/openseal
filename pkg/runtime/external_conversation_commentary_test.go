@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.T) {
 	for _, provider := range []string{"slack", "webchat"} {
 		t.Run(provider, func(t *testing.T) {
 			fixture := newRunProgressWorkerFixture(t, provider, []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator})
-			worker, err := NewRunProgressAcknowledgementWorker(fixture.store, fixture.catalog, RunProgressAcknowledgementRendererFunc(func(context.Context, RunProgressAcknowledgementRequest) (string, error) {
+			worker, err := NewRunProgressAcknowledgementWorker(fixture.store, fixture.catalog, RunProgressAcknowledgementRendererFunc(func(context.Context, agentrun.RunProgressAcknowledgementRequest) (string, error) {
 				t.Fatal("public commentary triggered a second model call")
 				return "", nil
 			}), RunProgressAcknowledgementWorkerConfig{PageSize: 1})
@@ -64,7 +65,7 @@ func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.
 
 func TestExternalThreadStatusKeepsQueuedFollowupWorking(t *testing.T) {
 	fixture := newRunProgressWorkerFixture(t, "webchat", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator})
-	_, err := NewRunCommandService(fixture.store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+	_, err := agentrun.NewRunCommandService(fixture.store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: fixture.run.Scope, Kind: RunKindConversation, Owner: fixture.run.Owner, AssignedAgentID: fixture.run.AssignedAgentID,
 		Goal: "Continue in the same thread", Source: RunSourceChat, ConcurrencyKey: "thread-a", IdempotencyKey: "thread-followup", Actor: ActivityActor{Type: "service", ID: "channel"},
 	})

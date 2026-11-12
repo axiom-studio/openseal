@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // conversation_start_task (section 04 §7, A4): a settle-phase control tool
@@ -15,7 +17,7 @@ import (
 
 type startTaskHandler struct{}
 
-func (startTaskHandler) Spec(ControlAuthority) ControlToolSpec {
+func (startTaskHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Start one durable background task for substantial requested work and reply with a brief acknowledgment. " +
 			"Call it alone; it ends your reply to this message.",
@@ -52,7 +54,7 @@ func startTaskNewMessage() *ToolResult {
 		"A new message arrived before the task started; read it and decide again.", nil)
 }
 
-func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*startTaskArgs)
 	// Rule 1 (§7.2): the only tool call of its assistant entry. The loop
 	// refuses mixed entries before the inline phase; this keeps a resumed
@@ -113,7 +115,7 @@ func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlC
 // independent task ended the source Run in its transaction. A replayed
 // continuation means this Run was already promoted to background work: the
 // redundant call gets an error result and the Run continues as that work.
-func (x *ControlExecutor) startTaskResult(ctx context.Context, cc ControlContext, result *ConversationTaskResult) (ControlResult, error) {
+func (x *ControlExecutor) startTaskResult(ctx context.Context, cc agentrun.ControlContext, result *ConversationTaskResult) (ControlResult, error) {
 	if result == nil || result.Task == nil {
 		return ControlResult{}, errors.New("conversation task admission returned no task")
 	}

@@ -13,6 +13,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -575,13 +576,13 @@ func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 		Goal: "Inspect production health", Source: RunSourceManual, IdempotencyKey: "health-run",
 		Actor: ActivityActor{Type: "user", ID: "7"},
 	}
-	services := []*RunCommandService{NewRunCommandService(primary), NewRunCommandService(replica)}
-	results := make(chan *AgentRunCommandResult, len(services))
+	services := []*agentrun.RunCommandService{agentrun.NewRunCommandService(primary), agentrun.NewRunCommandService(replica)}
+	results := make(chan *agentrun.AgentRunCommandResult, len(services))
 	errorsFound := make(chan error, len(services))
 	var group sync.WaitGroup
 	for _, service := range services {
 		group.Add(1)
-		go func(service *RunCommandService) {
+		go func(service *agentrun.RunCommandService) {
 			defer group.Done()
 			result, createErr := service.CreateAgentRun(ctx, request)
 			if createErr != nil {
@@ -624,29 +625,29 @@ func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 		t.Fatalf("creation activity = %#v, %v", events, err)
 	}
 
-	paused, err := services[1].CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: AgentRunCommandPause,
+	paused, err := services[1].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: agentrun.AgentRunCommandPause,
 		Actor: ActivityActor{Type: "user", ID: "7"},
 	})
 	if err != nil || paused.Run.Status != AgentRunStatusPaused {
 		t.Fatalf("paused = %#v, %v", paused, err)
 	}
-	intervened, err := services[0].CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: scope, RunID: run.ID, ExpectedRevision: paused.Run.Revision, Kind: AgentRunCommandIntervene,
+	intervened, err := services[0].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: paused.Run.Revision, Kind: agentrun.AgentRunCommandIntervene,
 		Actor: ActivityActor{Type: "user", ID: "7"}, Instruction: "Check database saturation first",
 	})
 	if err != nil || len(intervened.Run.PendingInterventions) != 1 {
 		t.Fatalf("intervened = %#v, %v", intervened, err)
 	}
-	resumed, err := services[1].CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: scope, RunID: run.ID, ExpectedRevision: intervened.Run.Revision, Kind: AgentRunCommandResume,
+	resumed, err := services[1].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: intervened.Run.Revision, Kind: agentrun.AgentRunCommandResume,
 		Actor: ActivityActor{Type: "user", ID: "7"},
 	})
 	if err != nil || resumed.Run.Status != AgentRunStatusQueued {
 		t.Fatalf("resumed = %#v, %v", resumed, err)
 	}
-	canceled, err := services[0].CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: scope, RunID: run.ID, ExpectedRevision: resumed.Run.Revision, Kind: AgentRunCommandCancel,
+	canceled, err := services[0].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+		Scope: scope, RunID: run.ID, ExpectedRevision: resumed.Run.Revision, Kind: agentrun.AgentRunCommandCancel,
 		Actor: ActivityActor{Type: "user", ID: "7"},
 	})
 	if err != nil || canceled.Run.Status != AgentRunStatusCanceled || canceled.Run.CompletedAt == nil {

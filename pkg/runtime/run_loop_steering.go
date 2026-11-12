@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Steering (SPEC §3.4, D8, A10). consumeSteering is the only consumer of the
@@ -21,7 +23,7 @@ const stepContextAttempts = 4
 // stepSteering is what consumeSteering decided for one step.
 type stepSteering struct {
 	// Plan goes to every StepPreparer.
-	Plan SteeringPlan
+	Plan agentrun.SteeringPlan
 	// Entries are the user entries for the unconsumed prefix, in order.
 	Entries []*SessionEntry
 	// Through is the cursor value the append writes: len(PendingInterventions)
@@ -77,7 +79,7 @@ func consumeSteering(run *AgentRun, step *AgentTurn, session *AgentSession) (ste
 	}
 	through := len(run.PendingInterventions)
 	out := stepSteering{
-		Plan:    SteeringPlan{Prefix: append([]AgentRunIntervention(nil), prefix...)},
+		Plan:    agentrun.SteeringPlan{Prefix: append([]AgentRunIntervention(nil), prefix...)},
 		Through: &through,
 	}
 	var stepSequence int64
@@ -168,7 +170,7 @@ func steeringAuthorType(kind string) string {
 // entries in preparer order, then the steering entries no preparer already
 // carried, the cursor and the (single) watermark CAS. It returns ok=false
 // when there is nothing to write. EarlyFinal is the first preparer's.
-func stepContextAppendRequest(run *AgentRun, session *AgentSession, workerID string, now time.Time, steering stepSteering, prepared []*StepContextAppend) (req AppendAgentSessionEntriesRequest, early *LoopFinal, ok bool, err error) {
+func stepContextAppendRequest(run *AgentRun, session *AgentSession, workerID string, now time.Time, steering stepSteering, prepared []*agentrun.StepContextAppend) (req AppendAgentSessionEntriesRequest, early *agentrun.LoopFinal, ok bool, err error) {
 	req = AppendAgentSessionEntriesRequest{
 		Scope:                       run.Scope,
 		SessionID:                   session.ID,
@@ -215,12 +217,12 @@ func stepContextAppendRequest(run *AgentRun, session *AgentSession, workerID str
 
 // stepContextResult is the outcome of phase 3.
 type stepContextResult struct {
-	Steering SteeringPlan
+	Steering agentrun.SteeringPlan
 	// Append is nil when nothing was written.
 	Append *AppendAgentSessionEntriesResult
 	// Session is the session after the append (or as loaded).
 	Session    *AgentSession
-	EarlyFinal *LoopFinal
+	EarlyFinal *agentrun.LoopFinal
 	// CursorMoved means the append moved the Run's cursor and so bumped its
 	// revision: the caller's Run copy is stale and must be reloaded before the
 	// next revision-fenced Run write.
@@ -231,7 +233,7 @@ type stepContextResult struct {
 // append. ErrChannelWatermarkMoved re-reads the session and re-runs the
 // preparers; after stepContextAttempts it is returned (the loop requeues the
 // Run as host-unavailable). in.Run must be the Run as read for this step.
-func appendStepContext(ctx context.Context, store AgentSessionStore, in StepInput, preparers []StepPreparer, now time.Time) (*stepContextResult, error) {
+func appendStepContext(ctx context.Context, store AgentSessionStore, in agentrun.StepInput, preparers []agentrun.StepPreparer, now time.Time) (*stepContextResult, error) {
 	if in.Run == nil || in.Session == nil {
 		return nil, errors.New("step context: run and session are required")
 	}
@@ -240,7 +242,7 @@ func appendStepContext(ctx context.Context, store AgentSessionStore, in StepInpu
 		return nil, err
 	}
 	for attempt := 1; ; attempt++ {
-		prepared := make([]*StepContextAppend, 0, len(preparers))
+		prepared := make([]*agentrun.StepContextAppend, 0, len(preparers))
 		for _, preparer := range preparers {
 			part, err := preparer.BeforeStep(ctx, in, steering.Plan)
 			if err != nil {

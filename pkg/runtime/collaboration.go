@@ -15,6 +15,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/google/uuid"
@@ -553,7 +554,7 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 }
 
 func validateTaskDelegationSource(ctx context.Context, store PortfolioStore, source *AgentRun) error {
-	task, err := persistedTaskWorkOrigin(ctx, store, source)
+	task, err := agentrun.PersistedTaskWorkOrigin(ctx, store, source)
 	if err != nil {
 		return err
 	}
@@ -700,14 +701,14 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 			}
 		}
 		child := buildCollaborationChildRun(source, updated, now, s.newID())
-		task, err := persistedConversationTaskSchedulingOrigin(ctx, s.runs, source, s.store.GetAgentRequest)
+		task, err := agentrun.PersistedConversationTaskSchedulingOrigin(ctx, s.runs, source, s.store.GetAgentRequest)
 		if err != nil {
 			return nil, err
 		}
 		if task != nil && task.Mode == ConversationTaskModeContinuation {
 			child.Kind = RunKindAgentWork
 		}
-		entrypoint, err := requestedAcceptedChildEntrypoint(updated.SharedContext)
+		entrypoint, err := agentrun.RequestedAcceptedChildEntrypoint(updated.SharedContext)
 		if err != nil {
 			return nil, err
 		}
@@ -720,7 +721,7 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 			Budget: child.Budget, Policy: child.Policy,
 		}
 		inherit := entrypoint != "" && child.AssignedAgentID == source.AssignedAgentID && entrypoint == source.Entrypoint
-		if err := prepareAcceptedChildRun(ctx, source, &childRequest, s.executionPreparer, inherit); err != nil {
+		if err := agentrun.PrepareAcceptedChildRun(ctx, source, &childRequest, s.executionPreparer, inherit); err != nil {
 			return nil, err
 		}
 		child.Entrypoint, child.Context, child.Plan = childRequest.Entrypoint, childRequest.Context, childRequest.Plan
@@ -784,7 +785,7 @@ func (s *CollaborationService) validateDecisionRunAuthority(ctx context.Context,
 		run.Owner != (ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID}) {
 		return ErrAgentRequestUnauthorized
 	}
-	inbox, _ := run.Context[AgentRequestInboxContextKey].(map[string]interface{})
+	inbox, _ := run.Context[agentrun.AgentRequestInboxContextKey].(map[string]interface{})
 	inboxRequestID, _ := inbox["requestId"].(string)
 	if strings.TrimSpace(inboxRequestID) != request.ID {
 		return ErrAgentRequestUnauthorized

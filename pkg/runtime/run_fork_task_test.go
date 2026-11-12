@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -34,8 +35,8 @@ func claimedForkTaskFixture(t *testing.T) (*sqlite.Store, *AgentRun, *Conversati
 	return store, claimed, accepted
 }
 
-func taskForkRequest(source *AgentRun, branches ...RunForkBranch) CreateRunForkRequest {
-	return CreateRunForkRequest{
+func taskForkRequest(source *AgentRun, branches ...agentrun.RunForkBranch) agentrun.CreateRunForkRequest {
+	return agentrun.CreateRunForkRequest{
 		Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 		WorkerID: source.LeaseOwner, ForkID: "task-research",
 		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast}, Branches: branches,
@@ -44,9 +45,9 @@ func taskForkRequest(source *AgentRun, branches ...RunForkBranch) CreateRunForkR
 
 func TestRunForkTaskSameAgentInheritsCanonicalContext(t *testing.T) {
 	store, source, accepted := claimedForkTaskFixture(t)
-	result, err := NewRunForkCoordinator(store).Create(t.Context(), taskForkRequest(source,
-		RunForkBranch{ID: "omitted", Goal: "Research omitted target", Context: map[string]interface{}{"release": "omitted-release"}, Budget: &BudgetPolicy{}},
-		RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research explicit same target", Context: map[string]interface{}{"release": "same-release"}, Budget: &BudgetPolicy{}},
+	result, err := agentrun.NewRunForkCoordinator(store).Create(t.Context(), taskForkRequest(source,
+		agentrun.RunForkBranch{ID: "omitted", Goal: "Research omitted target", Context: map[string]interface{}{"release": "omitted-release"}, Budget: &BudgetPolicy{}},
+		agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research explicit same target", Context: map[string]interface{}{"release": "same-release"}, Budget: &BudgetPolicy{}},
 	))
 	if err != nil || result == nil || len(result.Children) != 2 {
 		t.Fatalf("create task fork: %#v %v", result, err)
@@ -84,10 +85,10 @@ func TestRunForkTaskSameAgentInheritsCanonicalContext(t *testing.T) {
 func TestRunForkTaskRejectsForeignTargetBeforeCommittingDependencies(t *testing.T) {
 	store, source, accepted := claimedForkTaskFixture(t)
 	req := taskForkRequest(source,
-		RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research same target", Budget: &BudgetPolicy{}},
-		RunForkBranch{ID: "foreign", AssignedAgentID: "other-agent", Goal: "Research foreign target", Context: map[string]interface{}{ConversationTaskContextKey: accepted.Task.ID}, Budget: &BudgetPolicy{}},
+		agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research same target", Budget: &BudgetPolicy{}},
+		agentrun.RunForkBranch{ID: "foreign", AssignedAgentID: "other-agent", Goal: "Research foreign target", Context: map[string]interface{}{ConversationTaskContextKey: accepted.Task.ID}, Budget: &BudgetPolicy{}},
 	)
-	result, err := NewRunForkCoordinator(store).Create(t.Context(), req)
+	result, err := agentrun.NewRunForkCoordinator(store).Create(t.Context(), req)
 	if !errors.Is(err, ErrInvalidConversationTask) || result != nil {
 		t.Fatalf("foreign task fork was accepted: %#v %v", result, err)
 	}
@@ -152,8 +153,8 @@ func TestRunForkTaskRejectsBranchProvenanceReplacement(t *testing.T) {
 	for _, key := range []string{ConversationTaskContextKey, conversationRunContextConversationID, conversationRunContextTriggerID,
 		"threadRootMessageId", runReportingContextRootRunID, runReportingContextMilestones} {
 		t.Run(key, func(t *testing.T) {
-			_, err := NewRunForkCoordinator(store).Create(t.Context(), taskForkRequest(source,
-				RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research", Context: map[string]interface{}{key: "forged"}, Budget: &BudgetPolicy{}},
+			_, err := agentrun.NewRunForkCoordinator(store).Create(t.Context(), taskForkRequest(source,
+				agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research", Context: map[string]interface{}{key: "forged"}, Budget: &BudgetPolicy{}},
 			))
 			if !errors.Is(err, ErrInvalidConversationTask) {
 				t.Fatalf("task provenance replacement was accepted: %v", err)
@@ -181,10 +182,10 @@ func TestRunForkTaskRejectsContextOnlySelfRoot(t *testing.T) {
 	if err != nil || claimed == nil {
 		t.Fatalf("claim fake root: %#v %v", claimed, err)
 	}
-	_, err = NewRunForkCoordinator(store).Create(t.Context(), taskForkRequest(claimed,
-		RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research"},
+	_, err = agentrun.NewRunForkCoordinator(store).Create(t.Context(), taskForkRequest(claimed,
+		agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research"},
 	))
-	if !errors.Is(err, ErrConversationTaskNotFound) {
+	if !errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 		t.Fatalf("context-only task hint became authority: %v", err)
 	}
 	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: source.Scope, ParentRunID: source.ID, Limit: 10})
@@ -195,13 +196,13 @@ func TestRunForkTaskRejectsContextOnlySelfRoot(t *testing.T) {
 
 func TestRunForkTaskSourceCascadeIsIndependentAndWorkCascadeOwnsChildren(t *testing.T) {
 	store, source, accepted := claimedForkTaskFixture(t)
-	result, err := NewRunForkCoordinator(store).Create(t.Context(), taskForkRequest(source,
-		RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research", Budget: &BudgetPolicy{}},
+	result, err := agentrun.NewRunForkCoordinator(store).Create(t.Context(), taskForkRequest(source,
+		agentrun.RunForkBranch{ID: "same", AssignedAgentID: source.AssignedAgentID, Goal: "Research", Budget: &BudgetPolicy{}},
 	))
 	if err != nil {
 		t.Fatal(err)
 	}
-	commands := NewRunCommandService(store)
+	commands := agentrun.NewRunCommandService(store)
 	if err := commands.CascadeTerminalRun(t.Context(), accepted.SourceRun); err != nil {
 		t.Fatal(err)
 	}
@@ -213,8 +214,8 @@ func TestRunForkTaskSourceCascadeIsIndependentAndWorkCascadeOwnsChildren(t *test
 	if err != nil || child.Status != AgentRunStatusQueued {
 		t.Fatalf("source completion canceled task fork: %#v %v", child, err)
 	}
-	if _, err := commands.CommandAgentRun(t.Context(), AgentRunCommandRequest{
-		Scope: source.Scope, RunID: root.ID, ExpectedRevision: root.Revision, Kind: AgentRunCommandCancel,
+	if _, err := commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
+		Scope: source.Scope, RunID: root.ID, ExpectedRevision: root.Revision, Kind: agentrun.AgentRunCommandCancel,
 		Actor: ActivityActor{Type: "user", ID: accepted.Task.AuthenticatedActor.ID}, Summary: "Stop the task",
 	}); err != nil {
 		t.Fatal(err)

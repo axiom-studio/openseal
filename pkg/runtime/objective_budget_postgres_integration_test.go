@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
@@ -40,7 +41,7 @@ func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
 		go func(index int, store *postgres.Store) {
 			defer wait.Done()
 			<-start
-			_, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+			_, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 				Scope: scope, ObjectiveID: objective.ID, Owner: objective.Owner, AssignedAgentID: objective.Owner.ID,
 				Goal: "Replica work", Budget: &BudgetPolicy{MaxTurns: 6}, IdempotencyKey: "replica-" + string(rune('a'+index)),
 			})

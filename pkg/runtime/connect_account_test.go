@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -111,7 +112,7 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 	dispatched := false
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
-	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatched = true
 		return map[string]interface{}{}, nil
 	}))
@@ -144,7 +145,7 @@ func TestParkedCallReleasesExternalOperation(t *testing.T) {
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
-	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{}, nil
 	}))
 	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
@@ -165,7 +166,7 @@ func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
-	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		t.Fatal("a shared gap must not dispatch")
 		return nil, nil
 	}))
@@ -189,7 +190,7 @@ func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
-	worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		t.Fatal("a no_person gap must not dispatch")
 		return nil, nil
 	}))
@@ -233,7 +234,7 @@ func TestConnectAppKeyMatchesHostKey(t *testing.T) {
 // parked setup task.
 func TestTaskSetupActionMatchesPreviousBundledVersion(t *testing.T) {
 	run := &AgentRun{Scope: Scope{Kind: "tenant", ID: "one"}, ID: "run"}
-	call := &ActionCall{Scope: run.Scope, RunID: run.ID, DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: "1.6.0", Action: SkillActionRequestSetup}
+	call := &ActionCall{Scope: run.Scope, RunID: run.ID, DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: "1.6.0", Action: agentrun.SkillActionRequestSetup}
 	if !taskSetupActionMatches(call, run, "agent") {
 		t.Fatal("a 1.6.0 request_setup receipt no longer verifies")
 	}

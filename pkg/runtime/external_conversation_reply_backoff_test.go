@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -32,7 +33,7 @@ func TestExternalConversationReplyWorkerBacksOffAndStopsFailingItems(t *testing.
 	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend,
 	})
-	runs := NewRunCommandService(store)
+	runs := agentrun.NewRunCommandService(store)
 	activity := NewRunActivityService(store, store)
 	newRun := func(key string, finish bool) *AgentRun {
 		created, err := runs.CreateAgentRun(ctx, CreateAgentRunRequest{

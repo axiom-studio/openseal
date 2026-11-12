@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
 )
@@ -62,18 +63,18 @@ type ActionWorkerPool struct {
 	now       func() time.Time
 }
 
-func NewActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
+func NewActionWorkerPool(store KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
 	return newActionWorkerPool(store, catalog, credentials, nil, dispatcher, logger, config, opts...)
 }
 
-func NewActionCredentialLeaseWorkerPool(store KernelStore, catalog ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
+func NewActionCredentialLeaseWorkerPool(store KernelStore, catalog agentrun.ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
 	if issuer == nil {
 		return nil, errors.New("action credential lease issuer is required")
 	}
 	return newActionWorkerPool(store, catalog, nil, issuer, dispatcher, logger, config, opts...)
 }
 
-func newActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
+func newActionWorkerPool(store KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, issuer ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig, opts ...models.ServiceOption) (*ActionWorkerPool, error) {
 	if store == nil || catalog == nil || dispatcher == nil {
 		return nil, errors.New("action store, catalog, and dispatcher are required")
 	}

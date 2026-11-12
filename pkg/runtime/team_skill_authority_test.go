@@ -6,6 +6,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -88,7 +89,7 @@ func TestTeamSkillActionValidatorKeepsMemberConnectionsOutOfTeamRuns(t *testing.
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	run := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, AssignedAgentID: "analyst"}
 	validate := func(run *AgentRun, binding *skill.Binding, action capability.Action) error {
-		_, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: run, Bound: &skill.BoundAction{Binding: binding, Action: action}})
+		_, err := validator.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: run, Bound: &skill.BoundAction{Binding: binding, Action: action}})
 		return err
 	}
 	teamForum := &skill.Binding{Scope: skillScope, DeploymentID: "research", SkillID: "forum", SkillVersion: "1"}
@@ -142,14 +143,14 @@ func TestTeamSkillActionDispatcherStopsRevokedRosterAuthority(t *testing.T) {
 		Action:  capability.Action{Name: "search", Risk: capability.RiskLevelRead},
 	}
 	dispatched := 0
-	dispatcher, err := NewTeamSkillActionDispatcher(catalog, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	dispatcher, err := NewTeamSkillActionDispatcher(catalog, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatched++
 		return map[string]interface{}{"ok": true}, nil
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{Run: run, Bound: bound}); err != nil {
+	if _, err = dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: bound}); err != nil {
 		t.Fatal(err)
 	}
 	if dispatched != 1 {
@@ -159,7 +160,7 @@ func TestTeamSkillActionDispatcherStopsRevokedRosterAuthority(t *testing.T) {
 	// Simulate removal after proposal/approval but before the worker reaches the
 	// transport. The final authority check must fail closed without invoking it.
 	catalog.deployment.Roster = nil
-	if _, err = dispatcher.DispatchAction(t.Context(), ActionDispatchInput{Run: run, Bound: bound}); err == nil {
+	if _, err = dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: bound}); err == nil {
 		t.Fatal("expected revoked roster membership to stop dispatch")
 	}
 	if dispatched != 1 {

@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // agent_request_decision and agent_request_review (section 04 §11.7): the
@@ -48,7 +49,7 @@ func requestFinalSchema(decisions []string, messageDescription string) map[strin
 
 type requestDecisionHandler struct{}
 
-func (requestDecisionHandler) Spec(ControlAuthority) ControlToolSpec {
+func (requestDecisionHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Record your decision on the incoming request and finish this run. Call it alone.",
 		InputSchema: requestFinalSchema(
@@ -62,7 +63,7 @@ func (requestDecisionHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[requestFinalArgs](raw)
 }
 
-func (requestDecisionHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (requestDecisionHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	args, ok := cc.Arguments.(*requestFinalArgs)
 	if !ok || args == nil {
 		return ControlResult{}, errors.New("agent_request_decision arguments were not decoded")
@@ -74,7 +75,7 @@ func (requestDecisionHandler) Run(ctx context.Context, x *ControlExecutor, cc Co
 
 type completionReviewHandler struct{}
 
-func (completionReviewHandler) Spec(ControlAuthority) ControlToolSpec {
+func (completionReviewHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Record your review of the delegated work and finish this run. Call it alone.",
 		InputSchema: requestFinalSchema([]string{"approve", "reject"}, "A concise evidence-based reason."),
@@ -85,7 +86,7 @@ func (completionReviewHandler) Decode(raw json.RawMessage) (interface{}, error) 
 	return models.DecodeControlInto[requestFinalArgs](raw)
 }
 
-func (completionReviewHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (completionReviewHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	args, ok := cc.Arguments.(*requestFinalArgs)
 	if !ok || args == nil {
 		return ControlResult{}, errors.New("agent_request_review arguments were not decoded")
@@ -108,7 +109,7 @@ func requestFinalOutput(key string, args *requestFinalArgs) map[string]interface
 // tool entry stays open; the loop marks it delivered and completes the Run
 // with Output), or records a decision_invalid rejection the model corrects.
 // Rejections count toward the loop's final-rejection bound like any other.
-func (x *ControlExecutor) acceptRequestFinal(ctx context.Context, cc ControlContext, output map[string]interface{}, message string, parseErr error) (ControlResult, error) {
+func (x *ControlExecutor) acceptRequestFinal(ctx context.Context, cc agentrun.ControlContext, output map[string]interface{}, message string, parseErr error) (ControlResult, error) {
 	reason := ""
 	switch {
 	case parseErr != nil:
@@ -121,7 +122,7 @@ func (x *ControlExecutor) acceptRequestFinal(ctx context.Context, cc ControlCont
 	if reason != "" {
 		return x.rejectFinal(ctx, cc, &finalAnswerDraft{}, &finalAnswerRejection{Code: requestDecisionInvalidCode, Message: reason})
 	}
-	final := &FinalAnswer{
+	final := &agentrun.FinalAnswer{
 		StepID: cc.Entry.StepID, ToolEntryID: cc.Entry.ID, ToolCallID: cc.Entry.ToolCallID,
 		Answer: message, Output: output,
 	}

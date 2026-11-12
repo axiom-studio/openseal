@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -97,7 +98,7 @@ func TestRunSkillDependencyPinsQueuedInvocationBeforeFirstActionAcrossStores(t *
 		}
 		// Future deterministic execution still sees its original exact version.
 		producer, _ := NewCapabilityInvocationStepProducer([]capability.ModelAction{{Name: "reader.read", SkillID: "reader", Version: "1.0.0", Action: "read", BindingID: "account", BindingRevision: 1}}, store)
-		outcome, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step", Sequence: 1}})
+		outcome, err := producer.Produce(t.Context(), agentrun.StepInput{Run: run, Step: &AgentTurn{ID: "step", Sequence: 1}})
 		if err != nil || len(outcome.ToolCalls) != 1 {
 			t.Fatalf("preserved invocation cannot continue: %#v %v", outcome, err)
 		}

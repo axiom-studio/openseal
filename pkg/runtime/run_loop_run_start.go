@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // The Run-start preparer (SPEC §2.4 Preparers, first in the list). It turns
@@ -41,9 +43,9 @@ func newRunStartPreparer(sessions AgentSessionStore, actions ActionStore) *runSt
 	return &runStartPreparer{sessions: sessions, actions: actions}
 }
 
-var _ StepPreparer = (*runStartPreparer)(nil)
+var _ agentrun.StepPreparer = (*runStartPreparer)(nil)
 
-func (p *runStartPreparer) BeforeStep(ctx context.Context, in StepInput, _ SteeringPlan) (*StepContextAppend, error) {
+func (p *runStartPreparer) BeforeStep(ctx context.Context, in agentrun.StepInput, _ agentrun.SteeringPlan) (*agentrun.StepContextAppend, error) {
 	run, session, step := in.Run, in.Session, in.Step
 	if p == nil || run == nil || session == nil || step == nil {
 		return nil, nil
@@ -75,7 +77,7 @@ func (p *runStartPreparer) BeforeStep(ctx context.Context, in StepInput, _ Steer
 	if len(fresh) == 0 {
 		return nil, nil
 	}
-	return &StepContextAppend{Entries: fresh}, nil
+	return &agentrun.StepContextAppend{Entries: fresh}, nil
 }
 
 // holds reports whether the session already has the entry: on the loaded
@@ -169,7 +171,7 @@ func runStartSetupPendingNote(run *AgentRun, sessionID string, step *AgentTurn, 
 	for index := len(views) - 1; index >= 0; index-- {
 		view := views[index]
 		if view.SkillID != SkillManagementSkillID || view.Status != string(ActionCallStatusSucceeded) ||
-			view.Action != SkillActionRequestSetup && view.Action != SkillActionListSetupRequests {
+			view.Action != agentrun.SkillActionRequestSetup && view.Action != SkillActionListSetupRequests {
 			continue
 		}
 		id := pendingSetupIn(run, view, run.PendingInterventions)

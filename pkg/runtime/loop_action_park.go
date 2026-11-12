@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // governedParker decides where a Run with open governed tool entries waits:
@@ -387,8 +389,8 @@ func (p *governedParker) settledText(ctx context.Context, run *AgentRun, call *A
 			return ""
 		}
 		switch call.Action {
-		case SkillActionRequestCredential:
-			id := interactionRequestID(call, "credentialRequest")
+		case agentrun.SkillActionRequestCredential:
+			id := agentrun.InteractionRequestID(call, "credentialRequest")
 			if id == "" || p.credentials == nil {
 				return ""
 			}
@@ -397,8 +399,8 @@ func (p *governedParker) settledText(ctx context.Context, run *AgentRun, call *A
 				return ""
 			}
 			return CredentialRequestResolutionInstruction(request)
-		case SkillActionRequestConnection:
-			id := interactionRequestID(call, "setupRequest")
+		case agentrun.SkillActionRequestConnection:
+			id := agentrun.InteractionRequestID(call, "setupRequest")
 			if id == "" || p.setups == nil {
 				return ""
 			}

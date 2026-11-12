@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
@@ -19,7 +21,7 @@ func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	deadline := child.CreatedAt.Add(5 * time.Minute) // the trial timeout
-	if wake == nil || wake.Type != AgentTrialWakeType || wake.Reference != child.ID || wake.WakeAt == nil ||
+	if wake == nil || wake.Type != agentrun.AgentTrialWakeType || wake.Reference != child.ID || wake.WakeAt == nil ||
 		!wake.WakeAt.Equal(deadline) || summary != "Trying the draft" {
 		t.Fatalf("wake = %#v %q", wake, summary)
 	}
@@ -42,7 +44,7 @@ func TestAgentTrialFinalizerDeliversReceiptAndQueuesParent(t *testing.T) {
 	child := f.endChild(t, AgentRunStatusCompleted, map[string]interface{}{finalOutputReportKey: "I would apologise and refund."}, "")
 	var woken []Scope
 	nextCalls := 0
-	next := RunTerminalFinalizerFunc(func(context.Context, *AgentRun) error { nextCalls++; return nil })
+	next := agentrun.RunTerminalFinalizerFunc(func(context.Context, *AgentRun) error { nextCalls++; return nil })
 	finalizer := NewAgentTrialFinalizer(f.store, next, func(scope Scope) { woken = append(woken, scope) })
 	for range 2 {
 		if err := finalizer.FinalizeRun(context.Background(), child); err != nil {
@@ -108,7 +110,7 @@ func TestAgentTrialTimerWakeCancelsRunningChild(t *testing.T) {
 	deadline := agentTrialDeadline(f.child)
 
 	// The timer wakes the waiting parent only at the deadline.
-	wakes := NewAgentRunWakeService(f.store, f.store)
+	wakes := agentrun.NewAgentRunWakeService(f.store, f.store)
 	early, err := wakes.WakeDueTimers(ctx, f.scope, deadline.Add(-time.Second))
 	if err != nil || len(early.Runs) != 0 || early.NextWakeAt == nil || !early.NextWakeAt.Equal(deadline) {
 		t.Fatalf("early wake = %#v, %v", early, err)

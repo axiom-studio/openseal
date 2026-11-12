@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 // RunContextSessionKey is reserved for a kernel-created durable session
 // reference. Ordinary request handlers must reject caller-authored context

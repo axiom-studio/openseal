@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -22,7 +23,7 @@ func (s *countingAgentRunClaimStore) ClaimNextAgentRunWithDecision(ctx context.C
 
 func TestAgentRunWorkerPoolCoalescesIdleClaimPolling(t *testing.T) {
 	store := &countingAgentRunClaimStore{Store: newTestKernelStore(t)}
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return nil, errors.New("unexpected resolver call")
 	}), nil, AgentRunWorkerConfig{
 		Scope: Scope{Kind: "tenant", ID: "idle"}, Concurrency: 8,

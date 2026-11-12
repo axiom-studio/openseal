@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"golang.org/x/mod/semver"
 )
@@ -29,7 +30,7 @@ type skillSetupArguments struct {
 }
 
 func skillSetupAction() skill.Action {
-	return skill.Action{Name: SkillActionRequestSetup,
+	return skill.Action{Name: agentrun.SkillActionRequestSetup,
 		Description: "Ask the user to install, configure, or reauthorize an exact Skill through a durable in-chat setup form. Use discover first and copy the returned id and sourceIdentity exactly; publisher namespace spelling does not authorize a target. Request skillVersion latest; the host resolves and records the authorized current version. A verified existing account retains its binding ID and revision, while an older executable version requires a separately reviewed canonical binding upgrade before configuration or reauthorization can be completed. For example, configure the discovered Skill with skillVersion latest and omit requiredActions for a general account connection. For a general connection request, omit requiredActions, enablePrompt, and bindingId unless the user requested specific operations or a verified existing binding. Compatibility requirements and configuration fields are not action names. A successful pending request needs the user to complete its form. In an independent conversation task, preserve the unfinished work with waiting_for_event and wakeCondition type skill_setup referencing the exact saved setupRequest.id. In an ordinary foreground reply, finish without polling. If the result is refused, explain the reason to the user; do not repeat the same setup in this reply. A missing website login or payment card for the live browser is not Skill setup: use request_credential instead. A service in the app catalog (find_apps) is connected with request_connection, not Skill setup. This action creates a request only; it does not grant access, install anything, or verify a connection. Never request secrets in chat or invent authorization URLs. Use reauthorize for an existing binding whose credentials need replacement. Use configure to connect an installed Skill or change its configuration. Use install for a verified discoverable Skill that needs installation. With targetAgentId, the card still appears in this chat and the account is saved to that Agent.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
@@ -68,7 +69,7 @@ func decodeSkillSetupArguments(arguments map[string]interface{}) (skillSetupArgu
 // requestSkillSetup saves a setup card in the run's chat (under umbrella)
 // for owner, the Agent or Team the account is saved to: the umbrella, or
 // the Agent a builder names with targetAgentId.
-func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, input ActionDispatchInput, run *AgentRun, member string, umbrella, owner ObjectiveOwner) (map[string]interface{}, error) {
+func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun, member string, umbrella, owner ObjectiveOwner) (map[string]interface{}, error) {
 	a, err := decodeSkillSetupArguments(input.Arguments)
 	if err != nil {
 		return nil, err
@@ -126,7 +127,7 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		if call.Status == ActionCallStatusSucceeded && !interactionRequestRefused(call) {
 			continue
 		}
-		if call.ID == input.Call.ID || call.DeploymentID != member || call.Action != SkillActionRequestSetup || call.SkillID != SkillManagementSkillID {
+		if call.ID == input.Call.ID || call.DeploymentID != member || call.Action != agentrun.SkillActionRequestSetup || call.SkillID != SkillManagementSkillID {
 			continue
 		}
 		previous, decodeErr := decodeSkillSetupArguments(call.Arguments)

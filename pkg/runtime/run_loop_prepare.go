@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // catalogModelStepPreparer builds the model request of one step of a catalog
@@ -60,7 +61,7 @@ type catalogModelStepPreparer struct {
 	controls controlRegistry // loopControlRegistry; tests substitute their own
 }
 
-var _ ModelStepPreparer = (*catalogModelStepPreparer)(nil)
+var _ agentrun.ModelStepPreparer = (*catalogModelStepPreparer)(nil)
 
 func newCatalogModelStepPreparer(config catalogModelStepPreparerConfig) *catalogModelStepPreparer {
 	config.Render.ImageInput = config.ImageInput
@@ -82,7 +83,7 @@ func (p *catalogModelStepPreparer) ModelCredential() *capability.CredentialRefer
 // CapabilitySet is the visible capability set of the step: the binding's
 // authorized catalog with the loads on the session path. The tool executor
 // builds the same set to run load_capabilities and search_capabilities.
-func (p *catalogModelStepPreparer) CapabilitySet(in StepInput) *CapabilitySet {
+func (p *catalogModelStepPreparer) CapabilitySet(in agentrun.StepInput) *CapabilitySet {
 	catalog := CapabilityCatalog{SkillPrompts: p.config.SkillPrompts, HostTools: p.config.HostTools}
 	if in.Run != nil {
 		catalog.Scope = in.Run.Scope
@@ -98,7 +99,7 @@ func (p *catalogModelStepPreparer) CapabilitySet(in StepInput) *CapabilitySet {
 	return NewPathCapabilitySet(catalog, in.Path, p.config.Capabilities)
 }
 
-func (p *catalogModelStepPreparer) PrepareModelStep(ctx context.Context, in StepInput) (ModelStepRequest, error) {
+func (p *catalogModelStepPreparer) PrepareModelStep(ctx context.Context, in agentrun.StepInput) (ModelStepRequest, error) {
 	if in.Run == nil || in.Step == nil || in.Binding == nil {
 		return ModelStepRequest{}, errors.New("prepare model step: run, step and binding are required")
 	}
@@ -133,7 +134,7 @@ func (p *catalogModelStepPreparer) PrepareModelStep(ctx context.Context, in Step
 	default:
 		req.SessionID = in.Step.SessionID
 	}
-	if in.Mode == StepModeExplainFailure {
+	if in.Mode == agentrun.StepModeExplainFailure {
 		req.Purpose = ModelStepPurposeExplanation
 		req.Tools = nil
 		req.Stream.FinalAnswerTool = ""
@@ -154,12 +155,12 @@ func (p *catalogModelStepPreparer) PrepareModelStep(ctx context.Context, in Step
 // tools in HostToolSpecs order), then core (governed actions of the pinned
 // set, sorted by tool name). The loaded group comes from the session path
 // (applySurfaces): each tool exactly as its load froze it.
-func (p *catalogModelStepPreparer) tools(binding *TurnRunnerBinding, set *CapabilitySet) []ModelStepTool {
+func (p *catalogModelStepPreparer) tools(binding *agentrun.TurnRunnerBinding, set *CapabilitySet) []ModelStepTool {
 	var harness, core []ModelStepTool
 	for _, spec := range p.controls.specs(binding.Authority) {
 		harness = append(harness, spec.ModelStepTool())
 	}
-	if !binding.Authority.offersCapabilities() {
+	if !binding.Authority.OffersCapabilities() {
 		return harness
 	}
 	if set.Offered() {
@@ -215,7 +216,7 @@ func governedModelStepTool(action capability.ModelAction, name string, group Mod
 // system is SPEC §6: persona then the binding's instructions; the Skill
 // prompts visible from the start; the kernel sections in their fixed order,
 // the static loading instructions, then the binding's sections.
-func (p *catalogModelStepPreparer) system(binding *TurnRunnerBinding, set *CapabilitySet, tools []ModelStepTool) ModelStepSystem {
+func (p *catalogModelStepPreparer) system(binding *agentrun.TurnRunnerBinding, set *CapabilitySet, tools []ModelStepTool) ModelStepSystem {
 	var system ModelStepSystem
 	for _, text := range append(append([]string(nil), p.config.AgentInstructions...), binding.Prompt.AgentInstructions...) {
 		if text = strings.TrimSpace(text); text != "" {
@@ -226,7 +227,7 @@ func (p *catalogModelStepPreparer) system(binding *TurnRunnerBinding, set *Capab
 	for _, prompt := range prompts {
 		// Loaded instructions arrive in the load result, so the system
 		// prefix stays stable when the model loads.
-		if binding.Authority.offersCapabilities() && set.Pinned(capabilityPromptPrefix+prompt.Reference) {
+		if binding.Authority.OffersCapabilities() && set.Pinned(capabilityPromptPrefix+prompt.Reference) {
 			system.SkillPrompts = append(system.SkillPrompts, prompt)
 		}
 	}
@@ -262,7 +263,7 @@ func (p *catalogModelStepPreparer) system(binding *TurnRunnerBinding, set *Capab
 			system.Sections = append(system.Sections, ModelStepSystemSection{ID: id, Title: loopKernelSectionTitles[id], Text: text})
 		}
 	}
-	if binding.Authority.offersCapabilities() && set.Offered() {
+	if binding.Authority.OffersCapabilities() && set.Offered() {
 		system.Sections = append(system.Sections, ModelStepSystemSection{ID: loopSectionCapabilities, Title: loopSectionCapabilitiesTitle, Text: capabilityLoadingText})
 	}
 	system.Sections = append(system.Sections, binding.Prompt.Sections...)
@@ -271,8 +272,8 @@ func (p *catalogModelStepPreparer) system(binding *TurnRunnerBinding, set *Capab
 
 // boundSkill reports whether the claim has a bound Skill beyond the
 // always-present built-in one.
-func (p *catalogModelStepPreparer) boundSkill(binding *TurnRunnerBinding) bool {
-	if !binding.Authority.offersCapabilities() {
+func (p *catalogModelStepPreparer) boundSkill(binding *agentrun.TurnRunnerBinding) bool {
+	if !binding.Authority.OffersCapabilities() {
 		return false
 	}
 	for _, action := range binding.ModelActions {
@@ -288,11 +289,11 @@ func (p *catalogModelStepPreparer) boundSkill(binding *TurnRunnerBinding) bool {
 	return false
 }
 
-func (p *catalogModelStepPreparer) stream(ctx context.Context, binding *TurnRunnerBinding, tools []ModelStepTool) ModelStepStream {
+func (p *catalogModelStepPreparer) stream(ctx context.Context, binding *agentrun.TurnRunnerBinding, tools []ModelStepTool) ModelStepStream {
 	stream := ModelStepStream{
 		AnswerPreview:        HasTurnAnswerPreview(ctx),
 		ExternalChannelReply: binding.Authority.ExternalChannelReply,
-		Spoken:               binding.Authority.finalMode() == FinalModeSpoken,
+		Spoken:               binding.Authority.EffectiveFinalMode() == FinalModeSpoken,
 	}
 	for _, tool := range tools {
 		if tool.Name == string(ControlToolFinalAnswer) {
@@ -321,12 +322,12 @@ func loopCapabilityToolName(actions []capability.ModelAction) func(id string) st
 
 // ControlToolSpecs lists the control tools offered under a in the stable
 // advertised order (SPEC §5.1).
-func ControlToolSpecs(a ControlAuthority) []ControlToolSpec {
+func ControlToolSpecs(a agentrun.ControlAuthority) []ControlToolSpec {
 	return loopControlRegistry().specs(a)
 }
 
 // ControlModelStepTools is ControlToolSpecs as harness tools of a model step.
-func ControlModelStepTools(a ControlAuthority) []ModelStepTool {
+func ControlModelStepTools(a agentrun.ControlAuthority) []ModelStepTool {
 	specs := ControlToolSpecs(a)
 	tools := make([]ModelStepTool, 0, len(specs))
 	for _, spec := range specs {
@@ -340,14 +341,14 @@ func ControlModelStepTools(a ControlAuthority) []ModelStepTool {
 // operations the control tools accept, surfaced tools that are no longer in
 // the catalog, the guidance that depends on the catalog, and the
 // conversation's approval mode.
-func (p *catalogModelStepPreparer) CapabilityListing(in StepInput) capabilityListing {
+func (p *catalogModelStepPreparer) CapabilityListing(in agentrun.StepInput) capabilityListing {
 	listing := capabilityListing{Mode: capabilityNoteModeNone}
 	binding := in.Binding
 	if binding == nil {
 		return listing
 	}
 	authority := binding.Authority
-	if authority.offersCapabilities() {
+	if authority.OffersCapabilities() {
 		set := p.CapabilitySet(in)
 		switch {
 		case !set.Offered():
@@ -370,14 +371,14 @@ func (p *catalogModelStepPreparer) CapabilityListing(in StepInput) capabilityLis
 		}
 	}
 	listing.Items = append(listing.Items, controlTargetItems(authority)...)
-	if authority.offersCapabilities() && authority.ApprovalMode != "" {
+	if authority.OffersCapabilities() && authority.ApprovalMode != "" {
 		listing.Items = append(listing.Items, capabilityNoteItem{Key: capabilityNoteApprovalKey, Section: capabilityNoteGuidance, Text: approvalModeText(authority.ApprovalMode)})
 	}
 	if p.boundSkill(binding) {
 		listing.Items = append(listing.Items, capabilityNoteItem{Key: "guide:skill_access", Section: capabilityNoteGuidance, Text: loopSkillAccessText})
 	}
 	for _, action := range binding.ModelActions {
-		if authority.offersCapabilities() && (GovernedToolReviewed(action) || GovernedToolNeedsReviewSummary(action)) {
+		if authority.OffersCapabilities() && (GovernedToolReviewed(action) || GovernedToolNeedsReviewSummary(action)) {
 			listing.Items = append(listing.Items, capabilityNoteItem{Key: "guide:review_summaries", Section: capabilityNoteGuidance, Text: loopReviewSummariesText})
 			break
 		}

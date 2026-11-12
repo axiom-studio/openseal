@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -243,7 +244,7 @@ func (f *chatLoopFixture) startMember(trigger *ChannelMessage, agentID string) *
 	request.ConcurrencyKey = ConversationRunLane(f.conversation.ID, "", agentID)
 	request.SessionID = conversationSessionID(f.conversation.Scope, request.ConcurrencyKey)
 	request.IdempotencyKey = "member-" + agentID + "-" + trigger.ID
-	commands := NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
+	commands := agentrun.NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
 	result, err := commands.CreateAgentRun(f.ctx, request)
 	if err != nil {
 		f.t.Fatalf("create member run: %v", err)
@@ -258,7 +259,7 @@ func (f *chatLoopFixture) startMember(trigger *ChannelMessage, agentID string) *
 }
 
 // bindMember is bind for agentID's member Run.
-func (f *chatLoopFixture) bindMember(run *AgentRun, agentID string, producer StepProducer) *TurnRunnerBinding {
+func (f *chatLoopFixture) bindMember(run *AgentRun, agentID string, producer agentrun.StepProducer) *agentrun.TurnRunnerBinding {
 	f.t.Helper()
 	return f.bindAgent(run, agentID, producer)
 }
@@ -346,7 +347,7 @@ type followUpDuringStepProducer struct {
 	during func()
 }
 
-func (p *followUpDuringStepProducer) Produce(ctx context.Context, in StepInput) (StepOutput, error) {
+func (p *followUpDuringStepProducer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	if p.during != nil {
 		during := p.during
 		p.during = nil
@@ -398,7 +399,7 @@ func TestTeamFollowUpAppendsToEveryMemberSession(t *testing.T) {
 		trigger := f.post("trigger", "user-1", "Plan the launch.")
 		members := []string{"agent-1", "agent-2"}
 		runs := map[string]*AgentRun{}
-		bindings := map[string]*TurnRunnerBinding{}
+		bindings := map[string]*agentrun.TurnRunnerBinding{}
 		revisions := map[string]int64{}
 		for _, agentID := range members {
 			runs[agentID] = f.startMember(trigger, agentID)

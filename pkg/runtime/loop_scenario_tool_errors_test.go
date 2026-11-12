@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -290,7 +291,7 @@ func TestLoopToolNamesAreUniqueAcrossBindings(t *testing.T) {
 		if names["github"] == "" || names["linear"] == "" || names["github"] == names["linear"] {
 			t.Fatalf("binding tool names = %v (actions %v)", names, bySlug)
 		}
-		f.dispatch.on("read", func(in ActionDispatchInput) (map[string]interface{}, error) {
+		f.dispatch.on("read", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			hash, _ := in.Arguments["hash"].(string)
 			slug := strings.TrimPrefix(hash, "sha256:")
 			if in.Call == nil || in.Call.BindingID != slug+"-binding" {
@@ -326,4 +327,3 @@ func TestLoopToolNamesAreUniqueAcrossBindings(t *testing.T) {
 		}
 	})
 }
-

@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // turn_report_progress (SPEC §5.3): a deliberate public update while the Run
@@ -34,7 +35,7 @@ type reportProgressArgs struct {
 
 type reportProgressHandler struct{}
 
-func (reportProgressHandler) Spec(a ControlAuthority) ControlToolSpec {
+func (reportProgressHandler) Spec(a agentrun.ControlAuthority) ControlToolSpec {
 	if a.TaskWork {
 		return ControlToolSpec{
 			Description: "Record a concise internal activity-trail note and continue the existing task. Do not send a new public acknowledgment or routine progress commentary.",
@@ -66,7 +67,7 @@ func (reportProgressHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[reportProgressArgs](raw)
 }
 
-func (reportProgressHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (reportProgressHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	args, _ := cc.Arguments.(*reportProgressArgs)
 	if args == nil {
 		return ControlResult{}, errors.New("turn_report_progress: arguments were not decoded")
@@ -124,7 +125,7 @@ func (reportProgressHandler) Run(ctx context.Context, x *ControlExecutor, cc Con
 
 // progressAlreadyReported reports whether an earlier completed
 // turn_report_progress entry of the Run carried the same summary.
-func (x *ControlExecutor) progressAlreadyReported(ctx context.Context, cc ControlContext, summary string) (bool, error) {
+func (x *ControlExecutor) progressAlreadyReported(ctx context.Context, cc agentrun.ControlContext, summary string) (bool, error) {
 	entries, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID,
 		ToolNames: []string{string(ControlToolReportProgress)}, States: []ToolEntryState{ToolEntryCompleted},

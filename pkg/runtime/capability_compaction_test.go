@@ -3,6 +3,8 @@ package runtime
 import (
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestCompactionCarriesSurfacedTools(t *testing.T) {
@@ -36,7 +38,7 @@ func TestCompactionCarriesSurfacedTools(t *testing.T) {
 	if mustJSON(t, got[0].InputSchema) != mustJSON(t, loadedTools(before)[0].InputSchema) {
 		t.Fatal("the carried definition changed")
 	}
-	set := f.preparer.CapabilitySet(StepInput{Run: f.run, Binding: f.binding, Path: f.render.path()})
+	set := f.preparer.CapabilitySet(agentrun.StepInput{Run: f.run, Binding: f.binding, Path: f.render.path()})
 	if !set.Loaded("action:notion.fetch") {
 		t.Fatal("a carried tool is not callable")
 	}

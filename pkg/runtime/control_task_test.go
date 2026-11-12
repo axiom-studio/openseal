@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
@@ -55,7 +56,7 @@ type startTaskFixture struct {
 	conversation *Conversation
 	message      *ChannelMessage
 	exec         *ControlExecutor
-	authority    ControlAuthority
+	authority    agentrun.ControlAuthority
 }
 
 func startTaskCall(id, goal, ack string) ModelToolCall {
@@ -151,7 +152,7 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...ModelT
 	for _, entry := range batch[1:] {
 		f.entries[entry.ToolCallID] = f.storedEntry(entry.ID)
 	}
-	f.authority = ControlAuthority{AgentID: run.AssignedAgentID,
+	f.authority = agentrun.ControlAuthority{AgentID: run.AssignedAgentID,
 		TaskStart: &HostedConversationTaskContext{ConversationID: conversation.ID, ThreadRootID: thread, CanStart: true}}
 	f.exec = &ControlExecutor{Portfolio: store, Sessions: store, Tasks: NewConversationTaskService(store)}
 	return f
@@ -166,10 +167,10 @@ func (f *startTaskFixture) storedEntry(id string) *SessionEntry {
 	return entry
 }
 
-func (f *startTaskFixture) context(callID string) ControlContext {
-	return NewControlContext(StepToolsInput{
+func (f *startTaskFixture) context(callID string) agentrun.ControlContext {
+	return NewControlContext(agentrun.StepToolsInput{
 		Run: f.run, Step: f.step, Session: f.session, WorkerID: startTaskTestWorker, Assistant: f.assistant,
-		Binding: &TurnRunnerBinding{Authority: f.authority},
+		Binding: &agentrun.TurnRunnerBinding{Authority: f.authority},
 	}, f.entries[callID])
 }
 
@@ -423,7 +424,7 @@ func TestStartTaskReplayAfterCrashReturnsSameTask(t *testing.T) {
 func TestStartTaskNotAloneIsRefused(t *testing.T) {
 	calls := []ModelToolCall{startTaskCall("call-task", startTaskTestGoal, startTaskTestAck),
 		{ID: "call-react", Name: string(ControlToolReact), Arguments: json.RawMessage(`{"messageId":"m","emoji":"eyes"}`)}}
-	refusals := controlCallRefusals(calls, ControlAuthority{CanReact: true,
+	refusals := controlCallRefusals(calls, agentrun.ControlAuthority{CanReact: true,
 		TaskStart: &HostedConversationTaskContext{ConversationID: "c", CanStart: true}})
 	if refusals["call-task"] == nil || refusals["call-react"] != nil {
 		t.Fatalf("refusals = %#v", refusals)
@@ -505,7 +506,7 @@ func TestOldTaskWithoutToolEntryStillValidates(t *testing.T) {
 }
 
 func TestStartTaskSpecAndArguments(t *testing.T) {
-	authority := ControlAuthority{TaskStart: &HostedConversationTaskContext{ConversationID: "c", CanStart: true}}
+	authority := agentrun.ControlAuthority{TaskStart: &HostedConversationTaskContext{ConversationID: "c", CanStart: true}}
 	var spec *ControlToolSpec
 	for _, s := range builtinControlSpecs(authority) {
 		if s.Name == ControlToolStartTask {

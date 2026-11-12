@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -15,7 +16,7 @@ import (
 // newRequestFinalFixture claims run (a queued decision or review Run in store)
 // and gives it a session whose one finished step made call. The executor runs
 // the real decision and review handlers.
-func newRequestFinalFixture(t *testing.T, store *sqlite.Store, run *AgentRun, call LoopToolCall) *controlFixture {
+func newRequestFinalFixture(t *testing.T, store *sqlite.Store, run *AgentRun, call agentrun.LoopToolCall) *controlFixture {
 	t.Helper()
 	ctx := context.Background()
 	// After the reconciler created the Run (claims ignore Runs from the future).
@@ -76,17 +77,17 @@ func newRequestFinalFixture(t *testing.T, store *sqlite.Store, run *AgentRun, ca
 	return f
 }
 
-func requestDecisionCall(id, args string) LoopToolCall {
-	return LoopToolCall{ID: id, Name: string(ControlToolRequestDecision), Arguments: json.RawMessage(args)}
+func requestDecisionCall(id, args string) agentrun.LoopToolCall {
+	return agentrun.LoopToolCall{ID: id, Name: string(ControlToolRequestDecision), Arguments: json.RawMessage(args)}
 }
 
-func completionReviewCall(id, args string) LoopToolCall {
-	return LoopToolCall{ID: id, Name: string(ControlToolCompletionReview), Arguments: json.RawMessage(args)}
+func completionReviewCall(id, args string) agentrun.LoopToolCall {
+	return agentrun.LoopToolCall{ID: id, Name: string(ControlToolCompletionReview), Arguments: json.RawMessage(args)}
 }
 
 // completeWithFinal ends the claimed Run as the loop's final chain does for a
 // non-conversation Run: completed with FinalAnswer.Output.
-func (f *controlFixture) completeWithFinal(final *FinalAnswer) *AgentRun {
+func (f *controlFixture) completeWithFinal(final *agentrun.FinalAnswer) *AgentRun {
 	f.t.Helper()
 	completed, _, err := NewRunActivityService(f.store, f.store).TransitionRun(f.ctx, f.run.Scope, f.run.ID, RunTransitionRequest{
 		ExpectedRevision: f.run.Revision, Status: AgentRunStatusCompleted, Output: final.Output,
@@ -138,7 +139,7 @@ func TestDecisionToolWritesOutputConsumedByResolveDecisionRun(t *testing.T) {
 	store, reconciler, request, run := reconcileDecisionRun(t)
 	f := newRequestFinalFixture(t, store.Store, run,
 		requestDecisionCall("decide", `{"decision":"reject","message":" Outside my role. "}`))
-	authority := ControlAuthority{AgentID: "recipient", FinalMode: FinalModeDecision}
+	authority := agentrun.ControlAuthority{AgentID: "recipient", FinalMode: agentrun.FinalModeDecision}
 	result, err := f.exec.Settle(f.ctx, f.context("decide", authority))
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +166,7 @@ func TestDecisionToolWritesOutputConsumedByResolveDecisionRun(t *testing.T) {
 }
 
 func TestClarificationDecisionRequiresQuestion(t *testing.T) {
-	authority := ControlAuthority{AgentID: "recipient", FinalMode: FinalModeDecision}
+	authority := agentrun.ControlAuthority{AgentID: "recipient", FinalMode: agentrun.FinalModeDecision}
 	for name, args := range map[string]string{
 		"empty question":   `{"decision":"request_clarification","message":"  "}`,
 		"unknown decision": `{"decision":"maybe","message":"unsure"}`,
@@ -284,7 +285,7 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 
 	f := newRequestFinalFixture(t, store.Store, run,
 		completionReviewCall("review", `{"decision":"approve","message":"The evidence meets the criteria."}`))
-	authority := ControlAuthority{AgentID: "reviewer-agent", FinalMode: FinalModeReview}
+	authority := agentrun.ControlAuthority{AgentID: "reviewer-agent", FinalMode: agentrun.FinalModeReview}
 	// The decision tool is not offered in a review Run.
 	if specs := builtinControlSpecs(authority); len(specs) != 1 || specs[0].Name != ControlToolCompletionReview {
 		t.Fatalf("review specs = %#v", specs)
@@ -310,7 +311,7 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 
 	// A review needs an evidence-based reason and a known verdict.
 	for _, args := range []string{`{"decision":"approve","message":" "}`, `{"decision":"accept","message":"fine"}`} {
-		other := newControlFixture(t, []LoopToolCall{completionReviewCall("review", args)})
+		other := newControlFixture(t, []agentrun.LoopToolCall{completionReviewCall("review", args)})
 		registry := controlRegistry{}
 		registry.register(ControlToolCompletionReview, completionReviewHandler{})
 		other.exec.handlers = registry
@@ -333,7 +334,7 @@ func TestDecisionBudgetIsTwelveSteps(t *testing.T) {
 }
 
 func TestRequestFinalToolSchemas(t *testing.T) {
-	decision := builtinControlSpecs(ControlAuthority{FinalMode: FinalModeDecision})
+	decision := builtinControlSpecs(agentrun.ControlAuthority{FinalMode: agentrun.FinalModeDecision})
 	if len(decision) != 1 || decision[0].Name != ControlToolRequestDecision || decision[0].Phase != ControlPhaseSettle {
 		t.Fatalf("decision specs = %#v", decision)
 	}
@@ -345,13 +346,13 @@ func TestRequestFinalToolSchemas(t *testing.T) {
 	if !reflect.DeepEqual(enum, []string{"accept", "reject", "request_clarification"}) {
 		t.Fatalf("decision enum = %#v", enum)
 	}
-	review := builtinControlSpecs(ControlAuthority{FinalMode: FinalModeReview})
+	review := builtinControlSpecs(agentrun.ControlAuthority{FinalMode: agentrun.FinalModeReview})
 	properties, _ = schemaProperties(t, review[0].InputSchema)
 	if enum := properties["decision"].(map[string]interface{})["enum"]; !reflect.DeepEqual(enum, []string{"approve", "reject"}) {
 		t.Fatalf("review enum = %#v", enum)
 	}
 	// The plain-text note names the tool's required fields.
-	if got := newControlRegistry(builtinControlTools()...).finalToolRequiredFields(ControlToolRequestDecision, ControlAuthority{FinalMode: FinalModeDecision}); got != "decision, message" {
+	if got := newControlRegistry(builtinControlTools()...).finalToolRequiredFields(ControlToolRequestDecision, agentrun.ControlAuthority{FinalMode: agentrun.FinalModeDecision}); got != "decision, message" {
 		t.Fatalf("required fields = %q", got)
 	}
 }

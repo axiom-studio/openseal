@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // RequiredActionEvidenceValidator proves preparatory action requirements from
@@ -34,7 +36,7 @@ func (e requiredActionEvidenceError) actionAdvanceRecovery() (string, bool) {
 	return e.action, true
 }
 
-func (RequiredActionEvidenceValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (RequiredActionEvidenceValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if input.Run == nil || input.Bound == nil || input.Bound.Definition == nil || len(input.Bound.Action.RequiredEvidence) == 0 {
 		return nil, nil
 	}

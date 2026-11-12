@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestRunbookProducerReportsDelegatedAgentFailureReason(t *testing.T) {
@@ -39,7 +40,7 @@ func TestRunbookProducerEmitsPinnedGovernedCallAndConsumesActionCall(t *testing.
 		t.Fatalf("kind = %s", producer.Kind())
 	}
 	action := webFetchAction()
-	binding := &TurnRunnerBinding{ModelActions: []capability.ModelAction{action}}
+	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{action}}
 	run := &AgentRun{ID: "run-1", Context: map[string]interface{}{"url": "https://example.test/health"}}
 	path := &AgentSessionPath{}
 	first := produceRunbook(t, producer, runbookInput(run, 1, binding, path))
@@ -128,7 +129,7 @@ func TestRunbookProducerEmitsKernelForkCallAndRunsBoundedForEach(t *testing.T) {
 		}
 	}
 	// The group resolution writes the joined branches into Run.Output.
-	groupID := stableForkIdentifier(run.ID, "fork", "group")
+	groupID := agentrun.StableForkIdentifier(run.ID, "fork", "group")
 	run.Checkpoint = out.KernelState
 	run.Output = map[string]interface{}{"dependencyGroups": map[string]interface{}{groupID: map[string]interface{}{
 		"status": string(RunDependencyGroupSatisfied),
@@ -161,11 +162,11 @@ func TestRunbookValueRendersTypedTemplateSegments(t *testing.T) {
 
 func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
 	store := newTestKernelStore(t)
-	control := &ControlExecutor{Portfolio: store, Sessions: store, Forks: NewRunForkCoordinator(store), Collaboration: NewCollaborationService(store)}
+	control := &ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: NewCollaborationService(store)}
 	producer := newTestRunbookProducer(t, concurrentRunbookDefinition(), "manual", store)
-	cc := ControlContext{
+	cc := agentrun.ControlContext{
 		Run:     &AgentRun{ID: "run", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "fork", "pendingFork": "fork", "pendingCall": "runbook.2.fork"}}},
-		Binding: &TurnRunnerBinding{Producer: producer}, Origin: ControlOriginKernel,
+		Binding: &agentrun.TurnRunnerBinding{Producer: producer}, Origin: ControlOriginKernel,
 		Entry:     &SessionEntry{ToolCallID: "runbook.9.fork"},
 		Arguments: &runbookKernelArgs{Step: "fork", Visit: 9},
 	}
@@ -206,13 +207,13 @@ func TestRunbookProducerKeepsModelMediaAndOversizeOutputOutOfCheckpoint(t *testi
 	}
 	calls := fixedActionCalls{}
 	producer := newTestRunbookProducer(t, definition, "daily", calls)
-	binding := &TurnRunnerBinding{ModelActions: []capability.ModelAction{
+	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{
 		{Name: "browser_screenshot", SkillID: "browser", Version: "1", Action: "screenshot"},
 		{Name: "browser_dump", SkillID: "browser", Version: "1", Action: "dump"},
 	}}
 	run := &AgentRun{ID: "run-shots", Context: map[string]interface{}{}}
 	path := &AgentSessionPath{}
-	step := func(sequence int64) StepOutput {
+	step := func(sequence int64) agentrun.StepOutput {
 		out := produceRunbook(t, producer, runbookInput(run, sequence, binding, path))
 		run.Checkpoint = out.KernelState
 		return out

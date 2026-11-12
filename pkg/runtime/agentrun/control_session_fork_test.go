@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -41,7 +41,7 @@ func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 	run.AssignedAgentID = "agent-a"
 	cc := ControlContext{Run: run, Session: path.Session, Path: path, Assistant: assistant, Entry: tool}
 
-	ref := controlChildSessionFork(cc, "agent-a")
+	ref := ControlChildSessionFork(cc, "agent-a")
 	if ref == nil || ref.ParentSessionID != parent.ID || ref.ForkSequence != 2 || ref.ForkEntryID != "p2" {
 		t.Fatalf("ref = %+v", ref)
 	}
@@ -55,7 +55,7 @@ func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
 		ID: "child", Scope: forkTestScope, Goal: "Compare the two vendors", Source: models.RunSourceFork,
 		Checkpoint: map[string]interface{}{"forkChild": map[string]interface{}{"sourceRunId": "r1"}},
 	}
-	seed, err := controlChildSeed(child)
+	seed, err := ControlChildSeed(child)
 	if err != nil || seed == nil || seed.User.GoalKind != "fork_branch" {
 		t.Fatalf("seed = %+v, %v", seed, err)
 	}
@@ -90,11 +90,11 @@ func TestControlChildSessionForkSameAgentOnly(t *testing.T) {
 		Session:   session,
 		Assistant: &models.SessionEntry{ID: "a1", SessionID: "s1", Sequence: 7, Type: models.SessionEntryAssistant},
 	}
-	if ref := controlChildSessionFork(cc, "agent-a"); ref == nil || ref.ParentSessionID != "s1" || ref.ForkSequence != 6 || ref.ForkEntryID != "" {
+	if ref := ControlChildSessionFork(cc, "agent-a"); ref == nil || ref.ParentSessionID != "s1" || ref.ForkSequence != 6 || ref.ForkEntryID != "" {
 		t.Fatalf("same Agent ref = %+v", ref)
 	}
 	for _, agent := range []string{"agent-b", "", "  "} {
-		if ref := controlChildSessionFork(cc, agent); ref != nil {
+		if ref := ControlChildSessionFork(cc, agent); ref != nil {
 			t.Fatalf("child Agent %q inherits %+v", agent, ref)
 		}
 	}
@@ -106,7 +106,7 @@ func TestControlChildSessionForkSameAgentOnly(t *testing.T) {
 	notAssistant := cc
 	notAssistant.Assistant = &models.SessionEntry{ID: "u1", SessionID: "s1", Sequence: 7, Type: models.SessionEntryUser}
 	for name, bad := range map[string]ControlContext{"moved": moved, "foreign": foreign, "not assistant": notAssistant, "empty": {}} {
-		if ref := controlChildSessionFork(bad, "agent-a"); ref != nil {
+		if ref := ControlChildSessionFork(bad, "agent-a"); ref != nil {
 			t.Fatalf("%s: ref = %+v", name, ref)
 		}
 	}
@@ -119,14 +119,14 @@ func TestControlForkRefAtSessionStartUsesParentFork(t *testing.T) {
 		Session:   child,
 		Assistant: &models.SessionEntry{ID: "a1", SessionID: "s2", Sequence: 1, Type: models.SessionEntryAssistant},
 	}
-	if ref := controlChildSessionFork(cc, "agent-a"); ref == nil || ref.ParentSessionID != "s1" || ref.ForkSequence != 5 || ref.ForkEntryID != "p5" {
+	if ref := ControlChildSessionFork(cc, "agent-a"); ref == nil || ref.ParentSessionID != "s1" || ref.ForkSequence != 5 || ref.ForkEntryID != "p5" {
 		t.Fatalf("ref = %+v", ref)
 	}
 	root := cc
 	root.Run = &models.AgentRun{ID: "r1", SessionID: "s1", AssignedAgentID: "agent-a"}
 	root.Session = &models.AgentSession{ID: "s1", Kind: models.AgentSessionKindRun}
 	root.Assistant = &models.SessionEntry{ID: "a0", SessionID: "s1", Sequence: 1, Type: models.SessionEntryAssistant}
-	if ref := controlChildSessionFork(root, "agent-a"); ref != nil {
+	if ref := ControlChildSessionFork(root, "agent-a"); ref != nil {
 		t.Fatalf("nothing to inherit, ref = %+v", ref)
 	}
 }
@@ -186,7 +186,7 @@ func TestControlChildSeedTextKinds(t *testing.T) {
 		if !ok || text != tc.text {
 			t.Fatalf("%s: text = %q, %v", tc.name, text, ok)
 		}
-		seed, err := controlChildSeed(tc.run)
+		seed, err := ControlChildSeed(tc.run)
 		if err != nil || seed == nil || seed.User.GoalKind != tc.kind || seed.User.Content[0].Text != "<brief>\n"+tc.text+"\n</brief>" {
 			t.Fatalf("%s: seed = %+v, %v", tc.name, seed, err)
 		}
@@ -203,7 +203,7 @@ func TestControlChildSeedTextKinds(t *testing.T) {
 		if text, ok := ControlChildSeedText(run); ok {
 			t.Fatalf("run %+v seeds %q", run, text)
 		}
-		if seed, err := controlChildSeed(run); seed != nil || err != nil {
+		if seed, err := ControlChildSeed(run); seed != nil || err != nil {
 			t.Fatalf("run %+v seed = %+v, %v", run, seed, err)
 		}
 	}

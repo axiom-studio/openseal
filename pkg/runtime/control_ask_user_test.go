@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 type askUserTestStore interface {
@@ -126,10 +128,10 @@ func openAskUserSession(t *testing.T, sessions AgentSessionStore, run *AgentRun,
 	return nil
 }
 
-func (c *askUserCall) context() ControlContext {
-	return NewControlContext(StepToolsInput{
+func (c *askUserCall) context() agentrun.ControlContext {
+	return NewControlContext(agentrun.StepToolsInput{
 		Run: c.run, Step: c.step, Session: c.session, WorkerID: c.worker,
-		Binding: &TurnRunnerBinding{Authority: ControlAuthority{CanAskUser: true}},
+		Binding: &agentrun.TurnRunnerBinding{Authority: agentrun.ControlAuthority{CanAskUser: true}},
 	}, c.entry)
 }
 
@@ -146,7 +148,7 @@ func (c *askUserCall) settle(t *testing.T) ControlResult {
 }
 
 // park applies the settle's park the way the loop does.
-func (c *askUserCall) park(t *testing.T, park *LoopPark) *AgentRun {
+func (c *askUserCall) park(t *testing.T, park *agentrun.LoopPark) *AgentRun {
 	t.Helper()
 	current, err := c.store.GetAgentRun(t.Context(), c.run.Scope, c.run.ID)
 	if err != nil {
@@ -350,10 +352,10 @@ func TestAskUserAnswerFromOtherActorIgnored(t *testing.T) {
 }
 
 func TestAskUserWithoutConversationIsRefused(t *testing.T) {
-	f := newControlFixture(t, []LoopToolCall{{ID: "ask", Name: string(ControlToolAskUser), Arguments: json.RawMessage(`{"question":"Which one?"}`)}})
+	f := newControlFixture(t, []agentrun.LoopToolCall{{ID: "ask", Name: string(ControlToolAskUser), Arguments: json.RawMessage(`{"question":"Which one?"}`)}})
 	f.exec.handlers = nil // the real registry
 	f.exec.Reporting = f.store
-	result, err := f.exec.Settle(f.ctx, f.context("ask", ControlAuthority{CanAskUser: true}))
+	result, err := f.exec.Settle(f.ctx, f.context("ask", agentrun.ControlAuthority{CanAskUser: true}))
 	if err != nil || result.Kind != ControlContinue || result.Entry.State != ToolEntryError {
 		t.Fatalf("settle = %#v %v", result, err)
 	}

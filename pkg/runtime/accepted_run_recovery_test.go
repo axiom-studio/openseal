@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -24,7 +25,7 @@ func TestAcceptedRunRecoveryPreservesUnprovableLegacyWorkWithoutAutomaticRetries
 		}
 		deployment, definition := acceptedMethodFixture(scope)
 		catalog := &resolverCatalog{deployment: deployment, definition: definition, activation: &skill.ActivationSnapshot{SnapshotID: "live", Scope: skill.ScopeReference(scope), DeploymentID: deployment.ID}}
-		resolver := TurnRunnerResolverFunc(func(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		resolver := TurnRunnerResolverFunc(func(ctx context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			binding, err := ResolveLoopBinding(ctx, catalog, run, loopBindingTestConfig(t, store, nil))
 			if !errors.Is(err, ErrAcceptedRunExecution) {
 				t.Fatalf("legacy method guessed current implementation: %#v %v", binding, err)
@@ -56,7 +57,7 @@ func TestAcceptedRunRecoveryPreservesUnprovableLegacyWorkWithoutAutomaticRetries
 		if fixture.reopen != nil {
 			store = fixture.reopen().(KernelStore)
 		}
-		wake := NewAgentRunWakeService(store, store)
+		wake := agentrun.NewAgentRunWakeService(store, store)
 		for i := 0; i < 3; i++ {
 			if result, err := wake.WakeDueTimers(t.Context(), scope, at.Add(time.Duration(i+1)*time.Hour)); err != nil || len(result.Runs) != 0 {
 				t.Fatalf("manual recovery automatically woke: %#v %v", result, err)

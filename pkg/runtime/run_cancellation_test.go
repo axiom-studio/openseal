@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -40,7 +41,7 @@ func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 	ctx := t.Context()
 	store := newTestKernelStore(t)
 	catalog, scope := cancellationActionCatalog(t)
-	runs := NewRunCommandService(store)
+	runs := agentrun.NewRunCommandService(store)
 	root, err := runs.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "research-agent"},
 		AssignedAgentID: "research-agent", Goal: "coordinate reviewed work", Source: RunSourceManual,
@@ -75,9 +76,9 @@ func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 	}
 	loop.parkOnApproval(proposal.Approval.ID)
 
-	if _, err := runs.CommandAgentRun(ctx, AgentRunCommandRequest{
+	if _, err := runs.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 		Scope: scope, RunID: root.Run.ID, ExpectedRevision: root.Run.Revision,
-		Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "operator"},
+		Kind: agentrun.AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "operator"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func assertCanceledApproval(t *testing.T, store cancellationStore) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 20, 14, 0, 0, 0, time.UTC)
 	catalog, scope := cancellationActionCatalog(t)
-	runs := NewRunCommandService(store)
+	runs := agentrun.NewRunCommandService(store)
 	created, err := runs.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "research-agent",
 		Goal: "Send reviewed follow-up", Source: RunSourceRequest,
@@ -129,8 +130,8 @@ func assertCanceledApproval(t *testing.T, store cancellationStore) {
 	loop.parkOnApproval(proposal.Approval.ID)
 	parked := loop.current()
 
-	result, err := runs.CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: scope, RunID: parked.ID, ExpectedRevision: parked.Revision, Kind: AgentRunCommandCancel,
+	result, err := runs.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+		Scope: scope, RunID: parked.ID, ExpectedRevision: parked.Revision, Kind: agentrun.AgentRunCommandCancel,
 		Actor: ActivityActor{Type: "user", ID: "operator"}, Summary: "Operator canceled the reviewed reply",
 	})
 	if err != nil {

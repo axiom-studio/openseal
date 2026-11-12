@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -37,7 +38,7 @@ func interactionCall(scope Scope, runID, id, action, key, requestID string) *Act
 // requests it left open.
 func TestCanceledRunDismissesItsOpenInteractionRequests(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
-	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, SkillActionRequestCredential, map[string]interface{}{
+	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
 		"kind": "payment_card", "reason": "Add your card so I can pay 319.00 INR on amazon.in"})
 	run := f.run
 	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
@@ -56,18 +57,18 @@ func TestCanceledRunDismissesItsOpenInteractionRequests(t *testing.T) {
 	if err := store.SaveSkillSetupRequest(ctx, setup, 0); err != nil {
 		t.Fatal(err)
 	}
-	commands := NewRunCommandService(interactionCallsStore{store, []*ActionCall{interactionCall(scope, run.ID, "setup-call", SkillActionRequestSetup, "setupRequest", "setup-1")}})
-	canceled, err := commands.CommandAgentRun(ctx, AgentRunCommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: parked.Revision,
-		Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "user-1"}})
+	commands := agentrun.NewRunCommandService(interactionCallsStore{store, []*ActionCall{interactionCall(scope, run.ID, "setup-call", agentrun.SkillActionRequestSetup, "setupRequest", "setup-1")}})
+	canceled, err := commands.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: parked.Revision,
+		Kind: agentrun.AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "user-1"}})
 	if err != nil || canceled.Run.Status != AgentRunStatusCanceled {
 		t.Fatalf("cancel: %#v %v", canceled, err)
 	}
 	requests, err := store.ListCredentialRequests(ctx, scope, "agent", "chat")
-	if err != nil || len(requests) != 1 || requests[0].Status != CredentialRequestStatusDismissed || requests[0].ResolvedBy != TerminalRunInteractionCloser {
+	if err != nil || len(requests) != 1 || requests[0].Status != CredentialRequestStatusDismissed || requests[0].ResolvedBy != agentrun.TerminalRunInteractionCloser {
 		t.Fatalf("credential requests after cancel: %#v %v", requests, err)
 	}
 	closed, err := store.GetSkillSetupRequest(ctx, scope, "setup-1")
-	if err != nil || closed.Status != "dismissed" || closed.ResolvedBy != TerminalRunInteractionCloser {
+	if err != nil || closed.Status != "dismissed" || closed.ResolvedBy != agentrun.TerminalRunInteractionCloser {
 		t.Fatalf("setup request after cancel: %#v %v", closed, err)
 	}
 	// Reconciling the terminal Run again is a no-op.
@@ -114,9 +115,9 @@ func testFinishedRunKeepsSetupForms(t *testing.T, status AgentRunStatus) {
 		t.Fatal(err)
 	}
 	calls := interactionCallsStore{store, []*ActionCall{
-		interactionCall(scope, run.ID, "c1", SkillActionRequestCredential, "credentialRequest", "credential-1"),
-		interactionCall(scope, run.ID, "c2", SkillActionRequestSetup, "setupRequest", "setup-2")}}
-	if err := NewRunCommandService(calls).CascadeTerminalRun(ctx, run); err != nil {
+		interactionCall(scope, run.ID, "c1", agentrun.SkillActionRequestCredential, "credentialRequest", "credential-1"),
+		interactionCall(scope, run.ID, "c2", agentrun.SkillActionRequestSetup, "setupRequest", "setup-2")}}
+	if err := agentrun.NewRunCommandService(calls).CascadeTerminalRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := store.GetCredentialRequest(ctx, scope, "credential-1"); got.Status != CredentialRequestStatusDismissed {

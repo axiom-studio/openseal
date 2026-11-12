@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // conversationRunContextNote builds the Run's run_context note: the sections,
@@ -251,7 +253,7 @@ func (r *ConversationRunTurnRunner) runContextConversationTasks(ctx context.Cont
 			if proof == nil {
 				continue
 			}
-			verified, err := VerifyConversationTaskWorkRun(ctx, proof, task, work)
+			verified, err := agentrun.VerifyConversationTaskWorkRun(ctx, proof, task, work)
 			if err != nil {
 				return "", err
 			}
@@ -265,7 +267,7 @@ func (r *ConversationRunTurnRunner) runContextConversationTasks(ctx context.Cont
 		}
 		line := fmt.Sprintf("- task %s (%s, %s) workRunId %s revision %d, started %s: %q", task.ID, mode, work.Status, work.ID,
 			work.Revision, conversationMessageTime(task.CreatedAt), boundedRunContextValue(ConversationTaskGoalSummary(task.Goal), runContextTaskGoalRunes))
-		if controls := applicableAgentRunCommands(work); len(controls) > 0 {
+		if controls := agentrun.ApplicableAgentRunCommands(work); len(controls) > 0 {
 			line += " controls: " + strings.Join(controls, ",")
 		}
 		lines = append(lines, line)

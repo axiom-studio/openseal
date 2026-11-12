@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -336,7 +337,7 @@ func (g *loopRepeatGuard) Observe(entry *SessionEntry) {
 // finish writes each note once) and returns the step's Run failure, if any:
 // repeat_limit when a call was repeated five times, else error_streak when
 // the Run's last loopErrorStreakLimit steps all ended in errors (G13).
-func (g *loopRepeatGuard) Finish(ctx context.Context) (*LoopFailure, error) {
+func (g *loopRepeatGuard) Finish(ctx context.Context) (*agentrun.LoopFailure, error) {
 	g.mu.Lock()
 	var stepEntries []*SessionEntry
 	for _, entry := range g.ledger.entries {
@@ -405,8 +406,8 @@ func (g *loopRepeatGuard) repeatNote(after *SessionEntry, text string) *SessionE
 	return note
 }
 
-func loopFailureFromGuard(failure guardRunFailure) *LoopFailure {
-	return &LoopFailure{Kind: failure.Kind, Code: failure.Code, Message: failure.Message, Explainable: failure.Explainable}
+func loopFailureFromGuard(failure guardRunFailure) *agentrun.LoopFailure {
+	return &agentrun.LoopFailure{Kind: failure.Kind, Code: failure.Code, Message: failure.Message, Explainable: failure.Explainable}
 }
 
 func firstNonEmpty(values ...string) string {

@@ -5,13 +5,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestWorkerPoolScopeWakeDoesNotWakeAnotherTenant(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "mine"}
 	pool := newTestActionPool(t, newTestKernelStore(t), skill.NewCatalog(), scope, time.Hour, 1,
-		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }))
+		ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }))
 	pool.WakeScope(Scope{Kind: "tenant", ID: "other"})
 	select {
 	case <-pool.wake:

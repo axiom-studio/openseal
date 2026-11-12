@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -227,7 +228,7 @@ func TestAgentChannelRechecksEndpointAndAdapterAfterApproval(t *testing.T) {
 			}
 			before, _ := f.endpoints.Get(ctx, f.scope, f.endpoint.ID)
 			for attempt := 0; attempt < 2; attempt++ {
-				if _, err := f.dispatcher.configureChannel(ctx, ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); err == nil {
+				if _, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); err == nil {
 					t.Fatal("accepted stale or unavailable channel")
 				}
 				f.assertUnactivated(t)
@@ -252,7 +253,7 @@ func TestAgentChannelActivationRollsBackWhenEndpointWriteFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		if _, err := f.dispatcher.configureChannel(ctx, ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); err == nil || !strings.Contains(err.Error(), "endpoint write rejected") {
+		if _, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); err == nil || !strings.Contains(err.Error(), "endpoint write rejected") {
 			t.Fatalf("execution error: %v", err)
 		}
 		f.assertUnactivated(t)
@@ -264,7 +265,7 @@ func TestAgentChannelActivationRollsBackWhenEndpointWriteFails(t *testing.T) {
 	if _, err := f.db.ExecContext(ctx, `DROP TRIGGER reject_endpoint_update`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.dispatcher.configureChannel(ctx, ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); err != nil {
+	if _, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); err != nil {
 		t.Fatalf("retry after storage recovery: %v", err)
 	}
 }
@@ -277,7 +278,7 @@ func TestAgentChannelActivationAndReplayPreserveLaterEndpointChanges(t *testing.
 	}
 	call := f.approve(t, proposal)
 	ctx := context.Background()
-	output, err := f.dispatcher.configureChannel(ctx, ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run)
+	output, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +286,7 @@ func TestAgentChannelActivationAndReplayPreserveLaterEndpointChanges(t *testing.
 	if endpoint.Revision != f.endpoint.Revision+1 || endpoint.Policy.MessageSelection != ExternalConversationSelectAllMessages {
 		t.Fatalf("endpoint was not committed: %#v", endpoint)
 	}
-	if replay, err := f.dispatcher.configureChannel(ctx, ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); err != nil || replay["replayed"] != true {
+	if replay, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); err != nil || replay["replayed"] != true {
 		t.Fatalf("replay: %#v, %v", replay, err)
 	}
 	paused := ExternalConversationEndpointPaused
@@ -293,7 +294,7 @@ func TestAgentChannelActivationAndReplayPreserveLaterEndpointChanges(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.dispatcher.configureChannel(ctx, ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); !errors.Is(err, ErrExternalConversationConflict) {
+	if _, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); !errors.Is(err, ErrExternalConversationConflict) {
 		t.Fatalf("replay overwrote newer endpoint: %v", err)
 	}
 	unchanged, _ := f.endpoints.Get(ctx, f.scope, endpoint.ID)
@@ -343,7 +344,7 @@ func TestAgentChannelActivationEndpointCASRollsBackWholeTransaction(t *testing.T
 	if _, err := f.db.ExecContext(ctx, `CREATE TRIGGER change_endpoint_before_activation BEFORE INSERT ON agent_definitions BEGIN UPDATE external_conversation_endpoints SET revision=revision+1; END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.dispatcher.configureChannel(ctx, ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); !errors.Is(err, ErrExternalConversationConflict) {
+	if _, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); !errors.Is(err, ErrExternalConversationConflict) {
 		t.Fatalf("stale transaction commit: %v", err)
 	}
 	f.assertUnactivated(t)
@@ -365,7 +366,7 @@ func TestAgentChannelCanActivatePausedEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := f.approve(t, proposal)
-	output, err := f.dispatcher.configureChannel(ctx, ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run)
+	output, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run)
 	if err != nil {
 		t.Fatal(err)
 	}

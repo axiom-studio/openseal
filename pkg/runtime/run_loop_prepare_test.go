@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -34,12 +35,12 @@ func prepareTestActions() []capability.ModelAction {
 type prepareFixture struct {
 	t        *testing.T
 	preparer *catalogModelStepPreparer
-	binding  *TurnRunnerBinding
+	binding  *agentrun.TurnRunnerBinding
 	run      *AgentRun
 	render   *renderFixture
 }
 
-func newPrepareFixture(t *testing.T, authority ControlAuthority) *prepareFixture {
+func newPrepareFixture(t *testing.T, authority agentrun.ControlAuthority) *prepareFixture {
 	registry, _ := fakeLoopControls()
 	preparer := newCatalogModelStepPreparer(catalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are Finn.", "Purpose: help the team."},
@@ -52,10 +53,10 @@ func newPrepareFixture(t *testing.T, authority ControlAuthority) *prepareFixture
 	preparer.controls = registry
 	f := &prepareFixture{
 		t: t, preparer: preparer,
-		binding: &TurnRunnerBinding{
+		binding: &agentrun.TurnRunnerBinding{
 			DeploymentID: "agent-1", DefinitionID: "def-1", DefinitionVersion: "3", Model: "claude-test",
 			ModelActions: prepareTestActions(), Authority: authority,
-			Prompt: PromptContribution{
+			Prompt: agentrun.PromptContribution{
 				AgentInstructions: []string{"Reply in the chat's language."},
 				Sections:          []ModelStepSystemSection{{ID: "channel_rules", Title: "Channel", Text: "Keep replies short."}},
 			},
@@ -70,9 +71,9 @@ func newPrepareFixture(t *testing.T, authority ControlAuthority) *prepareFixture
 func (f *prepareFixture) prepare(step string) ModelStepRequest {
 	f.t.Helper()
 	path := f.render.path()
-	req, err := f.preparer.PrepareModelStep(context.Background(), StepInput{
+	req, err := f.preparer.PrepareModelStep(context.Background(), agentrun.StepInput{
 		Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path,
-		Binding: f.binding, Mode: StepModeNormal,
+		Binding: f.binding, Mode: agentrun.StepModeNormal,
 	})
 	if err != nil {
 		f.t.Fatalf("PrepareModelStep: %v", err)
@@ -91,8 +92,8 @@ func toolNames(tools []ModelStepTool) []string {
 	return names
 }
 
-func fullPrepareAuthority() ControlAuthority {
-	return ControlAuthority{
+func fullPrepareAuthority() agentrun.ControlAuthority {
+	return agentrun.ControlAuthority{
 		AgentID: "agent-1", CanReportProgress: true, CanWait: true, CanAskUser: true, CanReact: true,
 		TaskStart:   &HostedConversationTaskContext{ConversationID: "conv-1", CanStart: true},
 		ForkAllowed: true,
@@ -196,7 +197,7 @@ func (f *prepareFixture) addLoad(step, call string, ids ...string) *SessionEntry
 		Provider: ModelStepProviderAnthropic, Model: "claude-test", StopReason: ModelStopToolCalls,
 		ToolCalls: []ModelToolCall{{ID: call, Name: LoadCapabilitiesTool, Arguments: arguments}},
 	}})
-	set := f.preparer.CapabilitySet(StepInput{Run: f.run, Binding: f.binding, Path: f.render.path()})
+	set := f.preparer.CapabilitySet(agentrun.StepInput{Run: f.run, Binding: f.binding, Path: f.render.path()})
 	patch := loadKernelPatch(set, f.binding.ModelActions, ids)
 	return f.render.add(&SessionEntry{RunID: f.run.ID, StepID: step, Type: SessionEntryTool, State: ToolEntryCompleted, ToolCallID: call, Tool: &ToolEntry{
 		Name: LoadCapabilitiesTool, Arguments: arguments, SideEffect: ToolSideEffectNone,
@@ -241,7 +242,7 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 	// Task work: the activity-only progress rules; no task start, no
 	// workspace, no images, no evidence, no routine script. Loading is
 	// always deferred, so even this small catalog offers search and load.
-	bare := newPrepareFixture(t, ControlAuthority{AgentID: "agent-1", CanReportProgress: true, TaskWork: true})
+	bare := newPrepareFixture(t, agentrun.ControlAuthority{AgentID: "agent-1", CanReportProgress: true, TaskWork: true})
 	bare.preparer.config.HostTools = nil
 	bare.binding.ModelActions = bare.binding.ModelActions[:2]
 	bare.preparer.config.SkillPrompts = bare.preparer.config.SkillPrompts[:1]
@@ -257,7 +258,7 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 	}
 
 	// Decision Runs: only the decision tool, no capability listing.
-	decision := newPrepareFixture(t, ControlAuthority{AgentID: "agent-1", FinalMode: FinalModeDecision, CanReportProgress: true})
+	decision := newPrepareFixture(t, agentrun.ControlAuthority{AgentID: "agent-1", FinalMode: agentrun.FinalModeDecision, CanReportProgress: true})
 	dreq := decision.prepare("step-1")
 	if names := toolNames(dreq.Tools); !reflect.DeepEqual(names, []string{"agent_request_decision"}) {
 		t.Errorf("decision tools = %v", names)
@@ -271,9 +272,9 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 
 	// Explaining a failure sends no tools.
 	path := f.render.path()
-	explain, err := f.preparer.PrepareModelStep(context.Background(), StepInput{
+	explain, err := f.preparer.PrepareModelStep(context.Background(), agentrun.StepInput{
 		Run: f.run, Step: &AgentTurn{ID: "step-2", RunID: f.run.ID}, Session: path.Session, Path: path,
-		Binding: f.binding, Mode: StepModeExplainFailure,
+		Binding: f.binding, Mode: agentrun.StepModeExplainFailure,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -287,7 +288,7 @@ func TestPrepareNoFormWords(t *testing.T) {
 	authority := fullPrepareAuthority()
 	f := newPrepareFixture(t, authority)
 	f.preparer.config.ImageInput = true
-	f.binding.Prompt = PromptContribution{}
+	f.binding.Prompt = agentrun.PromptContribution{}
 	f.preparer.config.AgentInstructions = nil
 	req := f.prepare("step-1")
 	forbidden := []string{"runoutput", "outputsummary", "continuationcheckpoint", "this turn", "proposal", "hosted-turn", "offeredactions", "_atlas"}

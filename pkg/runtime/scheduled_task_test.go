@@ -13,6 +13,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -101,7 +102,7 @@ func dispatchTaskForTest(t *testing.T, store KernelStore, run *AgentRun, bound *
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := d.DispatchAction(t.Context(), ActionDispatchInput{Run: run, Bound: bound, Call: &ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID, IdempotencyKey: callID}, Arguments: args})
+	result, err := d.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: bound, Call: &ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID, IdempotencyKey: callID}, Arguments: args})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +138,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 					t.Fatal(err)
 				}
 				validator, _ := NewRunbookActionValidator(store.(routineActionStore))
-				if _, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args}); err != nil {
+				if _, err := validator.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args}); err != nil {
 					t.Fatal(err)
 				}
 				result := dispatchTaskForTest(t, store, run, bound, args, "create-task")
@@ -251,7 +252,7 @@ func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion
 			case "foreign-input":
 				a["deploymentId"] = "foreign"
 			}
-			if _, err := v.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: candidate, Bound: &b, Arguments: a}); err == nil {
+			if _, err := v.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: candidate, Bound: &b, Arguments: a}); err == nil {
 				t.Fatal("invalid task accepted")
 			}
 		})
@@ -334,7 +335,7 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 		t.Fatal("pause replay failed")
 	}
 	d, _ := NewRunbookActionDispatcher(store, nil)
-	if _, err := d.DispatchAction(t.Context(), ActionDispatchInput{Run: run, Bound: statusBound, Call: &ActionCall{ID: "different", Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID}, Arguments: pause}); !errors.Is(err, ErrRunbookActivationRevision) {
+	if _, err := d.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: statusBound, Call: &ActionCall{ID: "different", Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID}, Arguments: pause}); !errors.Is(err, ErrRunbookActivationRevision) {
 		t.Fatalf("stale different action: %v", err)
 	}
 	resume := map[string]interface{}{"activationId": a.ID, "expectedRevision": paused.Revision, "status": "active", "reason": "User resumed"}
@@ -353,7 +354,7 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: other, Bound: statusBound, Arguments: resume}); err == nil {
+	if _, err := validator.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: other, Bound: statusBound, Arguments: resume}); err == nil {
 		t.Fatal("foreign ownership accepted")
 	}
 	// A Team chat with the Agent on its roster passes the roster check and
@@ -364,7 +365,7 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 		ID: "team", Scope: capability.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: run.AssignedAgentID, AgentDeploymentID: run.AssignedAgentID}},
 	}})
-	if _, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: teamChat, Bound: statusBound, Arguments: resume}); err == nil || !strings.Contains(err.Error(), "not owned by this chat") {
+	if _, err := validator.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: teamChat, Bound: statusBound, Arguments: resume}); err == nil || !strings.Contains(err.Error(), "not owned by this chat") {
 		t.Fatalf("foreign Team chat ownership accepted: %v", err)
 	}
 	encoded, _ := json.Marshal(active)

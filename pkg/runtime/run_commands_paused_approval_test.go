@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Paused approvals on the run loop (12-tests §5.2,
@@ -14,11 +15,11 @@ import (
 // on an approval; canceling closes the approval, its call and the tool entry
 // together, and an expiry while paused is the tool result once resumed.
 
-func (f *loopFixture) commandRun(runID string, kind AgentRunCommandKind) *AgentRun {
+func (f *loopFixture) commandRun(runID string, kind agentrun.AgentRunCommandKind) *AgentRun {
 	f.t.Helper()
 	current := f.mustRun(runID)
-	commands := NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
-	result, err := commands.CommandAgentRun(f.ctx, AgentRunCommandRequest{
+	commands := agentrun.NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
+	result, err := commands.CommandAgentRun(f.ctx, agentrun.AgentRunCommandRequest{
 		Scope: f.scope, RunID: runID, ExpectedRevision: current.Revision, Kind: kind,
 		Actor: ActivityActor{Type: "user", ID: loopFixtureUser},
 	})
@@ -56,7 +57,7 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 				f := newApprovalScenario(t, store)
 				_, run := f.parkedApproval()
 				approval, call := assertParkedOnApproval(t, f, run)
-				paused := f.commandRun(run.ID, AgentRunCommandPause)
+				paused := f.commandRun(run.ID, agentrun.AgentRunCommandPause)
 				if paused.Status != AgentRunStatusPaused || paused.PausedFrom != AgentRunStatusWaitingForApproval || paused.PausedWakeCondition == nil {
 					t.Fatalf("paused = %#v", paused)
 				}
@@ -66,7 +67,7 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 						t.Fatalf("expiry while paused = %#v", result.Run)
 					}
 				}
-				canceled := f.commandRun(run.ID, AgentRunCommandCancel)
+				canceled := f.commandRun(run.ID, agentrun.AgentRunCommandCancel)
 				if canceled.Status != AgentRunStatusCanceled || canceled.PausedWakeCondition != nil || canceled.PausedFrom != "" || len(canceled.BudgetReservations) != 0 {
 					t.Fatalf("canceled = %#v", canceled)
 				}
@@ -113,7 +114,7 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 		eachStore(t, "loop_paused_approval_expiry", func(t *testing.T, store KernelStore) {
 			f := newApprovalScenario(t, store)
 			conversation, run := f.parkedApproval()
-			f.commandRun(run.ID, AgentRunCommandPause)
+			f.commandRun(run.ID, agentrun.AgentRunCommandPause)
 			result := f.expireApproval(run.ID)
 			if result.Approval.Status != ApprovalStatusExpired || result.Call.Status != ActionCallStatusDenied ||
 				result.Run.Status != AgentRunStatusPaused || result.Run.PausedFrom != AgentRunStatusQueued ||
@@ -124,7 +125,7 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 			if claimed, err := f.store.ClaimNextAgentRun(f.ctx, AgentRunClaim{Scope: f.scope, WorkerID: f.workerID, Now: f.clock.Now(), LeaseDuration: loopFixtureLease, AgingInterval: time.Minute}); err != nil || claimed != nil {
 				t.Fatalf("claimed a paused Run: %#v, %v", claimed, err)
 			}
-			resumed := f.commandRun(run.ID, AgentRunCommandResume)
+			resumed := f.commandRun(run.ID, agentrun.AgentRunCommandResume)
 			if resumed.Status != AgentRunStatusQueued || resumed.WakeCondition != nil || resumed.PausedWakeCondition != nil {
 				t.Fatalf("resume restored the expired wait: %#v", resumed)
 			}

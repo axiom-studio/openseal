@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -19,16 +20,16 @@ type workerLoopProducer struct {
 
 func (*workerLoopProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
-func (p *workerLoopProducer) Produce(_ context.Context, in StepInput) (StepOutput, error) {
+func (p *workerLoopProducer) Produce(_ context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	call := int(p.calls.Add(1))
 	if call <= p.steps {
 		due := time.Now().Add(p.wakeIn)
-		return StepOutput{Park: &LoopPark{
+		return agentrun.StepOutput{Park: &agentrun.LoopPark{
 			Status: AgentRunStatusSleeping, Summary: "Waiting for the next step",
 			Wake: &WakeCondition{Type: "timer", WakeAt: &due, Reference: "next-step"},
 		}}, nil
 	}
-	return StepOutput{Final: &LoopFinal{Answer: "Work complete", Output: map[string]interface{}{"winner": "agent", "sequence": float64(in.Step.Sequence)}}}, nil
+	return agentrun.StepOutput{Final: &agentrun.LoopFinal{Answer: "Work complete", Output: map[string]interface{}{"winner": "agent", "sequence": float64(in.Step.Sequence)}}}, nil
 }
 
 func workerLoopStores() []struct {
@@ -86,9 +87,9 @@ func TestAgentRunWorkerDrivesRunLoopAcrossClaims(t *testing.T) {
 			}
 			producer := &workerLoopProducer{steps: 1, wakeIn: 40 * time.Millisecond}
 			var resolved atomic.Int32
-			resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+			resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 				resolved.Add(1)
-				return &TurnRunnerBinding{
+				return &agentrun.TurnRunnerBinding{
 					DefinitionID: "test-agent", DefinitionVersion: "1", ModelProvider: "fake", Model: "deterministic",
 					Producer: producer,
 				}, nil
@@ -132,14 +133,14 @@ func TestAgentRunWorkerFailsRunWithoutStepProducer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DefinitionID: "test-agent", DefinitionVersion: "1"}, nil
+	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		return &agentrun.TurnRunnerBinding{DefinitionID: "test-agent", DefinitionVersion: "1"}, nil
 	})
 	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{Scope: scope, AssignedAgentID: "agent", LeaseDuration: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := pool.scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-1", AssignedAgentID: "agent", LeaseDuration: time.Second})
+	claimed, err := pool.scheduler.ClaimNext(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-1", AssignedAgentID: "agent", LeaseDuration: time.Second})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}

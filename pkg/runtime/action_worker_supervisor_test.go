@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
@@ -47,7 +48,7 @@ func TestActionWorkerSupervisorReconcilesIsolatedScopes(t *testing.T) {
 	}, listed: make(chan struct{}, 1)}
 	supervisor, err := NewActionWorkerSupervisor(
 		store, skill.NewCatalog(), nil,
-		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
+		ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
 		source, zap.NewNop().Sugar(), DynamicActionWorkerConfig{ReconcileInterval: time.Hour},
 	)
 	if err != nil {
@@ -92,7 +93,7 @@ func waitActionWorkerScopeCount(supervisor *ActionWorkerSupervisor, want int) in
 func TestActionWorkerSupervisorStartStopIsIdempotent(t *testing.T) {
 	supervisor, err := NewActionWorkerSupervisor(
 		newTestKernelStore(t), skill.NewCatalog(), nil,
-		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
+		ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
 		workqueue.WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{{Kind: "tenant", ID: "1"}}, nil }),
 		zap.NewNop().Sugar(), DynamicActionWorkerConfig{ReconcileInterval: 5 * time.Millisecond},
 	)

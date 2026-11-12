@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // capabilityInvocationToolCallID is the id of the one governed tool call a
@@ -37,13 +38,13 @@ func NewCapabilityInvocationStepProducer(actions []capability.ModelAction, calls
 
 func (p *CapabilityInvocationStepProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
-func (p *CapabilityInvocationStepProducer) Produce(ctx context.Context, in StepInput) (StepOutput, error) {
+func (p *CapabilityInvocationStepProducer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	if p == nil || in.Run == nil || in.Step == nil {
-		return StepOutput{}, errors.New("deterministic capability invocation requires a durable Run and step")
+		return agentrun.StepOutput{}, errors.New("deterministic capability invocation requires a durable Run and step")
 	}
 	requested, ok := in.Run.Context[capabilityInvocationContextKey].(map[string]interface{})
 	if !ok {
-		return StepOutput{}, errors.New("Run has no typed capability invocation")
+		return agentrun.StepOutput{}, errors.New("Run has no typed capability invocation")
 	}
 	skillID, _ := requested["skillId"].(string)
 	version, _ := requested["skillVersion"].(string)
@@ -55,49 +56,49 @@ func (p *CapabilityInvocationStepProducer) Produce(ctx context.Context, in StepI
 		candidate := &p.actions[index]
 		if candidate.SkillID == skillID && candidate.Version == version && candidate.Action == action {
 			if selected != nil {
-				return StepOutput{}, errors.New("typed capability invocation matches multiple authorized actions")
+				return agentrun.StepOutput{}, errors.New("typed capability invocation matches multiple authorized actions")
 			}
 			selected = candidate
 		}
 	}
 	if selected == nil {
-		return StepOutput{}, fmt.Errorf("typed capability %s@%s/%s is not authorized", skillID, version, action)
+		return agentrun.StepOutput{}, fmt.Errorf("typed capability %s@%s/%s is not authorized", skillID, version, action)
 	}
 	result, call, err := producerToolResult(ctx, p.calls, in.Run, in.Path, capabilityInvocationToolCallID)
 	if err != nil {
-		return StepOutput{}, err
+		return agentrun.StepOutput{}, err
 	}
 	if result == nil {
 		if arguments == nil {
 			arguments = map[string]interface{}{}
 		}
-		toolCall, err := producerGovernedToolCall(capabilityInvocationToolCallID, selected, arguments, &ToolCallDirective{
+		toolCall, err := producerGovernedToolCall(capabilityInvocationToolCallID, selected, arguments, &agentrun.ToolCallDirective{
 			IdempotencyKey: "capability-invocation:" + in.Run.ID,
 			Summary:        "Execute governed " + selected.Name,
 		})
 		if err != nil {
-			return StepOutput{}, err
+			return agentrun.StepOutput{}, err
 		}
-		return StepOutput{ToolCalls: []LoopToolCall{toolCall}}, nil
+		return agentrun.StepOutput{ToolCalls: []agentrun.LoopToolCall{toolCall}}, nil
 	}
 	if call == nil {
-		return StepOutput{Failure: &LoopFailure{
+		return agentrun.StepOutput{Failure: &agentrun.LoopFailure{
 			Kind: "execution", Code: "capability_invocation_refused",
 			Message: "The scheduled capability " + selected.Name + " was refused before it ran.",
 		}}, nil
 	}
 	if !producerCallMatches(call, selected) {
-		return StepOutput{}, errors.New("durable action result does not match the typed capability invocation")
+		return agentrun.StepOutput{}, errors.New("durable action result does not match the typed capability invocation")
 	}
 	// The ActionCall is authoritative: a succeeded call completes the Run
 	// whatever state its tool entry ended in.
 	if call.Status != ActionCallStatusSucceeded {
-		return StepOutput{Failure: &LoopFailure{
+		return agentrun.StepOutput{Failure: &agentrun.LoopFailure{
 			Kind: "execution", Code: "capability_invocation_failed",
 			Message: fmt.Sprintf("The scheduled capability %s did not complete (%s).", selected.Name, call.Status),
 		}}, nil
 	}
-	return StepOutput{Final: &LoopFinal{
+	return agentrun.StepOutput{Final: &agentrun.LoopFinal{
 		Answer: "Completed " + selected.Name + ".",
 		Output: map[string]interface{}{"capabilityResult": result.Output},
 		Status: AgentRunStatusCompleted,
@@ -106,15 +107,15 @@ func (p *CapabilityInvocationStepProducer) Produce(ctx context.Context, in StepI
 
 // producerGovernedToolCall builds a deterministic producer's governed tool
 // call pinned to the selected binding and Skill version.
-func producerGovernedToolCall(id string, selected *capability.ModelAction, arguments map[string]interface{}, directive *ToolCallDirective) (LoopToolCall, error) {
+func producerGovernedToolCall(id string, selected *capability.ModelAction, arguments map[string]interface{}, directive *agentrun.ToolCallDirective) (agentrun.LoopToolCall, error) {
 	raw, err := json.Marshal(arguments)
 	if err != nil {
-		return LoopToolCall{}, fmt.Errorf("encode %s arguments: %w", selected.Name, err)
+		return agentrun.LoopToolCall{}, fmt.Errorf("encode %s arguments: %w", selected.Name, err)
 	}
 	directive.BindingID = selected.BindingID
 	directive.BindingRevision = selected.BindingRevision
 	directive.ExpectedSkillVersion = selected.Version
-	return LoopToolCall{ID: id, Name: selected.Name, Arguments: raw, Directive: directive}, nil
+	return agentrun.LoopToolCall{ID: id, Name: selected.Name, Arguments: raw, Directive: directive}, nil
 }
 
 func producerCallMatches(call *ActionCall, selected *capability.ModelAction) bool {

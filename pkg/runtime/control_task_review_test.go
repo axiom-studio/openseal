@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // taskReviewHost answers review calls with scripted texts, in order.
@@ -34,7 +36,7 @@ const taskReviewGoal = "Compile the full list of open invoices with totals."
 
 // newTaskReviewFixture makes the fixture's Run the work Run of an independent
 // conversation task.
-func newTaskReviewFixture(t *testing.T, calls ...LoopToolCall) *controlFixture {
+func newTaskReviewFixture(t *testing.T, calls ...agentrun.LoopToolCall) *controlFixture {
 	t.Helper()
 	f := newFinalFixture(t, calls...)
 	f.run.Kind = RunKindAgentWork
@@ -48,9 +50,9 @@ func newTaskReviewFixture(t *testing.T, calls ...LoopToolCall) *controlFixture {
 	return f
 }
 
-func (f *controlFixture) settleReviewed(callID string, host StepHost) ControlResult {
+func (f *controlFixture) settleReviewed(callID string, host agentrun.StepHost) ControlResult {
 	f.t.Helper()
-	cc := f.context(callID, ControlAuthority{})
+	cc := f.context(callID, agentrun.ControlAuthority{})
 	cc.Binding.Host = host
 	result, err := f.exec.Settle(f.ctx, cc)
 	if err != nil {
@@ -60,7 +62,7 @@ func (f *controlFixture) settleReviewed(callID string, host StepHost) ControlRes
 }
 
 func TestTaskReviewApproveDelivers(t *testing.T) {
-	f := newTaskReviewFixture(t, LoopToolCall{ID: "lookup", Name: "invoices_list", Arguments: json.RawMessage(`{}`)},
+	f := newTaskReviewFixture(t, agentrun.LoopToolCall{ID: "lookup", Name: "invoices_list", Arguments: json.RawMessage(`{}`)},
 		finalCall("final", `{"answer":"Invoices: A 10, B 20. Total 30."}`))
 	// A finished tool call of this Run is review evidence.
 	lookup := f.entries["lookup"]
@@ -152,7 +154,7 @@ func TestTaskReviewSkipsRunsThatAreNotTaskWork(t *testing.T) {
 func TestTaskReviewPlainTextRevise(t *testing.T) {
 	f := newTaskReviewFixture(t)
 	host := &taskReviewHost{replies: []string{`{"decision":"revise","reason":"Nothing delivered."}`}}
-	cc := f.plainContext("step-2", 2, ControlAuthority{})
+	cc := f.plainContext("step-2", 2, agentrun.ControlAuthority{})
 	cc.Binding.Host = host
 	result, err := f.exec.PlainTextFinal(f.ctx, cc, "I'll get to it.")
 	if err != nil {

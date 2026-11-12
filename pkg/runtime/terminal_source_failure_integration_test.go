@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 	"github.com/google/uuid"
@@ -42,7 +43,7 @@ func sourceFailureRun(t *testing.T, store sourceFailureStore, at time.Time) (*Ag
 	}
 	trigger := posted.Message
 	lane := ConversationRunLane(conversation.ID, trigger.ID, owner.ID)
-	commands := NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
+	commands := agentrun.NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
 	created, err := commands.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: RunKindConversation, Source: RunSourceChat,
 		Goal: "Check the recent email request", ConcurrencyKey: lane, SessionID: ConversationAgentSessionID(scope, lane),

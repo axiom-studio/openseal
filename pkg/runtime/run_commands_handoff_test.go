@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -42,7 +43,7 @@ type handoffCommandFixture struct {
 	now           time.Time
 	portfolio     *PortfolioService
 	collaboration *CollaborationService
-	commands      *RunCommandService
+	commands      *agentrun.RunCommandService
 	sourceID      string
 	childID       string
 	requestID     string
@@ -60,7 +61,7 @@ func newHandoffCommandFixtureWithParent(t *testing.T, store handoffCommandTestSt
 		now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
 	}
 	clock := models.WithClock(func() time.Time { return f.now })
-	f.portfolio, f.collaboration, f.commands = NewPortfolioService(store, clock), NewCollaborationService(store, clock), NewRunCommandService(store, clock)
+	f.portfolio, f.collaboration, f.commands = NewPortfolioService(store, clock), NewCollaborationService(store, clock), agentrun.NewRunCommandService(store, clock)
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}
 	if teamOwned {
 		owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}
@@ -304,8 +305,8 @@ func TestRunCommandsHandoffDirectCancellationStillOwnsSubtree(t *testing.T) {
 		child := f.claimChild()
 		grandchild := f.childOf(child.ID, "marketing-helper")
 		source := f.run(f.sourceID)
-		if _, err := f.commands.CommandAgentRun(t.Context(), AgentRunCommandRequest{
-			Scope: f.scope, RunID: child.ID, ExpectedRevision: child.Revision, Kind: AgentRunCommandCancel,
+		if _, err := f.commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
+			Scope: f.scope, RunID: child.ID, ExpectedRevision: child.Revision, Kind: agentrun.AgentRunCommandCancel,
 			Actor: ActivityActor{Type: "user", ID: "recipient"},
 		}); err != nil {
 			t.Fatal(err)
@@ -600,7 +601,7 @@ func TestRunCommandsHandoffAcceptanceDuringRecursiveDiscoveryUsesCanonicalSource
 			ownedAfterAcceptance = f.childOf(f.childID, "marketing-helper")
 			requestAfterAcceptance = f.request()
 		}
-		commands := NewRunCommandService(wrapped, models.WithClock(func() time.Time { return f.now }))
+		commands := agentrun.NewRunCommandService(wrapped, models.WithClock(func() time.Time { return f.now }))
 		if err := commands.CascadeTerminalRun(t.Context(), outer); err != nil {
 			t.Fatal(err)
 		}
@@ -624,7 +625,7 @@ func TestRunCommandsHandoffGroupedReceiptDoesNotTransferOwnershipAfterQuorum(t *
 			now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
 		}
 		clock := models.WithClock(func() time.Time { return f.now })
-		f.portfolio, f.collaboration, f.commands = NewPortfolioService(store, clock), NewCollaborationService(store, clock), NewRunCommandService(store, clock)
+		f.portfolio, f.collaboration, f.commands = NewPortfolioService(store, clock), NewCollaborationService(store, clock), agentrun.NewRunCommandService(store, clock)
 		source, err := f.portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
 			Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 			Goal: "Accept the first adequate result", Source: RunSourceManual,
@@ -703,7 +704,7 @@ func TestRunCommandsHandoffUnavailableReceiptReaderFailsClosed(t *testing.T) {
 		beforeEvents := map[string][]*ActivityEvent{
 			source.ID: f.events(source.ID), child.ID: f.events(child.ID), grandchild.ID: f.events(grandchild.ID),
 		}
-		commands := NewRunCommandService(handoffRunCommandStoreOnly{RunCommandStore: store}, models.WithClock(func() time.Time { return f.now }))
+		commands := agentrun.NewRunCommandService(handoffRunCommandStoreOnly{RunCommandStore: store}, models.WithClock(func() time.Time { return f.now }))
 		if err := commands.CascadeTerminalRun(t.Context(), source); !errors.Is(err, ErrInvalidRunTransition) {
 			t.Fatalf("unavailable scoped receipt reader: %v", err)
 		}

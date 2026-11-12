@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Interaction control tools (section 04 §10): react (inline) and wait
@@ -25,7 +26,7 @@ type reactControlArgs struct {
 
 type reactControlHandler struct{}
 
-func (reactControlHandler) Spec(ControlAuthority) ControlToolSpec {
+func (reactControlHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: ConversationReactInstruction,
 		InputSchema: map[string]interface{}{
@@ -42,7 +43,7 @@ func (reactControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[reactControlArgs](raw)
 }
 
-func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (reactControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*reactControlArgs)
 	reaction := TurnReaction{MessageID: strings.TrimSpace(args.MessageID), Emoji: args.Emoji}
 	if !validOpaqueIdentifier(reaction.MessageID, 256) || ValidateReactionEmoji(reaction.Emoji) != nil {
@@ -139,7 +140,7 @@ type waitControlArgs struct {
 
 type waitControlHandler struct{}
 
-func (waitControlHandler) Spec(ControlAuthority) ControlToolSpec {
+func (waitControlHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: waitControlDescription,
 		InputSchema: map[string]interface{}{
@@ -165,7 +166,7 @@ func (waitControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return value, nil
 }
 
-func (waitControlHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (waitControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*waitControlArgs)
 	wakeAt := x.now().Add(time.Duration(args.Seconds) * time.Second)
 	entry, err := x.transitionControlEntry(ctx, cc, ToolEntryAwaitingEvent,
@@ -176,7 +177,7 @@ func (waitControlHandler) Run(ctx context.Context, x *ControlExecutor, cc Contro
 	return ControlResult{Kind: ControlParked, Entry: entry, Park: waitPark(entry.ID, wakeAt)}, nil
 }
 
-func (waitControlHandler) Resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
+func (waitControlHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
 	args := cc.Arguments.(*waitControlArgs)
 	meta, err := DecodeControlEntryMeta(cc.Entry)
 	if err != nil {
@@ -210,9 +211,9 @@ func (waitControlHandler) Resume(ctx context.Context, x *ControlExecutor, cc Con
 	return ControlResume{Resolved: true, Result: result}, nil
 }
 
-func waitPark(entryID string, wakeAt time.Time) *LoopPark {
+func waitPark(entryID string, wakeAt time.Time) *agentrun.LoopPark {
 	at := wakeAt
-	return &LoopPark{
+	return &agentrun.LoopPark{
 		Status:  AgentRunStatusSleeping,
 		Wake:    &WakeCondition{Type: "timer", WakeAt: &at, Reference: entryID},
 		Summary: "Waiting until " + at.Format(time.RFC3339),

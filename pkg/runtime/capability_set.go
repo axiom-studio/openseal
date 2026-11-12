@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Deferred capability loading (section 07 §7). A large Agent does not see
@@ -56,7 +57,7 @@ type CapabilityCatalog struct {
 	Actions           []capability.ModelAction
 	SkillPrompts      []HostedSkillPrompt
 	HostTools         []HostToolSpec
-	RunbookOperations []HostedRunbookOperation
+	RunbookOperations []agentrun.HostedRunbookOperation
 }
 
 // CapabilitySetConfig bounds the pinned set and decides search mode. Zero or
@@ -114,7 +115,7 @@ type CapabilitySet struct {
 	prompts   map[string]HostedSkillPrompt
 	actions   map[string]capability.ModelAction
 	hostTools map[string]HostToolSpec
-	runbooks  map[string]HostedRunbookOperation
+	runbooks  map[string]agentrun.HostedRunbookOperation
 
 	// Discovery handles are presentation only; loaded IDs stay canonical.
 	discoveryIDs map[string]string
@@ -151,7 +152,7 @@ func newCapabilitySet(catalog CapabilityCatalog, carriedIDs, loadedIDs []string,
 		prompts:   map[string]HostedSkillPrompt{},
 		actions:   map[string]capability.ModelAction{},
 		hostTools: map[string]HostToolSpec{},
-		runbooks:  map[string]HostedRunbookOperation{},
+		runbooks:  map[string]agentrun.HostedRunbookOperation{},
 		pinned:    map[string]bool{},
 		loaded:    map[string]bool{},
 	}
@@ -454,7 +455,7 @@ func (s *CapabilitySet) Offered() bool { return s != nil && len(s.entries) > 0 }
 func (s *CapabilitySet) Searching() bool { return s != nil && s.searching }
 
 // Visible returns the visible catalog subset in load order (pinned, then loads).
-func (s *CapabilitySet) Visible() (actions []capability.ModelAction, prompts []HostedSkillPrompt, hostTools []HostToolSpec, runbooks []HostedRunbookOperation) {
+func (s *CapabilitySet) Visible() (actions []capability.ModelAction, prompts []HostedSkillPrompt, hostTools []HostToolSpec, runbooks []agentrun.HostedRunbookOperation) {
 	if s == nil {
 		return nil, nil, nil, nil
 	}

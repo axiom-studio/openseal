@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -23,7 +24,7 @@ type ControlAuthorityInput struct {
 	Catalog           AgentTurnCatalog
 	Scope             skill.ScopeReference // zero = Run.Scope
 	SkillPromptRefs   []string
-	Operations        []HostedRunbookOperation // binding.RunbookOperations
+	Operations        []agentrun.HostedRunbookOperation // binding.RunbookOperations
 	ConversationTasks ConversationTaskKernelStore
 	Runs              PortfolioStore
 	Conversations     ConversationStore
@@ -34,22 +35,22 @@ type ControlAuthorityInput struct {
 
 // ResolveControlAuthority resolves the control authority of one claim. It is
 // called once per claim so the advertised tool list stays stable.
-func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (ControlAuthority, error) {
+func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (agentrun.ControlAuthority, error) {
 	run := in.Run
 	if run == nil {
-		return ControlAuthority{}, errors.New("control authority requires a Run")
+		return agentrun.ControlAuthority{}, errors.New("control authority requires a Run")
 	}
 	agentID := strings.TrimSpace(in.DeploymentID)
 	if agentID == "" {
-		return ControlAuthority{}, errors.New("control authority requires the speaking Agent deployment")
+		return agentrun.ControlAuthority{}, errors.New("control authority requires the speaking Agent deployment")
 	}
-	authority := ControlAuthority{AgentID: agentID, FinalMode: controlFinalMode(run),
+	authority := agentrun.ControlAuthority{AgentID: agentID, FinalMode: controlFinalMode(run),
 		RoutineOccurrence: routineOccurrenceRun(run) && run.Kind != RunKindConversation}
 	if in.Deterministic {
 		return authority, nil
 	}
 	mode := authority.FinalMode
-	if mode == FinalModeDecision || mode == FinalModeReview {
+	if mode == agentrun.FinalModeDecision || mode == agentrun.FinalModeReview {
 		// Decision and review Runs get only their typed final tool.
 		return authority, nil
 	}
@@ -64,17 +65,17 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (Con
 	voiceCall := run.Context["voiceCallStarted"] == true
 
 	authority.SkillPromptRefs = append([]string(nil), in.SkillPromptRefs...)
-	authority.VisualAllowed = mode == FinalModeDefault
+	authority.VisualAllowed = mode == agentrun.FinalModeDefault
 	authority.BroadcastAllowed = run.Kind == RunKindConversation
 	authority.TaskWork = taskWork
 	authority.CanReportProgress = true
 	authority.CanWait = !chatReply
 	authority.VoiceCallStarted = voiceCall
-	authority.Operations = append([]HostedRunbookOperation(nil), in.Operations...)
+	authority.Operations = append([]agentrun.HostedRunbookOperation(nil), in.Operations...)
 
 	targets, err := resolveHostedAgentTargets(ctx, in.Catalog, scope, run, agentID)
 	if err != nil {
-		return ControlAuthority{}, fmt.Errorf("resolve eligible Agent targets: %w", err)
+		return agentrun.ControlAuthority{}, fmt.Errorf("resolve eligible Agent targets: %w", err)
 	}
 	// No nested model forks (DI-15). Targets exclude the current Agent, so a
 	// task worker, which may fork only itself, gets none (self only).
@@ -83,12 +84,12 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (Con
 		authority.ForkTargets = targets
 	}
 	if !taskWork {
-		authority.DelegateTargets = append([]HostedAgentTarget(nil), targets...)
+		authority.DelegateTargets = append([]agentrun.HostedAgentTarget(nil), targets...)
 	}
 
 	tasks, err := resolveCatalogConversationTaskContext(ctx, in.Catalog, run, in.ConversationTasks)
 	if err != nil {
-		return ControlAuthority{}, fmt.Errorf("resolve conversation task context: %w", err)
+		return agentrun.ControlAuthority{}, fmt.Errorf("resolve conversation task context: %w", err)
 	}
 	if tasks != nil {
 		// The task snapshots stay visible; only the start right is withdrawn.
@@ -102,30 +103,30 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (Con
 	if in.Runs != nil && in.Conversations != nil {
 		_, conversation, trigger, err := conversationWorkOrigin(ctx, in.Runs, in.Conversations, run)
 		if err != nil {
-			return ControlAuthority{}, fmt.Errorf("resolve conversation origin: %w", err)
+			return agentrun.ControlAuthority{}, fmt.Errorf("resolve conversation origin: %w", err)
 		}
 		authority.CanAskUser = conversation != nil && trigger != nil && run.AssignedAgentID == agentID &&
 			run.AssignedAgentID == ConversationRunAgentID(conversation, run)
 		authority.ExternalChannelReply = externalChannelContext(conversation)
 		_, authority.ApprovalMode, err = RunConversationApprovalMode(ctx, in.Runs, in.Conversations, run)
 		if err != nil {
-			return ControlAuthority{}, fmt.Errorf("resolve conversation approval mode: %w", err)
+			return agentrun.ControlAuthority{}, fmt.Errorf("resolve conversation approval mode: %w", err)
 		}
 	}
 	return authority, nil
 }
 
-func controlFinalMode(run *AgentRun) FinalAnswerMode {
-	if _, ok := run.Context[AgentRequestInboxContextKey]; ok {
-		return FinalModeDecision
+func controlFinalMode(run *AgentRun) agentrun.FinalAnswerMode {
+	if _, ok := run.Context[agentrun.AgentRequestInboxContextKey]; ok {
+		return agentrun.FinalModeDecision
 	}
-	if _, ok := run.Context[AgentRequestCompletionReviewContextKey]; ok {
-		return FinalModeReview
+	if _, ok := run.Context[agentrun.AgentRequestCompletionReviewContextKey]; ok {
+		return agentrun.FinalModeReview
 	}
 	if run.Context["responseMode"] == "spoken" {
 		return FinalModeSpoken
 	}
-	return FinalModeDefault
+	return agentrun.FinalModeDefault
 }
 
 func resolveHostedAgentTargets(
@@ -134,7 +135,7 @@ func resolveHostedAgentTargets(
 	scope skill.ScopeReference,
 	run *AgentRun,
 	currentDeploymentID string,
-) ([]HostedAgentTarget, error) {
+) ([]agentrun.HostedAgentTarget, error) {
 	if run == nil || run.Owner.Type != OwnerTypeTeam || strings.TrimSpace(run.Owner.ID) == "" {
 		return nil, nil
 	}
@@ -162,7 +163,7 @@ func resolveHostedAgentTargets(
 	if err != nil {
 		return nil, err
 	}
-	targets := make([]HostedAgentTarget, 0, len(deployments))
+	targets := make([]agentrun.HostedAgentTarget, 0, len(deployments))
 	for _, candidate := range deployments {
 		if candidate == nil || candidate.ID == currentDeploymentID ||
 			candidate.RolloutStatus != kernelagent.RolloutActive || strings.TrimSpace(candidate.ActiveVersion) == "" {
@@ -178,7 +179,7 @@ func resolveHostedAgentTargets(
 		if definition == nil {
 			return nil, fmt.Errorf("resolve Agent %s definition: definition is unavailable", candidate.ID)
 		}
-		targets = append(targets, HostedAgentTarget{
+		targets = append(targets, agentrun.HostedAgentTarget{
 			ID: strings.TrimSpace(candidate.ID), DisplayName: strings.TrimSpace(definition.DisplayName),
 			Purpose: strings.TrimSpace(definition.Purpose),
 		})

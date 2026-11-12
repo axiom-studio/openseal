@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // fixedActionCalls is an ActionCallReader over a fixed set of calls.
@@ -36,7 +37,7 @@ func producerToolPath(runID, toolCallID string, state ToolEntryState, actionCall
 	}}}
 }
 
-func requireValidDeterministicOutput(t *testing.T, out StepOutput) {
+func requireValidDeterministicOutput(t *testing.T, out agentrun.StepOutput) {
 	t.Helper()
 	if err := validateStepOutput(StepProducerDeterministic, out); err != nil {
 		t.Fatalf("invalid deterministic output %#v: %v", out, err)
@@ -60,7 +61,7 @@ func TestCapabilityInvocationProducerProposesExactActionAndCompletesWithOutput(t
 		"skillId": "openseal.source", "skillVersion": "1.0.2", "action": "observe_feed",
 		"inputs": map[string]interface{}{"url": "https://example.com/feed", "maxItems": float64(5)},
 	}}}
-	first, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step-1", Sequence: 1}, Path: &AgentSessionPath{}})
+	first, err := producer.Produce(t.Context(), agentrun.StepInput{Run: run, Step: &AgentTurn{ID: "step-1", Sequence: 1}, Path: &AgentSessionPath{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestCapabilityInvocationProducerProposesExactActionAndCompletesWithOutput(t
 
 	calls["action-1"] = &ActionCall{ID: "action-1", RunID: "run-1", SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed",
 		BindingID: "feeds", BindingRevision: 4, Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"observationCount": float64(5)}}
-	second, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step-2", Sequence: 2},
+	second, err := producer.Produce(t.Context(), agentrun.StepInput{Run: run, Step: &AgentTurn{ID: "step-2", Sequence: 2},
 		Path: producerToolPath("run-1", capabilityInvocationToolCallID, ToolEntryCompleted, "action-1")})
 	if err != nil {
 		t.Fatal(err)
@@ -102,7 +103,7 @@ func TestCapabilityInvocationProducerFailsRunOnUnsuccessfulCall(t *testing.T) {
 			run := &AgentRun{ID: "run", Context: map[string]interface{}{capabilityInvocationContextKey: map[string]interface{}{
 				"skillId": "source", "skillVersion": "1", "action": "read", "inputs": map[string]interface{}{},
 			}}}
-			out, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step-2"},
+			out, err := producer.Produce(t.Context(), agentrun.StepInput{Run: run, Step: &AgentTurn{ID: "step-2"},
 				Path: producerToolPath("run", capabilityInvocationToolCallID, ToolEntryError, "action-1")})
 			if err != nil {
 				t.Fatal(err)
@@ -118,7 +119,7 @@ func TestCapabilityInvocationProducerFailsRunOnUnsuccessfulCall(t *testing.T) {
 	run := &AgentRun{ID: "run", Context: map[string]interface{}{capabilityInvocationContextKey: map[string]interface{}{
 		"skillId": "source", "skillVersion": "1", "action": "read",
 	}}}
-	out, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step-2"},
+	out, err := producer.Produce(t.Context(), agentrun.StepInput{Run: run, Step: &AgentTurn{ID: "step-2"},
 		Path: producerToolPath("run", capabilityInvocationToolCallID, ToolEntryError, "")})
 	if err != nil || out.Failure == nil || out.Failure.Code != "capability_invocation_refused" {
 		t.Fatalf("refused out = %#v err = %v", out, err)
@@ -135,25 +136,25 @@ func TestCapabilityInvocationProducerRejectsUnboundCapabilityAndForeignResults(t
 	unbound := &AgentRun{ID: "run", Context: map[string]interface{}{capabilityInvocationContextKey: map[string]interface{}{
 		"skillId": "source", "skillVersion": "2", "action": "read", "inputs": map[string]interface{}{},
 	}}}
-	if _, err := producer.Produce(t.Context(), StepInput{Run: unbound, Step: &AgentTurn{ID: "step"}}); err == nil {
+	if _, err := producer.Produce(t.Context(), agentrun.StepInput{Run: unbound, Step: &AgentTurn{ID: "step"}}); err == nil {
 		t.Fatal("unbound typed capability was accepted")
 	}
 	run := &AgentRun{ID: "run", Context: map[string]interface{}{capabilityInvocationContextKey: map[string]interface{}{
 		"skillId": "source", "skillVersion": "1", "action": "read",
 	}}}
 	for _, id := range []string{"other-skill", "other-run"} {
-		if _, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step-2"},
+		if _, err := producer.Produce(t.Context(), agentrun.StepInput{Run: run, Step: &AgentTurn{ID: "step-2"},
 			Path: producerToolPath("run", capabilityInvocationToolCallID, ToolEntryCompleted, id)}); err == nil {
 			t.Fatalf("result %s was consumed", id)
 		}
 	}
 	// An entry still waiting is never consumed as a result.
-	if _, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step-2"},
+	if _, err := producer.Produce(t.Context(), agentrun.StepInput{Run: run, Step: &AgentTurn{ID: "step-2"},
 		Path: producerToolPath("run", capabilityInvocationToolCallID, ToolEntryAwaitingApproval, "")}); err == nil {
 		t.Fatal("open tool entry was consumed")
 	}
 	// Another Run's entry on the path is not this Run's call.
-	out, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step-1"},
+	out, err := producer.Produce(t.Context(), agentrun.StepInput{Run: run, Step: &AgentTurn{ID: "step-1"},
 		Path: producerToolPath("run-2", capabilityInvocationToolCallID, ToolEntryCompleted, "other-run")})
 	if err != nil || len(out.ToolCalls) != 1 {
 		t.Fatalf("foreign entry changed the first step: %#v %v", out, err)

@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 )
 
-const skillRuntimeMaintenanceCheckpointKey = "_kernelSkillRuntimeMaintenance"
+const SkillRuntimeMaintenanceCheckpointKey = "_kernelSkillRuntimeMaintenance"
 
 type skillRuntimeMaintenanceWaiterStore interface {
 	ListCompletedSkillRuntimeMaintenanceWaiters(context.Context, models.Scope, int) ([]*models.AgentRun, error)
@@ -29,7 +29,7 @@ func (s *AgentRunWakeService) wakeCompletedSkillRuntimeMaintenances(ctx context.
 	result := &WakeResult{Runs: make([]WokenRun, 0, len(runs))}
 	for _, run := range runs {
 		checkpoint := maps.Clone(run.Checkpoint)
-		delete(checkpoint, skillRuntimeMaintenanceCheckpointKey)
+		delete(checkpoint, SkillRuntimeMaintenanceCheckpointKey)
 		id := fmt.Sprintf("skill-runtime-ready:%s:%d", run.ID, run.Revision)
 		woken, event, err := s.activity.TransitionRun(ctx, scope, run.ID, activity.RunTransitionRequest{
 			ExpectedRevision: run.Revision, Status: models.AgentRunStatusQueued, Checkpoint: checkpoint,

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
 )
@@ -85,12 +86,12 @@ type AgentRunWorkerSupervisor struct {
 
 	mu                sync.RWMutex
 	actions           *ActionCoordinator
-	runFinalizer      RunTerminalFinalizer
+	runFinalizer      agentrun.RunTerminalFinalizer
 	limiter           *workqueue.WorkerLimiter
 	executionPreparer AcceptedRunExecutionPreparer
 }
 
-func (s *AgentRunWorkerSupervisor) SetRunTerminalFinalizer(finalizer RunTerminalFinalizer) {
+func (s *AgentRunWorkerSupervisor) SetRunTerminalFinalizer(finalizer agentrun.RunTerminalFinalizer) {
 	s.mu.Lock()
 	s.runFinalizer = finalizer
 	s.mu.Unlock()

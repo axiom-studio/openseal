@@ -26,6 +26,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -43,13 +44,13 @@ const (
 // the runbook definitions of operation children.
 type childFixture struct {
 	*loopFixture
-	forks    *RunForkCoordinator
+	forks    *agentrun.RunForkCoordinator
 	collab   *CollaborationService
 	inbox    *AgentRequestInboxReconciler
 	runbooks map[string]*runbook.Definition // by definition id
 	// authority adjusts a model Run's control authority before its claim (a
 	// test grants delegation targets, task start or operations here).
-	authority func(run *AgentRun, authority *ControlAuthority)
+	authority func(run *AgentRun, authority *agentrun.ControlAuthority)
 	// claims counts claims per Run.
 	claims map[string]int
 }
@@ -122,7 +123,7 @@ func newChildFixture(t *testing.T, store KernelStore, opts ...loopOption) *child
 		t.Fatal(err)
 	}
 	c := &childFixture{
-		loopFixture: f, forks: NewRunForkCoordinator(stores, models.WithClock(f.clock.Now)), collab: collab,
+		loopFixture: f, forks: agentrun.NewRunForkCoordinator(stores, models.WithClock(f.clock.Now)), collab: collab,
 		inbox: inbox, runbooks: map[string]*runbook.Definition{}, claims: map[string]int{},
 	}
 	c.forks.SetAcceptedRunExecutionPreparer(childRunbookPreparer{c})
@@ -295,7 +296,7 @@ func (c *childFixture) resolveTerminal(run *AgentRun) {
 // kind: a chat reply binds to its lane through the conversation loop; a
 // pinned runbook entrypoint is deterministic over an unrendered run session;
 // every other Run is a model Run on its own session (A3).
-func (c *childFixture) bindingFor(run *AgentRun) *TurnRunnerBinding {
+func (c *childFixture) bindingFor(run *AgentRun) *agentrun.TurnRunnerBinding {
 	c.t.Helper()
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
@@ -327,21 +328,21 @@ func (c *childFixture) bindingFor(run *AgentRun) *TurnRunnerBinding {
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	binding := &TurnRunnerBinding{
+	binding := &agentrun.TurnRunnerBinding{
 		DeploymentID: run.AssignedAgentID, ActionDeploymentID: loopFixtureAgent,
 		DefinitionID: loopFixtureDefinition, DefinitionVersion: "1",
 		ModelProvider: string(kitModelProvider), Model: kitModelName,
 		Producer: producer, Host: host, Authority: control,
-		Preparers: []StepPreparer{newRunStartPreparer(c.store.(AgentSessionStore), c.store)},
+		Preparers: []agentrun.StepPreparer{newRunStartPreparer(c.store.(AgentSessionStore), c.store)},
 		Tools:     c.dispatcher.ForClaim(LoopToolClaim{}),
 	}
-	_, decision := run.Context[AgentRequestInboxContextKey]
-	_, review := run.Context[AgentRequestCompletionReviewContextKey]
+	_, decision := run.Context[agentrun.AgentRequestInboxContextKey]
+	_, review := run.Context[agentrun.AgentRequestCompletionReviewContextKey]
 	if !decision && !review {
 		binding.ModelActions = append([]capability.ModelAction(nil), c.offered...)
 	}
 	if run.Kind == RunKindConversation && conversationID != "" && triggerID != "" {
-		return c.conversationBinding(run, func(*AgentRun) *TurnRunnerBinding { return binding })
+		return c.conversationBinding(run, func(*AgentRun) *agentrun.TurnRunnerBinding { return binding })
 	}
 	binding.Session = c.runSession(run, true)
 	return binding
@@ -379,7 +380,7 @@ func (c *childFixture) runSession(run *AgentRun, seeded bool) *AgentSession {
 	return opened.Session
 }
 
-func (c *childFixture) runbookBinding(run *AgentRun) *TurnRunnerBinding {
+func (c *childFixture) runbookBinding(run *AgentRun) *agentrun.TurnRunnerBinding {
 	c.t.Helper()
 	id, _ := run.Context["runbookDefinitionId"].(string)
 	definition := c.runbooks[id]
@@ -394,7 +395,7 @@ func (c *childFixture) runbookBinding(run *AgentRun) *TurnRunnerBinding {
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	return &TurnRunnerBinding{
+	return &agentrun.TurnRunnerBinding{
 		DeploymentID: run.AssignedAgentID, ActionDeploymentID: loopFixtureAgent,
 		DefinitionID: loopFixtureDefinition, DefinitionVersion: "1",
 		Producer: producer, Authority: control, Session: c.runSession(run, false),
@@ -820,9 +821,9 @@ func TestLoopDelegationRunsDecisionExecutionAndReviewInChildSessions(t *testing.
 				return say("Scout says: " + content)
 			}},
 		))
-		c.authority = func(run *AgentRun, a *ControlAuthority) {
-			if run.AssignedAgentID == loopFixtureAgent && a.finalMode() == FinalModeDefault {
-				a.DelegateTargets = []HostedAgentTarget{{ID: childScout, DisplayName: "Scout"}}
+		c.authority = func(run *AgentRun, a *agentrun.ControlAuthority) {
+			if run.AssignedAgentID == loopFixtureAgent && a.EffectiveFinalMode() == agentrun.FinalModeDefault {
+				a.DelegateTargets = []agentrun.HostedAgentTarget{{ID: childScout, DisplayName: "Scout"}}
 			}
 		}
 		created, err := c.portfolio.CreateAgentRun(c.ctx, CreateAgentRunRequest{
@@ -945,7 +946,7 @@ func TestLoopConversationTaskStartsWithoutPark(t *testing.T) {
 			}},
 			&modelRule{name: "follow-up", reply: func(v stepView) ModelStepResult { return say("Revenue grew 4%, as the task reported.") }},
 		))
-		c.authority = func(run *AgentRun, a *ControlAuthority) {
+		c.authority = func(run *AgentRun, a *agentrun.ControlAuthority) {
 			if run.Kind == RunKindConversation && run.Context[ConversationTaskContextKey] == nil {
 				conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 				threadRootID, _ := run.Context["threadRootMessageId"].(string)
@@ -1191,7 +1192,7 @@ func (c *childFixture) driveToRestChild(runID string, maxClaims int) *AgentRun {
 // ---------------------------------------------------------------------------
 // Runbook operations
 
-var childEngageOperation = HostedRunbookOperation{
+var childEngageOperation = agentrun.HostedRunbookOperation{
 	DefinitionID: "def-engage", DefinitionVersion: "1", Entrypoint: "engage-now",
 	Name: "Engage accounts", Description: "Send the reviewed engagement sequence.",
 	InputSchema: map[string]interface{}{
@@ -1227,9 +1228,9 @@ func newRunbookChildFixture(t *testing.T, store KernelStore) *childFixture {
 		}},
 	))
 	c.runbooks[childEngageOperation.DefinitionID] = childEngageRunbook()
-	c.authority = func(run *AgentRun, a *ControlAuthority) {
+	c.authority = func(run *AgentRun, a *agentrun.ControlAuthority) {
 		if run.Entrypoint == "" {
-			a.Operations = []HostedRunbookOperation{childEngageOperation}
+			a.Operations = []agentrun.HostedRunbookOperation{childEngageOperation}
 		}
 	}
 	return c

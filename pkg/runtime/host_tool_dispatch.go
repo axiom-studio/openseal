@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	"go.uber.org/zap"
 )
@@ -32,9 +33,9 @@ var hostToolUnavailableRetries = []time.Duration{time.Second, 3 * time.Second}
 
 // HostToolCall is one host tool call of a running step, as the loop hands it over.
 type HostToolCall struct {
-	Run         *AgentRun          // running, leased by this worker
-	Step        *AgentTurn         // the running step row (LeaseOwner/LeaseExpiresAt live)
-	Binding     *TurnRunnerBinding // the claim's resolved binding
+	Run         *AgentRun                   // running, leased by this worker
+	Step        *AgentTurn                  // the running step row (LeaseOwner/LeaseExpiresAt live)
+	Binding     *agentrun.TurnRunnerBinding // the claim's resolved binding
 	SessionID   string
 	ToolEntryID string
 	ToolCallID  string

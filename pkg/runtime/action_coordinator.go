@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -77,7 +78,7 @@ type ActionCatalog interface {
 // approval request. A validator may return a typed, secret-safe approval
 // preview; the last non-nil preview replaces the generic Skill invocation.
 type ActionProposalValidator interface {
-	ValidateActionProposal(context.Context, ActionProposalValidationInput) (map[string]interface{}, error)
+	ValidateActionProposal(context.Context, agentrun.ActionProposalValidationInput) (map[string]interface{}, error)
 }
 
 // ActionProposalArgumentResolver lets a deterministic kernel validator add
@@ -87,7 +88,7 @@ type ActionProposalValidator interface {
 // intentionally separate from model input so concurrency tokens and similar
 // implementation details never need to become user-facing prompt fields.
 type ActionProposalArgumentResolver interface {
-	ResolveActionProposalArguments(context.Context, ActionProposalValidationInput) (map[string]interface{}, bool, error)
+	ResolveActionProposalArguments(context.Context, agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error)
 }
 
 type ProposeActionRequest struct {
@@ -249,14 +250,14 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		reviewed.Action = canonical
 		bound = &reviewed
 	}
-	history := newRunActionHistory(c.actions, req.Scope, run.ID)
+	history := agentrun.NewRunActionHistory(c.actions, req.Scope, run.ID)
 	arguments := maps.Clone(req.Arguments)
 	for _, validator := range c.validators {
 		resolver, ok := validator.(ActionProposalArgumentResolver)
 		if !ok || resolver == nil {
 			continue
 		}
-		resolved, handled, resolveErr := resolver.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{
+		resolved, handled, resolveErr := resolver.ResolveActionProposalArguments(ctx, agentrun.ActionProposalValidationInput{
 			Run: cloneAgentRun(run), Bound: bound, Arguments: maps.Clone(arguments), History: history, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		})
 		if resolveErr != nil {
@@ -274,7 +275,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		if validator == nil {
 			continue
 		}
-		preview, validateErr := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: cloneAgentRun(run), Bound: bound, Arguments: maps.Clone(arguments), History: history, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey)})
+		preview, validateErr := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: cloneAgentRun(run), Bound: bound, Arguments: maps.Clone(arguments), History: history, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey)})
 		if validateErr != nil {
 			return nil, proposalValidationError(ctx, ProposalRejectionNotAdmitted, validateErr)
 		}
@@ -435,7 +436,7 @@ func (c *ActionCoordinator) createLoopProposal(ctx context.Context, req ProposeA
 		reserved.Revision++
 		reserved.UpdatedAt = now
 		err := reserveRunBudget(reserved, BudgetReservation{
-			ID: actionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: now,
+			ID: agentrun.ActionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: now,
 		})
 		switch {
 		case errors.Is(err, ErrBudgetExhausted):

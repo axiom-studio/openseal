@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -46,7 +47,7 @@ func loopActionCredentialRefs(bound *skill.BoundAction) map[string]skill.Credent
 	return refs
 }
 
-func proposeLoopAction(t *testing.T, store KernelStore, catalog ActionExecutionCatalog, run *AgentRun, workerID string, now time.Time, spec loopActionSpec) *ActionProposalResult {
+func proposeLoopAction(t *testing.T, store KernelStore, catalog agentrun.ActionExecutionCatalog, run *AgentRun, workerID string, now time.Time, spec loopActionSpec) *ActionProposalResult {
 	t.Helper()
 	ctx := context.Background()
 	current, err := store.GetAgentRun(ctx, run.Scope, run.ID)
@@ -83,7 +84,7 @@ func proposeLoopAction(t *testing.T, store KernelStore, catalog ActionExecutionC
 	}
 	if current.Budget != nil {
 		updated := cloneAgentRun(current)
-		if err := reserveRunBudget(updated, BudgetReservation{ID: actionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: now}); err != nil {
+		if err := reserveRunBudget(updated, BudgetReservation{ID: agentrun.ActionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 		updated.Revision++
@@ -182,7 +183,7 @@ func (f *loopWorkerFixture) workerWithClock(dispatch ActionDispatcherFunc, clock
 		CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 			f.credentialCalls++
 			return map[string]string{"token": "loop-secret"}, nil
-		}), ActionDispatcherFunc(func(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+		}), ActionDispatcherFunc(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			f.dispatches++
 			return dispatch(ctx, input)
 		}), models.WithClock(clock))
@@ -241,7 +242,7 @@ func (f *loopWorkerFixture) requireNoAuthority() {
 	}
 }
 
-func succeedDispatch(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+func succeedDispatch(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	return map[string]interface{}{"providerResult": "delivered"}, nil
 }
 
@@ -252,7 +253,7 @@ func TestExecuteOwnLoopCallDispatchesInlineUnderCallLease(t *testing.T) {
 		before := f.currentRun()
 		poolClaimedDuringDispatch := false
 		var clockTicks atomic.Int64
-		worker := f.workerWithClock(func(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+		worker := f.workerWithClock(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			if input.Call.Status != ActionCallStatusRunning || input.Call.LeaseOwner != loopWorkerID || input.Credentials["token"] != "loop-secret" ||
 				input.Run == nil || input.Run.ID != call.RunID || input.Arguments["environment"] != "production" {
 				t.Fatalf("dispatch input = %#v", input)
@@ -372,7 +373,7 @@ func TestExecuteOwnLoopCallNotOwnedAfterLeaseLossCancels(t *testing.T) {
 				if after.Status != before.Status || after.LeaseOwner != before.LeaseOwner || !reflect.DeepEqual(after.WakeCondition, before.WakeCondition) {
 					t.Fatalf("cancellation changed the Run: before=%#v after=%#v", before, after)
 				}
-				if _, reserved := after.BudgetReservations[actionBudgetReservationID(call.ID)]; reserved || after.BudgetUsage.Actions != 0 {
+				if _, reserved := after.BudgetReservations[agentrun.ActionBudgetReservationID(call.ID)]; reserved || after.BudgetUsage.Actions != 0 {
 					t.Fatalf("cancellation did not release the action reservation: %#v", after)
 				}
 				assertActionLifecycleTerminalEvents(t, store, call, ActionCallStatusCanceled, 0)
@@ -446,7 +447,7 @@ func TestLoopRecoveredRunningReadRedispatches(t *testing.T) {
 			t.Fatalf("crashed claim = %#v, %v", first, err)
 		}
 		f.clock = first.LeaseExpiresAt.Add(time.Millisecond)
-		result, err := f.execute(f.worker(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		result, err := f.execute(f.worker(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"healthy": true}, nil
 		}), call.ID)
 		if err != nil {
@@ -488,7 +489,7 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				worker := NewActionWorker(wrapped, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 					f.credentialCalls++
 					return map[string]string{"token": "loop-secret"}, nil
-				}), ActionDispatcherFunc(func(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+				}), ActionDispatcherFunc(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 					f.dispatches++
 					return succeedDispatch(ctx, input)
 				}), models.WithClock(func() time.Time { return f.clock }))
@@ -550,7 +551,7 @@ func TestLoopOutcomeLeavesRunUnchangedExceptBudgetAndHumanIntervention(t *testin
 		failed := f.propose("deploy-fails", "deploy")
 		human := f.propose("status-human", "status")
 		before := f.currentRun()
-		worker := f.worker(func(_ context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+		worker := f.worker(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			switch input.Call.ID {
 			case failed.ID:
 				return nil, errors.New("provider rejected loop-secret")
@@ -601,7 +602,7 @@ func TestLoopOutcomeLeavesRunUnchangedExceptBudgetAndHumanIntervention(t *testin
 			f := newLoopWorkerFixture(t, store, &BudgetPolicy{MaxActions: 10})
 			call := f.propose("deploy-1", "deploy")
 			reserved := f.currentRun()
-			if _, ok := reserved.BudgetReservations[actionBudgetReservationID(call.ID)]; !ok {
+			if _, ok := reserved.BudgetReservations[agentrun.ActionBudgetReservationID(call.ID)]; !ok {
 				t.Fatalf("fixture did not reserve the action: %#v", reserved)
 			}
 			result, err := f.execute(f.worker(succeedDispatch), call.ID)
@@ -633,7 +634,7 @@ func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
 	dispatches := 0
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
-	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		return map[string]interface{}{"sent": true}, nil
 	}), models.WithClock(func() time.Time { return now.Add(time.Second) }))

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 const conversationAnswerEvent = "run.conversation_answer_received"
@@ -89,7 +90,7 @@ type conversationQuestion struct {
 // Answers target an explicit question (or its unambiguous thread). An unthreaded
 // answer may address the single immediately preceding pending question. Never
 // broadcast an answer across concurrent tasks.
-func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context, conversation *Conversation, answer *ChannelMessage) (*AgentRunCommandResult, bool, error) {
+func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context, conversation *Conversation, answer *ChannelMessage) (*agentrun.AgentRunCommandResult, bool, error) {
 	taskTargeted, err := s.targetsRootClarificationQuestion(ctx, conversation, answer)
 	if err != nil {
 		return nil, false, err
@@ -254,7 +255,7 @@ func (s *ConversationRunScheduler) conversationAnswerAccepted(ctx context.Contex
 		after = events[len(events)-1].Sequence
 	}
 }
-func (s *ConversationRunScheduler) acknowledgeConversationAnswer(ctx context.Context, conversation *Conversation, answer *ChannelMessage, run *AgentRun) (*AgentRunCommandResult, bool, error) {
+func (s *ConversationRunScheduler) acknowledgeConversationAnswer(ctx context.Context, conversation *Conversation, answer *ChannelMessage, run *AgentRun) (*agentrun.AgentRunCommandResult, bool, error) {
 	current, err := s.conversations.GetConversation(ctx, conversation.Scope, conversation.ID)
 	if err != nil {
 		return nil, false, err
@@ -266,5 +267,5 @@ func (s *ConversationRunScheduler) acknowledgeConversationAnswer(ctx context.Con
 		ReplyToMessageID: answer.ID, ResolvesMessageID: answer.ID, References: conversationClarificationReferences(run),
 		IdempotencyKey: "conversation-answer-received:" + answer.ID,
 	})
-	return &AgentRunCommandResult{Run: run}, true, err
+	return &agentrun.AgentRunCommandResult{Run: run}, true, err
 }

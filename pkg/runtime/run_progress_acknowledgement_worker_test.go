@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -53,7 +54,7 @@ func newRunProgressWorkerFixtureOn(t *testing.T, store *sqlite.Store, provider s
 	if err != nil {
 		t.Fatal(err)
 	}
-	runResult, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+	runResult, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: endpoint.Scope, Kind: RunKindConversation, Owner: endpoint.Owner,
 		AssignedAgentID: endpoint.DeploymentID, Goal: "Check the deployment", Source: RunSourceChat,
 		IdempotencyKey: "progress-run", Actor: ActivityActor{Type: "service", ID: "channel"},
@@ -91,8 +92,8 @@ func TestRunProgressAcknowledgementWorkerUsesNativeProgressCapability(t *testing
 	fixture := newRunProgressWorkerFixture(t, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
-	var rendered RunProgressAcknowledgementRequest
-	renderer := RunProgressAcknowledgementRendererFunc(func(_ context.Context, request RunProgressAcknowledgementRequest) (string, error) {
+	var rendered agentrun.RunProgressAcknowledgementRequest
+	renderer := RunProgressAcknowledgementRendererFunc(func(_ context.Context, request agentrun.RunProgressAcknowledgementRequest) (string, error) {
 		rendered = request
 		return "Inspecting it, obviously.", nil
 	})
@@ -126,7 +127,7 @@ func TestRunProgressAcknowledgementWorkerUsesNativeProgressCapability(t *testing
 
 func TestRunProgressAcknowledgementWorkerFallsBackToText(t *testing.T) {
 	fixture := newRunProgressWorkerFixture(t, "webchat", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
-	renderer := RunProgressAcknowledgementRendererFunc(func(context.Context, RunProgressAcknowledgementRequest) (string, error) {
+	renderer := RunProgressAcknowledgementRendererFunc(func(context.Context, agentrun.RunProgressAcknowledgementRequest) (string, error) {
 		return "I am checking now.", nil
 	})
 	worker, err := NewRunProgressAcknowledgementWorker(fixture.store, fixture.catalog, renderer, RunProgressAcknowledgementWorkerConfig{
@@ -194,9 +195,9 @@ func progressAckResult(req ModelStepRequest, text string, calls ...ModelToolCall
 	}
 }
 
-func progressAckRequest() RunProgressAcknowledgementRequest {
-	return RunProgressAcknowledgementRequest{
-		Snapshot: RunProgressSnapshot{
+func progressAckRequest() agentrun.RunProgressAcknowledgementRequest {
+	return agentrun.RunProgressAcknowledgementRequest{
+		Snapshot: agentrun.RunProgressSnapshot{
 			RunID: "run-1", Scope: Scope{Kind: "workspace", ID: "workspace-1"}, AgentID: "agent-1",
 			Goal: "Check the deployment", Status: AgentRunStatusRunning,
 			ActivityID: "event-1", ActivityType: "run.observed", ActivitySummary: "Inspecting the current deployment",

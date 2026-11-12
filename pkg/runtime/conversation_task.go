@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -103,7 +104,7 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 	// is proposing independent work. Reuse the committed continuation before
 	// preparing a fresh budget or admitting a second execution identity.
 	existing, taskErr := s.store.FindConversationTaskByWorkRunID(ctx, source.Scope, source.ID)
-	if taskErr != nil && !errors.Is(taskErr, ErrConversationTaskNotFound) {
+	if taskErr != nil && !errors.Is(taskErr, agentrun.ErrConversationTaskNotFound) {
 		return nil, taskErr
 	}
 	if existing != nil {
@@ -265,7 +266,7 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 		Context: map[string]interface{}{ConversationTaskContextKey: id, conversationRunContextConversationID: conversation.ID,
 			conversationRunContextTriggerID: message.ID, "threadRootMessageId": threadID, runReportingContextRootRunID: workID,
 			runReportingContextMilestones: []interface{}{"completed", "failed"}}}
-	if err := prepareAcceptedChildRun(ctx, source, &workRequest, s.executionPreparer, false); err != nil {
+	if err := agentrun.PrepareAcceptedChildRun(ctx, source, &workRequest, s.executionPreparer, false); err != nil {
 		return nil, err
 	}
 	work, err := buildAgentRun(ctx, s.store, workRequest, workID, now)
@@ -353,13 +354,13 @@ func (s *ConversationTaskService) Get(ctx context.Context, req GetConversationTa
 		return nil, err
 	}
 	if task == nil || task.Owner != req.Owner || task.ConversationID != req.ConversationID || req.ThreadRootID != "" && task.ThreadRootID != req.ThreadRootID || req.AuthenticatedActor.Type != "" && req.AuthenticatedActor != task.AuthenticatedActor {
-		return nil, ErrConversationTaskNotFound
+		return nil, agentrun.ErrConversationTaskNotFound
 	}
 	if req.Viewer != nil {
 		_, getErr := NewConversationService(s.store, models.WithClock(s.now)).GetVisibleChannelMessage(ctx, req.Scope, task.ConversationID, task.SourceMessageID, *req.Viewer)
 		if getErr != nil {
 			if errors.Is(getErr, ErrChannelMessageNotFound) {
-				return nil, ErrConversationTaskNotFound
+				return nil, agentrun.ErrConversationTaskNotFound
 			}
 			return nil, getErr
 		}
@@ -419,8 +420,8 @@ func (s *ConversationTaskService) Cancel(ctx context.Context, req CancelConversa
 	if req.ExpectedWorkRunRevision < 1 {
 		return nil, ErrInvalidConversationTask
 	}
-	command, err := NewRunCommandService(store, models.WithClock(s.now)).CommandAgentRun(ctx, AgentRunCommandRequest{Scope: req.Scope, RunID: result.WorkRun.ID,
-		ExpectedRevision: req.ExpectedWorkRunRevision, Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: string(req.Actor.Type), ID: req.Actor.ID}, Summary: req.Summary})
+	command, err := agentrun.NewRunCommandService(store, models.WithClock(s.now)).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: req.Scope, RunID: result.WorkRun.ID,
+		ExpectedRevision: req.ExpectedWorkRunRevision, Kind: agentrun.AgentRunCommandCancel, Actor: ActivityActor{Type: string(req.Actor.Type), ID: req.Actor.ID}, Summary: req.Summary})
 	if err != nil {
 		return nil, err
 	}

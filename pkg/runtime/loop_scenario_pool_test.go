@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // poolFixturePool is a worker pool over the loop fixture's store whose
@@ -24,7 +25,7 @@ func poolFixturePool(t *testing.T, f *loopFixture, maxSteps int) *AgentRunWorker
 	if maxSteps <= 0 {
 		maxSteps = RunLoopMaxStepsPerClaim
 	}
-	pool, err := newAgentRunWorkerPool(f.store, TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+	pool, err := newAgentRunWorkerPool(f.store, TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return f.binding(run), nil
 	}), nil, AgentRunWorkerConfig{Scope: f.scope, LeaseDuration: loopFixtureLease, TurnLeaseDuration: loopFixtureLease}, maxSteps, models.WithClock(f.clock.Now))
 	if err != nil {
@@ -38,7 +39,7 @@ func poolFixturePool(t *testing.T, f *loopFixture, maxSteps int) *AgentRunWorker
 // and executes the claim. It returns the Run as stored afterwards.
 func poolClaim(t *testing.T, f *loopFixture, pool *AgentRunWorkerPool, runID string) *AgentRun {
 	t.Helper()
-	claimed, err := pool.scheduler.ClaimNext(f.ctx, AgentRunClaimRequest{
+	claimed, err := pool.scheduler.ClaimNext(f.ctx, agentrun.AgentRunClaimRequest{
 		Scope: f.scope, WorkerID: f.workerID, LeaseDuration: loopFixtureLease,
 	})
 	if err != nil || claimed == nil || claimed.ID != runID {
@@ -67,7 +68,7 @@ func TestLoopPoolClaimsAndRunsToRest(t *testing.T) {
 	eachStore(t, "loop_pool_rest", func(t *testing.T, store KernelStore) {
 		f := newLoopFixture(t, store, withRules(lookupSteps(2)...))
 		var resolved atomic.Int32
-		pool, err := NewAgentRunWorkerPool(f.store, TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		pool, err := NewAgentRunWorkerPool(f.store, TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			resolved.Add(1)
 			return f.binding(run), nil
 		}), nil, AgentRunWorkerConfig{Scope: f.scope, LeaseDuration: loopFixtureLease, TurnLeaseDuration: loopFixtureLease}, models.WithClock(f.clock.Now))
@@ -138,7 +139,7 @@ func TestLoopPoolNeverChargesPastAttemptLimit(t *testing.T) {
 	}
 	paused := poolClaim(t, f, pool, run.ID)
 	f.mustStatus(paused, AgentRunStatusPaused)
-	if next, err := pool.scheduler.ClaimNext(f.ctx, AgentRunClaimRequest{Scope: f.scope, WorkerID: f.workerID, LeaseDuration: loopFixtureLease}); err != nil || next != nil {
+	if next, err := pool.scheduler.ClaimNext(f.ctx, agentrun.AgentRunClaimRequest{Scope: f.scope, WorkerID: f.workerID, LeaseDuration: loopFixtureLease}); err != nil || next != nil {
 		t.Fatalf("paused Run was claimed again: %#v %v", next, err)
 	}
 	if paused.BudgetUsage.Attempts != 1 || len(f.model.calls(ModelStepPurposeStep)) != 1 || len(f.steps(run.ID)) != 1 {
@@ -226,16 +227,16 @@ type plannedPoolProducer struct {
 
 func (*plannedPoolProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
-func (p *plannedPoolProducer) PlanStepBudget(context.Context, StepInput) (BudgetUsage, error) {
+func (p *plannedPoolProducer) PlanStepBudget(context.Context, agentrun.StepInput) (BudgetUsage, error) {
 	return p.planned, nil
 }
 
-func (p *plannedPoolProducer) Produce(_ context.Context, in StepInput) (StepOutput, error) {
+func (p *plannedPoolProducer) Produce(_ context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	reservation := in.Run.BudgetReservations[in.Step.ID].Usage
 	p.seen <- reservation
-	return StepOutput{
+	return agentrun.StepOutput{
 		Usage: TurnUsage{InputTokens: int(reservation.InputTokens), OutputTokens: int(reservation.OutputTokens)},
-		Final: &LoopFinal{Answer: "bounded work complete", Output: map[string]interface{}{"summary": "bounded work complete"}},
+		Final: &agentrun.LoopFinal{Answer: "bounded work complete", Output: map[string]interface{}{"summary": "bounded work complete"}},
 	}, nil
 }
 
@@ -253,8 +254,8 @@ func TestLoopPoolPreservesProducerBudgetPlanning(t *testing.T) {
 		t.Fatal(err)
 	}
 	producer := &plannedPoolProducer{planned: BudgetUsage{InputTokens: 5000, OutputTokens: 1000}, seen: make(chan BudgetUsage, 1)}
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DefinitionID: "researcher", DefinitionVersion: "1", Producer: producer}, nil
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		return &agentrun.TurnRunnerBinding{DefinitionID: "researcher", DefinitionVersion: "1", Producer: producer}, nil
 	}), nil, AgentRunWorkerConfig{
 		Scope: scope, AssignedAgentID: "researcher", Concurrency: 1,
 		PollInterval: 10 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
@@ -285,12 +286,12 @@ type slowPoolProducer struct{ wait time.Duration }
 
 func (*slowPoolProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
-func (p *slowPoolProducer) Produce(ctx context.Context, _ StepInput) (StepOutput, error) {
+func (p *slowPoolProducer) Produce(ctx context.Context, _ agentrun.StepInput) (agentrun.StepOutput, error) {
 	select {
 	case <-ctx.Done():
-		return StepOutput{}, ctx.Err()
+		return agentrun.StepOutput{}, ctx.Err()
 	case <-time.After(p.wait):
-		return StepOutput{Final: &LoopFinal{Answer: "Done", Output: map[string]interface{}{"summary": "Done"}}}, nil
+		return agentrun.StepOutput{Final: &agentrun.LoopFinal{Answer: "Done", Output: map[string]interface{}{"summary": "Done"}}}, nil
 	}
 }
 
@@ -309,8 +310,8 @@ func TestLoopPoolRenewsLeaseDuringLongStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DefinitionID: "agent", DefinitionVersion: "1", Producer: &slowPoolProducer{wait: 220 * time.Millisecond}}, nil
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		return &agentrun.TurnRunnerBinding{DefinitionID: "agent", DefinitionVersion: "1", Producer: &slowPoolProducer{wait: 220 * time.Millisecond}}, nil
 	}), nil, AgentRunWorkerConfig{
 		Scope: scope, AssignedAgentID: "agent", PollInterval: 5 * time.Millisecond,
 		LeaseDuration: 90 * time.Millisecond, TurnLeaseDuration: 90 * time.Millisecond,
@@ -335,8 +336,8 @@ type handoffPoolProducer struct{}
 
 func (handoffPoolProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
-func (handoffPoolProducer) Produce(context.Context, StepInput) (StepOutput, error) {
-	return StepOutput{Final: &LoopFinal{Answer: "Launch follow-up ready",
+func (handoffPoolProducer) Produce(context.Context, agentrun.StepInput) (agentrun.StepOutput, error) {
+	return agentrun.StepOutput{Final: &agentrun.LoopFinal{Answer: "Launch follow-up ready",
 		Output: map[string]interface{}{"followUp": "Publish the evidence-backed launch note"}}}, nil
 }
 
@@ -374,11 +375,11 @@ func TestLoopPoolCompletesArtifactFreeHandoffFromTerminalChild(t *testing.T) {
 	// Terminal maintenance can observe the completed source before the
 	// recipient claims its child. Acceptance transfers cancellation ownership
 	// even though the child's historical parent lineage remains unchanged.
-	if err := NewRunCommandService(store).CascadeTerminalRun(t.Context(), accepted.Source); err != nil {
+	if err := agentrun.NewRunCommandService(store).CascadeTerminalRun(t.Context(), accepted.Source); err != nil {
 		t.Fatal(err)
 	}
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DefinitionID: "marketing", DefinitionVersion: "1", Producer: handoffPoolProducer{}}, nil
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		return &agentrun.TurnRunnerBinding{DefinitionID: "marketing", DefinitionVersion: "1", Producer: handoffPoolProducer{}}, nil
 	}), nil, AgentRunWorkerConfig{
 		Scope: scope, AssignedAgentID: "marketing", Concurrency: 1,
 		PollInterval: 10 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,

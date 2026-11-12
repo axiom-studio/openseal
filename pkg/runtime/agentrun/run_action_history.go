@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -27,7 +27,7 @@ const runActionHistoryPage = 500
 
 // listAllRunActionHistory pages through the Run's terminal calls, oldest
 // first, until a short page; Runs are unbounded, so one page is not enough.
-func listAllRunActionHistory(ctx context.Context, store models.ActionStore, scope models.Scope, runID string) ([]*models.ActionCall, error) {
+func ListAllRunActionHistory(ctx context.Context, store models.ActionStore, scope models.Scope, runID string) ([]*models.ActionCall, error) {
 	var all []*models.ActionCall
 	for offset := 0; ; offset += runActionHistoryPage {
 		page, err := store.ListActionCalls(ctx, models.ActionFilter{
@@ -46,7 +46,7 @@ func listAllRunActionHistory(ctx context.Context, store models.ActionStore, scop
 
 // newRunActionHistory memoizes the paged ActionStore.ListActionCalls{Scope, RunID,
 // Status: terminal} per Propose; VM-origin calls are filtered out.
-func newRunActionHistory(store models.ActionStore, scope models.Scope, runID string) RunActionHistory {
+func NewRunActionHistory(store models.ActionStore, scope models.Scope, runID string) RunActionHistory {
 	return &storeRunActionHistory{store: store, scope: scope, runID: runID}
 }
 
@@ -67,7 +67,7 @@ func (h *storeRunActionHistory) Calls(ctx context.Context) ([]*models.ActionCall
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if !h.loaded {
-		listed, err := listAllRunActionHistory(ctx, h.store, h.scope, h.runID)
+		listed, err := ListAllRunActionHistory(ctx, h.store, h.scope, h.runID)
 		if err != nil {
 			return nil, err
 		}

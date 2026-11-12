@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 const (
@@ -553,7 +554,7 @@ func TestLoopApprovedCallExecutesInlineOnTheResumingReplica(t *testing.T) {
 		}
 		var inClaim atomic.Bool
 		var dispatchedInClaim atomic.Bool
-		f.dispatch.on("update_status", func(in ActionDispatchInput) (map[string]interface{}, error) {
+		f.dispatch.on("update_status", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			dispatchedInClaim.Store(inClaim.Load())
 			return map[string]interface{}{"id": "6815", "status": "closed"}, nil
 		})
@@ -707,9 +708,9 @@ func TestLoopReviewerGuidanceReachesTheModel(t *testing.T) {
 func (f *loopFixture) cancelRun(run *AgentRun) *AgentRun {
 	f.t.Helper()
 	current := f.mustRun(run.ID)
-	commands := NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
-	result, err := commands.CommandAgentRun(f.ctx, AgentRunCommandRequest{
-		Scope: f.scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: AgentRunCommandCancel,
+	commands := agentrun.NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
+	result, err := commands.CommandAgentRun(f.ctx, agentrun.AgentRunCommandRequest{
+		Scope: f.scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: agentrun.AgentRunCommandCancel,
 		Actor: ActivityActor{Type: "user", ID: loopFixtureUser},
 	})
 	if err != nil {

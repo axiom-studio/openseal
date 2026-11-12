@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Execution order inside a step (SPEC §5.2) and the four LoopToolExecutor
@@ -98,19 +100,19 @@ func (r *stepToolRun) runConcurrent(ctx context.Context, batch []int, run func(c
 // pending and SettlePending asks the loop to call SettleStep after
 // FinishTurn+applyStep; a planned park (approval, card, event, maintenance)
 // skips the settle phase.
-func (x *claimToolExecutor) ExecuteStepTools(ctx context.Context, in StepToolsInput) (StepToolsOutcome, error) {
+func (x *claimToolExecutor) ExecuteStepTools(ctx context.Context, in agentrun.StepToolsInput) (agentrun.StepToolsOutcome, error) {
 	if len(in.Entries) == 0 {
-		return StepToolsOutcome{}, nil
+		return agentrun.StepToolsOutcome{}, nil
 	}
 	r, err := x.newStepToolRun(in, in.Step, in.Entries)
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	if err := r.precheck(ctx); err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	if err := r.startGuard(ctx); err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	var indexes []int
 	for i := range r.entries {
@@ -119,7 +121,7 @@ func (x *claimToolExecutor) ExecuteStepTools(ctx context.Context, in StepToolsIn
 		}
 	}
 	if err := r.dispatchInOrder(ctx, indexes, r.runCall); err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	return r.endOfToolWork(ctx)
 }
@@ -127,14 +129,14 @@ func (x *claimToolExecutor) ExecuteStepTools(ctx context.Context, in StepToolsIn
 // endOfToolWork turns the step's state into its outcome: failure and budget
 // exits first, then the step-end park, then the settle-phase call, then the
 // guard's Run failure once every entry is terminal.
-func (r *stepToolRun) endOfToolWork(ctx context.Context) (StepToolsOutcome, error) {
+func (r *stepToolRun) endOfToolWork(ctx context.Context) (agentrun.StepToolsOutcome, error) {
 	out := r.outcome()
 	if out.Failure != nil || out.BudgetExhausted != nil || out.Final != nil || r.ended {
 		return out, nil
 	}
 	park, settled, err := r.planPark(ctx)
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	out = r.outcome()
 	if park != nil {
@@ -152,7 +154,7 @@ func (r *stepToolRun) endOfToolWork(ctx context.Context) (StepToolsOutcome, erro
 	}
 	failure, err := r.finishGuard(ctx)
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	out = r.outcome()
 	if failure != nil {
@@ -203,20 +205,20 @@ func (r *stepToolRun) onlyOpen(entry *SessionEntry) bool {
 // SettleStep settles the step's single settle-phase control call after
 // FinishTurn+applyStep (SPEC §3.1 phase 10). in.Step is the finished, applied
 // step and in.Run the Run after applying it.
-func (x *claimToolExecutor) SettleStep(ctx context.Context, in StepToolsInput) (StepToolsOutcome, error) {
+func (x *claimToolExecutor) SettleStep(ctx context.Context, in agentrun.StepToolsInput) (agentrun.StepToolsOutcome, error) {
 	if in.Step == nil {
-		return StepToolsOutcome{}, errors.New("settle needs the finished step")
+		return agentrun.StepToolsOutcome{}, errors.New("settle needs the finished step")
 	}
 	entries, err := x.stepEntries(ctx, in.Run, x.sessionOf(in), in.Step.ID)
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	r, err := x.newStepToolRun(in, in.Step, entries)
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	if err := r.settle(ctx); err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	return r.endOfSettle(ctx)
 }
@@ -288,7 +290,7 @@ func (r *stepToolRun) resumeControl(ctx context.Context, i int) error {
 	return r.applyControl(ctx, i, resumed.Result)
 }
 
-func (r *stepToolRun) endOfSettle(ctx context.Context) (StepToolsOutcome, error) {
+func (r *stepToolRun) endOfSettle(ctx context.Context) (agentrun.StepToolsOutcome, error) {
 	r.mu.Lock()
 	park := r.park
 	r.mu.Unlock()
@@ -301,11 +303,11 @@ func (r *stepToolRun) endOfSettle(ctx context.Context) (StepToolsOutcome, error)
 		return out, nil
 	}
 	if err := r.startGuard(ctx); err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	failure, err := r.finishGuard(ctx)
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	out = r.outcome()
 	out.Failure = failure
@@ -330,17 +332,17 @@ func (r *stepToolRun) endOfSettle(ctx context.Context) (StepToolsOutcome, error)
 //     unless an earlier call was denied, superseded or expired.
 //
 // A step that still waits stops the resume: later steps are not touched.
-func (x *claimToolExecutor) ResumeOpenTools(ctx context.Context, in StepToolsInput) (StepToolsOutcome, error) {
+func (x *claimToolExecutor) ResumeOpenTools(ctx context.Context, in agentrun.StepToolsInput) (agentrun.StepToolsOutcome, error) {
 	if in.Run == nil {
-		return StepToolsOutcome{}, errors.New("resume needs the Run")
+		return agentrun.StepToolsOutcome{}, errors.New("resume needs the Run")
 	}
 	sessionID := x.sessionOf(in)
 	if sessionID == "" {
-		return StepToolsOutcome{}, nil
+		return agentrun.StepToolsOutcome{}, nil
 	}
 	open, err := x.openEntries(ctx, in.Run, sessionID)
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	var steps []string
 	seen := map[string]bool{}
@@ -350,14 +352,14 @@ func (x *claimToolExecutor) ResumeOpenTools(ctx context.Context, in StepToolsInp
 			steps = append(steps, entry.StepID)
 		}
 	}
-	total := StepToolsOutcome{}
+	total := agentrun.StepToolsOutcome{}
 	run := in.Run
 	for _, stepID := range steps {
 		stepIn := in
 		stepIn.Run = run
 		out, err := x.resumeStep(ctx, stepIn, sessionID, stepID)
 		if err != nil {
-			return StepToolsOutcome{}, err
+			return agentrun.StepToolsOutcome{}, err
 		}
 		total.HostToolCalls += out.HostToolCalls
 		if out.Run != nil {
@@ -377,14 +379,14 @@ func (x *claimToolExecutor) ResumeOpenTools(ctx context.Context, in StepToolsInp
 	return total, nil
 }
 
-func (x *claimToolExecutor) resumeStep(ctx context.Context, in StepToolsInput, sessionID, stepID string) (StepToolsOutcome, error) {
+func (x *claimToolExecutor) resumeStep(ctx context.Context, in agentrun.StepToolsInput, sessionID, stepID string) (agentrun.StepToolsOutcome, error) {
 	step, err := x.cfg.Turns.GetAgentTurn(ctx, in.Run.Scope, stepID)
 	if err != nil {
-		return StepToolsOutcome{}, fmt.Errorf("load step %s of open tool entries: %w", stepID, err)
+		return agentrun.StepToolsOutcome{}, fmt.Errorf("load step %s of open tool entries: %w", stepID, err)
 	}
 	entries, err := x.stepEntries(ctx, in.Run, sessionID, stepID)
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	assistant, err := x.cfg.Sessions.GetSessionEntry(ctx, in.Run.Scope, SessionEntryID(sessionID, AssistantEntryKey(stepID)))
 	switch {
@@ -393,20 +395,20 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in StepToolsInput, s
 	case err == nil, errors.Is(err, ErrSessionEntryNotFound):
 		in.Assistant = nil
 	default:
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	r, err := x.newStepToolRun(in, step, entries)
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	// Pending entries may never have gone through phase 8 (a crash or lease
 	// loss between the append and ExecuteStepTools): run its pre-dispatch
 	// checks. Entries it already refused are terminal; the rest pass again.
 	if err := r.precheck(ctx); err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	if err := r.startGuard(ctx); err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	var indexes []int
 	for i := range r.entries {
@@ -420,7 +422,7 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in StepToolsInput, s
 		indexes = append(indexes, i)
 	}
 	if err := r.dispatchInOrder(ctx, indexes, r.resumeCall); err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	out := r.outcome()
 	if out.Failure != nil || out.BudgetExhausted != nil || out.Final != nil || r.ended {
@@ -428,7 +430,7 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in StepToolsInput, s
 	}
 	park, settled, err := r.planPark(ctx)
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	if park != nil || settled {
 		out = r.outcome()
@@ -448,14 +450,14 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in StepToolsInput, s
 			// The step ended (duration budget, host outage) before its
 			// settle phase: the call never ran and never will.
 			if err := r.refuseUnsettled(ctx, settle, step.Status); err != nil {
-				return StepToolsOutcome{}, err
+				return agentrun.StepToolsOutcome{}, err
 			}
 			settle = nil
 		}
 	}
 	if settle := r.openSettleEntry(); settle != nil {
 		if err := r.settle(ctx); err != nil {
-			return StepToolsOutcome{}, err
+			return agentrun.StepToolsOutcome{}, err
 		}
 		r.mu.Lock()
 		controlPark := r.park
@@ -471,7 +473,7 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in StepToolsInput, s
 	}
 	failure, err := r.finishGuard(ctx)
 	if err != nil {
-		return StepToolsOutcome{}, err
+		return agentrun.StepToolsOutcome{}, err
 	}
 	out = r.outcome()
 	out.Failure = failure
@@ -526,7 +528,7 @@ func (r *stepToolRun) resumeCall(ctx context.Context, i int) error {
 // the reloaded Run. Held approvals created before a newer conversation message
 // are superseded; a decided approval, a settled card or a resolved control
 // wait gives nil (do not park).
-func (x *claimToolExecutor) ReplanPark(ctx context.Context, in StepToolsInput) (*LoopPark, error) {
+func (x *claimToolExecutor) ReplanPark(ctx context.Context, in agentrun.StepToolsInput) (*agentrun.LoopPark, error) {
 	if in.Run == nil {
 		return nil, errors.New("replan needs the Run")
 	}
@@ -563,7 +565,7 @@ func (x *claimToolExecutor) ReplanPark(ctx context.Context, in StepToolsInput) (
 			return nil, nil
 		}
 		if plan.Park != nil {
-			return &LoopPark{Status: plan.Park.Status, Wake: plan.Park.Wake, Summary: plan.Park.Summary}, nil
+			return &agentrun.LoopPark{Status: plan.Park.Status, Wake: plan.Park.Wake, Summary: plan.Park.Summary}, nil
 		}
 	}
 	for i := range r.entries {
@@ -591,7 +593,7 @@ func (x *claimToolExecutor) ReplanPark(ctx context.Context, in StepToolsInput) (
 // ---------------------------------------------------------------------------
 // Session reads
 
-func (x *claimToolExecutor) sessionOf(in StepToolsInput) string {
+func (x *claimToolExecutor) sessionOf(in agentrun.StepToolsInput) string {
 	if in.Session != nil && in.Session.ID != "" {
 		return in.Session.ID
 	}

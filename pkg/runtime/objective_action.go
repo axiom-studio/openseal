@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -99,7 +100,7 @@ func NewObjectiveActionValidator(store PortfolioStore) (*ObjectiveActionValidato
 	return &ObjectiveActionValidator{store: store}, nil
 }
 
-func (v *ObjectiveActionValidator) ResolveActionProposalArguments(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+func (v *ObjectiveActionValidator) ResolveActionProposalArguments(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error) {
 	if !isObjectiveAction(input.Bound) || input.Bound.Action.Name == ObjectiveActionCreate {
 		return nil, false, nil
 	}
@@ -137,7 +138,7 @@ func (v *ObjectiveActionValidator) ResolveActionProposalArguments(ctx context.Co
 	return arguments, true, nil
 }
 
-func (v *ObjectiveActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (v *ObjectiveActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if !isObjectiveAction(input.Bound) {
 		return nil, nil
 	}
@@ -200,17 +201,17 @@ func (v *ObjectiveActionValidator) ValidateActionProposal(ctx context.Context, i
 // Skills without a parallel execution runtime.
 type ObjectiveActionDispatcher struct {
 	store    KernelStore
-	fallback ActionDispatcher
+	fallback agentrun.ActionDispatcher
 }
 
-func NewObjectiveActionDispatcher(store KernelStore, fallback ActionDispatcher) (*ObjectiveActionDispatcher, error) {
+func NewObjectiveActionDispatcher(store KernelStore, fallback agentrun.ActionDispatcher) (*ObjectiveActionDispatcher, error) {
 	if store == nil {
 		return nil, errors.New("kernel store is required")
 	}
 	return &ObjectiveActionDispatcher{store: store, fallback: fallback}, nil
 }
 
-func (d *ObjectiveActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+func (d *ObjectiveActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	if !isObjectiveAction(input.Bound) {
 		if d == nil || d.fallback == nil {
 			return nil, errors.New("action dispatcher does not support this action")

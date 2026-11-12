@@ -5,18 +5,19 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // bindChatAgent resolves the chat seams for a Run of agentID's own chat, as
 // chatLoopFixture.bind does for agent-1.
-func bindChatAgent(f *chatLoopFixture, run *AgentRun, producer StepProducer, agentID string) *TurnRunnerBinding {
+func bindChatAgent(f *chatLoopFixture, run *AgentRun, producer agentrun.StepProducer, agentID string) *agentrun.TurnRunnerBinding {
 	f.t.Helper()
 	return f.bindAgent(run, agentID, producer)
 }
 
 // chatStepText is everything one model step was given: the system sections
 // of the binding and the text of each rendered entry.
-func chatStepText(binding *TurnRunnerBinding, path []*SessionEntry) string {
+func chatStepText(binding *agentrun.TurnRunnerBinding, path []*SessionEntry) string {
 	var parts []string
 	for _, section := range binding.Prompt.Sections {
 		parts = append(parts, section.Text)

@@ -22,6 +22,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -522,15 +523,15 @@ func (convTeamCatalog) GetTeamDefinition(context.Context, string, string) (*kern
 // with its thread root (the fixture opens the chat's unthreaded lane). The
 // conversation turn runner adds the conversation loop seams on top of
 // convMemberAgentBinding, as it does for the fixture's own binding.
-func convMemberBinding(f *loopFixture, run *AgentRun) *TurnRunnerBinding {
+func convMemberBinding(f *loopFixture, run *AgentRun) *agentrun.TurnRunnerBinding {
 	f.t.Helper()
-	return f.conversationBinding(run, func(run *AgentRun) *TurnRunnerBinding { return convMemberAgentBinding(f, run) })
+	return f.conversationBinding(run, func(run *AgentRun) *agentrun.TurnRunnerBinding { return convMemberAgentBinding(f, run) })
 }
 
 // convMemberAgentBinding is the member or thread Run's own Agent binding:
 // its lane session, its control authority, the model producer, the run-start
 // preparer and the claim tool executor.
-func convMemberAgentBinding(f *loopFixture, run *AgentRun) *TurnRunnerBinding {
+func convMemberAgentBinding(f *loopFixture, run *AgentRun) *agentrun.TurnRunnerBinding {
 	f.t.Helper()
 	sessions := f.store.(AgentSessionStore)
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
@@ -557,13 +558,13 @@ func convMemberAgentBinding(f *loopFixture, run *AgentRun) *TurnRunnerBinding {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	binding := &TurnRunnerBinding{
+	binding := &agentrun.TurnRunnerBinding{
 		DeploymentID: run.AssignedAgentID, ActionDeploymentID: loopFixtureAgent,
 		DefinitionID: loopFixtureDefinition, DefinitionVersion: "1",
 		ModelProvider: string(kitModelProvider), Model: kitModelName,
 		ModelActions: append([]capability.ModelAction(nil), f.offered...),
 		Producer:     producer, Session: session, Host: host, Authority: control,
-		Preparers: []StepPreparer{newRunStartPreparer(sessions, f.store)},
+		Preparers: []agentrun.StepPreparer{newRunStartPreparer(sessions, f.store)},
 		Tools:     f.dispatcher.ForClaim(LoopToolClaim{}),
 	}
 	return binding
@@ -1060,7 +1061,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 			convRunner(f, ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
 			conversation := convChat(f, ObjectiveOwner{}, nil)
 			convParticipation(f, conversation.ID, true)
-			f.dispatch.on("list_items", func(ActionDispatchInput) (map[string]interface{}, error) {
+			f.dispatch.on("list_items", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				return map[string]interface{}{"items": []interface{}{"a", "b"}}, nil
 			})
 			f.model.add(

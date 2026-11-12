@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 const maximumConversationFollowUpInstructionBytes = 16000
@@ -62,7 +64,7 @@ func conversationFollowUpRunEligible(ctx context.Context, store PortfolioStore, 
 // ingests the message into its session through catch-up (a user entry, once).
 // One Run handles the whole exchange instead of parallel Runs competing for
 // the lane. A nil result means no Run absorbed the message.
-func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*AgentRunCommandResult, error) {
+func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*agentrun.AgentRunCommandResult, error) {
 	switch conversation.Owner.Type {
 	case OwnerTypeAgent:
 		return s.deliverToConversationLane(ctx, conversation, message, conversationAgentRunRequest(conversation, message).ConcurrencyKey)
@@ -80,7 +82,7 @@ func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Co
 // message to its own session. An
 // addressed message is routed; a member it names who is working takes it as
 // a follow-up there (routeTeamMessage).
-func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*AgentRunCommandResult, error) {
+func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*agentrun.AgentRunCommandResult, error) {
 	root := externalConversationThreadRoot(conversation, message)
 	if message.Sender.Type != ConversationParticipantUser || len(message.Mentions) > 0 || quotedMessageID(message.Quote) != "" ||
 		(message.Audience.Kind != "" && message.Audience.Kind != ConversationAudienceChannel) ||
@@ -94,7 +96,7 @@ func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	var first *AgentRunCommandResult
+	var first *agentrun.AgentRunCommandResult
 	lanes := map[string]bool{}
 	for _, run := range runs {
 		if !isTeamMemberRun(run) || isTerminalAgentRunStatus(run.Status) {
@@ -119,7 +121,7 @@ func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, 
 // deliverToConversationLane is deliverToActiveConversationRun for one lane:
 // an Agent channel's, or a Team member's lane in a Team channel, so a member
 // already answering the same person takes the new message as a follow-up.
-func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context, conversation *Conversation, message *ChannelMessage, lane string) (*AgentRunCommandResult, error) {
+func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context, conversation *Conversation, message *ChannelMessage, lane string) (*agentrun.AgentRunCommandResult, error) {
 	if message.Sender.Type != ConversationParticipantUser {
 		return nil, nil
 	}
@@ -147,7 +149,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 					if superseded != nil {
 						run = superseded.Run
 					}
-					return &AgentRunCommandResult{Run: run}, nil
+					return &agentrun.AgentRunCommandResult{Run: run}, nil
 				}
 			}
 		}
@@ -216,7 +218,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 		if superseded != nil {
 			run = superseded.Run
 		}
-		return &AgentRunCommandResult{Run: run, Event: event}, nil
+		return &agentrun.AgentRunCommandResult{Run: run, Event: event}, nil
 	}
 	return nil, ErrRevisionConflict
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
 )
@@ -68,13 +69,13 @@ const (
 // entry and calls is nil; for a deterministic step assistant is nil and calls
 // are the producer's calls (Directive kept on the entry). Entry ids are
 // SessionEntryID(session, ToolEntryKey(step.ID, callID)).
-type StepToolEntryPlanner func(binding *TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, calls []LoopToolCall) ([]*SessionEntry, error)
+type StepToolEntryPlanner func(binding *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, calls []agentrun.LoopToolCall) ([]*SessionEntry, error)
 
 // PlainTextFinalizer judges the text of a model step that made no tool calls
 // (CTL-14 ControlExecutor.PlainTextFinal): ControlFinal accepts it,
 // ControlContinue means a final_rejection note was appended, ControlFailed
 // fails the Run.
-type PlainTextFinalizer func(ctx context.Context, cc ControlContext, text string) (ControlResult, error)
+type PlainTextFinalizer func(ctx context.Context, cc agentrun.ControlContext, text string) (ControlResult, error)
 
 type RunLoopConfig struct {
 	StepLeaseDuration time.Duration // default 30s (AgentRunWorkerConfig.TurnLeaseDuration)
@@ -141,7 +142,7 @@ func (l *RunLoop) setActionCoordinator(actions *ActionCoordinator) { l.actions =
 type RunLoopClaim struct {
 	Run      *AgentRun // claimed, status running, LeaseOwner == WorkerID
 	WorkerID string
-	Binding  *TurnRunnerBinding // resolved by the worker
+	Binding  *agentrun.TurnRunnerBinding // resolved by the worker
 }
 
 type RunLoopExitReason string
@@ -168,7 +169,7 @@ type RunLoopExit struct {
 type drive struct {
 	l        *RunLoop
 	run      *AgentRun // latest Run this claim read or wrote
-	binding  *TurnRunnerBinding
+	binding  *agentrun.TurnRunnerBinding
 	session  *AgentSession // current session (moves on promotion)
 	workerID string
 	steps    int
@@ -189,7 +190,7 @@ func (l *RunLoop) Drive(ctx context.Context, claim RunLoopClaim) RunLoopExit {
 	d := &drive{l: l, run: cloneAgentRun(claim.Run), binding: claim.Binding, session: claim.Binding.Session, workerID: claim.WorkerID}
 	started := l.now()
 	if err := validatePreparedSkillRuntimes(claim.Binding); err != nil {
-		return d.failWithoutStep(ctx, LoopFailure{
+		return d.failWithoutStep(ctx, agentrun.LoopFailure{
 			Kind: RunFailureKindExecution, Code: runFailureCodePreparedRuntime,
 			Message: "The agent's Skill runtime is not valid, so the run could not start.",
 		}, err)
@@ -220,7 +221,7 @@ func (l *RunLoop) Drive(ctx context.Context, claim RunLoopClaim) RunLoopExit {
 		case stepFinalRejected:
 			rejections++
 			if rejections >= maximumFinalRejections {
-				return d.withSteps(d.failWithoutStep(ctx, LoopFailure{
+				return d.withSteps(d.failWithoutStep(ctx, agentrun.LoopFailure{
 					Kind: RunFailureKindExecution, Code: runFailureCodeFinalRejected,
 					Message: "The agent's final answer was rejected three times in a row, so the run stopped.",
 				}, nil))
@@ -496,7 +497,7 @@ func (d *drive) pauseAttempts(ctx context.Context) RunLoopExit {
 // failWithoutStep fails the Run outside a running step (before the first
 // step, or after the step that triggered it was applied). It is never
 // explained by the model.
-func (d *drive) failWithoutStep(ctx context.Context, failure LoopFailure, cause error) RunLoopExit {
+func (d *drive) failWithoutStep(ctx context.Context, failure agentrun.LoopFailure, cause error) RunLoopExit {
 	failure.Explainable = false
 	res := d.fail(ctx, nil, failure, cause, "")
 	if res.kind != stepExit {
@@ -505,7 +506,7 @@ func (d *drive) failWithoutStep(ctx context.Context, failure LoopFailure, cause 
 	return res.exit
 }
 
-func validatePreparedSkillRuntimes(binding *TurnRunnerBinding) error {
+func validatePreparedSkillRuntimes(binding *agentrun.TurnRunnerBinding) error {
 	seen := make(map[string]bool, len(binding.PreparedRuntimes))
 	for index := range binding.PreparedRuntimes {
 		prepared := &binding.PreparedRuntimes[index]

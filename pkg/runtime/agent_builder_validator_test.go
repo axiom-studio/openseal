@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -221,7 +222,7 @@ func (f *agentBuilderFixture) propose(t *testing.T, action string, arguments map
 	t.Helper()
 	ctx := context.Background()
 	bound := f.bound(t, action)
-	input := ActionProposalValidationInput{Run: f.run, Bound: bound, Arguments: arguments}
+	input := agentrun.ActionProposalValidationInput{Run: f.run, Bound: bound, Arguments: arguments}
 	resolved, handled, err := f.validator.ResolveActionProposalArguments(ctx, input)
 	if err != nil {
 		return nil, err
@@ -426,7 +427,7 @@ func TestAgentBuilderValidatorRefusesForeignBinding(t *testing.T) {
 	fixture := newAgentBuilderFixture(t, true)
 	run := *fixture.run
 	run.AssignedAgentID = "researcher"
-	_, err := fixture.validator.ValidateActionProposal(context.Background(), ActionProposalValidationInput{
+	_, err := fixture.validator.ValidateActionProposal(context.Background(), agentrun.ActionProposalValidationInput{
 		Run: &run, Bound: fixture.bound(t, AgentActionCreateAgent), Arguments: agentBuilderCreateArguments(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "not bound to the current Run's Agent") {
@@ -522,13 +523,13 @@ func TestAgentBuilderUpdateRefusals(t *testing.T) {
 func TestAgentBuilderUpdateKeepsOwnNameAndResolvesRevision(t *testing.T) {
 	fixture := newAgentBuilderFixture(t, false)
 	bound := fixture.bound(t, AgentActionUpdateAgent)
-	resolved, handled, err := fixture.validator.ResolveActionProposalArguments(context.Background(), ActionProposalValidationInput{
+	resolved, handled, err := fixture.validator.ResolveActionProposalArguments(context.Background(), agentrun.ActionProposalValidationInput{
 		Run: fixture.run, Bound: bound, Arguments: map[string]interface{}{"agentId": "researcher", "displayName": "researcher", "rationale": "x"},
 	})
 	if err != nil || !handled || resolved["expectedDeploymentRevision"] != int64(1) {
 		t.Fatalf("resolved=%#v handled=%v err=%v", resolved, handled, err)
 	}
-	preview, err := fixture.validator.ValidateActionProposal(context.Background(), ActionProposalValidationInput{Run: fixture.run, Bound: bound, Arguments: resolved})
+	preview, err := fixture.validator.ValidateActionProposal(context.Background(), agentrun.ActionProposalValidationInput{Run: fixture.run, Bound: bound, Arguments: resolved})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,7 +605,7 @@ func TestAgentBuilderUpdateRefusesAgentThePersonCannotChange(t *testing.T) {
 		t.Fatalf("forbidden update = %#v, %v", preview, err)
 	}
 	arguments["expectedDeploymentRevision"] = 1
-	preview, err = fixture.validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+	preview, err = fixture.validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 		Run: fixture.run, Bound: fixture.bound(t, AgentActionUpdateAgent), Arguments: arguments,
 	})
 	if err == nil || preview != nil || !strings.Contains(err.Error(), "can't change it") {

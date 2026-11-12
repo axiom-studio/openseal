@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 	"github.com/google/uuid"
@@ -102,18 +103,18 @@ type ActionCredentialLeaseIssueRequest struct {
 	Transport  string
 }
 
-type ActionDispatcherFunc func(context.Context, ActionDispatchInput) (map[string]interface{}, error)
+type ActionDispatcherFunc func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error)
 
-func (f ActionDispatcherFunc) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+func (f ActionDispatcherFunc) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	return f(ctx, input)
 }
 
 type ActionWorker struct {
 	store       KernelStore
-	catalog     ActionExecutionCatalog
+	catalog     agentrun.ActionExecutionCatalog
 	credentials CredentialResolver
 	leaseIssuer ActionCredentialLeaseIssuer
-	dispatcher  ActionDispatcher
+	dispatcher  agentrun.ActionDispatcher
 	now         func() time.Time
 	newID       func() string
 	// onClaim is an immutable pool hook that hands off another claim before
@@ -130,11 +131,11 @@ type ActionWorker struct {
 	loopLease time.Duration
 }
 
-func NewActionWorker(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher, opts ...models.ServiceOption) *ActionWorker {
+func NewActionWorker(store KernelStore, catalog agentrun.ActionExecutionCatalog, credentials CredentialResolver, dispatcher agentrun.ActionDispatcher, opts ...models.ServiceOption) *ActionWorker {
 	return &ActionWorker{store: store, catalog: catalog, credentials: credentials, dispatcher: dispatcher, now: models.ClockFrom(opts), newID: uuid.NewString, teams: teamRosterReader(store)}
 }
 
-func NewActionWorkerWithCredentialLeaseIssuer(store KernelStore, catalog ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher, opts ...models.ServiceOption) *ActionWorker {
+func NewActionWorkerWithCredentialLeaseIssuer(store KernelStore, catalog agentrun.ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher agentrun.ActionDispatcher, opts ...models.ServiceOption) *ActionWorker {
 	return &ActionWorker{store: store, catalog: catalog, leaseIssuer: issuer, dispatcher: dispatcher, now: models.ClockFrom(opts), newID: uuid.NewString, teams: teamRosterReader(store)}
 }
 
@@ -370,7 +371,7 @@ func (w *ActionWorker) executeClaimed(ctx context.Context, call *ActionCall, wor
 			dispatchCtx, cancel = context.WithTimeout(executionCtx, timeout)
 		}
 		dispatched = true
-		output, executionErr = w.dispatcher.DispatchAction(dispatchCtx, ActionDispatchInput{
+		output, executionErr = w.dispatcher.DispatchAction(dispatchCtx, agentrun.ActionDispatchInput{
 			Call: cloneActionCall(call), Run: cloneAgentRun(sourceRun), Bound: bound, Arguments: maps.Clone(call.Arguments), Credentials: credentials,
 			CredentialLease: credentialLease, CredentialReferences: credentialReferences,
 		})
@@ -666,15 +667,15 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 	// Cancellation before dispatch releases unused capacity. A result obtained
 	// after its Run ended still settles its own reservation.
 	if !nested && sourceRun.Budget != nil && (terminalOutcome || updatedCall.Status == ActionCallStatusCanceled) {
-		if _, reserved := sourceRun.BudgetReservations[actionBudgetReservationID(call.ID)]; reserved {
+		if _, reserved := sourceRun.BudgetReservations[agentrun.ActionBudgetReservationID(call.ID)]; reserved {
 			if updatedRun == nil {
 				updatedRun = cloneAgentRun(sourceRun)
 			}
 			var budgetErr error
 			if updatedCall.Status == ActionCallStatusCanceled {
-				budgetErr = releaseRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID))
+				budgetErr = releaseRunBudgetReservation(updatedRun, agentrun.ActionBudgetReservationID(call.ID))
 			} else {
-				budgetErr = settleRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID), BudgetUsage{Actions: 1})
+				budgetErr = settleRunBudgetReservation(updatedRun, agentrun.ActionBudgetReservationID(call.ID), BudgetUsage{Actions: 1})
 			}
 			if budgetErr != nil {
 				return ActionExecutionRecord{}, budgetErr

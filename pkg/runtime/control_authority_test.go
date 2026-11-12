@@ -7,6 +7,7 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -14,7 +15,7 @@ import (
 
 // offeredControlTools lists the control tools an authority offers, in the
 // advertised order.
-func offeredControlTools(a ControlAuthority) []string {
+func offeredControlTools(a agentrun.ControlAuthority) []string {
 	names := []string{}
 	for _, name := range controlToolOrder {
 		if controlToolOffered(name, a) {
@@ -54,7 +55,7 @@ func controlAuthorityTeamRun(scope Scope, context map[string]interface{}) *Agent
 	}
 }
 
-func resolveControlAuthorityForTest(t *testing.T, in ControlAuthorityInput) ControlAuthority {
+func resolveControlAuthorityForTest(t *testing.T, in ControlAuthorityInput) agentrun.ControlAuthority {
 	t.Helper()
 	authority, err := ResolveControlAuthority(t.Context(), in)
 	if err != nil {
@@ -97,7 +98,7 @@ func chatAuthorityInput(store *sqlite.Store, run *AgentRun) ControlAuthorityInpu
 	}
 }
 
-func assertOnlyFinalTool(t *testing.T, authority ControlAuthority, mode FinalAnswerMode, tool ControlToolName) {
+func assertOnlyFinalTool(t *testing.T, authority agentrun.ControlAuthority, mode agentrun.FinalAnswerMode, tool ControlToolName) {
 	t.Helper()
 	if authority.FinalMode != mode {
 		t.Fatalf("final mode = %q, want %q", authority.FinalMode, mode)
@@ -106,29 +107,29 @@ func assertOnlyFinalTool(t *testing.T, authority ControlAuthority, mode FinalAns
 		t.Fatalf("offered = %v", got)
 	}
 	// Every other field is empty, not merely hidden by the final mode.
-	if !reflect.DeepEqual(authority, ControlAuthority{AgentID: "lead", FinalMode: mode}) {
+	if !reflect.DeepEqual(authority, agentrun.ControlAuthority{AgentID: "lead", FinalMode: mode}) {
 		t.Fatalf("authority = %#v", authority)
 	}
 }
 
 func TestDecisionRunOffersOnlyDecisionTool(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "control-authority"}
-	run := controlAuthorityTeamRun(scope, map[string]interface{}{AgentRequestInboxContextKey: map[string]interface{}{"requestId": "request"}})
+	run := controlAuthorityTeamRun(scope, map[string]interface{}{agentrun.AgentRequestInboxContextKey: map[string]interface{}{"requestId": "request"}})
 	authority := resolveControlAuthorityForTest(t, ControlAuthorityInput{
 		Run: run, DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope),
-		SkillPromptRefs: []string{"skill:prompt"}, Operations: []HostedRunbookOperation{{Name: "op"}},
+		SkillPromptRefs: []string{"skill:prompt"}, Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
 	})
-	assertOnlyFinalTool(t, authority, FinalModeDecision, ControlToolRequestDecision)
+	assertOnlyFinalTool(t, authority, agentrun.FinalModeDecision, ControlToolRequestDecision)
 }
 
 func TestReviewRunOffersOnlyReviewTool(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "control-authority"}
-	run := controlAuthorityTeamRun(scope, map[string]interface{}{AgentRequestCompletionReviewContextKey: map[string]interface{}{"requestId": "request"}})
+	run := controlAuthorityTeamRun(scope, map[string]interface{}{agentrun.AgentRequestCompletionReviewContextKey: map[string]interface{}{"requestId": "request"}})
 	authority := resolveControlAuthorityForTest(t, ControlAuthorityInput{
 		Run: run, DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope),
-		SkillPromptRefs: []string{"skill:prompt"}, Operations: []HostedRunbookOperation{{Name: "op"}},
+		SkillPromptRefs: []string{"skill:prompt"}, Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
 	})
-	assertOnlyFinalTool(t, authority, FinalModeReview, ControlToolCompletionReview)
+	assertOnlyFinalTool(t, authority, agentrun.FinalModeReview, ControlToolCompletionReview)
 }
 
 func TestTaskWorkerForksSelfOnlyAndCannotDelegateOrStartTasks(t *testing.T) {
@@ -139,14 +140,14 @@ func TestTaskWorkerForksSelfOnlyAndCannotDelegateOrStartTasks(t *testing.T) {
 	ordinary := resolveControlAuthorityForTest(t, ControlAuthorityInput{
 		Run: controlAuthorityTeamRun(scope, map[string]interface{}{}), DeploymentID: "lead", Catalog: catalog,
 	})
-	want := []HostedAgentTarget{{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review"}}
+	want := []agentrun.HostedAgentTarget{{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review"}}
 	if !ordinary.ForkAllowed || !reflect.DeepEqual(ordinary.ForkTargets, want) || !reflect.DeepEqual(ordinary.DelegateTargets, want) || ordinary.TaskWork {
 		t.Fatalf("ordinary authority = %#v", ordinary)
 	}
 
 	worker := resolveControlAuthorityForTest(t, ControlAuthorityInput{
 		Run: controlAuthorityTeamRun(scope, map[string]interface{}{ConversationTaskContextKey: "task-1"}), DeploymentID: "lead", Catalog: catalog,
-		Operations: []HostedRunbookOperation{{Name: "op"}},
+		Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
 	})
 	if !worker.ForkAllowed || len(worker.ForkTargets) != 0 || len(worker.DelegateTargets) != 0 || !worker.TaskWork {
 		t.Fatalf("task worker authority = %#v", worker)
@@ -240,10 +241,10 @@ func TestControlAuthorityFinalModesAndDeterministicRuns(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "control-authority"}
 	for name, tc := range map[string]struct {
 		context map[string]interface{}
-		mode    FinalAnswerMode
+		mode    agentrun.FinalAnswerMode
 		visual  bool
 	}{
-		"default": {map[string]interface{}{}, FinalModeDefault, true},
+		"default": {map[string]interface{}{}, agentrun.FinalModeDefault, true},
 		"spoken":  {map[string]interface{}{"responseMode": "spoken"}, FinalModeSpoken, false},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -257,9 +258,9 @@ func TestControlAuthorityFinalModesAndDeterministicRuns(t *testing.T) {
 	}
 	deterministic := resolveControlAuthorityForTest(t, ControlAuthorityInput{
 		Run: controlAuthorityTeamRun(scope, map[string]interface{}{}), DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope),
-		Operations: []HostedRunbookOperation{{Name: "op"}}, Deterministic: true,
+		Operations: []agentrun.HostedRunbookOperation{{Name: "op"}}, Deterministic: true,
 	})
-	if !reflect.DeepEqual(deterministic, ControlAuthority{AgentID: "lead", FinalMode: FinalModeDefault}) {
+	if !reflect.DeepEqual(deterministic, agentrun.ControlAuthority{AgentID: "lead", FinalMode: agentrun.FinalModeDefault}) {
 		t.Fatalf("deterministic authority = %#v", deterministic)
 	}
 	if _, err := ResolveControlAuthority(t.Context(), ControlAuthorityInput{Run: controlAuthorityTeamRun(scope, nil)}); err == nil {

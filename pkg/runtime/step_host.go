@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // maxModelStepResultTextBytes caps the assistant text of one model step.
@@ -207,7 +208,7 @@ func remainingBudgetDimension(limit, used, allocated int64) int64 {
 	return remaining
 }
 
-func resolveHostedAgentTarget(reference string, eligible []HostedAgentTarget) (string, error) {
+func resolveHostedAgentTarget(reference string, eligible []agentrun.HostedAgentTarget) (string, error) {
 	reference = strings.TrimSpace(reference)
 	for _, target := range eligible {
 		if reference == target.ID {

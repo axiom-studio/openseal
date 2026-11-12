@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -263,8 +264,8 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 					firstRunID = run.ID
 				}
 			}
-			scheduler := NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
-			inspection, err := scheduler.Inspect(ctx, AgentRunClaimRequest{Scope: scope})
+			scheduler := agentrun.NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
+			inspection, err := scheduler.Inspect(ctx, agentrun.AgentRunClaimRequest{Scope: scope})
 			if err != nil || inspection == nil || inspection.Outcome != AgentRunAdmissionReady || inspection.Run == nil {
 				t.Fatalf("ready inspection = %#v, %v", inspection, err)
 			}
@@ -272,10 +273,10 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 			if err != nil || stillQueued.Status != AgentRunStatusQueued || stillQueued.LeaseOwner != "" {
 				t.Fatalf("inspection acquired authority: %#v, %v", stillQueued, err)
 			}
-			if run, err := scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour}); err != nil || run == nil {
+			if run, err := scheduler.ClaimNext(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour}); err != nil || run == nil {
 				t.Fatalf("initial claim = %#v, %v", run, err)
 			}
-			decision, err := scheduler.ClaimNextDecision(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
+			decision, err := scheduler.ClaimNextDecision(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
 			if err != nil || decision == nil || decision.Outcome != AgentRunAdmissionBackpressured || decision.Run != nil {
 				t.Fatalf("backpressure decision = %#v, %v", decision, err)
 			}
@@ -331,8 +332,8 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 				}
 				runIDs = append(runIDs, run.ID)
 			}
-			scheduler := NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
-			first, err := scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour})
+			scheduler := agentrun.NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
+			first, err := scheduler.ClaimNext(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour})
 			if err != nil || first == nil || first.ResourceRequirements["browser"] != 1 {
 				t.Fatalf("first resource claim = %#v, %v", first, err)
 			}
@@ -340,7 +341,7 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 			if first.ID == queuedRunID {
 				queuedRunID = runIDs[1]
 			}
-			decision, err := scheduler.ClaimNextDecision(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
+			decision, err := scheduler.ClaimNextDecision(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
 			if err != nil || decision == nil || decision.Outcome != AgentRunAdmissionBackpressured || decision.Run != nil {
 				t.Fatalf("resource admission decision = %#v, %v", decision, err)
 			}
@@ -362,7 +363,7 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-three", LeaseDuration: time.Hour})
+			second, err := scheduler.ClaimNext(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-three", LeaseDuration: time.Hour})
 			if err != nil || second == nil || second.ID != queuedRunID {
 				t.Fatalf("amended resource policy did not admit queued work: %#v, %v", second, err)
 			}

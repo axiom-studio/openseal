@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 // SkillActionRequestConnection asks the user, through a durable in-chat
 // card, to connect one catalog app (or an MCP server address). It pauses the

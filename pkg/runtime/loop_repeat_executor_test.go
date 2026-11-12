@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -162,7 +163,7 @@ func textResult(text string, failed bool) *ToolResult {
 
 // runStep plays a whole step: plan, refuse, execute what may run with
 // results[i] (by call), and finish.
-func (f *repeatExecFixture) runStep(results []string, calls ...execCall) ([]*SessionEntry, *LoopFailure) {
+func (f *repeatExecFixture) runStep(results []string, calls ...execCall) ([]*SessionEntry, *agentrun.LoopFailure) {
 	f.t.Helper()
 	planned := f.appendStep(calls...)
 	guard := f.guard(planned, false)

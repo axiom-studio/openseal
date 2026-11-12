@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -479,8 +480,8 @@ func TestConversationTaskClarificationReplayDoesNotAnswerLaterQuestion(t *testin
 func TestConversationTaskGenericInterventionDoesNotMintAnswerReceipt(t *testing.T) {
 	forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
 		f := newConversationTaskClarificationFixture(t, store, true)
-		result, err := NewRunCommandService(store).CommandAgentRun(t.Context(), AgentRunCommandRequest{
-			Scope: f.task.Scope, RunID: f.work.ID, ExpectedRevision: f.work.Revision, Kind: AgentRunCommandIntervene,
+		result, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
+			Scope: f.task.Scope, RunID: f.work.ID, ExpectedRevision: f.work.Revision, Kind: agentrun.AgentRunCommandIntervene,
 			Actor: ActivityActor{Type: "user", ID: f.task.AuthenticatedActor.ID}, InterventionID: stableConversationID(f.task.Scope, "generic-guidance", "intervention"),
 			Instruction: "Answer to your clarification:\nYes, proceed.",
 		})

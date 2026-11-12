@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -31,8 +32,8 @@ func addSteeringIntervention(t *testing.T, store *sqlite.Store, intervention Age
 
 func steeringStep() *AgentTurn { return &AgentTurn{ID: "step-3", Sequence: 3} }
 
-func steeringInput(run *AgentRun, session *AgentSession) StepInput {
-	return StepInput{Run: run, Step: steeringStep(), Session: session, WorkerID: "w1", Mode: StepModeNormal}
+func steeringInput(run *AgentRun, session *AgentSession) agentrun.StepInput {
+	return agentrun.StepInput{Run: run, Step: steeringStep(), Session: session, WorkerID: "w1", Mode: agentrun.StepModeNormal}
 }
 
 func steeringEntries(t *testing.T, store *sqlite.Store, sessionID string) []*SessionEntry {
@@ -46,11 +47,11 @@ func steeringEntries(t *testing.T, store *sqlite.Store, sessionID string) []*Ses
 
 type steeringPreparer struct {
 	calls int
-	plans []SteeringPlan
-	fn    func(in StepInput, plan SteeringPlan) *StepContextAppend
+	plans []agentrun.SteeringPlan
+	fn    func(in agentrun.StepInput, plan agentrun.SteeringPlan) *agentrun.StepContextAppend
 }
 
-func (p *steeringPreparer) BeforeStep(_ context.Context, in StepInput, plan SteeringPlan) (*StepContextAppend, error) {
+func (p *steeringPreparer) BeforeStep(_ context.Context, in agentrun.StepInput, plan agentrun.SteeringPlan) (*agentrun.StepContextAppend, error) {
 	p.calls++
 	p.plans = append(p.plans, plan)
 	if p.fn == nil {
@@ -77,7 +78,7 @@ func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
 	store := newTestKernelStore(t)
 	run, session := steeringRun(t, store, 1, mixedSteeringPrefix()...)
 	preparer := &steeringPreparer{}
-	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []StepPreparer{preparer}, testSessionNow)
+	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{preparer}, testSessionNow)
 	if err != nil {
 		t.Fatalf("append step context: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
 	}
 
 	// The next step sees nothing to consume and writes nothing.
-	result, err = appendStepContext(context.Background(), store, steeringInput(after, session), []StepPreparer{preparer}, testSessionNow)
+	result, err = appendStepContext(context.Background(), store, steeringInput(after, session), []agentrun.StepPreparer{preparer}, testSessionNow)
 	if err != nil || result.Append != nil || result.CursorMoved || len(result.Steering.Prefix) != 0 {
 		t.Fatalf("second step = %+v, %v", result, err)
 	}
@@ -123,9 +124,9 @@ func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
 func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
 	store := newTestKernelStore(t)
 	run, session := steeringRun(t, store, 0, mixedSteeringPrefix()[3])
-	catchUp := &steeringPreparer{fn: func(in StepInput, plan SteeringPlan) *StepContextAppend {
+	catchUp := &steeringPreparer{fn: func(in agentrun.StepInput, plan agentrun.SteeringPlan) *agentrun.StepContextAppend {
 		expected := in.Session.ChannelWatermark
-		return &StepContextAppend{
+		return &agentrun.StepContextAppend{
 			Entries: []*SessionEntry{{
 				ID: SessionEntryID(in.Session.ID, ChannelMessageSourceKey("m7")), Type: SessionEntryUser, SourceKey: ChannelMessageSourceKey("m7"),
 				User: &UserEntry{Origin: UserEntryChannelMessage, MessageID: "m7", MessageSequence: 7,
@@ -134,7 +135,7 @@ func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
 			ExpectedChannelWatermark: &expected, ChannelWatermark: plan.ThroughMessageSequence,
 		}
 	}}
-	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []StepPreparer{catchUp}, testSessionNow)
+	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{catchUp}, testSessionNow)
 	if err != nil {
 		t.Fatalf("append step context: %v", err)
 	}
@@ -151,10 +152,10 @@ func TestSteeringCursorCommitsWithEntries(t *testing.T) {
 	store := newTestKernelStore(t)
 	run, session := steeringRun(t, store, 0, AgentRunIntervention{ID: "steer", Instruction: "stop after the draft"})
 	stale := int64(99)
-	moving := &steeringPreparer{fn: func(StepInput, SteeringPlan) *StepContextAppend {
-		return &StepContextAppend{ExpectedChannelWatermark: &stale, ChannelWatermark: 100}
+	moving := &steeringPreparer{fn: func(agentrun.StepInput, agentrun.SteeringPlan) *agentrun.StepContextAppend {
+		return &agentrun.StepContextAppend{ExpectedChannelWatermark: &stale, ChannelWatermark: 100}
 	}}
-	_, err := appendStepContext(context.Background(), store, steeringInput(run, session), []StepPreparer{moving}, testSessionNow)
+	_, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{moving}, testSessionNow)
 	if !errors.Is(err, ErrChannelWatermarkMoved) {
 		t.Fatalf("append with a moving watermark = %v, want ErrChannelWatermarkMoved", err)
 	}
@@ -170,15 +171,15 @@ func TestSteeringCursorCommitsWithEntries(t *testing.T) {
 
 	// The watermark settles on the second try: entries and cursor land together.
 	tries := 0
-	settling := &steeringPreparer{fn: func(in StepInput, _ SteeringPlan) *StepContextAppend {
+	settling := &steeringPreparer{fn: func(in agentrun.StepInput, _ agentrun.SteeringPlan) *agentrun.StepContextAppend {
 		tries++
 		if tries == 1 {
-			return &StepContextAppend{ExpectedChannelWatermark: &stale, ChannelWatermark: 100}
+			return &agentrun.StepContextAppend{ExpectedChannelWatermark: &stale, ChannelWatermark: 100}
 		}
 		expected := in.Session.ChannelWatermark
-		return &StepContextAppend{ExpectedChannelWatermark: &expected, ChannelWatermark: 5}
+		return &agentrun.StepContextAppend{ExpectedChannelWatermark: &expected, ChannelWatermark: 5}
 	}}
-	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []StepPreparer{settling}, testSessionNow)
+	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{settling}, testSessionNow)
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}

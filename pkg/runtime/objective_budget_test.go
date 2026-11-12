@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -36,7 +37,7 @@ func TestObjectiveBudgetAllocatesConcurrentTopLevelRunsAtomically(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			first, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+			first, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 				Scope: scope, ObjectiveID: objective.ID, Owner: objective.Owner, AssignedAgentID: "researcher-one",
 				Goal: "Monitor forums", Budget: &BudgetPolicy{MaxTurns: 6, MaxTotalTokens: 600}, IdempotencyKey: "forums",
 			})
@@ -109,7 +110,7 @@ func TestObjectiveBudgetRejectsConcurrentOverAllocation(t *testing.T) {
 				go func(index int) {
 					defer wg.Done()
 					<-start
-					_, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+					_, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 						Scope: scope, ObjectiveID: objective.ID, Owner: objective.Owner, AssignedAgentID: objective.Owner.ID,
 						Goal: "Concurrent work", Budget: &BudgetPolicy{MaxTurns: 6}, IdempotencyKey: string(rune('a' + index)),
 					})

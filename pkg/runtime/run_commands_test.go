@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -28,7 +29,7 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			ctx := context.Background()
 			scope := Scope{Kind: "tenant", ID: "one"}
 			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
-			service := NewRunCommandService(fixture.store(t))
+			service := agentrun.NewRunCommandService(fixture.store(t))
 			create := CreateAgentRunRequest{
 				Scope: scope, Owner: owner, AssignedAgentID: owner.ID, ConcurrencyKey: "agent-1:operations", Goal: "Operate the service",
 				Source: RunSourceManual, IdempotencyKey: "run-one", Actor: ActivityActor{Type: "user", ID: "7"},
@@ -78,8 +79,8 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 				t.Fatalf("concurrency key replay conflict = %v", err)
 			}
 
-			paused, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
-				Scope: scope, RunID: created.Run.ID, ExpectedRevision: created.Run.Revision, Kind: AgentRunCommandPause,
+			paused, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+				Scope: scope, RunID: created.Run.ID, ExpectedRevision: created.Run.Revision, Kind: agentrun.AgentRunCommandPause,
 				Actor: ActivityActor{Type: "user", ID: "7"},
 			})
 			if err != nil {
@@ -88,14 +89,14 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			if paused.Run.Status != AgentRunStatusPaused || paused.Run.PausedFrom != AgentRunStatusQueued || paused.Event.EventType != "run.paused" {
 				t.Fatalf("paused result = %#v", paused)
 			}
-			if _, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
-				Scope: scope, RunID: created.Run.ID, ExpectedRevision: created.Run.Revision, Kind: AgentRunCommandResume,
+			if _, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+				Scope: scope, RunID: created.Run.ID, ExpectedRevision: created.Run.Revision, Kind: agentrun.AgentRunCommandResume,
 			}); !errors.Is(err, ErrRevisionConflict) {
 				t.Fatalf("stale command error = %v", err)
 			}
 
-			intervened, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
-				Scope: scope, RunID: paused.Run.ID, ExpectedRevision: paused.Run.Revision, Kind: AgentRunCommandIntervene,
+			intervened, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+				Scope: scope, RunID: paused.Run.ID, ExpectedRevision: paused.Run.Revision, Kind: agentrun.AgentRunCommandIntervene,
 				Actor: ActivityActor{Type: "user", ID: "7"}, Instruction: "Prioritize the database check",
 			})
 			if err != nil {
@@ -105,8 +106,8 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 				t.Fatalf("intervened result = %#v", intervened)
 			}
 
-			resumed, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
-				Scope: scope, RunID: paused.Run.ID, ExpectedRevision: intervened.Run.Revision, Kind: AgentRunCommandResume,
+			resumed, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+				Scope: scope, RunID: paused.Run.ID, ExpectedRevision: intervened.Run.Revision, Kind: agentrun.AgentRunCommandResume,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -115,8 +116,8 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 				t.Fatalf("resumed result = %#v", resumed)
 			}
 
-			canceled, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
-				Scope: scope, RunID: resumed.Run.ID, ExpectedRevision: resumed.Run.Revision, Kind: AgentRunCommandCancel,
+			canceled, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+				Scope: scope, RunID: resumed.Run.ID, ExpectedRevision: resumed.Run.Revision, Kind: agentrun.AgentRunCommandCancel,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -145,7 +146,7 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			ctx := t.Context()
 			store := fixture.store(t)
-			service := NewRunCommandService(store)
+			service := agentrun.NewRunCommandService(store)
 			scope := Scope{Kind: "tenant", ID: "cascade"}
 			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
 			create := func(goal, parentID string) *AgentRun {
@@ -173,8 +174,8 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 				ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted,
 			})
 
-			result, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
-				Scope: scope, RunID: root.ID, ExpectedRevision: root.Revision, Kind: AgentRunCommandCancel,
+			result, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+				Scope: scope, RunID: root.ID, ExpectedRevision: root.Revision, Kind: agentrun.AgentRunCommandCancel,
 				Actor: ActivityActor{Type: "user", ID: "operator"},
 			})
 			if err != nil {
@@ -219,7 +220,7 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	service := NewRunCommandService(store)
+	service := agentrun.NewRunCommandService(store)
 	scope := Scope{Kind: "tenant", ID: "human"}
 	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
@@ -246,8 +247,8 @@ func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := ActivityActor{Type: "user", ID: "operator"}
-	resolved, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: AgentRunCommandResolveHumanIntervention,
+	resolved, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+		Scope: scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: agentrun.AgentRunCommandResolveHumanIntervention,
 		HumanInterventionID: request.ID, Instruction: "CAPTCHA completed in the retained Browser session", Actor: actor,
 	})
 	if err != nil {
@@ -262,8 +263,8 @@ func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 	if len(resolved.Run.PendingInterventions) != 1 || resolved.Run.PendingInterventions[0].Instruction == "" {
 		t.Fatalf("operator context was not queued for the next turn: %#v", resolved.Run.PendingInterventions)
 	}
-	if _, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: scope, RunID: resolved.Run.ID, ExpectedRevision: resolved.Run.Revision, Kind: AgentRunCommandResolveHumanIntervention,
+	if _, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+		Scope: scope, RunID: resolved.Run.ID, ExpectedRevision: resolved.Run.Revision, Kind: agentrun.AgentRunCommandResolveHumanIntervention,
 		HumanInterventionID: request.ID, Instruction: "replay", Actor: actor,
 	}); err == nil {
 		t.Fatal("resolved human intervention was accepted twice")
@@ -273,7 +274,7 @@ func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 func TestResolveHumanInterventionCarriesActionCallID(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	service := NewRunCommandService(store)
+	service := agentrun.NewRunCommandService(store)
 	activity := NewRunActivityService(store, store)
 	scope := Scope{Kind: "tenant", ID: "human"}
 	now := time.Date(2026, 7, 27, 7, 15, 0, 0, time.UTC)
@@ -307,8 +308,8 @@ func TestResolveHumanInterventionCarriesActionCallID(t *testing.T) {
 			}
 			want = AgentRunStatusQueued
 		}
-		resolved, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
-			Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: AgentRunCommandResolveHumanIntervention,
+		resolved, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+			Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: agentrun.AgentRunCommandResolveHumanIntervention,
 			HumanInterventionID: request.ID, Instruction: "CAPTCHA completed", Actor: actor,
 		})
 		if err != nil {
@@ -330,7 +331,7 @@ func TestResolveHumanInterventionCarriesActionCallID(t *testing.T) {
 func TestRunPausePreservesWaitingCondition(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	service := NewRunCommandService(store)
+	service := agentrun.NewRunCommandService(store)
 	scope := Scope{Kind: "local", ID: "wait"}
 	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "ops"}, Goal: "Wait safely", Source: RunSourceEvent,
@@ -350,11 +351,11 @@ func TestRunPausePreservesWaitingCondition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	paused, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{Scope: scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: AgentRunCommandPause})
+	paused, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: agentrun.AgentRunCommandPause})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resumed, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{Scope: scope, RunID: waiting.ID, ExpectedRevision: paused.Run.Revision, Kind: AgentRunCommandResume})
+	resumed, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: scope, RunID: waiting.ID, ExpectedRevision: paused.Run.Revision, Kind: agentrun.AgentRunCommandResume})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +375,7 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := NewRunCommandService(store).CreateAgentRun(ctx, request)
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +388,7 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	replayed, err := NewRunCommandService(reopened).CreateAgentRun(ctx, request)
+	replayed, err := agentrun.NewRunCommandService(reopened).CreateAgentRun(ctx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +405,7 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 }
 
 func TestRunCreationRejectsCredentialStateButAllowsTokenBudgets(t *testing.T) {
-	service := NewRunCommandService(newTestKernelStore(t))
+	service := agentrun.NewRunCommandService(newTestKernelStore(t))
 	base := CreateAgentRunRequest{
 		Scope: Scope{Kind: "tenant", ID: "safe"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 		Goal: "Operate safely", Source: RunSourceManual,

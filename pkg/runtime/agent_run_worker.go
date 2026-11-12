@@ -10,14 +10,15 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
-type TurnRunnerResolverFunc func(context.Context, *AgentRun) (*TurnRunnerBinding, error)
+type TurnRunnerResolverFunc func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error)
 
-func (f TurnRunnerResolverFunc) ResolveTurnRunner(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+func (f TurnRunnerResolverFunc) ResolveTurnRunner(ctx context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 	return f(ctx, run)
 }
 
@@ -85,17 +86,17 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 // durable store is authoritative; the wake channel is only a latency hint.
 type AgentRunWorkerPool struct {
 	config               AgentRunWorkerConfig
-	scheduler            *AgentRunScheduler
+	scheduler            *agentrun.AgentRunScheduler
 	portfolio            PortfolioStore
 	loop                 *RunLoop
-	wakeService          *AgentRunWakeService
+	wakeService          *agentrun.AgentRunWakeService
 	activity             *RunActivityService
 	actions              *ActionCoordinator
-	runFinalizer         RunTerminalFinalizer
-	runCommands          *RunCommandService
+	runFinalizer         agentrun.RunTerminalFinalizer
+	runCommands          *agentrun.RunCommandService
 	lastFinalizationScan time.Time
 	dependencyCursor     string
-	forks                *RunForkCoordinator
+	forks                *agentrun.RunForkCoordinator
 	dependencies         *DependencyCoordinator // pages waiting fork groups; nil unless the store indexes them
 	collaboration        *CollaborationService
 	conversationTasks    *ConversationTaskService
@@ -126,7 +127,7 @@ func (p *AgentRunWorkerPool) SetActionCoordinator(actions *ActionCoordinator) {
 	p.loop.setActionCoordinator(actions)
 }
 
-func (p *AgentRunWorkerPool) SetRunTerminalFinalizer(finalizer RunTerminalFinalizer) {
+func (p *AgentRunWorkerPool) SetRunTerminalFinalizer(finalizer agentrun.RunTerminalFinalizer) {
 	p.runFinalizer = finalizer
 }
 
@@ -171,16 +172,16 @@ func newAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 		return nil, err
 	}
 	pool := &AgentRunWorkerPool{
-		config: config, scheduler: NewAgentRunScheduler(store, opts...), portfolio: store, loop: loop,
-		wakeService: NewAgentRunWakeService(store, store, opts...), activity: NewRunActivityService(store, store, opts...),
-		runCommands: NewRunCommandService(store, opts...), now: clock,
+		config: config, scheduler: agentrun.NewAgentRunScheduler(store, opts...), portfolio: store, loop: loop,
+		wakeService: agentrun.NewAgentRunWakeService(store, store, opts...), activity: NewRunActivityService(store, store, opts...),
+		runCommands: agentrun.NewRunCommandService(store, opts...), now: clock,
 		resolver: resolver, logger: logger, wake: make(chan struct{}, 1), maintenanceWake: workqueue.NewWorkerPollSignal(),
 		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
 	}
 	pool.deadlines, _ = store.(AgentRunDeadlineStore)
 	pool.usage.Touch()
 	if forkStore, ok := store.(RunForkStore); ok {
-		pool.forks = NewRunForkCoordinator(forkStore, opts...)
+		pool.forks = agentrun.NewRunForkCoordinator(forkStore, opts...)
 		if _, indexed := forkStore.(RunDependencyReconciliationStore); indexed {
 			pool.dependencies = NewDependencyCoordinator(forkStore, opts...)
 		}
@@ -256,7 +257,7 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			p.usage.End()
 			return
 		}
-		run, err := p.scheduler.ClaimNext(ctx, AgentRunClaimRequest{
+		run, err := p.scheduler.ClaimNext(ctx, agentrun.AgentRunClaimRequest{
 			Scope: p.config.Scope, Kind: p.config.Kind, WorkerID: workerID, AssignedAgentID: p.config.AssignedAgentID,
 			LeaseDuration: p.config.LeaseDuration, AgingInterval: p.config.AgingInterval,
 			MaxActiveForAgent:                 p.config.MaxActiveForAgent,
@@ -385,7 +386,7 @@ func (p *AgentRunWorkerPool) finishTerminalRun(ctx context.Context, run *AgentRu
 // workerPlanToolEntries is the pool's RunLoopConfig.PlanToolEntries: the
 // dispatcher's planners over the binding's claim executor.
 func workerPlanToolEntries(store PortfolioStore) StepToolEntryPlanner {
-	return func(binding *TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, calls []LoopToolCall) ([]*SessionEntry, error) {
+	return func(binding *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 		if assistant != nil {
 			return PlanToolEntries(binding, assistant)
 		}
@@ -405,7 +406,7 @@ func workerPlanToolEntries(store PortfolioStore) StepToolEntryPlanner {
 
 // workerPlainTextFinal is the pool's RunLoopConfig.PlainTextFinal: the
 // control executor of the binding's claim executor judges the text.
-func workerPlainTextFinal(ctx context.Context, cc ControlContext, text string) (ControlResult, error) {
+func workerPlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text string) (ControlResult, error) {
 	var control *ControlExecutor
 	if cc.Binding != nil {
 		if tools, ok := cc.Binding.Tools.(*claimToolExecutor); ok {

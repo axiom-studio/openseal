@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 const (
@@ -429,7 +430,7 @@ func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope
 				continue
 			}
 			task, err := tasks.FindConversationTaskByWorkRunID(ctx, scope, run.ID)
-			if errors.Is(err, ErrConversationTaskNotFound) {
+			if errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 				continue
 			}
 			if err != nil {
@@ -761,7 +762,7 @@ func (s *ConversationChangeService) proveConversationTaskRun(ctx context.Context
 	}
 	proofStore := conversationChangeTaskProofStore{ConversationStore: s.conversations.store, ConversationTaskStore: tasks, PortfolioStore: s.portfolio}
 	workTask, sourceReport, err := conversationTaskForReport(ctx, proofStore, work)
-	if errors.Is(err, ErrInvalidConversationTask) || errors.Is(err, ErrConversationTaskNotFound) {
+	if errors.Is(err, ErrInvalidConversationTask) || errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 		return nil, nil
 	}
 	if err != nil {
@@ -789,7 +790,7 @@ func (s *ConversationChangeService) proveConversationTaskRun(ctx context.Context
 			return nil, nil
 		}
 		sourceTask, sourceReport, err := conversationTaskForReport(ctx, proofStore, source)
-		if errors.Is(err, ErrInvalidConversationTask) || errors.Is(err, ErrConversationTaskNotFound) {
+		if errors.Is(err, ErrInvalidConversationTask) || errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 			return nil, nil
 		}
 		if err != nil {

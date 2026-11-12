@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
 
@@ -97,7 +98,7 @@ func loadGovernedToolViews(ctx context.Context, store ActionStore, scope Scope, 
 	if store == nil || path == nil || runID == "" {
 		return nil, nil
 	}
-	listed, err := listAllRunActionHistory(ctx, store, scope, runID)
+	listed, err := agentrun.ListAllRunActionHistory(ctx, store, scope, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +249,7 @@ func pendingSkillSetupID(run *AgentRun, views []governedToolView, interventions 
 	for index := len(views) - 1; index >= 0; index-- {
 		view := views[index]
 		if view.SkillID != SkillManagementSkillID || view.Status != string(ActionCallStatusSucceeded) ||
-			view.Action != SkillActionRequestSetup && view.Action != SkillActionListSetupRequests {
+			view.Action != agentrun.SkillActionRequestSetup && view.Action != SkillActionListSetupRequests {
 			continue
 		}
 		return pendingSetupIn(run, view, interventions)
@@ -278,7 +279,7 @@ func pendingSetupIn(run *AgentRun, view governedToolView, interventions []AgentR
 		return id
 	}
 	switch view.Action {
-	case SkillActionRequestSetup:
+	case agentrun.SkillActionRequestSetup:
 		return pending(view.Result["setupRequest"])
 	case SkillActionListSetupRequests:
 		values, _ := view.Result["requests"].([]interface{})

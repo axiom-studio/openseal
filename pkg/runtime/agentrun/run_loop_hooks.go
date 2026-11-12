@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -156,27 +156,27 @@ type ToolCallCheck func(ctx context.Context, in StepToolsInput, entry *models.Se
 type AfterToolEntryHook func(ctx context.Context, in StepToolsInput, entry *models.SessionEntry) error
 
 const (
-	finalOutputSilentKey    = "silent"
-	finalOutputBroadcastKey = "broadcastToChannel"
-	finalOutputReactedKey   = "reacted"
-	finalOutputVisualKey    = "visual"
+	FinalOutputSilentKey    = "silent"
+	FinalOutputBroadcastKey = "broadcastToChannel"
+	FinalOutputReactedKey   = "reacted"
+	FinalOutputVisualKey    = "visual"
 )
 
 // Silent: a spoken reply that needs no response; nothing is posted.
 func (a FinalAnswer) Silent() bool {
-	silent, _ := a.Output[finalOutputSilentKey].(bool)
+	silent, _ := a.Output[FinalOutputSilentKey].(bool)
 	return silent
 }
 
 // ReactionsOnly: the Run's reactions are the reply; no message is posted.
 func (a FinalAnswer) ReactionsOnly() bool {
-	reacted, _ := a.Output[finalOutputReactedKey].(bool)
+	reacted, _ := a.Output[FinalOutputReactedKey].(bool)
 	return reacted
 }
 
 // BroadcastToChannel: a thread reply that also goes to the main timeline.
 func (a FinalAnswer) BroadcastToChannel() bool {
-	broadcast, _ := a.Output[finalOutputBroadcastKey].(bool)
+	broadcast, _ := a.Output[FinalOutputBroadcastKey].(bool)
 	return broadcast
 }
 
@@ -184,6 +184,6 @@ func (a FinalAnswer) BroadcastToChannel() bool {
 // runs the host checks and place stamping, stores it, and removes it from the
 // Run output.
 func (a FinalAnswer) Visual() *presentation.Visual {
-	visual, _ := a.Output[finalOutputVisualKey].(*presentation.Visual)
+	visual, _ := a.Output[FinalOutputVisualKey].(*presentation.Visual)
 	return visual
 }

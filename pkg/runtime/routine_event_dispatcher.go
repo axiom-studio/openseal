@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Dispatcher limits and intervals (SPEC §4).
@@ -368,7 +369,7 @@ func (d *RoutineEventDispatcher) dispatchActivation(ctx context.Context, scope S
 	if batch != nil {
 		// A Run may already exist for the open batch: the process stopped
 		// between creating it and marking the batch. Finish that start.
-		existing, err := d.store.GetAgentRun(ctx, scope, runIDForIdempotencyKey(scope, routineEventIdempotencyKey(batch.ID)))
+		existing, err := d.store.GetAgentRun(ctx, scope, agentrun.RunIDForIdempotencyKey(scope, routineEventIdempotencyKey(batch.ID)))
 		if err != nil {
 			return err
 		}
@@ -584,7 +585,7 @@ func (d *RoutineEventDispatcher) closeOut(ctx context.Context, scope Scope, acti
 		return 0, err
 	}
 	if open != nil {
-		existing, err := d.store.GetAgentRun(ctx, scope, runIDForIdempotencyKey(scope, routineEventIdempotencyKey(open.ID)))
+		existing, err := d.store.GetAgentRun(ctx, scope, agentrun.RunIDForIdempotencyKey(scope, routineEventIdempotencyKey(open.ID)))
 		if err != nil {
 			return 0, err
 		}

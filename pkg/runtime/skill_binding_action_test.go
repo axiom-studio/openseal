@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -245,7 +246,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	}
 
 	foreignRun := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-b"}, AssignedAgentID: "agent-b"}
-	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: foreignRun, Bound: bound, Arguments: base}); err == nil {
+	if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: foreignRun, Bound: bound, Arguments: base}); err == nil {
 		t.Fatal("management binding from agent-a escalated into agent-b")
 	}
 	store := newTestKernelStore(t)
@@ -256,7 +257,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 		t.Fatal(err)
 	}
 	dispatcher, _ := NewSkillBindingActionDispatcher(store, catalog, nil)
-	if _, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{
+	if _, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{
 		Call: &ActionCall{Scope: scope, RunID: durableForeign.ID, DeploymentID: "agent-a"}, Bound: bound, Arguments: base,
 	}); err == nil {
 		t.Fatal("dispatcher allowed a cross-Agent Skill mutation")
@@ -265,7 +266,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	selfRun := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a"}
 	unknown := maps.Clone(base)
 	unknown["skillId"] = "missing"
-	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: unknown}); err == nil {
+	if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: unknown}); err == nil {
 		t.Fatal("unknown Skill reached approval")
 	}
 
@@ -277,13 +278,13 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	}
 	missingSource := maps.Clone(base)
 	missingSource["skillId"] = sourced.ID
-	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: missingSource}); err == nil || !strings.Contains(err.Error(), "sourceIdentity") {
+	if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: missingSource}); err == nil || !strings.Contains(err.Error(), "sourceIdentity") {
 		t.Fatalf("sourced Skill without exact source error = %v", err)
 	}
 
 	secretConfig := maps.Clone(base)
 	secretConfig["config"] = map[string]interface{}{"client_secret": "raw-secret"}
-	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: secretConfig}); err == nil || !strings.Contains(err.Error(), "opaque credential") {
+	if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: secretConfig}); err == nil || !strings.Contains(err.Error(), "opaque credential") {
 		t.Fatalf("secret config error = %v", err)
 	}
 
@@ -300,7 +301,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	stale := maps.Clone(base)
 	stale["bindingId"] = "reader"
 	stale["expectedRevision"] = 0
-	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: stale}); !errors.Is(err, skill.ErrBindingRevisionConflict) {
+	if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: stale}); !errors.Is(err, skill.ErrBindingRevisionConflict) {
 		t.Fatalf("stale CAS error = %v", err)
 	}
 }
@@ -403,7 +404,7 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preview, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+	preview, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 		Run: run, Bound: bound, Arguments: arguments,
 	})
 	if err != nil || preview["resourceType"] != "skill_binding" {
@@ -413,7 +414,7 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{
+	result, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{
 		Call: &ActionCall{Scope: scope, RunID: run.ID, DeploymentID: deploymentID}, Bound: bound, Arguments: arguments,
 	})
 	if err != nil || result["operation"] != SkillActionUpsertBinding {

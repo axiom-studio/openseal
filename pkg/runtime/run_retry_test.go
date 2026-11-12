@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -26,7 +27,7 @@ func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) 
 			if err != nil || !eligibility.Available || eligibility.Revision != failed.Revision {
 				t.Fatalf("failed reply eligibility = %#v, %v", eligibility, err)
 			}
-			request := AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision, Kind: AgentRunCommandRetry, Actor: ActivityActor{Type: "user", ID: "user"}}
+			request := agentrun.AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision, Kind: agentrun.AgentRunCommandRetry, Actor: ActivityActor{Type: "user", ID: "user"}}
 			result, err := service.CommandAgentRun(t.Context(), request)
 			if err != nil {
 				t.Fatal(err)
@@ -58,18 +59,18 @@ func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) 
 	}
 }
 
-func failedReplyFixture(t *testing.T, store RunCommandStore) (*RunCommandService, *AgentRun) {
+func failedReplyFixture(t *testing.T, store RunCommandStore) (*agentrun.RunCommandService, *AgentRun) {
 	return failedReplyFixtureWithFailure(t, store, &RunFailureExplanation{Kind: "execution", Code: "provider_unavailable", Message: "The model provider was unavailable."})
 }
 
-func failedReplyFixtureWithExplanation(t *testing.T, store RunCommandStore, explained bool) (*RunCommandService, *AgentRun) {
+func failedReplyFixtureWithExplanation(t *testing.T, store RunCommandStore, explained bool) (*agentrun.RunCommandService, *AgentRun) {
 	return failedReplyFixtureWithFailure(t, store, &RunFailureExplanation{Kind: "execution", Code: "tool_arguments_invalid", Message: "invalid input", Explained: explained})
 }
 
-func failedReplyFixtureWithFailure(t *testing.T, store RunCommandStore, failure *RunFailureExplanation) (*RunCommandService, *AgentRun) {
+func failedReplyFixtureWithFailure(t *testing.T, store RunCommandStore, failure *RunFailureExplanation) (*agentrun.RunCommandService, *AgentRun) {
 	t.Helper()
 	ctx := t.Context()
-	service := NewRunCommandService(store)
+	service := agentrun.NewRunCommandService(store)
 	scope := Scope{Kind: "tenant", ID: "one"}
 	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Reply", Source: RunSourceChat, Checkpoint: map[string]interface{}{"saved": "context"}})
 	if err != nil {
@@ -109,7 +110,7 @@ func TestRetryConversationRunRejectsAnAlreadyExplainedProposalFailure(t *testing
 			if err != nil || eligibility.Available || eligibility.Reason != reason {
 				t.Fatalf("answered failure retry eligibility = %#v, %v", eligibility, err)
 			}
-			_, err = service.RetryConversationRun(t.Context(), AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision})
+			_, err = service.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision})
 			if !errors.Is(err, ErrInvalidRunCommand) {
 				t.Fatalf("answered proposal failure admitted same-run retry: %v", err)
 			}
@@ -137,7 +138,7 @@ func TestRetryClearsFailureExplanation(t *testing.T) {
 			if failed.FailureExplanation == nil || failed.CreditError == nil {
 				t.Fatalf("fixture lacks its typed failure: %+v %+v", failed.FailureExplanation, failed.CreditError)
 			}
-			result, err := service.RetryConversationRun(t.Context(), AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision, Actor: ActivityActor{Type: "user", ID: "user"}})
+			result, err := service.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision, Actor: ActivityActor{Type: "user", ID: "user"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -184,7 +185,7 @@ func TestRetryConversationRunRejectsUnrecoveredWork(t *testing.T) {
 			case "pending":
 				store.pending = []*AgentTurn{{}}
 			}
-			_, err := service.RetryConversationRun(t.Context(), AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision})
+			_, err := service.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision})
 			if !errors.Is(err, ErrInvalidRunCommand) {
 				t.Fatalf("unsafe recovery accepted: %v", err)
 			}

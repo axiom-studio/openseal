@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
 )
@@ -48,10 +49,10 @@ func (c *DynamicActionWorkerConfig) applyDefaults() error {
 // ActionCall work. See workqueue.ScopePools for when a scope has a pool.
 type ActionWorkerSupervisor struct {
 	store       KernelStore
-	catalog     ActionExecutionCatalog
+	catalog     agentrun.ActionExecutionCatalog
 	credentials CredentialResolver
 	leaseIssuer ActionCredentialLeaseIssuer
-	dispatcher  ActionDispatcher
+	dispatcher  agentrun.ActionDispatcher
 	config      DynamicActionWorkerConfig
 	logger      *zap.SugaredLogger
 	limiter     atomic.Pointer[workqueue.WorkerLimiter]
@@ -62,9 +63,9 @@ type ActionWorkerSupervisor struct {
 
 func NewActionWorkerSupervisor(
 	store KernelStore,
-	catalog ActionExecutionCatalog,
+	catalog agentrun.ActionExecutionCatalog,
 	credentials CredentialResolver,
-	dispatcher ActionDispatcher,
+	dispatcher agentrun.ActionDispatcher,
 	source workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config DynamicActionWorkerConfig,
@@ -74,9 +75,9 @@ func NewActionWorkerSupervisor(
 
 func NewActionCredentialLeaseWorkerSupervisor(
 	store KernelStore,
-	catalog ActionExecutionCatalog,
+	catalog agentrun.ActionExecutionCatalog,
 	issuer ActionCredentialLeaseIssuer,
-	dispatcher ActionDispatcher,
+	dispatcher agentrun.ActionDispatcher,
 	source workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config DynamicActionWorkerConfig,
@@ -89,10 +90,10 @@ func NewActionCredentialLeaseWorkerSupervisor(
 
 func newActionWorkerSupervisor(
 	store KernelStore,
-	catalog ActionExecutionCatalog,
+	catalog agentrun.ActionExecutionCatalog,
 	credentials CredentialResolver,
 	issuer ActionCredentialLeaseIssuer,
-	dispatcher ActionDispatcher,
+	dispatcher agentrun.ActionDispatcher,
 	source workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config DynamicActionWorkerConfig,

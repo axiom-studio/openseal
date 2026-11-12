@@ -26,6 +26,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -106,18 +107,18 @@ func withCredentials(resolver CredentialResolver) loopOption {
 type fakeDispatcher struct {
 	t                     testing.TB
 	mu                    sync.Mutex
-	calls                 []ActionDispatchInput
-	results               map[string]func(ActionDispatchInput) (map[string]interface{}, error) // by action name; overrides defaults
-	block                 map[string]chan struct{}                                             // dispatch waits on it (crash scenario)
+	calls                 []agentrun.ActionDispatchInput
+	results               map[string]func(agentrun.ActionDispatchInput) (map[string]interface{}, error) // by action name; overrides defaults
+	block                 map[string]chan struct{}                                                      // dispatch waits on it (crash scenario)
 	inFlight, maxInFlight int
 }
 
 func newFakeDispatcher(t testing.TB) *fakeDispatcher {
-	return &fakeDispatcher{t: t, results: map[string]func(ActionDispatchInput) (map[string]interface{}, error){}, block: map[string]chan struct{}{}}
+	return &fakeDispatcher{t: t, results: map[string]func(agentrun.ActionDispatchInput) (map[string]interface{}, error){}, block: map[string]chan struct{}{}}
 }
 
 // on overrides the result of one action.
-func (d *fakeDispatcher) on(action string, result func(ActionDispatchInput) (map[string]interface{}, error)) {
+func (d *fakeDispatcher) on(action string, result func(agentrun.ActionDispatchInput) (map[string]interface{}, error)) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.results[action] = result
@@ -133,7 +134,7 @@ func (d *fakeDispatcher) hold(action string) chan struct{} {
 	return release
 }
 
-func (d *fakeDispatcher) Dispatch(ctx context.Context, in ActionDispatchInput) (map[string]interface{}, error) {
+func (d *fakeDispatcher) Dispatch(ctx context.Context, in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	action := ""
 	if in.Bound != nil {
 		action = in.Bound.Action.Name
@@ -459,7 +460,7 @@ func (f *loopFixture) build() {
 }
 
 // planToolEntries is the loop's planner seam over the dispatcher's planners.
-func (f *loopFixture) planToolEntries(binding *TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, calls []LoopToolCall) ([]*SessionEntry, error) {
+func (f *loopFixture) planToolEntries(binding *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 	if assistant != nil {
 		return PlanToolEntries(binding, assistant)
 	}
@@ -639,7 +640,7 @@ func (f *loopFixture) driveToRest(runID string, maxClaims int) *AgentRun {
 // adds the conversation loop seams (catch-up preparer, read receipts, tool
 // check, artifact receipts and the observed final delivery) on top of
 // agentBinding; any other Run gets agentBinding alone.
-func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
+func (f *loopFixture) binding(run *AgentRun) *agentrun.TurnRunnerBinding {
 	f.t.Helper()
 	if conversationID, _ := run.Context[conversationRunContextConversationID].(string); conversationID == "" {
 		binding, _ := f.agentBinding(f.ctx, run)
@@ -656,11 +657,11 @@ func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 // resolves it when agent gives the Run's own Agent binding: the runner adds
 // the conversation loop seams on top. Scenarios use it for the Runs whose
 // Agent binding the fixture cannot build (Team members, threads, children).
-func (f *loopFixture) conversationBinding(run *AgentRun, agent func(*AgentRun) *TurnRunnerBinding) *TurnRunnerBinding {
+func (f *loopFixture) conversationBinding(run *AgentRun, agent func(*AgentRun) *agentrun.TurnRunnerBinding) *agentrun.TurnRunnerBinding {
 	f.t.Helper()
 	runner, err := NewConversationRunTurnRunner(f.chats, f.coordinator(), ConversationRunTurnRunnerConfig{
 		AttachmentContent: &answerVisualContent{},
-		AgentTurns: TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		AgentTurns: TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			return agent(run), nil
 		}),
 	}, models.WithClock(f.clock.Now))
@@ -679,7 +680,7 @@ func (f *loopFixture) conversationBinding(run *AgentRun, agent func(*AgentRun) *
 // preparer, the claim tool executor, the control authority and the kernel
 // compactor (with its budget). A first claim opens the Run's session. It is
 // the fixture's AgentTurns resolver for the conversation turn runner.
-func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 	f.t.Helper()
 	sessions := f.store.(AgentSessionStore)
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
@@ -711,7 +712,7 @@ func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*TurnRunne
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	binding := &TurnRunnerBinding{
+	binding := &agentrun.TurnRunnerBinding{
 		DeploymentID: run.AssignedAgentID, ActionDeploymentID: loopFixtureAgent,
 		DefinitionID: loopFixtureDefinition, DefinitionVersion: "1",
 		ModelProvider: string(kitModelProvider), Model: kitModelName,
@@ -722,7 +723,7 @@ func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*TurnRunne
 			Budget: newRunActivityCompactionBudget(f.store, NewRunActivityService(f.store, f.store), f.clock.Now),
 			Now:    f.clock.Now,
 		},
-		Preparers: []StepPreparer{newRunStartPreparer(sessions, f.store)},
+		Preparers: []agentrun.StepPreparer{newRunStartPreparer(sessions, f.store)},
 		Tools:     f.dispatcher.ForClaim(LoopToolClaim{Workspace: authority, CapabilityConfig: loopFixtureCapabilities}),
 	}
 	return binding, nil
@@ -1100,7 +1101,7 @@ func TestLoopTestkitFixtureCrashResumesOnSecondWorker(t *testing.T) {
 			&modelRule{name: "answer", reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Issue 9 is open."}) }},
 		))
 		release := f.dispatch.hold("lookup")
-		f.dispatch.on("lookup", func(in ActionDispatchInput) (map[string]interface{}, error) {
+		f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"id": "9", "status": "open", "title": "Issue 9"}, nil
 		})
 		go func() {

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -18,7 +19,7 @@ import (
 // tool entry; only the model is scripted.
 
 // workerTaskStep is one scripted reply of workerTaskProducer.
-type workerTaskStep func(ctx context.Context, call int, in StepInput) (StepOutput, error)
+type workerTaskStep func(ctx context.Context, call int, in agentrun.StepInput) (agentrun.StepOutput, error)
 
 // workerTaskProducer is a model-kind producer that replies from a script.
 type workerTaskProducer struct {
@@ -29,7 +30,7 @@ type workerTaskProducer struct {
 
 func (*workerTaskProducer) Kind() StepProducerKind { return StepProducerModel }
 
-func (p *workerTaskProducer) Produce(ctx context.Context, in StepInput) (StepOutput, error) {
+func (p *workerTaskProducer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	p.mu.Lock()
 	p.calls++
 	call := p.calls
@@ -45,17 +46,17 @@ func (p *workerTaskProducer) count() int {
 
 // startTaskStep is a model step whose only tool call is
 // conversation_start_task, with the call id the task fixtures key entries by.
-func startTaskStep(goal, ack string) StepOutput {
+func startTaskStep(goal, ack string) agentrun.StepOutput {
 	args, _ := json.Marshal(map[string]string{"goal": goal, "acknowledgment": ack})
-	return StepOutput{ModelProvider: "fake", Model: "deterministic", Assistant: &AssistantEntry{
+	return agentrun.StepOutput{ModelProvider: "fake", Model: "deterministic", Assistant: &AssistantEntry{
 		Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls,
 		ToolCalls: []ModelToolCall{{ID: taskStartFixtureCallID, Name: string(ControlToolStartTask), Arguments: args}},
 	}}
 }
 
 // answerStep is a model step that answers in plain text.
-func answerStep(text string) StepOutput {
-	return StepOutput{ModelProvider: "fake", Model: "deterministic", Assistant: &AssistantEntry{
+func answerStep(text string) agentrun.StepOutput {
+	return agentrun.StepOutput{ModelProvider: "fake", Model: "deterministic", Assistant: &AssistantEntry{
 		Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopEnd, Text: text,
 	}}
 }
@@ -64,7 +65,7 @@ func answerStep(text string) StepOutput {
 // binding does for the parts these tests need: the lane session (seeded with
 // the trigger message), the control authority and the claim tool executor,
 // whose control executor admits tasks through tasks.
-func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTaskKernelStore, producer StepProducer) TurnRunnerResolverFunc {
+func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTaskKernelStore, producer agentrun.StepProducer) TurnRunnerResolverFunc {
 	t.Helper()
 	activity := NewRunActivityService(store, store)
 	control := &ControlExecutor{
@@ -75,7 +76,7 @@ func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTas
 	if err != nil {
 		t.Fatal(err)
 	}
-	return func(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+	return func(ctx context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		session, err := openWorkerTaskSession(ctx, store, run)
 		if err != nil {
 			return nil, err
@@ -86,7 +87,7 @@ func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTas
 		if err != nil {
 			return nil, err
 		}
-		return &TurnRunnerBinding{
+		return &agentrun.TurnRunnerBinding{
 			DeploymentID: run.AssignedAgentID, DefinitionID: run.AssignedAgentID, DefinitionVersion: "1",
 			ModelProvider: "fake", Model: "deterministic", Producer: producer, Session: session, Authority: authority,
 			Tools: dispatcher.ForClaim(LoopToolClaim{}),
@@ -128,7 +129,7 @@ func openWorkerTaskSession(ctx context.Context, store *sqlite.Store, run *AgentR
 	return store.GetAgentSession(ctx, run.Scope, session.ID)
 }
 
-func workerTaskPool(t *testing.T, store *sqlite.Store, scope Scope, producer StepProducer) *AgentRunWorkerPool {
+func workerTaskPool(t *testing.T, store *sqlite.Store, scope Scope, producer agentrun.StepProducer) *AgentRunWorkerPool {
 	t.Helper()
 	return workerTaskPoolWith(t, store, scope, workerTaskResolver(t, store, store, producer))
 }
@@ -181,7 +182,7 @@ func settledWorkerTaskFixture(t *testing.T, store *sqlite.Store) (*AgentRun, *Ag
 		t.Fatalf("claim foreground: %#v %v", claimed, err)
 	}
 	proposal := workerTaskProposal()
-	producer := &workerTaskProducer{reply: func(context.Context, int, StepInput) (StepOutput, error) {
+	producer := &workerTaskProducer{reply: func(context.Context, int, agentrun.StepInput) (agentrun.StepOutput, error) {
 		return startTaskStep(proposal.goal, proposal.ack), nil
 	}}
 	pool := workerTaskPoolWith(t, store, scope, workerTaskResolver(t, store, &admissionLostTaskStore{Store: store}, producer))
@@ -220,11 +221,11 @@ func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
 	source, step, conversation, _ := settledWorkerTaskFixture(t, store)
 	expireRunLease(t, store, source)
 
-	producer := &workerTaskProducer{reply: func(context.Context, int, StepInput) (StepOutput, error) {
+	producer := &workerTaskProducer{reply: func(context.Context, int, agentrun.StepInput) (agentrun.StepOutput, error) {
 		return answerStep("unexpected second step"), nil
 	}}
 	pool := workerTaskPool(t, store, source.Scope, producer)
-	claimed, err := pool.scheduler.ClaimNext(t.Context(), AgentRunClaimRequest{
+	claimed, err := pool.scheduler.ClaimNext(t.Context(), agentrun.AgentRunClaimRequest{
 		Scope: source.Scope, Kind: RunKindConversation, WorkerID: "worker-2", LeaseDuration: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != source.ID {

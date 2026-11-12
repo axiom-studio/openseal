@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Cache-stable capability loading: a load, a new Run and a Skill connected
@@ -47,7 +48,7 @@ func (f *prepareFixture) ensureNote(step string) bool {
 	}
 	before := len(f.capabilityNotes())
 	path := f.render.path()
-	in := StepInput{Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path, Binding: f.binding, Mode: StepModeNormal}
+	in := agentrun.StepInput{Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path, Binding: f.binding, Mode: agentrun.StepModeNormal}
 	if _, err := producer.Produce(context.Background(), in); err != nil {
 		f.t.Fatal(err)
 	}
@@ -245,7 +246,7 @@ func TestSurfacedToolDefinitionFrozen(t *testing.T) {
 	}
 
 	// The executor answers a call of the revoked tool with is_error.
-	x := newToolExecFixture(t, ControlAuthority{})
+	x := newToolExecFixture(t, agentrun.ControlAuthority{})
 	step := x.step("step-1", AgentTurnStatusRunning, toolCall("call-revoked", "action_gmail_send", `{}`))
 	if _, err := x.binding.Tools.ExecuteStepTools(x.ctx, x.input(step)); err != nil {
 		t.Fatal(err)
@@ -266,7 +267,7 @@ func TestLoadDescriptionModeIndependent(t *testing.T) {
 	listedReq := f.prepare("step-1")
 	f.preparer.config.Capabilities.CatalogBytes = 100
 	searchReq := f.prepare("step-1")
-	if !f.preparer.CapabilitySet(StepInput{Run: f.run, Binding: f.binding}).Searching() {
+	if !f.preparer.CapabilitySet(agentrun.StepInput{Run: f.run, Binding: f.binding}).Searching() {
 		t.Fatal("the fixture did not switch to search mode")
 	}
 	if mustJSON(t, listedReq.Tools) != mustJSON(t, searchReq.Tools) || mustJSON(t, listedReq.System) != mustJSON(t, searchReq.System) {
@@ -279,7 +280,7 @@ func TestLoadDescriptionModeIndependent(t *testing.T) {
 }
 
 func TestLoadFreezesSurfacedToolsOnTheEntry(t *testing.T) {
-	x := newToolExecFixture(t, ControlAuthority{})
+	x := newToolExecFixture(t, agentrun.ControlAuthority{})
 	x.binding.ModelActions = capabilityCatalogFixture().Actions
 	step := x.step("step-1", AgentTurnStatusRunning, toolCall("call-load", LoadCapabilitiesTool, `{"ids":["action:notion.op2"]}`))
 	if _, err := x.binding.Tools.ExecuteStepTools(x.ctx, x.input(step)); err != nil {

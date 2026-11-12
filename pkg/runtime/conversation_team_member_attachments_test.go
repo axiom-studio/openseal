@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // A Team member's chat step gets the message's attachments exactly as a 1:1
@@ -19,7 +21,7 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 		if !ok {
 			t.Fatalf("%T stores no artifacts", base)
 		}
-		ask := func(team bool) (*SessionEntry, *SessionEntry, *TurnRunnerBinding, *chatLoopFixture) {
+		ask := func(team bool) (*SessionEntry, *SessionEntry, *agentrun.TurnRunnerBinding, *chatLoopFixture) {
 			t.Helper()
 			f := newChatLoopFixture(t, base, chatLoopOptions{team: team})
 			artifact := conversationTestArtifact()

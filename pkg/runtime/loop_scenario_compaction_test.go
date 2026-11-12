@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // ---------------------------------------------------------------------------
@@ -19,7 +21,7 @@ import (
 
 // bigLookups makes every lookup result about tokens kernel-estimated tokens.
 func bigLookups(f *loopFixture, tokens int) {
-	f.dispatch.on("lookup", func(in ActionDispatchInput) (map[string]interface{}, error) {
+	f.dispatch.on("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		id, _ := in.Arguments["id"].(string)
 		return map[string]interface{}{"id": id, "status": "open", "notes": strings.Repeat("note ", tokens*4/5)}, nil
 	})

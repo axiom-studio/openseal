@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // run_operation (section 04 §9): a settle-phase control tool that starts one
@@ -41,7 +42,7 @@ type operationHandler struct{}
 
 // Spec carries no operation list: the operations and their input schemas are
 // in the capabilities note, and the handler authorizes the entrypoint.
-func (operationHandler) Spec(a ControlAuthority) ControlToolSpec {
+func (operationHandler) Spec(a agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Start one of your callable operations as a separate Run; its result comes back to you as this tool's result. The operations and their input schemas are listed in the capabilities note.",
 		InputSchema: map[string]interface{}{
@@ -73,7 +74,7 @@ func (operationHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return args, nil
 }
 
-func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*operationArgs)
 	run := cc.Run
 	op, ok := authorizedOperation(cc.Authority.Operations, args.Entrypoint)
@@ -118,7 +119,7 @@ func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlC
 	result, err := x.Fork(ctx, cc, ForkSpec{
 		ForkID: forkID,
 		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Branches: []RunForkBranch{{
+		Branches: []agentrun.RunForkBranch{{
 			ID: operationBranchID, Goal: summary, AssignedAgentID: run.AssignedAgentID,
 			Entrypoint: op.Entrypoint, Context: childContext, Checkpoint: map[string]interface{}{}, Budget: budget,
 		}},
@@ -130,20 +131,20 @@ func (operationHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlC
 	if result.Park != nil {
 		result.Park.Summary = "Waiting for " + operationName(op)
 	}
-	x.projectOperationStart(ctx, run, summary, stableForkIdentifier(run.ID, forkID, "child:"+operationBranchID))
+	x.projectOperationStart(ctx, run, summary, agentrun.StableForkIdentifier(run.ID, forkID, "child:"+operationBranchID))
 	return result, nil
 }
 
-func authorizedOperation(operations []HostedRunbookOperation, entrypoint string) (HostedRunbookOperation, bool) {
+func authorizedOperation(operations []agentrun.HostedRunbookOperation, entrypoint string) (agentrun.HostedRunbookOperation, bool) {
 	for _, op := range operations {
 		if op.Entrypoint == entrypoint {
 			return op, true
 		}
 	}
-	return HostedRunbookOperation{}, false
+	return agentrun.HostedRunbookOperation{}, false
 }
 
-func operationName(op HostedRunbookOperation) string {
+func operationName(op agentrun.HostedRunbookOperation) string {
 	if name := strings.TrimSpace(op.Name); name != "" {
 		return name
 	}
@@ -152,7 +153,7 @@ func operationName(op HostedRunbookOperation) string {
 
 // operationChildContext is the child's context: the arguments, the
 // invocation record and the runbook definition identity.
-func (x *ControlExecutor) operationChildContext(ctx context.Context, run *AgentRun, op HostedRunbookOperation, arguments map[string]interface{}, summary string) (map[string]interface{}, error) {
+func (x *ControlExecutor) operationChildContext(ctx context.Context, run *AgentRun, op agentrun.HostedRunbookOperation, arguments map[string]interface{}, summary string) (map[string]interface{}, error) {
 	childContext := maps.Clone(arguments)
 	if childContext == nil {
 		childContext = map[string]interface{}{}
@@ -169,7 +170,7 @@ func (x *ControlExecutor) operationChildContext(ctx context.Context, run *AgentR
 	if sourceMessage != nil {
 		invocation["sourceMessage"] = sourceMessage
 	}
-	childContext[RunbookInvocationContextKey] = invocation
+	childContext[agentrun.RunbookInvocationContextKey] = invocation
 	if id, version := strings.TrimSpace(op.DefinitionID), strings.TrimSpace(op.DefinitionVersion); id != "" && version != "" {
 		childContext["runbookDefinitionId"] = id
 		childContext["runbookDefinitionVersion"] = version
@@ -203,7 +204,7 @@ var errRecursiveOperation = errors.New("recursive operation invocation")
 // in the Run's ancestry (same definition and version, or, for operations
 // without a definition identity, the same entrypoint on the same Agent).
 // Refusals wrap errRecursiveOperation; other errors are store errors.
-func controlRejectRecursiveRunbook(ctx context.Context, portfolio PortfolioStore, run *AgentRun, op HostedRunbookOperation) error {
+func controlRejectRecursiveRunbook(ctx context.Context, portfolio PortfolioStore, run *AgentRun, op agentrun.HostedRunbookOperation) error {
 	if run == nil {
 		return nil
 	}
@@ -247,8 +248,8 @@ func controlRejectRecursiveRunbook(ctx context.Context, portfolio PortfolioStore
 
 // Resume: a group still waiting re-parks; otherwise the child's saved output
 // becomes the entry's result.
-func (operationHandler) Resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
-	if !x.Forks.configured() || x.Portfolio == nil {
+func (operationHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
+	if !x.Forks.Configured() || x.Portfolio == nil {
 		return ControlResume{}, errors.New("control executor has no fork coordinator")
 	}
 	args := cc.Arguments.(*operationArgs)
@@ -265,7 +266,7 @@ func (operationHandler) Resume(ctx context.Context, x *ControlExecutor, cc Contr
 	}
 	var group *RunDependencyGroup
 	if groupID != "" {
-		group, err = x.Forks.dependencyGroup(ctx, cc.Run.Scope, groupID)
+		group, err = x.Forks.DependencyGroup(ctx, cc.Run.Scope, groupID)
 		if err != nil && !errors.Is(err, ErrDependencyGroupNotFound) {
 			return ControlResume{}, err
 		}
@@ -273,7 +274,7 @@ func (operationHandler) Resume(ctx context.Context, x *ControlExecutor, cc Contr
 	var child *AgentRun
 	if group != nil && meta != nil && len(meta.ChildRunIDs) > 0 {
 		if group.Status == RunDependencyGroupWaiting || group.Status == RunDependencyGroupOpen {
-			return ControlResume{Park: &LoopPark{
+			return ControlResume{Park: &agentrun.LoopPark{
 				Status: AgentRunStatusWaitingForDependency, Wake: &WakeCondition{Type: "run_dependencies", Reference: group.ID},
 				Summary: "Waiting for operation " + args.Entrypoint,
 			}}, nil

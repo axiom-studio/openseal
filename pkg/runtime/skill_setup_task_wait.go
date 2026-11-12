@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 const ConversationTaskSkillSetupWakeType = "skill_setup"
@@ -115,7 +116,7 @@ func isExactTaskSetupWait(run *AgentRun, requestID string) bool {
 // ReconcileSkillSetupTask resumes only the exact task waiting for this saved
 // setup request. Handled remains true for pending, paused, canceled and already
 // resumed tasks: a host must not create a new foreground request for those.
-func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, scope Scope, requestID string) (*AgentRunCommandResult, bool, error) {
+func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, scope Scope, requestID string) (*agentrun.AgentRunCommandResult, bool, error) {
 	if s == nil || s.runs == nil || scope.Validate() != nil || !validOpaqueIdentifier(requestID, 256) {
 		return nil, false, ErrInvalidSkillSetup
 	}
@@ -142,7 +143,7 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 	if task == nil {
 		return nil, false, nil
 	}
-	result := &AgentRunCommandResult{Run: run}
+	result := &agentrun.AgentRunCommandResult{Run: run}
 	accepted, err := skillSetupTaskAccepted(ctx, s.runStore, run, request)
 	if err != nil || accepted {
 		return result, true, err
@@ -187,14 +188,14 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 				return nil, true, readErr
 			}
 			if accepted || latest.Status != AgentRunStatusWaitingForEvent {
-				return &AgentRunCommandResult{Run: latest}, true, nil
+				return &agentrun.AgentRunCommandResult{Run: latest}, true, nil
 			}
 		}
 	}
 	if err != nil {
 		return nil, true, err
 	}
-	return &AgentRunCommandResult{Run: updated, Event: event}, true, nil
+	return &agentrun.AgentRunCommandResult{Run: updated, Event: event}, true, nil
 }
 
 func skillSetupTaskAccepted(ctx context.Context, store RunActivityStore, run *AgentRun, request *SkillSetupRequest) (bool, error) {

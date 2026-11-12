@@ -19,6 +19,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // portVisualArtifactID is the stable artifact ID of the visual on the answer
@@ -351,7 +352,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			if err != nil || surface.Title != "Quarterly revenue" || content.puts != 1 {
 				t.Fatalf("stored visual = %#v (%d puts), %v", surface, content.puts, err)
 			}
-			if _, ok := done.Output[finalOutputVisualKey]; ok {
+			if _, ok := done.Output[agentrun.FinalOutputVisualKey]; ok {
 				t.Fatalf("the visual stayed in the Run output: %#v", done.Output)
 			}
 		})
@@ -400,7 +401,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 				r.RequiresResponse = true
 			})
 			run := convDrive(f, convSchedule(f, conversation.ID, spoken).ID)
-			if run.Output[finalOutputSilentKey] != true {
+			if run.Output[agentrun.FinalOutputSilentKey] != true {
 				t.Fatalf("output = %#v, want silent", run.Output)
 			}
 			if answers := portAgentMessages(f, conversation.ID); len(answers) != 0 {
@@ -422,7 +423,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 					return finalAnswer(map[string]any{"answer": "Here is the quarterly report.", "files": []any{"report-pdf", "report-csv"}})
 				}},
 			))
-			f.dispatch.on("lookup", func(ActionDispatchInput) (map[string]interface{}, error) {
+			f.dispatch.on("lookup", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				return map[string]interface{}{"artifactRefs": []interface{}{
 					map[string]interface{}{"id": "report-pdf", "version": 1},
 					map[string]interface{}{"id": "report-csv", "version": 2},
@@ -464,7 +465,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			done := f.driveToRest(run.ID, 3)
 			f.mustStatus(done, AgentRunStatusCompleted)
 			answers := portAgentMessages(f, conversation.ID)
-			if len(answers) != 1 || !answers[0].BroadcastToChannel || done.Output[finalOutputBroadcastKey] != true {
+			if len(answers) != 1 || !answers[0].BroadcastToChannel || done.Output[agentrun.FinalOutputBroadcastKey] != true {
 				t.Fatalf("answers = %#v, output = %#v", answers, done.Output)
 			}
 		})

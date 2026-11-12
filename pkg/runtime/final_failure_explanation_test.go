@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -69,7 +70,7 @@ func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
 		if reply, ok := externalConversationRunReply(ctx, nil, nil, failed); !ok || reply != "I couldn't read that file, so I stopped." {
 			t.Fatalf("explained reply = %q %v", reply, ok)
 		}
-		if retry, err := NewRunCommandService(store).ConversationRetryEligibility(ctx, stored.Scope, stored.ID); err != nil || retry.Available || !strings.Contains(retry.Reason, "already has a reply") {
+		if retry, err := agentrun.NewRunCommandService(store).ConversationRetryEligibility(ctx, stored.Scope, stored.ID); err != nil || retry.Available || !strings.Contains(retry.Reason, "already has a reply") {
 			t.Fatalf("explained attempt was retryable: %+v %v", retry, err)
 		}
 	})
@@ -105,7 +106,7 @@ func TestNonExplainableFailureFailsWithKernelReply(t *testing.T) {
 		if !ok || reply != TerminalFailureReply("provider_unavailable") || strings.Contains(reply, "SECRET") {
 			t.Fatalf("kernel reply = %q %v", reply, ok)
 		}
-		if retry, err := NewRunCommandService(store).ConversationRetryEligibility(ctx, failed.Scope, failed.ID); err != nil || !retry.Available || retry.Reason != "" {
+		if retry, err := agentrun.NewRunCommandService(store).ConversationRetryEligibility(ctx, failed.Scope, failed.ID); err != nil || !retry.Available || retry.Reason != "" {
 			t.Fatalf("unexplained failure must be retryable: %+v %v", retry, err)
 		}
 	})

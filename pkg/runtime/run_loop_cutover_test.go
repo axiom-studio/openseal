@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
 )
@@ -81,7 +82,7 @@ func asOldRun(t *testing.T, store cutoverTestStore, runID string, mutate func(*A
 func cutoverManualRun(t *testing.T, store cutoverTestStore, key string, parentID string) *AgentRun {
 	t.Helper()
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
-	created, err := NewRunCommandService(store).CreateAgentRun(context.Background(), CreateAgentRunRequest{
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(context.Background(), CreateAgentRunRequest{
 		Scope: cutoverScope, Owner: owner, AssignedAgentID: owner.ID, ConcurrencyKey: "agent-1:" + key, Goal: "Do " + key,
 		Source: RunSourceManual, IdempotencyKey: key, ParentRunID: parentID, Actor: ActivityActor{Type: "user", ID: "7"},
 	})
@@ -232,7 +233,7 @@ func TestCutoverCancelsOldInFlightRunsOncePerLane(t *testing.T) {
 			}
 			// The old running step is closed by the cancel.
 			closed, err := store.GetAgentTurn(ctx, cutoverScope, step.ID)
-			if err != nil || closed.Status != AgentTurnStatusCanceled || closed.FailureCode != StepFailureRunEnded {
+			if err != nil || closed.Status != AgentTurnStatusCanceled || closed.FailureCode != agentrun.StepFailureRunEnded {
 				t.Fatalf("old step = %#v, %v", closed, err)
 			}
 			for _, lane := range []cutoverLane{laneA, laneB} {

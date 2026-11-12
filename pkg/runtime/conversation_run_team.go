@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // routeTeamMessage is a Team channel's routing Run: it records who answers the
@@ -48,7 +49,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 	}
 	for _, responder := range result.Round.Responders {
 		key := childKey(responder.Participant)
-		existing, err := r.runStore.GetAgentRun(ctx, run.Scope, runIDForIdempotencyKey(run.Scope, key))
+		existing, err := r.runStore.GetAgentRun(ctx, run.Scope, agentrun.RunIDForIdempotencyKey(run.Scope, key))
 		if err != nil {
 			return nil, err
 		}

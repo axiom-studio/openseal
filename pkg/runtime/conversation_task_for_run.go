@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func conversationTaskForReport(ctx context.Context, store ConversationStore, run *AgentRun) (*ConversationTask, bool, error) {
@@ -47,7 +49,7 @@ func conversationTaskForReport(ctx context.Context, store ConversationStore, run
 		if !ok {
 			return nil, false, ErrInvalidConversationTask
 		}
-		valid, err := VerifyConversationTaskWorkRun(ctx, proof, task, run)
+		valid, err := agentrun.VerifyConversationTaskWorkRun(ctx, proof, task, run)
 		if err != nil {
 			return nil, false, err
 		}

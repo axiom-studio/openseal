@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 type foregroundClarificationFixture struct {
@@ -206,8 +208,8 @@ func TestForegroundConversationClarificationRejectsForeignAndInactiveAnswers(t *
 					other := f.post(t, PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: MessageIntentUpdate, Content: "Another thread", StartThread: true, IdempotencyKey: "other-thread"})
 					req.ReplyToMessageID = other.ID
 				case "canceled":
-					result, err := NewRunCommandService(store).CommandAgentRun(t.Context(), AgentRunCommandRequest{Scope: f.run.Scope, RunID: f.run.ID,
-						ExpectedRevision: f.run.Revision, Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: f.trigger.Sender.ID}})
+					result, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: f.run.Scope, RunID: f.run.ID,
+						ExpectedRevision: f.run.Revision, Kind: agentrun.AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: f.trigger.Sender.ID}})
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // ConversationRunAgentID is the Agent a chat Run speaks as in conversation:
@@ -49,7 +51,7 @@ func verifyTeamMemberRun(ctx context.Context, runs teamMemberRunReader, conversa
 	}
 	routingID, _ := run.Context[teamRoutingRunContextKey].(string)
 	expected := conversationAgentRunRequest(conversation, trigger)
-	if routingID == "" || routingID != runIDForIdempotencyKey(conversation.Scope, expected.IdempotencyKey) {
+	if routingID == "" || routingID != agentrun.RunIDForIdempotencyKey(conversation.Scope, expected.IdempotencyKey) {
 		return false, nil
 	}
 	routing, err := runs.GetAgentRun(ctx, conversation.Scope, routingID)
@@ -62,7 +64,7 @@ func verifyTeamMemberRun(ctx context.Context, runs teamMemberRunReader, conversa
 		routing.Context[conversationRunContextTriggerID] != trigger.ID {
 		return false, nil
 	}
-	return run.ID == runIDForIdempotencyKey(run.Scope, teamMemberRunKey(routing, run.AssignedAgentID)) &&
+	return run.ID == agentrun.RunIDForIdempotencyKey(run.Scope, teamMemberRunKey(routing, run.AssignedAgentID)) &&
 		run.ConcurrencyKey == ConversationRunLane(conversation.ID, root, run.AssignedAgentID) &&
 		run.Context[conversationRunContextConversationID] == conversation.ID && run.Context[conversationRunContextTriggerID] == trigger.ID, nil
 }

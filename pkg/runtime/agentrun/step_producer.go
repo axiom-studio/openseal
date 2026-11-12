@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -119,34 +119,34 @@ type LoopFailure struct {
 // the step with producer_failed.
 var ErrInvalidStepOutput = errors.New("invalid step output")
 
-func invalidStepOutput(format string, args ...interface{}) error {
+func InvalidStepOutputf(format string, args ...interface{}) error {
 	return fmt.Errorf("%w: %s", ErrInvalidStepOutput, fmt.Sprintf(format, args...))
 }
 
-func (f *LoopFinal) validate() error {
+func (f *LoopFinal) Validate() error {
 	switch f.Status {
 	case "", models.AgentRunStatusCompleted, models.AgentRunStatusFailed:
 		return nil
 	}
-	return invalidStepOutput("final status %q must be completed or failed", f.Status)
+	return InvalidStepOutputf("final status %q must be completed or failed", f.Status)
 }
 
-func (p *LoopPark) validate() error {
+func (p *LoopPark) Validate() error {
 	switch p.Status {
 	case models.AgentRunStatusWaitingForApproval, models.AgentRunStatusWaitingForDependency, models.AgentRunStatusWaitingForAgent,
 		models.AgentRunStatusWaitingForEvent, models.AgentRunStatusSleeping:
 	default:
-		return invalidStepOutput("park status %q is not a wait status", p.Status)
+		return InvalidStepOutputf("park status %q is not a wait status", p.Status)
 	}
 	if p.Wake == nil {
-		return invalidStepOutput("park to %s has no wake condition", p.Status)
+		return InvalidStepOutputf("park to %s has no wake condition", p.Status)
 	}
 	return nil
 }
 
-func (f *LoopFailure) validate() error {
+func (f *LoopFailure) Validate() error {
 	if strings.TrimSpace(f.Kind) == "" || strings.TrimSpace(f.Code) == "" || strings.TrimSpace(f.Message) == "" {
-		return invalidStepOutput("failure needs kind, code and message")
+		return InvalidStepOutputf("failure needs kind, code and message")
 	}
 	return nil
 }

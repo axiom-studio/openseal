@@ -9,6 +9,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -106,7 +107,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	replayed, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: executed.Call, Bound: bound, Arguments: executed.Call.Arguments})
+	replayed, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: executed.Call, Bound: bound, Arguments: executed.Call.Arguments})
 	if err != nil || replayed["replayed"] != true {
 		t.Fatalf("replay = %#v, %v", replayed, err)
 	}
@@ -117,7 +118,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	// Another call's retry at the same stale revision is not this call's replay.
 	other := *executed.Call
 	other.ID = "another-call"
-	if _, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: &other, Bound: bound, Arguments: executed.Call.Arguments}); !errors.Is(err, ErrRevisionConflict) {
+	if _, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Call: &other, Bound: bound, Arguments: executed.Call.Arguments}); !errors.Is(err, ErrRevisionConflict) {
 		t.Fatalf("foreign replay error = %v", err)
 	}
 }
@@ -147,7 +148,7 @@ func TestTeamMemberActionRejectsStaleForeignAndPolicyForbiddenChangesBeforeAppro
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: testCase.run, Bound: bound, Arguments: testCase.arguments}); err == nil {
+			if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: testCase.run, Bound: bound, Arguments: testCase.arguments}); err == nil {
 				t.Fatal("invalid Team member action reached approval")
 			}
 		})
@@ -166,7 +167,7 @@ func TestTeamMemberActionRejectsStaleForeignAndPolicyForbiddenChangesBeforeAppro
 	if _, _, err := teams.ActivateDefinition(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "accessibility-team", forbidden.Version, 1, "user", "operator", "lock policy"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+	_, err = validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
 		Run: &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "accessibility-team"}}, Bound: bound,
 		Arguments: map[string]interface{}{"memberId": "ux-reviewer", "expectedDeploymentRevision": 2, "channelParticipation": "active"},
 	})

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -21,8 +22,8 @@ func observation(id string, status ActionCallStatus, generation int, elements ..
 		Output: map[string]interface{}{"generation": generation, "elements": elements}}
 }
 
-func validateObservationRef(bound *skill.BoundAction, history RunActionHistory, arguments map[string]interface{}) error {
-	_, err := ObservationRefActionProposalValidator{}.ValidateActionProposal(context.Background(), ActionProposalValidationInput{
+func validateObservationRef(bound *skill.BoundAction, history agentrun.RunActionHistory, arguments map[string]interface{}) error {
+	_, err := ObservationRefActionProposalValidator{}.ValidateActionProposal(context.Background(), agentrun.ActionProposalValidationInput{
 		Run: &AgentRun{ID: "run"}, Bound: bound, Arguments: arguments, History: history,
 	})
 	return err

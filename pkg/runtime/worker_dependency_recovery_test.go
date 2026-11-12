@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
 )
@@ -51,7 +52,7 @@ func TestAgentRunWorkerFinalizerRecoversWinnerCommitBeforeLoserCancellation(t *t
 			after.source.QueueEnteredAt != before.source.QueueEnteredAt || !reflect.DeepEqual(before.source.Checkpoint, after.source.Checkpoint) {
 			t.Fatalf("bounded terminal repair did not recover owned cleanup without rewaking the source: beta=%s source=%s", after.children["beta"].Status, after.source.Status)
 		}
-		if _, err := NewRunForkCoordinator(store).CompleteChild(t.Context(), winner, ActivityActor{Type: "worker", ID: "restarted-worker"}); err != nil {
+		if _, err := agentrun.NewRunForkCoordinator(store).CompleteChild(t.Context(), winner, ActivityActor{Type: "worker", ID: "restarted-worker"}); err != nil {
 			t.Fatal(err)
 		}
 		fixture.assertSnapshot(t, after)
@@ -150,7 +151,7 @@ func TestAgentRunWorkerIdleDependencyMetadataDoesNotHydrateRunsOrHistory(t *test
 
 func newDependencyRepairTestPool(t *testing.T, store KernelStore, scope Scope) *AgentRunWorkerPool {
 	t.Helper()
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return nil, errors.New("reconciliation must not resolve provider authority")
 	}), nil, AgentRunWorkerConfig{Scope: scope})
 	if err != nil {

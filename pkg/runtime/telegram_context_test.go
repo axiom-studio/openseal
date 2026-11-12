@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -68,7 +69,7 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content ArtifactContentStore, conversation *Conversation, trigger *ChannelMessage, messageID string) *SessionEntry {
 	t.Helper()
 	ctx := t.Context()
-	created, err := NewRunCommandService(store).CreateAgentRun(ctx, conversationAgentRunRequest(conversation, trigger))
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, conversationAgentRunRequest(conversation, trigger))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +80,7 @@ func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content ArtifactCon
 	agent := chatLoopAgentTurns{run.ID: {
 		DeploymentID: run.AssignedAgentID, DefinitionID: "agent-definition", DefinitionVersion: "1",
 		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model", Producer: &chatLoopProducer{},
-		Authority: ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
+		Authority: agentrun.ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
 	}}
 	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, NewConversationService(store)), ConversationRunTurnRunnerConfig{
 		AttachmentContent: content, AgentTurns: agent,
@@ -92,7 +93,7 @@ func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content ArtifactCon
 		t.Fatal(err)
 	}
 	chat := binding.Preparers[len(binding.Preparers)-1]
-	part, err := chat.BeforeStep(ctx, StepInput{Run: run, Session: binding.Session, Binding: binding, WorkerID: "photo-step", Step: &AgentTurn{ID: run.ID + "-step-1", Sequence: 1}}, SteeringPlan{})
+	part, err := chat.BeforeStep(ctx, agentrun.StepInput{Run: run, Session: binding.Session, Binding: binding, WorkerID: "photo-step", Step: &AgentTurn{ID: run.ID + "-step-1", Sequence: 1}}, agentrun.SteeringPlan{})
 	if err != nil || part == nil {
 		t.Fatalf("first step context = %#v, %v", part, err)
 	}

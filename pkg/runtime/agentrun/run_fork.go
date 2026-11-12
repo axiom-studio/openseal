@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -285,13 +285,13 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		}
 	}
 	now := c.now().UTC()
-	groupID := stableForkIdentifier(source.ID, req.ForkID, "group")
+	groupID := StableForkIdentifier(source.ID, req.ForkID, "group")
 	children := make([]*models.AgentRun, 0, len(req.Branches))
 	edges := make([]*models.RunDependency, 0, len(req.Branches))
 	var childSessions []models.CreateRunAgentSessionTxRequest
 	for _, branch := range req.Branches {
 		branch.ID = strings.TrimSpace(branch.ID)
-		childID := stableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
+		childID := StableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
 		assignedAgentID := strings.TrimSpace(branch.AssignedAgentID)
 		implicitAgent := assignedAgentID == ""
 		childContext := maps.Clone(branch.Context)
@@ -381,7 +381,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			childRequest.SessionID = models.RunAgentSessionID(source.Scope, childID)
 		}
 		inherit := entrypoint != "" && assignedAgentID == source.AssignedAgentID && entrypoint == source.Entrypoint
-		if err := prepareAcceptedChildRun(ctx, source, &childRequest, c.executionPreparer, inherit); err != nil {
+		if err := PrepareAcceptedChildRun(ctx, source, &childRequest, c.executionPreparer, inherit); err != nil {
 			return nil, err
 		}
 		child, err := portfolio.BuildAgentRun(ctx, c.store, childRequest, childID, now)
@@ -390,7 +390,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		}
 		children = append(children, child)
 		if sessionFork != nil {
-			seed, err := controlChildSeed(child)
+			seed, err := ControlChildSeed(child)
 			if err != nil {
 				return nil, fmt.Errorf("branch %s seed: %w", branch.ID, err)
 			}
@@ -436,7 +436,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		actor = models.ActivityActor{Type: "worker", ID: req.WorkerID}
 	}
 	event := &models.ActivityEvent{
-		ID: stableForkIdentifier(source.ID, req.ForkID, "event"), Scope: source.Scope, RunID: source.ID,
+		ID: StableForkIdentifier(source.ID, req.ForkID, "event"), Scope: source.Scope, RunID: source.ID,
 		AgentID: source.AssignedAgentID, ObjectiveID: source.ObjectiveID, TeamID: models.TeamIDForRun(source),
 		EventType: "run.forked", Summary: fmt.Sprintf("Forked %d concurrent child Runs", len(children)),
 		Actor: actor, Visibility: visibility, CorrelationID: group.ID,
@@ -530,10 +530,10 @@ func immutableForkTaskContextKey(key string) bool {
 }
 
 func (c *RunForkCoordinator) persistedForkTaskOrigin(ctx context.Context, source *models.AgentRun) (*models.ConversationTask, error) {
-	return persistedTaskWorkOrigin(ctx, c.store, source)
+	return PersistedTaskWorkOrigin(ctx, c.store, source)
 }
 
-func persistedTaskWorkOrigin(ctx context.Context, store models.PortfolioStore, source *models.AgentRun) (*models.ConversationTask, error) {
+func PersistedTaskWorkOrigin(ctx context.Context, store models.PortfolioStore, source *models.AgentRun) (*models.ConversationTask, error) {
 	_, hinted := source.Context[models.ConversationTaskContextKey]
 	taskLike := hinted || strings.HasPrefix(source.ConcurrencyKey, "task:")
 	tasks, ok := store.(models.ConversationTaskStore)
@@ -603,7 +603,7 @@ func persistedTaskWorkOrigin(ctx context.Context, store models.PortfolioStore, s
 }
 
 func (c *RunForkCoordinator) replay(ctx context.Context, source *models.AgentRun, group *models.RunDependencyGroup, req CreateRunForkRequest) (*RunForkResult, error) {
-	if group.SourceRunID != source.ID || group.Policy != req.Policy || group.ExpectedCount != len(req.Branches) || group.ID != stableForkIdentifier(source.ID, req.ForkID, "group") {
+	if group.SourceRunID != source.ID || group.Policy != req.Policy || group.ExpectedCount != len(req.Branches) || group.ID != StableForkIdentifier(source.ID, req.ForkID, "group") {
 		return nil, models.ErrDependencyConflict
 	}
 	edges, err := c.store.ListRunDependencies(ctx, req.Scope, group.ID)
@@ -617,7 +617,7 @@ func (c *RunForkCoordinator) replay(ctx context.Context, source *models.AgentRun
 	children := make([]*models.AgentRun, 0, len(req.Branches))
 	for _, branch := range req.Branches {
 		edge := byID[branch.ID]
-		expectedChild := stableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
+		expectedChild := StableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
 		if edge == nil || edge.Kind != models.RunDependencyKindRun || edge.TargetRunID != expectedChild {
 			return nil, models.ErrDependencyConflict
 		}
@@ -637,7 +637,7 @@ func (c *RunForkCoordinator) replay(ctx context.Context, source *models.AgentRun
 	return &RunForkResult{DependencyGroup: &models.RunDependencyResult{Group: group, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}, Children: children}, nil
 }
 
-func stableForkIdentifier(runID, forkID, suffix string) string {
+func StableForkIdentifier(runID, forkID, suffix string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("openseal:fork:"+runID+":"+forkID+":"+suffix)).String()
 }
 
@@ -775,7 +775,7 @@ func ownedForkChild(group *models.RunDependencyGroup, edge *models.RunDependency
 	}
 	forkID, _ := metadata["forkId"].(string)
 	return forkID != "" && metadata["sourceRunId"] == group.SourceRunID && metadata["groupId"] == group.ID && metadata["dependencyId"] == edge.ID &&
-		group.ID == stableForkIdentifier(group.SourceRunID, forkID, "group") && child.ID == stableForkIdentifier(group.SourceRunID, forkID, "child:"+edge.ID)
+		group.ID == StableForkIdentifier(group.SourceRunID, forkID, "group") && child.ID == StableForkIdentifier(group.SourceRunID, forkID, "child:"+edge.ID)
 }
 
 func (c *RunForkCoordinator) cancelLosingChildren(ctx context.Context, winner *models.RunDependencyResult, winnerID string, actor models.ActivityActor) error {
@@ -825,16 +825,16 @@ func (c *RunForkCoordinator) cancelLosingChild(ctx context.Context, runActivity 
 }
 
 // configured reports whether c has a store (false for a nil coordinator).
-func (c *RunForkCoordinator) configured() bool {
+func (c *RunForkCoordinator) Configured() bool {
 	return c != nil && c.store != nil
 }
 
 // dependencyGroup reads a fork's dependency group.
-func (c *RunForkCoordinator) dependencyGroup(ctx context.Context, scope models.Scope, groupID string) (*models.RunDependencyGroup, error) {
+func (c *RunForkCoordinator) DependencyGroup(ctx context.Context, scope models.Scope, groupID string) (*models.RunDependencyGroup, error) {
 	return c.store.GetRunDependencyGroup(ctx, scope, groupID)
 }
 
 // dependencies lists the edges of a fork's dependency group.
-func (c *RunForkCoordinator) dependencies(ctx context.Context, scope models.Scope, groupID string) ([]*models.RunDependency, error) {
+func (c *RunForkCoordinator) Dependencies(ctx context.Context, scope models.Scope, groupID string) ([]*models.RunDependency, error) {
 	return c.store.ListRunDependencies(ctx, scope, groupID)
 }

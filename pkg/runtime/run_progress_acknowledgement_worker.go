@@ -10,14 +10,15 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 const runProgressAcknowledgementCorrelationKind = "run_acknowledgement"
 
-type RunProgressAcknowledgementRendererFunc func(context.Context, RunProgressAcknowledgementRequest) (string, error)
+type RunProgressAcknowledgementRendererFunc func(context.Context, agentrun.RunProgressAcknowledgementRequest) (string, error)
 
-func (f RunProgressAcknowledgementRendererFunc) RenderRunProgressAcknowledgement(ctx context.Context, request RunProgressAcknowledgementRequest) (string, error) {
+func (f RunProgressAcknowledgementRendererFunc) RenderRunProgressAcknowledgement(ctx context.Context, request agentrun.RunProgressAcknowledgementRequest) (string, error) {
 	return f(ctx, request)
 }
 
@@ -65,7 +66,7 @@ func (c RunProgressAcknowledgementWorkerConfig) normalize() (RunProgressAcknowle
 type RunProgressAcknowledgementWorker struct {
 	store         RunProgressAcknowledgementStore
 	resolver      ExternalConversationAdapterResolver
-	renderer      RunProgressAcknowledgementRenderer
+	renderer      agentrun.RunProgressAcknowledgementRenderer
 	conversations *ConversationService
 	transport     *ExternalConversationTransportService
 	config        RunProgressAcknowledgementWorkerConfig
@@ -75,7 +76,7 @@ type RunProgressAcknowledgementWorker struct {
 func NewRunProgressAcknowledgementWorker(
 	store RunProgressAcknowledgementStore,
 	resolver ExternalConversationAdapterResolver,
-	renderer RunProgressAcknowledgementRenderer,
+	renderer agentrun.RunProgressAcknowledgementRenderer,
 	config RunProgressAcknowledgementWorkerConfig,
 	opts ...models.ServiceOption,
 ) (*RunProgressAcknowledgementWorker, error) {
@@ -210,7 +211,7 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 		(len(prior) > 0 && now.Sub(prior[0].CreatedAt) < w.config.MinimumInterval) {
 		return nil, nil
 	}
-	text, err := w.renderer.RenderRunProgressAcknowledgement(ctx, RunProgressAcknowledgementRequest{
+	text, err := w.renderer.RenderRunProgressAcknowledgement(ctx, agentrun.RunProgressAcknowledgementRequest{
 		Snapshot: snapshot, MaxSentences: 2, MaxCharacters: 100,
 	})
 	if err != nil {
@@ -305,8 +306,8 @@ func (w *RunProgressAcknowledgementWorker) post(ctx context.Context, item *Exter
 	return nil, ErrRevisionConflict
 }
 
-func runProgressSnapshot(run *AgentRun, event *ActivityEvent) RunProgressSnapshot {
-	result := RunProgressSnapshot{
+func runProgressSnapshot(run *AgentRun, event *ActivityEvent) agentrun.RunProgressSnapshot {
+	result := agentrun.RunProgressSnapshot{
 		RunID: run.ID, Scope: run.Scope, AgentID: run.AssignedAgentID, Goal: run.Goal, Status: run.Status, Revision: run.Revision,
 	}
 	if event != nil {
@@ -315,7 +316,7 @@ func runProgressSnapshot(run *AgentRun, event *ActivityEvent) RunProgressSnapsho
 	return result
 }
 
-func runProgressPhase(snapshot RunProgressSnapshot) string {
+func runProgressPhase(snapshot agentrun.RunProgressSnapshot) string {
 	source := string(snapshot.Status) + "\x00" + snapshot.ActivityID + "\x00" + snapshot.ActivityType
 	digest := hashString(source)
 	return "progress-" + digest[:16]
@@ -344,7 +345,7 @@ const runProgressAcknowledgementSystemInstruction = "Produce only a brief progre
 // one bounded, tool-free sentence through a single sessionless model step. The
 // step writes no agent_turns row and no session entry.
 type modelStepProgressAcknowledgementRenderer struct {
-	host              StepHost
+	host              agentrun.StepHost
 	agentID           string
 	definitionID      string
 	definitionVersion string
@@ -358,7 +359,7 @@ type modelStepProgressAcknowledgementRenderer struct {
 // newProgressAcknowledgementRenderer renders through host as the Agent
 // agentID at its definition version, with its model credential and
 // instructions (the system prompt adds the acknowledgement rules).
-func newProgressAcknowledgementRenderer(host StepHost, agentID, definitionID, definitionVersion string, modelCredential *capability.CredentialReference, instructions []string, opts ...models.ServiceOption) *modelStepProgressAcknowledgementRenderer {
+func newProgressAcknowledgementRenderer(host agentrun.StepHost, agentID, definitionID, definitionVersion string, modelCredential *capability.CredentialReference, instructions []string, opts ...models.ServiceOption) *modelStepProgressAcknowledgementRenderer {
 	return &modelStepProgressAcknowledgementRenderer{
 		host: host, agentID: agentID, definitionID: definitionID, definitionVersion: definitionVersion,
 		modelCredential: modelCredential,
@@ -367,7 +368,7 @@ func newProgressAcknowledgementRenderer(host StepHost, agentID, definitionID, de
 	}
 }
 
-func (r *modelStepProgressAcknowledgementRenderer) RenderRunProgressAcknowledgement(ctx context.Context, request RunProgressAcknowledgementRequest) (string, error) {
+func (r *modelStepProgressAcknowledgementRenderer) RenderRunProgressAcknowledgement(ctx context.Context, request agentrun.RunProgressAcknowledgementRequest) (string, error) {
 	snapshot := request.Snapshot
 	if r == nil || r.host == nil || snapshot.Scope.Validate() != nil || snapshot.RunID == "" || snapshot.AgentID == "" ||
 		(r.agentID != "" && r.agentID != snapshot.AgentID) {
@@ -448,7 +449,7 @@ func NewTurnRunnerProgressAcknowledgementRenderer(resolver TurnRunnerResolver) (
 	return &TurnRunnerProgressAcknowledgementRenderer{resolver: resolver}, nil
 }
 
-func (r *TurnRunnerProgressAcknowledgementRenderer) RenderRunProgressAcknowledgement(ctx context.Context, request RunProgressAcknowledgementRequest) (string, error) {
+func (r *TurnRunnerProgressAcknowledgementRenderer) RenderRunProgressAcknowledgement(ctx context.Context, request agentrun.RunProgressAcknowledgementRequest) (string, error) {
 	if r == nil || r.resolver == nil || request.Snapshot.RunID == "" || request.Snapshot.AgentID == "" || request.Snapshot.Scope.Validate() != nil {
 		return "", errors.New("Run progress acknowledgement rendering is unavailable")
 	}

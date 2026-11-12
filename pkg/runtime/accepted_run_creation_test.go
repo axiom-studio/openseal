@@ -12,6 +12,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -119,7 +120,7 @@ func TestAcceptedRunCreationManualPinsOnceAndReplaysBeforeMutableAdmission(t *te
 		if rejected != nil || !errors.Is(err, preparer.err) || preparer.calls != 2 {
 			t.Fatalf("new manual occurrence bypassed immutable admission: %#v, %v", rejected, err)
 		}
-		persisted, err := store.GetAgentRun(t.Context(), activation.Scope, runIDForIdempotencyKey(activation.Scope, request.IdempotencyKey))
+		persisted, err := store.GetAgentRun(t.Context(), activation.Scope, agentrun.RunIDForIdempotencyKey(activation.Scope, request.IdempotencyKey))
 		if err != nil || persisted != nil {
 			t.Fatalf("rejected manual occurrence was persisted: %#v, %v", persisted, err)
 		}
@@ -166,7 +167,7 @@ func TestAcceptedRunCreationSchedulerRetainsPinAcrossOccurrenceDeliveryRetry(t *
 		if err == nil || created.Scheduled != 1 || preparer.calls != 1 {
 			t.Fatalf("schedule did not create before cursor failure: %#v, %v", created, err)
 		}
-		accepted, err := store.GetAgentRun(t.Context(), activation.Scope, runIDForIdempotencyKey(activation.Scope, key))
+		accepted, err := store.GetAgentRun(t.Context(), activation.Scope, agentrun.RunIDForIdempotencyKey(activation.Scope, key))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -193,8 +194,8 @@ func TestAcceptedRunCreationReplayRejectsChangedWorkBeforePreparation(t *testing
 	store := newTestKernelStore(t)
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}})
 	request := CreateAgentRunRequest{Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID, Entrypoint: "review", Goal: "Original work", Source: RunSourceManual, IdempotencyKey: "request-conflict", Context: map[string]interface{}{"runbookDefinitionId": "review", "runbookDefinitionVersion": "1"}}
-	commands := NewRunCommandService(store)
-	created, err := createAgentRunWithAcceptedExecution(t.Context(), commands, request, preparer)
+	commands := agentrun.NewRunCommandService(store)
+	created, err := agentrun.CreateAgentRunWithAcceptedExecution(t.Context(), commands, request, preparer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +205,7 @@ func TestAcceptedRunCreationReplayRejectsChangedWorkBeforePreparation(t *testing
 	}
 	request.Goal = "Different work"
 	preparer.err = errors.New("mutable admission must not run")
-	conflict, err := createAgentRunWithAcceptedExecution(t.Context(), commands, request, preparer)
+	conflict, err := agentrun.CreateAgentRunWithAcceptedExecution(t.Context(), commands, request, preparer)
 	if conflict != nil || !errors.Is(err, ErrRunIdempotency) || preparer.calls != 1 {
 		t.Fatalf("changed retry bypassed canonical fingerprint or reached admission: %#v, %v", conflict, err)
 	}
@@ -217,8 +218,8 @@ func TestAcceptedRunCreationDiscardsUntrustedPinBeforeCanonicalReplay(t *testing
 		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: "rowan", Entrypoint: "review", Goal: "Original work", Source: RunSourceManual, IdempotencyKey: "untrusted-pin",
 		Context: map[string]interface{}{"runbookDefinitionId": "review", "runbookDefinitionVersion": "1", "input": "preserved", AcceptedRunExecutionContextKey: "caller-supplied forged pin"},
 	}
-	commands := NewRunCommandService(store)
-	created, err := createAgentRunWithAcceptedExecution(t.Context(), commands, request, preparer)
+	commands := agentrun.NewRunCommandService(store)
+	created, err := agentrun.CreateAgentRunWithAcceptedExecution(t.Context(), commands, request, preparer)
 	if err != nil || created == nil || preparer.calls != 1 {
 		t.Fatalf("untrusted pin affected authoritative creation: %#v, %v", created, err)
 	}
@@ -227,7 +228,7 @@ func TestAcceptedRunCreationDiscardsUntrustedPinBeforeCanonicalReplay(t *testing
 		t.Fatal("server sanitization rewrote ordinary inputs or the caller's request")
 	}
 	preparer.err = errors.New("mutable admission must not run on replay")
-	replayed, err := createAgentRunWithAcceptedExecution(t.Context(), commands, request, preparer)
+	replayed, err := agentrun.CreateAgentRunWithAcceptedExecution(t.Context(), commands, request, preparer)
 	if err != nil || replayed == nil || replayed.Event != nil || replayed.Run.ID != created.Run.ID || preparer.calls != 1 {
 		t.Fatalf("untrusted pin affected canonical replay: %#v, %v", replayed, err)
 	}
@@ -257,7 +258,7 @@ func TestAcceptedRunCreationActionDispatcherPreparesNewWorkAndReplays(t *testing
 	}
 	dispatcher.SetAcceptedRunExecutionPreparer(preparer)
 	definition := RunbookManagementSkill()
-	input := ActionDispatchInput{
+	input := agentrun.ActionDispatchInput{
 		Run: parent, Call: &ActionCall{ID: "approved-start", Scope: activation.Scope, RunID: parent.ID, DeploymentID: "rowan"},
 		Bound:     &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: "rowan"}, Action: definition.Actions[RunbookActionStart]},
 		Arguments: map[string]interface{}{"activationId": activation.ID, "reason": "User requested immediate review"},

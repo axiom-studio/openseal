@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // One step of the loop (SPEC §3.1 phases 0-11).
@@ -36,7 +37,7 @@ func exitResultPtr(exit *RunLoopExit) stepResult { return exitResult(*exit) }
 type stepState struct {
 	lease *stepLease
 	step  *AgentTurn // the finished row once finished; the begun row before
-	mode  StepMode
+	mode  agentrun.StepMode
 
 	started  time.Time
 	stepCtx  context.Context // canceled on step lease loss
@@ -158,9 +159,9 @@ func (s *stepLease) stopHeartbeat() {
 
 // runStep runs one step: a new row, or the running row reconcile claimed.
 func (d *drive) runStep(ctx context.Context, resumed *resumedStep) stepResult {
-	mode := StepModeNormal
+	mode := agentrun.StepModeNormal
 	if runExplainingFailure(d.run) {
-		mode = StepModeExplainFailure
+		mode = agentrun.StepModeExplainFailure
 	}
 	var step *AgentTurn
 	if resumed != nil {
@@ -226,16 +227,16 @@ func (d *drive) releaseUnfinished(ctx context.Context, st *stepState) {
 }
 
 // stepInput is the producer/preparer/compactor view of the step.
-func (d *drive) stepInput(st *stepState, attempt int) StepInput {
-	return StepInput{
+func (d *drive) stepInput(st *stepState, attempt int) agentrun.StepInput {
+	return agentrun.StepInput{
 		Run: cloneAgentRun(d.run), Step: cloneAgentTurn(st.current()), Session: cloneAgentSession(d.session),
 		Path: st.path, Binding: d.binding, Mode: st.mode, Attempt: attempt, WorkerID: d.workerID,
 	}
 }
 
 // toolsInput is the executor's view of the step.
-func (d *drive) toolsInput(st *stepState, entries []*SessionEntry) StepToolsInput {
-	return StepToolsInput{
+func (d *drive) toolsInput(st *stepState, entries []*SessionEntry) agentrun.StepToolsInput {
+	return agentrun.StepToolsInput{
 		Run: cloneAgentRun(d.run), Step: cloneAgentTurn(st.current()), Session: cloneAgentSession(d.session),
 		Path: st.path, Binding: d.binding, WorkerID: d.workerID, Assistant: st.assistant, Entries: entries,
 	}
@@ -259,7 +260,7 @@ func (d *drive) stepPhases(ctx context.Context, st *stepState, resumed *resumedS
 		return d.resumeRecordedStep(ctx, st, resumed.assistant)
 	}
 	// Phase 2: open tool entries of earlier steps.
-	if st.mode == StepModeNormal {
+	if st.mode == agentrun.StepModeNormal {
 		if res, done := d.resumeOpenTools(ctx, st); done {
 			return res
 		}
@@ -276,7 +277,7 @@ func (d *drive) stepPhases(ctx context.Context, st *stepState, resumed *resumedS
 		return d.finishLoopFinal(ctx, st, early)
 	}
 	// Phase 4: compaction.
-	if st.mode == StepModeNormal && d.binding.Compactor != nil {
+	if st.mode == agentrun.StepModeNormal && d.binding.Compactor != nil {
 		if d.binding.Compactor.Due(d.stepInput(st, 0)) {
 			usage, err := d.binding.Compactor.CompactIfNeeded(st.durCtx, d.stepInput(st, 0))
 			st.addCompaction(usage)
@@ -444,16 +445,16 @@ func (d *drive) resumeRecordedStep(ctx context.Context, st *stepState, assistant
 }
 
 // appendContext is phase 3. It returns a preparer's EarlyFinal.
-func (d *drive) appendContext(ctx context.Context, st *stepState) (*LoopFinal, error) {
+func (d *drive) appendContext(ctx context.Context, st *stepState) (*agentrun.LoopFinal, error) {
 	if d.session == nil {
 		return nil, nil
 	}
 	preparers := d.binding.Preparers
-	if st.mode == StepModeExplainFailure {
+	if st.mode == agentrun.StepModeExplainFailure {
 		note := failureExplanationNote(d.session.ID, d.run.ID, st.step.ID, d.run.FailureExplanation)
 		note.Scope, note.Step = d.run.Scope, st.step.Sequence
 		note.Tokens = estimateEntryTokens(note)
-		preparers = []StepPreparer{fixedEntriesPreparer{entries: []*SessionEntry{note}}}
+		preparers = []agentrun.StepPreparer{fixedEntriesPreparer{entries: []*SessionEntry{note}}}
 	}
 	for attempt := 0; ; attempt++ {
 		result, err := appendStepContext(st.durCtx, d.l.sessions, d.stepInput(st, 0), preparers, d.l.now())
@@ -486,8 +487,8 @@ func (d *drive) appendContext(ctx context.Context, st *stepState) (*LoopFinal, e
 // explanation step's failure note).
 type fixedEntriesPreparer struct{ entries []*SessionEntry }
 
-func (p fixedEntriesPreparer) BeforeStep(context.Context, StepInput, SteeringPlan) (*StepContextAppend, error) {
-	return &StepContextAppend{Entries: p.entries}, nil
+func (p fixedEntriesPreparer) BeforeStep(context.Context, agentrun.StepInput, agentrun.SteeringPlan) (*agentrun.StepContextAppend, error) {
+	return &agentrun.StepContextAppend{Entries: p.entries}, nil
 }
 
 // followSession re-binds the claim to the Run's session after
@@ -520,8 +521,8 @@ func (d *drive) afterCompaction(ctx context.Context, st *stepState) error {
 
 // produce is phases 5 and 6. On a context-length rejection of the first
 // attempt it compacts (force) and retries once.
-func (d *drive) produce(ctx context.Context, st *stepState) (StepOutput, stepResult, bool) {
-	var out StepOutput
+func (d *drive) produce(ctx context.Context, st *stepState) (agentrun.StepOutput, stepResult, bool) {
+	var out agentrun.StepOutput
 	var err error
 	for attempt := 0; ; attempt++ {
 		st.called = true
@@ -530,12 +531,12 @@ func (d *drive) produce(ctx context.Context, st *stepState) (StepOutput, stepRes
 		if err == nil || !errors.As(err, &failure) || failure.Code != TurnHostContextExceeded {
 			break
 		}
-		if attempt > 0 || st.mode != StepModeNormal || d.binding.Compactor == nil {
+		if attempt > 0 || st.mode != agentrun.StepModeNormal || d.binding.Compactor == nil {
 			if res, done := d.checkRunAfterProduce(ctx, st); done {
 				return out, res, true
 			}
 			guard, _ := guardRunFailureFor(TurnHostContextExceeded)
-			return out, d.fail(ctx, st, LoopFailure{Kind: guard.Kind, Code: guard.Code, Message: guard.Message}, err, StepFailureContextExceeded), true
+			return out, d.fail(ctx, st, agentrun.LoopFailure{Kind: guard.Kind, Code: guard.Code, Message: guard.Message}, err, StepFailureContextExceeded), true
 		}
 		usage, err := d.binding.Compactor.Compact(withCompactionPressure(st.durCtx, failure.ContextPressure), d.stepInput(st, attempt), true)
 		st.addCompaction(usage)
@@ -564,7 +565,7 @@ func (d *drive) produce(ctx context.Context, st *stepState) (StepOutput, stepRes
 		return out, d.stepError(ctx, st, err, StepFailureProducerFailed), true
 	}
 	if err := validateStepOutput(d.binding.Producer.Kind(), out); err != nil {
-		return out, d.fail(ctx, st, LoopFailure{
+		return out, d.fail(ctx, st, agentrun.LoopFailure{
 			Kind: RunFailureKindExecution, Code: StepFailureProducerFailed,
 			Message: "The agent returned a step the kernel could not accept.", Explainable: true,
 		}, err, StepFailureProducerFailed), true
@@ -601,7 +602,7 @@ func (d *drive) checkRunAfterProduce(ctx context.Context, st *stepState) (stepRe
 // canceled/run_ended. The terminal close may already have finished it.
 func (d *drive) endStep(ctx context.Context, st *stepState) {
 	err := d.finishStep(ctx, st, FinishAgentTurnRequest{
-		Status: AgentTurnStatusCanceled, FailureCode: StepFailureRunEnded, Error: terminalCloseStepError,
+		Status: AgentTurnStatusCanceled, FailureCode: agentrun.StepFailureRunEnded, Error: agentrun.TerminalCloseStepError,
 	})
 	if err != nil && !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrTurnLeaseHeld) {
 		d.l.logger.Warnw("finish step of an ended run", "run", d.run.ID, "step", st.step.ID, "error", err)
@@ -614,7 +615,7 @@ func (d *drive) endStep(ctx context.Context, st *stepState) {
 
 // recordModelStep appends [assistant, tool(pending)×N] in one append, then
 // records the step's model output on its row (narration, turn.narration).
-func (d *drive) recordModelStep(ctx context.Context, st *stepState, out StepOutput) error {
+func (d *drive) recordModelStep(ctx context.Context, st *stepState, out agentrun.StepOutput) error {
 	a := out.Assistant
 	st.output = a
 	if d.session == nil {
@@ -638,7 +639,7 @@ func (d *drive) recordModelStep(ctx context.Context, st *stepState, out StepOutp
 		if err != nil {
 			return nil, err
 		}
-		if st.mode == StepModeExplainFailure {
+		if st.mode == agentrun.StepModeExplainFailure {
 			// The explanation step is tool-free: its calls are refused as
 			// they are appended, so none stays open in the session.
 			refuseExplanationToolEntries(tools, d.l.now())
@@ -745,7 +746,7 @@ func (d *drive) recordStep(ctx context.Context, st *stepState, provider, model s
 }
 
 // recordDeterministicStep records a deterministic step (no assistant entry).
-func (d *drive) recordDeterministicStep(ctx context.Context, st *stepState, out StepOutput) error {
+func (d *drive) recordDeterministicStep(ctx context.Context, st *stepState, out agentrun.StepOutput) error {
 	record := StepModelRecord{
 		WorkerID: d.workerID, ModelProvider: out.ModelProvider, Model: out.Model,
 		ToolCallCount: len(out.ToolCalls), Usage: st.usage, SkillSelections: out.SkillSelections,
@@ -781,8 +782,8 @@ func (d *drive) inlinePhase(ctx context.Context, st *stepState) stepResult {
 		}
 		return d.plainTextFinal(ctx, st, text)
 	}
-	if st.mode == StepModeExplainFailure {
-		return d.fail(ctx, st, LoopFailure{
+	if st.mode == agentrun.StepModeExplainFailure {
+		return d.fail(ctx, st, agentrun.LoopFailure{
 			Kind: RunFailureKindExecution, Code: StepFailureProducerFailed,
 			Message: "The agent called tools while explaining a failure.",
 		}, nil, StepFailureProducerFailed)
@@ -794,7 +795,7 @@ func (d *drive) inlinePhase(ctx context.Context, st *stepState) stepResult {
 // phases 9-11.
 func (d *drive) executeTools(ctx context.Context, st *stepState) stepResult {
 	if d.binding.Tools == nil {
-		return d.fail(ctx, st, LoopFailure{
+		return d.fail(ctx, st, agentrun.LoopFailure{
 			Kind: RunFailureKindExecution, Code: StepFailureHostConfiguration,
 			Message: "The agent called tools, but this run has no tool executor.",
 		}, nil, StepFailureHostConfiguration)
@@ -808,22 +809,22 @@ func (d *drive) executeTools(ctx context.Context, st *stepState) stepResult {
 
 // plainTextFinal is phase 8 for a step with no tool calls.
 func (d *drive) plainTextFinal(ctx context.Context, st *stepState, text string) stepResult {
-	if st.mode == StepModeExplainFailure {
+	if st.mode == agentrun.StepModeExplainFailure {
 		text = strings.TrimSpace(text)
 		if text == "" {
-			return d.fail(ctx, st, LoopFailure{
+			return d.fail(ctx, st, agentrun.LoopFailure{
 				Kind: RunFailureKindExecution, Code: StepFailureProducerFailed,
 				Message: "The agent did not explain the failure.",
 			}, nil, StepFailureProducerFailed)
 		}
-		return d.finishFinal(ctx, st, &FinalAnswer{
+		return d.finishFinal(ctx, st, &agentrun.FinalAnswer{
 			StepID: st.step.ID, PlainText: true, Answer: text,
 			Output: map[string]interface{}{"summary": text},
 		}, "")
 	}
 	if d.session == nil {
 		text = strings.TrimSpace(text)
-		return d.finishFinal(ctx, st, &FinalAnswer{
+		return d.finishFinal(ctx, st, &agentrun.FinalAnswer{
 			StepID: st.step.ID, PlainText: true, Answer: text,
 			Output: map[string]interface{}{"summary": text},
 		}, "")
@@ -852,7 +853,7 @@ func (d *drive) plainTextFinal(ctx context.Context, st *stepState, text string) 
 }
 
 // deterministicStep handles a deterministic producer's output (phases 7-11).
-func (d *drive) deterministicStep(ctx context.Context, st *stepState, out StepOutput) stepResult {
+func (d *drive) deterministicStep(ctx context.Context, st *stepState, out agentrun.StepOutput) stepResult {
 	st.kernelState = out.KernelState
 	if err := d.recordDeterministicStep(ctx, st, out); err != nil {
 		return d.stepError(ctx, st, err, StepFailureHostConfiguration)
@@ -866,7 +867,7 @@ func (d *drive) deterministicStep(ctx context.Context, st *stepState, out StepOu
 		return d.park(ctx, st, *out.Park)
 	}
 	if d.session == nil {
-		return d.fail(ctx, st, LoopFailure{
+		return d.fail(ctx, st, agentrun.LoopFailure{
 			Kind: RunFailureKindExecution, Code: StepFailureHostConfiguration,
 			Message: "The run has tool calls to execute but no session.",
 		}, nil, StepFailureHostConfiguration)
@@ -886,7 +887,7 @@ func (d *drive) deterministicStep(ctx context.Context, st *stepState, out StepOu
 // toolOutcome branches on an executor outcome (phases 2, 8 and 10). done is
 // false when the step goes on (st.settle tells whether a settle-phase call is
 // pending).
-func (d *drive) toolOutcome(ctx context.Context, st *stepState, out StepToolsOutcome, err error) (stepResult, bool) {
+func (d *drive) toolOutcome(ctx context.Context, st *stepState, out agentrun.StepToolsOutcome, err error) (stepResult, bool) {
 	st.hostCalls += out.HostToolCalls
 	if out.Run != nil && out.Run.Revision >= d.run.Revision {
 		d.run = cloneAgentRun(out.Run)
@@ -978,7 +979,7 @@ func (d *drive) endedByTool(ctx context.Context, st *stepState, run *AgentRun) s
 }
 
 // budgetExhausted pauses the Run on an executor's budget exit.
-func (d *drive) budgetExhausted(ctx context.Context, st *stepState, b *BudgetExhaustion) stepResult {
+func (d *drive) budgetExhausted(ctx context.Context, st *stepState, b *agentrun.BudgetExhaustion) stepResult {
 	if err := d.finishCompleted(ctx, st); err != nil {
 		return exitResultPtr(d.writeErrorExit(err))
 	}
@@ -1001,7 +1002,7 @@ func (d *drive) budgetExhausted(ctx context.Context, st *stepState, b *BudgetExh
 // moved the Run; the loop only finishes the step. Every other park is a CAS
 // transition on the revision read after the step's last write, guarded by
 // the intervention count; a conflict re-plans instead of re-applying.
-func (d *drive) park(ctx context.Context, st *stepState, park LoopPark) stepResult {
+func (d *drive) park(ctx context.Context, st *stepState, park agentrun.LoopPark) stepResult {
 	if err := d.finishCompleted(ctx, st); err != nil {
 		return exitResultPtr(d.writeErrorExit(err))
 	}
@@ -1037,7 +1038,7 @@ func (d *drive) park(ctx context.Context, st *stepState, park LoopPark) stepResu
 		if reloaded.Status != AgentRunStatusRunning || reloaded.LeaseOwner != d.workerID {
 			return exitResultPtr(d.statusExit(reloaded))
 		}
-		var next *LoopPark
+		var next *agentrun.LoopPark
 		if d.binding.Tools != nil {
 			next, err = d.binding.Tools.ReplanPark(ctx, d.toolsInput(st, st.entries))
 			if err != nil {
@@ -1132,7 +1133,7 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 		if code == "" {
 			code = StepFailureProducerFailed
 		}
-		return d.fail(ctx, st, LoopFailure{
+		return d.fail(ctx, st, agentrun.LoopFailure{
 			Kind: RunFailureKindExecution, Code: code, Message: hostFailure.Error(),
 			Explainable: turnFailureCanBeExplained(err, code),
 		}, err, code)
@@ -1142,7 +1143,7 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 			// The host is fine; the step built from the session was refused.
 			message = "The agent's next step could not be prepared from this conversation."
 		}
-		return d.fail(ctx, st, LoopFailure{
+		return d.fail(ctx, st, agentrun.LoopFailure{
 			Kind: RunFailureKindExecution, Code: StepFailureHostConfiguration,
 			Message: message,
 		}, err, StepFailureHostConfiguration)
@@ -1151,7 +1152,7 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 	if code == "" {
 		code = "execution_failed"
 	}
-	return d.fail(ctx, st, LoopFailure{
+	return d.fail(ctx, st, agentrun.LoopFailure{
 		Kind: RunFailureKindExecution, Code: code, Message: "The requested work did not complete.",
 		Explainable: turnFailureCanBeExplained(err, code),
 	}, err, code)

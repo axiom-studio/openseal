@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -27,7 +28,7 @@ func TestSkillReferenceUpgradeDrainsQueuedCallsAndLiveReceiptsAcrossStores(t *te
 			t.Fatalf("queued call was not drained: %v", err)
 		}
 		assertSkillUpgradePin(t, catalog, proposal.Call, "1.0.0", 1)
-		worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"channel": "provider-conversation"}, nil
 		}))
 		result, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "chat-worker")
@@ -144,7 +145,7 @@ func TestSkillRuntimeUsageScopesAndRetentionAcrossStores(t *testing.T) {
 		}
 		// The loop's inline execution retires a stale/revoked call instead of
 		// issuing side effects.
-		worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			t.Fatal("revoked call dispatched")
 			return nil, nil
 		}))

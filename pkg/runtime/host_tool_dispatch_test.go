@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -79,7 +80,7 @@ func hostToolCallFixture(t *testing.T, operation string, arguments map[string]in
 			LeaseOwner: "worker_1", LeaseExpiresAt: &expires},
 		Step: &AgentTurn{ID: "step_1", Scope: scope, RunID: "run_1", Status: AgentTurnStatusRunning,
 			LeaseOwner: "worker_1", LeaseExpiresAt: &expires},
-		Binding: &TurnRunnerBinding{DefinitionID: "def_1", DefinitionVersion: "3", ModelActions: []capability.ModelAction{
+		Binding: &agentrun.TurnRunnerBinding{DefinitionID: "def_1", DefinitionVersion: "3", ModelActions: []capability.ModelAction{
 			{Name: "zeta.send", Description: "Send", Risk: capability.RiskLevel("high"), InputSchema: map[string]interface{}{"type": "object", "required": []interface{}{"to"}}},
 			{Name: "alpha.lookup", Description: "Look up", Risk: capability.RiskLevel("low")},
 		}},

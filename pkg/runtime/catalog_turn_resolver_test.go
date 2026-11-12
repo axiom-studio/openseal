@@ -14,6 +14,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -107,7 +108,7 @@ func (c *resolverCatalog) GetActionCall(context.Context, Scope, string) (*Action
 
 // loopBindingTestConfig is the minimal LoopBindingConfig of a test: the
 // store's sessions, steps and calls and a tool dispatcher over them.
-func loopBindingTestConfig(t testing.TB, store KernelStore, host StepHost) LoopBindingConfig {
+func loopBindingTestConfig(t testing.TB, store KernelStore, host agentrun.StepHost) LoopBindingConfig {
 	t.Helper()
 	tools, err := NewStepToolDispatcher(StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store})
 	if err != nil {
@@ -140,7 +141,7 @@ func claimedBindingRun(t *testing.T, store *sqlite.Store, run *AgentRun) *AgentR
 }
 
 // prepareBindingStep is the model request of the binding's first step.
-func prepareBindingStep(t *testing.T, binding *TurnRunnerBinding, run *AgentRun) ModelStepRequest {
+func prepareBindingStep(t *testing.T, binding *agentrun.TurnRunnerBinding, run *AgentRun) ModelStepRequest {
 	t.Helper()
 	if _, ok := binding.Producer.(*ModelStepProducer); !ok {
 		t.Fatalf("binding producer = %T, want the model step producer", binding.Producer)
@@ -151,8 +152,8 @@ func prepareBindingStep(t *testing.T, binding *TurnRunnerBinding, run *AgentRun)
 	if !ok {
 		t.Fatalf("binding compactor = %T, want the loop compactor", binding.Compactor)
 	}
-	req, err := compactor.Requests.PrepareModelStep(t.Context(), StepInput{
-		Run: run, Step: &AgentTurn{ID: "step-1", RunID: run.ID, Sequence: 1}, Session: binding.Session, Binding: binding, Mode: StepModeNormal,
+	req, err := compactor.Requests.PrepareModelStep(t.Context(), agentrun.StepInput{
+		Run: run, Step: &AgentTurn{ID: "step-1", RunID: run.ID, Sequence: 1}, Session: binding.Session, Binding: binding, Mode: agentrun.StepModeNormal,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +192,7 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 		run           AgentRun
 		deterministic bool
 		producer      string
-		finalMode     FinalAnswerMode
+		finalMode     agentrun.FinalAnswerMode
 		fork          bool
 		taskWork      bool
 		actions       int
@@ -214,13 +215,13 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 			"collaboration": map[string]interface{}{"requestId": "request"},
 		}}, producer: "model", fork: true, actions: 1, instruction: acceptedAgentRequestExecutionSystemInstruction, goalKind: "delegation"},
 		{name: "decision", run: AgentRun{Goal: "Evaluate incoming work", Source: RunSourceRequestDecision, Context: map[string]interface{}{
-			AgentRequestInboxContextKey: map[string]interface{}{"requestId": "request", "requestRevision": int64(1)},
-		}}, producer: "model", finalMode: FinalModeDecision, instruction: agentRequestDecisionSystemInstruction, goalKind: "decision"},
+			agentrun.AgentRequestInboxContextKey: map[string]interface{}{"requestId": "request", "requestRevision": int64(1)},
+		}}, producer: "model", finalMode: agentrun.FinalModeDecision, instruction: agentRequestDecisionSystemInstruction, goalKind: "decision"},
 		{name: "review", run: AgentRun{Goal: "Review delegated work", Context: map[string]interface{}{
-			AgentRequestCompletionReviewContextKey: map[string]interface{}{"requestId": "request"},
-		}}, producer: "model", finalMode: FinalModeReview, instruction: agentRequestCompletionReviewSystemInstruction, goalKind: "review"},
+			agentrun.AgentRequestCompletionReviewContextKey: map[string]interface{}{"requestId": "request"},
+		}}, producer: "model", finalMode: agentrun.FinalModeReview, instruction: agentRequestCompletionReviewSystemInstruction, goalKind: "review"},
 		{name: "runbook child", run: AgentRun{Goal: "Draft the summary", Source: RunSourceRequest, Entrypoint: "draft", Context: map[string]interface{}{
-			DelegationModeContextKey: string(runbook.DelegateReason),
+			agentrun.DelegationModeContextKey: string(runbook.DelegateReason),
 		}}, producer: "model", fork: true, actions: 1, goalKind: "routine"},
 		{name: "capability invocation", run: AgentRun{Goal: "Reply on the forum", Context: map[string]interface{}{
 			"capabilityInvocation": map[string]interface{}{"skillId": "forum", "skillVersion": "1", "action": "reply"},
@@ -256,7 +257,7 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 				t.Fatalf("model actions = %#v", binding.ModelActions)
 			}
 			authority := binding.Authority
-			if authority.AgentID != "agent" || authority.finalMode() != tc.finalMode && !(tc.finalMode == "" && authority.finalMode() == FinalModeDefault) ||
+			if authority.AgentID != "agent" || authority.EffectiveFinalMode() != tc.finalMode && !(tc.finalMode == "" && authority.EffectiveFinalMode() == agentrun.FinalModeDefault) ||
 				authority.ForkAllowed != tc.fork || authority.TaskWork != tc.taskWork {
 				t.Fatalf("authority = %#v", authority)
 			}
@@ -340,8 +341,8 @@ func TestDecisionRunOffersOnlyDecisionToolViaBinding(t *testing.T) {
 		key, tool, instruction string
 		value                  map[string]interface{}
 	}{
-		{AgentRequestInboxContextKey, string(ControlToolRequestDecision), agentRequestDecisionSystemInstruction, map[string]interface{}{"requestId": "request", "requestRevision": int64(1)}},
-		{AgentRequestCompletionReviewContextKey, string(ControlToolCompletionReview), agentRequestCompletionReviewSystemInstruction, map[string]interface{}{"requestId": "request"}},
+		{agentrun.AgentRequestInboxContextKey, string(ControlToolRequestDecision), agentRequestDecisionSystemInstruction, map[string]interface{}{"requestId": "request", "requestRevision": int64(1)}},
+		{agentrun.AgentRequestCompletionReviewContextKey, string(ControlToolCompletionReview), agentRequestCompletionReviewSystemInstruction, map[string]interface{}{"requestId": "request"}},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
 			catalog.activationDeployments = nil
@@ -446,8 +447,8 @@ func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	progress, err := binding.ProgressAcknowledgementRenderer.RenderRunProgressAcknowledgement(t.Context(), RunProgressAcknowledgementRequest{
-		Snapshot:     RunProgressSnapshot{RunID: run.ID, Scope: run.Scope, AgentID: run.AssignedAgentID, Goal: run.Goal, Status: AgentRunStatusRunning, Revision: 1},
+	progress, err := binding.ProgressAcknowledgementRenderer.RenderRunProgressAcknowledgement(t.Context(), agentrun.RunProgressAcknowledgementRequest{
+		Snapshot:     agentrun.RunProgressSnapshot{RunID: run.ID, Scope: run.Scope, AgentID: run.AssignedAgentID, Goal: run.Goal, Status: AgentRunStatusRunning, Revision: 1},
 		MaxSentences: 2, MaxCharacters: 100,
 	})
 	if err != nil || progress != "done" || len(stepHost.requests) != 1 {
@@ -696,7 +697,7 @@ func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := HostedAgentTarget{ID: "reviewer-7", DisplayName: "Release Reviewer", Purpose: "Review releases"}
+	want := agentrun.HostedAgentTarget{ID: "reviewer-7", DisplayName: "Release Reviewer", Purpose: "Review releases"}
 	if targets := binding.Authority.DelegateTargets; len(targets) != 1 || targets[0] != want {
 		t.Fatalf("delegation targets = %#v", targets)
 	}
@@ -1001,7 +1002,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 		t.Fatalf("binding = %#v", binding)
 	}
 	authority := binding.Authority
-	if authority.finalMode() != FinalModeDefault || authority.CanAskUser || authority.ForkAllowed || authority.CanReportProgress ||
+	if authority.EffectiveFinalMode() != agentrun.FinalModeDefault || authority.CanAskUser || authority.ForkAllowed || authority.CanReportProgress ||
 		authority.CanWait || authority.CanReact || authority.TaskStart != nil || len(authority.DelegateTargets) != 0 {
 		t.Fatalf("authority = %#v", authority)
 	}

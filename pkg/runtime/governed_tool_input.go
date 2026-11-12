@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // GovernedToolInput is a governed tool call's input after the kernel took
@@ -35,7 +36,7 @@ type governedInputDirective struct {
 
 // governedDirectiveOf is the governance part of a producer's tool call
 // directive; nil for a model call.
-func governedDirectiveOf(directive *ToolCallDirective) *governedInputDirective {
+func governedDirectiveOf(directive *agentrun.ToolCallDirective) *governedInputDirective {
 	if directive == nil {
 		return nil
 	}

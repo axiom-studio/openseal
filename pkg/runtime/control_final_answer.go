@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -131,8 +132,8 @@ func finalSkillRefsList(value json.RawMessage) json.RawMessage {
 // Schema (§11.1; constant per claim)
 
 // finalFieldOffered says whether the claim offers a kernel property.
-func finalFieldOffered(field string, a ControlAuthority) bool {
-	mode := a.finalMode()
+func finalFieldOffered(field string, a agentrun.ControlAuthority) bool {
+	mode := a.EffectiveFinalMode()
 	switch field {
 	case "answer":
 		return true
@@ -143,31 +144,31 @@ func finalFieldOffered(field string, a ControlAuthority) bool {
 	case "broadcastToChannel":
 		return a.BroadcastAllowed
 	case "report":
-		return mode == FinalModeDefault
+		return mode == agentrun.FinalModeDefault
 	case "silent":
-		return mode == FinalModeSpoken || mode == FinalModeDefault && a.RoutineOccurrence
+		return mode == FinalModeSpoken || mode == agentrun.FinalModeDefault && a.RoutineOccurrence
 	case "files":
-		return mode == FinalModeDefault
+		return mode == agentrun.FinalModeDefault
 	}
 	return false
 }
 
 // finalRequiredFields lists the required kernel properties in schema order.
-func finalRequiredFields(a ControlAuthority) []string {
+func finalRequiredFields(a agentrun.ControlAuthority) []string {
 	required := []string{"answer"}
 	if len(a.SkillPromptRefs) > 0 {
 		required = append(required, "appliedSkillRefs")
 	}
-	switch a.finalMode() {
+	switch a.EffectiveFinalMode() {
 	case FinalModeSpoken:
 		required = append(required, "silent")
 	}
 	return required
 }
 
-func finalAnswerSchema(a ControlAuthority) map[string]interface{} {
+func finalAnswerSchema(a agentrun.ControlAuthority) map[string]interface{} {
 	answer := map[string]interface{}{"type": "string", "description": "The user-facing answer."}
-	if a.finalMode() == FinalModeSpoken {
+	if a.EffectiveFinalMode() == FinalModeSpoken {
 		answer["description"] = "Only the words to speak; empty when silent is true."
 	}
 	properties := map[string]interface{}{"answer": answer}
@@ -207,7 +208,7 @@ func finalAnswerSchema(a ControlAuthority) map[string]interface{} {
 	}
 	if finalFieldOffered("silent", a) {
 		description := "Write before answer. True when ambient speech needs no response; answer must then be empty. Do not announce silence."
-		if a.finalMode() != FinalModeSpoken {
+		if a.EffectiveFinalMode() != FinalModeSpoken {
 			description = "Set true, with an empty answer, when nothing needs the person's attention; nothing is posted."
 		}
 		properties["silent"] = map[string]interface{}{"type": "boolean", "description": description}
@@ -218,7 +219,7 @@ func finalAnswerSchema(a ControlAuthority) map[string]interface{} {
 	}
 }
 
-func finalAnswerDescription(a ControlAuthority) string {
+func finalAnswerDescription(a agentrun.ControlAuthority) string {
 	text := "Finish with the user-facing answer"
 	if a.VisualAllowed {
 		text += ", an optional visual shown under it"
@@ -231,7 +232,7 @@ func finalAnswerDescription(a ControlAuthority) string {
 
 // finalOutputFieldNames are the publisher's extension properties offered on
 // this Run (kernel names excluded).
-func finalOutputFieldNames(run *AgentRun, publisher FinalOutputPublisher) map[string]interface{} {
+func finalOutputFieldNames(run *AgentRun, publisher agentrun.FinalOutputPublisher) map[string]interface{} {
 	if publisher == nil || run == nil {
 		return nil
 	}
@@ -252,7 +253,7 @@ func finalOutputFieldNames(run *AgentRun, publisher FinalOutputPublisher) map[st
 // properties of run to the turn_final_answer tool in tools (prep-2 calls it on
 // the ControlModelStepTools list). They are never required. Other tools and the
 // input slice are left unchanged.
-func WithFinalOutputProperties(tools []ModelStepTool, run *AgentRun, publisher FinalOutputPublisher) []ModelStepTool {
+func WithFinalOutputProperties(tools []ModelStepTool, run *AgentRun, publisher agentrun.FinalOutputPublisher) []ModelStepTool {
 	extra := finalOutputFieldNames(run, publisher)
 	if len(extra) == 0 {
 		return tools
@@ -281,7 +282,7 @@ func WithFinalOutputProperties(tools []ModelStepTool, run *AgentRun, publisher F
 
 type finalAnswerHandler struct{}
 
-func (finalAnswerHandler) Spec(a ControlAuthority) ControlToolSpec {
+func (finalAnswerHandler) Spec(a agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{Description: finalAnswerDescription(a), InputSchema: finalAnswerSchema(a)}
 }
 
@@ -289,7 +290,7 @@ func (finalAnswerHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return decodeFinalAnswerCall(raw)
 }
 
-func (finalAnswerHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (finalAnswerHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	call, ok := cc.Arguments.(*finalAnswerCall)
 	if !ok || call == nil {
 		return ControlResult{}, errors.New("turn_final_answer arguments were not decoded")
@@ -306,14 +307,14 @@ func (finalAnswerHandler) Run(ctx context.Context, x *ControlExecutor, cc Contro
 // message, or "". A key that is neither a kernel field nor a host extension
 // (a model adding "tone") is dropped instead: refusing it throws away a whole
 // written answer to have the model write it again.
-func checkFinalAnswerFields(call *finalAnswerCall, cc ControlContext) string {
+func checkFinalAnswerFields(call *finalAnswerCall, cc agentrun.ControlContext) string {
 	var unknown []string
 	for key := range call.Present {
 		if !finalFieldOffered(key, cc.Authority) {
 			unknown = append(unknown, key)
 		}
 	}
-	var publisher FinalOutputPublisher
+	var publisher agentrun.FinalOutputPublisher
 	if cc.Binding != nil {
 		publisher = cc.Binding.FinalOutput
 	}
@@ -367,13 +368,13 @@ type finalAnswerRejection struct {
 	Code    string
 	Message string
 	Extra   map[string]interface{}
-	Failure *LoopFailure
+	Failure *agentrun.LoopFailure
 }
 
 // finalAnswerCheck is one completion check of an accepted final answer.
 type finalAnswerCheck struct {
 	Name  string
-	Check func(ctx context.Context, x *ControlExecutor, cc ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error)
+	Check func(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error)
 }
 
 // builtinFinalAnswerChecks are the checks every final answer passes, in the
@@ -390,14 +391,14 @@ func builtinFinalAnswerChecks() []finalAnswerCheck {
 // acceptFinalAnswer runs the pipeline on a decoded final. It returns
 // ControlFinal with the FinalAnswer (the tool entry stays open; the loop marks
 // it delivered), ControlContinue after a rejection, or ControlFailed.
-func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc ControlContext, d *finalAnswerDraft) (ControlResult, error) {
-	mode := cc.Authority.finalMode()
+func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlContext, d *finalAnswerDraft) (ControlResult, error) {
+	mode := cc.Authority.EffectiveFinalMode()
 	answer := strings.TrimSpace(d.Args.Answer)
 	// 2. Silent: a spoken reply or a routine occurrence, with an empty
 	// answer and no visual, report, files or extension fields. A routine occurrence that changed
 	// something always reports it.
 	if d.Args.Silent {
-		routine := mode == FinalModeDefault && cc.Authority.RoutineOccurrence
+		routine := mode == agentrun.FinalModeDefault && cc.Authority.RoutineOccurrence
 		if (mode != FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.Args.Visual != nil ||
 			len(d.Args.Files) > 0 || len(d.Extra) > 0 {
 			message := "silent is only for a spoken reply that needs no response: leave answer empty and send no visual or files."
@@ -468,7 +469,7 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc ControlConte
 	}
 	// 9. Host extension fields.
 	if len(d.Extra) > 0 {
-		var publisher FinalOutputPublisher
+		var publisher agentrun.FinalOutputPublisher
 		if cc.Binding != nil {
 			publisher = cc.Binding.FinalOutput
 		}
@@ -479,7 +480,7 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc ControlConte
 			return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalOutputInvalidCode, Message: err.Error()})
 		}
 	}
-	final := &FinalAnswer{PlainText: d.PlainText, Answer: d.content(), Output: d.Output}
+	final := &agentrun.FinalAnswer{PlainText: d.PlainText, Answer: d.content(), Output: d.Output}
 	if d.Args.Silent || d.ReactionsOnly {
 		final.Answer = ""
 	}
@@ -499,25 +500,25 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc ControlConte
 }
 
 // output is FinalAnswer.Output (§11.3 RunOutput).
-func (d *finalAnswerDraft) output(mode FinalAnswerMode) map[string]interface{} {
+func (d *finalAnswerDraft) output(mode agentrun.FinalAnswerMode) map[string]interface{} {
 	if d.Args.Silent {
-		return map[string]interface{}{finalOutputSilentKey: true}
+		return map[string]interface{}{agentrun.FinalOutputSilentKey: true}
 	}
 	if d.ReactionsOnly {
-		return map[string]interface{}{finalOutputReactedKey: true}
+		return map[string]interface{}{agentrun.FinalOutputReactedKey: true}
 	}
 	output := map[string]interface{}{finalOutputSummaryKey: strings.TrimSpace(d.Args.Answer)}
 	if report := strings.TrimSpace(d.Args.Report); report != "" {
 		output[finalOutputReportKey] = report
 	}
 	if d.Args.BroadcastToChannel {
-		output[finalOutputBroadcastKey] = true
+		output[agentrun.FinalOutputBroadcastKey] = true
 	}
 	if files := handedOverFileIDs(d.Args.Files); len(files) > 0 {
 		output[finalOutputFilesKey] = files
 	}
 	if d.Visual != nil {
-		output[finalOutputVisualKey] = d.Visual
+		output[agentrun.FinalOutputVisualKey] = d.Visual
 	}
 	if d.VisualRejection != "" {
 		output[finalOutputVisualRejectionKey] = d.VisualRejection
@@ -554,7 +555,7 @@ func finalSkillSelections(applied, offered []string) ([]HostedSkillSelection, *f
 // rejectFinal records a rejection: the tool entry → error with the code (and
 // ControlEntryMeta.ErrorCode), or for plain text a final_rejection note. A
 // rejection with a Failure then fails the Run.
-func (x *ControlExecutor) rejectFinal(ctx context.Context, cc ControlContext, d *finalAnswerDraft, r *finalAnswerRejection) (ControlResult, error) {
+func (x *ControlExecutor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, d *finalAnswerDraft, r *finalAnswerRejection) (ControlResult, error) {
 	var recorded *SessionEntry
 	if d.PlainText {
 		note, err := x.appendFinalRejectionNote(ctx, cc, r.Code, r.Message)
@@ -583,7 +584,7 @@ type finalRejectionNoteData struct {
 
 // appendFinalRejectionNote appends the step's final_rejection note (one per
 // step: id and SourceKey final-rejection:<stepId>).
-func (x *ControlExecutor) appendFinalRejectionNote(ctx context.Context, cc ControlContext, code, message string) (*SessionEntry, error) {
+func (x *ControlExecutor) appendFinalRejectionNote(ctx context.Context, cc agentrun.ControlContext, code, message string) (*SessionEntry, error) {
 	sessionID := cc.Run.SessionID
 	if cc.Session != nil {
 		sessionID = cc.Session.ID
@@ -602,7 +603,7 @@ func (x *ControlExecutor) appendFinalRejectionNote(ctx context.Context, cc Contr
 		Note: &NoteEntry{Kind: NoteFinalRejection, Text: message, Data: data},
 	}
 	now := x.now()
-	lease := cc.lease(now)
+	lease := cc.LeaseGuard(now)
 	appended, err := x.Sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
 		Scope: cc.Run.Scope, SessionID: sessionID, RunID: cc.Run.ID, Lease: &lease,
 		Entries: []*SessionEntry{note}, Now: now,
@@ -621,7 +622,7 @@ func (x *ControlExecutor) appendFinalRejectionNote(ctx context.Context, cc Contr
 // attempts: final tool entries (ControlEntryMeta.ErrorCode) and final_rejection
 // notes. The current entry and the current step's note are not counted. CTL-15/16 use it for their
 // "second time" rules.
-func (x *ControlExecutor) priorFinalErrorCodes(ctx context.Context, cc ControlContext) (map[string]int, error) {
+func (x *ControlExecutor) priorFinalErrorCodes(ctx context.Context, cc agentrun.ControlContext) (map[string]int, error) {
 	counts := map[string]int{}
 	tools, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID, ToolNames: []string{string(ControlToolFinalAnswer)}, Limit: maxSessionEntryListLimit,
@@ -664,7 +665,7 @@ func (x *ControlExecutor) priorFinalErrorCodes(ctx context.Context, cc ControlCo
 }
 
 // runReacted: a react call of this Run completed (reactions-only reply).
-func (x *ControlExecutor) runReacted(ctx context.Context, cc ControlContext) (bool, error) {
+func (x *ControlExecutor) runReacted(ctx context.Context, cc agentrun.ControlContext) (bool, error) {
 	entries, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID, ToolNames: []string{string(ControlToolReact)},
 		States: []ToolEntryState{ToolEntryCompleted}, Limit: 1,
@@ -685,7 +686,7 @@ var runChangedSomethingStatuses = []ActionCallStatus{
 // root (a delegated or forked child), completed an action whose side effect
 // is not none or read, granted or approved. It runs only for a silent routine
 // final, never on a step.
-func (x *ControlExecutor) runChangedSomething(ctx context.Context, cc ControlContext) (bool, error) {
+func (x *ControlExecutor) runChangedSomething(ctx context.Context, cc agentrun.ControlContext) (bool, error) {
 	actions, ok := x.Portfolio.(ActionStore)
 	if !ok {
 		return false, errors.New("control executor portfolio is not an action store; a silent routine final needs the Run's calls")
@@ -732,7 +733,7 @@ func (x *ControlExecutor) runChangedSomething(ctx context.Context, cc ControlCon
 }
 
 // finalPark applies finalAnswerPark to the Run's governed calls on its path.
-func (x *ControlExecutor) finalPark(ctx context.Context, cc ControlContext, answer string) (*FinalPark, error) {
+func (x *ControlExecutor) finalPark(ctx context.Context, cc agentrun.ControlContext, answer string) (*agentrun.FinalPark, error) {
 	path := cc.Path
 	if path == nil {
 		sessionID := cc.Run.SessionID
@@ -770,7 +771,7 @@ func (x *ControlExecutor) finalPark(ctx context.Context, cc ControlContext, answ
 	if plan == nil {
 		return nil, nil
 	}
-	return &FinalPark{Deliver: plan.Deliver, Park: LoopPark{Status: plan.Status, Wake: plan.Wake, Summary: plan.Summary}}, nil
+	return &agentrun.FinalPark{Deliver: plan.Deliver, Park: agentrun.LoopPark{Status: plan.Status, Wake: plan.Wake, Summary: plan.Summary}}, nil
 }
 
 func cloneRawFields(fields map[string]json.RawMessage) map[string]json.RawMessage {
@@ -794,7 +795,7 @@ func cloneRawFields(fields map[string]json.RawMessage) map[string]json.RawMessag
 //     note, not a tool entry); the loop counts it toward the rejection bound;
 //   - ControlFailed: the 3rd plain reply where a final tool is required, or
 //     the 3rd empty reply.
-func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc ControlContext, text string) (ControlResult, error) {
+func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text string) (ControlResult, error) {
 	if x == nil || x.Sessions == nil {
 		return ControlResult{}, errors.New("control executor has no session store")
 	}
@@ -808,7 +809,7 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc ControlContext,
 		return ControlResult{}, errors.New("plain-text final on an assistant entry with tool calls")
 	}
 	cc.Entry = nil
-	mode := cc.Authority.finalMode()
+	mode := cc.Authority.EffectiveFinalMode()
 	finalOffered := controlToolOffered(ControlToolFinalAnswer, cc.Authority)
 	trimmed := strings.TrimSpace(text)
 	// 1. Repair: the text is the tool's arguments as one JSON object (kernel
@@ -828,7 +829,7 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc ControlContext,
 		message := fmt.Sprintf("Finish with %s (%s); a plain reply is not accepted in this run.", tool, x.registry().finalToolRequiredFields(tool, cc.Authority))
 		rejection := &finalAnswerRejection{Code: finalToolRequiredCode, Message: message}
 		if prior[finalToolRequiredCode]+1 >= finalPlainTextAttemptsLimit {
-			rejection.Failure = &LoopFailure{Kind: RunFailureKindExecution, Code: finalToolRequiredCode,
+			rejection.Failure = &agentrun.LoopFailure{Kind: RunFailureKindExecution, Code: finalToolRequiredCode,
 				Message: fmt.Sprintf("The agent replied without %s %d times, so the run stopped.", tool, finalPlainTextAttemptsLimit)}
 		}
 		return x.rejectFinal(ctx, cc, &finalAnswerDraft{PlainText: true}, rejection)
@@ -854,7 +855,7 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc ControlContext,
 		rejection := &finalAnswerRejection{Code: finalEmptyReplyCode,
 			Message: "An empty reply is not an answer. Write the reply, or call turn_final_answer."}
 		if prior[finalEmptyReplyCode]+1 >= finalEmptyReplyAttemptLimit {
-			rejection.Failure = &LoopFailure{Kind: RunFailureKindExecution, Code: finalEmptyReplyCode,
+			rejection.Failure = &agentrun.LoopFailure{Kind: RunFailureKindExecution, Code: finalEmptyReplyCode,
 				Message: "The agent sent an empty reply three times, so the run stopped."}
 		}
 		return x.rejectFinal(ctx, cc, draft, rejection)
@@ -865,17 +866,17 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc ControlContext,
 
 // finalToolRequired names the final tool a plain reply cannot replace in
 // mode ("" when plain text is a final answer).
-func finalToolRequired(mode FinalAnswerMode) ControlToolName {
+func finalToolRequired(mode agentrun.FinalAnswerMode) ControlToolName {
 	switch mode {
-	case FinalModeDecision:
+	case agentrun.FinalModeDecision:
 		return ControlToolRequestDecision
-	case FinalModeReview:
+	case agentrun.FinalModeReview:
 		return ControlToolCompletionReview
 	}
 	return ""
 }
 
-func (r controlRegistry) finalToolRequiredFields(tool ControlToolName, a ControlAuthority) string {
+func (r controlRegistry) finalToolRequiredFields(tool ControlToolName, a agentrun.ControlAuthority) string {
 	if tool == ControlToolFinalAnswer {
 		return strings.Join(finalRequiredFields(a), ", ")
 	}
@@ -896,7 +897,7 @@ func (r controlRegistry) finalToolRequiredFields(tool ControlToolName, a Control
 // FinalOutputPublicationFor returns the publish request for the host
 // extension fields of an accepted turn_final_answer (SPEC §3.3 step 4), or nil
 // when the call carried none. entry is the final tool entry.
-func FinalOutputPublicationFor(run *AgentRun, answer FinalAnswer, entry *SessionEntry, publisher FinalOutputPublisher) (*FinalOutputPublication, error) {
+func FinalOutputPublicationFor(run *AgentRun, answer agentrun.FinalAnswer, entry *SessionEntry, publisher agentrun.FinalOutputPublisher) (*agentrun.FinalOutputPublication, error) {
 	if publisher == nil || answer.ToolEntryID == "" {
 		return nil, nil
 	}
@@ -917,5 +918,5 @@ func FinalOutputPublicationFor(run *AgentRun, answer FinalAnswer, entry *Session
 	if len(fields) == 0 {
 		return nil, nil
 	}
-	return &FinalOutputPublication{Run: run, StepID: answer.StepID, ToolCallID: answer.ToolCallID, Fields: fields}, nil
+	return &agentrun.FinalOutputPublication{Run: run, StepID: answer.StepID, ToolCallID: answer.ToolCallID, Fields: fields}, nil
 }

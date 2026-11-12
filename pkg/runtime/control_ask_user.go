@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // ask_user (section 04 §10.2): a settle-phase control tool that posts one
@@ -24,7 +25,7 @@ const (
 
 type askUserHandler struct{}
 
-func (askUserHandler) Spec(ControlAuthority) ControlToolSpec {
+func (askUserHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Ask the person who asked one concrete question and wait for their answer. " +
 			"Ask only when you cannot continue well without it. Offer options when the answer is a choice. " +
@@ -62,8 +63,8 @@ func (askUserHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return args, nil
 }
 
-func askUserPark(entryID string) *LoopPark {
-	return &LoopPark{
+func askUserPark(entryID string) *agentrun.LoopPark {
+	return &agentrun.LoopPark{
 		Status:  AgentRunStatusWaitingForEvent,
 		Wake:    &WakeCondition{Type: "user_message", Reference: entryID},
 		Summary: askUserParkSummary,
@@ -107,7 +108,7 @@ func (x *ControlExecutor) askUserOrigin(ctx context.Context, run *AgentRun) (*Co
 	return conversation, trigger, nil
 }
 
-func (askUserHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (askUserHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	args := cc.Arguments.(*askUserArgs)
 	conversation, trigger, err := x.askUserOrigin(ctx, cc.Run)
 	if err != nil {
@@ -138,7 +139,7 @@ func (askUserHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlCon
 
 // askUserAnsweredBefore finds an earlier answered ask_user entry of this Run
 // with the same question, and its answer.
-func (x *ControlExecutor) askUserAnsweredBefore(ctx context.Context, cc ControlContext, question string) (*SessionEntry, string, error) {
+func (x *ControlExecutor) askUserAnsweredBefore(ctx context.Context, cc agentrun.ControlContext, question string) (*SessionEntry, string, error) {
 	entries, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID,
 		ToolNames: []string{string(ControlToolAskUser)}, States: []ToolEntryState{ToolEntryCompleted},
@@ -205,7 +206,7 @@ func (x *ControlExecutor) postAskUserQuestion(ctx context.Context, run *AgentRun
 // names this entry's step and question message. Until it arrives the Run
 // re-parks; the question is re-posted idempotently first, which also covers a
 // crash between the entry transition and the post.
-func (askUserHandler) Resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
+func (askUserHandler) Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error) {
 	if cc.Entry.State != ToolEntryAwaitingEvent {
 		return ControlResume{}, fmt.Errorf("%w: ask_user resume of %s in state %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
 	}

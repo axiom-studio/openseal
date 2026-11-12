@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -16,16 +17,16 @@ type explanationProducer struct{ answer string }
 
 func (explanationProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
-func (p explanationProducer) Produce(context.Context, StepInput) (StepOutput, error) {
-	return StepOutput{Final: &LoopFinal{Answer: p.answer}}, nil
+func (p explanationProducer) Produce(context.Context, agentrun.StepInput) (agentrun.StepOutput, error) {
+	return agentrun.StepOutput{Final: &agentrun.LoopFinal{Answer: p.answer}}, nil
 }
 
 type explanationFinal struct {
-	result FinalDeliveryResult
+	result agentrun.FinalDeliveryResult
 	calls  int
 }
 
-func (f *explanationFinal) Deliver(context.Context, FinalDelivery) (FinalDeliveryResult, error) {
+func (f *explanationFinal) Deliver(context.Context, agentrun.FinalDelivery) (agentrun.FinalDeliveryResult, error) {
 	f.calls++
 	return f.result, nil
 }
@@ -44,7 +45,7 @@ func explanationStores(t *testing.T, test func(*testing.T, KernelStore)) {
 
 // driveExplanation claims a Run that is in failure-explanation mode and
 // drives its explanation step with final as the delivery result.
-func driveExplanation(t *testing.T, store KernelStore, result FinalDeliveryResult) (RunLoopExit, *AgentRun, *explanationFinal) {
+func driveExplanation(t *testing.T, store KernelStore, result agentrun.FinalDeliveryResult) (RunLoopExit, *AgentRun, *explanationFinal) {
 	t.Helper()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "explain"}
@@ -70,16 +71,18 @@ func driveExplanation(t *testing.T, store KernelStore, result FinalDeliveryResul
 		t.Fatal(err)
 	}
 	loop, err := NewRunLoop(store, nil, nil, RunLoopConfig{
-		PlanToolEntries: func(*TurnRunnerBinding, *AgentSession, *AgentTurn, *SessionEntry, []LoopToolCall) ([]*SessionEntry, error) {
+		PlanToolEntries: func(*agentrun.TurnRunnerBinding, *AgentSession, *AgentTurn, *SessionEntry, []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 			return nil, nil
 		},
-		PlainTextFinal: func(context.Context, ControlContext, string) (ControlResult, error) { return ControlResult{}, nil },
+		PlainTextFinal: func(context.Context, agentrun.ControlContext, string) (ControlResult, error) {
+			return ControlResult{}, nil
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	final := &explanationFinal{result: result}
-	exit := loop.Drive(ctx, RunLoopClaim{Run: explaining, WorkerID: explanationWorker, Binding: &TurnRunnerBinding{
+	exit := loop.Drive(ctx, RunLoopClaim{Run: explaining, WorkerID: explanationWorker, Binding: &agentrun.TurnRunnerBinding{
 		Producer: explanationProducer{answer: "I could not build the report."}, Final: final,
 	}})
 	stored, err := store.GetAgentRun(ctx, scope, claimed.ID)
@@ -91,7 +94,7 @@ func driveExplanation(t *testing.T, store KernelStore, result FinalDeliveryResul
 
 func TestRunLoopPostedExplanationEndsFailedExplained(t *testing.T) {
 	explanationStores(t, func(t *testing.T, store KernelStore) {
-		exit, run, final := driveExplanation(t, store, FinalDeliveryResult{Kind: FinalDeliveryFail, Output: map[string]interface{}{
+		exit, run, final := driveExplanation(t, store, agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryFail, Output: map[string]interface{}{
 			"summary": "I could not build the report.", "conversationId": "c1", "triggerMessageId": "m1", "messageId": "m2", "replayed": false,
 		}})
 		if exit.Err != nil || exit.Reason != RunLoopExitFinal || final.calls != 1 {
@@ -108,7 +111,7 @@ func TestRunLoopPostedExplanationEndsFailedExplained(t *testing.T) {
 
 func TestRunLoopUnpostedExplanationEndsFailedUnexplained(t *testing.T) {
 	explanationStores(t, func(t *testing.T, store KernelStore) {
-		exit, run, final := driveExplanation(t, store, FinalDeliveryResult{Kind: FinalDeliveryFail, Failure: &LoopFailure{
+		exit, run, final := driveExplanation(t, store, agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryFail, Failure: &agentrun.LoopFailure{
 			Kind: RunFailureKindExecution, Code: runFailureCodeFinalDelivery, Message: "The agent's reply could not be posted.",
 		}})
 		if exit.Err != nil || exit.Reason != RunLoopExitFailed || final.calls != 1 {

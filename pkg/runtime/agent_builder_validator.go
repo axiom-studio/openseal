@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -59,7 +60,7 @@ func NewAgentBuilderActionValidator(
 // ResolveActionProposalArguments fills the kernel-resolved arguments: the
 // space of a created Agent (the Run's conversation space, else Default) and
 // the current revision of an updated Agent.
-func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error) {
 	if !isAgentBuilderAction(input.Bound) {
 		return nil, false, nil
 	}
@@ -104,7 +105,7 @@ func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context
 
 // ValidateActionProposal returns the §2.2 card preview for create_agent and
 // update_agent, and nil for the read actions after checking try_agent.
-func (v *AgentBuilderActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (v *AgentBuilderActionValidator) ValidateActionProposal(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if !isAgentBuilderAction(input.Bound) {
 		return nil, nil
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -70,7 +71,7 @@ type chatLoopProducer struct {
 
 func (*chatLoopProducer) Kind() StepProducerKind { return StepProducerModel }
 
-func (p *chatLoopProducer) Produce(_ context.Context, in StepInput) (StepOutput, error) {
+func (p *chatLoopProducer) Produce(_ context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	var entries []*SessionEntry
 	if in.Path != nil {
 		entries = append(entries, in.Path.Entries...)
@@ -80,7 +81,7 @@ func (p *chatLoopProducer) Produce(_ context.Context, in StepInput) (StepOutput,
 	if len(p.answers) > 0 {
 		answer, p.answers = p.answers[0], p.answers[1:]
 	}
-	return StepOutput{Assistant: &AssistantEntry{
+	return agentrun.StepOutput{Assistant: &AssistantEntry{
 		Provider: ModelStepProviderAnthropic, Model: "chat-model", Text: answer, StopReason: ModelStopEnd,
 	}}, nil
 }
@@ -134,11 +135,11 @@ func newChatLoopFixture(t *testing.T, base conversationThreadStartTestStore, opt
 		t.Fatal(err)
 	}
 	loop, err := NewRunLoop(store, nil, nil, RunLoopConfig{
-		PlanToolEntries: func(*TurnRunnerBinding, *AgentSession, *AgentTurn, *SessionEntry, []LoopToolCall) ([]*SessionEntry, error) {
+		PlanToolEntries: func(*agentrun.TurnRunnerBinding, *AgentSession, *AgentTurn, *SessionEntry, []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 			return nil, fmt.Errorf("chat loop tests make no tool calls")
 		},
-		PlainTextFinal: func(_ context.Context, cc ControlContext, text string) (ControlResult, error) {
-			return ControlResult{Kind: ControlFinal, Final: &FinalAnswer{
+		PlainTextFinal: func(_ context.Context, cc agentrun.ControlContext, text string) (ControlResult, error) {
+			return ControlResult{Kind: ControlFinal, Final: &agentrun.FinalAnswer{
 				StepID: cc.Step.ID, PlainText: true, Answer: text, Output: map[string]interface{}{finalOutputSummaryKey: text},
 			}}, nil
 		},
@@ -170,9 +171,9 @@ func (f *chatLoopFixture) newRunner(config ConversationRunTurnRunnerConfig) *Con
 
 // chatLoopAgentTurns is the bare Agent binding bindAgent registered for each
 // Run, by Run id.
-type chatLoopAgentTurns map[string]*TurnRunnerBinding
+type chatLoopAgentTurns map[string]*agentrun.TurnRunnerBinding
 
-func (a chatLoopAgentTurns) ResolveTurnRunner(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+func (a chatLoopAgentTurns) ResolveTurnRunner(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 	binding, ok := a[run.ID]
 	if !ok {
 		return nil, fmt.Errorf("no Agent binding registered for Run %s", run.ID)
@@ -271,7 +272,7 @@ func (f *chatLoopFixture) startRun(trigger *ChannelMessage) *AgentRun {
 		request.SessionID = conversationSessionID(f.conversation.Scope, request.ConcurrencyKey)
 		request.IdempotencyKey = "member-" + trigger.ID
 	}
-	commands := NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
+	commands := agentrun.NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
 	result, err := commands.CreateAgentRun(f.ctx, request)
 	if err != nil {
 		f.t.Fatalf("create run: %v", err)
@@ -287,7 +288,7 @@ func (f *chatLoopFixture) startRun(trigger *ChannelMessage) *AgentRun {
 }
 
 // bind resolves agent-1's binding for run.
-func (f *chatLoopFixture) bind(run *AgentRun, producer StepProducer, actions ...capability.ModelAction) *TurnRunnerBinding {
+func (f *chatLoopFixture) bind(run *AgentRun, producer agentrun.StepProducer, actions ...capability.ModelAction) *agentrun.TurnRunnerBinding {
 	f.t.Helper()
 	return f.bindAgent(run, "agent-1", producer, actions...)
 }
@@ -295,14 +296,14 @@ func (f *chatLoopFixture) bind(run *AgentRun, producer StepProducer, actions ...
 // bindAgent resolves run's binding through the conversation turn runner, as
 // the worker does: the runner adds the chat seams to a bare binding of
 // agentID with producer and actions.
-func (f *chatLoopFixture) bindAgent(run *AgentRun, agentID string, producer StepProducer, actions ...capability.ModelAction) *TurnRunnerBinding {
+func (f *chatLoopFixture) bindAgent(run *AgentRun, agentID string, producer agentrun.StepProducer, actions ...capability.ModelAction) *agentrun.TurnRunnerBinding {
 	f.t.Helper()
-	f.agents[run.ID] = &TurnRunnerBinding{
+	f.agents[run.ID] = &agentrun.TurnRunnerBinding{
 		DeploymentID: agentID, DefinitionID: "agent-definition", DefinitionVersion: "1",
 		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model", ModelActions: actions,
-		Producer: producer, Preparers: []StepPreparer{newRunStartPreparer(f.store, f.store)},
+		Producer: producer, Preparers: []agentrun.StepPreparer{newRunStartPreparer(f.store, f.store)},
 		// What ResolveControlAuthority grants the speaking Agent of a chat.
-		Authority: ControlAuthority{AgentID: agentID, CanAskUser: true, CanReact: true},
+		Authority: agentrun.ControlAuthority{AgentID: agentID, CanAskUser: true, CanReact: true},
 	}
 	binding, err := f.runner.ResolveTurnRunner(f.ctx, run)
 	if err != nil {
@@ -311,7 +312,7 @@ func (f *chatLoopFixture) bindAgent(run *AgentRun, agentID string, producer Step
 	return binding
 }
 
-func (f *chatLoopFixture) drive(run *AgentRun, binding *TurnRunnerBinding) RunLoopExit {
+func (f *chatLoopFixture) drive(run *AgentRun, binding *agentrun.TurnRunnerBinding) RunLoopExit {
 	f.t.Helper()
 	current, err := f.store.GetAgentRun(f.ctx, run.Scope, run.ID)
 	if err != nil {
@@ -325,7 +326,7 @@ func (f *chatLoopFixture) drive(run *AgentRun, binding *TurnRunnerBinding) RunLo
 }
 
 // prepare runs the loop's phase 3 for run as the next step would.
-func (f *chatLoopFixture) prepare(run *AgentRun, binding *TurnRunnerBinding, step int64) *stepContextResult {
+func (f *chatLoopFixture) prepare(run *AgentRun, binding *agentrun.TurnRunnerBinding, step int64) *stepContextResult {
 	f.t.Helper()
 	current, err := f.store.GetAgentRun(f.ctx, run.Scope, run.ID)
 	if err != nil {
@@ -335,7 +336,7 @@ func (f *chatLoopFixture) prepare(run *AgentRun, binding *TurnRunnerBinding, ste
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	in := StepInput{
+	in := agentrun.StepInput{
 		Run: current, Session: session, Binding: binding, WorkerID: chatLoopWorker,
 		Step: &AgentTurn{ID: fmt.Sprintf("%s-step-%d", run.ID, step), Sequence: step},
 	}
@@ -608,9 +609,9 @@ func TestOtherPersonsMessageStartsOwnRunAndInterleavesAfterApprovalPark(t *testi
 // ends); a call names no active work, so it is refused.
 func TestRunActionsPresentWithoutActiveWork(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		definition := RunManagementSkill()
+		definition := agentrun.RunManagementSkill()
 		pause := capability.ModelAction{
-			Name: "openseal_runs__pause", SkillID: RunManagementSkillID, Version: RunManagementSkillVersion,
+			Name: "openseal_runs__pause", SkillID: RunManagementSkillID, Version: agentrun.RunManagementSkillVersion,
 			Action: RunActionPause, InputSchema: definition.Actions[RunActionPause].InputSchema,
 		}
 		other := capability.ModelAction{Name: "reports__export", SkillID: "reports", Action: "export"}
@@ -620,7 +621,7 @@ func TestRunActionsPresentWithoutActiveWork(t *testing.T) {
 		if len(binding.ModelActions) != 2 || binding.ModelActions[0].Name != pause.Name {
 			t.Fatalf("idle chat actions = %#v", binding.ModelActions)
 		}
-		refusal, err := binding.ToolCheck(f.ctx, StepToolsInput{Run: idle, Binding: binding}, &SessionEntry{
+		refusal, err := binding.ToolCheck(f.ctx, agentrun.StepToolsInput{Run: idle, Binding: binding}, &SessionEntry{
 			Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: "call",
 			Tool: &ToolEntry{Name: pause.Name, Arguments: json.RawMessage(`{"runId":"nope"}`)},
 		})
@@ -635,9 +636,9 @@ func TestRunActionsPresentWithoutActiveWork(t *testing.T) {
 
 func TestRunControlInvalidRunIdIsToolError(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
-		definition := RunManagementSkill()
+		definition := agentrun.RunManagementSkill()
 		pause := capability.ModelAction{
-			Name: "openseal_runs__pause", SkillID: RunManagementSkillID, Version: RunManagementSkillVersion,
+			Name: "openseal_runs__pause", SkillID: RunManagementSkillID, Version: agentrun.RunManagementSkillVersion,
 			Action: RunActionPause, InputSchema: definition.Actions[RunActionPause].InputSchema,
 		}
 		resume := pause
@@ -663,7 +664,7 @@ func TestRunControlInvalidRunIdIsToolError(t *testing.T) {
 		}
 		check := func(name, runID string) string {
 			t.Helper()
-			refusal, err := binding.ToolCheck(f.ctx, StepToolsInput{Run: run, Binding: binding}, &SessionEntry{
+			refusal, err := binding.ToolCheck(f.ctx, agentrun.StepToolsInput{Run: run, Binding: binding}, &SessionEntry{
 				Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: "call",
 				Tool: &ToolEntry{Name: name, Arguments: json.RawMessage(fmt.Sprintf(`{"runId":%q}`, runID))},
 			})
@@ -715,7 +716,7 @@ func TestNoMessageAfterAGovernedToolSavesFiles(t *testing.T) {
 				Output: map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": artifact.ID, "version": 1}}}}
 			done := f.settle(run, entries[id], ToolEntryCompleted, actionID, &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{storetest.TextPart("saved")}})
 			for range 2 { // the hook is replay-safe
-				if err := binding.AfterTool(f.ctx, StepToolsInput{Run: f.run(run.ID), Binding: binding}, done); err != nil {
+				if err := binding.AfterTool(f.ctx, agentrun.StepToolsInput{Run: f.run(run.ID), Binding: binding}, done); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -835,7 +836,7 @@ func TestPromotedBeforeFirstStepRendersTriggerAndRunContext(t *testing.T) {
 				// child of the non-empty lane before its first step.
 				second := f.post("second", "user-1", "Research the venues in depth.")
 				run2 := f.startRun(second)
-				var binding *TurnRunnerBinding
+				var binding *agentrun.TurnRunnerBinding
 				producer := &chatLoopProducer{answers: []string{"Venues: A, B."}}
 				if when == "after-bind" {
 					binding = f.bind(run2, producer)
@@ -877,7 +878,7 @@ func TestPromotedBeforeFirstStepOnEmptyLaneSeedsTriggerAndRunContext(t *testing.
 			forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
 				trigger := f.post("trigger", "user-1", "Research the venues in depth.")
 				run := f.startRun(trigger)
-				var binding *TurnRunnerBinding
+				var binding *agentrun.TurnRunnerBinding
 				producer := &chatLoopProducer{answers: []string{"Venues: A, B."}}
 				if when == "after-bind" {
 					binding = f.bind(run, producer)
@@ -925,7 +926,7 @@ func TestRunPromotedMidFlightCountsAsStartedInChild(t *testing.T) {
 			t.Fatalf("preparers = %d, want the run-start and chat preparers", len(promoted.Preparers))
 		}
 		step := &AgentTurn{ID: run.ID + "-step-2", Sequence: 2}
-		part, err := promoted.Preparers[1].BeforeStep(f.ctx, StepInput{Run: f.run(run.ID), Session: promoted.Session, Binding: promoted, WorkerID: chatLoopWorker, Step: step}, SteeringPlan{})
+		part, err := promoted.Preparers[1].BeforeStep(f.ctx, agentrun.StepInput{Run: f.run(run.ID), Session: promoted.Session, Binding: promoted, WorkerID: chatLoopWorker, Step: step}, agentrun.SteeringPlan{})
 		if err != nil || part != nil {
 			t.Fatalf("the promoted Run did not count as started: %#v, %v", part, err)
 		}

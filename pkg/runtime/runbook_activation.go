@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -186,14 +187,14 @@ type StartRunbookActivationRequest struct {
 // StartRunbookActivation creates one manual Run from the exact reviewed
 // activation. Clients never manufacture the definition pin or execution
 // policy themselves.
-func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope, activationID string, request StartRunbookActivationRequest) (*AgentRunCommandResult, error) {
+func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope, activationID string, request StartRunbookActivationRequest) (*agentrun.AgentRunCommandResult, error) {
 	return StartRunbookActivationWithExecutionPreparer(ctx, store, scope, activationID, request, nil)
 }
 
 // StartRunbookActivationWithExecutionPreparer adds the host's authoritative
 // immutable execution snapshot to newly accepted manual work. Delivery replay
 // uses the accepted request before resolving a potentially changed deployment.
-func StartRunbookActivationWithExecutionPreparer(ctx context.Context, store KernelStore, scope Scope, activationID string, request StartRunbookActivationRequest, preparer AcceptedRunExecutionPreparer) (*AgentRunCommandResult, error) {
+func StartRunbookActivationWithExecutionPreparer(ctx context.Context, store KernelStore, scope Scope, activationID string, request StartRunbookActivationRequest, preparer AcceptedRunExecutionPreparer) (*agentrun.AgentRunCommandResult, error) {
 	if store == nil {
 		return nil, errors.New("Runbook activation store is not configured")
 	}
@@ -251,7 +252,7 @@ func startActivationOccurrence(
 	actor ActivityActor,
 	visibility ActivityVisibility,
 	preparer AcceptedRunExecutionPreparer,
-) (*AgentRunCommandResult, error) {
+) (*agentrun.AgentRunCommandResult, error) {
 	contextValues := maps.Clone(activation.Input)
 	if contextValues == nil {
 		contextValues = make(map[string]interface{})
@@ -278,12 +279,12 @@ func startActivationOccurrence(
 	messageKey := ""
 	if activation.Trigger.Reporting != nil || activation.Task != nil {
 		var err error
-		channel, messageKey, err = prepareActivationReporting(ctx, reportingStore, activation, runIDForIdempotencyKey(activation.Scope, idempotencyKey), contextValues)
+		channel, messageKey, err = prepareActivationReporting(ctx, reportingStore, activation, agentrun.RunIDForIdempotencyKey(activation.Scope, idempotencyKey), contextValues)
 		if err != nil {
 			return nil, fmt.Errorf("prepare Runbook activation %s reporting: %w", activation.ID, err)
 		}
 	}
-	created, err := createAgentRunWithAcceptedExecution(ctx, NewRunCommandService(store), request, preparer)
+	created, err := agentrun.CreateAgentRunWithAcceptedExecution(ctx, agentrun.NewRunCommandService(store), request, preparer)
 	if err != nil {
 		return nil, err
 	}

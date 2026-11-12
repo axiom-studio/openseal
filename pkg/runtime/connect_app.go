@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/mcp"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -39,8 +40,8 @@ const (
 const (
 	FindAppsTypeApp    = "mcp-server"
 	FindAppsTypeSkill  = "skill"
-	FindAppsSetupApp   = SkillActionRequestConnection
-	FindAppsSetupSkill = SkillActionRequestSetup
+	FindAppsSetupApp   = agentrun.SkillActionRequestConnection
+	FindAppsSetupSkill = agentrun.SkillActionRequestSetup
 )
 
 // AppCatalogEntry is one connectable app as the host's catalog lists it.
@@ -123,7 +124,7 @@ func findAppsAction() skill.Action {
 }
 
 func requestConnectionAction() skill.Action {
-	return skill.Action{Name: SkillActionRequestConnection,
+	return skill.Action{Name: agentrun.SkillActionRequestConnection,
 		Description: "Ask the person who sent the message to connect the app through a Connect card in this chat. If the app is shared with the agent or team, ask someone who manages it. " + connectAppGuidance + " Pass app as the exact slug from find_apps, or as {\"address\": \"https://...\"} when the user gave an MCP server address. The user signs in on the card; never ask for keys or passwords in chat. A pending result pauses this work until the app is connected (you then continue with its new tools) or the card is dismissed. If the app is already connected, the result lists its tools instead: use them. If the result is refused, explain the reason and do not repeat the request in this reply. With targetAgentId, the card still appears in this chat and the app is connected for that Agent.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
@@ -148,7 +149,7 @@ type findAppsArguments struct {
 	Limit int    `json:"limit,omitempty"`
 }
 
-func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input ActionDispatchInput, run *AgentRun, umbrella ObjectiveOwner) (map[string]interface{}, error) {
+func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun, umbrella ObjectiveOwner) (map[string]interface{}, error) {
 	var a findAppsArguments
 	if err := decodeSkillBindingArguments(input.Arguments, &a); err != nil {
 		return nil, err
@@ -296,7 +297,7 @@ func decodeAppAddress(value, reason string) (ConnectAppTarget, string, error) {
 // requestConnection saves a connect card in the run's chat (under umbrella)
 // for owner, the Agent or Team the app is connected for: the umbrella, or
 // the Agent a builder names with targetAgentId.
-func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, input ActionDispatchInput, run *AgentRun, member string, umbrella, owner ObjectiveOwner) (map[string]interface{}, error) {
+func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun, member string, umbrella, owner ObjectiveOwner) (map[string]interface{}, error) {
 	target, reason, err := decodeRequestConnectionArguments(input.Arguments)
 	if err != nil {
 		return nil, err
@@ -507,10 +508,10 @@ func listedToolNames(tools []string) []interface{} {
 // request_connection call created for its own Run when it still waits for
 // the user.
 func pendingConnectAppRequestFromAction(ctx context.Context, store SkillSetupRequestStore, call *ActionCall) *SkillSetupRequest {
-	if call == nil || store == nil || call.Status != ActionCallStatusSucceeded || call.SkillID != SkillManagementSkillID || call.Action != SkillActionRequestConnection {
+	if call == nil || store == nil || call.Status != ActionCallStatusSucceeded || call.SkillID != SkillManagementSkillID || call.Action != agentrun.SkillActionRequestConnection {
 		return nil
 	}
-	id := interactionRequestID(call, "setupRequest")
+	id := agentrun.InteractionRequestID(call, "setupRequest")
 	if id == "" {
 		return nil
 	}

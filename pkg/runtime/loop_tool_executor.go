@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	"go.uber.org/zap"
@@ -77,7 +78,7 @@ type LoopToolClaim struct {
 }
 
 // ForClaim returns the LoopToolExecutor of one claim (TurnRunnerBinding.Tools).
-func (d *StepToolDispatcher) ForClaim(claim LoopToolClaim) LoopToolExecutor {
+func (d *StepToolDispatcher) ForClaim(claim LoopToolClaim) agentrun.LoopToolExecutor {
 	return &claimToolExecutor{cfg: d.cfg, claim: claim, hostTools: HostToolSpecs(claim.Workspace)}
 }
 
@@ -85,7 +86,7 @@ func (d *StepToolDispatcher) ForClaim(claim LoopToolClaim) LoopToolExecutor {
 // governed actions and runbook operations, the claim's Skill prompts and the
 // host tools of its Workspace. The model-step preparer builds its tool list
 // from the same catalog, so offered and executable tools agree.
-func LoopCapabilityCatalog(run *AgentRun, binding *TurnRunnerBinding, claim LoopToolClaim) CapabilityCatalog {
+func LoopCapabilityCatalog(run *AgentRun, binding *agentrun.TurnRunnerBinding, claim LoopToolClaim) CapabilityCatalog {
 	catalog := CapabilityCatalog{SkillPrompts: claim.SkillPrompts, HostTools: HostToolSpecs(claim.Workspace)}
 	if run != nil {
 		catalog.Scope, catalog.AgentID = run.Scope, run.AssignedAgentID
@@ -146,7 +147,7 @@ func (t resolvedLoopTool) concurrent() bool {
 
 // resolveLoopTool routes a call by name: control tools, then capability
 // tools, then host tools, then the binding's governed actions.
-func (x *claimToolExecutor) resolveLoopTool(binding *TurnRunnerBinding, name string, arguments json.RawMessage, directive *ToolCallDirective) (resolvedLoopTool, error) {
+func (x *claimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding, name string, arguments json.RawMessage, directive *agentrun.ToolCallDirective) (resolvedLoopTool, error) {
 	args := decodeLoopToolArguments(arguments)
 	switch {
 	case IsControlTool(name):
@@ -232,11 +233,11 @@ func decodeLoopToolArguments(raw json.RawMessage) map[string]interface{} {
 	return args
 }
 
-func loopEntryDirective(entry *SessionEntry) (*ToolCallDirective, error) {
+func loopEntryDirective(entry *SessionEntry) (*agentrun.ToolCallDirective, error) {
 	if entry == nil || entry.Tool == nil || len(entry.Tool.Directive) == 0 {
 		return nil, nil
 	}
-	var directive ToolCallDirective
+	var directive agentrun.ToolCallDirective
 	if err := json.Unmarshal(entry.Tool.Directive, &directive); err != nil {
 		return nil, fmt.Errorf("decode directive of tool entry %s: %w", entry.ID, err)
 	}
@@ -248,8 +249,8 @@ func loopEntryDirective(entry *SessionEntry) (*ToolCallDirective, error) {
 
 // toolEntryPlanner is implemented by the claim executor.
 type toolEntryPlanner interface {
-	planToolEntries(binding *TurnRunnerBinding, assistant *SessionEntry) ([]*SessionEntry, error)
-	planToolCallEntries(binding *TurnRunnerBinding, run *AgentRun, step *AgentTurn, sessionID string, calls []LoopToolCall) ([]*SessionEntry, error)
+	planToolEntries(binding *agentrun.TurnRunnerBinding, assistant *SessionEntry) ([]*SessionEntry, error)
+	planToolCallEntries(binding *agentrun.TurnRunnerBinding, run *AgentRun, step *AgentTurn, sessionID string, calls []agentrun.LoopToolCall) ([]*SessionEntry, error)
 }
 
 // Plan-time refusal code and texts.
@@ -268,7 +269,7 @@ const (
 // appended already error/refused. assistant must carry its session, Run and
 // step identity; binding.Tools must be a claim executor from
 // StepToolDispatcher.ForClaim.
-func PlanToolEntries(binding *TurnRunnerBinding, assistant *SessionEntry) ([]*SessionEntry, error) {
+func PlanToolEntries(binding *agentrun.TurnRunnerBinding, assistant *SessionEntry) ([]*SessionEntry, error) {
 	planner, err := bindingToolPlanner(binding)
 	if err != nil {
 		return nil, err
@@ -278,7 +279,7 @@ func PlanToolEntries(binding *TurnRunnerBinding, assistant *SessionEntry) ([]*Se
 
 // PlanToolCallEntries builds the tool entries of a deterministic producer's
 // tool calls (StepOutput.ToolCalls). Each entry stores its directive.
-func PlanToolCallEntries(binding *TurnRunnerBinding, run *AgentRun, step *AgentTurn, sessionID string, calls []LoopToolCall) ([]*SessionEntry, error) {
+func PlanToolCallEntries(binding *agentrun.TurnRunnerBinding, run *AgentRun, step *AgentTurn, sessionID string, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 	planner, err := bindingToolPlanner(binding)
 	if err != nil {
 		return nil, err
@@ -286,7 +287,7 @@ func PlanToolCallEntries(binding *TurnRunnerBinding, run *AgentRun, step *AgentT
 	return planner.planToolCallEntries(binding, run, step, sessionID, calls)
 }
 
-func bindingToolPlanner(binding *TurnRunnerBinding) (toolEntryPlanner, error) {
+func bindingToolPlanner(binding *agentrun.TurnRunnerBinding) (toolEntryPlanner, error) {
 	if binding == nil || binding.Tools == nil {
 		return nil, errors.New("tool entries need a binding with a tool executor")
 	}
@@ -297,7 +298,7 @@ func bindingToolPlanner(binding *TurnRunnerBinding) (toolEntryPlanner, error) {
 	return planner, nil
 }
 
-func (x *claimToolExecutor) planToolEntries(binding *TurnRunnerBinding, assistant *SessionEntry) ([]*SessionEntry, error) {
+func (x *claimToolExecutor) planToolEntries(binding *agentrun.TurnRunnerBinding, assistant *SessionEntry) ([]*SessionEntry, error) {
 	if assistant == nil || assistant.Type != SessionEntryAssistant || assistant.Assistant == nil {
 		return nil, errors.New("plan tool entries needs an assistant entry")
 	}
@@ -321,7 +322,7 @@ func (x *claimToolExecutor) planToolEntries(binding *TurnRunnerBinding, assistan
 	return entries, nil
 }
 
-func (x *claimToolExecutor) planToolCallEntries(binding *TurnRunnerBinding, run *AgentRun, step *AgentTurn, sessionID string, calls []LoopToolCall) ([]*SessionEntry, error) {
+func (x *claimToolExecutor) planToolCallEntries(binding *agentrun.TurnRunnerBinding, run *AgentRun, step *AgentTurn, sessionID string, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
 	if run == nil || step == nil || sessionID == "" {
 		return nil, errors.New("plan tool call entries needs the Run, its step and its session")
 	}
@@ -350,7 +351,7 @@ func (x *claimToolExecutor) planToolCallEntries(binding *TurnRunnerBinding, run 
 
 // planEntry stamps one pending entry, or ends it error/refused when its
 // arguments cannot be used.
-func (x *claimToolExecutor) planEntry(binding *TurnRunnerBinding, entry *SessionEntry, directive *ToolCallDirective) error {
+func (x *claimToolExecutor) planEntry(binding *agentrun.TurnRunnerBinding, entry *SessionEntry, directive *agentrun.ToolCallDirective) error {
 	tool := entry.Tool
 	if len(tool.Arguments) > MaxToolArgumentsBytes {
 		tool.ArgumentsError = fmt.Sprintf("The tool arguments are %d bytes; the limit is %d.", len(tool.Arguments), MaxToolArgumentsBytes)
@@ -378,8 +379,8 @@ func (x *claimToolExecutor) planEntry(binding *TurnRunnerBinding, entry *Session
 // stepToolRun holds the entries of one step while the executor works on them.
 type stepToolRun struct {
 	x       *claimToolExecutor
-	in      StepToolsInput
-	binding *TurnRunnerBinding
+	in      agentrun.StepToolsInput
+	binding *agentrun.TurnRunnerBinding
 	// step produced the entries; current is the claim's running step (the
 	// TurnID of new governed calls and the nested VM fence of host calls).
 	step    *AgentTurn
@@ -398,10 +399,10 @@ type stepToolRun struct {
 	governed  []GovernedToolOutcome // awaiting governed outcomes, in call order
 	held      bool                  // a call of the step reached awaiting_* (or waits for a foreign call lease)
 	retryAt   *time.Time
-	park      *LoopPark // a control entry's (non-governed) park
-	final     *FinalAnswer
-	failure   *LoopFailure
-	budget    *BudgetExhaustion
+	park      *agentrun.LoopPark // a control entry's (non-governed) park
+	final     *agentrun.FinalAnswer
+	failure   *agentrun.LoopFailure
+	budget    *agentrun.BudgetExhaustion
 	ended     bool
 	hostCalls int
 	searches  int
@@ -416,7 +417,7 @@ type stepToolRun struct {
 	viewErr  error
 }
 
-func (x *claimToolExecutor) newStepToolRun(in StepToolsInput, step *AgentTurn, entries []*SessionEntry) (*stepToolRun, error) {
+func (x *claimToolExecutor) newStepToolRun(in agentrun.StepToolsInput, step *AgentTurn, entries []*SessionEntry) (*stepToolRun, error) {
 	if in.Run == nil || in.Binding == nil {
 		return nil, errors.New("step tools need the Run and its binding")
 	}
@@ -459,7 +460,7 @@ func (r *stepToolRun) run() *AgentRun {
 }
 
 // input is the step input with the Run as the executor's writes left it.
-func (r *stepToolRun) input() StepToolsInput {
+func (r *stepToolRun) input() agentrun.StepToolsInput {
 	in := r.in
 	in.Run = r.run()
 	if r.step != nil {
@@ -705,7 +706,7 @@ func (r *stepToolRun) offerRefusal(ctx context.Context, i int) (*ToolResult, err
 			return notAvailable(), nil
 		}
 	case loopRouteCapability:
-		if !r.binding.Authority.offersCapabilities() {
+		if !r.binding.Authority.OffersCapabilities() {
 			return notAvailable(), nil
 		}
 		set, err := r.capabilities(ctx)
@@ -912,7 +913,7 @@ func loadKernelPatch(set *CapabilitySet, actions []capability.ModelAction, loade
 	return patch
 }
 
-func (r *stepToolRun) controlContext(i int) ControlContext {
+func (r *stepToolRun) controlContext(i int) agentrun.ControlContext {
 	in := r.input()
 	if r.in.Assistant == nil || r.in.Assistant.StepID != stepIDOf(r.step) {
 		in.Assistant = nil
@@ -1118,7 +1119,7 @@ func (r *stepToolRun) recordAwaiting(outcome GovernedToolOutcome) {
 // cards), then a control park, then a wait for a foreign call lease. nil
 // with settled == true means a wait target was decided meanwhile: do not
 // park; the next step resumes the entries.
-func (r *stepToolRun) planPark(ctx context.Context) (park *LoopPark, settled bool, err error) {
+func (r *stepToolRun) planPark(ctx context.Context) (park *agentrun.LoopPark, settled bool, err error) {
 	r.mu.Lock()
 	governed := append([]GovernedToolOutcome(nil), r.governed...)
 	controlPark, retryAt := r.park, r.retryAt
@@ -1135,7 +1136,7 @@ func (r *stepToolRun) planPark(ctx context.Context) (park *LoopPark, settled boo
 			return nil, true, nil
 		}
 		if plan.Park != nil {
-			return &LoopPark{Status: plan.Park.Status, Wake: plan.Park.Wake, Summary: plan.Park.Summary}, false, nil
+			return &agentrun.LoopPark{Status: plan.Park.Status, Wake: plan.Park.Wake, Summary: plan.Park.Summary}, false, nil
 		}
 	}
 	if controlPark != nil {
@@ -1143,7 +1144,7 @@ func (r *stepToolRun) planPark(ctx context.Context) (park *LoopPark, settled boo
 	}
 	if retryAt != nil {
 		at := *retryAt
-		return &LoopPark{
+		return &agentrun.LoopPark{
 			Status: AgentRunStatusSleeping, Wake: &WakeCondition{Type: "timer", WakeAt: &at},
 			Summary: "Waiting for a tool call that is still running elsewhere",
 		}, false, nil
@@ -1185,13 +1186,13 @@ func (r *stepToolRun) applyReplaced(ctx context.Context, plan GovernedParkPlan) 
 
 // finishGuard appends the step's D9 notes and setup notes once every entry is
 // terminal and returns the guard's Run failure (repeat_limit, error_streak).
-func (r *stepToolRun) finishGuard(ctx context.Context) (*LoopFailure, error) {
+func (r *stepToolRun) finishGuard(ctx context.Context) (*agentrun.LoopFailure, error) {
 	for i := range r.entries {
 		if !r.entry(i).State.Terminal() {
 			return nil, nil
 		}
 	}
-	var failure *LoopFailure
+	var failure *agentrun.LoopFailure
 	if r.guard != nil {
 		var err error
 		if failure, err = r.guard.Finish(ctx); err != nil {
@@ -1234,10 +1235,10 @@ func (r *stepToolRun) appendSetupNotes(ctx context.Context) error {
 }
 
 // outcome is the StepToolsOutcome of the work done so far.
-func (r *stepToolRun) outcome() StepToolsOutcome {
+func (r *stepToolRun) outcome() agentrun.StepToolsOutcome {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := StepToolsOutcome{
+	out := agentrun.StepToolsOutcome{
 		Final: r.final, Failure: r.failure, BudgetExhausted: r.budget, HostToolCalls: r.hostCalls,
 	}
 	if r.chain.known != r.in.Run {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -126,7 +127,7 @@ func TestExternalConversationSnapshotSQLiteQueuedReplySurvivesUpgrade(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: item.Scope, Kind: RunKindConversation, Owner: endpoint.Owner,
 		AssignedAgentID: endpoint.DeploymentID, Goal: "Respond", Source: RunSourceEvent,
 		IdempotencyKey: "sqlite-snapshot-run", Actor: ActivityActor{Type: "service", ID: "test"}, Visibility: ActivityVisibilityPrivate,

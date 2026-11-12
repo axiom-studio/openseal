@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -132,7 +132,7 @@ func (v *RunActionValidator) ValidateActionProposal(ctx context.Context, input A
 	if target.Revision != revision {
 		return nil, models.ErrRevisionConflict
 	}
-	if !slices.Contains(applicableAgentRunCommands(target), input.Bound.Action.Name) {
+	if !slices.Contains(ApplicableAgentRunCommands(target), input.Bound.Action.Name) {
 		return nil, fmt.Errorf("%w: cannot %s %s Run", models.ErrInvalidRunTransition, input.Bound.Action.Name, target.Status)
 	}
 	return map[string]interface{}{
@@ -209,7 +209,7 @@ func runControlPositiveInt64(value interface{}) (int64, bool) {
 	}
 }
 
-func applicableAgentRunCommands(run *models.AgentRun) []string {
+func ApplicableAgentRunCommands(run *models.AgentRun) []string {
 	if run == nil || models.IsTerminalAgentRunStatus(run.Status) || run.Kind == models.RunKindConversation {
 		return nil
 	}

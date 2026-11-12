@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -132,10 +133,10 @@ func TestRepeatEffectOf(t *testing.T) {
 		{"governed unknown side effect fails closed", LoopToolGoverned, "", false, repeatGovernedOperation("x", "y"), RepeatEffectWrite},
 		{"governed repeatable write", LoopToolGoverned, capability.SideEffectWrite, true, repeatGovernedOperation("live-browser", "click"), RepeatEffectStateful},
 		{"governed repeatable read stays read", LoopToolGoverned, capability.SideEffectRead, true, repeatGovernedOperation("live-browser", "snapshot"), RepeatEffectRead},
-		{"card credential", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(SkillManagementSkillID, SkillActionRequestCredential), RepeatEffectControl},
-		{"card setup", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(SkillManagementSkillID, SkillActionRequestSetup), RepeatEffectControl},
-		{"card connection", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(SkillManagementSkillID, SkillActionRequestConnection), RepeatEffectControl},
-		{"same action name on another skill is not a card", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation("other", SkillActionRequestCredential), RepeatEffectWrite},
+		{"card credential", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(SkillManagementSkillID, agentrun.SkillActionRequestCredential), RepeatEffectControl},
+		{"card setup", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(SkillManagementSkillID, agentrun.SkillActionRequestSetup), RepeatEffectControl},
+		{"card connection", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(SkillManagementSkillID, agentrun.SkillActionRequestConnection), RepeatEffectControl},
+		{"same action name on another skill is not a card", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation("other", agentrun.SkillActionRequestCredential), RepeatEffectWrite},
 
 		{"host list_directory", LoopToolHost, capability.SideEffectRead, false, workspace.OperationListDirectory, RepeatEffectRead},
 		{"host read_file", LoopToolHost, capability.SideEffectRead, false, workspace.OperationReadFile, RepeatEffectRead},

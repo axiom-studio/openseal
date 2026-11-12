@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -61,7 +62,7 @@ func RunLoopCutover(ctx context.Context, store RunLoopCutoverStore, conversation
 		if err != nil {
 			return fmt.Errorf("list cutover candidates: %w", err)
 		}
-		c := &runLoopCutover{store: store, conversations: conversations, commands: NewRunCommandService(store), posted: map[string]bool{}}
+		c := &runLoopCutover{store: store, conversations: conversations, commands: agentrun.NewRunCommandService(store), posted: map[string]bool{}}
 		for _, ref := range refs {
 			if err := c.cutRun(ctx, ref, &report); err != nil {
 				return fmt.Errorf("cut over Run %s: %w", ref.ID, err)
@@ -78,7 +79,7 @@ func RunLoopCutover(ctx context.Context, store RunLoopCutoverStore, conversation
 type runLoopCutover struct {
 	store         RunLoopCutoverStore
 	conversations RunLoopCutoverConversations
-	commands      *RunCommandService
+	commands      *agentrun.RunCommandService
 	// posted holds the requests answered in this pass, so a lane whose
 	// request also reached a child Run gets one message.
 	posted map[string]bool
@@ -193,8 +194,8 @@ func (c *runLoopCutover) cancel(ctx context.Context, run *AgentRun, report *RunL
 		}
 		run = marked
 	}
-	if _, err := c.commands.CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: AgentRunCommandCancel,
+	if _, err := c.commands.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
+		Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: agentrun.AgentRunCommandCancel,
 		Actor: runLoopCutoverActor, Summary: "Stopped by a platform update", Visibility: ActivityVisibilityScope,
 	}); err != nil {
 		return err

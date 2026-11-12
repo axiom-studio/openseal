@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -145,7 +146,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	if err := catalog.Bind(t.Context(), &skill.Binding{
 		ID: "setup-actions", Revision: 1, Scope: skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID},
 		DeploymentID: run.AssignedAgentID, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion,
-		AllowedActions: []string{SkillActionRequestSetup, SkillActionListSetupRequests}, MaximumRisk: skill.RiskLevelRead,
+		AllowedActions: []string{agentrun.SkillActionRequestSetup, SkillActionListSetupRequests}, MaximumRisk: skill.RiskLevelRead,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +168,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	}
 	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator}).Propose(t.Context(), ProposeActionRequest{
 		Scope: run.Scope, RunID: run.ID, TurnID: step.ID, WorkerID: "setup-worker", DeploymentID: run.AssignedAgentID,
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup,
+		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: agentrun.SkillActionRequestSetup,
 		Arguments: arguments,
 		Summary:   "Ask for Reddit setup",
 		Origin:    ActionOriginLoop, Execution: ActionExecutionLoop, IdempotencyKey: "loop:" + step.ID + ":call-setup", CausationID: step.ID,
@@ -269,7 +270,7 @@ func (f *skillSetupTaskWaitFixture) resolve(t *testing.T, status string) {
 	f.request = request
 }
 
-func (f *skillSetupTaskWaitFixture) reconcile(t *testing.T) (*AgentRunCommandResult, bool, error) {
+func (f *skillSetupTaskWaitFixture) reconcile(t *testing.T) (*agentrun.AgentRunCommandResult, bool, error) {
 	t.Helper()
 	scheduler, err := NewConversationRunScheduler(f.store, f.store, ConversationRunSchedulerConfig{})
 	if err != nil {
@@ -294,12 +295,12 @@ func skillSetupCompletionEvents(t *testing.T, store skillSetupTaskTestStore, run
 }
 
 func TestSkillSetupTaskResolutionPreservesOperatorPauseAndCancel(t *testing.T) {
-	for _, command := range []AgentRunCommandKind{AgentRunCommandPause, AgentRunCommandCancel} {
+	for _, command := range []agentrun.AgentRunCommandKind{agentrun.AgentRunCommandPause, agentrun.AgentRunCommandCancel} {
 		t.Run(string(command), func(t *testing.T) {
 			forSkillSetupTaskStores(t, func(t *testing.T, store skillSetupTaskTestStore, restart func() skillSetupTaskTestStore) {
 				f := newSkillSetupTaskFixture(t, store)
 				waiting := f.wait(t)
-				changed, err := NewRunCommandService(store).CommandAgentRun(t.Context(), AgentRunCommandRequest{
+				changed, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
 					Scope: waiting.Scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: command,
 					Actor: ActivityActor{Type: "user", ID: f.task.Task.AuthenticatedActor.ID},
 				})
@@ -310,11 +311,11 @@ func TestSkillSetupTaskResolutionPreservesOperatorPauseAndCancel(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if command == AgentRunCommandCancel {
+				if command == agentrun.AgentRunCommandCancel {
 					// Canceling closes the Run's open setup form; it can no longer
 					// be completed for this Run.
 					closed, err := store.GetSkillSetupRequest(t.Context(), f.request.Scope, f.request.ID)
-					if err != nil || closed == nil || closed.Status != "dismissed" || closed.ResolvedBy != TerminalRunInteractionCloser {
+					if err != nil || closed == nil || closed.Status != "dismissed" || closed.ResolvedBy != agentrun.TerminalRunInteractionCloser {
 						t.Fatalf("cancel left the setup form open: %#v %v", closed, err)
 					}
 					f.request = closed
@@ -634,7 +635,7 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 			t.Fatal("copied conversation context granted task setup access")
 		}
 		// A refused interaction request is a result, not a dispatch error.
-		if result, err := f.dispatch(t, dispatcher, run, SkillActionRequestSetup, "model-invented-action", maps.Clone(f.call.Arguments)); err == nil && result["refused"] == nil {
+		if result, err := f.dispatch(t, dispatcher, run, agentrun.SkillActionRequestSetup, "model-invented-action", maps.Clone(f.call.Arguments)); err == nil && result["refused"] == nil {
 			t.Fatalf("unpersisted action was allowed to create a task setup request: %#v", result)
 		}
 		persisted, err := store.ListSkillSetupRequests(t.Context(), run.Scope, run.AssignedAgentID, f.request.ConversationID)
@@ -651,7 +652,7 @@ func (f *skillSetupTaskWaitFixture) dispatch(t *testing.T, dispatcher *SkillBind
 	if err != nil {
 		t.Fatal(err)
 	}
-	return dispatcher.DispatchAction(t.Context(), ActionDispatchInput{Run: run, Bound: bound, Arguments: arguments,
+	return dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: bound, Arguments: arguments,
 		Call: &ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID}})
 }
 

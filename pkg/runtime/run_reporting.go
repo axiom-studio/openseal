@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func runReportingChannelKey(owner ObjectiveOwner, policy *runbook.ReportingPolicy) string {
@@ -311,7 +312,7 @@ func silentRoutineOccurrence(run *AgentRun) bool {
 	if !routineOccurrenceRun(run) || run.Kind == RunKindConversation || run.Status != AgentRunStatusCompleted {
 		return false
 	}
-	silent, _ := run.Output[finalOutputSilentKey].(bool)
+	silent, _ := run.Output[agentrun.FinalOutputSilentKey].(bool)
 	return silent
 }
 

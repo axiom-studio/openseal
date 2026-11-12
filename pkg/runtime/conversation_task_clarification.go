@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // An explicit reply to a root Run's question is a clarification attempt, including
@@ -52,7 +54,7 @@ func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.
 			continue
 		}
 		task, err := tasks.FindConversationTaskByWorkRunID(ctx, conversation.Scope, reference.ID)
-		if err != nil && !errors.Is(err, ErrConversationTaskNotFound) {
+		if err != nil && !errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 			return false, err
 		}
 		if task != nil && task.Validate() == nil && task.Mode == ConversationTaskModeIndependent && task.ConversationID == conversation.ID && task.Owner == conversation.Owner &&

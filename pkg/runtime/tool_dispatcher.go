@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/fileinput"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -36,7 +37,7 @@ func NewToolActionDispatcher(invoker ToolInvoker) (*ToolActionDispatcher, error)
 	return &ToolActionDispatcher{invoker: invoker}, nil
 }
 
-func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	if d == nil || d.invoker == nil || input.Bound == nil || input.Bound.Definition == nil || input.Bound.Binding == nil {
 		return nil, errors.New("tool action dispatcher is not configured")
 	}

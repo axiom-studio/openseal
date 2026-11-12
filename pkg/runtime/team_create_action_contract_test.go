@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -25,7 +26,7 @@ func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 	// The builder dispatcher takes the current create_team and passes a
 	// 2.0.0 binding's on to the next dispatcher.
 	f := newAgentBuilderDispatchFixture(t)
-	fallback := ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	fallback := ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"fallback": true}, nil
 	})
 	dispatcher, err := newTestAgentBuilderDispatcher(f.store, f.agents, f.teams, f.catalog, f.provision, nil, fallback)
@@ -34,10 +35,10 @@ func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 	}
 	old := *definition
 	old.Version = "2.0.0"
-	if result, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Bound: &skill.BoundAction{Definition: &old, Action: action}}); err != nil || result["fallback"] != true {
+	if result, err := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Bound: &skill.BoundAction{Definition: &old, Action: action}}); err != nil || result["fallback"] != true {
 		t.Fatalf("create_team matched a 2.0.0 binding: %#v, %v", result, err)
 	}
-	if result, _ := dispatcher.DispatchAction(ctx, ActionDispatchInput{Bound: &skill.BoundAction{Definition: definition, Action: action}}); result["fallback"] == true {
+	if result, _ := dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Bound: &skill.BoundAction{Definition: definition, Action: action}}); result["fallback"] == true {
 		t.Fatal("the builder dispatcher does not take create_team")
 	}
 }

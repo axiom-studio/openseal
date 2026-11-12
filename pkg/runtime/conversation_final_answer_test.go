@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -186,7 +187,7 @@ func (f *finalDeliveryFixture) mutateRun(mutate func(*AgentRun)) {
 
 // step appends one assistant entry with these tool calls as pending entries
 // and returns the entries by call id.
-func (f *finalDeliveryFixture) step(calls ...LoopToolCall) (string, map[string]*SessionEntry) {
+func (f *finalDeliveryFixture) step(calls ...agentrun.LoopToolCall) (string, map[string]*SessionEntry) {
 	f.t.Helper()
 	f.steps++
 	stepID := "step-" + string(rune('0'+f.steps))
@@ -237,7 +238,7 @@ func (f *finalDeliveryFixture) settle(entry *SessionEntry, to ToolEntryState, ac
 // governed records a governed tool call of the Run with this status and output.
 func (f *finalDeliveryFixture) governed(callID string, status ActionCallStatus, output map[string]interface{}) string {
 	f.t.Helper()
-	_, entries := f.step(LoopToolCall{ID: callID, Name: "reports__export", Arguments: json.RawMessage(`{}`)})
+	_, entries := f.step(agentrun.LoopToolCall{ID: callID, Name: "reports__export", Arguments: json.RawMessage(`{}`)})
 	actionID := "action-" + callID
 	f.actions.mu.Lock()
 	f.actions.calls[actionID] = &ActionCall{ID: actionID, Scope: f.run.Scope, RunID: f.run.ID, Status: status, Output: output}
@@ -252,27 +253,27 @@ func (f *finalDeliveryFixture) governed(callID string, status ActionCallStatus, 
 
 // finalEntry appends a pending turn_final_answer entry and returns the
 // FinalAnswer the control section would hand the loop for it.
-func (f *finalDeliveryFixture) finalEntry(answer string, output map[string]interface{}) (FinalAnswer, *SessionEntry) {
+func (f *finalDeliveryFixture) finalEntry(answer string, output map[string]interface{}) (agentrun.FinalAnswer, *SessionEntry) {
 	f.t.Helper()
 	callID := "final-" + uuid.NewString()[:6]
-	stepID, entries := f.step(LoopToolCall{ID: callID, Name: string(ControlToolFinalAnswer), Arguments: json.RawMessage(`{}`)})
+	stepID, entries := f.step(agentrun.LoopToolCall{ID: callID, Name: string(ControlToolFinalAnswer), Arguments: json.RawMessage(`{}`)})
 	if output == nil {
 		output = map[string]interface{}{finalOutputSummaryKey: answer}
 	}
 	entry := entries[callID]
-	return FinalAnswer{StepID: stepID, ToolEntryID: entry.ID, ToolCallID: callID, Answer: answer, Output: output}, entry
+	return agentrun.FinalAnswer{StepID: stepID, ToolEntryID: entry.ID, ToolCallID: callID, Answer: answer, Output: output}, entry
 }
 
-func (f *finalDeliveryFixture) deliver(answer FinalAnswer) (FinalDeliveryResult, error) {
+func (f *finalDeliveryFixture) deliver(answer agentrun.FinalAnswer) (agentrun.FinalDeliveryResult, error) {
 	f.t.Helper()
 	run := f.currentRun()
-	return f.handler.Deliver(f.ctx, FinalDelivery{Run: run, Answer: answer, Guard: ReplyRunGuard{
+	return f.handler.Deliver(f.ctx, agentrun.FinalDelivery{Run: run, Answer: answer, Guard: ReplyRunGuard{
 		Scope: run.Scope, RunID: run.ID, WorkerID: finalDeliveryWorker, ConcurrencyKey: run.ConcurrencyKey,
 		InterventionCount: len(run.PendingInterventions),
 	}})
 }
 
-func (f *finalDeliveryFixture) mustDeliver(answer FinalAnswer, kind FinalDeliveryKind) FinalDeliveryResult {
+func (f *finalDeliveryFixture) mustDeliver(answer agentrun.FinalAnswer, kind agentrun.FinalDeliveryKind) agentrun.FinalDeliveryResult {
 	f.t.Helper()
 	result, err := f.deliver(answer)
 	if err != nil {
@@ -345,7 +346,7 @@ func TestFinalAnswerSendsBackFilesThatAreNotSavedFileIDs(t *testing.T) {
 		f.governed("failed", ActionCallStatusFailed, map[string]interface{}{"artifactRefs": []interface{}{ref("failed-file", 1)}})
 		for _, files := range [][]interface{}{{"docs/draft.pdf"}, {"docs/report.pdf", "failed-file"}} {
 			answer, _ := f.finalEntry("Here is the report.", map[string]interface{}{finalOutputSummaryKey: "Here is the report.", finalOutputFilesKey: files})
-			result := f.mustDeliver(answer, FinalDeliveryRetryFinal)
+			result := f.mustDeliver(answer, agentrun.FinalDeliveryRetryFinal)
 			if !strings.Contains(result.RejectionText, files[len(files)-1].(string)) || !strings.Contains(result.RejectionText, "docs/report.pdf") {
 				t.Fatalf("files %v: rejection = %q", files, result.RejectionText)
 			}
@@ -367,7 +368,7 @@ func TestFinalAnswerPostsThreadReplyWithRunAndArtifactRefs(t *testing.T) {
 		// The answer hands over the files it names; the Run's others stay in the Library.
 		answer, _ := f.finalEntry("Here is the quarterly report.", map[string]interface{}{
 			finalOutputSummaryKey: "Here is the quarterly report.", finalOutputFilesKey: []interface{}{"report-pdf", "report-csv"}})
-		result := f.mustDeliver(answer, FinalDeliveryComplete)
+		result := f.mustDeliver(answer, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 {
 			t.Fatalf("answers = %#v", answers)
@@ -392,11 +393,11 @@ func TestFinalAnswerPostsThreadReplyWithRunAndArtifactRefs(t *testing.T) {
 			result.Output["messageId"] != posted.ID || result.Output["replayed"] != false || result.Output["summary"] != posted.Content {
 			t.Fatalf("output = %#v", result.Output)
 		}
-		if _, ok := result.Output[finalOutputBroadcastKey]; ok {
+		if _, ok := result.Output[agentrun.FinalOutputBroadcastKey]; ok {
 			t.Fatalf("broadcastToChannel present without broadcast: %#v", result.Output)
 		}
 		// A re-delivery after a crash returns the stored reply.
-		replay := f.mustDeliver(answer, FinalDeliveryComplete)
+		replay := f.mustDeliver(answer, agentrun.FinalDeliveryComplete)
 		if replay.Output["messageId"] != posted.ID || replay.Output["replayed"] != true || len(f.answers()) != 1 {
 			t.Fatalf("replay = %#v, answers = %d", replay.Output, len(f.answers()))
 		}
@@ -405,28 +406,28 @@ func TestFinalAnswerPostsThreadReplyWithRunAndArtifactRefs(t *testing.T) {
 
 func TestBroadcastToChannelFlagPosted(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
-		answer, _ := f.finalEntry("Shipped to everyone.", map[string]interface{}{finalOutputSummaryKey: "Shipped to everyone.", finalOutputBroadcastKey: true})
-		result := f.mustDeliver(answer, FinalDeliveryComplete)
+		answer, _ := f.finalEntry("Shipped to everyone.", map[string]interface{}{finalOutputSummaryKey: "Shipped to everyone.", agentrun.FinalOutputBroadcastKey: true})
+		result := f.mustDeliver(answer, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
-		if len(answers) != 1 || !answers[0].BroadcastToChannel || result.Output[finalOutputBroadcastKey] != true {
+		if len(answers) != 1 || !answers[0].BroadcastToChannel || result.Output[agentrun.FinalOutputBroadcastKey] != true {
 			t.Fatalf("answers = %#v, output = %#v", answers, result.Output)
 		}
 	})
 }
 
 func TestSilentOnlyForSpoken(t *testing.T) {
-	silent := map[string]interface{}{finalOutputSilentKey: true}
+	silent := map[string]interface{}{agentrun.FinalOutputSilentKey: true}
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		answer, _ := f.finalEntry("", silent)
-		result := f.mustDeliver(answer, FinalDeliveryRetryFinal)
+		result := f.mustDeliver(answer, agentrun.FinalDeliveryRetryFinal)
 		if result.RejectionText != conversationSilentNotSpokenText || len(f.answers()) != 0 {
 			t.Fatalf("result = %#v, answers = %d", result, len(f.answers()))
 		}
 	})
 	forFinalDeliveryStores(t, finalDeliveryOptions{responseMode: "spoken"}, func(t *testing.T, f *finalDeliveryFixture) {
 		answer, _ := f.finalEntry("", silent)
-		result := f.mustDeliver(answer, FinalDeliveryComplete)
-		if result.Output[finalOutputSilentKey] != true || result.Output["conversationId"] != f.conversation.ID ||
+		result := f.mustDeliver(answer, agentrun.FinalDeliveryComplete)
+		if result.Output[agentrun.FinalOutputSilentKey] != true || result.Output["conversationId"] != f.conversation.ID ||
 			result.Output["triggerMessageId"] != f.trigger.ID || len(f.answers()) != 0 {
 			t.Fatalf("output = %#v, answers = %d", result.Output, len(f.answers()))
 		}
@@ -436,17 +437,17 @@ func TestSilentOnlyForSpoken(t *testing.T) {
 func TestReactionOnlyCompletionPostsNoMessage(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		args, _ := json.Marshal(TurnReaction{MessageID: f.trigger.ID, Emoji: "👍"})
-		_, entries := f.step(LoopToolCall{ID: "react", Name: string(ControlToolReact), Arguments: args})
+		_, entries := f.step(agentrun.LoopToolCall{ID: "react", Name: string(ControlToolReact), Arguments: args})
 		f.settle(entries["react"], ToolEntryCompleted, "", `{"status":"added"}`)
 		// The control section's reactions-only final.
-		reacted, _ := f.finalEntry("", map[string]interface{}{finalOutputReactedKey: true})
-		result := f.mustDeliver(reacted, FinalDeliveryComplete)
-		if result.Output[finalOutputReactedKey] != true || result.Output["triggerMessageId"] != f.trigger.ID {
+		reacted, _ := f.finalEntry("", map[string]interface{}{agentrun.FinalOutputReactedKey: true})
+		result := f.mustDeliver(reacted, agentrun.FinalDeliveryComplete)
+		if result.Output[agentrun.FinalOutputReactedKey] != true || result.Output["triggerMessageId"] != f.trigger.ID {
 			t.Fatalf("output = %#v", result.Output)
 		}
 		// An answer that only repeats the emoji says nothing more.
 		echo, _ := f.finalEntry(" 👍️ ", nil)
-		if result := f.mustDeliver(echo, FinalDeliveryComplete); result.Output[finalOutputReactedKey] != true {
+		if result := f.mustDeliver(echo, agentrun.FinalDeliveryComplete); result.Output[agentrun.FinalOutputReactedKey] != true {
 			t.Fatalf("echo output = %#v", result.Output)
 		}
 		if answers := f.answers(); len(answers) != 0 {
@@ -454,7 +455,7 @@ func TestReactionOnlyCompletionPostsNoMessage(t *testing.T) {
 		}
 		// Words beyond the emoji are a reply.
 		words, _ := f.finalEntry("👍 On it, report coming up.", nil)
-		f.mustDeliver(words, FinalDeliveryComplete)
+		f.mustDeliver(words, agentrun.FinalDeliveryComplete)
 		if answers := f.answers(); len(answers) != 1 {
 			t.Fatalf("answers = %#v", answers)
 		}
@@ -464,14 +465,14 @@ func TestReactionOnlyCompletionPostsNoMessage(t *testing.T) {
 func TestEmptyAnswerRetriesOnceThenFails(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		first, entry := f.finalEntry("  ", nil)
-		result := f.mustDeliver(first, FinalDeliveryRetryFinal)
+		result := f.mustDeliver(first, agentrun.FinalDeliveryRetryFinal)
 		if result.RejectionText != conversationEmptyAnswerText {
 			t.Fatalf("result = %#v", result)
 		}
 		// The loop records the rejection on the final entry (rejectDeliveredFinal).
 		f.settle(entry, ToolEntryError, "", result.RejectionText)
 		second, _ := f.finalEntry("", nil)
-		result = f.mustDeliver(second, FinalDeliveryFail)
+		result = f.mustDeliver(second, agentrun.FinalDeliveryFail)
 		if result.Failure == nil || result.Failure.Message != conversationEmptyAnswerFailure || result.Failure.Code != conversationEmptyAnswerCode {
 			t.Fatalf("failure = %#v", result.Failure)
 		}
@@ -484,17 +485,17 @@ func TestEmptyAnswerRetriesOnceThenFails(t *testing.T) {
 func TestVisualStoredPerFollowUp(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		output := func(answer string) map[string]interface{} {
-			return map[string]interface{}{finalOutputSummaryKey: answer, finalOutputVisualKey: finalDeliveryVisual()}
+			return map[string]interface{}{finalOutputSummaryKey: answer, agentrun.FinalOutputVisualKey: finalDeliveryVisual()}
 		}
 		first, _ := f.finalEntry("Revenue is up.", output("Revenue is up."))
-		result := f.mustDeliver(first, FinalDeliveryComplete)
-		if _, ok := result.Output[finalOutputVisualKey]; ok {
+		result := f.mustDeliver(first, agentrun.FinalDeliveryComplete)
+		if _, ok := result.Output[agentrun.FinalOutputVisualKey]; ok {
 			t.Fatalf("the visual stayed in the Run output: %#v", result.Output)
 		}
 		firstID := answerVisualArtifactID(f.run.ID, f.trigger.ID, "")
 		follow := f.followUp("follow-up", "And last quarter?")
 		second, _ := f.finalEntry("Last quarter was flat.", output("Last quarter was flat."))
-		f.mustDeliver(second, FinalDeliveryComplete)
+		f.mustDeliver(second, agentrun.FinalDeliveryComplete)
 		secondID := answerVisualArtifactID(f.run.ID, f.trigger.ID, "followup:"+follow.ID)
 		answers := f.answers()
 		if len(answers) != 2 || firstID == secondID {
@@ -527,14 +528,14 @@ func TestVisualFailingHostChecksRetriesOnceThenPostsWithout(t *testing.T) {
 		bound.Components = append(bound.Components, presentation.Component{ID: "next", Type: "actions", Actions: []presentation.Action{
 			{ID: "stop", Label: "Stop", Kind: presentation.ActionEntity, Command: "stop", Binding: &presentation.Binding{Kind: presentation.BindingRunbook, ID: "rb-1"}},
 		}})
-		first, entry := f.finalEntry("Revenue is up.", map[string]interface{}{finalOutputSummaryKey: "Revenue is up.", finalOutputVisualKey: bound})
-		result := f.mustDeliver(first, FinalDeliveryRetryFinal)
+		first, entry := f.finalEntry("Revenue is up.", map[string]interface{}{finalOutputSummaryKey: "Revenue is up.", agentrun.FinalOutputVisualKey: bound})
+		result := f.mustDeliver(first, agentrun.FinalDeliveryRetryFinal)
 		if !strings.HasPrefix(result.RejectionText, conversationVisualRejectedText) || len(f.answers()) != 0 {
 			t.Fatalf("result = %#v", result)
 		}
 		f.settle(entry, ToolEntryError, "", result.RejectionText)
-		second, _ := f.finalEntry("Revenue is up.", map[string]interface{}{finalOutputSummaryKey: "Revenue is up.", finalOutputVisualKey: bound})
-		f.mustDeliver(second, FinalDeliveryComplete)
+		second, _ := f.finalEntry("Revenue is up.", map[string]interface{}{finalOutputSummaryKey: "Revenue is up.", agentrun.FinalOutputVisualKey: bound})
+		f.mustDeliver(second, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 || len(answers[0].References) != 1 {
 			t.Fatalf("answers = %#v", answers)
@@ -559,7 +560,7 @@ func TestNoDeterministicOperationReply(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		f.governed("operation", ActionCallStatusSucceeded, map[string]interface{}{"summary": "Runbook operation completed", "resourceId": "rb-1"})
 		answer, _ := f.finalEntry("I paused the weekly digest; it will not send on Monday.", nil)
-		f.mustDeliver(answer, FinalDeliveryComplete)
+		f.mustDeliver(answer, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 || answers[0].Content != "I paused the weekly digest; it will not send on Monday." {
 			t.Fatalf("answers = %#v", answers)
@@ -571,7 +572,7 @@ func TestUnconsumedInterventionBlocksPostAndContinues(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		answer, _ := f.finalEntry("Here is the report.", nil)
 		run := f.currentRun()
-		delivery := FinalDelivery{Run: run, Answer: answer, Guard: ReplyRunGuard{
+		delivery := agentrun.FinalDelivery{Run: run, Answer: answer, Guard: ReplyRunGuard{
 			Scope: run.Scope, RunID: run.ID, WorkerID: finalDeliveryWorker, ConcurrencyKey: run.ConcurrencyKey,
 			InterventionCount: len(run.PendingInterventions),
 		}}
@@ -585,7 +586,7 @@ func TestUnconsumedInterventionBlocksPostAndContinues(t *testing.T) {
 		}
 		// The next answer, which saw the message, posts under its own key.
 		next, _ := f.finalEntry("Here is Q3.", nil)
-		f.mustDeliver(next, FinalDeliveryComplete)
+		f.mustDeliver(next, agentrun.FinalDeliveryComplete)
 		if answers := f.answers(); len(answers) != 1 || answers[0].Content != "Here is Q3." {
 			t.Fatalf("answers = %#v", answers)
 		}
@@ -612,7 +613,7 @@ func TestTeamHandoffMentionsFromFinalAnswer(t *testing.T) {
 	}
 	forFinalDeliveryStores(t, finalDeliveryOptions{team: true, coordinator: team}, func(t *testing.T, f *finalDeliveryFixture) {
 		answer, _ := f.finalEntry("@agent-2 can you check the ad spend numbers?", nil)
-		f.mustDeliver(answer, FinalDeliveryComplete)
+		f.mustDeliver(answer, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 || len(answers[0].Mentions) != 1 || answers[0].Mentions[0].ID != "agent-2" {
 			t.Fatalf("answers = %#v", answers)
@@ -623,8 +624,8 @@ func TestTeamHandoffMentionsFromFinalAnswer(t *testing.T) {
 func TestOTPAnswerIsPostedThenParks(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		answer, _ := f.finalEntry("What is the code the bank just sent you?", nil)
-		answer.Park = &FinalPark{Deliver: true, Park: LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: &WakeCondition{Type: "user_message"}}}
-		result := f.mustDeliver(answer, FinalDeliveryPark)
+		answer.Park = &agentrun.FinalPark{Deliver: true, Park: agentrun.LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: &WakeCondition{Type: "user_message"}}}
+		result := f.mustDeliver(answer, agentrun.FinalDeliveryPark)
 		answers := f.answers()
 		if len(answers) != 1 || answers[0].Content != answer.Answer || result.Output["messageId"] != answers[0].ID {
 			t.Fatalf("answers = %#v, output = %#v", answers, result.Output)
@@ -638,8 +639,8 @@ func TestFailureExplanationIsPostedAndFails(t *testing.T) {
 			run.FailureExplanation = &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "execution_failed", Message: "The export service was unavailable."}
 		})
 		answer, _ := f.finalEntry("I couldn't export the report: the export service was down.",
-			map[string]interface{}{finalOutputSummaryKey: "x", finalOutputVisualKey: finalDeliveryVisual()})
-		result := f.mustDeliver(answer, FinalDeliveryFail)
+			map[string]interface{}{finalOutputSummaryKey: "x", agentrun.FinalOutputVisualKey: finalDeliveryVisual()})
+		result := f.mustDeliver(answer, agentrun.FinalDeliveryFail)
 		answers := f.answers()
 		if result.Failure != nil || len(answers) != 1 || answers[0].Content != answer.Answer || len(answers[0].References) != 1 ||
 			result.Output["summary"] != answer.Answer || result.Output["messageId"] != answers[0].ID {
@@ -651,8 +652,8 @@ func TestFailureExplanationIsPostedAndFails(t *testing.T) {
 		f.mutateRun(func(run *AgentRun) {
 			run.FailureExplanation = &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "execution_failed", Message: "The export service was unavailable."}
 		})
-		answer, _ := f.finalEntry("", map[string]interface{}{finalOutputSilentKey: true})
-		f.mustDeliver(answer, FinalDeliveryFail)
+		answer, _ := f.finalEntry("", map[string]interface{}{agentrun.FinalOutputSilentKey: true})
+		f.mustDeliver(answer, agentrun.FinalDeliveryFail)
 		answers := f.answers()
 		if len(answers) != 1 || answers[0].Content != TerminalFailureReply("execution_failed") {
 			t.Fatalf("answers = %#v", answers)
@@ -663,7 +664,7 @@ func TestFailureExplanationIsPostedAndFails(t *testing.T) {
 func TestParticipationStoppedPostsNothing(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{participation: true}, func(t *testing.T, f *finalDeliveryFixture) {
 		answer, _ := f.finalEntry("Here is the report.", nil)
-		result := f.mustDeliver(answer, FinalDeliveryComplete)
+		result := f.mustDeliver(answer, agentrun.FinalDeliveryComplete)
 		if result.Output["participationSkipped"] != true || len(f.answers()) != 0 {
 			t.Fatalf("output = %#v, answers = %d", result.Output, len(f.answers()))
 		}
@@ -673,7 +674,7 @@ func TestParticipationStoppedPostsNothing(t *testing.T) {
 func TestKernelFinalWithoutAnswerKeepsItsOutput(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		output := map[string]interface{}{"approvalReplaced": true, "replacedByMessageId": "m-2"}
-		result := f.mustDeliver(FinalAnswer{StepID: "step-k", Output: output}, FinalDeliveryComplete)
+		result := f.mustDeliver(agentrun.FinalAnswer{StepID: "step-k", Output: output}, agentrun.FinalDeliveryComplete)
 		if result.Output["approvalReplaced"] != true || len(f.answers()) != 0 {
 			t.Fatalf("output = %#v, answers = %d", result.Output, len(f.answers()))
 		}

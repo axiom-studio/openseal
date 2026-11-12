@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func validModelStepResultFixture() (ModelStepRequest, ModelStepResult) {
@@ -111,11 +113,11 @@ func TestValidateModelStepResultAcceptsSummaryText(t *testing.T) {
 	}
 }
 
-func modelStepOutputFixture() StepOutput {
+func modelStepOutputFixture() agentrun.StepOutput {
 	_, res := validModelStepResultFixture()
 	assistant := res.Assistant
 	assistant.Limits = &AssistantModelLimits{ContextTokens: 200000, PromptTokens: 10}
-	return StepOutput{ModelProvider: "anthropic", Model: "claude-x", Usage: TurnUsage{InputTokens: 10}, Assistant: &assistant}
+	return agentrun.StepOutput{ModelProvider: "anthropic", Model: "claude-x", Usage: TurnUsage{InputTokens: 10}, Assistant: &assistant}
 }
 
 func TestValidateStepOutputModel(t *testing.T) {
@@ -123,22 +125,24 @@ func TestValidateStepOutputModel(t *testing.T) {
 	if err := validateStepOutput(StepProducerModel, out); err != nil {
 		t.Fatalf("valid model output rejected: %v", err)
 	}
-	out.Failure = &LoopFailure{Kind: "execution", Code: "refusal", Message: "The model refused."}
+	out.Failure = &agentrun.LoopFailure{Kind: "execution", Code: "refusal", Message: "The model refused."}
 	if err := validateStepOutput(StepProducerModel, out); err != nil {
 		t.Fatalf("model failure rejected: %v", err)
 	}
-	bad := map[string]func(*StepOutput){
-		"no assistant": func(o *StepOutput) { o.Assistant = nil },
-		"tool calls":   func(o *StepOutput) { o.ToolCalls = []LoopToolCall{{ID: "a", Name: "x"}} },
-		"final":        func(o *StepOutput) { o.Final = &LoopFinal{} },
-		"park": func(o *StepOutput) {
-			o.Park = &LoopPark{Status: AgentRunStatusSleeping, Wake: &WakeCondition{Type: "timer"}}
+	bad := map[string]func(*agentrun.StepOutput){
+		"no assistant": func(o *agentrun.StepOutput) { o.Assistant = nil },
+		"tool calls":   func(o *agentrun.StepOutput) { o.ToolCalls = []agentrun.LoopToolCall{{ID: "a", Name: "x"}} },
+		"final":        func(o *agentrun.StepOutput) { o.Final = &agentrun.LoopFinal{} },
+		"park": func(o *agentrun.StepOutput) {
+			o.Park = &agentrun.LoopPark{Status: AgentRunStatusSleeping, Wake: &WakeCondition{Type: "timer"}}
 		},
-		"kernel state":     func(o *StepOutput) { o.KernelState = map[string]interface{}{} },
-		"assistant shape":  func(o *StepOutput) { o.Assistant.StopReason = "" },
-		"usage":            func(o *StepOutput) { o.Usage.OutputTokens = -1 },
-		"failure no code":  func(o *StepOutput) { o.Failure = &LoopFailure{Kind: "execution", Message: "m"} },
-		"duplicate call":   func(o *StepOutput) { o.Assistant.ToolCalls = append(o.Assistant.ToolCalls, o.Assistant.ToolCalls[0]) },
+		"kernel state":    func(o *agentrun.StepOutput) { o.KernelState = map[string]interface{}{} },
+		"assistant shape": func(o *agentrun.StepOutput) { o.Assistant.StopReason = "" },
+		"usage":           func(o *agentrun.StepOutput) { o.Usage.OutputTokens = -1 },
+		"failure no code": func(o *agentrun.StepOutput) { o.Failure = &agentrun.LoopFailure{Kind: "execution", Message: "m"} },
+		"duplicate call": func(o *agentrun.StepOutput) {
+			o.Assistant.ToolCalls = append(o.Assistant.ToolCalls, o.Assistant.ToolCalls[0])
+		},
 		"unknown producer": nil,
 	}
 	for name, mutate := range bad {
@@ -150,7 +154,7 @@ func TestValidateStepOutputModel(t *testing.T) {
 			} else {
 				mutate(&o)
 			}
-			if err := validateStepOutput(kind, o); !errors.Is(err, ErrInvalidStepOutput) {
+			if err := validateStepOutput(kind, o); !errors.Is(err, agentrun.ErrInvalidStepOutput) {
 				t.Fatalf("got %v, want ErrInvalidStepOutput", err)
 			}
 		})
@@ -159,42 +163,42 @@ func TestValidateStepOutputModel(t *testing.T) {
 
 func TestValidateStepOutputDeterministic(t *testing.T) {
 	wake := &WakeCondition{Type: "event"}
-	good := map[string]StepOutput{
+	good := map[string]agentrun.StepOutput{
 		"tool calls": {
-			ToolCalls: []LoopToolCall{
-				{ID: "op-1", Name: "skill_action", Arguments: json.RawMessage(`{"a":1}`), Directive: &ToolCallDirective{BindingID: "b", BindingRevision: 2, IdempotencyKey: "k"}},
+			ToolCalls: []agentrun.LoopToolCall{
+				{ID: "op-1", Name: "skill_action", Arguments: json.RawMessage(`{"a":1}`), Directive: &agentrun.ToolCallDirective{BindingID: "b", BindingRevision: 2, IdempotencyKey: "k"}},
 				{ID: "op-2", Name: "skill_action"},
 			},
 			KernelState: map[string]interface{}{"cursor": 1},
 		},
-		"final":        {Final: &LoopFinal{Answer: "done", Status: AgentRunStatusCompleted}},
-		"failed final": {Final: &LoopFinal{Status: AgentRunStatusFailed}},
-		"park":         {Park: &LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: wake}},
-		"failure":      {Failure: &LoopFailure{Kind: "execution", Code: "routine_script", Message: "The script failed."}},
+		"final":        {Final: &agentrun.LoopFinal{Answer: "done", Status: AgentRunStatusCompleted}},
+		"failed final": {Final: &agentrun.LoopFinal{Status: AgentRunStatusFailed}},
+		"park":         {Park: &agentrun.LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: wake}},
+		"failure":      {Failure: &agentrun.LoopFailure{Kind: "execution", Code: "routine_script", Message: "The script failed."}},
 	}
 	for name, out := range good {
 		if err := validateStepOutput(StepProducerDeterministic, out); err != nil {
 			t.Fatalf("%s rejected: %v", name, err)
 		}
 	}
-	bad := map[string]StepOutput{
+	bad := map[string]agentrun.StepOutput{
 		"nothing":        {},
-		"two results":    {Final: &LoopFinal{}, Failure: &LoopFailure{Kind: "k", Code: "c", Message: "m"}},
-		"assistant":      {Assistant: &AssistantEntry{}, Final: &LoopFinal{}},
-		"empty call id":  {ToolCalls: []LoopToolCall{{Name: "x"}}},
-		"duplicate call": {ToolCalls: []LoopToolCall{{ID: "a", Name: "x"}, {ID: "a", Name: "y"}}},
-		"empty name":     {ToolCalls: []LoopToolCall{{ID: "a"}}},
-		"bad arguments":  {ToolCalls: []LoopToolCall{{ID: "a", Name: "x", Arguments: json.RawMessage(`"s"`)}}},
-		"bad directive":  {ToolCalls: []LoopToolCall{{ID: "a", Name: "x", Directive: &ToolCallDirective{BindingRevision: -1}}}},
-		"committed park": {Park: &LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: wake, Committed: true}},
-		"park no wake":   {Park: &LoopPark{Status: AgentRunStatusWaitingForEvent}},
-		"park status":    {Park: &LoopPark{Status: AgentRunStatusPaused, Wake: wake}},
-		"final status":   {Final: &LoopFinal{Status: AgentRunStatusCanceled}},
-		"usage":          {Final: &LoopFinal{}, Usage: TurnUsage{Cost: -1}},
+		"two results":    {Final: &agentrun.LoopFinal{}, Failure: &agentrun.LoopFailure{Kind: "k", Code: "c", Message: "m"}},
+		"assistant":      {Assistant: &AssistantEntry{}, Final: &agentrun.LoopFinal{}},
+		"empty call id":  {ToolCalls: []agentrun.LoopToolCall{{Name: "x"}}},
+		"duplicate call": {ToolCalls: []agentrun.LoopToolCall{{ID: "a", Name: "x"}, {ID: "a", Name: "y"}}},
+		"empty name":     {ToolCalls: []agentrun.LoopToolCall{{ID: "a"}}},
+		"bad arguments":  {ToolCalls: []agentrun.LoopToolCall{{ID: "a", Name: "x", Arguments: json.RawMessage(`"s"`)}}},
+		"bad directive":  {ToolCalls: []agentrun.LoopToolCall{{ID: "a", Name: "x", Directive: &agentrun.ToolCallDirective{BindingRevision: -1}}}},
+		"committed park": {Park: &agentrun.LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: wake, Committed: true}},
+		"park no wake":   {Park: &agentrun.LoopPark{Status: AgentRunStatusWaitingForEvent}},
+		"park status":    {Park: &agentrun.LoopPark{Status: AgentRunStatusPaused, Wake: wake}},
+		"final status":   {Final: &agentrun.LoopFinal{Status: AgentRunStatusCanceled}},
+		"usage":          {Final: &agentrun.LoopFinal{}, Usage: TurnUsage{Cost: -1}},
 	}
 	for name, out := range bad {
 		t.Run(name, func(t *testing.T) {
-			if err := validateStepOutput(StepProducerDeterministic, out); !errors.Is(err, ErrInvalidStepOutput) {
+			if err := validateStepOutput(StepProducerDeterministic, out); !errors.Is(err, agentrun.ErrInvalidStepOutput) {
 				t.Fatalf("got %v, want ErrInvalidStepOutput", err)
 			}
 		})

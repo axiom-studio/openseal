@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
@@ -18,12 +19,12 @@ import (
 // Compaction is not a step: it writes no agent_turns row and charges no Turns;
 // its usage is returned so the loop adds it to the step that triggered it.
 type LoopCompactor struct {
-	Host     StepHost          // only ExecuteModelStep is used
+	Host     agentrun.StepHost // only ExecuteModelStep is used
 	Sessions AgentSessionStore // appends the compaction entry and its event
 	// Requests builds the step's own model request (prep-2), so the summary
 	// call's System and Tools are byte-identical to the step's and it reads
 	// the step's prompt cache.
-	Requests ModelStepPreparer
+	Requests agentrun.ModelStepPreparer
 	// Budget reserves and settles a bounded Run's compaction usage. nil is
 	// valid only while no Run has a budget.
 	Budget compactionBudget
@@ -31,11 +32,11 @@ type LoopCompactor struct {
 	NewID  func() string
 }
 
-var _ StepCompactor = (*LoopCompactor)(nil)
+var _ agentrun.StepCompactor = (*LoopCompactor)(nil)
 
 // LoopFailureError carries a LoopFailure through an error return. The loop
 // maps it with errors.As to failStep(failure) instead of producer_failed.
-type LoopFailureError struct{ Failure LoopFailure }
+type LoopFailureError struct{ Failure agentrun.LoopFailure }
 
 func (e *LoopFailureError) Error() string {
 	if e == nil {
@@ -188,13 +189,13 @@ func compactionPressureFrom(ctx context.Context) *HostedContextPressure {
 // (TurnHostContextExceeded or RunFailureCodeCompactionFailed).
 func compactionFailure(code string) error {
 	failure, _ := guardRunFailureFor(code)
-	return &LoopFailureError{Failure: LoopFailure{
+	return &LoopFailureError{Failure: agentrun.LoopFailure{
 		Kind: failure.Kind, Code: failure.Code, Message: failure.Message, Explainable: failure.Explainable,
 	}}
 }
 
 func compactionBudgetFailure() error {
-	return &LoopFailureError{Failure: LoopFailure{
+	return &LoopFailureError{Failure: agentrun.LoopFailure{
 		Kind: "budget", Code: "budget_exhausted",
 		Message: "The run's budget has no room left to compact the conversation.",
 	}}
@@ -204,7 +205,7 @@ func compactionBudgetFailure() error {
 // against: the step's model when already known, else the binding's model
 // when the path holds a step of it, else the newest step's model when no
 // model change followed it (the host resolved the binding's model to it).
-func compactionModel(in StepInput) string {
+func compactionModel(in agentrun.StepInput) string {
 	if in.Step != nil && strings.TrimSpace(in.Step.Model) != "" {
 		return in.Step.Model
 	}
@@ -242,7 +243,7 @@ func compactionModel(in StepInput) string {
 
 // Due reports whether a threshold compaction should run before this step
 // (section 08 §2).
-func (c *LoopCompactor) Due(in StepInput) bool {
+func (c *LoopCompactor) Due(in agentrun.StepInput) bool {
 	if in.Path == nil {
 		return false
 	}
@@ -251,7 +252,7 @@ func (c *LoopCompactor) Due(in StepInput) bool {
 }
 
 // CompactIfNeeded runs a threshold compaction when Due.
-func (c *LoopCompactor) CompactIfNeeded(ctx context.Context, in StepInput) (ModelStepUsage, error) {
+func (c *LoopCompactor) CompactIfNeeded(ctx context.Context, in agentrun.StepInput) (ModelStepUsage, error) {
 	if !c.Due(in) {
 		return ModelStepUsage{}, nil
 	}
@@ -262,7 +263,7 @@ func (c *LoopCompactor) CompactIfNeeded(ctx context.Context, in StepInput) (Mode
 // rejection (the loop attaches the rejection's pressure with
 // withCompactionPressure), force=false a threshold compaction without the
 // Due check.
-func (c *LoopCompactor) Compact(ctx context.Context, in StepInput, force bool) (ModelStepUsage, error) {
+func (c *LoopCompactor) Compact(ctx context.Context, in agentrun.StepInput, force bool) (ModelStepUsage, error) {
 	if force {
 		return c.compact(ctx, in, CompactionTriggerOverflow)
 	}
@@ -283,7 +284,7 @@ func (c *LoopCompactor) newID() string {
 	return uuid.NewString()
 }
 
-func (c *LoopCompactor) validate(in StepInput) error {
+func (c *LoopCompactor) validate(in agentrun.StepInput) error {
 	switch {
 	case c == nil || c.Host == nil || c.Sessions == nil || c.Requests == nil:
 		return fmt.Errorf("%w: the compactor needs a host, a session store and a request builder", ErrTurnHostConfiguration)
@@ -310,7 +311,7 @@ type compactionWork struct {
 	chunks   [][]*SessionEntry // overflow only
 }
 
-func (c *LoopCompactor) compact(ctx context.Context, in StepInput, trigger string) (ModelStepUsage, error) {
+func (c *LoopCompactor) compact(ctx context.Context, in agentrun.StepInput, trigger string) (ModelStepUsage, error) {
 	if err := c.validate(in); err != nil {
 		return ModelStepUsage{}, err
 	}
@@ -402,7 +403,7 @@ type compactionSummary struct {
 	model    string
 }
 
-func (c *LoopCompactor) summarizeAndAppend(ctx context.Context, in StepInput, work compactionWork) (ModelStepUsage, error) {
+func (c *LoopCompactor) summarizeAndAppend(ctx context.Context, in agentrun.StepInput, work compactionWork) (ModelStepUsage, error) {
 	var (
 		summary compactionSummary
 		usage   ModelStepUsage
@@ -427,7 +428,7 @@ func (c *LoopCompactor) summarizeAndAppend(ctx context.Context, in StepInput, wo
 // summarizeOverflow folds the summarized span chunk by chunk: chunk 0 after
 // the previous compaction, chunk k after a synthetic compaction view of
 // summary k−1. A chunk the host rejects for length is halved once.
-func (c *LoopCompactor) summarizeOverflow(ctx context.Context, in StepInput, work compactionWork) (compactionSummary, ModelStepUsage, error) {
+func (c *LoopCompactor) summarizeOverflow(ctx context.Context, in agentrun.StepInput, work compactionWork) (compactionSummary, ModelStepUsage, error) {
 	views := make(map[string]SessionEntryView, len(work.step.Entries))
 	for _, view := range work.step.Entries {
 		views[view.ID] = view
@@ -616,7 +617,7 @@ func isContextExceeded(err error) bool {
 
 // appendCompaction appends the compaction entry and its session.compacted
 // event in one lease-fenced store call.
-func (c *LoopCompactor) appendCompaction(ctx context.Context, in StepInput, work compactionWork, summary compactionSummary, usage ModelStepUsage) error {
+func (c *LoopCompactor) appendCompaction(ctx context.Context, in agentrun.StepInput, work compactionWork, summary compactionSummary, usage ModelStepUsage) error {
 	now := c.now()
 	var previous *CompactionEntry
 	if in.Path.Compaction != nil {

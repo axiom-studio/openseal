@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -166,8 +167,8 @@ func TestApprovalCoordinatorExpiresApprovalAfterRunLeavesWaitingState(t *testing
 	store := newTestKernelStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
-	paused, err := NewRunCommandService(store).CommandAgentRun(t.Context(), AgentRunCommandRequest{
-		Scope: proposal.Run.Scope, RunID: proposal.Run.ID, ExpectedRevision: proposal.Run.Revision, Kind: AgentRunCommandPause,
+	paused, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
+		Scope: proposal.Run.Scope, RunID: proposal.Run.ID, ExpectedRevision: proposal.Run.Revision, Kind: agentrun.AgentRunCommandPause,
 		Actor: ActivityActor{Type: "user", ID: "operator"},
 	})
 	if err != nil || paused.Run.Status != AgentRunStatusPaused {
@@ -310,7 +311,7 @@ func createApprovalForStoreWithTimeout(t *testing.T, store KernelStore, now time
 		ExpiresAt: proposedAt.Add(time.Hour), Revision: 1, CreatedAt: proposedAt, UpdatedAt: proposedAt,
 	}
 	reserved := cloneAgentRun(claimed)
-	if err := reserveRunBudget(reserved, BudgetReservation{ID: actionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: proposedAt}); err != nil {
+	if err := reserveRunBudget(reserved, BudgetReservation{ID: agentrun.ActionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: proposedAt}); err != nil {
 		t.Fatal(err)
 	}
 	reserved.Revision++

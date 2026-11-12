@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"maps"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func (p *AgentRunWorkerPool) parkSkillRuntimeMaintenance(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, cause error) bool {
@@ -15,7 +17,7 @@ func (p *AgentRunWorkerPool) parkSkillRuntimeMaintenance(ctx context.Context, wo
 	if checkpoint == nil {
 		checkpoint = make(map[string]interface{})
 	}
-	checkpoint[skillRuntimeMaintenanceCheckpointKey] = map[string]interface{}{"skillId": held.Maintenance.SkillID, "operationId": held.Maintenance.OperationID}
+	checkpoint[agentrun.SkillRuntimeMaintenanceCheckpointKey] = map[string]interface{}{"skillId": held.Maintenance.SkillID, "operationId": held.Maintenance.OperationID}
 	turnID := ""
 	if turn != nil {
 		turnID = turn.ID

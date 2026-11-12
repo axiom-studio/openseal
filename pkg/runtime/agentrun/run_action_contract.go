@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -45,6 +45,6 @@ type ActionProposalValidationInput struct {
 	IdempotencyKey string
 }
 
-func actionBudgetReservationID(actionID string) string {
+func ActionBudgetReservationID(actionID string) string {
 	return "action:" + actionID
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -57,7 +58,7 @@ func waitCardSkills(f *loopFixture) {
 	}
 	bindings := []*skill.Binding{
 		{ID: "skills-binding", Scope: skillScope, DeploymentID: loopFixtureAgent, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion,
-			AllowedActions: []string{SkillActionRequestCredential, SkillActionRequestConnection}, MaximumRisk: skill.RiskLevelExternal, Revision: 1},
+			AllowedActions: []string{agentrun.SkillActionRequestCredential, agentrun.SkillActionRequestConnection}, MaximumRisk: skill.RiskLevelExternal, Revision: 1},
 		{ID: "mail-binding", Scope: skillScope, DeploymentID: loopFixtureAgent, SkillID: "mail", SkillVersion: "1.0.0",
 			AllowedActions: []string{"send_mail"}, MaximumRisk: skill.RiskLevelExternal, Revision: 1,
 			Credentials: map[string]skill.CredentialReference{"google": {Kind: "oauth2", ID: skill.PersonCredentialReferenceID}}},
@@ -171,7 +172,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 		eachStore(t, "wait-credential", func(t *testing.T, store KernelStore) {
 			f := newLoopFixture(t, store)
 			waitCardSkills(f)
-			f.dispatch.on(SkillActionRequestCredential, func(in ActionDispatchInput) (map[string]interface{}, error) {
+			f.dispatch.on(agentrun.SkillActionRequestCredential, func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				conversationID, _ := in.Run.Context[conversationRunContextConversationID].(string)
 				triggerID, _ := in.Run.Context[conversationRunContextTriggerID].(string)
 				now := f.clock.Now()
@@ -183,12 +184,12 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 				}
 				return waitCredentialRequestOutput(request)
 			})
-			f.model.add(waitCardRules(t, SkillActionRequestCredential, func(v stepView) ModelStepResult {
-				return act("I need your card.", call(waitTool(t, v, SkillActionRequestCredential), map[string]any{"kind": CredentialRequestKindPaymentCard, "reason": "Add your card so I can pay"}))
+			f.model.add(waitCardRules(t, agentrun.SkillActionRequestCredential, func(v stepView) ModelStepResult {
+				return act("I need your card.", call(waitTool(t, v, agentrun.SkillActionRequestCredential), map[string]any{"kind": CredentialRequestKindPaymentCard, "reason": "Add your card so I can pay"}))
 			})...)
 			conversation, run := f.startChat("Pay the invoice")
 			steerToRest(f, run.ID, 4)
-			entry := waitParked(f, run.ID, waitTool(t, stepView{req: convFirstStep(f, run.ID)}, SkillActionRequestCredential), CredentialRequestWakeType)
+			entry := waitParked(f, run.ID, waitTool(t, stepView{req: convFirstStep(f, run.ID)}, agentrun.SkillActionRequestCredential), CredentialRequestWakeType)
 			requestID := f.mustRun(run.ID).WakeCondition.Reference
 			if entry.Tool.Wait == nil || entry.Tool.Wait.EventWaitID != requestID {
 				t.Fatalf("entry wait = %#v, want event %s", entry.Tool.Wait, requestID)
@@ -224,7 +225,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			f := newLoopFixture(t, store)
 			waitCardSkills(f)
 			setups := f.raw.(SkillSetupRequestStore)
-			f.dispatch.on(SkillActionRequestConnection, func(in ActionDispatchInput) (map[string]interface{}, error) {
+			f.dispatch.on(agentrun.SkillActionRequestConnection, func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				conversationID, _ := in.Run.Context[conversationRunContextConversationID].(string)
 				triggerID, _ := in.Run.Context[conversationRunContextTriggerID].(string)
 				now := f.clock.Now()
@@ -238,12 +239,12 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 				}
 				return skillSetupResult(request)
 			})
-			f.model.add(waitCardRules(t, SkillActionRequestConnection, func(v stepView) ModelStepResult {
-				return act("Linear needs connecting.", call(waitTool(t, v, SkillActionRequestConnection), map[string]any{"app": "linear", "reason": "Connect Linear to list your issues"}))
+			f.model.add(waitCardRules(t, agentrun.SkillActionRequestConnection, func(v stepView) ModelStepResult {
+				return act("Linear needs connecting.", call(waitTool(t, v, agentrun.SkillActionRequestConnection), map[string]any{"app": "linear", "reason": "Connect Linear to list your issues"}))
 			})...)
 			conversation, run := f.startChat("List my Linear issues")
 			steerToRest(f, run.ID, 4)
-			entry := waitParked(f, run.ID, waitTool(t, stepView{req: convFirstStep(f, run.ID)}, SkillActionRequestConnection), ConnectAppWakeType)
+			entry := waitParked(f, run.ID, waitTool(t, stepView{req: convFirstStep(f, run.ID)}, agentrun.SkillActionRequestConnection), ConnectAppWakeType)
 			requestID := f.mustRun(run.ID).WakeCondition.Reference
 
 			request, err := setups.GetSkillSetupRequest(f.ctx, f.scope, requestID)
@@ -279,7 +280,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 				}
 				return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapPersonSignIn}}, nil
 			}))
-			f.dispatch.on("send_mail", func(ActionDispatchInput) (map[string]interface{}, error) {
+			f.dispatch.on("send_mail", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				return map[string]interface{}{"sent": true}, nil
 			})
 			sends := 0
@@ -345,7 +346,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 	t.Run("human_intervention", func(t *testing.T) {
 		eachStore(t, "wait-human", func(t *testing.T, store KernelStore) {
 			f := newLoopFixture(t, store)
-			f.dispatch.on("lookup", func(ActionDispatchInput) (map[string]interface{}, error) {
+			f.dispatch.on("lookup", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				return map[string]interface{}{"requiresHuman": true, "challenges": []interface{}{"captcha"}}, nil
 			})
 			f.model.add(waitCardRules(t, "lookup", func(v stepView) ModelStepResult {
@@ -362,9 +363,9 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			}
 
 			// The person solves the captcha through the run command service.
-			commands := NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
-			if _, err := commands.CommandAgentRun(f.ctx, AgentRunCommandRequest{
-				Scope: f.scope, RunID: run.ID, ExpectedRevision: parked.Revision, Kind: AgentRunCommandResolveHumanIntervention,
+			commands := agentrun.NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
+			if _, err := commands.CommandAgentRun(f.ctx, agentrun.AgentRunCommandRequest{
+				Scope: f.scope, RunID: run.ID, ExpectedRevision: parked.Revision, Kind: agentrun.AgentRunCommandResolveHumanIntervention,
 				HumanInterventionID: parked.HumanInterventions[0].ID, Instruction: "Solved the captcha.",
 				Actor: ActivityActor{Type: "user", ID: loopFixtureUser},
 			}); err != nil {
@@ -471,7 +472,7 @@ func TestWaitToolParksUntilTimer(t *testing.T) {
 			t.Fatalf("wait entries = %#v, wake %#v", waits, parked.WakeCondition)
 		}
 
-		wake := NewAgentRunWakeService(f.store, f.store, models.WithClock(f.clock.Now))
+		wake := agentrun.NewAgentRunWakeService(f.store, f.store, models.WithClock(f.clock.Now))
 		// Before the timer nothing wakes.
 		f.clock.Advance(599 * time.Second)
 		if result, err := wake.WakeDueTimers(f.ctx, f.scope, f.clock.Now()); err != nil || len(result.Runs) != 0 {

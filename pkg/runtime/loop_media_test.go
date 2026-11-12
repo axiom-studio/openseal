@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
@@ -135,7 +136,7 @@ func (f *mediaFixture) startChatWithAttachments(text string, refs ...Conversatio
 
 // bind gives the claim's model producer the artifact sources and the
 // fixture's image modality, as the catalog resolver does from the catalog.
-func (f *mediaFixture) bind(binding *TurnRunnerBinding) {
+func (f *mediaFixture) bind(binding *agentrun.TurnRunnerBinding) {
 	producer, ok := binding.Producer.(*ModelStepProducer)
 	if !ok {
 		f.t.Fatalf("producer is %T", binding.Producer)
@@ -143,7 +144,7 @@ func (f *mediaFixture) bind(binding *TurnRunnerBinding) {
 	vision := f.vision
 	producer.Media = ModelStepMedia{
 		Artifacts: f.raw.(ArtifactStore), Content: f.content,
-		ImageInput: func(context.Context, StepInput, ModelStepRequest) bool { return vision },
+		ImageInput: func(context.Context, agentrun.StepInput, ModelStepRequest) bool { return vision },
 	}
 }
 
@@ -239,8 +240,8 @@ func requireNoStoredBytes(t *testing.T, f *loopFixture, runID string, encoded ..
 }
 
 // screenshotOutput is a lookup result with a screenshot as output.modelMedia.
-func screenshotOutput(data []byte) func(ActionDispatchInput) (map[string]interface{}, error) {
-	return func(in ActionDispatchInput) (map[string]interface{}, error) {
+func screenshotOutput(data []byte) func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	return func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{
 			"id": in.Arguments["id"], "status": "open",
 			"modelMedia": map[string]interface{}{"mediaType": "image/png", "detail": "low", "contentBase64": base64.StdEncoding.EncodeToString(data)},

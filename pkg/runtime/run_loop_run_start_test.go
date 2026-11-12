@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // runStartActions serves ListActionCalls from a fixed set; every other
@@ -20,7 +22,7 @@ func TestRunStartNoteIdempotent(t *testing.T) {
 	// Governed-history notes: rate-limited source and pending setup.
 	g := newGuardFixture(t)
 	g.rateLimitedLightpanda("read-429")
-	g.add("setup-1", SkillManagementSkillID, SkillActionRequestSetup, ActionCallStatusSucceeded, map[string]interface{}{
+	g.add("setup-1", SkillManagementSkillID, agentrun.SkillActionRequestSetup, ActionCallStatusSucceeded, map[string]interface{}{
 		"setupRequest": map[string]interface{}{"id": "form-1", "status": "pending", "runId": g.run.ID, "actionCallId": "setup-1"},
 	}, "", nil)
 	actions := &runStartActions{}
@@ -32,7 +34,7 @@ func TestRunStartNoteIdempotent(t *testing.T) {
 	prepare := func(run *AgentRun, path *AgentSessionPath) []*SessionEntry {
 		t.Helper()
 		out, err := newRunStartPreparer(newTestKernelStore(t), actions).BeforeStep(context.Background(),
-			StepInput{Run: run, Step: step, Session: session, Path: path}, SteeringPlan{})
+			agentrun.StepInput{Run: run, Step: step, Session: session, Path: path}, agentrun.SteeringPlan{})
 		if err != nil {
 			t.Fatalf("before step: %v", err)
 		}

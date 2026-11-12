@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -46,8 +47,8 @@ func TestConversationTaskForegroundReserveLeavesFourthSlotForConversation(t *tes
 		for i := range tasks {
 			tasks[i] = storetest.CreateConversationTaskAdmissionTask(t, store, fmt.Sprintf("reserve-%d", i))
 		}
-		scheduler := NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
-		request := AgentRunClaimRequest{Scope: tasks[0].Task.Scope, Kind: RunKindAgentWork, WorkerID: "worker",
+		scheduler := agentrun.NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
+		request := agentrun.AgentRunClaimRequest{Scope: tasks[0].Task.Scope, Kind: RunKindAgentWork, WorkerID: "worker",
 			AssignedAgentID: tasks[0].Task.TargetAgentID, MaxActiveForAgent: 4, ConversationTaskForegroundReserve: 1}
 		for i := 0; i < 3; i++ {
 			decision, err := scheduler.ClaimNextDecision(t.Context(), request)

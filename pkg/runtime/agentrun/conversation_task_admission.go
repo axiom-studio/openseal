@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -59,7 +59,7 @@ func VerifyConversationTaskWorkRun(ctx context.Context, store models.Conversatio
 // Scheduling provenance classifies legitimate original delegated work while
 // keeping each child's existing owner, deployment and grants authoritative.
 // It is deliberately separate from the same-Agent task fork authority.
-func persistedConversationTaskSchedulingOrigin(ctx context.Context, store models.PortfolioStore, run *models.AgentRun, getRequest func(context.Context, models.Scope, string) (*models.AgentRequest, error)) (*models.ConversationTask, error) {
+func PersistedConversationTaskSchedulingOrigin(ctx context.Context, store models.PortfolioStore, run *models.AgentRun, getRequest func(context.Context, models.Scope, string) (*models.AgentRequest, error)) (*models.ConversationTask, error) {
 	tasks, ok := store.(models.ConversationTaskStore)
 	if !ok || run == nil {
 		return nil, nil

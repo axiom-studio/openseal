@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // StepBudgetPlanner is implemented by producers that know what a step will
@@ -13,7 +14,7 @@ import (
 // reservation and sets Turns to 1. Deterministic producers do not implement
 // it: their reservation is the floor with Turns 1.
 type StepBudgetPlanner interface {
-	PlanStepBudget(ctx context.Context, in StepInput) (BudgetUsage, error)
+	PlanStepBudget(ctx context.Context, in agentrun.StepInput) (BudgetUsage, error)
 }
 
 const (

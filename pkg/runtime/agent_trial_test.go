@@ -8,6 +8,7 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
 )
@@ -158,7 +159,7 @@ func newAgentTrialFinalizerFixture(t *testing.T, parentStatus AgentRunStatus) *a
 	parent.Status = parentStatus
 	if parentStatus == AgentRunStatusWaitingForEvent {
 		deadline := agentTrialDeadline(child)
-		parent.WakeCondition = &WakeCondition{Type: AgentTrialWakeType, Reference: child.ID, WakeAt: &deadline}
+		parent.WakeCondition = &WakeCondition{Type: agentrun.AgentTrialWakeType, Reference: child.ID, WakeAt: &deadline}
 	}
 	putAgentTrialRun(t, f.store.Store, parent)
 	return &agentTrialFinalizerFixture{store: f.store.Store, scope: f.scope, parent: parent, child: child, call: call}

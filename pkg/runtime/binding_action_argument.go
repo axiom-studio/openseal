@@ -8,6 +8,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -20,7 +21,7 @@ const (
 // output and before schema, policy, approval, persistence, and execution.
 type BindingActionArgumentResolver struct{}
 
-func (BindingActionArgumentResolver) ResolveActionProposalArguments(_ context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
+func (BindingActionArgumentResolver) ResolveActionProposalArguments(_ context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, bool, error) {
 	if input.Bound == nil || input.Bound.Binding == nil {
 		return nil, false, nil
 	}
@@ -39,7 +40,7 @@ func (BindingActionArgumentResolver) ResolveActionProposalArguments(_ context.Co
 	return resolved, true, nil
 }
 
-func (BindingActionArgumentResolver) ValidateActionProposal(context.Context, ActionProposalValidationInput) (map[string]interface{}, error) {
+func (BindingActionArgumentResolver) ValidateActionProposal(context.Context, agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	return nil, nil
 }
 
@@ -90,7 +91,7 @@ func trustedRunSessionContext(run *AgentRun) (map[string]interface{}, error) {
 	if run == nil {
 		return nil, errors.New("durable Run is required")
 	}
-	session, _ := run.Context[RunContextSessionKey].(map[string]interface{})
+	session, _ := run.Context[agentrun.RunContextSessionKey].(map[string]interface{})
 	if session == nil {
 		return nil, errors.New("Run is not attached to a trusted session")
 	}
@@ -117,11 +118,11 @@ func bindingResolvedArgumentProvenance(bound *skill.BoundAction) map[string]Reso
 // but direct or stale proposals must still fail closed here.
 type EmbedSessionActionAuthorityValidator struct{}
 
-func (EmbedSessionActionAuthorityValidator) ValidateActionProposal(_ context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (EmbedSessionActionAuthorityValidator) ValidateActionProposal(_ context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if input.Run == nil || input.Bound == nil || input.Bound.Binding == nil {
 		return nil, nil
 	}
-	session, _ := input.Run.Context[RunContextSessionKey].(map[string]interface{})
+	session, _ := input.Run.Context[agentrun.RunContextSessionKey].(map[string]interface{})
 	if session == nil {
 		return nil, nil
 	}
@@ -136,7 +137,7 @@ func constrainEmbedSessionActions(run *AgentRun, actions []skill.ModelAction) []
 	if run == nil {
 		return actions
 	}
-	session, _ := run.Context[RunContextSessionKey].(map[string]interface{})
+	session, _ := run.Context[agentrun.RunContextSessionKey].(map[string]interface{})
 	if session == nil {
 		return actions
 	}

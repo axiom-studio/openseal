@@ -1,4 +1,4 @@
-package runtime
+package agentrun
 
 import (
 	"context"
@@ -27,7 +27,7 @@ const (
 	// terminal close finishes it.
 	terminalCloseWorkerID  = "run-terminal-close"
 	terminalCloseStepLease = time.Minute
-	terminalCloseStepError = "The run ended before this step finished."
+	TerminalCloseStepError = "The run ended before this step finished."
 	terminalCloseAttempts  = 4
 	terminalClosePageSize  = 500
 )
@@ -104,7 +104,7 @@ func finishTerminalRunStep(ctx context.Context, turns models.AgentTurnStore, sco
 		finished := models.CloneAgentTurn(step)
 		finished.Status = models.AgentTurnStatusCanceled
 		finished.FailureCode = StepFailureRunEnded
-		finished.Error = terminalCloseStepError
+		finished.Error = TerminalCloseStepError
 		finished.LeaseOwner = ""
 		finished.LeaseExpiresAt = nil
 		completed := now

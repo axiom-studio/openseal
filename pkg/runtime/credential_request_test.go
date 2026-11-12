@@ -10,6 +10,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -68,7 +69,7 @@ func credentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.St
 	scope := Scope{Kind: "tenant", ID: "a"}
 	catalog := skillActionCatalog(t, ctx, scope, "agent")
 	if err := catalog.Bind(ctx, &skill.Binding{ID: "interaction-actions", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent",
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, AllowedActions: []string{SkillActionRequestSetup, SkillActionRequestCredential}, MaximumRisk: skill.RiskLevelRead}); err != nil {
+		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, AllowedActions: []string{agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestCredential}, MaximumRisk: skill.RiskLevelRead}); err != nil {
 		t.Fatal(err)
 	}
 	// The bundled live browser is never in the installable catalog.
@@ -123,7 +124,7 @@ func assertRunNotParkedByCall(t *testing.T, f *loopProposalFixture) *AgentRun {
 
 func TestRequestCredentialParksRunUntilTheUserSavesIt(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
-	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, SkillActionRequestCredential, map[string]interface{}{
+	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
 		"kind": "website_login", "website": "https://www.amazon.in/", "reason": "Add your amazon.in login so I can finish the order"})
 	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["credentialRequest"] == nil {
@@ -156,8 +157,8 @@ func TestFailedInteractionRequestsAreExplainedInsteadOfFailingTheRun(t *testing.
 	}{
 		// The production failure: a bundled Skill is not in the installable
 		// catalog, so this setup request cannot be created.
-		"setup for a bundled Skill":  {SkillActionRequestSetup, map[string]interface{}{"kind": "configure", "skillId": "skill-live-browser", "skillVersion": "latest", "reason": "Add your amazon.in login"}},
-		"credential with a page URL": {SkillActionRequestCredential, map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in/ap/signin?x=1", "reason": "Add your amazon.in login"}},
+		"setup for a bundled Skill":  {agentrun.SkillActionRequestSetup, map[string]interface{}{"kind": "configure", "skillId": "skill-live-browser", "skillVersion": "latest", "reason": "Add your amazon.in login"}},
+		"credential with a page URL": {agentrun.SkillActionRequestCredential, map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in/ap/signin?x=1", "reason": "Add your amazon.in login"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
@@ -221,7 +222,7 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	run := f.run
 	validator, _ := NewSkillBindingActionValidator(catalog, store)
 	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), []ActionProposalValidator{validator}).Propose(ctx, f.request(ProposeActionRequest{
-		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestCredential,
+		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: agentrun.SkillActionRequestCredential,
 		Arguments: map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in", "reason": "Add the login"}, Summary: "Ask the user"}, "request-credential"))
 	if err != nil {
 		t.Fatal(err)

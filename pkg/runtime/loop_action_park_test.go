@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // fakeGovernedCards serves card requests by id, without the store's
@@ -72,12 +74,12 @@ func governedCardCall(id, action string, status ActionCallStatus, output map[str
 }
 
 func credentialCardCall(id string) *ActionCall {
-	return governedCardCall(id, SkillActionRequestCredential, ActionCallStatusSucceeded,
+	return governedCardCall(id, agentrun.SkillActionRequestCredential, ActionCallStatusSucceeded,
 		map[string]interface{}{"credentialRequest": map[string]interface{}{"id": "credential-" + id}})
 }
 
 func connectAppCardCall(id string) *ActionCall {
-	return governedCardCall(id, SkillActionRequestConnection, ActionCallStatusSucceeded,
+	return governedCardCall(id, agentrun.SkillActionRequestConnection, ActionCallStatusSucceeded,
 		map[string]interface{}{"setupRequest": map[string]interface{}{"id": "setup-" + id}})
 }
 
@@ -205,7 +207,7 @@ func TestRefusedInteractionDoesNotPark(t *testing.T) {
 
 func TestAlreadyConnectedAppDoesNotPark(t *testing.T) {
 	cards := newFakeGovernedCards()
-	call := governedCardCall("call-1", SkillActionRequestConnection, ActionCallStatusSucceeded, map[string]interface{}{
+	call := governedCardCall("call-1", agentrun.SkillActionRequestConnection, ActionCallStatusSucceeded, map[string]interface{}{
 		"connected": map[string]interface{}{"tools": []interface{}{"linear_search"}, "instruction": "Linear is already connected."},
 	})
 	requireCardWait(t, cardParker(cards), governedCardRun(), call, "", "", "")

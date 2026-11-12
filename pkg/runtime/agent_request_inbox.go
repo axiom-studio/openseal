@@ -13,6 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -60,7 +61,7 @@ type AgentRequestInboxReconcileResult struct {
 // leasing Agent identity to a human caller.
 type AgentRequestInboxReconciler struct {
 	collaboration      *CollaborationService
-	commands           *RunCommandService
+	commands           *agentrun.RunCommandService
 	projector          *AgentRequestConversationProjector
 	projectionMu       sync.Mutex
 	lastProjection     time.Time
@@ -74,7 +75,7 @@ func NewAgentRequestInboxReconciler(store AgentRequestInboxStore, opts ...models
 	}
 	reconciler := &AgentRequestInboxReconciler{
 		collaboration: NewCollaborationService(store, opts...),
-		commands:      NewRunCommandService(store, opts...),
+		commands:      agentrun.NewRunCommandService(store, opts...),
 		now:           models.ClockFrom(opts),
 	}
 	if conversationStore, ok := store.(agentRequestInboxConversationStore); ok {
@@ -425,7 +426,7 @@ func (r *AgentRequestInboxReconciler) ensureCompletionReviewRun(
 		"artifacts": request.Artifacts, "output": maps.Clone(child.Output),
 		"conversationRefs": append([]string(nil), request.ConversationRefs...),
 	}
-	contextValue := map[string]interface{}{AgentRequestCompletionReviewContextKey: review}
+	contextValue := map[string]interface{}{agentrun.AgentRequestCompletionReviewContextKey: review}
 	key := fmt.Sprintf("agent-request-completion-review:%s:%s:%s", request.ID, request.CompletionKey, reviewerID)
 	created, err := r.commands.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: request.Scope, Kind: RunKindAgentWork, ParentRunID: source.ID,
@@ -493,7 +494,7 @@ func completionReviewRunMatchesRequest(run *AgentRun, request *AgentRequest, rev
 		run.AssignedAgentID != reviewerID || run.ConcurrencyKey != "agent-request-completion-review:"+request.ID+":"+reviewerID {
 		return false
 	}
-	review, ok := run.Context[AgentRequestCompletionReviewContextKey].(map[string]interface{})
+	review, ok := run.Context[agentrun.AgentRequestCompletionReviewContextKey].(map[string]interface{})
 	if !ok {
 		return false
 	}
@@ -526,7 +527,7 @@ func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, req
 		"artifactRequirements": cloneArtifactRequirements(request.ArtifactRequirements),
 		"sharedContext":        maps.Clone(request.SharedContext), "conversationRefs": append([]string(nil), request.ConversationRefs...),
 	}
-	contextValue := map[string]interface{}{AgentRequestInboxContextKey: inbox}
+	contextValue := map[string]interface{}{agentrun.AgentRequestInboxContextKey: inbox}
 	key := fmt.Sprintf("agent-request-decision:%s:%d:%s", request.ID, request.Revision, assignedAgentID)
 	created, err := r.commands.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: request.Scope, Kind: RunKindAgentWork, ParentRunID: source.ID,
@@ -594,7 +595,7 @@ func decisionRunMatchesRequest(run *AgentRun, request *AgentRequest, assignedAge
 		run.AssignedAgentID != assignedAgentID || run.ConcurrencyKey != "agent-request:"+request.ID {
 		return false
 	}
-	inbox, ok := run.Context[AgentRequestInboxContextKey].(map[string]interface{})
+	inbox, ok := run.Context[agentrun.AgentRequestInboxContextKey].(map[string]interface{})
 	if !ok {
 		return false
 	}
@@ -607,7 +608,7 @@ func (r *AgentRequestInboxReconciler) ResolveDecisionRun(ctx context.Context, ru
 	if r == nil || r.collaboration == nil || run == nil || run.Source != RunSourceRequestDecision || !isTerminalAgentRunStatus(run.Status) {
 		return false, nil
 	}
-	inbox, ok := run.Context[AgentRequestInboxContextKey].(map[string]interface{})
+	inbox, ok := run.Context[agentrun.AgentRequestInboxContextKey].(map[string]interface{})
 	if !ok {
 		return false, errors.New("AgentRequest decision Run has no durable inbox context")
 	}
@@ -663,7 +664,7 @@ func (r *AgentRequestInboxReconciler) ResolveCompletionReviewRun(ctx context.Con
 	if r == nil || r.collaboration == nil || run == nil || run.Source != RunSourceCompletionReview || !isTerminalAgentRunStatus(run.Status) {
 		return false, nil
 	}
-	review, ok := run.Context[AgentRequestCompletionReviewContextKey].(map[string]interface{})
+	review, ok := run.Context[agentrun.AgentRequestCompletionReviewContextKey].(map[string]interface{})
 	if !ok {
 		return false, errors.New("AgentRequest completion review Run has no durable review context")
 	}

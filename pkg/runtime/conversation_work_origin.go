@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Resolve the channel through kernel-owned lineage, never model-supplied context
@@ -80,7 +82,7 @@ func conversationTaskWorkOrigin(ctx context.Context, runs PortfolioStore, conver
 		return nil, nil, nil, nil
 	}
 	task, err := proof.FindConversationTaskByWorkRunID(ctx, run.Scope, run.ID)
-	if errors.Is(err, ErrConversationTaskNotFound) {
+	if errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 		return nil, nil, nil, nil
 	}
 	if err != nil || task == nil {
@@ -89,7 +91,7 @@ func conversationTaskWorkOrigin(ctx context.Context, runs PortfolioStore, conver
 	if task.Mode != ConversationTaskModeIndependent || task.TargetAgentID == "" || task.TargetAgentID != strings.TrimSpace(run.AssignedAgentID) {
 		return nil, nil, nil, nil
 	}
-	valid, err := VerifyConversationTaskWorkRun(ctx, proof, task, run)
+	valid, err := agentrun.VerifyConversationTaskWorkRun(ctx, proof, task, run)
 	if err != nil || !valid {
 		return nil, nil, nil, err
 	}
@@ -160,7 +162,7 @@ func foregroundConversationWorkOrigin(ctx context.Context, runs PortfolioStore, 
 		return canonical, conversation, trigger, nil
 	}
 	expected := conversationAgentRunRequest(conversation, trigger)
-	if run.ID != runIDForIdempotencyKey(run.Scope, expected.IdempotencyKey) || run.ConcurrencyKey != expected.ConcurrencyKey ||
+	if run.ID != agentrun.RunIDForIdempotencyKey(run.Scope, expected.IdempotencyKey) || run.ConcurrencyKey != expected.ConcurrencyKey ||
 		canonical.ConcurrencyKey != expected.ConcurrencyKey || canonical.Context["threadRootMessageId"] != expected.Context["threadRootMessageId"] {
 		return nil, nil, nil, nil
 	}

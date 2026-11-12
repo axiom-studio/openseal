@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -297,7 +298,7 @@ func TestLoopIdenticalReadWithChangedResultIsNotARepeat(t *testing.T) {
 		))
 		var mu sync.Mutex
 		statuses := []string{"open", "closed", "open", "closed"}
-		f.dispatch.on("lookup", func(ActionDispatchInput) (map[string]interface{}, error) {
+		f.dispatch.on("lookup", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			status := statuses[0]
@@ -457,7 +458,7 @@ func TestLoopIdenticalWriteAfterFailureMayRetry(t *testing.T) {
 		))
 		var mu sync.Mutex
 		attempts := 0
-		f.dispatch.on("send", func(ActionDispatchInput) (map[string]interface{}, error) {
+		f.dispatch.on("send", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			attempts++

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
@@ -26,7 +27,7 @@ type fakeControlHandler struct {
 	seen  []interface{}
 }
 
-func (h *fakeControlHandler) Spec(a ControlAuthority) ControlToolSpec {
+func (h *fakeControlHandler) Spec(a agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{Description: "fake", InputSchema: map[string]interface{}{"type": "object"}}
 }
 
@@ -34,7 +35,7 @@ func (h *fakeControlHandler) Decode(raw json.RawMessage) (interface{}, error) {
 	return models.DecodeControlInto[fakeControlArgs](raw)
 }
 
-func (h *fakeControlHandler) Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+func (h *fakeControlHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error) {
 	h.calls++
 	h.seen = append(h.seen, cc.Arguments)
 	return x.complete(ctx, cc, controlJSONResult(ToolResultSucceeded, map[string]interface{}{"status": "done"}), &ControlEntryMeta{ForkID: "fork-" + cc.Entry.ID})
@@ -54,12 +55,12 @@ func fakeControlRegistry() (controlRegistry, map[ControlToolName]*fakeControlHan
 // builtinControlSpecs are the specs of the built-in control tools offered
 // under a. The runbook tools are never offered, so they are the specs every
 // loop step gets.
-func builtinControlSpecs(a ControlAuthority) []ControlToolSpec {
+func builtinControlSpecs(a agentrun.ControlAuthority) []ControlToolSpec {
 	return newControlRegistry(builtinControlTools()...).specs(a)
 }
 
 // builtinControlModelStepTools are builtinControlSpecs as model step tools.
-func builtinControlModelStepTools(a ControlAuthority) []ModelStepTool {
+func builtinControlModelStepTools(a agentrun.ControlAuthority) []ModelStepTool {
 	specs := builtinControlSpecs(a)
 	tools := make([]ModelStepTool, 0, len(specs))
 	for _, spec := range specs {
@@ -78,37 +79,37 @@ func specNames(specs []ControlToolSpec) []string {
 
 func TestControlToolSpecsStableOrderAndPresence(t *testing.T) {
 	registry, _ := fakeControlRegistry()
-	everything := ControlAuthority{
+	everything := agentrun.ControlAuthority{
 		CanReportProgress: true, CanWait: true, CanAskUser: true, CanReact: true,
 		TaskStart:       &HostedConversationTaskContext{ConversationID: "c1", CanStart: true},
 		ForkAllowed:     true,
-		Operations:      []HostedRunbookOperation{{Name: "op"}},
-		DelegateTargets: []HostedAgentTarget{{ID: "a2", DisplayName: "Other"}},
+		Operations:      []agentrun.HostedRunbookOperation{{Name: "op"}},
+		DelegateTargets: []agentrun.HostedAgentTarget{{ID: "a2", DisplayName: "Other"}},
 	}
 	cases := []struct {
 		name string
-		edit func(*ControlAuthority)
+		edit func(*agentrun.ControlAuthority)
 		want []string
 	}{
-		{"everything", func(*ControlAuthority) {}, []string{
+		{"everything", func(*agentrun.ControlAuthority) {}, []string{
 			"turn_final_answer", "turn_report_progress", "wait", "ask_user", "react", "conversation_start_task",
 			"control_fork", "run_operation", "agent_delegate", "agent_delegate_reply",
 		}},
-		{"zero authority offers only the final answer", func(a *ControlAuthority) { *a = ControlAuthority{} }, []string{"turn_final_answer"}},
-		{"spoken and evidence keep the default final tool", func(a *ControlAuthority) {
-			*a = ControlAuthority{FinalMode: FinalModeSpoken, CanReact: true}
+		{"zero authority offers only the final answer", func(a *agentrun.ControlAuthority) { *a = agentrun.ControlAuthority{} }, []string{"turn_final_answer"}},
+		{"spoken and evidence keep the default final tool", func(a *agentrun.ControlAuthority) {
+			*a = agentrun.ControlAuthority{FinalMode: FinalModeSpoken, CanReact: true}
 		}, []string{"turn_final_answer", "react"}},
-		{"voice call hides task start", func(a *ControlAuthority) { a.VoiceCallStarted = true }, []string{
+		{"voice call hides task start", func(a *agentrun.ControlAuthority) { a.VoiceCallStarted = true }, []string{
 			"turn_final_answer", "turn_report_progress", "wait", "ask_user", "react",
 			"control_fork", "run_operation", "agent_delegate", "agent_delegate_reply",
 		}},
-		{"task context that cannot start", func(a *ControlAuthority) {
+		{"task context that cannot start", func(a *agentrun.ControlAuthority) {
 			a.TaskStart = &HostedConversationTaskContext{ConversationID: "c1"}
 			a.Operations = nil
 			a.DelegateTargets = nil
 		}, []string{"turn_final_answer", "turn_report_progress", "wait", "ask_user", "react", "control_fork"}},
-		{"decision Run offers only its tool", func(a *ControlAuthority) { a.FinalMode = FinalModeDecision }, []string{"agent_request_decision"}},
-		{"review Run offers only its tool", func(a *ControlAuthority) { a.FinalMode = FinalModeReview }, []string{"agent_request_review"}},
+		{"decision Run offers only its tool", func(a *agentrun.ControlAuthority) { a.FinalMode = agentrun.FinalModeDecision }, []string{"agent_request_decision"}},
+		{"review Run offers only its tool", func(a *agentrun.ControlAuthority) { a.FinalMode = agentrun.FinalModeReview }, []string{"agent_request_review"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -244,7 +245,7 @@ type controlFixture struct {
 
 const controlTestWorker = "control-worker"
 
-func newControlFixture(t *testing.T, calls []LoopToolCall) *controlFixture {
+func newControlFixture(t *testing.T, calls []agentrun.LoopToolCall) *controlFixture {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Millisecond)
@@ -363,7 +364,7 @@ func (s *controlRecords) FindConversationTaskByWorkRunID(_ context.Context, scop
 	return nil, nil
 }
 
-func (f *controlFixture) context(callID string, authority ControlAuthority) ControlContext {
+func (f *controlFixture) context(callID string, authority agentrun.ControlAuthority) agentrun.ControlContext {
 	entry := f.entries[callID]
 	if entry == nil {
 		f.t.Fatalf("no entry for call %s", callID)
@@ -373,9 +374,9 @@ func (f *controlFixture) context(callID string, authority ControlAuthority) Cont
 		// Deterministic entries carry their own (finished, applied) step.
 		step = &AgentTurn{ID: entry.StepID, RunID: f.run.ID, Sequence: f.step.Sequence, Status: AgentTurnStatusCompleted}
 	}
-	return NewControlContext(StepToolsInput{
+	return NewControlContext(agentrun.StepToolsInput{
 		Run: f.run, Step: step, Session: f.session, WorkerID: controlTestWorker,
-		Binding: &TurnRunnerBinding{Authority: authority},
+		Binding: &agentrun.TurnRunnerBinding{Authority: authority},
 	}, entry)
 }
 
@@ -389,12 +390,12 @@ func (f *controlFixture) stored(callID string) *SessionEntry {
 }
 
 func TestControlArgumentsRejectUnknownFields(t *testing.T) {
-	f := newControlFixture(t, []LoopToolCall{
+	f := newControlFixture(t, []agentrun.LoopToolCall{
 		{ID: "unknown", Name: "control_fork", Arguments: json.RawMessage(`{"goal":"x","budget":3}`)},
 		{ID: "string", Name: "wait", Arguments: json.RawMessage(`{"goal":3}`)},
 		{ID: "ok", Name: "ask_user", Arguments: json.RawMessage(`{"goal":"x"}`)},
 	})
-	authority := ControlAuthority{ForkAllowed: true, CanWait: true, CanAskUser: true}
+	authority := agentrun.ControlAuthority{ForkAllowed: true, CanWait: true, CanAskUser: true}
 	for _, callID := range []string{"unknown", "string"} {
 		result, err := f.exec.Settle(f.ctx, f.context(callID, authority))
 		if err != nil {
@@ -433,13 +434,13 @@ func TestControlArgumentsRejectUnknownFields(t *testing.T) {
 }
 
 func TestControlToolNotOfferedIsError(t *testing.T) {
-	f := newControlFixture(t, []LoopToolCall{
+	f := newControlFixture(t, []agentrun.LoopToolCall{
 		{ID: "fork", Name: "control_fork", Arguments: json.RawMessage(`{"goal":"x"}`)},
 		{ID: "decide", Name: "agent_request_decision", Arguments: json.RawMessage(`{}`)},
 		{ID: "kernel", Name: "agent_delegate", Arguments: json.RawMessage(`{"goal":"x"}`),
-			Directive: &ToolCallDirective{IdempotencyKey: "runbook-step"}},
+			Directive: &agentrun.ToolCallDirective{IdempotencyKey: "runbook-step"}},
 	})
-	authority := ControlAuthority{CanWait: true}
+	authority := agentrun.ControlAuthority{CanWait: true}
 	for _, callID := range []string{"fork", "decide"} {
 		result, err := f.exec.Settle(f.ctx, f.context(callID, authority))
 		if err != nil {
@@ -468,12 +469,12 @@ func TestControlToolNotOfferedIsError(t *testing.T) {
 }
 
 func TestControlDispatcherPhaseAndStateRules(t *testing.T) {
-	f := newControlFixture(t, []LoopToolCall{
+	f := newControlFixture(t, []agentrun.LoopToolCall{
 		{ID: "react", Name: "react", Arguments: json.RawMessage(`{}`)},
 		{ID: "wait", Name: "wait", Arguments: json.RawMessage(`{}`)},
 		{ID: "gov", Name: "linear_get_issue", Arguments: json.RawMessage(`{}`)},
 	})
-	authority := ControlAuthority{CanReact: true, CanWait: true}
+	authority := agentrun.ControlAuthority{CanReact: true, CanWait: true}
 	// Phase mismatch is a loop bug.
 	if _, err := f.exec.Settle(f.ctx, f.context("react", authority)); err == nil {
 		t.Fatal("settle of an inline tool succeeded")
@@ -566,7 +567,7 @@ func TestControlJSONResultIsCompactWithStatus(t *testing.T) {
 }
 
 // allSettleTools offers every tool the phase-rule tests use.
-var allSettleTools = ControlAuthority{
+var allSettleTools = agentrun.ControlAuthority{
 	ForkAllowed: true, CanWait: true, CanAskUser: true, CanReact: true,
 	TaskStart: &HostedConversationTaskContext{CanStart: true},
 }
@@ -578,28 +579,28 @@ func cloneRunForTest(run *AgentRun) *AgentRun {
 
 func TestControlNotOfferedCallDoesNotTakeSettleSlot(t *testing.T) {
 	calls := modelCalls("wait", "control_fork")
-	refusals := controlCallRefusals(calls, ControlAuthority{ForkAllowed: true})
+	refusals := controlCallRefusals(calls, agentrun.ControlAuthority{ForkAllowed: true})
 	if len(refusals) != 0 {
 		t.Fatalf("refusals = %v", refusals)
 	}
-	refusals = controlCallRefusals(calls, ControlAuthority{ForkAllowed: true, CanWait: true})
+	refusals = controlCallRefusals(calls, agentrun.ControlAuthority{ForkAllowed: true, CanWait: true})
 	requireControlError(t, refusals["call-b"], ToolResultRefused, "control_one_settle_call")
 }
 
 func TestControlSettleOfEarlierAppliedStep(t *testing.T) {
-	f := newControlFixture(t, []LoopToolCall{{ID: "wait", Name: "wait", Arguments: json.RawMessage(`{}`)}})
+	f := newControlFixture(t, []agentrun.LoopToolCall{{ID: "wait", Name: "wait", Arguments: json.RawMessage(`{}`)}})
 	// The Run has since applied step 2; ResumeOpenTools settles the entry
 	// left open by step 1 with step 1 as cc.Step.
 	f.run.LastAppliedTurn = 2
-	result, err := f.exec.Settle(f.ctx, f.context("wait", ControlAuthority{CanWait: true}))
+	result, err := f.exec.Settle(f.ctx, f.context("wait", agentrun.ControlAuthority{CanWait: true}))
 	if err != nil || result.Entry.State != ToolEntryCompleted {
 		t.Fatalf("settle = %#v, %v", result, err)
 	}
 }
 
 func TestControlTransitionRetriesOneStaleRevision(t *testing.T) {
-	f := newControlFixture(t, []LoopToolCall{{ID: "wait", Name: "wait", Arguments: json.RawMessage(`{}`)}})
-	authority := ControlAuthority{CanWait: true}
+	f := newControlFixture(t, []agentrun.LoopToolCall{{ID: "wait", Name: "wait", Arguments: json.RawMessage(`{}`)}})
+	authority := agentrun.ControlAuthority{CanWait: true}
 	cc := f.context("wait", authority)
 	// Another writer bumps the entry's revision and leaves it pending again.
 	bumped := cc.Entry
@@ -631,7 +632,7 @@ func TestControlTransitionRetriesOneStaleRevision(t *testing.T) {
 		t.Fatalf("stored meta = %#v, %v", stored, err)
 	}
 	// A state change by another writer is not retried.
-	f2 := newControlFixture(t, []LoopToolCall{{ID: "wait", Name: "wait", Arguments: json.RawMessage(`{}`)}})
+	f2 := newControlFixture(t, []agentrun.LoopToolCall{{ID: "wait", Name: "wait", Arguments: json.RawMessage(`{}`)}})
 	cc2 := f2.context("wait", authority)
 	if _, err := f2.store.TransitionToolEntry(f2.ctx, ToolEntryTransitionRequest{
 		Scope: f2.run.Scope, EntryID: cc2.Entry.ID, RunID: f2.run.ID,

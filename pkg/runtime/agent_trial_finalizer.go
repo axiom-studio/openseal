@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // AgentTrialFinalizer hands a terminal try_agent child's reply to its parent
@@ -14,14 +15,14 @@ import (
 // which runs for every Run as before.
 type AgentTrialFinalizer struct {
 	store RunCommandStore
-	next  RunTerminalFinalizer
+	next  agentrun.RunTerminalFinalizer
 	// wake nudges the scope's workers after a parent is queued (optional).
 	wake func(Scope)
 	now  func() time.Time
 }
 
 // NewAgentTrialFinalizer wraps next (may be nil). wake may be nil.
-func NewAgentTrialFinalizer(store RunCommandStore, next RunTerminalFinalizer, wake func(Scope), opts ...models.ServiceOption) *AgentTrialFinalizer {
+func NewAgentTrialFinalizer(store RunCommandStore, next agentrun.RunTerminalFinalizer, wake func(Scope), opts ...models.ServiceOption) *AgentTrialFinalizer {
 	return &AgentTrialFinalizer{store: store, next: next, wake: wake, now: models.ClockFrom(opts)}
 }
 
@@ -62,7 +63,7 @@ func (f *AgentTrialFinalizer) settleAgentTrial(ctx context.Context, child *Agent
 			return nil
 		}
 		waiting := parent.Status == AgentRunStatusWaitingForEvent && parent.WakeCondition != nil &&
-			parent.WakeCondition.Type == AgentTrialWakeType && parent.WakeCondition.Reference == child.ID
+			parent.WakeCondition.Type == agentrun.AgentTrialWakeType && parent.WakeCondition.Reference == child.ID
 		if child.Status == AgentRunStatusCanceled && !waiting {
 			return nil
 		}

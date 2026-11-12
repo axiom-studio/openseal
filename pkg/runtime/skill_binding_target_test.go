@@ -8,6 +8,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/mcp"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -76,7 +77,7 @@ func newSkillTargetFixture(t *testing.T) *skillTargetFixture {
 	for _, member := range []string{"finn", "writer"} {
 		if err := f.catalog.Bind(f.ctx, &skill.Binding{
 			ID: "skills", Revision: 1, Scope: f.skillScope, DeploymentID: member, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion,
-			AllowedActions: []string{SkillActionDiscoverBinding, SkillActionUpsertBinding, SkillActionDisableBinding, SkillActionRequestSetup, SkillActionRequestConnection, SkillActionListSetupRequests},
+			AllowedActions: []string{SkillActionDiscoverBinding, SkillActionUpsertBinding, SkillActionDisableBinding, agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestConnection, SkillActionListSetupRequests},
 			MaximumRisk:    skill.RiskLevelWrite,
 		}); err != nil {
 			t.Fatal(err)
@@ -145,7 +146,7 @@ func (f *skillTargetFixture) bound(t *testing.T, member, action string) *skill.B
 
 func (f *skillTargetFixture) dispatch(t *testing.T, run *AgentRun, callID, action string, arguments map[string]interface{}) (map[string]interface{}, error) {
 	t.Helper()
-	return f.dispatcher.DispatchAction(f.ctx, ActionDispatchInput{
+	return f.dispatcher.DispatchAction(f.ctx, agentrun.ActionDispatchInput{
 		Call:  &ActionCall{ID: callID, Scope: f.scope, RunID: run.ID, DeploymentID: run.AssignedAgentID},
 		Bound: f.bound(t, run.AssignedAgentID, action), Arguments: arguments,
 	})
@@ -165,12 +166,12 @@ func readerUpsertArguments(target string) map[string]interface{} {
 func TestSkillBindingTargetFromNonBuilderIsRefused(t *testing.T) {
 	f := newSkillTargetFixture(t)
 	run := f.chatRun(t, "writer")
-	if _, err := f.validator.ValidateActionProposal(f.ctx, ActionProposalValidationInput{
+	if _, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
 		Run: run, Bound: f.bound(t, "writer", SkillActionUpsertBinding), Arguments: readerUpsertArguments("researcher"),
 	}); err == nil || !strings.Contains(err.Error(), "only an Agent that builds Agents") {
 		t.Fatalf("non-builder upsert for another Agent = %v", err)
 	}
-	if _, err := f.validator.ValidateActionProposal(f.ctx, ActionProposalValidationInput{
+	if _, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
 		Run: run, Bound: f.bound(t, "writer", SkillActionDiscoverBinding), Arguments: map[string]interface{}{"query": "reddit", SkillActionTargetAgentArgument: "researcher"},
 	}); err == nil {
 		t.Fatal("non-builder discovery for another Agent was accepted")
@@ -178,7 +179,7 @@ func TestSkillBindingTargetFromNonBuilderIsRefused(t *testing.T) {
 	if _, err := f.dispatch(t, run, "upsert", SkillActionUpsertBinding, readerUpsertArguments("researcher")); err == nil {
 		t.Fatal("non-builder dispatch bound a Skill to another Agent")
 	}
-	result, err := f.dispatch(t, run, "setup", SkillActionRequestSetup, map[string]interface{}{
+	result, err := f.dispatch(t, run, "setup", agentrun.SkillActionRequestSetup, map[string]interface{}{
 		"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Read communities", SkillActionTargetAgentArgument: "researcher",
 	})
 	if err != nil || result["refused"] == nil {
@@ -205,7 +206,7 @@ func TestSkillBindingTargetFromBuilderBindsTheTarget(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	preview, err := f.validator.ValidateActionProposal(f.ctx, ActionProposalValidationInput{
+	preview, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
 		Run: run, Bound: f.bound(t, "finn", SkillActionUpsertBinding), Arguments: readerUpsertArguments("researcher"),
 	})
 	if err != nil {
@@ -216,7 +217,7 @@ func TestSkillBindingTargetFromBuilderBindsTheTarget(t *testing.T) {
 		preview["owner"] != (ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}) {
 		t.Fatalf("targeted preview = %#v", preview)
 	}
-	own, err := f.validator.ValidateActionProposal(f.ctx, ActionProposalValidationInput{
+	own, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
 		Run: run, Bound: f.bound(t, "finn", SkillActionUpsertBinding), Arguments: readerUpsertArguments(""),
 	})
 	if err != nil || own["targetAgent"] != nil || own["deploymentId"] != "finn" {
@@ -240,7 +241,7 @@ func TestSkillBindingTargetFromBuilderBindsTheTarget(t *testing.T) {
 	}
 
 	disable := map[string]interface{}{"bindingId": "reddit", "expectedRevision": binding.Revision, SkillActionTargetAgentArgument: "researcher"}
-	disablePreview, err := f.validator.ValidateActionProposal(f.ctx, ActionProposalValidationInput{Run: run, Bound: f.bound(t, "finn", SkillActionDisableBinding), Arguments: disable})
+	disablePreview, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{Run: run, Bound: f.bound(t, "finn", SkillActionDisableBinding), Arguments: disable})
 	if err != nil || disablePreview["targetAgent"] == nil || disablePreview["deploymentId"] != "researcher" {
 		t.Fatalf("targeted disable preview = %#v, %v", disablePreview, err)
 	}
@@ -255,7 +256,7 @@ func TestSkillBindingTargetFromBuilderBindsTheTarget(t *testing.T) {
 func TestSkillBindingTargetDiscoverReportsTargetReadiness(t *testing.T) {
 	f := newSkillTargetFixture(t)
 	run := f.chatRun(t, "finn")
-	if _, err := f.validator.ValidateActionProposal(f.ctx, ActionProposalValidationInput{
+	if _, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
 		Run: run, Bound: f.bound(t, "finn", SkillActionDiscoverBinding), Arguments: map[string]interface{}{"query": "reddit", SkillActionTargetAgentArgument: "researcher"},
 	}); err != nil {
 		t.Fatal(err)
@@ -292,7 +293,7 @@ func TestSkillBindingTargetConnectionRequestIsOwnedByTheTarget(t *testing.T) {
 	apps.Set(fakeAppCatalog{entries: []AppCatalogEntry{{Slug: "linear", Name: "Linear", Official: true, SignIn: AppSignInOAuth}}})
 	f.dispatcher.UseAppCatalog(apps)
 	run := f.chatRun(t, "finn")
-	result, err := f.dispatch(t, run, "connect", SkillActionRequestConnection, map[string]interface{}{"app": "linear", SkillActionTargetAgentArgument: "researcher"})
+	result, err := f.dispatch(t, run, "connect", agentrun.SkillActionRequestConnection, map[string]interface{}{"app": "linear", SkillActionTargetAgentArgument: "researcher"})
 	if err != nil || result["setupRequest"] == nil {
 		t.Fatalf("targeted connection = %#v, %v", result, err)
 	}
@@ -305,7 +306,7 @@ func TestSkillBindingTargetConnectionRequestIsOwnedByTheTarget(t *testing.T) {
 		t.Fatalf("target connections read as %#v", actors)
 	}
 	writer := f.chatRun(t, "writer")
-	refused, err := f.dispatch(t, writer, "connect-writer", SkillActionRequestConnection, map[string]interface{}{"app": "linear", SkillActionTargetAgentArgument: "researcher"})
+	refused, err := f.dispatch(t, writer, "connect-writer", agentrun.SkillActionRequestConnection, map[string]interface{}{"app": "linear", SkillActionTargetAgentArgument: "researcher"})
 	if err != nil || refused["refused"] == nil {
 		t.Fatalf("non-builder connection for another Agent = %#v, %v", refused, err)
 	}
@@ -314,7 +315,7 @@ func TestSkillBindingTargetConnectionRequestIsOwnedByTheTarget(t *testing.T) {
 func TestTargetAgentHiddenFromNonBuilders(t *testing.T) {
 	definition := SkillManagementSkill()
 	var actions []capability.ModelAction
-	for _, name := range []string{SkillActionRequestConnection, SkillActionFindApps, SkillActionUpsertBinding} {
+	for _, name := range []string{agentrun.SkillActionRequestConnection, SkillActionFindApps, SkillActionUpsertBinding} {
 		action := definition.Actions[name]
 		actions = append(actions, capability.ModelAction{SkillID: SkillManagementSkillID, Action: name, Description: action.Description, InputSchema: action.InputSchema})
 	}
@@ -323,7 +324,7 @@ func TestTargetAgentHiddenFromNonBuilders(t *testing.T) {
 		if properties, _ := action.InputSchema["properties"].(map[string]interface{}); properties[SkillActionTargetAgentArgument] != nil {
 			t.Fatalf("%s still offers targetAgentId", action.Action)
 		}
-		if action.Action == SkillActionRequestConnection && strings.Contains(action.Description, "With targetAgentId") {
+		if action.Action == agentrun.SkillActionRequestConnection && strings.Contains(action.Description, "With targetAgentId") {
 			t.Fatalf("%s still describes targetAgentId", action.Action)
 		}
 	}
@@ -349,13 +350,13 @@ func TestSkillManagementSkillVersionIs170(t *testing.T) {
 		t.Fatalf("openseal.skills = %s, want 1.7.0", SkillManagementSkillVersion)
 	}
 	definition := SkillManagementSkill()
-	for _, name := range []string{SkillActionDiscoverBinding, SkillActionUpsertBinding, SkillActionDisableBinding, SkillActionRequestSetup, SkillActionRequestConnection} {
+	for _, name := range []string{SkillActionDiscoverBinding, SkillActionUpsertBinding, SkillActionDisableBinding, agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestConnection} {
 		properties := definition.Actions[name].InputSchema["properties"].(map[string]interface{})
 		if properties[SkillActionTargetAgentArgument] == nil {
 			t.Fatalf("%s has no targetAgentId", name)
 		}
 	}
-	for _, name := range []string{SkillActionRequestCredential, SkillActionListSetupRequests, SkillActionFindApps} {
+	for _, name := range []string{agentrun.SkillActionRequestCredential, SkillActionListSetupRequests, SkillActionFindApps} {
 		properties, _ := definition.Actions[name].InputSchema["properties"].(map[string]interface{})
 		if properties[SkillActionTargetAgentArgument] != nil {
 			t.Fatalf("%s accepts targetAgentId", name)

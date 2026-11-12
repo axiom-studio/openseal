@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"maps"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // Kernel control tools (section 04 §3). The model calls them like any other
@@ -97,13 +99,13 @@ func (s ControlToolSpec) ModelStepTool() ModelStepTool {
 const ()
 
 const (
-	ControlOriginModel  ControlOrigin = "model"
-	ControlOriginKernel ControlOrigin = "kernel"
+	ControlOriginModel  agentrun.ControlOrigin = "model"
+	ControlOriginKernel agentrun.ControlOrigin = "kernel"
 )
 
 // NewControlContext builds the context of one control tool entry of a step.
-func NewControlContext(in StepToolsInput, entry *SessionEntry) ControlContext {
-	cc := ControlContext{
+func NewControlContext(in agentrun.StepToolsInput, entry *SessionEntry) agentrun.ControlContext {
+	cc := agentrun.ControlContext{
 		Run: in.Run, WorkerID: in.WorkerID, Step: in.Step, Session: in.Session, Path: in.Path,
 		Binding: in.Binding, Assistant: in.Assistant, Entry: entry, Origin: controlOriginOf(entry),
 	}
@@ -115,7 +117,7 @@ func NewControlContext(in StepToolsInput, entry *SessionEntry) ControlContext {
 
 // controlOriginOf: deterministic producers' calls carry a directive; model
 // calls never do.
-func controlOriginOf(entry *SessionEntry) ControlOrigin {
+func controlOriginOf(entry *SessionEntry) agentrun.ControlOrigin {
 	if entry != nil && entry.Tool != nil && len(entry.Tool.Directive) > 0 {
 		return ControlOriginKernel
 	}
@@ -167,9 +169,9 @@ type ControlResult struct {
 	Kind    ControlOutcomeKind
 	Run     *AgentRun     // canonical Run after the operation (nil = unchanged)
 	Entry   *SessionEntry // the tool entry after the operation
-	Park    *LoopPark
-	Final   *FinalAnswer
-	Failure *LoopFailure
+	Park    *agentrun.LoopPark
+	Final   *agentrun.FinalAnswer
+	Failure *agentrun.LoopFailure
 }
 
 func (r ControlResult) validate() error {
@@ -182,7 +184,7 @@ func (r ControlResult) validate() error {
 		if r.Park == nil {
 			return errors.New("control parked result needs a park")
 		}
-		if err := r.Park.validate(); err != nil {
+		if err := r.Park.Validate(); err != nil {
 			return err
 		}
 	case ControlFinal:
@@ -197,7 +199,7 @@ func (r ControlResult) validate() error {
 		if r.Failure == nil {
 			return errors.New("control failed result needs a failure")
 		}
-		if err := r.Failure.validate(); err != nil {
+		if err := r.Failure.Validate(); err != nil {
 			return err
 		}
 	default:
@@ -208,8 +210,8 @@ func (r ControlResult) validate() error {
 
 // ControlResume is the outcome of resuming a parked control entry.
 type ControlResume struct {
-	Resolved bool      // false: still waiting
-	Park     *LoopPark // when !Resolved: the park to re-apply
+	Resolved bool               // false: still waiting
+	Park     *agentrun.LoopPark // when !Resolved: the park to re-apply
 	Result   ControlResult
 }
 
@@ -218,15 +220,15 @@ type ControlResume struct {
 // models.DecodeControlInto); Run is the inline or settle execution, by the
 // tool's phase.
 type controlHandler interface {
-	Spec(a ControlAuthority) ControlToolSpec
+	Spec(a agentrun.ControlAuthority) ControlToolSpec
 	Decode(raw json.RawMessage) (interface{}, error)
-	Run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error)
+	Run(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResult, error)
 }
 
 // controlResumer is implemented by parking tools (awaiting_child /
 // awaiting_event entries).
 type controlResumer interface {
-	Resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error)
+	Resume(ctx context.Context, x *ControlExecutor, cc agentrun.ControlContext) (ControlResume, error)
 }
 
 type controlRegistry map[ControlToolName]controlHandler
@@ -286,7 +288,7 @@ func (r controlRegistry) register(name ControlToolName, h controlHandler) {
 
 // specs lists the offered tools in the stable order. A tool is offered when
 // the authority allows it and a handler is registered.
-func (r controlRegistry) specs(a ControlAuthority) []ControlToolSpec {
+func (r controlRegistry) specs(a agentrun.ControlAuthority) []ControlToolSpec {
 	var specs []ControlToolSpec
 	for _, name := range controlToolOrder {
 		h, ok := r[name]
@@ -307,7 +309,7 @@ type ControlExecutor struct {
 	Portfolio     PortfolioStore
 	Sessions      AgentSessionStore
 	Activity      *RunActivityService
-	Forks         *RunForkCoordinator
+	Forks         *agentrun.RunForkCoordinator
 	Collaboration *CollaborationService
 	Tasks         *ConversationTaskService
 	Conversations *ConversationService
@@ -357,7 +359,7 @@ func (x *ControlExecutor) now() time.Time {
 var ErrControlEntryState = errors.New("control tool entry is not in a runnable state")
 
 // Inline executes an inline-phase control call (react, turn_report_progress).
-func (x *ControlExecutor) Inline(ctx context.Context, cc ControlContext) (ControlResult, error) {
+func (x *ControlExecutor) Inline(ctx context.Context, cc agentrun.ControlContext) (ControlResult, error) {
 	return x.dispatch(ctx, cc, ControlPhaseInline)
 }
 
@@ -369,15 +371,15 @@ func (x *ControlExecutor) Inline(ctx context.Context, cc ControlContext) (Contro
 // and applied. When ResumeOpenTools settles an entry left open by an earlier
 // step (after a park or a crash after the model call), pass that earlier
 // step, not the claim's current running step.
-func (x *ControlExecutor) Settle(ctx context.Context, cc ControlContext) (ControlResult, error) {
+func (x *ControlExecutor) Settle(ctx context.Context, cc agentrun.ControlContext) (ControlResult, error) {
 	return x.dispatch(ctx, cc, ControlPhaseSettle)
 }
 
-func (x *ControlExecutor) dispatch(ctx context.Context, cc ControlContext, phase ControlPhase) (ControlResult, error) {
+func (x *ControlExecutor) dispatch(ctx context.Context, cc agentrun.ControlContext, phase ControlPhase) (ControlResult, error) {
 	if err := x.checkContext(cc); err != nil {
 		return ControlResult{}, err
 	}
-	name := cc.toolName()
+	name := cc.ToolName()
 	rule, known := controlToolRules[name]
 	if !known {
 		return ControlResult{}, fmt.Errorf("tool %q is not a control tool", name)
@@ -422,11 +424,11 @@ func (x *ControlExecutor) dispatch(ctx context.Context, cc ControlContext, phase
 
 // Resume turns the awaited outcome of a parked control entry
 // (awaiting_child / awaiting_event) into its tool result.
-func (x *ControlExecutor) Resume(ctx context.Context, cc ControlContext) (ControlResume, error) {
+func (x *ControlExecutor) Resume(ctx context.Context, cc agentrun.ControlContext) (ControlResume, error) {
 	if err := x.checkContext(cc); err != nil {
 		return ControlResume{}, err
 	}
-	name := cc.toolName()
+	name := cc.ToolName()
 	if !IsControlTool(string(name)) {
 		return ControlResume{}, fmt.Errorf("tool %q is not a control tool", name)
 	}
@@ -454,7 +456,7 @@ func (x *ControlExecutor) Resume(ctx context.Context, cc ControlContext) (Contro
 		if resumed.Park == nil {
 			return ControlResume{}, fmt.Errorf("control tool %s: unresolved resume needs a park", name)
 		}
-		if err := resumed.Park.validate(); err != nil {
+		if err := resumed.Park.Validate(); err != nil {
 			return ControlResume{}, fmt.Errorf("control tool %s: %w", name, err)
 		}
 		return resumed, nil
@@ -465,7 +467,7 @@ func (x *ControlExecutor) Resume(ctx context.Context, cc ControlContext) (Contro
 	return resumed, nil
 }
 
-func (x *ControlExecutor) checkContext(cc ControlContext) error {
+func (x *ControlExecutor) checkContext(cc agentrun.ControlContext) error {
 	if x == nil || x.Sessions == nil {
 		return errors.New("control executor has no session store")
 	}
@@ -483,7 +485,7 @@ func (x *ControlExecutor) checkContext(cc ControlContext) error {
 }
 
 // refuse ends the entry with an is_error result; the loop continues (D5/D6).
-func (x *ControlExecutor) refuse(ctx context.Context, cc ControlContext, result *ToolResult) (ControlResult, error) {
+func (x *ControlExecutor) refuse(ctx context.Context, cc agentrun.ControlContext, result *ToolResult) (ControlResult, error) {
 	entry, err := x.transitionControlEntry(ctx, cc, ToolEntryError, nil, result, nil)
 	if err != nil {
 		return ControlResult{}, err
@@ -492,7 +494,7 @@ func (x *ControlExecutor) refuse(ctx context.Context, cc ControlContext, result 
 }
 
 // complete ends the entry with result and returns a continue outcome.
-func (x *ControlExecutor) complete(ctx context.Context, cc ControlContext, result *ToolResult, meta *ControlEntryMeta) (ControlResult, error) {
+func (x *ControlExecutor) complete(ctx context.Context, cc agentrun.ControlContext, result *ToolResult, meta *ControlEntryMeta) (ControlResult, error) {
 	to := ToolEntryCompleted
 	if result != nil && result.IsError {
 		to = ToolEntryError
@@ -508,12 +510,12 @@ func (x *ControlExecutor) complete(ctx context.Context, cc ControlContext, resul
 // to, fenced by the Run lease. A stale revision (the stores report it as
 // ErrToolEntryStateConflict) is retried once after re-reading the entry,
 // while it is still in the state the caller saw.
-func (x *ControlExecutor) transitionControlEntry(ctx context.Context, cc ControlContext, to ToolEntryState, wait *ToolEntryWait, result *ToolResult, meta *ControlEntryMeta) (*SessionEntry, error) {
+func (x *ControlExecutor) transitionControlEntry(ctx context.Context, cc agentrun.ControlContext, to ToolEntryState, wait *ToolEntryWait, result *ToolResult, meta *ControlEntryMeta) (*SessionEntry, error) {
 	var kernel *ToolEntryKernelPatch
 	if meta != nil {
 		stored := *meta // the handler's value is left as it was
 		if stored.Kind == "" {
-			stored.Kind = cc.toolName()
+			stored.Kind = cc.ToolName()
 		}
 		encoded, err := json.Marshal(&stored)
 		if err != nil {
@@ -525,7 +527,7 @@ func (x *ControlExecutor) transitionControlEntry(ctx context.Context, cc Control
 	for attempt := 0; ; attempt++ {
 		now := x.now()
 		req := ToolEntryTransitionRequest{
-			Scope: cc.Run.Scope, EntryID: current.ID, RunID: cc.Run.ID, Lease: cc.lease(now),
+			Scope: cc.Run.Scope, EntryID: current.ID, RunID: cc.Run.ID, Lease: cc.LeaseGuard(now),
 			From: current.State, ExpectedRevision: current.Revision, To: to,
 			Wait: wait, Result: result, Kernel: kernel, Now: now,
 		}
@@ -579,7 +581,7 @@ const (
 //     the others are refused. A call to a tool the claim does not offer never
 //     takes the settle slot (the dispatcher refuses it with
 //     tool_not_available), so it cannot block an offered settle call.
-func controlCallRefusals(calls []ModelToolCall, authority ControlAuthority) map[string]*ToolResult {
+func controlCallRefusals(calls []ModelToolCall, authority agentrun.ControlAuthority) map[string]*ToolResult {
 	refusals := map[string]*ToolResult{}
 	for _, call := range calls {
 		name := ControlToolName(call.Name)
@@ -607,7 +609,7 @@ func controlCallRefusals(calls []ModelToolCall, authority ControlAuthority) map[
 // controlSettleConflicts returns the indexes of settle-phase calls after the
 // first one that may settle. Calls refused by the alone rule and calls to
 // tools the authority does not offer do not count.
-func controlSettleConflicts(calls []ModelToolCall, authority ControlAuthority) []int {
+func controlSettleConflicts(calls []ModelToolCall, authority agentrun.ControlAuthority) []int {
 	var conflicts []int
 	settled := false
 	for i, call := range calls {

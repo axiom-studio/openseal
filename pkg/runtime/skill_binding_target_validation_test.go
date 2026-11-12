@@ -3,6 +3,8 @@ package runtime
 import (
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestSkillBindingTargetRefusesInvalidTargets(t *testing.T) {
@@ -11,7 +13,7 @@ func TestSkillBindingTargetRefusesInvalidTargets(t *testing.T) {
 	for target, want := range map[string]string{
 		"finn": "the Agent you are", "old": "retired", "platform": "cannot be changed in chat", "nobody": "does not exist",
 	} {
-		if _, err := f.validator.ValidateActionProposal(f.ctx, ActionProposalValidationInput{
+		if _, err := f.validator.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
 			Run: run, Bound: f.bound(t, "finn", SkillActionUpsertBinding), Arguments: readerUpsertArguments(target),
 		}); err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("target %q = %v, want %q", target, err, want)
@@ -30,7 +32,7 @@ func TestSkillBindingTargetRefusesInvalidTargets(t *testing.T) {
 	}
 	// A host without the Agent registry refuses every target.
 	bare, _ := NewSkillBindingActionValidator(f.catalog, f.store)
-	if _, err := bare.ValidateActionProposal(f.ctx, ActionProposalValidationInput{
+	if _, err := bare.ValidateActionProposal(f.ctx, agentrun.ActionProposalValidationInput{
 		Run: run, Bound: f.bound(t, "finn", SkillActionUpsertBinding), Arguments: readerUpsertArguments("researcher"),
 	}); err == nil {
 		t.Fatal("a validator without the Agent registry accepted a target")
