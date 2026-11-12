@@ -17,7 +17,7 @@ type interactionUmbrellaRow struct {
 	scopeKind, scopeID, id, deploymentID, conversationID, status, payload string
 }
 
-// stampInteractionUmbrellas moves setup and credential requests to their
+// StampInteractionUmbrellas moves setup and credential requests to their
 // conversation's umbrella. A pending request gets owner = the conversation's
 // owner, deployment_id = its ID and agentId = the member that asked, or is
 // dismissed when that member is no longer on the roster. Settled requests

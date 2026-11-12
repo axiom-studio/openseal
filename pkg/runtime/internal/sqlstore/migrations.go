@@ -1,6 +1,6 @@
 package sqlstore
 
-// defaultSpaceRewrites move every personal-<md5> space to default-<md5>. The
+// DefaultSpaceRewrites move every personal-<md5> space to default-<md5>. The
 // old rows give up is_default first so the new rows fit the one-per-scope
 // index; members move before the old rows go, so the cascade drops nothing.
 func DefaultSpaceRewrites(spaces, members, conversations, artifacts string, postgres bool) []string {
@@ -29,23 +29,23 @@ func DefaultSpaceRewrites(spaces, members, conversations, artifacts string, post
 	}
 }
 
-// retiredKernelProjectTables are dropped by migration 77, dependents first.
+// RetiredKernelProjectTables are dropped by migration 77, dependents first.
 var RetiredKernelProjectTables = []string{
 	"project_skill_references", "outreach_threads", "source_monitor_checkpoints", "source_observations", "projects",
 	"source_policy_lifecycle_events", "source_policy_lifecycles", "source_policy_versions",
 }
 
-// legacyEventSourceTables are dropped by migration 79, dependents first.
+// LegacyEventSourceTables are dropped by migration 79, dependents first.
 var LegacyEventSourceTables = []string{"event_source_health", "event_source_subscriptions", "event_source_checkpoints"}
 
-// legacyEventWaitTables are dropped by migration 81, dependents first.
+// LegacyEventWaitTables are dropped by migration 81, dependents first.
 // run_event_retention_scopes only ever existed in SQLite.
 var LegacyEventWaitTables = []string{
 	"run_event_notifications", "run_event_consumptions", "run_event_wait_scopes", "run_event_waits",
 	"run_event_retention_cursor", "run_event_retention_scopes", "run_event_inbox",
 }
 
-// markOwnerDefaultSpaces marks, for every (scope, owner) that owns spaces and
+// MarkOwnerDefaultSpaces marks, for every (scope, owner) that owns spaces and
 // has no default space, their oldest space by (created_at, id). An owner who
 // has a default space keeps it, so running it again changes nothing.
 func MarkOwnerDefaultSpaces(spaces, isTrue string) string {
@@ -71,7 +71,7 @@ func SkillUpgradeDrainIndexStatements(actions, runs string, postgres bool) []str
 	}
 }
 
-// teamCoordinationPaths are the JSON locations of the retired coordination
+// TeamCoordinationPaths are the JSON locations of the retired coordination
 // policy (speaker caps and participation flags) in every durable artifact that
 // can carry a Team definition. Team channels now route each message to the
 // members it addresses, or to one member a router picks.

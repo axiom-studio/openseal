@@ -13,7 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-// reconcileAgentRunbookActivations advances the operational projection of an
+// ReconcileAgentRunbookActivations advances the operational projection of an
 // Agent's embedded Runbook to the exact immutable definition being activated.
 // Existing activation identities and deployed Objective identities are kept
 // stable; a definition amendment is not allowed to manufacture new deployed

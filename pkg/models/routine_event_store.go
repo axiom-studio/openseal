@@ -239,8 +239,8 @@ func NormalizeRoutineEventLimit(limit, ceiling int) int {
 	return limit
 }
 
-// routineEventSubscriptionCursor is the opaque keyset cursor (scope kind,
-// scope ID, activation ID) of ListRoutineEventSubscriptions.
+// EncodeRoutineEventSubscriptionCursor encodes the opaque keyset cursor
+// (scope kind, scope ID, activation ID) of ListRoutineEventSubscriptions.
 func EncodeRoutineEventSubscriptionCursor(subscription RoutineEventSubscription) string {
 	raw := subscription.Scope.Kind + "\x00" + subscription.Scope.ID + "\x00" + subscription.ActivationID
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))

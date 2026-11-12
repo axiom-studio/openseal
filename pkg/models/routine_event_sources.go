@@ -6,8 +6,8 @@ import (
 )
 
 // routineEventNamedChannels lists the channels or chats a Slack or Telegram
-// trigger names in its equals/one_of place conditions, the ones
-// pinRoutineEventChannels checked at create time.
+// trigger names in its equals/one_of place conditions, the ones the
+// runtime's create-time channel pinning checked.
 func routineEventNamedChannels(trigger *RoutineEventTrigger) []string {
 	if trigger == nil {
 		return nil

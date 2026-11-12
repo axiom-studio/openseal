@@ -16,7 +16,7 @@ func DecodeSurfaceInteraction(payload string) (*models.SurfaceInteraction, error
 	return &value, nil
 }
 
-// latestSurfaceInteractionQuery keeps the last write per item; table is the
+// LatestSurfaceInteractionQuery keeps the last write per item; table is the
 // (qualified) surface_interactions table and placeholders are the four
 // scope/conversation/surface parameters in order.
 func LatestSurfaceInteractionQuery(table string, acrossActors bool, placeholders [4]string) string {

@@ -134,7 +134,7 @@ func readChangeSetLineage(ctx context.Context, tx ExecQuerier, query string) ([]
 	return lineage, rows.Err()
 }
 
-// foldChangeSetDrafts keeps only the leaf drafts, each with its lineage's
+// FoldChangeSetDrafts keeps only the leaf drafts, each with its lineage's
 // prompts in cutoverPrompts. The SQL dialect differs only in placeholders
 // and the JSON write.
 func FoldChangeSetDrafts(ctx context.Context, tx ExecQuerier, table, selectQuery, setPrompts, deleteRow string) error {
@@ -164,7 +164,7 @@ func FoldChangeSetDrafts(ctx context.Context, tx ExecQuerier, table, selectQuery
 	return nil
 }
 
-// scanAgentBuilderCutoverDrafts decodes (scope_kind, scope_id, id,
+// ScanAgentBuilderCutoverDrafts decodes (scope_kind, scope_id, id,
 // idempotency_key, payload) rows.
 func ScanAgentBuilderCutoverDrafts(rows *sql.Rows) ([]models.AgentBuilderCutoverDraft, error) {
 	defer rows.Close()

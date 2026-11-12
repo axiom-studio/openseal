@@ -9,7 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-// artifactListQuery applies the common catalog filters and page boundaries in
+// ArtifactListQuery applies the common catalog filters and page boundaries in
 // SQL so a user-visible page does not load and sort every tenant artifact.
 // Evidence and retention queries keep the exact Go filter until those nested
 // fields have a portable indexed representation.
@@ -106,7 +106,7 @@ func QueryArtifactPage(ctx context.Context, db *sql.DB, query string, args []any
 	return result, rows.Err()
 }
 
-// workingArtifactIDs reads a scope's working files for the list paths that
+// WorkingArtifactIDs reads a scope's working files for the list paths that
 // filter in Go.
 func WorkingArtifactIDs(ctx context.Context, db *sql.DB, query string, scope models.Scope) (map[string]bool, error) {
 	rows, err := db.QueryContext(ctx, query, scope.Kind, scope.ID)

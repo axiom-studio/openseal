@@ -148,7 +148,7 @@ func (f *SessionFixture) createRun(agentID, sessionID string) *models.AgentRun {
 	return run
 }
 
-// leasedRun stores a Run bound to sessionID and claims it under
+// LeasedRun stores a Run bound to sessionID and claims it under
 // SessionWorker. Only one Run is ever queued at a time, so the claim
 // takes this one.
 func (f *SessionFixture) LeasedRun(agentID, sessionID string) *models.AgentRun {
@@ -173,7 +173,7 @@ func (f *SessionFixture) Run(runID string) *models.AgentRun {
 	return run
 }
 
-// updateRun rewrites the Run outside any lease (park, resume, finish, rebind).
+// UpdateRun rewrites the Run outside any lease (park, resume, finish, rebind).
 func (f *SessionFixture) UpdateRun(runID string, mutate func(*models.AgentRun)) *models.AgentRun {
 	f.T.Helper()
 	current := f.Run(runID)
@@ -208,7 +208,7 @@ func (f *SessionFixture) setStatus(runID string, status models.AgentRunStatus) *
 	})
 }
 
-// conversationRun claims a Run of the c1 lane of agentID and opens its session.
+// ConversationRun claims a Run of the c1 lane of agentID and opens its session.
 func (f *SessionFixture) ConversationRun(agentID string) (*models.AgentRun, *models.AgentSession) {
 	f.T.Helper()
 	run := f.LeasedRun(agentID, f.laneSessionID(agentID))

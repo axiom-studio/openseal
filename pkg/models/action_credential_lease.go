@@ -305,7 +305,7 @@ func MatchActionCredentialLease(lease ActionCredentialLease, call *ActionCall, r
 	return nil
 }
 
-// matchActionCredentialLeaseUmbrella requires the redeemed binding, stored
+// CheckActionCredentialLeaseUmbrella requires the redeemed binding, stored
 // or supplied by the host, to belong to the run's umbrella: the Agent of a
 // 1:1 run or the Team of a Team run. A run delegated to another Agent has no
 // umbrella and redeems nothing.

@@ -13,7 +13,7 @@ import (
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
-// connectOnceMigration repairs records that migrations 71 to 73 left
+// ConnectOnceMigration repairs records that migrations 71 to 73 left
 // inconsistent and records the creator of every routine:
 //  1. setup-request copies in action outputs carry the request's umbrella;
 //  2. in-flight Team amendments and change sets carry current digests;

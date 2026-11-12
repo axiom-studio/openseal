@@ -12,7 +12,7 @@ import (
 // teamRetiredLeadRoleID was the lead role of a Team that named none.
 const teamRetiredLeadRoleID = "lead"
 
-// teamMembersMigration rewrites stored Team payloads in Go so PostgreSQL and
+// TeamMembersMigration rewrites stored Team payloads in Go so PostgreSQL and
 // SQLite share one transformation. Stored definition digests are left as they
 // are, like migration 69 left them: nothing recomputes a stored digest, and a
 // pending amendment still has to match its base's.
@@ -20,7 +20,7 @@ type TeamMembersMigration struct {
 	Ctx   context.Context
 	DB    ExecQuerier
 	Table func(string) string
-	// placeholder renders the n-th bind parameter; "?" selects SQLite.
+	// Placeholder renders the n-th bind parameter; "?" selects SQLite.
 	Placeholder func(int) string
 	Exists      func(table string) (bool, error)
 }
@@ -149,7 +149,7 @@ func stripTeamRoles(definition map[string]interface{}) bool {
 	return changed
 }
 
-// up moves every stored Team from role slots to members.
+// Up moves every stored Team from role slots to members.
 func (m TeamMembersMigration) Up() error {
 	definitions, err := m.rows("team_definitions", teamDefinitionKey, "roles", "approverRoleIds", "leadRoleId")
 	if err != nil {
@@ -297,7 +297,7 @@ func (r *teamRetiredRoles) restore(definition map[string]interface{}) bool {
 	return true
 }
 
-// down gives every member a role slot of its own, named after the member,
+// Down gives every member a role slot of its own, named after the member,
 // in every stored version of its Team's definition. Running it again changes
 // nothing: members that have a role and definitions that have roles are
 // skipped, and so are tables an earlier rollback dropped.

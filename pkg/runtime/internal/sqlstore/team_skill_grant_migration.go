@@ -22,7 +22,7 @@ var teamSkillGrantDefinitionPaths = []struct {
 	{"team_definition_amendments", []string{"candidate"}, []string{"scope_kind", "scope_id", "id"}},
 }
 
-// stripTeamSkillGrants removes roles[].skillGrants from every stored Team
+// StripTeamSkillGrants removes roles[].skillGrants from every stored Team
 // definition and recomputes the digest of each stored definition version.
 // table maps a bare table name to its qualified name; placeholder renders the
 // n-th bind parameter, and "?" selects SQLite.
