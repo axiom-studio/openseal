@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 func TestActiveConversationRunsIncludeNonterminalDescendantAfterCoordinationRootEnds(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	now := time.Now().UTC()
 	scope := models.Scope{Kind: "tenant", ID: "1"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}
@@ -33,21 +35,21 @@ func TestActiveConversationRunsIncludeNonterminalDescendantAfterCoordinationRoot
 	if err := store.CreateAgentRun(ctx, child); err != nil {
 		t.Fatal(err)
 	}
-	runner := &ConversationRunTurnRunner{portfolio: store}
-	active, err := runner.activeConversationRuns(ctx, &models.Conversation{ID: "channel-1", Scope: scope, Owner: owner})
+	runner := runtime.NewPortfolioTurnRunner(store)
+	active, err := runner.ActiveConversationRuns(ctx, &models.Conversation{ID: "channel-1", Scope: scope, Owner: owner})
 	if err != nil || len(active) != 1 || active[0].ID != child.ID {
 		t.Fatalf("active Runs = %#v, %v", active, err)
 	}
 }
 
 func TestActiveConversationRunsIncludeOnlyExactIndependentTaskThreadAndActor(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	source, turn, conversation, trigger := settledTaskSourceFixture(t, store)
-	if _, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err != nil {
+	if _, err := runtime.NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err != nil {
 		t.Fatal(err)
 	}
-	runner := &ConversationRunTurnRunner{portfolio: store}
-	active, err := runner.activeConversationRuns(t.Context(), conversation, trigger)
+	runner := runtime.NewPortfolioTurnRunner(store)
+	active, err := runner.ActiveConversationRuns(t.Context(), conversation, trigger)
 	if err != nil || len(active) != 1 || active[0].Revision < 1 || !slices.Contains(active[0].AvailableControls, models.RunActionCancel) {
 		t.Fatalf("task controls absent from authoritative thread snapshot: %#v %v", active, err)
 	}
@@ -60,7 +62,7 @@ func TestActiveConversationRunsIncludeOnlyExactIndependentTaskThreadAndActor(t *
 	} {
 		other := models.CloneChannelMessage(trigger)
 		change(other)
-		active, err := runner.activeConversationRuns(t.Context(), conversation, other)
+		active, err := runner.ActiveConversationRuns(t.Context(), conversation, other)
 		if err != nil || len(active) != 0 {
 			t.Fatalf("task leaked across actor or thread: %#v %v", active, err)
 		}

@@ -114,13 +114,13 @@ func settleFixtureStep(t *testing.T, store interface{}, scope Scope, runID, work
 		t.Fatalf("step fixture needs portfolio, activity and turn stores")
 	}
 	turns := NewAgentTurnService(steps, steps)
-	activity := NewRunActivityService(steps, steps)
+	activities := NewRunActivityService(steps, steps)
 	run, err := steps.GetAgentRun(ctx, scope, runID)
 	if err != nil || run == nil {
 		t.Fatalf("get run: %#v %v", run, err)
 	}
 	if run.Status == AgentRunStatusPlanning {
-		if run, _, err = activity.TransitionRun(ctx, scope, runID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning,
+		if run, _, err = activities.TransitionRun(ctx, scope, runID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning,
 			Summary: "Run started", LeaseOwner: workerID}); err != nil {
 			t.Fatalf("start run: %v", err)
 		}
@@ -134,7 +134,7 @@ func settleFixtureStep(t *testing.T, store interface{}, scope Scope, runID, work
 		t.Fatalf("finish step: %v", err)
 	}
 	transition.ExpectedRevision, transition.TurnID, transition.AppliedTurn, transition.LeaseOwner = run.Revision, step.ID, step.Sequence, workerID
-	if run, _, err = activity.TransitionRun(ctx, scope, runID, transition); err != nil {
+	if run, _, err = activities.TransitionRun(ctx, scope, runID, transition); err != nil {
 		t.Fatalf("apply step: %v", err)
 	}
 	return run, step
