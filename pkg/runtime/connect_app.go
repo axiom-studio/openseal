@@ -185,7 +185,7 @@ func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input agent
 		item := map[string]interface{}{"type": FindAppsTypeApp, "setup": FindAppsSetupApp, "slug": entry.Slug, "name": entry.Name,
 			"official": entry.Official, "signIn": appSignIn(entry.SignIn), "connected": false}
 		if summary := strings.TrimSpace(entry.Summary); summary != "" {
-			item["summary"] = truncateRunes(summary, 240)
+			item["summary"] = models.TruncateRunes(summary, 240)
 		}
 		if binding := ConnectedAppBinding(set, models.ConnectAppTarget{CatalogSlug: entry.Slug}); binding != nil {
 			tools, toolErr := ConnectedAppToolNames(ctx, d.catalog, binding)
@@ -232,7 +232,7 @@ func (d *SkillBindingActionDispatcher) findSetupSkills(ctx context.Context, run 
 			item["sourceIdentity"] = candidate.SourceIdentity
 		}
 		if summary := strings.TrimSpace(candidate.Description); summary != "" {
-			item["summary"] = truncateRunes(summary, 240)
+			item["summary"] = models.TruncateRunes(summary, 240)
 		}
 		skills = append(skills, item)
 	}
@@ -320,7 +320,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 			target.Name = entry.Slug
 		}
 		if len(target.Name) > 256 {
-			target.Name = truncateRunes(target.Name, 64)
+			target.Name = models.TruncateRunes(target.Name, 64)
 		}
 		if !models.IsValidLogoDigest(target.LogoSHA256) {
 			target.LogoSHA256, target.LogoMonochrome = "", false
@@ -419,13 +419,6 @@ func appSignIn(value string) string {
 		return value
 	}
 	return models.AppSignInUnknown
-}
-
-func truncateRunes(value string, limit int) string {
-	if utf8.RuneCountInString(value) <= limit {
-		return value
-	}
-	return string([]rune(value)[:limit-1]) + "…"
 }
 
 // ConnectAppKey is the host's key of an app: its catalog slug, or for an

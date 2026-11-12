@@ -866,6 +866,11 @@ func startTaskArguments(entry *models.SessionEntry) *startTaskArgs {
 	return models.StartTaskEntryArgs(entry)
 }
 
+// truncateRunes forwards to models.TruncateRunes.
+func truncateRunes(value string, limit int) string {
+	return models.TruncateRunes(value, limit)
+}
+
 // teamRosterReader forwards to models.TeamRosterReaderOf.
 func teamRosterReader(store any) models.TeamRosterReader {
 	return models.TeamRosterReaderOf(store)

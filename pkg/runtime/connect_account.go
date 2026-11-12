@@ -126,7 +126,7 @@ func createConnectAccountRequest(ctx context.Context, store models.KernelStore, 
 	}
 	skillName := boundSkillName(bound)
 	if len(skillName) > 256 {
-		skillName = truncateRunes(skillName, 64)
+		skillName = models.TruncateRunes(skillName, 64)
 	}
 	now := time.Now().UTC()
 	r := &models.SkillSetupRequest{
