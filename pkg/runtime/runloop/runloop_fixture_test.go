@@ -1,13 +1,14 @@
 package runloop
 
-// Copies of runtime's base test fixtures for the run loop tests, so they can
-// move with the run loop code: the session store helpers of
+// Copies of test fixtures for the run loop's in-package tests, which cannot
+// import looptest (it imports runloop) or see runtime's in-package test
+// helpers. From pkg/runtime: the session store helpers of
 // agent_session_store_test.go and kernel_store_test.go, the Postgres opener
 // of postgres_test_schema_test.go, the person action helpers of
-// connect_account_test.go, the governed tool prefix of
-// loop_testkit_fixture_test.go, the routine script digest of
-// routine_script_test.go and the store matrix, clock and crash store of
-// loop_testkit_model_test.go. Change them together.
+// connect_account_test.go and the routine script digest of
+// routine_script_test.go. From looptest: the governed tool prefix of
+// observe.go and the store matrix, clock and crash store of model.go.
+// Change them together.
 
 import (
 	"context"
@@ -33,6 +34,7 @@ import (
 const loopModelName = "fake-model"
 
 // loopGovernedToolPrefix starts every governed tool name the model is offered.
+// The tests spell it out so they pin the names the model sees.
 const loopGovernedToolPrefix = "action_"
 
 func loopScriptDigest(seed string) string {
