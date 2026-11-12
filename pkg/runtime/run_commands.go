@@ -53,9 +53,9 @@ func NewRunCommandService(store models.RunCommandStore, opts ...models.ServiceOp
 	return &RunCommandService{store: store, now: models.ClockFrom(opts)}
 }
 
-// transitionRun applies req to the Run through its activity log, stamped
+// TransitionRun applies req to the Run through its activity log, stamped
 // with the service's clock.
-func (s *RunCommandService) transitionRun(ctx context.Context, scope models.Scope, runID string, req activity.RunTransitionRequest) (*models.AgentRun, *models.ActivityEvent, error) {
+func (s *RunCommandService) TransitionRun(ctx context.Context, scope models.Scope, runID string, req activity.RunTransitionRequest) (*models.AgentRun, *models.ActivityEvent, error) {
 	return activity.NewRunActivityService(s.store, s.store, models.WithClock(s.now)).TransitionRun(ctx, scope, runID, req)
 }
 

@@ -184,7 +184,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 			// A retry or schedule timer must not delay fresh human input.
 			status, wake = AgentRunStatusQueued, nil
 		}
-		run, event, err := s.runs.transitionRun(ctx, conversation.Scope, target.ID, RunTransitionRequest{
+		run, event, err := s.runs.TransitionRun(ctx, conversation.Scope, target.ID, RunTransitionRequest{
 			ExpectedRevision: target.Revision, Status: status, WakeCondition: wake,
 			Summary: "Received a new message for this request", EventType: "run.intervened",
 			Actor:         ActivityActor{Type: "user", ID: actor.ID},
