@@ -19,52 +19,52 @@ var (
 )
 
 type CreateObjectiveRequest struct {
-	Scope           Scope
-	Owner           ObjectiveOwner
+	Scope           models.Scope
+	Owner           models.ObjectiveOwner
 	Title           string
 	Goal            string
-	Status          ObjectiveStatus
+	Status          models.ObjectiveStatus
 	Priority        int
-	ExecutionPolicy *ObjectiveExecutionPolicy
-	Budget          *BudgetPolicy
+	ExecutionPolicy *models.ObjectiveExecutionPolicy
+	Budget          *models.BudgetPolicy
 	Constraints     map[string]interface{}
 	SuccessCriteria map[string]interface{}
 	IdempotencyKey  string
-	Actor           ActivityActor
-	Visibility      ActivityVisibility
+	Actor           models.ActivityActor
+	Visibility      models.ActivityVisibility
 }
 
 type UpdateObjectiveRequest struct {
 	ExpectedRevision int64
 	Title            *string
 	Goal             *string
-	Status           *ObjectiveStatus
+	Status           *models.ObjectiveStatus
 	Priority         *int
-	ExecutionPolicy  *ObjectiveExecutionPolicy
-	Budget           *BudgetPolicy
+	ExecutionPolicy  *models.ObjectiveExecutionPolicy
+	Budget           *models.BudgetPolicy
 	Constraints      map[string]interface{}
 	SuccessCriteria  map[string]interface{}
 	ProgressSummary  *string
-	Actor            ActivityActor
-	Visibility       ActivityVisibility
+	Actor            models.ActivityActor
+	Visibility       models.ActivityVisibility
 	Summary          string
 }
 
 type PortfolioService struct {
-	store PortfolioStore
+	store models.PortfolioStore
 	now   func() time.Time
 }
 
 type CreateObjectiveResult struct {
-	Objective *Objective `json:"objective"`
-	Created   bool       `json:"created"`
+	Objective *models.Objective `json:"objective"`
+	Created   bool              `json:"created"`
 }
 
-func NewPortfolioService(store PortfolioStore, opts ...models.ServiceOption) *PortfolioService {
+func NewPortfolioService(store models.PortfolioStore, opts ...models.ServiceOption) *PortfolioService {
 	return &PortfolioService{store: store, now: models.ClockFrom(opts)}
 }
 
-func (s *PortfolioService) CreateObjective(ctx context.Context, req CreateObjectiveRequest) (*Objective, error) {
+func (s *PortfolioService) CreateObjective(ctx context.Context, req CreateObjectiveRequest) (*models.Objective, error) {
 	result, err := s.CreateObjectiveIdempotent(ctx, req)
 	if err != nil {
 		return nil, err
@@ -83,44 +83,44 @@ func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req Cr
 	now := s.now()
 	status := req.Status
 	if status == "" {
-		status = ObjectiveStatusDraft
+		status = models.ObjectiveStatusDraft
 	}
 	objectiveID := uuid.NewString()
 	key := strings.TrimSpace(req.IdempotencyKey)
 	if len(key) > 256 {
-		return nil, fmt.Errorf("%w: idempotency key cannot exceed 256 characters", ErrObjectiveIdempotency)
+		return nil, fmt.Errorf("%w: idempotency key cannot exceed 256 characters", models.ErrObjectiveIdempotency)
 	}
 	if key != "" {
-		objectiveID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(req.Scope.Kind+"\x00"+req.Scope.ID+"\x00"+hashString(key))).String()
+		objectiveID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(req.Scope.Kind+"\x00"+req.Scope.ID+"\x00"+models.SHA256DigestString(key))).String()
 		current, getErr := s.store.GetObjective(ctx, req.Scope, objectiveID)
 		if getErr != nil {
 			return nil, getErr
 		}
 		if current != nil {
 			if current.CreationFingerprint != fingerprint {
-				return nil, ErrObjectiveIdempotency
+				return nil, models.ErrObjectiveIdempotency
 			}
 			return &CreateObjectiveResult{Objective: current, Created: false}, nil
 		}
 	}
-	objective := &Objective{
+	objective := &models.Objective{
 		ID: objectiveID, Scope: req.Scope, Owner: req.Owner, Title: req.Title,
 		Goal: req.Goal, Status: status, Priority: req.Priority,
-		ExecutionPolicy: cloneObjectiveExecutionPolicy(req.ExecutionPolicy), Budget: cloneBudgetPolicy(req.Budget), Constraints: req.Constraints, SuccessCriteria: req.SuccessCriteria,
+		ExecutionPolicy: cloneObjectiveExecutionPolicy(req.ExecutionPolicy), Budget: models.CloneBudgetPolicy(req.Budget), Constraints: req.Constraints, SuccessCriteria: req.SuccessCriteria,
 		Revision: 1, CreatedAt: now, UpdatedAt: now, CreationFingerprint: fingerprint,
 	}
 	if key != "" {
-		objective.IdempotencyKeyHash = hashString(key)
+		objective.IdempotencyKeyHash = models.SHA256DigestString(key)
 	}
 	if err := objective.Validate(); err != nil {
 		return nil, err
 	}
 	persistObjective := func() error {
-		activityStore, ok := s.store.(ObjectiveActivityStore)
+		activityStore, ok := s.store.(models.ObjectiveActivityStore)
 		if !ok {
 			return s.store.CreateObjective(ctx, objective)
 		}
-		_, persistErr := activityStore.CreateObjectiveWithEvent(ctx, objective, objectiveActivityEvent(objective, req.Actor, req.Visibility, "objective.created", "Objective created", now, map[string]interface{}{"status": objective.Status}))
+		_, persistErr := activityStore.CreateObjectiveWithEvent(ctx, objective, models.ObjectiveActivityEvent(objective, req.Actor, req.Visibility, "objective.created", "Objective created", now, map[string]interface{}{"status": objective.Status}))
 		return persistErr
 	}
 	if err := persistObjective(); err != nil {
@@ -128,7 +128,7 @@ func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req Cr
 			current, getErr := s.store.GetObjective(ctx, req.Scope, objectiveID)
 			if getErr == nil && current != nil {
 				if current.CreationFingerprint != fingerprint {
-					return nil, ErrObjectiveIdempotency
+					return nil, models.ErrObjectiveIdempotency
 				}
 				return &CreateObjectiveResult{Objective: current, Created: false}, nil
 			}
@@ -138,7 +138,7 @@ func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req Cr
 	return &CreateObjectiveResult{Objective: objective, Created: true}, nil
 }
 
-func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, objectiveID string, req UpdateObjectiveRequest) (*Objective, error) {
+func (s *PortfolioService) UpdateObjective(ctx context.Context, scope models.Scope, objectiveID string, req UpdateObjectiveRequest) (*models.Objective, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -150,12 +150,12 @@ func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, obj
 		return nil, err
 	}
 	if current == nil {
-		return nil, ErrObjectiveNotFound
+		return nil, models.ErrObjectiveNotFound
 	}
 	if req.ExpectedRevision != current.Revision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	if req.Status != nil && *req.Status != current.Status && !canTransitionObjective(current.Status, *req.Status) {
+	if req.Status != nil && *req.Status != current.Status && !models.CanTransitionObjective(current.Status, *req.Status) {
 		return nil, fmt.Errorf("%w: %s -> %s", ErrInvalidObjectiveTransition, current.Status, *req.Status)
 	}
 	previousStatus := current.Status
@@ -166,7 +166,7 @@ func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, obj
 		return nil, err
 	}
 	persistUpdate := func() error {
-		activityStore, ok := s.store.(ObjectiveActivityStore)
+		activityStore, ok := s.store.(models.ObjectiveActivityStore)
 		if !ok {
 			return s.store.UpdateObjective(ctx, current, req.ExpectedRevision)
 		}
@@ -180,7 +180,7 @@ func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, obj
 		if summary == "" {
 			summary = "Objective updated"
 		}
-		_, persistErr := activityStore.UpdateObjectiveWithEvent(ctx, current, req.ExpectedRevision, objectiveActivityEvent(current, req.Actor, req.Visibility, eventType, summary, current.UpdatedAt, map[string]interface{}{"previousStatus": previousStatus, "status": current.Status, "revision": current.Revision}))
+		_, persistErr := activityStore.UpdateObjectiveWithEvent(ctx, current, req.ExpectedRevision, models.ObjectiveActivityEvent(current, req.Actor, req.Visibility, eventType, summary, current.UpdatedAt, map[string]interface{}{"previousStatus": previousStatus, "status": current.Status, "revision": current.Revision}))
 		return persistErr
 	}
 	if err := persistUpdate(); err != nil {
@@ -189,7 +189,7 @@ func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, obj
 	return current, nil
 }
 
-func (s *PortfolioService) GetObjective(ctx context.Context, scope Scope, objectiveID string) (*Objective, error) {
+func (s *PortfolioService) GetObjective(ctx context.Context, scope models.Scope, objectiveID string) (*models.Objective, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -201,12 +201,12 @@ func (s *PortfolioService) GetObjective(ctx context.Context, scope Scope, object
 		return nil, err
 	}
 	if objective == nil {
-		return nil, ErrObjectiveNotFound
+		return nil, models.ErrObjectiveNotFound
 	}
 	return objective, nil
 }
 
-func (s *PortfolioService) ListObjectives(ctx context.Context, filter ObjectiveFilter) ([]*Objective, error) {
+func (s *PortfolioService) ListObjectives(ctx context.Context, filter models.ObjectiveFilter) ([]*models.Objective, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -216,7 +216,7 @@ func (s *PortfolioService) ListObjectives(ctx context.Context, filter ObjectiveF
 	return s.store.ListObjectives(ctx, filter)
 }
 
-func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRunRequest) (*AgentRun, error) {
+func (s *PortfolioService) CreateAgentRun(ctx context.Context, req models.CreateAgentRunRequest) (*models.AgentRun, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -230,16 +230,16 @@ func (s *PortfolioService) CreateAgentRun(ctx context.Context, req CreateAgentRu
 	return run, nil
 }
 
-func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRunRequest, runID string, now time.Time) (*AgentRun, error) {
+func buildAgentRun(ctx context.Context, store models.PortfolioStore, req models.CreateAgentRunRequest, runID string, now time.Time) (*models.AgentRun, error) {
 	if err := req.Scope.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidAgentRun, err)
+		return nil, fmt.Errorf("%w: %w", models.ErrInvalidAgentRun, err)
 	}
 	if err := req.Owner.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidAgentRun, err)
+		return nil, fmt.Errorf("%w: %w", models.ErrInvalidAgentRun, err)
 	}
 	for _, state := range []map[string]interface{}{req.Context, req.Plan, req.Checkpoint, req.Policy} {
-		if err := ValidateCredentialFreeContext(state); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidAgentRun, err)
+		if err := models.ValidateCredentialFreeContext(state); err != nil {
+			return nil, fmt.Errorf("%w: %w", models.ErrInvalidAgentRun, err)
 		}
 	}
 	if req.ObjectiveID != "" {
@@ -248,10 +248,10 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 			return nil, err
 		}
 		if objective == nil {
-			return nil, ErrObjectiveNotFound
+			return nil, models.ErrObjectiveNotFound
 		}
 		if req.ParentRunID == "" {
-			if err := validateObjectiveRunBudget(objective, req.Budget); err != nil {
+			if err := models.ValidateObjectiveRunBudget(objective, req.Budget); err != nil {
 				return nil, err
 			}
 		}
@@ -268,41 +268,41 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 			return nil, err
 		}
 		if parent == nil {
-			return nil, ErrRunNotFound
+			return nil, models.ErrRunNotFound
 		}
 		rootID = parent.RootRunID
-		runContext = inheritRoutineEventBatch(parent, maps.Clone(req.Context))
+		runContext = models.InheritRoutineEventBatch(parent, maps.Clone(req.Context))
 	}
 	source := req.Source
 	if source == "" {
-		source = RunSourceManual
+		source = models.RunSourceManual
 	}
 	switch source {
-	case RunSourceManual, RunSourceChat, RunSourceSchedule, RunSourceEvent, RunSourceWebhook, RunSourceRequest, RunSourceRequestDecision, RunSourceCompletionReview, RunSourceHandoff, RunSourceEscalation, RunSourceObjective, RunSourceFork:
+	case models.RunSourceManual, models.RunSourceChat, models.RunSourceSchedule, models.RunSourceEvent, models.RunSourceWebhook, models.RunSourceRequest, models.RunSourceRequestDecision, models.RunSourceCompletionReview, models.RunSourceHandoff, models.RunSourceEscalation, models.RunSourceObjective, models.RunSourceFork:
 	default:
-		return nil, fmt.Errorf("%w: unsupported run source %q", ErrInvalidAgentRun, source)
+		return nil, fmt.Errorf("%w: unsupported run source %q", models.ErrInvalidAgentRun, source)
 	}
-	kind := normalizeRunKind(req.Kind)
-	if !validRunKind(kind) {
-		return nil, fmt.Errorf("%w: unsupported run kind %q", ErrInvalidAgentRun, req.Kind)
+	kind := models.NormalizeRunKind(req.Kind)
+	if !models.IsValidRunKind(kind) {
+		return nil, fmt.Errorf("%w: unsupported run kind %q", models.ErrInvalidAgentRun, req.Kind)
 	}
-	run := &AgentRun{
+	run := &models.AgentRun{
 		ID: runID, Kind: kind, Scope: req.Scope, ObjectiveID: req.ObjectiveID,
 		ParentRunID: req.ParentRunID, RootRunID: rootID, Owner: req.Owner,
 		AssignedAgentID: req.AssignedAgentID, ActingUser: req.ActingUser, Entrypoint: strings.TrimSpace(req.Entrypoint), ConcurrencyKey: strings.TrimSpace(req.ConcurrencyKey),
 		ResourceRequirements: cloneResourceQuantities(req.ResourceRequirements),
 		Goal:                 req.Goal, Source: source,
-		Status: AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
+		Status: models.AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
 		AvailableAt: availableAt, QueueEnteredAt: now, Context: runContext,
 		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,
-		Budget: cloneBudgetPolicy(req.Budget), Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
-		SessionID: req.SessionID, Engine: RunEngineLoop,
+		Budget: models.CloneBudgetPolicy(req.Budget), Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		SessionID: req.SessionID, Engine: models.RunEngineLoop,
 	}
 	if run.Budget != nil {
-		run.BudgetState = BudgetStateActive
+		run.BudgetState = models.BudgetStateActive
 	}
 	if err := run.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidAgentRun, err)
+		return nil, fmt.Errorf("%w: %w", models.ErrInvalidAgentRun, err)
 	}
 	return run, nil
 }
@@ -318,7 +318,7 @@ func cloneResourceQuantities(values map[string]int) map[string]int {
 	return cloned
 }
 
-func (s *PortfolioService) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {
+func (s *PortfolioService) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
@@ -330,23 +330,23 @@ func (s *PortfolioService) GetAgentRun(ctx context.Context, scope Scope, runID s
 		return nil, err
 	}
 	if run == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	return run, nil
 }
 
-func (s *PortfolioService) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
+func (s *PortfolioService) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio store is not configured")
 	}
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	if filter.Kind != "" && !validRunKind(filter.Kind) {
-		return nil, fmt.Errorf("%w: unsupported run kind %q", ErrInvalidAgentRun, filter.Kind)
+	if filter.Kind != "" && !models.IsValidRunKind(filter.Kind) {
+		return nil, fmt.Errorf("%w: unsupported run kind %q", models.ErrInvalidAgentRun, filter.Kind)
 	}
-	if filter.Order != "" && filter.Order != AgentRunOrderScheduler && filter.Order != AgentRunOrderCreatedDesc {
-		return nil, fmt.Errorf("%w: unsupported run order %q", ErrInvalidAgentRun, filter.Order)
+	if filter.Order != "" && filter.Order != models.AgentRunOrderScheduler && filter.Order != models.AgentRunOrderCreatedDesc {
+		return nil, fmt.Errorf("%w: unsupported run order %q", models.ErrInvalidAgentRun, filter.Order)
 	}
 	if filter.Owner != nil {
 		if err := filter.Owner.Validate(); err != nil {
@@ -356,7 +356,7 @@ func (s *PortfolioService) ListAgentRuns(ctx context.Context, filter AgentRunFil
 	return s.store.ListAgentRuns(ctx, filter)
 }
 
-func (s *PortfolioService) SummarizeAgentRuns(ctx context.Context, scope Scope, owners []ObjectiveOwner) ([]AgentRunOwnerSummary, error) {
+func (s *PortfolioService) SummarizeAgentRuns(ctx context.Context, scope models.Scope, owners []models.ObjectiveOwner) ([]models.AgentRunOwnerSummary, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("portfolio service is not configured")
 	}
@@ -368,14 +368,14 @@ func (s *PortfolioService) SummarizeAgentRuns(ctx context.Context, scope Scope, 
 			return nil, err
 		}
 	}
-	store, ok := s.store.(AgentRunSummaryStore)
+	store, ok := s.store.(models.AgentRunSummaryStore)
 	if !ok {
 		return nil, errors.New("agent run summaries are unavailable")
 	}
 	return store.SummarizeAgentRuns(ctx, scope, owners)
 }
 
-func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
+func applyObjectiveUpdate(objective *models.Objective, req UpdateObjectiveRequest) {
 	if req.Title != nil {
 		objective.Title = *req.Title
 	}
@@ -392,7 +392,7 @@ func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
 		objective.ExecutionPolicy = cloneObjectiveExecutionPolicy(req.ExecutionPolicy)
 	}
 	if req.Budget != nil {
-		objective.Budget = cloneBudgetPolicy(req.Budget)
+		objective.Budget = models.CloneBudgetPolicy(req.Budget)
 	}
 	if req.Constraints != nil {
 		objective.Constraints = req.Constraints
@@ -407,24 +407,24 @@ func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
 
 func objectiveCreationFingerprint(req CreateObjectiveRequest) (string, error) {
 	payload := struct {
-		Scope           Scope                     `json:"scope"`
-		Owner           ObjectiveOwner            `json:"owner"`
-		Title           string                    `json:"title"`
-		Goal            string                    `json:"goal"`
-		Status          ObjectiveStatus           `json:"status"`
-		Priority        int                       `json:"priority"`
-		ExecutionPolicy *ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
-		Budget          *BudgetPolicy             `json:"budget,omitempty"`
-		Constraints     map[string]interface{}    `json:"constraints,omitempty"`
-		SuccessCriteria map[string]interface{}    `json:"successCriteria,omitempty"`
+		Scope           models.Scope                     `json:"scope"`
+		Owner           models.ObjectiveOwner            `json:"owner"`
+		Title           string                           `json:"title"`
+		Goal            string                           `json:"goal"`
+		Status          models.ObjectiveStatus           `json:"status"`
+		Priority        int                              `json:"priority"`
+		ExecutionPolicy *models.ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
+		Budget          *models.BudgetPolicy             `json:"budget,omitempty"`
+		Constraints     map[string]interface{}           `json:"constraints,omitempty"`
+		SuccessCriteria map[string]interface{}           `json:"successCriteria,omitempty"`
 	}{req.Scope, req.Owner, req.Title, req.Goal, req.Status, req.Priority, req.ExecutionPolicy,
 		req.Budget, req.Constraints, req.SuccessCriteria}
 	if payload.Status == "" {
-		payload.Status = ObjectiveStatusDraft
+		payload.Status = models.ObjectiveStatusDraft
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("encode objective creation fingerprint: %w", err)
 	}
-	return hashBytes(encoded), nil
+	return models.SHA256Digest(encoded), nil
 }

@@ -1,8 +1,10 @@
 package runtime
 
-func portfolioKey(scope Scope, id string) string { return scope.Key() + ":" + id }
+import "github.com/axiom-studio/openseal/pkg/models"
 
-func cloneObjectiveExecutionPolicy(in *ObjectiveExecutionPolicy) *ObjectiveExecutionPolicy {
+func portfolioKey(scope models.Scope, id string) string { return scope.Key() + ":" + id }
+
+func cloneObjectiveExecutionPolicy(in *models.ObjectiveExecutionPolicy) *models.ObjectiveExecutionPolicy {
 	if in == nil {
 		return nil
 	}
