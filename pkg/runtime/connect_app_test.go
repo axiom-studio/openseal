@@ -65,12 +65,13 @@ func connectAppFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Cat
 				Arguments: map[string]interface{}{"tool": "list_issues", "hash": strings.Repeat("0", 64)}}},
 		}}}, nil
 	})
-	dispatcher.UseAppCatalog(&AppCatalogRef{})
-	dispatcher.apps.Set(fakeAppCatalog{entries: []AppCatalogEntry{
+	apps := &AppCatalogRef{}
+	apps.Set(fakeAppCatalog{entries: []AppCatalogEntry{
 		{Slug: "linear", Name: "Linear", Summary: "Issue tracking", Official: true, SignIn: AppSignInOAuth, LogoSHA256: linearLogo},
 		{Slug: "acme/linear-tools", Name: "Linear Tools", SignIn: "weird"},
 		{Slug: "neondatabase/mcp-server-neon", Name: "Neon", SignIn: AppSignInOAuth},
 	}})
+	dispatcher.UseAppCatalog(apps)
 	return ctx, store, catalog, dispatcher, scope, connected
 }
 
@@ -183,20 +184,32 @@ func TestRequestConnectionParksTheRunOnOneConnectCard(t *testing.T) {
 		t.Fatalf("change set: %#v %v", changes, err)
 	}
 	// Asking again in the conversation shows the same card, never a second one.
-	again, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "again"}, Arguments: map[string]interface{}{"app": "linear"}}, parked, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
-	if err != nil || again["setupRequest"].(map[string]interface{})["id"] != request.ID {
+	again, err := dispatchSkillManagementAction(t, ctx, catalog, dispatcher, parked, SkillActionRequestConnection, "again", map[string]interface{}{"app": "linear"})
+	if card, _ := again["setupRequest"].(map[string]interface{}); err != nil || card["id"] != request.ID {
 		t.Fatalf("second card: %#v %v", again, err)
 	}
 	// Once connected for the run, the result is the app's tools.
 	connected.Store(true)
-	done, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "after"}, Arguments: map[string]interface{}{"app": "linear"}}, parked, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
-	if err != nil || done["setupRequest"] != nil {
+	done, err := dispatchSkillManagementAction(t, ctx, catalog, dispatcher, parked, SkillActionRequestConnection, "after", map[string]interface{}{"app": "linear"})
+	if err != nil || done["setupRequest"] != nil || done["refused"] != nil {
 		t.Fatalf("connected app: %#v %v", done, err)
 	}
 	tools := done["connected"].(map[string]interface{})["tools"].([]interface{})
 	if len(tools) != 1 || tools[0] != "mcp.linear.list_issues" {
 		t.Fatalf("tools: %#v", tools)
 	}
+}
+
+// dispatchSkillManagementAction dispatches one SkillManagement action of the
+// Agent's run as a call of that run.
+func dispatchSkillManagementAction(t *testing.T, ctx context.Context, catalog *skill.Catalog, dispatcher *SkillBindingActionDispatcher, run *AgentRun, action, callID string, arguments map[string]interface{}) (map[string]interface{}, error) {
+	t.Helper()
+	bound, err := catalog.Resolve(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, "agent", SkillManagementSkillID, SkillManagementSkillVersion, action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dispatcher.DispatchAction(ctx, ActionDispatchInput{Run: run, Bound: bound, Arguments: arguments,
+		Call: &ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: "agent"}})
 }
 
 func TestRequestConnectionByAddressAndRefusals(t *testing.T) {
