@@ -4,8 +4,8 @@ package runtime
 // catch-up with attribution, the seed of a new session, the run_context note
 // that carries the ephemeral chat facts, and the react and participation
 // tools. The Runs are driven by the real RunLoop through the loop fixture,
-// whose chat bindings carry the production conversation seams
-// (bindConversationLoop). These replace the Goal-builder tests of
+// whose chat bindings carry the production conversation seams (resolved
+// through ConversationRunTurnRunner). These replace the Goal-builder tests of
 // conversation_card_state_test.go, conversation_places_test.go,
 // conversation_image_style_test.go and the thread, Telegram, participation
 // and spoken-mode coverage of the old conversation runner.
@@ -519,8 +519,30 @@ func (convTeamCatalog) GetTeamDefinition(context.Context, string, string) (*kern
 // cannot bind: a Team member Run, whose control authority is resolved through
 // the Team catalog seam (the fixture resolves it without a catalog, which a
 // Team-owned Run cannot do), and a thread Run, whose lane session is opened
-// with its thread root (the fixture opens the chat's unthreaded lane).
+// with its thread root (the fixture opens the chat's unthreaded lane). The
+// conversation turn runner adds the conversation loop seams on top of
+// convMemberAgentBinding, as it does for the fixture's own binding.
 func convMemberBinding(f *loopFixture, run *AgentRun) *TurnRunnerBinding {
+	f.t.Helper()
+	runner, err := NewConversationRunTurnRunner(f.chats, f.coordinator(), ConversationRunTurnRunnerConfig{
+		AttachmentContent: &answerVisualContent{}, AgentTurns: TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+			return convMemberAgentBinding(f, run), nil
+		}),
+	}, models.WithClock(f.clock.Now))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	binding, err := runner.ResolveTurnRunner(f.ctx, run)
+	if err != nil {
+		f.t.Fatalf("resolve member conversation turn runner: %v", err)
+	}
+	return binding
+}
+
+// convMemberAgentBinding is the member or thread Run's own Agent binding:
+// its lane session, its control authority, the model producer, the run-start
+// preparer and the claim tool executor.
+func convMemberAgentBinding(f *loopFixture, run *AgentRun) *TurnRunnerBinding {
 	f.t.Helper()
 	sessions := f.store.(AgentSessionStore)
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
@@ -555,9 +577,6 @@ func convMemberBinding(f *loopFixture, run *AgentRun) *TurnRunnerBinding {
 		Producer:     producer, Session: session, Host: host, Authority: control,
 		Preparers: []StepPreparer{newRunStartPreparer(sessions, f.store)},
 		Tools:     f.dispatcher.ForClaim(LoopToolClaim{}),
-	}
-	if err := f.runner.bindConversationLoop(f.ctx, run, binding, ConversationLoopStores{Sessions: sessions, Actions: f.store, Activity: f.store}); err != nil {
-		f.t.Fatalf("bind member conversation loop: %v", err)
 	}
 	return binding
 }
@@ -1042,8 +1061,8 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if conversationParticipationAllows(current, quiet) {
-			t.Fatal("the opt-in reached a message from before it")
+		if p := current.Participation; p == nil || !p.Enabled || quiet.Sequence > p.AfterSequence {
+			t.Fatalf("participation = %#v, want the opt-in to start after message %d", p, quiet.Sequence)
 		}
 	})
 
