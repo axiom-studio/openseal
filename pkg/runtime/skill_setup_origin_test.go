@@ -17,7 +17,7 @@ import (
 func skillSetupTaskFixture(t *testing.T) (*SkillBindingActionDispatcher, *sqlite.Store, *sql.DB, *ConversationTaskResult) {
 	t.Helper()
 	store, db := newTestSQLiteStore(t)
-	source, turn, _, _ := settledWorkerTaskFixture(t, store)
+	source, turn, _, _ := settledTaskSourceFixture(t, store)
 	result, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
