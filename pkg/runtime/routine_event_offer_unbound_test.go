@@ -1,14 +1,17 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
-func unboundConversationMessage() (Scope, ExternalConversationAdapterReference, *NormalizedExternalConversationEvent) {
+func unboundConversationMessage() (models.Scope, models.ExternalConversationAdapterReference, *models.NormalizedExternalConversationEvent) {
 	event := slackRoutineMessage("173.001", "U1", "Ana Ruiz", "hello", false)
-	return Scope{Kind: "tenant", ID: "busy"},
-		ExternalConversationAdapterReference{SkillID: "slack", SkillVersion: "1.0.0", BindingID: "binding", BindingRevision: 1, AdapterID: "slack"},
+	return models.Scope{Kind: "tenant", ID: "busy"},
+		models.ExternalConversationAdapterReference{SkillID: "slack", SkillVersion: "1.0.0", BindingID: "binding", BindingRevision: 1, AdapterID: "slack"},
 		&event
 }
 
@@ -20,7 +23,7 @@ func TestConversationRoutineOfferUnboundAllocFree(t *testing.T) {
 	scope, adapter, event := unboundConversationMessage()
 	ctx := context.Background()
 	allocs := testing.AllocsPerRun(1000, func() {
-		if err := offerConversationRoutineEvent(ctx, matcher, scope, "deployment", adapter, "slack", "installation", event); err != nil {
+		if err := runtime.OfferConversationRoutineEvent(ctx, matcher, scope, "deployment", adapter, "slack", "installation", event); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -30,8 +33,8 @@ func TestConversationRoutineOfferUnboundAllocFree(t *testing.T) {
 	if store.calls != 0 {
 		t.Fatalf("unbound conversation offer made %d store calls", store.calls)
 	}
-	if stats := matcher.RoutineEventStats(); stats.In[RoutineEventSlackMessage] != 0 {
-		t.Fatalf("unbound message reached the matcher: in=%d", stats.In[RoutineEventSlackMessage])
+	if stats := matcher.RoutineEventStats(); stats.In[models.RoutineEventSlackMessage] != 0 {
+		t.Fatalf("unbound message reached the matcher: in=%d", stats.In[models.RoutineEventSlackMessage])
 	}
 }
 
@@ -42,7 +45,7 @@ func BenchmarkConversationRoutineOfferUnbound(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := offerConversationRoutineEvent(ctx, matcher, scope, "deployment", adapter, "slack", "installation", event); err != nil {
+		if err := runtime.OfferConversationRoutineEvent(ctx, matcher, scope, "deployment", adapter, "slack", "installation", event); err != nil {
 			b.Fatal(err)
 		}
 	}
