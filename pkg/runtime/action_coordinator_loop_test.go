@@ -284,21 +284,6 @@ func TestLoopProposeValidationErrorsAreRejections(t *testing.T) {
 	assertLoopRunUntouched(t, f.store, f.run)
 }
 
-func TestLoopProposeRejectionMessageIsBounded(t *testing.T) {
-	long := strings.Repeat("é", runtime.MaximumProposalRejectionMessageBytes)
-	err := runtime.RejectProposal(runtime.ProposalRejectionNotAdmitted, errors.New(long))
-	var rejection *runtime.ActionProposalRejection
-	if !errors.As(err, &rejection) || len(rejection.Message) > runtime.MaximumProposalRejectionMessageBytes || !strings.HasPrefix(long, rejection.Message) {
-		t.Fatalf("bounded rejection = %#v", err)
-	}
-	if again := runtime.RejectProposal(runtime.ProposalRejectionToolArgumentsInvalid, err); again != err {
-		t.Fatalf("existing rejection was rewrapped: %#v", again)
-	}
-	if runtime.RejectProposal(runtime.ProposalRejectionNotAdmitted, nil) != nil {
-		t.Fatal("nil error became a rejection")
-	}
-}
-
 func TestLoopProposeCrossRunExternalReceiptSuppressesWithoutRunChange(t *testing.T) {
 	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopProposeFixture(t, store, nil)

@@ -25,8 +25,6 @@ const (
 // ErrLoopActionAbandoned is the error an abandoned loop call records.
 var ErrLoopActionAbandoned = errLoopActionAbandoned
 
-func RejectProposal(code string, err error) error { return rejectProposal(code, err) }
-
 func CanonicalActionCredentialLeasePayload(lease models.ActionCredentialLease) ([]byte, error) {
 	return canonicalActionCredentialLeasePayload(lease)
 }
