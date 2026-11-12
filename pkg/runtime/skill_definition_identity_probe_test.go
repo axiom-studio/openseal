@@ -38,13 +38,15 @@ func TestSkillDefinitionIdentityProbeIsLiveExactAndIsolated(t *testing.T) {
 
 func TestSQLiteSkillDefinitionIdentityProbeDoesNotDecodePayload(t *testing.T) {
 	ctx := context.Background()
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "corrupt-definition.db"))
+	path := filepath.Join(t.TempDir(), "corrupt-definition.db")
+	store, err := NewSQLiteStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	db := openTestSQLiteDB(t, path)
 	identity := capability.SkillIdentity{ID: "broken", Version: "1", SourceIdentity: "catalog::@publisher/broken"}
-	if _, err := store.db.ExecContext(ctx, `INSERT INTO skill_definitions(id, version, source_identity, payload) VALUES(?, ?, ?, ?)`, identity.ID, identity.Version, identity.SourceIdentity, "{malformed immutable payload"); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO skill_definitions(id, version, source_identity, payload) VALUES(?, ?, ?, ?)`, identity.ID, identity.Version, identity.SourceIdentity, "{malformed immutable payload"); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.ListSkillDefinitionIdentities(ctx, identity.ID, identity.Version)
@@ -57,7 +59,7 @@ func TestSQLiteSkillDefinitionIdentityProbeDoesNotDecodePayload(t *testing.T) {
 	if definition, err := skill.NewCatalogWithStore(store).GetDefinitionVariant(ctx, identity.ID, identity.Version, identity.SourceIdentity); err == nil || definition != nil {
 		t.Fatalf("cold catalog accepted malformed definition = %#v, %v", definition, err)
 	}
-	rows, err := store.db.QueryContext(ctx, `EXPLAIN QUERY PLAN SELECT id, version, source_identity FROM skill_definitions WHERE id = ? AND version = ? ORDER BY source_identity`, identity.ID, identity.Version)
+	rows, err := db.QueryContext(ctx, `EXPLAIN QUERY PLAN SELECT id, version, source_identity FROM skill_definitions WHERE id = ? AND version = ? ORDER BY source_identity`, identity.ID, identity.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
