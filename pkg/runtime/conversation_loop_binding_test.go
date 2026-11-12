@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -16,7 +17,7 @@ func TestConversationLoopBindingSetsSeams(t *testing.T) {
 		if _, ok := binding.Final.(conversationObservedFinal); !ok || binding.ToolCheck == nil || binding.AfterTool == nil || len(binding.Preparers) != 2 {
 			t.Fatalf("seams = final %T check %v after %v preparers %d", binding.Final, binding.ToolCheck != nil, binding.AfterTool != nil, len(binding.Preparers))
 		}
-		if _, ok := binding.Preparers[0].(*runStartPreparer); !ok {
+		if reflect.TypeOf(binding.Preparers[0]) != reflect.TypeOf(newRunStartPreparer(nil, nil)) {
 			t.Fatalf("the run-start preparer must stay first: %T", binding.Preparers[0])
 		}
 		authority := binding.Authority
