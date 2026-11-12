@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -32,7 +33,7 @@ type HostToolExecutor interface {
 type HostToolRequest struct {
 	APIVersion        string                 `json:"apiVersion"`
 	InvocationID      string                 `json:"invocationId"` // == ToolEntryID
-	Scope             Scope                  `json:"scope"`
+	Scope             models.Scope           `json:"scope"`
 	RunID             string                 `json:"runId"`
 	StepID            string                 `json:"stepId"` // agent_turns.id of the running step
 	SessionID         string                 `json:"sessionId"`
@@ -66,8 +67,8 @@ type HostToolResult struct {
 	InvocationID string `json:"invocationId"`
 	// Content is text/json at most MaxToolResultContentBytes, plus file parts
 	// for kept output. Parts never carry DataBase64.
-	Content []ContentPart `json:"content"`
-	IsError bool          `json:"isError,omitempty"` // the tool reported a failure the model can act on
+	Content []models.ContentPart `json:"content"`
+	IsError bool                 `json:"isError,omitempty"` // the tool reported a failure the model can act on
 }
 
 // Host tool failure codes (HostToolFailure.Code).
@@ -169,10 +170,10 @@ func (r HostToolResult) Validate(request HostToolRequest) error {
 	if len(r.Content) == 0 {
 		return fmt.Errorf("host tool result has no content")
 	}
-	if _, err := validateContentParts(r.Content, contentPartLimits{
+	if _, err := models.ValidateContentParts(r.Content, models.ContentPartLimits{
 		Field:      "host tool result",
-		MaxParts:   MaxToolResultParts,
-		MaxContent: MaxToolResultContentBytes,
+		MaxParts:   models.MaxToolResultParts,
+		MaxContent: models.MaxToolResultContentBytes,
 	}); err != nil {
 		return fmt.Errorf("host tool result: %w", err)
 	}

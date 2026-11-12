@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -17,20 +18,20 @@ type RunDependencySpec struct {
 	ID          string
 	TargetRunID string
 	RequestID   string
-	Kind        RunDependencyKind
+	Kind        models.RunDependencyKind
 	Required    *bool
 }
 
 type CreateRunDependencyGroupRequest struct {
 	ID                     string
-	Scope                  Scope
+	Scope                  models.Scope
 	SourceRunID            string
 	ExpectedSourceRevision int64
-	Policy                 RunDependencyPolicy
+	Policy                 models.RunDependencyPolicy
 	Dependencies           []RunDependencySpec
 	IdempotencyKey         string
-	Actor                  ActivityActor
-	Visibility             ActivityVisibility
+	Actor                  models.ActivityActor
+	Visibility             models.ActivityVisibility
 }
 
 type ResolveRunDependencyRequest struct {
@@ -217,26 +218,26 @@ func (c *DependencyCoordinator) ListRunDependencies(ctx context.Context, scope S
 	return c.store.ListRunDependencies(ctx, scope, strings.TrimSpace(groupID))
 }
 
-func canEnterDependencyWait(run *AgentRun) bool {
+func canEnterDependencyWait(run *models.AgentRun) bool {
 	if run == nil || run.WakeCondition != nil {
 		return false
 	}
 	switch run.Status {
-	case AgentRunStatusQueued, AgentRunStatusPlanning, AgentRunStatusRunning:
+	case models.AgentRunStatusQueued, models.AgentRunStatusPlanning, models.AgentRunStatusRunning:
 		return true
 	default:
 		return false
 	}
 }
 
-func sameDependencyGroupRequest(group *RunDependencyGroup, edges []*RunDependency, req CreateRunDependencyGroupRequest) bool {
+func sameDependencyGroupRequest(group *models.RunDependencyGroup, edges []*models.RunDependency, req CreateRunDependencyGroupRequest) bool {
 	if group == nil || group.Scope != req.Scope || group.SourceRunID != strings.TrimSpace(req.SourceRunID) ||
 		group.Policy != req.Policy || group.IdempotencyKey != strings.TrimSpace(req.IdempotencyKey) || len(edges) != len(req.Dependencies) {
 		return false
 	}
 	type intent struct {
 		target, request string
-		kind            RunDependencyKind
+		kind            models.RunDependencyKind
 		required        bool
 	}
 	existing := make([]intent, 0, len(edges))

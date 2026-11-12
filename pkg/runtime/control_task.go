@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // conversation_start_task (section 04 §7, A4): a settle-phase control tool
@@ -79,8 +81,8 @@ func parseStartTaskArgs(raw json.RawMessage) (*startTaskArgs, error) {
 // startTaskArguments decodes the arguments of a conversation_start_task
 // entry exactly as the handler does (nil when it is not one or they are
 // invalid). Admission and provenance proofs compare against these.
-func startTaskArguments(entry *SessionEntry) *startTaskArgs {
-	if entry == nil || entry.Type != SessionEntryTool || entry.Tool == nil || entry.Tool.Name != string(ControlToolStartTask) ||
+func startTaskArguments(entry *models.SessionEntry) *startTaskArgs {
+	if entry == nil || entry.Type != models.SessionEntryTool || entry.Tool == nil || entry.Tool.Name != string(models.ControlToolStartTask) ||
 		entry.Tool.ArgumentsError != "" {
 		return nil
 	}

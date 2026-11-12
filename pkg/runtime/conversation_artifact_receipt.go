@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
 	"github.com/axiom-studio/openseal/pkg/computer"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const conversationArtifactReceiptService = "openseal.artifact-delivery"
@@ -63,7 +64,7 @@ func runActionArtifactReferences(ctx context.Context, sessions loopSessionEntryL
 // Shown is set for a file the Agent showed in the chat itself (save_app,
 // present): it goes out with the answer whether or not the answer names it.
 type savedArtifact struct {
-	Ref   ConversationReference
+	Ref   models.ConversationReference
 	Path  string
 	Shown bool
 }

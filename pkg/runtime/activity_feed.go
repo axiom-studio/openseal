@@ -9,6 +9,8 @@ import (
 	"maps"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const (
@@ -34,28 +36,28 @@ type ActivityFeedRequest struct {
 }
 
 type ActivityProjection struct {
-	AnswerPreview    *TurnAnswerPreview     `json:"answerPreview,omitempty"`
-	ID               string                 `json:"id"`
-	Sequence         int64                  `json:"sequence"`
-	EventType        string                 `json:"eventType"`
-	Category         string                 `json:"category"`
-	Severity         ActivitySeverity       `json:"severity"`
-	Visibility       ActivityVisibility     `json:"visibility"`
-	AgentID          string                 `json:"agentId,omitempty"`
-	ObjectiveID      string                 `json:"objectiveId,omitempty"`
-	RunID            string                 `json:"runId,omitempty"`
-	TurnID           string                 `json:"turnId,omitempty"`
-	ParentRunID      string                 `json:"parentRunId,omitempty"`
-	TeamID           string                 `json:"teamId,omitempty"`
-	Actor            ActivityActor          `json:"actor"`
-	Summary          string                 `json:"summary"`
-	UsageDelta       *BudgetUsage           `json:"usageDelta,omitempty"`
-	CreatedAt        time.Time              `json:"createdAt"`
-	DetailAvailable  bool                   `json:"detailAvailable"`
-	Payload          map[string]interface{} `json:"payload,omitempty"`
-	ConversationRefs []string               `json:"conversationRefs,omitempty"`
-	CorrelationID    string                 `json:"correlationId,omitempty"`
-	CausationID      string                 `json:"causationId,omitempty"`
+	AnswerPreview    *TurnAnswerPreview        `json:"answerPreview,omitempty"`
+	ID               string                    `json:"id"`
+	Sequence         int64                     `json:"sequence"`
+	EventType        string                    `json:"eventType"`
+	Category         string                    `json:"category"`
+	Severity         models.ActivitySeverity   `json:"severity"`
+	Visibility       models.ActivityVisibility `json:"visibility"`
+	AgentID          string                    `json:"agentId,omitempty"`
+	ObjectiveID      string                    `json:"objectiveId,omitempty"`
+	RunID            string                    `json:"runId,omitempty"`
+	TurnID           string                    `json:"turnId,omitempty"`
+	ParentRunID      string                    `json:"parentRunId,omitempty"`
+	TeamID           string                    `json:"teamId,omitempty"`
+	Actor            models.ActivityActor      `json:"actor"`
+	Summary          string                    `json:"summary"`
+	UsageDelta       *models.BudgetUsage       `json:"usageDelta,omitempty"`
+	CreatedAt        time.Time                 `json:"createdAt"`
+	DetailAvailable  bool                      `json:"detailAvailable"`
+	Payload          map[string]interface{}    `json:"payload,omitempty"`
+	ConversationRefs []string                  `json:"conversationRefs,omitempty"`
+	CorrelationID    string                    `json:"correlationId,omitempty"`
+	CausationID      string                    `json:"causationId,omitempty"`
 }
 
 type ActivityFeedPage struct {
@@ -126,7 +128,7 @@ func (s *RunActivityService) ListActivityFeed(ctx context.Context, request Activ
 	return page, nil
 }
 
-func projectActivityEvent(event *ActivityEvent, includeDetails bool) ActivityProjection {
+func projectActivityEvent(event *models.ActivityEvent, includeDetails bool) ActivityProjection {
 	projection := ActivityProjection{
 		ID: event.ID, Sequence: event.Sequence, EventType: event.EventType, Category: activityCategory(event.EventType),
 		Severity: event.Severity, Visibility: event.Visibility, AgentID: event.AgentID, ObjectiveID: event.ObjectiveID,
@@ -154,7 +156,7 @@ func activityCategory(eventType string) string {
 	}
 }
 
-func encodeActivityFeedCursor(event *ActivityEvent) (string, error) {
+func encodeActivityFeedCursor(event *models.ActivityEvent) (string, error) {
 	encoded, err := json.Marshal(activityFeedCursor{CreatedAt: event.CreatedAt.UTC(), ID: event.ID})
 	if err != nil {
 		return "", err

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -18,7 +19,7 @@ type ActionCredentialLeaseSignature struct {
 }
 
 type SignedActionCredentialLease struct {
-	Lease     ActionCredentialLease          `json:"lease"`
+	Lease     models.ActionCredentialLease   `json:"lease"`
 	Signature ActionCredentialLeaseSignature `json:"signature"`
 }
 

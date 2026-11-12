@@ -10,14 +10,15 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ValidateAgentProfileImage checks content, not just caller-supplied metadata.
 // The host must independently authorize the profile mutation and artifact read
 // for its principal before calling this scoped validation.
 func ValidateAgentProfileImage(ctx context.Context, store interface {
-	GetArtifact(context.Context, Scope, string, int64) (*Artifact, error)
-}, content ArtifactContentStore, scope Scope, reference *agent.ProfileImage) error {
+	GetArtifact(context.Context, models.Scope, string, int64) (*models.Artifact, error)
+}, content ArtifactContentStore, scope models.Scope, reference *agent.ProfileImage) error {
 	if reference == nil {
 		return nil
 	}
@@ -31,7 +32,7 @@ func ValidateAgentProfileImage(ctx context.Context, store interface {
 	const maximum = 1 << 20
 	// Availability may be projected by the host rather than persisted. Opening
 	// and validating the content below is the authoritative availability check.
-	if artifact == nil || artifact.Scope != scope || artifact.ID != reference.ArtifactID || artifact.Version != reference.Version || artifact.SizeBytes < 1 || artifact.SizeBytes > maximum || artifact.ContentAvailability == ArtifactContentUnavailable {
+	if artifact == nil || artifact.Scope != scope || artifact.ID != reference.ArtifactID || artifact.Version != reference.Version || artifact.SizeBytes < 1 || artifact.SizeBytes > maximum || artifact.ContentAvailability == models.ArtifactContentUnavailable {
 		return errors.New("profile image must be an available image in this workspace, at most 1 MiB")
 	}
 	switch artifact.MediaType {

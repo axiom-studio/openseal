@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -43,14 +44,14 @@ func teamRosterReader(store any) TeamRosterReader {
 // Team's current active deployment. An empty agent, an unknown owner, a
 // missing Team catalog and a missing or inactive Team are not members; store
 // errors are returned.
-func AgentOnChatRoster(ctx context.Context, teams TeamRosterReader, scope Scope, owner ObjectiveOwner, agentID string) (bool, error) {
+func AgentOnChatRoster(ctx context.Context, teams models.TeamRosterReader, scope models.Scope, owner models.ObjectiveOwner, agentID string) (bool, error) {
 	if agentID == "" || strings.TrimSpace(agentID) != agentID {
 		return false, nil
 	}
 	switch owner.Type {
-	case OwnerTypeAgent:
+	case models.OwnerTypeAgent:
 		return owner.ID != "" && owner.ID == agentID, nil
-	case OwnerTypeTeam:
+	case models.OwnerTypeTeam:
 		roster, active, err := teamRoster(ctx, teams, scope, owner.ID)
 		if err != nil || !active {
 			return false, err
@@ -67,7 +68,7 @@ func AgentOnChatRoster(ctx context.Context, teams TeamRosterReader, scope Scope,
 // teamRoster is the Agent deployment IDs on teamID's current deployment and
 // whether that deployment is active. A missing Team, a missing catalog and a
 // deployment from another scope have no roster.
-func teamRoster(ctx context.Context, teams TeamRosterReader, scope Scope, teamID string) ([]string, bool, error) {
+func teamRoster(ctx context.Context, teams models.TeamRosterReader, scope models.Scope, teamID string) ([]string, bool, error) {
 	if teams == nil || strings.TrimSpace(teamID) == "" {
 		return nil, false, nil
 	}

@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ask_user (section 04 §10.2): a settle-phase control tool that posts one
@@ -41,13 +43,13 @@ type askUserOption struct {
 func askUserOptionID(index int) string { return fmt.Sprintf("o%d", index+1) }
 
 // channelQuestion is the posted shape of the options (nil without options).
-func (a *askUserArgs) channelQuestion() *ChannelQuestion {
+func (a *askUserArgs) channelQuestion() *models.ChannelQuestion {
 	if a == nil || len(a.Options) == 0 {
 		return nil
 	}
-	question := &ChannelQuestion{AllowMultiple: a.AllowMultiple, AllowOther: a.AllowOther}
+	question := &models.ChannelQuestion{AllowMultiple: a.AllowMultiple, AllowOther: a.AllowOther}
 	for index, option := range a.Options {
-		question.Options = append(question.Options, ChannelQuestionOption{ID: askUserOptionID(index), Label: option.Label, Description: option.Description})
+		question.Options = append(question.Options, models.ChannelQuestionOption{ID: askUserOptionID(index), Label: option.Label, Description: option.Description})
 	}
 	return question
 }
@@ -125,15 +127,15 @@ func parseAskUserArgs(raw json.RawMessage) (*askUserArgs, error) {
 		}
 		return args, nil
 	}
-	if len(args.Options) < minimumAskUserOptions || len(args.Options) > maximumAskUserOptions {
-		return nil, fmt.Errorf("options must list %d to %d choices", minimumAskUserOptions, maximumAskUserOptions)
+	if len(args.Options) < models.MinimumAskUserOptions || len(args.Options) > models.MaximumAskUserOptions {
+		return nil, fmt.Errorf("options must list %d to %d choices", models.MinimumAskUserOptions, models.MaximumAskUserOptions)
 	}
 	seen := make(map[string]struct{}, len(args.Options))
 	for index := range args.Options {
 		option := &args.Options[index]
 		option.Label = strings.TrimSpace(option.Label)
 		option.Description = strings.TrimSpace(option.Description)
-		if err := validChannelQuestionOptionText(option.Label, option.Description); err != nil {
+		if err := models.ValidateChannelQuestionOptionText(option.Label, option.Description); err != nil {
 			return nil, err
 		}
 		if _, exists := seen[option.Label]; exists {
@@ -146,8 +148,8 @@ func parseAskUserArgs(raw json.RawMessage) (*askUserArgs, error) {
 
 // askUserEntryArgs decodes an ask_user entry's arguments (nil when the entry
 // is not a valid ask_user call).
-func askUserEntryArgs(entry *SessionEntry) *askUserArgs {
-	if entry == nil || entry.Type != SessionEntryTool || entry.Tool == nil || entry.Tool.Name != string(ControlToolAskUser) {
+func askUserEntryArgs(entry *models.SessionEntry) *askUserArgs {
+	if entry == nil || entry.Type != models.SessionEntryTool || entry.Tool == nil || entry.Tool.Name != string(models.ControlToolAskUser) {
 		return nil
 	}
 	args, err := parseAskUserArgs(entry.Tool.Arguments)
@@ -159,7 +161,7 @@ func askUserEntryArgs(entry *SessionEntry) *askUserArgs {
 
 // askUserQuestion is the posted text of an ask_user entry: its trimmed
 // question argument ("" when the entry is not an ask_user call).
-func askUserQuestion(entry *SessionEntry) string {
+func askUserQuestion(entry *models.SessionEntry) string {
 	if args := askUserEntryArgs(entry); args != nil {
 		return args.Question
 	}

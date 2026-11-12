@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -191,20 +192,20 @@ func (s *PortfolioService) UpdateObjective(ctx context.Context, scope Scope, obj
 	return current, nil
 }
 
-func objectiveActivityEvent(objective *Objective, actor ActivityActor, visibility ActivityVisibility, eventType, summary string, occurredAt time.Time, payload map[string]interface{}) *ActivityEvent {
+func objectiveActivityEvent(objective *models.Objective, actor models.ActivityActor, visibility models.ActivityVisibility, eventType, summary string, occurredAt time.Time, payload map[string]interface{}) *models.ActivityEvent {
 	if strings.TrimSpace(actor.Type) == "" {
-		actor = ActivityActor{Type: "system", ID: "openseal"}
+		actor = models.ActivityActor{Type: "system", ID: "openseal"}
 	}
 	if visibility == "" {
-		visibility = ActivityVisibilityScope
+		visibility = models.ActivityVisibilityScope
 	}
-	event := &ActivityEvent{
+	event := &models.ActivityEvent{
 		ID: uuid.NewString(), Scope: objective.Scope, ObjectiveID: objective.ID, EventType: eventType,
-		Severity: ActivitySeverityInfo, Actor: actor, Summary: summary, Payload: payload,
+		Severity: models.ActivitySeverityInfo, Actor: actor, Summary: summary, Payload: payload,
 		Visibility: visibility, CreatedAt: occurredAt,
 	}
 	event.AgentID = ownedItemEventAgentID(objective.Owner, actor)
-	if objective.Owner.Type == OwnerTypeTeam {
+	if objective.Owner.Type == models.OwnerTypeTeam {
 		event.TeamID = objective.Owner.ID
 	}
 	return event
@@ -212,11 +213,11 @@ func objectiveActivityEvent(objective *Objective, actor ActivityActor, visibilit
 
 // ownedItemEventAgentID is the Agent an owned item's activity belongs to: the
 // owning Agent, or the Team member that acted on a Team-owned item.
-func ownedItemEventAgentID(owner ObjectiveOwner, actor ActivityActor) string {
+func ownedItemEventAgentID(owner models.ObjectiveOwner, actor models.ActivityActor) string {
 	switch owner.Type {
-	case OwnerTypeAgent:
+	case models.OwnerTypeAgent:
 		return owner.ID
-	case OwnerTypeTeam:
+	case models.OwnerTypeTeam:
 		if actor.Type == "agent" {
 			return actor.ID
 		}
@@ -440,11 +441,11 @@ func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
 	}
 }
 
-func canTransitionObjective(from, to ObjectiveStatus) bool {
-	allowed := map[ObjectiveStatus]map[ObjectiveStatus]bool{
-		ObjectiveStatusDraft:  {ObjectiveStatusActive: true, ObjectiveStatusRetired: true},
-		ObjectiveStatusActive: {ObjectiveStatusPaused: true, ObjectiveStatusSatisfied: true, ObjectiveStatusFailed: true, ObjectiveStatusRetired: true},
-		ObjectiveStatusPaused: {ObjectiveStatusActive: true, ObjectiveStatusFailed: true, ObjectiveStatusRetired: true},
+func canTransitionObjective(from, to models.ObjectiveStatus) bool {
+	allowed := map[models.ObjectiveStatus]map[models.ObjectiveStatus]bool{
+		models.ObjectiveStatusDraft:  {models.ObjectiveStatusActive: true, models.ObjectiveStatusRetired: true},
+		models.ObjectiveStatusActive: {models.ObjectiveStatusPaused: true, models.ObjectiveStatusSatisfied: true, models.ObjectiveStatusFailed: true, models.ObjectiveStatusRetired: true},
+		models.ObjectiveStatusPaused: {models.ObjectiveStatusActive: true, models.ObjectiveStatusFailed: true, models.ObjectiveStatusRetired: true},
 	}
 	return allowed[from][to]
 }

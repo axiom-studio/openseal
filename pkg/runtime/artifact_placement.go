@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ArtifactPlacement records where an artifact was made: the chat whose run
@@ -87,10 +89,10 @@ func (p ArtifactPlacement) runConversationID(ctx context.Context, scope Scope, r
 	return runContextConversationID(root), nil
 }
 
-func runContextConversationID(run *AgentRun) string {
-	id, _ := run.Context[conversationRunContextConversationID].(string)
+func runContextConversationID(run *models.AgentRun) string {
+	id, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
 	id = strings.TrimSpace(id)
-	if !validOpaqueIdentifier(id, 128) {
+	if !models.IsValidOpaqueIdentifier(id, 128) {
 		return ""
 	}
 	return id

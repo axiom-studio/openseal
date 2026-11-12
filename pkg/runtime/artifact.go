@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 var (
@@ -138,7 +140,7 @@ func (c *ArtifactCatalog) List(ctx context.Context, filter ArtifactFilter) ([]*A
 // state. SizeBytes may be -1 when the incoming stream size is unknown.
 type ArtifactContentStore interface {
 	Put(context.Context, ArtifactContentWrite) (ArtifactStoredContent, error)
-	Open(context.Context, Scope, string) (io.ReadCloser, error)
+	Open(context.Context, models.Scope, string) (io.ReadCloser, error)
 }
 
 // ArtifactContentInspector lets a host truthfully project whether the bytes
@@ -163,7 +165,7 @@ type ArtifactContentResolver interface {
 }
 
 type ArtifactContentWrite struct {
-	Scope     Scope
+	Scope     models.Scope
 	MediaType string
 	Reader    io.Reader
 	SizeBytes int64
@@ -171,7 +173,7 @@ type ArtifactContentWrite struct {
 	// Owner is the Artifact's owner, such as the Agent whose conversation
 	// produced it. A host may use it to place bytes; it is never part of the
 	// content reference contract.
-	Owner *ObjectiveOwner
+	Owner *models.ObjectiveOwner
 	// Space is the id of the Space the bytes belong to when the content is
 	// the Space's own, such as its icon, rather than an Agent's or a Team's.
 	// Like Owner it only tells a host where to place the bytes (an object
@@ -222,7 +224,7 @@ func artifactFingerprint(artifact *Artifact) (string, error) {
 	return "sha256:" + hex.EncodeToString(digest[:]), nil
 }
 
-func normalizeArtifact(artifact *Artifact) {
+func normalizeArtifact(artifact *models.Artifact) {
 	artifact.ID = strings.TrimSpace(artifact.ID)
 	artifact.Name = strings.TrimSpace(artifact.Name)
 	artifact.Type = strings.TrimSpace(artifact.Type)

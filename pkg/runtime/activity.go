@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -293,7 +294,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 	return run, persisted, nil
 }
 
-func cloneBudgetUsage(usage *BudgetUsage) *BudgetUsage {
+func cloneBudgetUsage(usage *models.BudgetUsage) *models.BudgetUsage {
 	if usage == nil {
 		return nil
 	}
@@ -340,32 +341,32 @@ func (s *RunActivityService) ListActivity(ctx context.Context, filter ActivityFi
 	return s.activity.ListActivity(ctx, filter)
 }
 
-func canTransitionAgentRun(from, to AgentRunStatus) bool {
-	allowed := map[AgentRunStatus]map[AgentRunStatus]bool{
-		AgentRunStatusQueued:               {AgentRunStatusPlanning: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusCanceled: true},
-		AgentRunStatusPlanning:             {AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusWaitingForAgent: true, AgentRunStatusWaitingForApproval: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
-		AgentRunStatusRunning:              {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusSleeping: true, AgentRunStatusWaitingForDependency: true, AgentRunStatusWaitingForAgent: true, AgentRunStatusWaitingForApproval: true, AgentRunStatusWaitingForEvent: true, AgentRunStatusCompleted: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
-		AgentRunStatusPaused:               {AgentRunStatusQueued: true, AgentRunStatusSleeping: true, AgentRunStatusWaitingForDependency: true, AgentRunStatusWaitingForAgent: true, AgentRunStatusWaitingForApproval: true, AgentRunStatusWaitingForEvent: true, AgentRunStatusCanceled: true},
-		AgentRunStatusSleeping:             {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusCanceled: true},
-		AgentRunStatusWaitingForDependency: {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
-		AgentRunStatusWaitingForAgent:      {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
-		AgentRunStatusWaitingForApproval:   {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
-		AgentRunStatusWaitingForEvent:      {AgentRunStatusQueued: true, AgentRunStatusRunning: true, AgentRunStatusPaused: true, AgentRunStatusFailed: true, AgentRunStatusCanceled: true},
+func canTransitionAgentRun(from, to models.AgentRunStatus) bool {
+	allowed := map[models.AgentRunStatus]map[models.AgentRunStatus]bool{
+		models.AgentRunStatusQueued:               {models.AgentRunStatusPlanning: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusCanceled: true},
+		models.AgentRunStatusPlanning:             {models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusWaitingForAgent: true, models.AgentRunStatusWaitingForApproval: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
+		models.AgentRunStatusRunning:              {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusSleeping: true, models.AgentRunStatusWaitingForDependency: true, models.AgentRunStatusWaitingForAgent: true, models.AgentRunStatusWaitingForApproval: true, models.AgentRunStatusWaitingForEvent: true, models.AgentRunStatusCompleted: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
+		models.AgentRunStatusPaused:               {models.AgentRunStatusQueued: true, models.AgentRunStatusSleeping: true, models.AgentRunStatusWaitingForDependency: true, models.AgentRunStatusWaitingForAgent: true, models.AgentRunStatusWaitingForApproval: true, models.AgentRunStatusWaitingForEvent: true, models.AgentRunStatusCanceled: true},
+		models.AgentRunStatusSleeping:             {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusCanceled: true},
+		models.AgentRunStatusWaitingForDependency: {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
+		models.AgentRunStatusWaitingForAgent:      {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
+		models.AgentRunStatusWaitingForApproval:   {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
+		models.AgentRunStatusWaitingForEvent:      {models.AgentRunStatusQueued: true, models.AgentRunStatusRunning: true, models.AgentRunStatusPaused: true, models.AgentRunStatusFailed: true, models.AgentRunStatusCanceled: true},
 	}
 	return allowed[from][to]
 }
 
-func isWaitingRunStatus(status AgentRunStatus) bool {
-	return status == AgentRunStatusSleeping || status == AgentRunStatusWaitingForDependency ||
-		status == AgentRunStatusWaitingForAgent || status == AgentRunStatusWaitingForApproval ||
-		status == AgentRunStatusWaitingForEvent
+func isWaitingRunStatus(status models.AgentRunStatus) bool {
+	return status == models.AgentRunStatusSleeping || status == models.AgentRunStatusWaitingForDependency ||
+		status == models.AgentRunStatusWaitingForAgent || status == models.AgentRunStatusWaitingForApproval ||
+		status == models.AgentRunStatusWaitingForEvent
 }
 
 // terminalCreditError reads the kernel-classified cause of a failed Run, never
 // provider text, so only a Workspace credit refusal yields a credit error.
-func terminalCreditError(status AgentRunStatus, failure *RunFailureExplanation) *RunCreditError {
-	if status != AgentRunStatusFailed || failure == nil || failure.Code != RunCreditErrorWorkspaceCreditsExhausted {
+func terminalCreditError(status models.AgentRunStatus, failure *models.RunFailureExplanation) *models.RunCreditError {
+	if status != models.AgentRunStatusFailed || failure == nil || failure.Code != RunCreditErrorWorkspaceCreditsExhausted {
 		return nil
 	}
-	return &RunCreditError{Code: RunCreditErrorWorkspaceCreditsExhausted}
+	return &models.RunCreditError{Code: RunCreditErrorWorkspaceCreditsExhausted}
 }

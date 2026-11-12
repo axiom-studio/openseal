@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -26,7 +27,7 @@ type RoutineBrief struct {
 // prove a user's addresses leave it unset, and owner-only grants are then
 // neither offered nor applied.
 type RoutineOwnerAddressResolver interface {
-	RoutineOwnerAddresses(ctx context.Context, scope Scope, owner ConversationParticipant) ([]string, error)
+	RoutineOwnerAddresses(ctx context.Context, scope models.Scope, owner models.ConversationParticipant) ([]string, error)
 }
 
 // RoutineGrantCatalog resolves the Agent's bound actions when a brief is
@@ -90,7 +91,7 @@ func normalizeRoutineBrief(brief *RoutineBrief, allowEmptyLabels bool) (*Routine
 
 // routineGrantToolPinned reports whether a grant's pin is exactly the fixed
 // arguments of the tool being called.
-func routineGrantToolPinned(grant RoutineGrant, tool *skill.BindingTool) bool {
+func routineGrantToolPinned(grant models.RoutineGrant, tool *skill.BindingTool) bool {
 	if tool == nil || len(grant.ToolArguments) == 0 || len(grant.ToolArguments) != len(tool.Arguments) {
 		return false
 	}
@@ -385,13 +386,13 @@ func routineGrantDestinationLabel(label string, destinations []string) (string, 
 func routineDestinationsPinned(arguments map[string]interface{}, keys []string, pinned []string) bool {
 	allowed := make(map[string]bool, len(pinned))
 	for _, destination := range pinned {
-		if destination = normalizeRoutineGrantDestination(destination); destination != "" {
+		if destination = models.NormalizeRoutineGrantDestination(destination); destination != "" {
 			allowed[destination] = true
 		}
 	}
 	count := 0
 	check := func(value string) bool {
-		destination := normalizeRoutineGrantDestination(value)
+		destination := models.NormalizeRoutineGrantDestination(value)
 		if destination == "" {
 			return true
 		}
@@ -495,14 +496,14 @@ func routineRecipientsOwned(arguments map[string]interface{}, owned []string) bo
 }
 
 type routineGrantStore interface {
-	GetRunbookActivation(context.Context, Scope, string) (*RunbookActivation, error)
-	GetChannelMessage(context.Context, Scope, string, string) (*ChannelMessage, error)
+	GetRunbookActivation(context.Context, models.Scope, string) (*models.RunbookActivation, error)
+	GetChannelMessage(context.Context, models.Scope, string, string) (*models.ChannelMessage, error)
 }
 
 // routineActivationForRun returns the routine activation a Run executes for:
 // a kernel-scheduled or started occurrence of a scheduled task, or a child of
 // one assigned to the same Agent.
-func routineActivationForRun(ctx context.Context, runs agentRunReader, store routineGrantStore, run *AgentRun) (*RunbookActivation, error) {
+func routineActivationForRun(ctx context.Context, runs agentRunReader, store routineGrantStore, run *models.AgentRun) (*models.RunbookActivation, error) {
 	if run == nil || store == nil {
 		return nil, nil
 	}
@@ -513,7 +514,7 @@ func routineActivationForRun(ctx context.Context, runs agentRunReader, store rou
 			return nil, nil
 		}
 		root, err := runs.GetAgentRun(ctx, run.Scope, rootID)
-		if errors.Is(err, ErrRunNotFound) || err == nil && root == nil {
+		if errors.Is(err, models.ErrRunNotFound) || err == nil && root == nil {
 			return nil, nil
 		}
 		if err != nil {
@@ -526,7 +527,7 @@ func routineActivationForRun(ctx context.Context, runs agentRunReader, store rou
 		return nil, nil
 	}
 	activation, err := store.GetRunbookActivation(ctx, run.Scope, strings.TrimSpace(activationID))
-	if errors.Is(err, ErrRunbookActivationNotFound) {
+	if errors.Is(err, models.ErrRunbookActivationNotFound) {
 		return nil, nil
 	}
 	if err != nil || activation == nil {
@@ -541,11 +542,11 @@ func routineActivationForRun(ctx context.Context, runs agentRunReader, store rou
 }
 
 // RoutineOwner is the person who created the routine: its task's CreatedBy.
-func routineOwner(activation *RunbookActivation) (ConversationParticipant, error) {
+func routineOwner(activation *models.RunbookActivation) (models.ConversationParticipant, error) {
 	if activation == nil || activation.Task == nil || activation.Task.CreatedBy == "" {
-		return ConversationParticipant{}, errors.New("routine owner is unavailable")
+		return models.ConversationParticipant{}, errors.New("routine owner is unavailable")
 	}
-	return ConversationParticipant{Type: ConversationParticipantUser, ID: activation.Task.CreatedBy}, nil
+	return models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: activation.Task.CreatedBy}, nil
 }
 
 // resolveRoutineGrant returns the approved routine grant that covers this
@@ -555,7 +556,7 @@ func routineOwner(activation *RunbookActivation) (ConversationParticipant, error
 // exact tool its fixed arguments select on the routine umbrella's binding,
 // never by the base action, and only while that tool still has the fixed
 // arguments (upstream name and pinned hash) the user approved.
-func resolveRoutineGrant(ctx context.Context, runs agentRunReader, store routineGrantStore, owners RoutineOwnerAddressResolver, run *AgentRun, bound *skill.BoundAction, arguments map[string]interface{}) (*RoutineGrant, error) {
+func resolveRoutineGrant(ctx context.Context, runs agentRunReader, store routineGrantStore, owners RoutineOwnerAddressResolver, run *models.AgentRun, bound *skill.BoundAction, arguments map[string]interface{}) (*models.RoutineGrant, error) {
 	if bound == nil || bound.Definition == nil || bound.Action.AlwaysReview() || routineUngrantableSkills[bound.Definition.ID] {
 		return nil, nil
 	}

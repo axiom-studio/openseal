@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -672,7 +673,7 @@ func agentBuilderTargetError(agentID string, err error) error {
 	return err
 }
 
-func agentBuilderScope(scope Scope) capability.ScopeReference {
+func agentBuilderScope(scope models.Scope) capability.ScopeReference {
 	return capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 }
 

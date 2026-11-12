@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/google/uuid"
 )
@@ -400,9 +401,11 @@ func (s *SpaceService) CheckTeamAgents(ctx context.Context, scope Scope, teamID 
 	return nil
 }
 
-func agentsInSpace(space *Space, members []*SpaceMember, agentIDs []string) error {
+func agentsInSpace(space *models.Space, members []*models.SpaceMember, agentIDs []string) error {
 	for _, agentID := range agentIDs {
-		if !slices.ContainsFunc(members, func(member *SpaceMember) bool { return member.Type == SpaceMemberAgent && member.ID == agentID }) {
+		if !slices.ContainsFunc(members, func(member *models.SpaceMember) bool {
+			return member.Type == models.SpaceMemberAgent && member.ID == agentID
+		}) {
 			return fmt.Errorf("%w: agent %q is not in space %q", ErrTeamAgentOutsideSpace, agentID, space.Name)
 		}
 	}

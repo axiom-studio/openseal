@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -38,7 +39,7 @@ func ApprovalModeAllowsAction(mode ConversationApprovalMode, review skill.Action
 }
 
 type agentRunReader interface {
-	GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error)
+	GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error)
 }
 
 type conversationReader interface {
@@ -107,24 +108,24 @@ func routineEventOccurrenceRun(run *AgentRun) bool {
 // inheritRoutineEventBatch gives a child Run its source's routineEventBatchId,
 // and drops any value the child's caller-supplied context tried to set, so
 // only a real occurrence and the Runs under it carry the key.
-func inheritRoutineEventBatch(source *AgentRun, context map[string]interface{}) map[string]interface{} {
+func inheritRoutineEventBatch(source *models.AgentRun, context map[string]interface{}) map[string]interface{} {
 	batch := ""
 	if source != nil {
 		batch = routineEventBatchOf(source)
 	}
 	if batch == "" {
-		delete(context, RoutineEventBatchContextKey)
+		delete(context, models.RoutineEventBatchContextKey)
 		return context
 	}
 	if context == nil {
 		context = map[string]interface{}{}
 	}
-	context[RoutineEventBatchContextKey] = batch
+	context[models.RoutineEventBatchContextKey] = batch
 	return context
 }
 
-func routineEventBatchOf(run *AgentRun) string {
-	batch, _ := run.Context[RoutineEventBatchContextKey].(string)
+func routineEventBatchOf(run *models.AgentRun) string {
+	batch, _ := run.Context[models.RoutineEventBatchContextKey].(string)
 	return strings.TrimSpace(batch)
 }
 
