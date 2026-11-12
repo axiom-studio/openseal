@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -29,7 +29,7 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
 	}), nil)
 	waiting := func(agentID string, trigger *models.ChannelMessage) *models.ActionProposalResult {
-		created, err := f.scheduler.runs.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		created, err := f.scheduler.Runs().CreateAgentRun(ctx, models.CreateAgentRunRequest{
 			Scope: scope, Kind: models.RunKindConversation, Owner: team.Owner, AssignedAgentID: agentID,
 			ConcurrencyKey: models.ConversationRunLane(team.ID, "", agentID), Goal: "Respond to a Team channel message", Source: models.RunSourceChat,
 			Context:        map[string]interface{}{models.ConversationRunConversationIDContextKey: team.ID, models.ConversationRunTriggerIDContextKey: trigger.ID, conversation.ConversationRunContextTriggerSeq: trigger.Sequence},
@@ -57,7 +57,7 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 	next := f.post(t, conversation.PostChannelMessageRequest{Sender: person, IdempotencyKey: "next", Content: "connect my Google account first"})
 
 	// Routed to iris; nova's approval is the person's, rex's is someone else's.
-	if err := f.scheduler.replaceOtherMemberApprovals(ctx, team, next, "", map[string]bool{"iris": true}); err != nil {
+	if err := f.scheduler.ReplaceOtherMemberApprovals(ctx, team, next, "", map[string]bool{"iris": true}); err != nil {
 		t.Fatal(err)
 	}
 	if approval, err := f.store.GetApproval(ctx, scope, nova.Approval.ID); err != nil || approval.Status != models.ApprovalStatusSuperseded || approval.SupersededByMessageID != next.ID {
@@ -78,7 +78,7 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 
 	// A routed member is left to the normal follow-up path.
 	again := f.post(t, conversation.PostChannelMessageRequest{Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "member-b"}, IdempotencyKey: "again"})
-	if err := f.scheduler.replaceOtherMemberApprovals(ctx, team, again, "", map[string]bool{"rex": true}); err != nil {
+	if err := f.scheduler.ReplaceOtherMemberApprovals(ctx, team, again, "", map[string]bool{"rex": true}); err != nil {
 		t.Fatal(err)
 	}
 	if approval, _ := f.store.GetApproval(ctx, scope, someoneElses.Approval.ID); approval.Status != models.ApprovalStatusPending {

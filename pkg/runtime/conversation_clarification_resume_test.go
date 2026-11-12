@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"testing"
@@ -6,6 +6,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
@@ -45,7 +46,7 @@ func TestConversationClarificationReplayWithInactiveParent(t *testing.T) {
 						t.Fatalf("accepted answer replay lost original receipt: %#v, %v, %v", result, replayed, err)
 					}
 				} else {
-					result, handled, err := f.scheduler.resumeConversationAnswer(t.Context(), f.conversation, answer)
+					result, handled, err := f.scheduler.ResumeConversationAnswer(t.Context(), f.conversation, answer)
 					if err != nil || handled || result != nil {
 						t.Fatalf("fresh answer resumed inactive parent's work: %#v, %v, %v", result, handled, err)
 					}
@@ -58,7 +59,7 @@ func TestConversationClarificationReplayWithInactiveParent(t *testing.T) {
 }
 
 func TestConversationClarificationTargetsOnlyTheRepliedTask(t *testing.T) {
-	f := newClarificationFixture(t, newTestKernelStore(t), "targets")
+	f := newClarificationFixture(t, conversationtest.NewStore(t), "targets")
 	q := f.question(t)
 	other, err := portfolio.NewPortfolioService(f.store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: f.root.Scope, Kind: models.RunKindAgentWork, Owner: f.root.Owner, AssignedAgentID: "writer", ParentRunID: f.root.ID, Goal: "Draft the outline", Source: models.RunSourceRequest})
 	if err != nil {
@@ -70,11 +71,11 @@ func TestConversationClarificationTargetsOnlyTheRepliedTask(t *testing.T) {
 	}
 	answer := f.answer(t, "")
 	// More than one waiting task: do not guess what an unthreaded message answers.
-	if _, handled, err := f.scheduler.resumeConversationAnswer(t.Context(), f.conversation, answer); err != nil || handled {
+	if _, handled, err := f.scheduler.ResumeConversationAnswer(t.Context(), f.conversation, answer); err != nil || handled {
 		t.Fatalf("ambiguous reply consumed: %v %v", handled, err)
 	}
 	answer.ResolvesMessageID = q.ID
-	result, handled, err := f.scheduler.resumeConversationAnswer(t.Context(), f.conversation, answer)
+	result, handled, err := f.scheduler.ResumeConversationAnswer(t.Context(), f.conversation, answer)
 	if err != nil || !handled || result.Run.ID != f.child.ID {
 		t.Fatalf("explicit reply = %#v %v %v", result, handled, err)
 	}

@@ -509,3 +509,14 @@ func TestConversationTaskGenericInterventionDoesNotMintAnswerReceipt(t *testing.
 // answerReceivedEvent is the activity event of a clarification answer the
 // scheduler delivered to the waiting Run.
 const answerReceivedEvent = "run.conversation_answer_received"
+
+// clarificationQuestionKeyOf is the idempotency key of the question a Run
+// waiting on an ask_user entry posted: the ask_user settle and the question
+// reconciler post under it, so either replays the other. The tests spell it
+// out to pin that key.
+func clarificationQuestionKeyOf(run *AgentRun) string {
+	if run == nil || run.WakeCondition == nil {
+		return ""
+	}
+	return "conversation-clarification:" + run.ID + ":" + run.WakeCondition.Reference
+}
