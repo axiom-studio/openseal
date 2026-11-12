@@ -1,4 +1,16 @@
-package runtime
+package runtime_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/skill"
+)
 
 // Agent-builder approval paths (D11, spec-openseal §3.1 "Approval paths").
 //
@@ -25,21 +37,10 @@ package runtime
 //
 // Each case below resolves through the authorizer that caller builds.
 
-import (
-	"context"
-	"errors"
-	"testing"
-	"time"
-
-	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/skill"
-)
-
 // builderApprovalHost is a host authorizer that may approve agent-builder
 // cards; builderErr, when set, is its refusal.
 type builderApprovalHost struct {
-	EligibleApprovalAuthorizer
+	runtime.EligibleApprovalAuthorizer
 	builderErr error
 	calls      *int
 }
@@ -54,7 +55,7 @@ func (h builderApprovalHost) AuthorizeAgentBuilderApproval(_ context.Context, _ 
 	return h.builderErr
 }
 
-var allowAllApprovals = ApprovalAuthorizerFunc(func(context.Context, models.ApprovalPrincipal, *models.ApprovalCheckpoint) error { return nil })
+var allowAllApprovals = runtime.ApprovalAuthorizerFunc(func(context.Context, models.ApprovalPrincipal, *models.ApprovalCheckpoint) error { return nil })
 
 // cardApproval starts its own Run, commits a write loop call waiting on an
 // approval whose review preview is proposed, and parks the Run on it.
@@ -102,9 +103,9 @@ func agentBuilderCards() map[string]map[string]interface{} {
 	}
 }
 
-func (f *loopStoreFixture) resolveWith(authorizer ApprovalAuthorizer, approval *models.ApprovalCheckpoint, decision models.ApprovalDecision, principal models.ApprovalPrincipal, reason string) (*models.ApprovalResolutionResult, error) {
-	coordinator := NewApprovalCoordinator(f.store, f.store, authorizer, models.WithClock(func() time.Time { return f.now.Add(time.Second) }))
-	return coordinator.Resolve(f.ctx, ResolveApprovalRequest{
+func (f *loopStoreFixture) resolveWith(authorizer runtime.ApprovalAuthorizer, approval *models.ApprovalCheckpoint, decision models.ApprovalDecision, principal models.ApprovalPrincipal, reason string) (*models.ApprovalResolutionResult, error) {
+	coordinator := runtime.NewApprovalCoordinator(f.store, f.store, authorizer, models.WithClock(func() time.Time { return f.now.Add(time.Second) }))
+	return coordinator.Resolve(f.ctx, runtime.ResolveApprovalRequest{
 		Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision,
 		DecisionID: "decision-" + approval.ID, Decision: decision, Principal: principal, Reason: reason,
 	})
@@ -122,17 +123,17 @@ func requireStillPending(t *testing.T, f *loopStoreFixture, approval *models.App
 }
 
 func TestAgentBuilderApprovalPathsRefuseInKernelApprove(t *testing.T) {
-	resolvers := map[string]ApprovalAuthorizer{
-		"external_conversation_transport eligible": EligibleApprovalAuthorizer{},
+	resolvers := map[string]runtime.ApprovalAuthorizer{
+		"external_conversation_transport eligible": runtime.EligibleApprovalAuthorizer{},
 		"external_conversation_transport origin":   allowAllApprovals,
-		"callback_approval_consumer":               EligibleApprovalAuthorizer{},
-		"engine default authorizer":                EligibleApprovalAuthorizer{},
+		"callback_approval_consumer":               runtime.EligibleApprovalAuthorizer{},
+		"engine default authorizer":                runtime.EligibleApprovalAuthorizer{},
 	}
 	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		for cardName, card := range agentBuilderCards() {
 			for resolver, authorizer := range resolvers {
 				f, approval := cardApproval(t, store, cardName+"-"+resolver, card, models.ApprovalTimeoutExpire)
-				if _, err := f.resolveWith(authorizer, approval, models.ApprovalDecisionApprove, loopApprover, ""); !errors.Is(err, ErrAgentBuilderApprovalForbidden) {
+				if _, err := f.resolveWith(authorizer, approval, models.ApprovalDecisionApprove, loopApprover, ""); !errors.Is(err, runtime.ErrAgentBuilderApprovalForbidden) {
 					t.Fatalf("%s approve of %s = %v, want ErrAgentBuilderApprovalForbidden", resolver, cardName, err)
 				}
 				requireStillPending(t, f, approval)
@@ -153,9 +154,9 @@ func TestAgentBuilderApprovalPathsRefuseApprovalModeAndNilCoordinators(t *testin
 	// not configured at all.
 	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f, approval := cardApproval(t, store, "mode", createAgentCard(), models.ApprovalTimeoutExpire)
-		coordinator := NewApprovalCoordinator(f.store, f.store, nil)
+		coordinator := runtime.NewApprovalCoordinator(f.store, f.store, nil)
 		for _, mode := range []models.ConversationApprovalMode{models.ConversationApprovalAuto, models.ConversationApprovalSkip} {
-			if _, err := coordinator.ResolveByApprovalMode(f.ctx, f.scope, approval.ID, approval.Revision, mode, "sweep"); !errors.Is(err, ErrAgentBuilderApprovalForbidden) {
+			if _, err := coordinator.ResolveByApprovalMode(f.ctx, f.scope, approval.ID, approval.Revision, mode, "sweep"); !errors.Is(err, runtime.ErrAgentBuilderApprovalForbidden) {
 				t.Fatalf("approval mode %s approve = %v", mode, err)
 			}
 		}
@@ -177,7 +178,7 @@ func TestAgentBuilderApprovalPathsTimeoutNeverApproves(t *testing.T) {
 	// approve.
 	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f, approval := cardApproval(t, store, "timeout", createAgentCard(), models.ApprovalTimeoutApprove)
-		coordinator := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(time.Second) }))
+		coordinator := runtime.NewApprovalCoordinator(f.store, f.store, runtime.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(time.Second) }))
 		result, err := coordinator.ResolveTimeout(f.ctx, f.scope, approval.ID, approval.Revision, approval.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -191,7 +192,7 @@ func TestAgentBuilderApprovalPathsTimeoutNeverApproves(t *testing.T) {
 func TestAgentBuilderApprovalPathsChangesRequestedAndCancel(t *testing.T) {
 	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f, approval := cardApproval(t, store, "changes", createAgentCard(), models.ApprovalTimeoutExpire)
-		result, err := f.resolveWith(EligibleApprovalAuthorizer{}, approval, models.ApprovalDecisionRequestChanges, loopApprover, "Call it Ledger instead.")
+		result, err := f.resolveWith(runtime.EligibleApprovalAuthorizer{}, approval, models.ApprovalDecisionRequestChanges, loopApprover, "Call it Ledger instead.")
 		if err != nil || result.Approval.Status != models.ApprovalStatusChangesRequested {
 			t.Fatalf("changes requested = %#v, %v", result, err)
 		}
@@ -219,14 +220,14 @@ func TestAgentBuilderApprovalPathsHostAuthorizer(t *testing.T) {
 
 		// A role principal is refused even by the host authorizer.
 		f, roleCard := cardApproval(t, store, "role", createAgentCard(), models.ApprovalTimeoutExpire, loopApprover, role)
-		if _, err := f.resolveWith(host, roleCard, models.ApprovalDecisionApprove, role, ""); !errors.Is(err, ErrAgentBuilderApprovalForbidden) {
+		if _, err := f.resolveWith(host, roleCard, models.ApprovalDecisionApprove, role, ""); !errors.Is(err, runtime.ErrAgentBuilderApprovalForbidden) {
 			t.Fatalf("role approve = %v", err)
 		}
 		requireStillPending(t, f, roleCard)
 
 		// The host's refusal stands.
 		refused := builderApprovalHost{builderErr: errors.New("not allowed by policy")}
-		if _, err := f.resolveWith(refused, roleCard, models.ApprovalDecisionApprove, loopApprover, ""); err == nil || errors.Is(err, ErrAgentBuilderApprovalForbidden) {
+		if _, err := f.resolveWith(refused, roleCard, models.ApprovalDecisionApprove, loopApprover, ""); err == nil || errors.Is(err, runtime.ErrAgentBuilderApprovalForbidden) {
 			t.Fatalf("host-refused approve = %v", err)
 		}
 		requireStillPending(t, f, roleCard)
@@ -254,22 +255,22 @@ func TestAgentBuilderApprovalPathsOtherCardsUnchanged(t *testing.T) {
 	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		others := map[string]map[string]interface{}{
 			"plain":       {"skillId": "github", "action": "push"},
-			"team member": {"skillId": "openseal.teams", "action": TeamActionUpdateMember, "resourceType": "team", "operation": TeamActionUpdateMember},
+			"team member": {"skillId": "openseal.teams", "action": runtime.TeamActionUpdateMember, "resourceType": "team", "operation": runtime.TeamActionUpdateMember},
 			"agent other": {"skillId": models.AgentManagementSkillID, "action": "propose_amendment", "resourceType": "agent", "operation": "propose_amendment"},
 		}
 		for name, card := range others {
 			f, approval := cardApproval(t, store, "eligible-"+name, card, models.ApprovalTimeoutExpire)
-			result, err := f.resolveWith(EligibleApprovalAuthorizer{}, approval, models.ApprovalDecisionApprove, loopApprover, "")
+			result, err := f.resolveWith(runtime.EligibleApprovalAuthorizer{}, approval, models.ApprovalDecisionApprove, loopApprover, "")
 			if err != nil || result.Approval.Status != models.ApprovalStatusApproved {
 				t.Fatalf("%s eligible approve = %#v, %v", name, result, err)
 			}
 			f, moded := cardApproval(t, store, "mode-"+name, card, models.ApprovalTimeoutExpire)
-			coordinator := NewApprovalCoordinator(f.store, f.store, nil)
+			coordinator := runtime.NewApprovalCoordinator(f.store, f.store, nil)
 			if result, err := coordinator.ResolveByApprovalMode(f.ctx, f.scope, moded.ID, moded.Revision, models.ConversationApprovalSkip, "sweep"); err != nil || result.Approval.Status != models.ApprovalStatusApproved {
 				t.Fatalf("%s approval-mode approve = %#v, %v", name, result, err)
 			}
 			f, timed := cardApproval(t, store, "timeout-"+name, card, models.ApprovalTimeoutApprove)
-			timer := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return timed.ExpiresAt.Add(time.Second) }))
+			timer := runtime.NewApprovalCoordinator(f.store, f.store, runtime.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return timed.ExpiresAt.Add(time.Second) }))
 			if result, err := timer.ResolveTimeout(f.ctx, f.scope, timed.ID, timed.Revision, timed.ID); err != nil || result.Approval.Status != models.ApprovalStatusApproved {
 				t.Fatalf("%s timeout auto-approve = %#v, %v", name, result, err)
 			}

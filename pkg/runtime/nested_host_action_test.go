@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -40,15 +41,15 @@ func newNestedHostFixture(t *testing.T, store models.KernelStore) *nestedActionF
 	return newNestedActionFixtureWith(t, store, definition, binding, func(action capability.ModelAction) bool { return action.Action != "issue-delete" })
 }
 
-func (f *nestedActionFixture) hostRead(key string) NestedHostActionRequest {
-	return NestedHostActionRequest{
+func (f *nestedActionFixture) hostRead(key string) runtime.NestedHostActionRequest {
+	return runtime.NestedHostActionRequest{
 		Scope: f.scope, RunID: f.run.ID, TurnID: f.turn.ID, SkillID: "skill-github", Action: "repository-get",
 		Arguments: map[string]interface{}{"owner": "acme", "repository": "widgets"}, OriginRef: "command-1", IdempotencyKey: key, Summary: "git fetch acme/widgets",
 	}
 }
 
-func (f *nestedActionFixture) hostPush(key string) NestedHostActionRequest {
-	return NestedHostActionRequest{
+func (f *nestedActionFixture) hostPush(key string) runtime.NestedHostActionRequest {
+	return runtime.NestedHostActionRequest{
 		Scope: f.scope, RunID: f.run.ID, TurnID: f.turn.ID, SkillID: "skill-github", Action: "branch-create",
 		Arguments: map[string]interface{}{"owner": "acme", "repository": "widgets", "branch": "fix/x", "sha": strings.Repeat("a", 40)},
 		OriginRef: "command-1", IdempotencyKey: key, Summary: "git push acme/widgets fix/x",
@@ -57,8 +58,8 @@ func (f *nestedActionFixture) hostPush(key string) NestedHostActionRequest {
 
 // hostIssuer signs a credential lease for each acquisition, as a host's
 // issuer does, and counts them.
-func (f *nestedActionFixture) hostIssuer(t *testing.T, issued *atomic.Int64) ActionCredentialLeaseIssuer {
-	return ActionCredentialLeaseIssuerFunc(func(ctx context.Context, request ActionCredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
+func (f *nestedActionFixture) hostIssuer(t *testing.T, issued *atomic.Int64) runtime.ActionCredentialLeaseIssuer {
+	return runtime.ActionCredentialLeaseIssuerFunc(func(ctx context.Context, request runtime.ActionCredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
 		if request.Transport != "skill-github" || request.References["token"].ID != "credential://github" || request.Call.Execution != models.ActionExecutionHost {
 			t.Fatalf("host lease request = %#v", request)
 		}
@@ -71,13 +72,13 @@ func (f *nestedActionFixture) hostIssuer(t *testing.T, issued *atomic.Int64) Act
 		if err != nil {
 			return nil, err
 		}
-		return SignActionCredentialLease(ctx, *lease, testCredentialLeaseSigner{key: []byte("host-lease-key")})
+		return runtime.SignActionCredentialLease(ctx, *lease, testCredentialLeaseSigner{key: []byte("host-lease-key")})
 	})
 }
 
 // refusingWorker fails the test if it dispatches anything.
-func (f *nestedActionFixture) refusingWorker(t *testing.T, at time.Time) *ActionWorker {
-	worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+func (f *nestedActionFixture) refusingWorker(t *testing.T, at time.Time) *runtime.ActionWorker {
+	worker := runtime.NewActionWorker(f.store, f.catalog, nil, runtime.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		t.Fatal("an action worker dispatched a host call")
 		return nil, nil
 	}), models.WithClock(func() time.Time { return at }))
@@ -122,7 +123,7 @@ func TestNestedHostReadIsClaimedLeasedAndFinishedByItsHostOnly(t *testing.T) {
 				t.Fatalf("renewed grant = %#v (first %#v)", again, grant)
 			}
 
-			finished, err := f.coordinator.FinishNestedHostAction(ctx, NestedHostActionOutcome{
+			finished, err := f.coordinator.FinishNestedHostAction(ctx, runtime.NestedHostActionOutcome{
 				Scope: f.scope, RunID: f.run.ID, TurnID: f.turn.ID, ActionCallID: call.ID, Performed: true,
 				Output: map[string]interface{}{"repository": "acme/widgets", "bytes": 1234}, Summary: "git clone acme/widgets",
 			})
@@ -133,7 +134,7 @@ func TestNestedHostReadIsClaimedLeasedAndFinishedByItsHostOnly(t *testing.T) {
 				t.Fatalf("finished host call = %#v", finished)
 			}
 			f.assertRunUnchanged(t)
-			if _, err := f.coordinator.AcquireNestedHostAction(ctx, f.scope, f.run.ID, f.turn.ID, call.ID, f.hostIssuer(t, &issued)); !errors.Is(err, ErrNestedHostActionClosed) {
+			if _, err := f.coordinator.AcquireNestedHostAction(ctx, f.scope, f.run.ID, f.turn.ID, call.ID, f.hostIssuer(t, &issued)); !errors.Is(err, runtime.ErrNestedHostActionClosed) {
 				t.Fatalf("acquire after finish err = %v", err)
 			}
 			events, err := f.store.ListActivity(ctx, models.ActivityFilter{Scope: f.scope, RunID: f.run.ID})
@@ -161,13 +162,13 @@ func TestNestedHostCallsActOnlyAsOfferedActionsOfTheTurn(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			ctx := context.Background()
 			f := newNestedHostFixture(t, testCase.open(t))
-			for _, refused := range []NestedHostActionRequest{
+			for _, refused := range []runtime.NestedHostActionRequest{
 				{SkillID: "skill-github", Action: "issue-delete"},
 				{SkillID: "skill-gitlab", Action: "repository-get"},
 			} {
 				request := f.hostRead("refused-" + refused.SkillID + refused.Action)
 				request.SkillID, request.Action = refused.SkillID, refused.Action
-				if _, err := f.coordinator.ProposeNestedHost(ctx, request); !errors.Is(err, ErrNestedActionNotAuthorized) {
+				if _, err := f.coordinator.ProposeNestedHost(ctx, request); !errors.Is(err, runtime.ErrNestedActionNotAuthorized) {
 					t.Fatalf("%s %s err = %v, want not authorized", refused.SkillID, refused.Action, err)
 				}
 			}
@@ -225,11 +226,11 @@ func TestNestedHostPushWaitsForApprovalAndHonorsTheDecision(t *testing.T) {
 			if pushed.Call.Status != models.ActionCallStatusWaitingApproval || pushed.Approval == nil || pushed.Approval.Summary != "git push acme/widgets fix/x" {
 				t.Fatalf("host push = %#v", pushed)
 			}
-			if _, err := f.coordinator.AcquireNestedHostAction(ctx, f.scope, f.run.ID, f.turn.ID, pushed.Call.ID, f.hostIssuer(t, &issued)); !errors.Is(err, ErrNestedHostActionNotReady) {
+			if _, err := f.coordinator.AcquireNestedHostAction(ctx, f.scope, f.run.ID, f.turn.ID, pushed.Call.ID, f.hostIssuer(t, &issued)); !errors.Is(err, runtime.ErrNestedHostActionNotReady) {
 				t.Fatalf("acquire before approval err = %v", err)
 			}
-			approvals := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return f.now.Add(2 * time.Second) }))
-			if _, err := approvals.Resolve(ctx, ResolveApprovalRequest{
+			approvals := runtime.NewApprovalCoordinator(f.store, f.store, runtime.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return f.now.Add(2 * time.Second) }))
+			if _, err := approvals.Resolve(ctx, runtime.ResolveApprovalRequest{
 				Scope: f.scope, ApprovalID: pushed.Approval.ID, ExpectedRevision: pushed.Approval.Revision, DecisionID: "decision-1",
 				Decision: models.ApprovalDecisionApprove, Principal: models.ApprovalPrincipal{Type: "user", ID: "user"},
 			}); err != nil {
@@ -246,7 +247,7 @@ func TestNestedHostPushWaitsForApprovalAndHonorsTheDecision(t *testing.T) {
 			if grant.Call.Arguments["branch"] != "fix/x" || grant.Call.Arguments["sha"] != strings.Repeat("a", 40) {
 				t.Fatalf("approved push arguments = %#v", grant.Call.Arguments)
 			}
-			failed, err := f.coordinator.FinishNestedHostAction(ctx, NestedHostActionOutcome{
+			failed, err := f.coordinator.FinishNestedHostAction(ctx, runtime.NestedHostActionOutcome{
 				Scope: f.scope, RunID: f.run.ID, TurnID: f.turn.ID, ActionCallID: pushed.Call.ID, Performed: true, Error: "GitHub rejected the push",
 			})
 			if err != nil || failed.Status != models.ActionCallStatusFailed || failed.FailurePhase != models.ActionFailureAfterDispatch || failed.Error != "GitHub rejected the push" {
@@ -257,13 +258,13 @@ func TestNestedHostPushWaitsForApprovalAndHonorsTheDecision(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := approvals.Resolve(ctx, ResolveApprovalRequest{
+			if _, err := approvals.Resolve(ctx, runtime.ResolveApprovalRequest{
 				Scope: f.scope, ApprovalID: rejected.Approval.ID, ExpectedRevision: rejected.Approval.Revision, DecisionID: "decision-2",
 				Decision: models.ApprovalDecisionReject, Principal: models.ApprovalPrincipal{Type: "user", ID: "user"}, Reason: "not now",
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.coordinator.AcquireNestedHostAction(ctx, f.scope, f.run.ID, f.turn.ID, rejected.Call.ID, f.hostIssuer(t, &issued)); !errors.Is(err, ErrNestedHostActionClosed) {
+			if _, err := f.coordinator.AcquireNestedHostAction(ctx, f.scope, f.run.ID, f.turn.ID, rejected.Call.ID, f.hostIssuer(t, &issued)); !errors.Is(err, runtime.ErrNestedHostActionClosed) {
 				t.Fatalf("acquire after rejection err = %v", err)
 			}
 			if issued.Load() != 1 {
@@ -304,7 +305,7 @@ func TestNestedHostCallsTheirHostAbandonedAreClosedWithoutDispatch(t *testing.T)
 			if _, err := f.coordinator.AcquireNestedHostAction(ctx, f.scope, f.run.ID, f.turn.ID, running.Call.ID, f.hostIssuer(t, &issued)); err != nil {
 				t.Fatal(err)
 			}
-			stopped, err := f.refusingWorker(t, f.now.Add(NestedHostActionLease+2*time.Second)).RunOnce(ctx, f.scope, "action-worker", time.Minute)
+			stopped, err := f.refusingWorker(t, f.now.Add(runtime.NestedHostActionLease+2*time.Second)).RunOnce(ctx, f.scope, "action-worker", time.Minute)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -342,7 +343,7 @@ func TestNestedHostCallEndsWithItsTurn(t *testing.T) {
 				t.Fatalf("host call of an ended turn = %#v, %v (leases %d)", call, err, issued.Load())
 			}
 			f.closeTurn()
-			if _, err := f.coordinator.FinishNestedHostAction(ctx, NestedHostActionOutcome{Scope: f.scope, RunID: f.run.ID, TurnID: f.turn.ID, ActionCallID: proposed.Call.ID}); !errors.Is(err, models.ErrNestedTurnNotActive) {
+			if _, err := f.coordinator.FinishNestedHostAction(ctx, runtime.NestedHostActionOutcome{Scope: f.scope, RunID: f.run.ID, TurnID: f.turn.ID, ActionCallID: proposed.Call.ID}); !errors.Is(err, models.ErrNestedTurnNotActive) {
 				t.Fatalf("finish after the turn closed err = %v", err)
 			}
 		})

@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/google/uuid"
@@ -72,7 +73,7 @@ func TestLoopParkedApprovalApprovedQueuesRunAndReadiesCall(t *testing.T) {
 		if replay, err := f.decide(f.approvalCoordinator(at), approval, models.ApprovalDecisionApprove, ""); err != nil || replay.Resolved {
 			t.Fatalf("replay = %#v, %v", replay, err)
 		}
-		if _, err := f.approvalCoordinator(at).Resolve(f.ctx, ResolveApprovalRequest{
+		if _, err := f.approvalCoordinator(at).Resolve(f.ctx, runtime.ResolveApprovalRequest{
 			Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: result.Approval.Revision,
 			DecisionID: "other", Decision: models.ApprovalDecisionReject, Principal: loopApprover,
 		}); !errors.Is(err, models.ErrApprovalResolved) {
@@ -259,7 +260,7 @@ func TestLoopHeldApprovalApprovalModeSweep(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Approval.Status != models.ApprovalStatusApproved || result.Approval.DecisionBy == nil || *result.Approval.DecisionBy != ApprovalModePrincipal ||
+		if result.Approval.Status != models.ApprovalStatusApproved || result.Approval.DecisionBy == nil || *result.Approval.DecisionBy != runtime.ApprovalModePrincipal ||
 			result.Call.Status != models.ActionCallStatusReady {
 			t.Fatalf("mode sweep = %#v", result)
 		}
@@ -282,7 +283,7 @@ func TestLoopSupersededRecordsMessageID(t *testing.T) {
 			t.Fatal(err)
 		}
 		if result.Approval.Status != models.ApprovalStatusSuperseded || result.Approval.SupersededByMessageID != "message-1" ||
-			result.Call.Status != models.ActionCallStatusDenied || result.Call.Error != "superseded: "+ApprovalSupersededReason {
+			result.Call.Status != models.ActionCallStatusDenied || result.Call.Error != "superseded: "+runtime.ApprovalSupersededReason {
 			t.Fatalf("held supersede = %#v", result)
 		}
 		if after := f.currentRun(); after.Status != models.AgentRunStatusRunning || after.Revision != before.Revision+1 {
@@ -385,13 +386,13 @@ func TestLoopHeldApprovalRetriesWhenRunMoves(t *testing.T) {
 		_, starved := f.proposeLoopApproval("starved", loopApprovalOptions{})
 		at := f.now.Add(time.Second)
 		portfolio := &raceRunPortfolio{PortfolioStore: store, store: store, now: at}
-		portfolio.races.Store(approvalResolveAttempts - 1)
-		coordinator := NewApprovalCoordinator(portfolio, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return at }))
+		portfolio.races.Store(runtime.ApprovalResolveAttempts - 1)
+		coordinator := runtime.NewApprovalCoordinator(portfolio, store, runtime.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return at }))
 		result, err := f.decide(coordinator, approval, models.ApprovalDecisionApprove, "")
 		if err != nil || !result.Resolved || result.Call.Status != models.ActionCallStatusReady {
 			t.Fatalf("decision after racing heartbeats = %#v, %v", result, err)
 		}
-		portfolio.races.Store(approvalResolveAttempts)
+		portfolio.races.Store(runtime.ApprovalResolveAttempts)
 		if _, err := f.decide(coordinator, starved, models.ApprovalDecisionApprove, ""); !errors.Is(err, models.ErrRevisionConflict) {
 			t.Fatalf("decision losing every race = %v", err)
 		}

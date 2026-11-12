@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -22,7 +23,7 @@ type nestedActionFixture struct {
 	run         *models.AgentRun
 	turn        *models.AgentTurn
 	catalog     *skill.Catalog
-	coordinator *ActionCoordinator
+	coordinator *runtime.ActionCoordinator
 	clock       func() time.Time // the coordinator's clock
 	binding     *agentrun.TurnRunnerBinding
 	closeTurn   func()
@@ -95,18 +96,18 @@ func newNestedActionFixtureWith(t *testing.T, store models.KernelStore, definiti
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := ActionPolicyEvaluatorFunc(func(_ context.Context, input ActionPolicyInput) (ActionPolicyDecision, error) {
+	policy := runtime.ActionPolicyEvaluatorFunc(func(_ context.Context, input runtime.ActionPolicyInput) (runtime.ActionPolicyDecision, error) {
 		if input.Bound.Action.SideEffect == skill.SideEffectRead {
-			return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+			return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow}, nil
 		}
-		return ActionPolicyDecision{
-			Disposition: ActionDispositionRequireApproval, Reason: "writes need review",
+		return runtime.ActionPolicyDecision{
+			Disposition: runtime.ActionDispositionRequireApproval, Reason: "writes need review",
 			EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
 	fixture := &nestedActionFixture{store: store, scope: scope, now: now, run: run, turn: turn, catalog: catalog, binding: binding}
 	fixture.clock = func() time.Time { return now.Add(time.Second) }
-	fixture.coordinator = NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return fixture.clock() }))
+	fixture.coordinator = runtime.NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return fixture.clock() }))
 	fixture.closeTurn = fixture.coordinator.OpenNestedActionTurn(run, turn, binding)
 	t.Cleanup(fixture.closeTurn)
 	return fixture
@@ -147,15 +148,15 @@ func (f *nestedActionFixture) openStep(t *testing.T, sequence int64) {
 	t.Cleanup(f.closeTurn)
 }
 
-func (f *nestedActionFixture) request(capability, key string) NestedActionRequest {
-	return NestedActionRequest{
+func (f *nestedActionFixture) request(capability, key string) runtime.NestedActionRequest {
+	return runtime.NestedActionRequest{
 		Scope: f.scope, RunID: f.run.ID, TurnID: f.turn.ID, Capability: capability, Origin: models.ActionOriginVM,
 		Arguments: map[string]interface{}{"path": "README.md"}, OriginRef: "command-1", IdempotencyKey: key,
 	}
 }
 
-func (f *nestedActionFixture) worker(t *testing.T) *ActionWorker {
-	worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+func (f *nestedActionFixture) worker(t *testing.T) *runtime.ActionWorker {
+	worker := runtime.NewActionWorker(f.store, f.catalog, nil, runtime.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		if input.Call.Origin != models.ActionOriginVM || input.Run == nil || input.Run.Status != models.AgentRunStatusRunning {
 			t.Fatalf("nested dispatch input = %#v", input)
 		}
@@ -235,7 +236,7 @@ func TestNestedActionRefusesCapabilitiesTheStepDidNotOffer(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			f := newNestedActionFixture(t, testCase.open(t))
 			for _, capability := range []string{"repo.delete_all", "other.read_file", "read_file"} {
-				if _, err := f.coordinator.ProposeNested(context.Background(), f.request(capability, "bridge-"+capability)); !errors.Is(err, ErrNestedActionNotAuthorized) {
+				if _, err := f.coordinator.ProposeNested(context.Background(), f.request(capability, "bridge-"+capability)); !errors.Is(err, runtime.ErrNestedActionNotAuthorized) {
 					t.Fatalf("%s: err = %v, want not authorized", capability, err)
 				}
 			}
@@ -275,7 +276,7 @@ func TestNestedActionRequiresTheRunsRunningStep(t *testing.T) {
 			if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-2")); !errors.Is(err, models.ErrNestedTurnNotActive) {
 				t.Fatalf("finished step err = %v", err)
 			}
-			worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+			worker := runtime.NewActionWorker(f.store, f.catalog, nil, runtime.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				t.Fatal("a nested call of a finished step was dispatched")
 				return nil, nil
 			}), models.WithClock(func() time.Time { return f.now.Add(2 * time.Second) }))
@@ -374,8 +375,8 @@ func TestNestedWriteActionWaitsForApprovalWithoutChangingTheRun(t *testing.T) {
 			}
 			f.assertRunUnchanged(t)
 
-			approvals := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return f.now.Add(2 * time.Second) }))
-			resolved, err := approvals.Resolve(ctx, ResolveApprovalRequest{
+			approvals := runtime.NewApprovalCoordinator(f.store, f.store, runtime.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return f.now.Add(2 * time.Second) }))
+			resolved, err := approvals.Resolve(ctx, runtime.ResolveApprovalRequest{
 				Scope: f.scope, ApprovalID: result.Approval.ID, ExpectedRevision: result.Approval.Revision, DecisionID: "decision-1",
 				Decision: models.ApprovalDecisionApprove, Principal: models.ApprovalPrincipal{Type: "user", ID: "user"},
 			})
@@ -401,7 +402,7 @@ func TestNestedWriteActionWaitsForApprovalWithoutChangingTheRun(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			denied, err := approvals.Resolve(ctx, ResolveApprovalRequest{
+			denied, err := approvals.Resolve(ctx, runtime.ResolveApprovalRequest{
 				Scope: f.scope, ApprovalID: rejected.Approval.ID, ExpectedRevision: rejected.Approval.Revision, DecisionID: "decision-2",
 				Decision: models.ApprovalDecisionReject, Principal: models.ApprovalPrincipal{Type: "user", ID: "user"}, Reason: "not now",
 			})
@@ -418,7 +419,7 @@ func TestNestedActionBoundsArePerStep(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			ctx := context.Background()
 			f := newNestedActionFixture(t, testCase.open(t))
-			f.coordinator.nestedMaxCalls, f.coordinator.nestedMaxConcurrent = 5, 2
+			f.coordinator.SetNestedLimits(5, 2)
 			worker := f.worker(t)
 			exhaust := func(step int) {
 				t.Helper()

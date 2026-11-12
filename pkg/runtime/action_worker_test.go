@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -20,7 +21,7 @@ func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *test
 	catalog := &toolTransportActionCatalog{ActionExecutionCatalog: baseCatalog, endpoint: "release_deploy"}
 	signer := testCredentialLeaseSigner{key: []byte("lease-signing-key")}
 	issuerCalls := 0
-	worker := NewActionWorkerWithCredentialLeaseIssuer(store, catalog, ActionCredentialLeaseIssuerFunc(func(ctx context.Context, request ActionCredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
+	worker := runtime.NewActionWorkerWithCredentialLeaseIssuer(store, catalog, runtime.ActionCredentialLeaseIssuerFunc(func(ctx context.Context, request runtime.ActionCredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
 		issuerCalls++
 		if request.Call == nil || request.Run == nil || request.Call.ID != proposal.Call.ID || request.Run.ID != proposal.Call.RunID || request.Run.AssignedAgentID == "" || request.References["token"] != proposal.Call.CredentialRefs["token"] || request.Transport != "release_deploy" {
 			t.Fatalf("credential lease issue request = %#v", request)
@@ -32,8 +33,8 @@ func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *test
 		if err != nil {
 			return nil, err
 		}
-		return SignActionCredentialLease(ctx, *lease, signer)
-	}), ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		return runtime.SignActionCredentialLease(ctx, *lease, signer)
+	}), runtime.ActionDispatcherFunc(func(_ context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		if len(input.Credentials) != 0 || input.CredentialLease == nil || input.CredentialLease.Lease.ActionCallID != proposal.Call.ID || input.CredentialReferences["token"] != proposal.Call.CredentialRefs["token"] {
 			t.Fatalf("opaque dispatch input = %#v", input)
 		}
@@ -42,7 +43,7 @@ func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *test
 		}
 		return map[string]interface{}{"ok": true}, nil
 	}), models.WithClock(func() time.Time { return now.Add(2 * time.Second) }))
-	worker.newID = func() string { return "opaque-lease-execution" }
+	worker.SetNewID(func() string { return "opaque-lease-execution" })
 	result, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "agent-worker")
 	if err != nil {
 		t.Fatal(err)
@@ -74,9 +75,9 @@ func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
 	catalog, proposal := createRunnableAction(t, store, now)
 	attempts := 0
 	current := now.Add(2 * time.Second)
-	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+	worker := runtime.NewActionWorker(store, catalog, runtime.CredentialResolverFunc(func(context.Context, runtime.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "raw-secret-value"}, nil
-	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), runtime.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		attempts++
 		if attempts == 1 {
 			return nil, errors.New("provider rejected raw-secret-value")
@@ -92,7 +93,7 @@ func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
 		t.Fatalf("failure result mismatch: %#v", first)
 	}
 	current = current.Add(30 * time.Second)
-	if second, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "agent-worker"); !errors.Is(err, ErrLoopActionNotClaimable) || second != nil || attempts != 1 {
+	if second, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "agent-worker"); !errors.Is(err, runtime.ErrLoopActionNotClaimable) || second != nil || attempts != 1 {
 		t.Fatalf("failed action was retried: %#v attempts=%d err=%v", second, attempts, err)
 	}
 	if pooled, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "pool-worker", time.Minute); err != nil || pooled != nil || attempts != 1 {

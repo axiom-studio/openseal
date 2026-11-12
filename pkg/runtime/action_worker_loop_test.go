@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
@@ -68,24 +69,24 @@ func (f *loopWorkerFixture) propose(id, action string) *models.ActionCall {
 
 // worker counts catalog resolutions, credential resolutions and dispatches;
 // its clock is f.clock.
-func (f *loopWorkerFixture) worker(dispatch ActionDispatcherFunc) *ActionWorker {
+func (f *loopWorkerFixture) worker(dispatch runtime.ActionDispatcherFunc) *runtime.ActionWorker {
 	return f.workerWithClock(dispatch, func() time.Time { return f.clock })
 }
 
 // workerWithClock is worker reading time from clock.
-func (f *loopWorkerFixture) workerWithClock(dispatch ActionDispatcherFunc, clock models.Clock) *ActionWorker {
-	worker := NewActionWorker(f.store, &actionLifecycleCountingCatalog{ActionExecutionCatalog: f.catalog, calls: &f.catalogCalls},
-		CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+func (f *loopWorkerFixture) workerWithClock(dispatch runtime.ActionDispatcherFunc, clock models.Clock) *runtime.ActionWorker {
+	worker := runtime.NewActionWorker(f.store, &actionLifecycleCountingCatalog{ActionExecutionCatalog: f.catalog, calls: &f.catalogCalls},
+		runtime.CredentialResolverFunc(func(context.Context, runtime.CredentialResolutionRequest) (map[string]string, error) {
 			f.credentialCalls++
 			return map[string]string{"token": "loop-secret"}, nil
-		}), ActionDispatcherFunc(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+		}), runtime.ActionDispatcherFunc(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			f.dispatches++
 			return dispatch(ctx, input)
 		}), models.WithClock(clock))
 	return worker
 }
 
-func (f *loopWorkerFixture) execute(worker *ActionWorker, id string) (*models.ActionExecutionResult, error) {
+func (f *loopWorkerFixture) execute(worker *runtime.ActionWorker, id string) (*models.ActionExecutionResult, error) {
 	return worker.ExecuteOwnLoopCall(context.Background(), f.scope, id, loopWorkerID)
 }
 
@@ -177,9 +178,9 @@ func TestExecuteOwnLoopCallDispatchesInlineUnderCallLease(t *testing.T) {
 				}
 			}
 		}, func() time.Time { return f.clock.Add(time.Duration(clockTicks.Add(1)) * 10 * time.Millisecond) })
-		worker.loopLease = 45 * time.Millisecond
+		worker.SetLoopLease(45 * time.Millisecond)
 		onClaim := false
-		worker.onClaim = func() { onClaim = true }
+		worker.SetOnClaim(func() { onClaim = true })
 		result, err := f.execute(worker, call.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -211,14 +212,14 @@ func TestExecuteOwnLoopCallNotClaimable(t *testing.T) {
 			t.Fatalf("own claim = %#v, %v", claimed, err)
 		}
 		worker := f.worker(succeedDispatch)
-		if _, err := f.execute(worker, live.ID); !errors.Is(err, ErrLoopActionNotClaimable) {
+		if _, err := f.execute(worker, live.ID); !errors.Is(err, runtime.ErrLoopActionNotClaimable) {
 			t.Fatalf("running call with a live lease = %v", err)
 		}
 		done := f.propose("done", "status")
 		if result, err := f.execute(worker, done.ID); err != nil || result.Call.Status != models.ActionCallStatusSucceeded {
 			t.Fatalf("first execution = %#v, %v", result, err)
 		}
-		if _, err := f.execute(worker, done.ID); !errors.Is(err, ErrLoopActionNotClaimable) || f.dispatches != 1 {
+		if _, err := f.execute(worker, done.ID); !errors.Is(err, runtime.ErrLoopActionNotClaimable) || f.dispatches != 1 {
 			t.Fatalf("terminal call = %v dispatches=%d", err, f.dispatches)
 		}
 		if _, err := f.execute(worker, "missing"); !errors.Is(err, models.ErrActionNotFound) {
@@ -243,11 +244,11 @@ func TestExecuteOwnLoopCallNotOwnedAfterLeaseLossCancels(t *testing.T) {
 				case "parked_run":
 					f.setRunStatus(models.AgentRunStatusWaitingForApproval)
 				case "canceled_during_credentials":
-					worker.credentials = CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+					worker.SetCredentials(runtime.CredentialResolverFunc(func(context.Context, runtime.CredentialResolutionRequest) (map[string]string, error) {
 						f.credentialCalls++
 						f.setRunStatus(models.AgentRunStatusCanceled)
 						return map[string]string{"token": "loop-secret"}, nil
-					})
+					}))
 				}
 				before := f.currentRun()
 				result, err := worker.ExecuteOwnLoopCall(t.Context(), f.scope, call.ID, workerID)
@@ -381,19 +382,19 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				if boundary == "after_catalog" {
 					catalog.afterResolve = func() { wrapped.active = true }
 				}
-				worker := NewActionWorker(wrapped, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+				worker := runtime.NewActionWorker(wrapped, catalog, runtime.CredentialResolverFunc(func(context.Context, runtime.CredentialResolutionRequest) (map[string]string, error) {
 					f.credentialCalls++
 					return map[string]string{"token": "loop-secret"}, nil
-				}), ActionDispatcherFunc(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+				}), runtime.ActionDispatcherFunc(func(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 					f.dispatches++
 					return succeedDispatch(ctx, input)
 				}), models.WithClock(func() time.Time { return f.clock }))
 				result, err := f.execute(worker, call.ID)
-				var held *LoopActionMaintenanceError
+				var held *runtime.LoopActionMaintenanceError
 				if result != nil || !errors.As(err, &held) || !errors.Is(err, models.ErrSkillRuntimeMaintenance) {
 					t.Fatalf("maintenance at execution = %#v, %v", result, err)
 				}
-				if held.Maintenance.OperationID != "upgrade-release" || !held.RetryAt.Equal(f.clock.Add(loopActionMaintenanceRetry)) ||
+				if held.Maintenance.OperationID != "upgrade-release" || !held.RetryAt.Equal(f.clock.Add(runtime.LoopActionMaintenanceRetry)) ||
 					held.Call == nil || held.Call.ID != call.ID || held.Call.Status != models.ActionCallStatusReady {
 					t.Fatalf("maintenance park = %#v", held)
 				}
@@ -456,11 +457,11 @@ func TestLoopOutcomeLeavesRunUnchangedExceptBudgetAndHumanIntervention(t *testin
 			return map[string]interface{}{"healthy": true}, nil
 		})
 		ids := []string{"event-ok", "human-request", "event-human", "event-failed"}
-		worker.newID = func() string {
+		worker.SetNewID(func() string {
 			id := ids[0]
 			ids = ids[1:]
 			return id
-		}
+		})
 		ok, err := f.execute(worker, succeeded.ID)
 		if err != nil || ok.Call.Status != models.ActionCallStatusSucceeded || ok.Run != nil {
 			t.Fatalf("succeeded = %#v, %v", ok, err)
@@ -527,14 +528,14 @@ func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
 	}
 	before, _ := store.GetAgentRun(t.Context(), scope, run.ID)
 	dispatches := 0
-	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+	worker := runtime.NewActionWorker(store, catalog, runtime.CredentialResolverFunc(func(context.Context, runtime.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
-	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	}), runtime.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		return map[string]interface{}{"sent": true}, nil
 	}), models.WithClock(func() time.Time { return now.Add(time.Second) }))
-	worker.setCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
-		return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapPersonSignIn}}, nil
+	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(context.Context, runtime.CredentialAvailabilityRequest) (runtime.CredentialAvailability, error) {
+		return runtime.CredentialAvailability{Gaps: map[string]runtime.CredentialGap{"google": runtime.CredentialGapPersonSignIn}}, nil
 	}))
 	result, err := worker.ExecuteOwnLoopCall(t.Context(), scope, proposal.Call.ID, "agent-worker")
 	if err != nil {
@@ -584,11 +585,11 @@ func TestPoolClosesAbandonedLoopCallOfEndedRun(t *testing.T) {
 					closed[result.Call.ID] = result.Call
 				}
 				f.requireNoAuthority()
-				if call := closed[ready.ID]; call == nil || call.Status != models.ActionCallStatusCanceled || call.Error != errLoopActionAbandoned.Error() || call.CompletedAt == nil {
+				if call := closed[ready.ID]; call == nil || call.Status != models.ActionCallStatusCanceled || call.Error != runtime.ErrLoopActionAbandoned.Error() || call.CompletedAt == nil {
 					t.Fatalf("abandoned ready call = %#v", call)
 				}
 				if call := closed[running.ID]; call == nil || call.Status != models.ActionCallStatusFailed || call.FailurePhase != models.ActionFailureAfterDispatch ||
-					call.Error != errLoopActionAbandoned.Error() || !call.RecoveredRunning {
+					call.Error != runtime.ErrLoopActionAbandoned.Error() || !call.RecoveredRunning {
 					t.Fatalf("abandoned running call = %#v", call)
 				}
 				after := f.currentRun()

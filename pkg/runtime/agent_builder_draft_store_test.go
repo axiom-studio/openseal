@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -27,7 +28,7 @@ func seedAgentBuilderDrafts(t *testing.T, store models.KernelStore) agentBuilder
 	t.Helper()
 	f, card := cardApproval(t, store, "create", createAgentCard(), models.ApprovalTimeoutExpire)
 	ctx := f.ctx
-	service := NewConversationService(store.(models.ConversationStore))
+	service := runtime.NewConversationService(store.(models.ConversationStore))
 	// Each requester's first space is their default; the plain chat has no
 	// person behind it and goes to the empty owner's.
 	seedTestSpaceFor(t, store.(models.SpaceStore), f.scope, "ana")
@@ -39,7 +40,7 @@ func seedAgentBuilderDrafts(t *testing.T, store models.KernelStore) agentBuilder
 	}
 	start := func(requester, key, spaceID string) *models.Conversation {
 		t.Helper()
-		result, err := StartAgentBuilderConversation(ctx, service, models.StartAgentBuilderRequest{
+		result, err := runtime.StartAgentBuilderConversation(ctx, service, models.StartAgentBuilderRequest{
 			Scope: f.scope, Requester: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: requester},
 			Prompt: "Build " + key, Parameters: models.AgentBuilderParameters{Name: key}, SpaceID: spaceID, IdempotencyKey: key,
 		})
@@ -55,13 +56,13 @@ func seedAgentBuilderDrafts(t *testing.T, store models.KernelStore) agentBuilder
 	theirs := start("bo", "theirs", "")
 	two := start("ana", "two", second.ID)
 	// A plain chat with the builder is nobody's draft.
-	plain, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+	plain, _, err := service.CreateConversation(ctx, runtime.CreateConversationRequest{
 		Scope: f.scope, Owner: made.Owner, Title: "Chat", IdempotencyKey: "plain",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+	if _, err := service.PostChannelMessage(ctx, runtime.PostChannelMessageRequest{
 		Scope: f.scope, ConversationID: plain.ID, ExpectedRevision: plain.Revision, Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "ana"},
 		Intent: models.MessageIntentUpdate, Content: "Hi", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "plain-1",
 	}); err != nil {
@@ -76,7 +77,7 @@ func seedAgentBuilderDrafts(t *testing.T, store models.KernelStore) agentBuilder
 	if _, err := store.UpdateAgentRunWithEvent(ctx, withConversation, run.Revision, f.event("run-conversation", "run.updated"), nil); err != nil {
 		t.Fatal(err)
 	}
-	if created, err := createdAgentBuilderConversation(ctx, store, &models.ActionCall{Scope: f.scope, ApprovalID: card.ID}, withConversation); err != nil || created != "" {
+	if created, err := runtime.CreatedAgentBuilderConversation(ctx, store, &models.ActionCall{Scope: f.scope, ApprovalID: card.ID}, withConversation); err != nil || created != "" {
 		t.Fatalf("a pending card finished its draft: %q, %v", created, err)
 	}
 	if _, err := f.resolveWith(builderApprovalHost{calls: new(int)}, card, models.ApprovalDecisionApprove, loopApprover, ""); err != nil {
@@ -88,7 +89,7 @@ func seedAgentBuilderDrafts(t *testing.T, store models.KernelStore) agentBuilder
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	run = f.currentRun()
-	created, err := createdAgentBuilderConversation(ctx, store, claimed, run)
+	created, err := runtime.CreatedAgentBuilderConversation(ctx, store, claimed, run)
 	if err != nil || created != made.ID {
 		t.Fatalf("created from = %q, %v; want %s", created, err, made.ID)
 	}
@@ -108,7 +109,7 @@ func seedAgentBuilderDrafts(t *testing.T, store models.KernelStore) agentBuilder
 
 // countingDraftReader records which conversations a drafts list read.
 type countingDraftReader struct {
-	*ConversationService
+	*runtime.ConversationService
 	store         models.KernelStore
 	conversations int
 	statusReads   []string
@@ -130,12 +131,12 @@ func (r *countingDraftReader) ListApprovals(ctx context.Context, filter models.A
 
 func assertAgentBuilderDrafts(t *testing.T, store models.KernelStore, seed agentBuilderDraftSeed) {
 	t.Helper()
-	list := func(requester string, filter AgentBuilderDraftFilter, want ...string) {
+	list := func(requester string, filter runtime.AgentBuilderDraftFilter, want ...string) {
 		t.Helper()
-		reader := &countingDraftReader{ConversationService: NewConversationService(store.(models.ConversationStore)), store: store}
+		reader := &countingDraftReader{ConversationService: runtime.NewConversationService(store.(models.ConversationStore)), store: store}
 		filter.Scope = seed.scope
 		filter.Requester = models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: requester}
-		drafts, err := ListAgentBuilderDrafts(context.Background(), reader, filter)
+		drafts, err := runtime.ListAgentBuilderDrafts(context.Background(), reader, filter)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -148,14 +149,14 @@ func assertAgentBuilderDrafts(t *testing.T, store models.KernelStore, seed agent
 			t.Fatalf("%s %+v = %v (conversation queries %d, status reads %v), want %v", requester, filter, got, reader.conversations, reader.statusReads, want)
 		}
 	}
-	list("ana", AgentBuilderDraftFilter{}, seed.two, seed.one)
-	list("ana", AgentBuilderDraftFilter{Limit: 1}, seed.two)
-	list("ana", AgentBuilderDraftFilter{Limit: 1, Offset: 1}, seed.one)
-	list("ana", AgentBuilderDraftFilter{Offset: 2})
-	list("ana", AgentBuilderDraftFilter{SpaceID: seed.secondSpace}, seed.two)
-	list("ana", AgentBuilderDraftFilter{SpaceID: seed.defaultSpace}, seed.one)
-	list("bo", AgentBuilderDraftFilter{}, seed.theirs)
-	list("cy", AgentBuilderDraftFilter{})
+	list("ana", runtime.AgentBuilderDraftFilter{}, seed.two, seed.one)
+	list("ana", runtime.AgentBuilderDraftFilter{Limit: 1}, seed.two)
+	list("ana", runtime.AgentBuilderDraftFilter{Limit: 1, Offset: 1}, seed.one)
+	list("ana", runtime.AgentBuilderDraftFilter{Offset: 2})
+	list("ana", runtime.AgentBuilderDraftFilter{SpaceID: seed.secondSpace}, seed.two)
+	list("ana", runtime.AgentBuilderDraftFilter{SpaceID: seed.defaultSpace}, seed.one)
+	list("bo", runtime.AgentBuilderDraftFilter{}, seed.theirs)
+	list("cy", runtime.AgentBuilderDraftFilter{})
 }
 
 func TestAgentBuilderDraftsAreSelectedByTheStore(t *testing.T) {

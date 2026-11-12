@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
@@ -27,20 +28,20 @@ type loopProposeFixture struct {
 	scope       models.Scope
 	now         time.Time
 	run         *models.AgentRun
-	coordinator *ActionCoordinator
+	coordinator *runtime.ActionCoordinator
 	clock       func() time.Time // the coordinator's clock
-	decision    ActionPolicyDecision
+	decision    runtime.ActionPolicyDecision
 	evaluations int
 }
 
-func newLoopProposeFixture(t *testing.T, store models.KernelStore, mutate func(*models.CreateAgentRunRequest), validators ...ActionProposalValidator) *loopProposeFixture {
+func newLoopProposeFixture(t *testing.T, store models.KernelStore, mutate func(*models.CreateAgentRunRequest), validators ...runtime.ActionProposalValidator) *loopProposeFixture {
 	t.Helper()
 	catalog, scope := governedActionCatalog(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	f := &loopProposeFixture{t: t, ctx: context.Background(), store: store, scope: scope, now: now, decision: ActionPolicyDecision{Disposition: ActionDispositionAllow}}
+	f := &loopProposeFixture{t: t, ctx: context.Background(), store: store, scope: scope, now: now, decision: runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow}}
 	f.run = claimLoopProposeRun(t, store, scope, now, loopProposeWorker, mutate)
 	f.clock = func() time.Time { return now.Add(time.Second) }
-	f.coordinator = NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+	f.coordinator = runtime.NewActionCoordinator(store, store, catalog, runtime.ActionPolicyEvaluatorFunc(func(context.Context, runtime.ActionPolicyInput) (runtime.ActionPolicyDecision, error) {
 		f.evaluations++
 		return f.decision, nil
 	}), validators, models.WithClock(func() time.Time { return f.clock() }))
@@ -69,15 +70,15 @@ func claimLoopProposeRun(t *testing.T, store models.KernelStore, scope models.Sc
 	return claimed
 }
 
-func (f *loopProposeFixture) request(toolCallID string) ProposeActionRequest {
-	return loopProposeRequest(ProposeActionRequest{
+func (f *loopProposeFixture) request(toolCallID string) runtime.ProposeActionRequest {
+	return loopProposeRequest(runtime.ProposeActionRequest{
 		Scope: f.scope, RunID: f.run.ID, WorkerID: loopProposeWorker, DeploymentID: "release-agent",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
 		Arguments: map[string]interface{}{"environment": "staging"}, Summary: "Deploy the release to staging",
 	}, toolCallID)
 }
 
-func (f *loopProposeFixture) propose(req ProposeActionRequest) *models.ActionProposalResult {
+func (f *loopProposeFixture) propose(req runtime.ProposeActionRequest) *models.ActionProposalResult {
 	f.t.Helper()
 	result, err := f.coordinator.Propose(f.ctx, req)
 	if err != nil {
@@ -97,15 +98,15 @@ func (f *loopProposeFixture) calls() []*models.ActionCall {
 
 func (f *loopProposeFixture) requireRejection(err error, code string) {
 	f.t.Helper()
-	var rejection *ActionProposalRejection
-	if !errors.As(err, &rejection) || rejection.Code != code || rejection.Message == "" || len(rejection.Message) > maximumProposalRejectionMessageBytes {
+	var rejection *runtime.ActionProposalRejection
+	if !errors.As(err, &rejection) || rejection.Code != code || rejection.Message == "" || len(rejection.Message) > runtime.MaximumProposalRejectionMessageBytes {
 		f.t.Fatalf("error = %#v (%v), want rejection %s", err, err, code)
 	}
 }
 
 func (f *loopProposeFixture) requireApproval() {
-	f.decision = ActionPolicyDecision{
-		Disposition: ActionDispositionRequireApproval, Reason: "deploys need review",
+	f.decision = runtime.ActionPolicyDecision{
+		Disposition: runtime.ActionDispositionRequireApproval, Reason: "deploys need review",
 		EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "release-manager"}}, ApprovalTTL: time.Hour,
 	}
 }
@@ -165,7 +166,7 @@ func TestLoopProposeAllowCreatesReadyLoopCallAndLeavesRun(t *testing.T) {
 func TestLoopProposeDenyLeavesRunRunning(t *testing.T) {
 	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopProposeFixture(t, store, nil)
-		f.decision = ActionPolicyDecision{Disposition: ActionDispositionDeny, Reason: "production freeze"}
+		f.decision = runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionDeny, Reason: "production freeze"}
 		result := f.propose(f.request("call-1"))
 		if result.Call.Status != models.ActionCallStatusDenied || result.Call.Error != "production freeze" || result.Call.CompletedAt == nil ||
 			result.Approval != nil || result.Run != nil || result.Event.EventType != "action.denied" || result.Event.Payload["policyReason"] != "production freeze" {
@@ -199,15 +200,15 @@ func TestLoopProposeApprovalWithoutSummaryIsRejected(t *testing.T) {
 	req := f.request("call-1")
 	req.Summary = "   "
 	_, err := f.coordinator.Propose(f.ctx, req)
-	f.requireRejection(err, ProposalRejectionReviewSummaryRequired)
-	if err.Error() != proposalRejectionReviewSummaryRequiredMessage {
+	f.requireRejection(err, runtime.ProposalRejectionReviewSummaryRequired)
+	if err.Error() != runtime.ProposalRejectionReviewSummaryRequiredMessage {
 		t.Fatalf("rejection text = %q", err.Error())
 	}
 	if calls := f.calls(); len(calls) != 0 {
 		t.Fatalf("rejected proposal was recorded: %#v", calls)
 	}
 	// An allowed call needs no summary; activity keeps its audit fallback.
-	f.decision = ActionPolicyDecision{Disposition: ActionDispositionAllow}
+	f.decision = runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow}
 	result := f.propose(req)
 	if result.Call.Status != models.ActionCallStatusReady || result.Event.Summary != "Proposed release.deploy" {
 		t.Fatalf("allowed call without summary = %#v", result)
@@ -263,17 +264,17 @@ func TestLoopProposeValidationErrorsAreRejections(t *testing.T) {
 	missing := f.request("missing")
 	missing.Action = "rollback"
 	_, err := f.coordinator.Propose(f.ctx, missing)
-	f.requireRejection(err, ProposalRejectionCapabilityUnavailable)
+	f.requireRejection(err, runtime.ProposalRejectionCapabilityUnavailable)
 
 	invalid := f.request("invalid")
 	invalid.Arguments = map[string]interface{}{"environment": 42}
 	_, err = f.coordinator.Propose(f.ctx, invalid)
-	f.requireRejection(err, ProposalRejectionToolArgumentsInvalid)
+	f.requireRejection(err, runtime.ProposalRejectionToolArgumentsInvalid)
 
 	blocked := f.request("blocked")
 	blocked.Arguments = map[string]interface{}{"environment": "blocked"}
 	_, err = f.coordinator.Propose(f.ctx, blocked)
-	f.requireRejection(err, ProposalRejectionNotAdmitted)
+	f.requireRejection(err, runtime.ProposalRejectionNotAdmitted)
 	if err.Error() != validatorErr.Error() || !errors.Is(err, validatorErr) {
 		t.Fatalf("validator rejection = %v", err)
 	}
@@ -284,16 +285,16 @@ func TestLoopProposeValidationErrorsAreRejections(t *testing.T) {
 }
 
 func TestLoopProposeRejectionMessageIsBounded(t *testing.T) {
-	long := strings.Repeat("é", maximumProposalRejectionMessageBytes)
-	err := rejectProposal(ProposalRejectionNotAdmitted, errors.New(long))
-	var rejection *ActionProposalRejection
-	if !errors.As(err, &rejection) || len(rejection.Message) > maximumProposalRejectionMessageBytes || !strings.HasPrefix(long, rejection.Message) {
+	long := strings.Repeat("é", runtime.MaximumProposalRejectionMessageBytes)
+	err := runtime.RejectProposal(runtime.ProposalRejectionNotAdmitted, errors.New(long))
+	var rejection *runtime.ActionProposalRejection
+	if !errors.As(err, &rejection) || len(rejection.Message) > runtime.MaximumProposalRejectionMessageBytes || !strings.HasPrefix(long, rejection.Message) {
 		t.Fatalf("bounded rejection = %#v", err)
 	}
-	if again := rejectProposal(ProposalRejectionToolArgumentsInvalid, err); again != err {
+	if again := runtime.RejectProposal(runtime.ProposalRejectionToolArgumentsInvalid, err); again != err {
 		t.Fatalf("existing rejection was rewrapped: %#v", again)
 	}
-	if rejectProposal(ProposalRejectionNotAdmitted, nil) != nil {
+	if runtime.RejectProposal(runtime.ProposalRejectionNotAdmitted, nil) != nil {
 		t.Fatal("nil error became a rejection")
 	}
 }
@@ -399,15 +400,15 @@ func TestLoopProposeRequiresLiveLeaseOfRunningRun(t *testing.T) {
 	if _, err := f.coordinator.Propose(f.ctx, expired); !errors.Is(err, models.ErrLeaseLost) {
 		t.Fatalf("expired lease error = %v", err)
 	}
-	for name, mutate := range map[string]func(*ProposeActionRequest){
-		"no origin":      func(req *ProposeActionRequest) { req.Origin, req.Execution = "", "" },
-		"host execution": func(req *ProposeActionRequest) { req.Execution = models.ActionExecutionHost },
-		"no step":        func(req *ProposeActionRequest) { req.TurnID = "" },
-		"origin ref":     func(req *ProposeActionRequest) { req.OriginRef = "command-1" },
+	for name, mutate := range map[string]func(*runtime.ProposeActionRequest){
+		"no origin":      func(req *runtime.ProposeActionRequest) { req.Origin, req.Execution = "", "" },
+		"host execution": func(req *runtime.ProposeActionRequest) { req.Execution = models.ActionExecutionHost },
+		"no step":        func(req *runtime.ProposeActionRequest) { req.TurnID = "" },
+		"origin ref":     func(req *runtime.ProposeActionRequest) { req.OriginRef = "command-1" },
 	} {
 		req := f.request("shape")
 		mutate(&req)
-		var rejection *ActionProposalRejection
+		var rejection *runtime.ActionProposalRejection
 		if _, err := f.coordinator.Propose(f.ctx, req); err == nil || errors.As(err, &rejection) {
 			t.Fatalf("%s: error = %v", name, err)
 		}
@@ -533,10 +534,10 @@ func TestLoopProposePersonCredentialApproverIsActingUser(t *testing.T) {
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
-	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
+	coordinator := runtime.NewActionCoordinator(store, store, catalog, runtime.ActionPolicyEvaluatorFunc(func(context.Context, runtime.ActionPolicyInput) (runtime.ActionPolicyDecision, error) {
+		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionRequireApproval, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
 	}), nil, models.WithClock(func() time.Time { return now }))
-	proposal, err := coordinator.Propose(context.Background(), loopProposeRequest(ProposeActionRequest{
+	proposal, err := coordinator.Propose(context.Background(), loopProposeRequest(runtime.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: "release-agent",
 		SkillID: "mail", SkillVersion: "1.0.0", Action: "send", Arguments: map[string]interface{}{"to": "ada@example.com"},
 		Summary: "Send the weekly update to Ada",

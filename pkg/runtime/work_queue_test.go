@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -94,7 +95,7 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 func TestQueueDrivenActionPoolIssuesNoReadsWhileIdle(t *testing.T) {
 	store := &deadlineActionStore{Store: newTestKernelStore(t)}
 	catalog, scope := governedActionCatalog(t)
-	pool := newTestActionPool(t, store, catalog, scope, 5*time.Millisecond, 4, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	pool := newTestActionPool(t, store, catalog, scope, 5*time.Millisecond, 4, runtime.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return nil, errors.New("unexpected idle dispatch")
 	}))
 	pool.SetWorkSignals(newQueueHarness(t).status)
@@ -113,7 +114,7 @@ func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
 	store := &deadlineActionStore{Store: newTestKernelStore(t)}
 	catalog, scope := governedActionCatalog(t)
 	dispatched := make(chan struct{}, 1)
-	pool := newTestActionPool(t, store, catalog, scope, time.Hour, 2, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	pool := newTestActionPool(t, store, catalog, scope, time.Hour, 2, runtime.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		dispatched <- struct{}{}
 		return map[string]interface{}{"ok": true}, nil
 	}))
@@ -182,7 +183,7 @@ func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.
 					t.Fatalf("crashed claim = %#v, %v", claimed, err)
 				}
 			}
-			pool := newTestActionPool(t, store, catalog, scope, time.Hour, 1, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+			pool := newTestActionPool(t, store, catalog, scope, time.Hour, 1, runtime.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				return map[string]interface{}{"ok": true}, nil
 			}))
 			// The pool holds no timer: its deadline goes into the queue,
@@ -216,7 +217,7 @@ func TestQueueDrivenActionPoolPollsWhileQueueIsUnhealthy(t *testing.T) {
 	store := &deadlineActionStore{Store: newTestKernelStore(t)}
 	catalog, scope := governedActionCatalog(t)
 	status := newQueueHarness(t).status
-	pool := newTestActionPool(t, store, catalog, scope, 10*time.Millisecond, 1, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	pool := newTestActionPool(t, store, catalog, scope, 10*time.Millisecond, 1, runtime.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"ok": true}, nil
 	}))
 	pool.SetWorkSignals(status)
@@ -272,9 +273,9 @@ func (s *deadlineAgentRunStore) reads() int64 {
 func TestQueueDrivenAgentRunPoolIssuesNoReadsWhileIdleAndWakesOnDeadline(t *testing.T) {
 	store := &deadlineAgentRunStore{Store: newTestKernelStore(t)}
 	scope := models.Scope{Kind: "tenant", ID: "idle-runs"}
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	pool, err := runtime.NewAgentRunWorkerPool(store, runtime.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return nil, errors.New("unexpected idle turn")
-	}), nil, AgentRunWorkerConfig{Scope: scope, Concurrency: 4, PollInterval: 5 * time.Millisecond})
+	}), nil, runtime.AgentRunWorkerConfig{Scope: scope, Concurrency: 4, PollInterval: 5 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,9 +346,9 @@ func TestQueueDrivenSupervisorAdmitsScopesWithoutListingAndRetiresIdlePools(t *t
 	catalog, scope := governedActionCatalog(t)
 	source := &checkedScopeSource{}
 	source.active.Store(true)
-	supervisor, err := newActionWorkerSupervisor(store, catalog, nil, nil, ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+	supervisor, err := runtime.NewActionWorkerSupervisorRetiringAfter(store, catalog, nil, nil, runtime.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"ok": true}, nil
-	}), source, nil, DynamicActionWorkerConfig{Concurrency: 1, PollInterval: 5 * time.Millisecond, ReconcileInterval: 10 * time.Millisecond}, 60*time.Millisecond)
+	}), source, nil, runtime.DynamicActionWorkerConfig{Concurrency: 1, PollInterval: 5 * time.Millisecond, ReconcileInterval: 10 * time.Millisecond}, 60*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +452,7 @@ func (s *signalConversationStore) ListConversations(ctx context.Context, filter 
 
 func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) {
 	store := &signalConversationStore{Store: newTestKernelStore(t)}
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	scheduler, err := runtime.NewConversationRunScheduler(store, store, runtime.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +460,7 @@ func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) 
 	source := &checkedScopeSource{}
 	source.active.Store(true)
 	source.scopes.Store(&[]models.Scope{scope, other})
-	reconciler, err := NewConversationRunReconciler(scheduler, source, nil, ConversationRunReconcilerConfig{Interval: 100 * time.Millisecond})
+	reconciler, err := runtime.NewConversationRunReconciler(scheduler, source, nil, runtime.ConversationRunReconcilerConfig{Interval: 100 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

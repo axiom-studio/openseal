@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"errors"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -23,14 +24,14 @@ func TestActionProposalFenceChecksHostBindings(t *testing.T) {
 		t.Fatalf("resolve = %#v, %v", bound, err)
 	}
 	call := &models.ActionCall{Scope: scope, DeploymentID: "release-agent", BindingID: "mcp:linear", BindingRevision: 1, SkillID: "openseal.connector", SkillVersion: "1.0.0"}
-	if err := models.ValidateActionSubmissionBinding(call, hostActionBinding(bound)); err != nil {
+	if err := models.ValidateActionSubmissionBinding(call, runtime.HostActionBinding(bound)); err != nil {
 		t.Fatalf("matching host binding refused: %v", err)
 	}
 	call.BindingRevision = 2
-	if err := models.ValidateActionSubmissionBinding(call, hostActionBinding(bound)); !errors.Is(err, skill.ErrBindingUnavailable) {
+	if err := models.ValidateActionSubmissionBinding(call, runtime.HostActionBinding(bound)); !errors.Is(err, skill.ErrBindingUnavailable) {
 		t.Fatalf("stale host binding admitted: %v", err)
 	}
-	if hostActionBinding(&skill.BoundAction{Binding: bound.Binding}) != nil {
+	if runtime.HostActionBinding(&skill.BoundAction{Binding: bound.Binding}) != nil {
 		t.Fatal("a stored binding was treated as host supplied")
 	}
 }

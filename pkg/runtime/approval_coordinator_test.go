@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -35,14 +36,14 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 			ctx := context.Background()
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 			proposal := createApprovalForStore(t, store, now)
-			approvalCoordinator := NewApprovalCoordinator(store, store, ApprovalAuthorizerFunc(func(_ context.Context, principal models.ApprovalPrincipal, approval *models.ApprovalCheckpoint) error {
+			approvalCoordinator := runtime.NewApprovalCoordinator(store, store, runtime.ApprovalAuthorizerFunc(func(_ context.Context, principal models.ApprovalPrincipal, approval *models.ApprovalCheckpoint) error {
 				if principal.ID != "alice" || approval.ID != proposal.Approval.ID {
 					return errors.New("not authorized")
 				}
 				return nil
 			}), models.WithClock(func() time.Time { return now.Add(2 * time.Second) }))
-			approvalCoordinator.newID = func() string { return "approval-event" }
-			result, err := approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
+			approvalCoordinator.SetNewID(func() string { return "approval-event" })
+			result, err := approvalCoordinator.Resolve(ctx, runtime.ResolveApprovalRequest{
 				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 				DecisionID: "decision-1", Decision: models.ApprovalDecisionApprove, Principal: models.ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "change reviewed",
 			})
@@ -52,14 +53,14 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 			if !result.Resolved || result.Approval.Status != models.ApprovalStatusApproved || result.Call.Status != models.ActionCallStatusReady || result.Run.Status != models.AgentRunStatusQueued || result.Run.WakeCondition != nil || result.Run.LastWakeSignalID != "decision-1" {
 				t.Fatalf("resolution mismatch: %#v", result)
 			}
-			retry, err := approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
+			retry, err := approvalCoordinator.Resolve(ctx, runtime.ResolveApprovalRequest{
 				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 				DecisionID: "decision-1", Decision: models.ApprovalDecisionApprove, Principal: models.ApprovalPrincipal{Type: "user", ID: "alice"},
 			})
 			if err != nil || retry.Resolved {
 				t.Fatalf("idempotent retry = %#v, %v", retry, err)
 			}
-			_, err = approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
+			_, err = approvalCoordinator.Resolve(ctx, runtime.ResolveApprovalRequest{
 				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: result.Approval.Revision,
 				DecisionID: "decision-2", Decision: models.ApprovalDecisionReject, Principal: models.ApprovalPrincipal{Type: "user", ID: "alice"},
 			})
@@ -88,10 +89,10 @@ func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
 	coordinatorClock := func() time.Time { return now.Add(2 * time.Second) }
-	coordinator := NewApprovalCoordinator(store, store, ApprovalAuthorizerFunc(func(context.Context, models.ApprovalPrincipal, *models.ApprovalCheckpoint) error {
+	coordinator := runtime.NewApprovalCoordinator(store, store, runtime.ApprovalAuthorizerFunc(func(context.Context, models.ApprovalPrincipal, *models.ApprovalCheckpoint) error {
 		return errors.New("RBAC denied")
 	}), models.WithClock(func() time.Time { return coordinatorClock() }))
-	_, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
+	_, err := coordinator.Resolve(ctx, runtime.ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 		DecisionID: "unauthorized", Decision: models.ApprovalDecisionApprove, Principal: models.ApprovalPrincipal{Type: "user", ID: "mallory"},
 	})
@@ -103,7 +104,7 @@ func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 		t.Fatalf("unauthorized decision mutated approval: %#v, %v", unchanged, err)
 	}
 	coordinatorClock = func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }
-	expired, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
+	expired, err := coordinator.Resolve(ctx, runtime.ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 		DecisionID: "expiry", Decision: models.ApprovalDecisionApprove, Principal: models.ApprovalPrincipal{Type: "system", ID: "expiry-worker"},
 	})
@@ -140,7 +141,7 @@ func TestApprovalCoordinatorAppliesReviewedTimeoutApprovalAcrossStores(t *testin
 			}
 
 			coordinatorClock := func() time.Time { return stored.ExpiresAt.Add(-time.Second) }
-			coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return coordinatorClock() }))
+			coordinator := runtime.NewApprovalCoordinator(store, store, runtime.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return coordinatorClock() }))
 			if _, err = coordinator.ResolveTimeout(t.Context(), stored.Scope, stored.ID, stored.Revision, stored.ID); err == nil || !strings.Contains(err.Error(), "deadline has not elapsed") {
 				t.Fatalf("early timeout resolution = %v", err)
 			}
@@ -175,8 +176,8 @@ func TestApprovalCoordinatorExpiresApprovalAfterRunLeavesWaitingState(t *testing
 	if err != nil || paused.Run.Status != models.AgentRunStatusPaused {
 		t.Fatalf("pause pending approval run = %#v, %v", paused, err)
 	}
-	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }))
-	expired, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
+	coordinator := runtime.NewApprovalCoordinator(store, store, runtime.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }))
+	expired, err := coordinator.Resolve(t.Context(), runtime.ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 		DecisionID: "orphan-expiry", Principal: models.ApprovalPrincipal{Type: "system", ID: "expiry-worker"}, Reason: "deadline elapsed",
 	})
@@ -208,8 +209,8 @@ func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 			defer cleanup()
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 			proposal := createApprovalForStore(t, store, now)
-			coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return now.Add(2 * time.Second) }))
-			result, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
+			coordinator := runtime.NewApprovalCoordinator(store, store, runtime.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return now.Add(2 * time.Second) }))
+			result, err := coordinator.Resolve(t.Context(), runtime.ResolveApprovalRequest{
 				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 				DecisionID: "reject-release", Decision: models.ApprovalDecisionReject, Principal: models.ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "change is not authorized",
 			})
@@ -233,9 +234,9 @@ func TestApprovalCoordinatorResumesRunWithReviewerGuidance(t *testing.T) {
 	store := newTestKernelStore(t)
 	now := time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
-	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return now.Add(time.Second) }))
+	coordinator := runtime.NewApprovalCoordinator(store, store, runtime.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 
-	_, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
+	_, err := coordinator.Resolve(t.Context(), runtime.ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID,
 		ExpectedRevision: proposal.Approval.Revision, DecisionID: "missing-guidance",
 		Decision: models.ApprovalDecisionRequestChanges, Principal: models.ApprovalPrincipal{Type: "user", ID: "alice"},
@@ -245,7 +246,7 @@ func TestApprovalCoordinatorResumesRunWithReviewerGuidance(t *testing.T) {
 	}
 
 	const guidance = "Keep the draft, but use r/vibecoding instead."
-	result, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
+	result, err := coordinator.Resolve(t.Context(), runtime.ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID,
 		ExpectedRevision: proposal.Approval.Revision, DecisionID: "request-revision",
 		Decision: models.ApprovalDecisionRequestChanges, Principal: models.ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: guidance,
@@ -260,7 +261,7 @@ func TestApprovalCoordinatorResumesRunWithReviewerGuidance(t *testing.T) {
 	if result.Event == nil || result.Event.EventType != "approval.changes_requested" || fmt.Sprint(result.Event.Payload["decisionReason"]) != guidance {
 		t.Fatalf("change request activity = %#v", result.Event)
 	}
-	replay, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
+	replay, err := coordinator.Resolve(t.Context(), runtime.ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID,
 		ExpectedRevision: proposal.Approval.Revision, DecisionID: "request-revision",
 		Decision: models.ApprovalDecisionRequestChanges, Principal: models.ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: guidance,
