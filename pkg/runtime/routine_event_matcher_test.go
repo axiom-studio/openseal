@@ -123,7 +123,7 @@ func (h *routineEventHarness) routine(name string, mutate func(*RoutineEventTrig
 	if mutate != nil {
 		mutate(trigger)
 	}
-	activation, err := NewRunbookActivationService(h.store).Create(h.ctx, CreateRunbookActivationRequest{
+	activation, err := NewRunbookActivationService(h.store, models.WithClock(h.clock)).Create(h.ctx, CreateRunbookActivationRequest{
 		Scope: h.scope, Owner: h.owner, ObjectiveID: objective.ID, AssignedAgentID: h.owner.ID, TriggerID: "event", MaximumConcurrent: 1,
 		Trigger: runbook.Trigger{Kind: runbook.TriggerEvent}, IdempotencyKey: "create-task:" + name,
 		Task: &ScheduledAgentTask{
@@ -187,7 +187,7 @@ func (h *routineEventHarness) setStatus(activation *RunbookActivation, status Ru
 	current := h.get(activation)
 	// The creator stays signed in to Google, so a resume passes its source check.
 	signedIn := routineGoogleSourcesForTest{{Kind: current.Task.Event.Kind, Source: current.Task.Event.SourceRef, Available: true}}
-	updated, err := NewRunbookActivationService(h.store).WithRoutineEventSources(signedIn).Update(h.ctx, h.scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: status})
+	updated, err := NewRunbookActivationService(h.store, models.WithClock(h.clock)).WithRoutineEventSources(signedIn).Update(h.ctx, h.scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: status})
 	if err != nil {
 		h.t.Fatal(err)
 	}
