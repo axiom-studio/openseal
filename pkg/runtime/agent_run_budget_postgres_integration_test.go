@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
 func TestPostgresAgentRunAttemptBudgetIsReplicaSafeAndRestartDurable(t *testing.T) {
@@ -15,7 +17,7 @@ func TestPostgresAgentRunAttemptBudgetIsReplicaSafeAndRestartDurable(t *testing.
 	primary, pgSchema := openTestPostgresStore(t, "openseal_attempt_budget_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,14 +37,14 @@ func TestPostgresAgentRunAttemptBudgetIsReplicaSafeAndRestartDurable(t *testing.
 
 	claimAcrossReplicas := func(at time.Time, prefix string) []*AgentRun {
 		t.Helper()
-		stores := []*PostgresStore{primary, replica}
+		stores := []*postgres.PostgresStore{primary, replica}
 		results := make(chan *AgentRun, len(stores))
 		errs := make(chan error, len(stores))
 		start := make(chan struct{})
 		var wait sync.WaitGroup
 		for index, store := range stores {
 			wait.Add(1)
-			go func(index int, store *PostgresStore) {
+			go func(index int, store *postgres.PostgresStore) {
 				defer wait.Done()
 				<-start
 				claimed, claimErr := store.ClaimNextAgentRun(ctx, AgentRunClaim{

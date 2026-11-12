@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -146,7 +147,7 @@ func TestPostgresActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *t
 	pgSchema := storetest.NewPostgresSchema(t, "openseal_lease_umbrella_")
 	dsn := pgSchema.DSN
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
+	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

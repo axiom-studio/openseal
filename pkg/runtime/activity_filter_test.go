@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -87,13 +88,13 @@ func TestListActivityAppliesEveryFilterInBothDirections(t *testing.T) {
 	}
 }
 
-func activityFilterPostgresStore(t *testing.T) *PostgresStore {
+func activityFilterPostgresStore(t *testing.T) *postgres.PostgresStore {
 	t.Helper()
 	pgSchema := storetest.NewPostgresSchema(t, "openseal_activity_filter_")
 	dsn := pgSchema.DSN
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
+	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

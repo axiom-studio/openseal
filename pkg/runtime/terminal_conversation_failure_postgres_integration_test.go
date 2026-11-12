@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func terminalFailureMigrationPostgres(t *testing.T) (*PostgresStore, storetest.PostgresSchema) {
+func terminalFailureMigrationPostgres(t *testing.T) (*postgres.PostgresStore, storetest.PostgresSchema) {
 	t.Helper()
 	return openTestPostgresStore(t, "failure_reporting_")
 }

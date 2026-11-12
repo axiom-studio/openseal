@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -18,7 +19,7 @@ func TestPostgresUmbrellaMigrationsRewriteStoredRecords(t *testing.T) {
 	dsn := pgSchema.DSN
 	schema := pgSchema.Name
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func TestPostgresUmbrellaMigrationsRewriteStoredRecords(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	store, err = postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

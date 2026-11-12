@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
 func TestPostgresArtifactCatalogIsConcurrentRecoverableAndScoped(t *testing.T) {
@@ -16,12 +18,12 @@ func TestPostgresArtifactCatalogIsConcurrentRecoverableAndScoped(t *testing.T) {
 	primary, pgSchema := openTestPostgresStore(t, "openseal_artifacts_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	stores := []*PostgresStore{primary, replica}
+	stores := []*postgres.PostgresStore{primary, replica}
 	artifact := validCatalogArtifact("postgres-report", 1)
 	var created atomic.Int32
 	errorsSeen := make(chan error, 20)

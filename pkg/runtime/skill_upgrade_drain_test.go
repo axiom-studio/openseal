@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -162,7 +163,7 @@ func TestSkillUpgradeDrainProjectsRollingVersionWritesAcrossStores(t *testing.T)
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
 		db, actions := fixture.db, fixture.table("action_calls")
-		_, postgres := store.(*PostgresStore)
+		_, postgres := store.(*postgres.PostgresStore)
 		scope := Scope{Kind: "tenant", ID: "rolling"}
 		run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Rolling-version write", Source: RunSourceManual})
 		if err != nil {
@@ -206,7 +207,7 @@ func TestSkillUpgradeDrainFencesLegacyWritersAgainstExistingAuthority(t *testing
 			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 				store := fixture.store.(KernelStore)
 				db, actions := fixture.db, fixture.table("action_calls")
-				_, postgres := store.(*PostgresStore)
+				_, postgres := store.(*postgres.PostgresStore)
 				scope := Scope{Kind: "tenant", ID: "legacy-fence"}
 				run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Fence old writer", Source: RunSourceManual})
 				if err != nil {
@@ -397,7 +398,7 @@ func TestSkillRuntimeUsageStatusesAcrossStores(t *testing.T) {
 func seedSkillUsageMetadata(t *testing.T, fixture runStoreContractFixture, run *AgentRun, call *ActionCall) {
 	t.Helper()
 	db := fixture.db
-	_, postgres := fixture.store.(*PostgresStore)
+	_, postgres := fixture.store.(*postgres.PostgresStore)
 	actions, runs := fixture.table("action_calls"), fixture.table("agent_runs")
 	payload, _ := json.Marshal(run)
 	placeholder := func(n int) string {

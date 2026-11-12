@@ -1,0 +1,146 @@
+package postgres
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/skill"
+)
+
+func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, application *models.SkillReferenceUpgradeMutation) error {
+	if err := models.ValidateSkillReferenceUpgradeMutation(application); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// First accepted typed Run pins take the shared logical fence. Cutover is
+	// exclusive so an old invocation either becomes visible to drain checks or
+	// observes the new binding and cannot be admitted with its obsolete version.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, skillRuntimeMaintenanceLockKey(application.Plan.Scope, application.Plan.From.ID)); err != nil {
+		return err
+	}
+	gate, err := s.postgresSkillRuntimeMaintenanceActiveTx(ctx, tx, application.Plan.Scope, application.Plan.From.ID)
+	if err != nil {
+		return err
+	}
+	if err := models.ValidateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
+		return err
+	}
+	// Every binding the upgrade moves is locked and checked before any write.
+	members := application.Members()
+	for _, member := range members {
+		var bindingPayload string
+		if err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("skill_bindings")+`
+			WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 AND revision=$5 FOR UPDATE`,
+			application.Plan.Scope.Kind, application.Plan.Scope.ID, application.Plan.DeploymentID,
+			member.Binding.ID, member.ExpectedRevision).Scan(&bindingPayload); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return models.ErrSkillReferenceUpgradeConflict
+			}
+			return err
+		}
+		var currentBinding skill.Binding
+		if json.Unmarshal([]byte(bindingPayload), &currentBinding) != nil || currentBinding.Disabled ||
+			currentBinding.SkillID != application.Plan.From.ID || currentBinding.SkillVersion != application.Plan.From.Version ||
+			currentBinding.SourceIdentity != application.Plan.From.SourceIdentity {
+			return models.ErrSkillReferenceUpgradeConflict
+		}
+		// The locked binding is also the proposal fence. A concurrent proposal
+		// either commits first and is visible here, or waits and fails its old pin.
+		busy, err := sqlstore.HasSkillRuntimeUsage(ctx, tx, models.SkillBindingUpgradeUsageFilter(application, member.Binding.ID), s.table("action_calls"), s.table("agent_runs"), true)
+		if err != nil {
+			return err
+		}
+		if busy {
+			return models.ErrSkillReferenceUpgradeBusy
+		}
+	}
+	// Binding and Team locks can wait behind another transaction. The logical
+	// fence prevents ownership changes; the current clock still fences expiry.
+	if err := models.ValidateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
+		return err
+	}
+	var result sql.Result
+	for _, member := range members {
+		encodedBinding, marshalErr := json.Marshal(member.Binding)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = tx.ExecContext(ctx, `UPDATE `+s.table("skill_bindings")+`
+			SET skill_id=$1,skill_version=$2,source_identity=$3,revision=$4,payload=$5::jsonb
+			WHERE scope_kind=$6 AND scope_id=$7 AND deployment_id=$8 AND id=$9 AND revision=$10`,
+			member.Binding.SkillID, member.Binding.SkillVersion, member.Binding.SourceIdentity,
+			member.Binding.Revision, string(encodedBinding), member.Binding.Scope.Kind, member.Binding.Scope.ID,
+			member.Binding.DeploymentID, member.Binding.ID, member.ExpectedRevision)
+		if err != nil {
+			return err
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
+			return models.ErrSkillReferenceUpgradeConflict
+		}
+	}
+	for _, mutation := range application.Objectives {
+		encoded, marshalErr := json.Marshal(mutation.Value)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = tx.ExecContext(ctx, `UPDATE `+s.table("objectives")+`
+			SET owner_type=$1,owner_id=$2,status=$3,priority=$4,revision=$5,updated_at=$6,payload=$7::jsonb
+			WHERE scope_kind=$8 AND scope_id=$9 AND id=$10 AND revision=$11`,
+			mutation.Value.Owner.Type, mutation.Value.Owner.ID, mutation.Value.Status, mutation.Value.Priority,
+			mutation.Value.Revision, mutation.Value.UpdatedAt, string(encoded), mutation.Value.Scope.Kind,
+			mutation.Value.Scope.ID, mutation.Value.ID, mutation.ExpectedRevision)
+		if err != nil {
+			return err
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
+			return models.ErrSkillReferenceUpgradeConflict
+		}
+		if _, err = s.insertPostgresActivityTx(ctx, tx, mutation.Event); err != nil {
+			return err
+		}
+	}
+	for _, mutation := range application.ConversationEndpoints {
+		encoded, marshalErr := json.Marshal(mutation.Value)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = tx.ExecContext(ctx, `UPDATE `+s.table("external_conversation_endpoints")+`
+			SET ingress_route=$1,provider=$2,status=$3,revision=$4,updated_at=$5,payload=$6::jsonb
+			WHERE scope_kind=$7 AND scope_id=$8 AND id=$9 AND revision=$10`, mutation.Value.IngressRoute,
+			mutation.Value.Provider, mutation.Value.Status, mutation.Value.Revision, mutation.Value.UpdatedAt,
+			string(encoded), mutation.Value.Scope.Kind, mutation.Value.Scope.ID, mutation.Value.ID, mutation.ExpectedRevision)
+		if err != nil {
+			return err
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
+			return models.ErrSkillReferenceUpgradeConflict
+		}
+	}
+	for _, mutation := range application.CallbackRegistrations {
+		encoded, marshalErr := json.Marshal(mutation.Value)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = tx.ExecContext(ctx, `UPDATE `+s.table("callback_registrations")+`
+			SET ingress_route=$1,provider=$2,status=$3,revision=$4,updated_at=$5,payload=$6::jsonb
+			WHERE scope_kind=$7 AND scope_id=$8 AND id=$9 AND revision=$10`, mutation.Value.IngressRoute,
+			mutation.Value.Provider, mutation.Value.Status, mutation.Value.Revision, mutation.Value.UpdatedAt,
+			string(encoded), mutation.Value.Scope.Kind, mutation.Value.Scope.ID, mutation.Value.ID, mutation.ExpectedRevision)
+		if err != nil {
+			return err
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
+			return models.ErrSkillReferenceUpgradeConflict
+		}
+	}
+	return tx.Commit()
+}

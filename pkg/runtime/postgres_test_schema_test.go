@@ -6,16 +6,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // openPostgresStoreOn opens another store on schema s, closed when the
 // test ends.
-func openPostgresStoreOn(t testing.TB, s storetest.PostgresSchema, options ...PostgresStoreOption) *PostgresStore {
+func openPostgresStoreOn(t testing.TB, s storetest.PostgresSchema, options ...postgres.PostgresStoreOption) *postgres.PostgresStore {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, s.DSN, append([]PostgresStoreOption{WithPostgresSchema(s.Name)}, options...)...)
+	store, err := postgres.NewPostgresStore(ctx, s.DSN, append([]postgres.PostgresStoreOption{postgres.WithPostgresSchema(s.Name)}, options...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +26,7 @@ func openPostgresStoreOn(t testing.TB, s storetest.PostgresSchema, options ...Po
 
 // openTestPostgresStore opens a Postgres store on a fresh schema (see
 // storetest.NewPostgresSchema) and returns it with the schema.
-func openTestPostgresStore(t testing.TB, prefix string, options ...PostgresStoreOption) (*PostgresStore, storetest.PostgresSchema) {
+func openTestPostgresStore(t testing.TB, prefix string, options ...postgres.PostgresStoreOption) (*postgres.PostgresStore, storetest.PostgresSchema) {
 	t.Helper()
 	schema := storetest.NewPostgresSchema(t, prefix)
 	return openPostgresStoreOn(t, schema, options...), schema

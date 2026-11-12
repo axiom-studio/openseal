@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -30,7 +31,7 @@ func forConversationTaskToolStores(t *testing.T, test func(*testing.T, conversat
 	t.Run("postgres", func(t *testing.T) {
 		pgSchema := storetest.NewPostgresSchema(t, "openseal_task_tool_")
 		dsn := pgSchema.DSN
-		store, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(pgSchema.Name))
+		store, err := postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(pgSchema.Name))
 		if err != nil {
 			t.Fatal(err)
 		}

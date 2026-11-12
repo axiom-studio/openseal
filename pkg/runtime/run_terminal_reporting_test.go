@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/google/uuid"
 )
 
@@ -405,7 +406,7 @@ func TestTerminalRunReportingContractFailedTerminalCommitRollsBackIntent(t *test
 			t.Cleanup(func() {
 				_, _ = fixture.db.ExecContext(context.Background(), `DROP TRIGGER IF EXISTS reporting_contract_activity_failure`)
 			})
-		case *PostgresStore:
+		case *postgres.PostgresStore:
 			_, err = fixture.db.ExecContext(t.Context(), `CREATE FUNCTION `+fixture.table("reporting_contract_activity_failure")+`() RETURNS trigger LANGUAGE plpgsql AS $report_test$ BEGIN RAISE EXCEPTION 'injected activity failure'; END; $report_test$;
 				CREATE TRIGGER reporting_contract_activity_failure BEFORE INSERT ON `+fixture.table("run_activity")+` FOR EACH ROW EXECUTE FUNCTION `+fixture.table("reporting_contract_activity_failure")+`()`)
 		default:

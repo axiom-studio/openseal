@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
 func TestPostgresObjectiveExecutionPolicySerializesReplicaClaims(t *testing.T) {
@@ -15,7 +17,7 @@ func TestPostgresObjectiveExecutionPolicySerializesReplicaClaims(t *testing.T) {
 	primary, pgSchema := openTestPostgresStore(t, "openseal_objective_policy_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,14 +40,14 @@ func TestPostgresObjectiveExecutionPolicySerializesReplicaClaims(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	stores := []*PostgresStore{primary, replica}
+	stores := []*postgres.PostgresStore{primary, replica}
 	start := make(chan struct{})
 	results := make(chan *AgentRun, len(stores))
 	errs := make(chan error, len(stores))
 	var wait sync.WaitGroup
 	for index, store := range stores {
 		wait.Add(1)
-		go func(index int, store *PostgresStore) {
+		go func(index int, store *postgres.PostgresStore) {
 			defer wait.Done()
 			<-start
 			claimed, claimErr := store.ClaimNextAgentRun(ctx, AgentRunClaim{
@@ -111,7 +113,7 @@ func TestPostgresObjectiveExecutionPolicySerializesReplicaClaims(t *testing.T) {
 	resourceErrors := make(chan error, len(stores))
 	for index, store := range stores {
 		wait.Add(1)
-		go func(index int, store *PostgresStore) {
+		go func(index int, store *postgres.PostgresStore) {
 			defer wait.Done()
 			<-resourceStart
 			claimed, claimErr := store.ClaimNextAgentRun(ctx, AgentRunClaim{

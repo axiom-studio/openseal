@@ -9,6 +9,7 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -66,7 +67,7 @@ func TestLegacyRunSkillDependencyBackfillPagesWithoutRewritingHistoryAcrossStore
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		db := fixture.db
 		runs, deployments, definitions, dependencies := fixture.table("agent_runs"), fixture.table("agent_deployments"), fixture.table("agent_definitions"), fixture.table("run_skill_dependencies")
-		_, postgres := fixture.store.(*PostgresStore)
+		_, postgres := fixture.store.(*postgres.PostgresStore)
 		store := fixture.store.(KernelStore)
 		scope := Scope{Kind: "tenant", ID: "legacy-backfill"}
 		deployment, definition := acceptedMethodFixture(scope)

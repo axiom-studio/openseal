@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -49,7 +50,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 	t.Run("postgres", func(t *testing.T) {
 		pgSchema := storetest.NewPostgresSchema(t, "run_store_contract_")
 		schema, dsn := pgSchema.Name, pgSchema.DSN
-		current, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
+		current, err := postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(schema))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +59,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 			if err := current.Close(); err != nil {
 				t.Fatal(err)
 			}
-			current, err = NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
+			current, err = postgres.NewPostgresStore(t.Context(), dsn, postgres.WithPostgresSchema(schema))
 			if err != nil {
 				t.Fatal(err)
 			}

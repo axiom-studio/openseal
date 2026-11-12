@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -20,7 +21,7 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	primary, pgSchema := openTestPostgresStore(t, "openseal_team_registry_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +122,7 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 		t.Fatalf("successful concurrent amendment activations = %d, want 1", amendmentActivated.Load())
 	}
 
-	restarted, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	restarted, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
 type placementRuns map[string]*AgentRun
@@ -216,7 +218,7 @@ func TestKernelStoresProvideArtifactPlacementLookups(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	for name, store := range map[string]any{"sqlite": sqlite, "postgres": &PostgresStore{}} {
+	for name, store := range map[string]any{"sqlite": sqlite, "postgres": &postgres.PostgresStore{}} {
 		if placement := NewStoreArtifactPlacement(store); placement.Runs == nil || placement.Conversations == nil {
 			t.Fatalf("%s store placement = %#v", name, placement)
 		}

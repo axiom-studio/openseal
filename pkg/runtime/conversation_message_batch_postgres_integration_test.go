@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -15,7 +16,7 @@ func TestConversationMessageBatchPostgresScopesExactIDsAndBoundsHistoricalReads(
 	dsn := pgSchema.DSN
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
+	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

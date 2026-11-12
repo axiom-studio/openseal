@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -65,12 +66,12 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("postgres conversation claim = %#v, %v", claimedConversation, err)
 	}
 
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	stores := []*PostgresStore{primary, replica}
+	stores := []*postgres.PostgresStore{primary, replica}
 	var wait sync.WaitGroup
 
 	const agentRunCount = 16
@@ -494,7 +495,7 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	primary, pgSchema := openTestPostgresStore(t, "openseal_collab_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +567,7 @@ func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 	primary, pgSchema := openTestPostgresStore(t, "openseal_commands_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	replica, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

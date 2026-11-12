@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -191,7 +192,7 @@ func TestReplyRunGuardMissingRunAndNilGuard(t *testing.T) {
 func TestGuardedReplyLocksRunBeforeConversation(t *testing.T) {
 	pgSchema := storetest.NewPostgresSchema(t, "openseal_reply_guard_")
 	dsn := pgSchema.DSN
-	store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(pgSchema.Name))
+	store, err := postgres.NewPostgresStore(context.Background(), dsn, postgres.WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

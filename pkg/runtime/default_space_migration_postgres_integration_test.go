@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -20,7 +21,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	dsn := pgSchema.DSN
 	schema := pgSchema.Name
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	store, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 		}
 	}
 	_ = store.Close()
-	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	reopened, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}

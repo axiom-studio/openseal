@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -46,7 +47,7 @@ func BenchmarkConversationTaskPostgresActiveHistory(b *testing.B) {
 			b.Fatal(err)
 		}
 		schema := storetest.PostgresSchema{DSN: dsn, Name: fmt.Sprintf("conversation_task_benchmark_%x", time.Now().UnixNano()), DB: db}
-		store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(schema.Name))
+		store, err := postgres.NewPostgresStore(context.Background(), dsn, postgres.WithPostgresSchema(schema.Name))
 		if err != nil {
 			b.Fatal(err)
 		}

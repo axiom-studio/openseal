@@ -7,6 +7,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
 func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
@@ -36,7 +38,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT COALESCE(payload->>'approvalMode', '') FROM `+pgSchema.Table("conversations")).Scan(&raw); err != nil || raw != "" {
 		t.Fatalf("rolled back approval mode = %q, %v", raw, err)
 	}
-	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
+	reopened, err := postgres.NewPostgresStore(ctx, dsn, postgres.WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
