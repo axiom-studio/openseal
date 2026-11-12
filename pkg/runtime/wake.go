@@ -9,21 +9,22 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 )
 
 type WakeSignal struct {
 	ID        string
-	Scope     Scope
+	Scope     models.Scope
 	Type      string
 	Reference string
 	Payload   map[string]interface{}
 	At        time.Time
-	Actor     ActivityActor
+	Actor     models.ActivityActor
 }
 
 type WokenRun struct {
-	Run   *AgentRun
-	Event *ActivityEvent
+	Run   *models.AgentRun
+	Event *models.ActivityEvent
 }
 
 type WakeResult struct {
@@ -32,14 +33,14 @@ type WakeResult struct {
 }
 
 type AgentRunWakeService struct {
-	portfolio PortfolioStore
-	activity  *RunActivityService
+	portfolio models.PortfolioStore
+	activity  *activity.RunActivityService
 	now       func() time.Time
 }
 
-func NewAgentRunWakeService(portfolio PortfolioStore, activity RunActivityStore, opts ...models.ServiceOption) *AgentRunWakeService {
+func NewAgentRunWakeService(portfolio models.PortfolioStore, activityStore models.RunActivityStore, opts ...models.ServiceOption) *AgentRunWakeService {
 	return &AgentRunWakeService{
-		portfolio: portfolio, activity: NewRunActivityService(portfolio, activity, opts...), now: models.ClockFrom(opts),
+		portfolio: portfolio, activity: activity.NewRunActivityService(portfolio, activityStore, opts...), now: models.ClockFrom(opts),
 	}
 }
 
@@ -57,17 +58,17 @@ func (s *AgentRunWakeService) Wake(ctx context.Context, signal WakeSignal) (*Wak
 		signal.At = s.now()
 	}
 	if signal.Actor.Type == "" {
-		signal.Actor = ActivityActor{Type: "event", ID: signal.Type}
+		signal.Actor = models.ActivityActor{Type: "event", ID: signal.Type}
 	}
 	result := &WakeResult{Runs: make([]WokenRun, 0)}
 	const pageSize = 200
-	waiting := make([]*AgentRun, 0)
+	waiting := make([]*models.AgentRun, 0)
 	for offset := 0; ; offset += pageSize {
-		runs, err := s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
+		runs, err := s.portfolio.ListAgentRuns(ctx, models.AgentRunFilter{
 			Scope: signal.Scope,
-			Statuses: []AgentRunStatus{
-				AgentRunStatusSleeping, AgentRunStatusWaitingForDependency, AgentRunStatusWaitingForAgent,
-				AgentRunStatusWaitingForApproval, AgentRunStatusWaitingForEvent,
+			Statuses: []models.AgentRunStatus{
+				models.AgentRunStatusSleeping, models.AgentRunStatusWaitingForDependency, models.AgentRunStatusWaitingForAgent,
+				models.AgentRunStatusWaitingForApproval, models.AgentRunStatusWaitingForEvent,
 			},
 			Limit: pageSize, Offset: offset,
 		})
@@ -94,7 +95,7 @@ func (s *AgentRunWakeService) Wake(ctx context.Context, signal WakeSignal) (*Wak
 	return result, nil
 }
 
-func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope Scope, at time.Time) (*WakeResult, error) {
+func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope models.Scope, at time.Time) (*WakeResult, error) {
 	if s == nil || s.portfolio == nil || s.activity == nil {
 		return nil, errors.New("agent run wake service is not configured")
 	}
@@ -110,8 +111,8 @@ func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope Scope, at
 	}
 	// A builder waiting on a try_agent trial has a deadline too: past it,
 	// the resume cancels the trial and reports timed_out.
-	runs, err := s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
-		Scope: scope, Statuses: []AgentRunStatus{AgentRunStatusSleeping, AgentRunStatusWaitingForEvent},
+	runs, err := s.portfolio.ListAgentRuns(ctx, models.AgentRunFilter{
+		Scope: scope, Statuses: []models.AgentRunStatus{models.AgentRunStatusSleeping, models.AgentRunStatusWaitingForEvent},
 	})
 	if err != nil {
 		return nil, err
@@ -122,8 +123,8 @@ func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope Scope, at
 		if condition == nil || condition.WakeAt == nil {
 			continue
 		}
-		if !(run.Status == AgentRunStatusSleeping && condition.Type == "timer") &&
-			!(run.Status == AgentRunStatusWaitingForEvent && condition.Type == AgentTrialWakeType) {
+		if !(run.Status == models.AgentRunStatusSleeping && condition.Type == "timer") &&
+			!(run.Status == models.AgentRunStatusWaitingForEvent && condition.Type == AgentTrialWakeType) {
 			continue
 		}
 		if at.Before(*condition.WakeAt) {
@@ -136,7 +137,7 @@ func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope Scope, at
 		signal := WakeSignal{
 			ID: fmt.Sprintf("timer:%s:%d", run.ID, condition.WakeAt.UnixNano()), Scope: scope,
 			Type: "timer", Reference: condition.Reference, At: at,
-			Actor: ActivityActor{Type: "scheduler", ID: "timer"},
+			Actor: models.ActivityActor{Type: "scheduler", ID: "timer"},
 		}
 		woken, event, err := s.wakeOne(ctx, run, signal)
 		if err != nil {
@@ -149,26 +150,26 @@ func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope Scope, at
 	return result, nil
 }
 
-func (s *AgentRunWakeService) wakeOne(ctx context.Context, run *AgentRun, signal WakeSignal) (*AgentRun, *ActivityEvent, error) {
-	woken, event, err := s.activity.TransitionRun(ctx, signal.Scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusQueued,
+func (s *AgentRunWakeService) wakeOne(ctx context.Context, run *models.AgentRun, signal WakeSignal) (*models.AgentRun, *models.ActivityEvent, error) {
+	woken, event, err := s.activity.TransitionRun(ctx, signal.Scope, run.ID, activity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusQueued,
 		Summary: fmt.Sprintf("Run woken by %s signal", signal.Type), Actor: signal.Actor,
 		Payload: signal.Payload, CorrelationID: signal.ID, WakeSignalID: signal.ID, EventType: "run.woken",
 		OccurredAt: &signal.At,
 	})
-	if errors.Is(err, ErrRevisionConflict) {
+	if errors.Is(err, models.ErrRevisionConflict) {
 		current, getErr := s.portfolio.GetAgentRun(ctx, signal.Scope, run.ID)
 		if getErr != nil {
 			return nil, nil, getErr
 		}
-		if current.LastWakeSignalID == signal.ID || current.Status == AgentRunStatusQueued {
+		if current.LastWakeSignalID == signal.ID || current.Status == models.AgentRunStatusQueued {
 			return nil, nil, nil
 		}
 	}
 	return woken, event, err
 }
 
-func wakeConditionMatches(condition *WakeCondition, signal WakeSignal) bool {
+func wakeConditionMatches(condition *models.WakeCondition, signal WakeSignal) bool {
 	if condition == nil || condition.Type != signal.Type {
 		return false
 	}

@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type FinalAnswerMode string
@@ -25,8 +27,8 @@ type ControlAuthority struct {
 	ForkTargets       []HostedAgentTarget // other Agents a branch may target; empty = self only
 	DelegateTargets   []HostedAgentTarget
 	Operations        []HostedRunbookOperation
-	TaskStart         *HostedConversationTaskContext // offered iff non-nil && CanStart && !VoiceCallStarted
-	TaskWork          bool                           // the Run is the work of a conversation task
+	TaskStart         *models.HostedConversationTaskContext // offered iff non-nil && CanStart && !VoiceCallStarted
+	TaskWork          bool                                  // the Run is the work of a conversation task
 	CanReportProgress bool
 	CanReact          bool
 	CanAskUser        bool
@@ -34,7 +36,7 @@ type ControlAuthority struct {
 	// Conversation flags (section 05 §7).
 	ExternalChannelReply bool
 	VoiceCallStarted     bool
-	ApprovalMode         ConversationApprovalMode
+	ApprovalMode         models.ConversationApprovalMode
 	// RoutineOccurrence marks a Run started by a routine (schedule or
 	// event), not a chat reply: it may finish silent when nothing needs the
 	// person and it changed nothing.
@@ -55,14 +57,14 @@ type ControlOrigin string
 
 // ControlContext is built by the loop for each control call.
 type ControlContext struct {
-	Run       *AgentRun // re-read; Status running; LeaseOwner == WorkerID
+	Run       *models.AgentRun // re-read; Status running; LeaseOwner == WorkerID
 	WorkerID  string
-	Step      *AgentTurn // settle phase: the entry's producing step: completed && Sequence <= Run.LastAppliedTurn
-	Session   *AgentSession
-	Path      *AgentSessionPath // the step's session path (URL provenance, §11.4)
+	Step      *models.AgentTurn // settle phase: the entry's producing step: completed && Sequence <= Run.LastAppliedTurn
+	Session   *models.AgentSession
+	Path      *models.AgentSessionPath // the step's session path (URL provenance, §11.4)
 	Binding   *TurnRunnerBinding
-	Assistant *SessionEntry // assistant entry holding the call
-	Entry     *SessionEntry // this call's tool entry
+	Assistant *models.SessionEntry // assistant entry holding the call
+	Entry     *models.SessionEntry // this call's tool entry
 	Authority ControlAuthority
 	Origin    ControlOrigin
 	// Arguments is the strictly decoded call input (rule 4), set by the
@@ -71,15 +73,15 @@ type ControlContext struct {
 	Arguments interface{}
 }
 
-func (cc ControlContext) toolName() ControlToolName {
+func (cc ControlContext) toolName() models.ControlToolName {
 	if cc.Entry == nil || cc.Entry.Tool == nil {
 		return ""
 	}
-	return ControlToolName(cc.Entry.Tool.Name)
+	return models.ControlToolName(cc.Entry.Tool.Name)
 }
 
-func (cc ControlContext) lease(now time.Time) AgentRunLeaseGuard {
-	return AgentRunLeaseGuard{WorkerID: cc.WorkerID, Now: now}
+func (cc ControlContext) lease(now time.Time) models.AgentRunLeaseGuard {
+	return models.AgentRunLeaseGuard{WorkerID: cc.WorkerID, Now: now}
 }
 
 // offersCapabilities is false for decision and review Runs: they are offered

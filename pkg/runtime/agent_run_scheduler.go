@@ -10,8 +10,8 @@ import (
 )
 
 type AgentRunClaimRequest struct {
-	Scope                             Scope
-	Kind                              RunKind
+	Scope                             models.Scope
+	Kind                              models.RunKind
 	WorkerID                          string
 	AssignedAgentID                   string
 	LeaseDuration                     time.Duration
@@ -24,15 +24,15 @@ type AgentRunClaimRequest struct {
 }
 
 type AgentRunScheduler struct {
-	store AgentRunScheduleStore
+	store models.AgentRunScheduleStore
 	now   func() time.Time
 }
 
-func NewAgentRunScheduler(store AgentRunScheduleStore, opts ...models.ServiceOption) *AgentRunScheduler {
+func NewAgentRunScheduler(store models.AgentRunScheduleStore, opts ...models.ServiceOption) *AgentRunScheduler {
 	return &AgentRunScheduler{store: store, now: models.ClockFrom(opts)}
 }
 
-func (s *AgentRunScheduler) ClaimNext(ctx context.Context, req AgentRunClaimRequest) (*AgentRun, error) {
+func (s *AgentRunScheduler) ClaimNext(ctx context.Context, req AgentRunClaimRequest) (*models.AgentRun, error) {
 	decision, err := s.ClaimNextDecision(ctx, req)
 	if err != nil || decision == nil {
 		return nil, err
@@ -40,7 +40,7 @@ func (s *AgentRunScheduler) ClaimNext(ctx context.Context, req AgentRunClaimRequ
 	return decision.Run, nil
 }
 
-func (s *AgentRunScheduler) ClaimNextDecision(ctx context.Context, req AgentRunClaimRequest) (*AgentRunAdmissionDecision, error) {
+func (s *AgentRunScheduler) ClaimNextDecision(ctx context.Context, req AgentRunClaimRequest) (*models.AgentRunAdmissionDecision, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("agent run scheduler is not configured")
 	}
@@ -56,35 +56,35 @@ func (s *AgentRunScheduler) ClaimNextDecision(ctx context.Context, req AgentRunC
 	if req.AgingInterval <= 0 {
 		req.AgingInterval = time.Minute
 	}
-	claim := AgentRunClaim{
+	claim := models.AgentRunClaim{
 		Scope: req.Scope, Kind: req.Kind, WorkerID: req.WorkerID, AssignedAgentID: req.AssignedAgentID,
 		Now: s.now(), LeaseDuration: req.LeaseDuration, AgingInterval: req.AgingInterval,
 		MaxActiveForAgent: req.MaxActiveForAgent, MaxActiveForOwner: req.MaxActiveForOwner,
 		MaxActiveForObjective: req.MaxActiveForObjective, MaxActiveForConcurrencyKey: req.MaxActiveForConcurrencyKey,
 		ConversationTaskForegroundReserve: req.ConversationTaskForegroundReserve,
 	}
-	if store, ok := s.store.(AgentRunAdmissionStore); ok {
+	if store, ok := s.store.(models.AgentRunAdmissionStore); ok {
 		return store.ClaimNextAgentRunWithDecision(ctx, claim)
 	}
 	run, err := s.store.ClaimNextAgentRun(ctx, claim)
 	if err != nil {
 		return nil, err
 	}
-	outcome := AgentRunAdmissionIdle
+	outcome := models.AgentRunAdmissionIdle
 	if run != nil {
-		outcome = AgentRunAdmissionClaimed
+		outcome = models.AgentRunAdmissionClaimed
 	}
-	return &AgentRunAdmissionDecision{Outcome: outcome, Run: run, EvaluatedAt: claim.Now}, nil
+	return &models.AgentRunAdmissionDecision{Outcome: outcome, Run: run, EvaluatedAt: claim.Now}, nil
 }
 
 // Inspect returns the current portfolio admission decision without acquiring a
 // lease. It is an observational projection for operators and user interfaces;
 // only ClaimNextDecision grants execution authority.
-func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimRequest) (*AgentRunAdmissionDecision, error) {
+func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimRequest) (*models.AgentRunAdmissionDecision, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("agent run scheduler is not configured")
 	}
-	portfolio, ok := s.store.(PortfolioStore)
+	portfolio, ok := s.store.(models.PortfolioStore)
 	if !ok {
 		return nil, errors.New("agent run admission inspection is unavailable")
 	}
@@ -94,7 +94,7 @@ func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimReques
 	if req.AgingInterval <= 0 {
 		req.AgingInterval = time.Minute
 	}
-	claim := AgentRunClaim{
+	claim := models.AgentRunClaim{
 		Scope: req.Scope, Kind: req.Kind, WorkerID: "admission-inspector", Now: s.now(), LeaseDuration: time.Second,
 		AgingInterval: req.AgingInterval, AssignedAgentID: req.AssignedAgentID,
 		MaxActiveForAgent: req.MaxActiveForAgent, MaxActiveForOwner: req.MaxActiveForOwner,
@@ -104,15 +104,15 @@ func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimReques
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
-	runs := make([]*AgentRun, 0)
+	runs := make([]*models.AgentRun, 0)
 	filterKind := req.Kind
 	if claim.ConversationTaskForegroundReserve > 0 {
 		filterKind = "" // Capacity is shared with foreground conversation claims.
 	}
 	for offset := 0; ; offset += 500 {
-		page, err := portfolio.ListAgentRuns(ctx, AgentRunFilter{
+		page, err := portfolio.ListAgentRuns(ctx, models.AgentRunFilter{
 			Scope: req.Scope, Kind: filterKind, AssignedAgentID: req.AssignedAgentID,
-			Statuses: []AgentRunStatus{AgentRunStatusQueued, AgentRunStatusRunning}, Limit: 500, Offset: offset,
+			Statuses: []models.AgentRunStatus{models.AgentRunStatusQueued, models.AgentRunStatusRunning}, Limit: 500, Offset: offset,
 		})
 		if err != nil {
 			return nil, err
@@ -123,23 +123,23 @@ func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimReques
 		}
 	}
 	if claim.ConversationTaskForegroundReserve > 0 {
-		tasks, ok := s.store.(ConversationTaskStore)
-		conversations, conversationOK := s.store.(ConversationStore)
+		tasks, ok := s.store.(models.ConversationTaskStore)
+		conversations, conversationOK := s.store.(models.ConversationStore)
 		if !ok || !conversationOK {
 			return nil, errors.New("conversation task admission proof is unavailable")
 		}
-		if err := prepareConversationTaskAdmission(ctx, &claim, runs, conversationTaskAdmissionLookup{
+		if err := models.PrepareConversationTaskAdmission(ctx, &claim, runs, models.ConversationTaskAdmissionLookup{
 			Task: tasks.FindConversationTaskByWorkRunID, Run: portfolio.GetAgentRun,
 			Conversation: conversations.GetConversation, Message: conversations.GetChannelMessage,
-			Request: func(ctx context.Context, scope Scope, id string) (*AgentRequest, error) {
+			Request: func(ctx context.Context, scope models.Scope, id string) (*models.AgentRequest, error) {
 				if requests, ok := s.store.(interface {
-					GetAgentRequest(context.Context, Scope, string) (*AgentRequest, error)
+					GetAgentRequest(context.Context, models.Scope, string) (*models.AgentRequest, error)
 				}); ok {
 					return requests.GetAgentRequest(ctx, scope, id)
 				}
 				return nil, nil
 			},
-			Round: func(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRound, error) {
+			Round: func(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ParticipationRound, error) {
 				result, err := conversations.FindParticipationRoundByIdempotencyKey(ctx, scope, conversationID, key)
 				if err != nil || result == nil {
 					return nil, err
@@ -150,9 +150,9 @@ func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimReques
 			return nil, err
 		}
 	}
-	objectives := make(map[string]*Objective)
+	objectives := make(map[string]*models.Objective)
 	for offset := 0; ; offset += 500 {
-		page, err := portfolio.ListObjectives(ctx, ObjectiveFilter{Scope: req.Scope, IncludeRetired: true, Limit: 500, Offset: offset})
+		page, err := portfolio.ListObjectives(ctx, models.ObjectiveFilter{Scope: req.Scope, IncludeRetired: true, Limit: 500, Offset: offset})
 		if err != nil {
 			return nil, err
 		}
@@ -163,14 +163,14 @@ func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimReques
 			break
 		}
 	}
-	selected, decision := evaluateAgentRunAdmission(runs, objectives, claim)
+	selected, decision := models.EvaluateAgentRunAdmission(runs, objectives, claim)
 	if selected != nil {
-		decision.Run = cloneAgentRun(selected)
+		decision.Run = models.CloneAgentRun(selected)
 	}
 	return decision, nil
 }
 
-func (s *AgentRunScheduler) RenewLease(ctx context.Context, scope Scope, runID, workerID string, leaseDuration time.Duration) (*AgentRun, error) {
+func (s *AgentRunScheduler) RenewLease(ctx context.Context, scope models.Scope, runID, workerID string, leaseDuration time.Duration) (*models.AgentRun, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("agent run scheduler is not configured")
 	}

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -13,18 +14,18 @@ type ActionExecutionCatalog interface {
 }
 
 type ActionDispatchInput struct {
-	Call *ActionCall
+	Call *models.ActionCall
 	// Run is the durable, kernel-owned execution context for the call. It is
 	// deliberately unavailable to model arguments. Dispatchers use it to keep
 	// authority ownership (for example, a Team Skill binding) separate from the
 	// roster Agent that supplies execution placement.
-	Run         *AgentRun
+	Run         *models.AgentRun
 	Bound       *skill.BoundAction
 	Arguments   map[string]interface{}
 	Credentials map[string]string
 	// CredentialLease and CredentialReferences are the remote-resolution path.
 	// They are mutually exclusive with plaintext Credentials.
-	CredentialLease      *SignedActionCredentialLease
+	CredentialLease      *models.SignedActionCredentialLease
 	CredentialReferences map[string]skill.CredentialReference
 }
 
@@ -33,7 +34,7 @@ type ActionDispatcher interface {
 }
 
 type ActionProposalValidationInput struct {
-	Run       *AgentRun
+	Run       *models.AgentRun
 	Bound     *skill.BoundAction
 	Arguments map[string]interface{}
 	// History reads this Run's governed action calls. nil means none.

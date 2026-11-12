@@ -4,15 +4,17 @@ import (
 	"context"
 	"maps"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // createAgentRunWithAcceptedExecution preserves an already accepted delivery
 // before consulting mutable deployment state. New work is prepared through the
 // host's authoritative catalog before the canonical creation transaction.
-func createAgentRunWithAcceptedExecution(ctx context.Context, commands *RunCommandService, request CreateAgentRunRequest, preparer AcceptedRunExecutionPreparer) (*AgentRunCommandResult, error) {
+func createAgentRunWithAcceptedExecution(ctx context.Context, commands *RunCommandService, request models.CreateAgentRunRequest, preparer models.AcceptedRunExecutionPreparer) (*AgentRunCommandResult, error) {
 	if preparer != nil {
 		request.Context = maps.Clone(request.Context)
-		delete(request.Context, AcceptedRunExecutionContextKey)
+		delete(request.Context, models.AcceptedRunExecutionContextKey)
 	}
 	if strings.TrimSpace(request.IdempotencyKey) != "" {
 		existing, err := commands.FindCreatedAgentRun(ctx, request)

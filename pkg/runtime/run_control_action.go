@@ -7,6 +7,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -22,7 +23,7 @@ const (
 // re-resolved before execution.
 func RunManagementSkill() *skill.Definition {
 	actions := make(map[string]skill.Action, 3)
-	for _, name := range []string{RunActionPause, RunActionResume, RunActionCancel} {
+	for _, name := range []string{models.RunActionPause, models.RunActionResume, models.RunActionCancel} {
 		actions[name] = skill.Action{
 			Name:        name,
 			Description: runActionDescription(name),
@@ -50,7 +51,7 @@ func RunManagementSkill() *skill.Definition {
 		}
 	}
 	return &skill.Definition{
-		ID: RunManagementSkillID, Version: RunManagementSkillVersion,
+		ID: models.RunManagementSkillID, Version: RunManagementSkillVersion,
 		Name: "Runs", Description: "Pause, resume, or cancel current work owned by this Agent or Team.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: RunManagementEndpoint}, Actions: actions,
 	}
@@ -58,18 +59,18 @@ func RunManagementSkill() *skill.Definition {
 
 func runActionDescription(action string) string {
 	switch action {
-	case RunActionPause:
+	case models.RunActionPause:
 		return "Pause an active Run shown in the current conversation context."
-	case RunActionResume:
+	case models.RunActionResume:
 		return "Resume a paused Run shown in the current conversation context."
 	default:
 		return "Cancel a non-terminal Run shown in the current conversation context, including its pending approval when applicable."
 	}
 }
 
-type RunActionValidator struct{ store RunCommandStore }
+type RunActionValidator struct{ store models.RunCommandStore }
 
-func NewRunActionValidator(store RunCommandStore) (*RunActionValidator, error) {
+func NewRunActionValidator(store models.RunCommandStore) (*RunActionValidator, error) {
 	if store == nil {
 		return nil, errors.New("Run command store is required")
 	}
@@ -93,7 +94,7 @@ func (v *RunActionValidator) ResolveActionProposalArguments(ctx context.Context,
 		return nil, true, err
 	}
 	if target == nil {
-		return nil, true, ErrRunNotFound
+		return nil, true, models.ErrRunNotFound
 	}
 	arguments["expectedRevision"] = target.Revision
 	return arguments, true, nil
@@ -116,7 +117,7 @@ func (v *RunActionValidator) ValidateActionProposal(ctx context.Context, input A
 		return nil, err
 	}
 	if target == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if target.Owner != input.Run.Owner {
 		return nil, errors.New("Run is not owned by the conversation Agent or Team")
@@ -124,14 +125,14 @@ func (v *RunActionValidator) ValidateActionProposal(ctx context.Context, input A
 	if err := validateConversationTaskControl(ctx, v.store, input.Run, target); err != nil {
 		return nil, err
 	}
-	if target.ID == input.Run.ID || target.Kind == RunKindConversation {
+	if target.ID == input.Run.ID || target.Kind == models.RunKindConversation {
 		return nil, errors.New("a conversation cannot control its own coordination Run")
 	}
 	if target.Revision != revision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	if !slicesContainsRunCommand(applicableAgentRunCommands(target), input.Bound.Action.Name) {
-		return nil, fmt.Errorf("%w: cannot %s %s Run", ErrInvalidRunTransition, input.Bound.Action.Name, target.Status)
+		return nil, fmt.Errorf("%w: cannot %s %s Run", models.ErrInvalidRunTransition, input.Bound.Action.Name, target.Status)
 	}
 	return map[string]interface{}{
 		"resourceType": runResourceType, "operation": input.Bound.Action.Name,
@@ -142,11 +143,11 @@ func (v *RunActionValidator) ValidateActionProposal(ctx context.Context, input A
 
 type RunActionDispatcher struct {
 	commands *RunCommandService
-	store    RunCommandStore
+	store    models.RunCommandStore
 	fallback ActionDispatcher
 }
 
-func NewRunActionDispatcher(store RunCommandStore, fallback ActionDispatcher) (*RunActionDispatcher, error) {
+func NewRunActionDispatcher(store models.RunCommandStore, fallback ActionDispatcher) (*RunActionDispatcher, error) {
 	if store == nil {
 		return nil, errors.New("Run command store is required")
 	}
@@ -175,9 +176,9 @@ func (d *RunActionDispatcher) DispatchAction(ctx context.Context, input ActionDi
 	result, err := d.commands.CommandAgentRun(ctx, AgentRunCommandRequest{
 		Scope: input.Call.Scope, RunID: runID, ExpectedRevision: revision,
 		Kind:       AgentRunCommandKind(input.Bound.Action.Name),
-		Actor:      ActivityActor{Type: "agent", ID: input.Run.Owner.ID},
+		Actor:      models.ActivityActor{Type: "agent", ID: input.Run.Owner.ID},
 		Summary:    strings.TrimSpace(fmt.Sprint(input.Call.Arguments["reason"])),
-		Visibility: ActivityVisibilityScope,
+		Visibility: models.ActivityVisibilityScope,
 	})
 	if err != nil {
 		return nil, err
@@ -190,8 +191,8 @@ func (d *RunActionDispatcher) DispatchAction(ctx context.Context, input ActionDi
 }
 
 func isRunManagementAction(bound *skill.BoundAction) bool {
-	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunManagementSkillID &&
-		(bound.Action.Name == RunActionPause || bound.Action.Name == RunActionResume || bound.Action.Name == RunActionCancel)
+	return bound != nil && bound.Definition != nil && bound.Definition.ID == models.RunManagementSkillID &&
+		(bound.Action.Name == models.RunActionPause || bound.Action.Name == models.RunActionResume || bound.Action.Name == models.RunActionCancel)
 }
 
 func runControlPositiveInt64(value interface{}) (int64, bool) {
@@ -207,14 +208,14 @@ func runControlPositiveInt64(value interface{}) (int64, bool) {
 	}
 }
 
-func applicableAgentRunCommands(run *AgentRun) []string {
-	if run == nil || isTerminalAgentRunStatus(run.Status) || run.Kind == RunKindConversation {
+func applicableAgentRunCommands(run *models.AgentRun) []string {
+	if run == nil || models.IsTerminalAgentRunStatus(run.Status) || run.Kind == models.RunKindConversation {
 		return nil
 	}
-	if run.Status == AgentRunStatusPaused {
-		return []string{RunActionResume, RunActionCancel}
+	if run.Status == models.AgentRunStatusPaused {
+		return []string{models.RunActionResume, models.RunActionCancel}
 	}
-	return []string{RunActionPause, RunActionCancel}
+	return []string{models.RunActionPause, models.RunActionCancel}
 }
 
 func slicesContainsRunCommand(values []string, target string) bool {

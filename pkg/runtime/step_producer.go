@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 )
 
 // StepProducer produces one step of a Run. The model loop implements it over
@@ -13,7 +16,7 @@ import (
 // invocation) implement it directly and return tool calls for the same
 // inline executor, or a final result.
 type StepProducer interface {
-	Kind() StepProducerKind
+	Kind() models.StepProducerKind
 	Produce(ctx context.Context, in StepInput) (StepOutput, error)
 }
 
@@ -31,10 +34,10 @@ func (m StepMode) Valid() bool {
 // StepInput is what a producer, preparer or compactor sees for one step.
 // Run and Step are clones; Step is running.
 type StepInput struct {
-	Run      *AgentRun
-	Step     *AgentTurn
-	Session  *AgentSession     // nil for producers that run no tool calls (routing)
-	Path     *AgentSessionPath // the session path loaded for this step
+	Run      *models.AgentRun
+	Step     *models.AgentTurn
+	Session  *models.AgentSession     // nil for producers that run no tool calls (routing)
+	Path     *models.AgentSessionPath // the session path loaded for this step
 	Binding  *TurnRunnerBinding
 	Mode     StepMode
 	Attempt  int // 0-based; 1 after a forced compaction retry
@@ -47,10 +50,10 @@ type StepInput struct {
 type StepOutput struct {
 	ModelProvider   string
 	Model           string
-	Usage           TurnUsage
-	SkillSelections []HostedSkillSelection
+	Usage           models.TurnUsage
+	SkillSelections []models.HostedSkillSelection
 	// Model producers only. Limits are kernel-filled from the step result.
-	Assistant *AssistantEntry
+	Assistant *models.AssistantEntry
 	// Deterministic producers only: exactly one of the four.
 	ToolCalls []LoopToolCall
 	Final     *LoopFinal
@@ -74,14 +77,14 @@ type LoopToolCall struct {
 }
 
 type ToolCallDirective struct {
-	BindingID            string                     `json:"bindingId,omitempty"`
-	BindingRevision      int64                      `json:"bindingRevision,omitempty"`
-	ExpectedSkillVersion string                     `json:"expectedSkillVersion,omitempty"`
-	IdempotencyKey       string                     `json:"idempotencyKey,omitempty"`
-	Summary              string                     `json:"summary,omitempty"`
-	ExternalOperation    *ExternalOperationIdentity `json:"externalOperation,omitempty"`
-	ReviewContext        *ApprovalReviewContext     `json:"reviewContext,omitempty"`
-	EvidenceRefs         []string                   `json:"evidenceRefs,omitempty"`
+	BindingID            string                              `json:"bindingId,omitempty"`
+	BindingRevision      int64                               `json:"bindingRevision,omitempty"`
+	ExpectedSkillVersion string                              `json:"expectedSkillVersion,omitempty"`
+	IdempotencyKey       string                              `json:"idempotencyKey,omitempty"`
+	Summary              string                              `json:"summary,omitempty"`
+	ExternalOperation    *activity.ExternalOperationIdentity `json:"externalOperation,omitempty"`
+	ReviewContext        *activity.ApprovalReviewContext     `json:"reviewContext,omitempty"`
+	EvidenceRefs         []string                            `json:"evidenceRefs,omitempty"`
 }
 
 // LoopFinal ends the Run without (or after) the final-answer chain: a
@@ -89,13 +92,13 @@ type ToolCallDirective struct {
 type LoopFinal struct {
 	Answer string                 // user-visible text ("" only when Output.silent or a structured final)
 	Output map[string]interface{} // Run output
-	Status AgentRunStatus         // completed (default) | failed
+	Status models.AgentRunStatus  // completed (default) | failed
 }
 
 // LoopPark parks the Run at step end.
 type LoopPark struct {
-	Status  AgentRunStatus // waiting_for_approval|waiting_for_dependency|waiting_for_agent|waiting_for_event|sleeping
-	Wake    *WakeCondition // required (TransitionRun rule)
+	Status  models.AgentRunStatus // waiting_for_approval|waiting_for_dependency|waiting_for_agent|waiting_for_event|sleeping
+	Wake    *models.WakeCondition // required (TransitionRun rule)
 	Summary string
 	// Committed is set only by the fork / run_operation / delegate / task
 	// coordinators, which moved the Run in their own transaction.
@@ -122,7 +125,7 @@ func invalidStepOutput(format string, args ...interface{}) error {
 
 func (f *LoopFinal) validate() error {
 	switch f.Status {
-	case "", AgentRunStatusCompleted, AgentRunStatusFailed:
+	case "", models.AgentRunStatusCompleted, models.AgentRunStatusFailed:
 		return nil
 	}
 	return invalidStepOutput("final status %q must be completed or failed", f.Status)
@@ -130,8 +133,8 @@ func (f *LoopFinal) validate() error {
 
 func (p *LoopPark) validate() error {
 	switch p.Status {
-	case AgentRunStatusWaitingForApproval, AgentRunStatusWaitingForDependency, AgentRunStatusWaitingForAgent,
-		AgentRunStatusWaitingForEvent, AgentRunStatusSleeping:
+	case models.AgentRunStatusWaitingForApproval, models.AgentRunStatusWaitingForDependency, models.AgentRunStatusWaitingForAgent,
+		models.AgentRunStatusWaitingForEvent, models.AgentRunStatusSleeping:
 	default:
 		return invalidStepOutput("park status %q is not a wait status", p.Status)
 	}

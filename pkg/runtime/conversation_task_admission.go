@@ -3,27 +3,29 @@ package runtime
 import (
 	"context"
 	"errors"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // VerifyConversationTaskWorkRun binds a loaded Task to its canonical work,
 // original actor/message/thread and any later governed Team assignment. The
 // structural matcher alone never grants execution or viewer authority.
-func VerifyConversationTaskWorkRun(ctx context.Context, store ConversationTaskProofStore, task *ConversationTask, run *AgentRun) (bool, error) {
-	if store == nil || !ConversationTaskMatchesWorkRun(task, run) {
+func VerifyConversationTaskWorkRun(ctx context.Context, store models.ConversationTaskProofStore, task *models.ConversationTask, run *models.AgentRun) (bool, error) {
+	if store == nil || !models.ConversationTaskMatchesWorkRun(task, run) {
 		return false, nil
 	}
 	persisted, err := store.FindConversationTaskByWorkRunID(ctx, task.Scope, task.WorkRunID)
 	if err != nil {
 		return false, err
 	}
-	if persisted == nil || !sameConversationTask(persisted, task) {
+	if persisted == nil || !models.SameConversationTask(persisted, task) {
 		return false, nil
 	}
 	canonical, err := store.GetAgentRun(ctx, task.Scope, task.WorkRunID)
 	if err != nil {
 		return false, err
 	}
-	if !ConversationTaskMatchesWorkRun(task, canonical) || canonical.AssignedAgentID != run.AssignedAgentID {
+	if !models.ConversationTaskMatchesWorkRun(task, canonical) || canonical.AssignedAgentID != run.AssignedAgentID {
 		return false, nil
 	}
 	source := canonical
@@ -41,9 +43,9 @@ func VerifyConversationTaskWorkRun(ctx context.Context, store ConversationTaskPr
 	if err != nil {
 		return false, err
 	}
-	var round *ParticipationRound
-	if conversationTaskContinuationNeedsAssignmentProof(task, source) {
-		result, err := store.FindParticipationRoundByIdempotencyKey(ctx, task.Scope, task.ConversationID, conversationTaskLedgerParticipationRoundKey(task))
+	var round *models.ParticipationRound
+	if models.ConversationTaskContinuationNeedsAssignmentProof(task, source) {
+		result, err := store.FindParticipationRoundByIdempotencyKey(ctx, task.Scope, task.ConversationID, models.ConversationTaskLedgerParticipationRoundKey(task))
 		if err != nil {
 			return false, err
 		}
@@ -51,14 +53,14 @@ func VerifyConversationTaskWorkRun(ctx context.Context, store ConversationTaskPr
 			round = result.Round
 		}
 	}
-	return validConversationTaskAdmissionSourceWithRound(source, conversation, message, task, round), nil
+	return models.IsValidConversationTaskAdmissionSourceWithRound(source, conversation, message, task, round), nil
 }
 
 // Scheduling provenance classifies legitimate original delegated work while
 // keeping each child's existing owner, deployment and grants authoritative.
 // It is deliberately separate from the same-Agent task fork authority.
-func persistedConversationTaskSchedulingOrigin(ctx context.Context, store PortfolioStore, run *AgentRun, getRequest func(context.Context, Scope, string) (*AgentRequest, error)) (*ConversationTask, error) {
-	tasks, ok := store.(ConversationTaskStore)
+func persistedConversationTaskSchedulingOrigin(ctx context.Context, store models.PortfolioStore, run *models.AgentRun, getRequest func(context.Context, models.Scope, string) (*models.AgentRequest, error)) (*models.ConversationTask, error) {
+	tasks, ok := store.(models.ConversationTaskStore)
 	if !ok || run == nil {
 		return nil, nil
 	}
@@ -77,25 +79,25 @@ func persistedConversationTaskSchedulingOrigin(ctx context.Context, store Portfo
 	if err != nil {
 		return nil, err
 	}
-	proof, ok := store.(ConversationTaskProofStore)
+	proof, ok := store.(models.ConversationTaskProofStore)
 	if !ok {
-		return nil, ErrInvalidConversationTask
+		return nil, models.ErrInvalidConversationTask
 	}
 	valid, err := VerifyConversationTaskWorkRun(ctx, proof, task, root)
 	if err != nil {
 		return nil, err
 	}
 	if !valid {
-		return nil, ErrInvalidConversationTask
+		return nil, models.ErrInvalidConversationTask
 	}
-	valid, err = conversationTaskAdmissionLineage(ctx, run.Scope, task, run, func(id string) (*AgentRun, error) {
+	valid, err = models.ConversationTaskAdmissionLineage(ctx, run.Scope, task, run, func(id string) (*models.AgentRun, error) {
 		return store.GetAgentRun(ctx, run.Scope, id)
 	}, getRequest)
 	if err != nil {
 		return nil, err
 	}
 	if !valid {
-		return nil, ErrInvalidConversationTask
+		return nil, models.ErrInvalidConversationTask
 	}
 	return task, nil
 }
@@ -107,9 +109,9 @@ var (
 // PersistedTaskOrigin resolves an exact independent work identity. Caller
 // context is only a hint; hosting applications must verify canonical source
 // conversation/message/actor and their existing authorization policy.
-func PersistedTaskOrigin(ctx context.Context, store ConversationTaskStore, scope Scope, workRunID string) (*ConversationTask, error) {
+func PersistedTaskOrigin(ctx context.Context, store models.ConversationTaskStore, scope models.Scope, workRunID string) (*models.ConversationTask, error) {
 	if store == nil {
-		return nil, ErrInvalidConversationTask
+		return nil, models.ErrInvalidConversationTask
 	}
 	task, err := store.FindConversationTaskByWorkRunID(ctx, scope, workRunID)
 	if err != nil {
@@ -119,7 +121,7 @@ func PersistedTaskOrigin(ctx context.Context, store ConversationTaskStore, scope
 		return nil, ErrConversationTaskNotFound
 	}
 	if task.Scope != scope || task.WorkRunID != workRunID || task.Validate() != nil {
-		return nil, ErrInvalidConversationTask
+		return nil, models.ErrInvalidConversationTask
 	}
 	return task, nil
 }

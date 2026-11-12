@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
@@ -13,7 +14,7 @@ import (
 // adds to every model step of a Run.
 type PromptContribution struct {
 	AgentInstructions []string
-	Sections          []ModelStepSystemSection
+	Sections          []models.ModelStepSystemSection
 }
 
 // SteeringPlan is what consumeSteering decided for this step: the
@@ -21,14 +22,14 @@ type PromptContribution struct {
 // the conversation catch-up must cover so steering messages are not
 // appended twice.
 type SteeringPlan struct {
-	Prefix                 []AgentRunIntervention
+	Prefix                 []models.AgentRunIntervention
 	ThroughMessageSequence int64
 }
 
 // StepContextAppend is a preparer's contribution to the one context append of
 // a step (phase 3).
 type StepContextAppend struct {
-	Entries []*SessionEntry
+	Entries []*models.SessionEntry
 	// ExpectedChannelWatermark, when set, makes the append a watermark CAS
 	// that moves the session's watermark to ChannelWatermark.
 	ExpectedChannelWatermark *int64
@@ -45,7 +46,7 @@ type StepPreparer interface {
 
 // ModelStepPreparer builds the model request of one step (prep-2).
 type ModelStepPreparer interface {
-	PrepareModelStep(ctx context.Context, in StepInput) (ModelStepRequest, error)
+	PrepareModelStep(ctx context.Context, in StepInput) (models.ModelStepRequest, error)
 }
 
 // LoopToolExecutor runs the tool entries of a step (disp-1).
@@ -61,18 +62,18 @@ type LoopToolExecutor interface {
 }
 
 type StepToolsInput struct {
-	Run       *AgentRun
-	Step      *AgentTurn
-	Session   *AgentSession
-	Path      *AgentSessionPath
+	Run       *models.AgentRun
+	Step      *models.AgentTurn
+	Session   *models.AgentSession
+	Path      *models.AgentSessionPath
 	Binding   *TurnRunnerBinding
 	WorkerID  string
-	Assistant *SessionEntry
-	Entries   []*SessionEntry // this step's tool entries
+	Assistant *models.SessionEntry
+	Entries   []*models.SessionEntry // this step's tool entries
 }
 
 type StepToolsOutcome struct {
-	Run             *AgentRun // latest Run if the executor changed it
+	Run             *models.AgentRun // latest Run if the executor changed it
 	Final           *FinalAnswer
 	Park            *LoopPark
 	Failure         *LoopFailure
@@ -86,9 +87,9 @@ type StepToolsOutcome struct {
 // Run's action budget is used up. It is not a park.
 type BudgetExhaustion struct {
 	Summary      string
-	Dimensions   []string         // exhausted budget dimensions, when known
-	Admission    *BudgetAdmission // the reservation calculation, when one refused
-	ActionCallID string           // the denied governed call, if any
+	Dimensions   []string                // exhausted budget dimensions, when known
+	Admission    *models.BudgetAdmission // the reservation calculation, when one refused
+	ActionCallID string                  // the denied governed call, if any
 }
 
 // FinalAnswer is produced only by the control section (decodeFinalAnswer /
@@ -110,10 +111,10 @@ type FinalPark struct {
 }
 
 type FinalDelivery struct {
-	Run    *AgentRun
-	Step   *AgentTurn
+	Run    *models.AgentRun
+	Step   *models.AgentTurn
 	Answer FinalAnswer
-	Guard  ReplyRunGuard
+	Guard  models.ReplyRunGuard
 }
 
 type FinalDeliveryKind string
@@ -142,17 +143,17 @@ type FinalAnswerHandler interface {
 // StepCompactor compacts the session path at step start (section 08 G3).
 type StepCompactor interface {
 	Due(in StepInput) bool
-	CompactIfNeeded(ctx context.Context, in StepInput) (ModelStepUsage, error)
-	Compact(ctx context.Context, in StepInput, force bool) (ModelStepUsage, error)
+	CompactIfNeeded(ctx context.Context, in StepInput) (models.ModelStepUsage, error)
+	Compact(ctx context.Context, in StepInput, force bool) (models.ModelStepUsage, error)
 }
 
 // ToolCallCheck may refuse a tool entry before it runs (conversation
 // CheckToolCall). A non-empty refusal becomes the entry's error result.
-type ToolCallCheck func(ctx context.Context, in StepToolsInput, entry *SessionEntry) (refusal string, err error)
+type ToolCallCheck func(ctx context.Context, in StepToolsInput, entry *models.SessionEntry) (refusal string, err error)
 
 // AfterToolEntryHook runs after a tool entry became terminal (conversation
 // artifact receipts).
-type AfterToolEntryHook func(ctx context.Context, in StepToolsInput, entry *SessionEntry) error
+type AfterToolEntryHook func(ctx context.Context, in StepToolsInput, entry *models.SessionEntry) error
 
 const (
 	finalOutputSilentKey    = "silent"

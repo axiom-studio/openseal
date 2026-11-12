@@ -23,12 +23,12 @@ const (
 // reaches any terminal state. Implementations must be idempotent because the
 // worker reconciles terminal Runs after process restarts.
 type RunTerminalFinalizer interface {
-	FinalizeRun(context.Context, *AgentRun) error
+	FinalizeRun(context.Context, *models.AgentRun) error
 }
 
-type RunTerminalFinalizerFunc func(context.Context, *AgentRun) error
+type RunTerminalFinalizerFunc func(context.Context, *models.AgentRun) error
 
-func (f RunTerminalFinalizerFunc) FinalizeRun(ctx context.Context, run *AgentRun) error {
+func (f RunTerminalFinalizerFunc) FinalizeRun(ctx context.Context, run *models.AgentRun) error {
 	return f(ctx, run)
 }
 
@@ -37,25 +37,25 @@ func (f RunTerminalFinalizerFunc) FinalizeRun(ctx context.Context, run *AgentRun
 // are projected deterministically from same-named action outputs, falling back
 // to persisted non-secret inputs. The model never participates in cleanup.
 type ActionRunTerminalFinalizer struct {
-	store      KernelStore
+	store      models.KernelStore
 	catalog    ActionExecutionCatalog
 	dispatcher ActionDispatcher
 	now        func() time.Time
 	newID      func() string
 }
 
-func NewActionRunTerminalFinalizer(store KernelStore, catalog ActionExecutionCatalog, dispatcher ActionDispatcher, opts ...models.ServiceOption) *ActionRunTerminalFinalizer {
+func NewActionRunTerminalFinalizer(store models.KernelStore, catalog ActionExecutionCatalog, dispatcher ActionDispatcher, opts ...models.ServiceOption) *ActionRunTerminalFinalizer {
 	return &ActionRunTerminalFinalizer{store: store, catalog: catalog, dispatcher: dispatcher, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
-func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *AgentRun) error {
+func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *models.AgentRun) error {
 	if f == nil || f.store == nil || f.catalog == nil || f.dispatcher == nil {
 		return errors.New("Run terminal finalizer is not configured")
 	}
-	if run == nil || !isTerminalAgentRunStatus(run.Status) {
+	if run == nil || !models.IsTerminalAgentRunStatus(run.Status) {
 		return errors.New("only terminal Runs can be finalized")
 	}
-	events, err := f.store.ListActivity(ctx, ActivityFilter{
+	events, err := f.store.ListActivity(ctx, models.ActivityFilter{
 		Scope: run.Scope, RunID: run.ID,
 		EventTypes: []string{runResourcesReleasedEvent, runResourcesQuarantinedEvent}, Descending: true, Limit: 1,
 	})
@@ -65,8 +65,8 @@ func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *Agent
 	if len(events) > 0 {
 		return nil
 	}
-	calls, err := f.store.ListActionCalls(ctx, ActionFilter{
-		Scope: run.Scope, RunID: run.ID, Status: []ActionCallStatus{ActionCallStatusSucceeded}, Limit: 1000,
+	calls, err := f.store.ListActionCalls(ctx, models.ActionFilter{
+		Scope: run.Scope, RunID: run.ID, Status: []models.ActionCallStatus{models.ActionCallStatusSucceeded}, Limit: 1000,
 	})
 	if err != nil {
 		return err
@@ -118,16 +118,16 @@ func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *Agent
 			continue
 		}
 		seenFinalizers[finalizerKey] = struct{}{}
-		finalizerCall := &ActionCall{
+		finalizerCall := &models.ActionCall{
 			ID: f.newID(), Scope: run.Scope, RunID: run.ID, DeploymentID: call.DeploymentID,
 			BindingID: call.BindingID, BindingRevision: call.BindingRevision,
 			SkillID: call.SkillID, SkillVersion: call.SkillVersion, Action: finalizerName,
-			Status: ActionCallStatusRunning, Risk: finalizer.Action.Risk, SideEffect: finalizer.Action.SideEffect,
+			Status: models.ActionCallStatusRunning, Risk: finalizer.Action.Risk, SideEffect: finalizer.Action.SideEffect,
 			Arguments: arguments, MaxAttempts: 1, Attempt: 1, AvailableAt: f.now().UTC(),
 			Revision: 1, CreatedAt: f.now().UTC(), UpdatedAt: f.now().UTC(),
 		}
 		output, err := f.dispatcher.DispatchAction(ctx, ActionDispatchInput{
-			Call: finalizerCall, Run: cloneAgentRun(run), Bound: finalizer, Arguments: maps.Clone(arguments),
+			Call: finalizerCall, Run: models.CloneAgentRun(run), Bound: finalizer, Arguments: maps.Clone(arguments),
 		})
 		if err != nil {
 			return fmt.Errorf("execute finalizer %s for action %s: %w", finalizerName, call.ID, err)
@@ -137,26 +137,26 @@ func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *Agent
 		}
 		finalized++
 	}
-	_, err = f.store.AppendActivity(ctx, &ActivityEvent{
+	_, err = f.store.AppendActivity(ctx, &models.ActivityEvent{
 		ID: f.newID(), Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID,
-		ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
-		EventType: runResourcesReleasedEvent, Severity: ActivitySeverityInfo,
+		ObjectiveID: run.ObjectiveID, TeamID: models.TeamIDForRun(run),
+		EventType: runResourcesReleasedEvent, Severity: models.ActivitySeverityInfo,
 		Summary:    "Released temporary resources owned by the terminal Run",
-		Actor:      ActivityActor{Type: "runtime", ID: "run-finalizer"},
-		Visibility: ActivityVisibilityScope, CreatedAt: f.now().UTC(),
+		Actor:      models.ActivityActor{Type: "runtime", ID: "run-finalizer"},
+		Visibility: models.ActivityVisibilityScope, CreatedAt: f.now().UTC(),
 		Payload: map[string]interface{}{"finalizersExecuted": finalized, "terminalStatus": run.Status},
 	})
 	return err
 }
 
-func (f *ActionRunTerminalFinalizer) quarantine(ctx context.Context, run *AgentRun, call *ActionCall, finalized int, reason string) error {
-	_, err := f.store.AppendActivity(ctx, &ActivityEvent{
+func (f *ActionRunTerminalFinalizer) quarantine(ctx context.Context, run *models.AgentRun, call *models.ActionCall, finalized int, reason string) error {
+	_, err := f.store.AppendActivity(ctx, &models.ActivityEvent{
 		ID: f.newID(), Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID,
-		ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
-		EventType: runResourcesQuarantinedEvent, Severity: ActivitySeverityWarning,
+		ObjectiveID: run.ObjectiveID, TeamID: models.TeamIDForRun(run),
+		EventType: runResourcesQuarantinedEvent, Severity: models.ActivitySeverityWarning,
 		Summary:    "Stopped terminal resource cleanup for an unavailable historical binding",
-		Actor:      ActivityActor{Type: "runtime", ID: "run-finalizer"},
-		Visibility: ActivityVisibilityScope, CreatedAt: f.now().UTC(),
+		Actor:      models.ActivityActor{Type: "runtime", ID: "run-finalizer"},
+		Visibility: models.ActivityVisibilityScope, CreatedAt: f.now().UTC(),
 		Payload: map[string]interface{}{
 			"actionCallId": call.ID, "bindingId": call.BindingID, "bindingRevision": call.BindingRevision,
 			"finalizersExecuted": finalized, "reason": reason, "terminalStatus": run.Status,
@@ -165,7 +165,7 @@ func (f *ActionRunTerminalFinalizer) quarantine(ctx context.Context, run *AgentR
 	return err
 }
 
-func terminalFinalizerArguments(schema map[string]interface{}, call *ActionCall) map[string]interface{} {
+func terminalFinalizerArguments(schema map[string]interface{}, call *models.ActionCall) map[string]interface{} {
 	result := make(map[string]interface{})
 	properties, _ := schema["properties"].(map[string]interface{})
 	for name := range properties {

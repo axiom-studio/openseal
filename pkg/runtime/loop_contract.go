@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -22,7 +23,7 @@ type TurnRunnerBinding struct {
 	RunbookOperations  []HostedRunbookOperation
 	PreparedRuntimes   []PreparedSkillRuntime
 	InputContextRefs   []string
-	BudgetReservation  BudgetUsage
+	BudgetReservation  models.BudgetUsage
 	// ModelCredential is the deployment's model binding
 	// (deploymentModelCredential); kernel-issued model calls outside the
 	// step, such as the evidence grounding review, send it. nil on desktop.
@@ -30,7 +31,7 @@ type TurnRunnerBinding struct {
 
 	// RunLoop seams (SPEC §2.4).
 	Producer    StepProducer
-	Session     *AgentSession        // nil only for producers with no tool calls (routing)
+	Session     *models.AgentSession // nil only for producers with no tool calls (routing)
 	Preparers   []StepPreparer       // run-start, then conversation
 	Tools       LoopToolExecutor     // disp-1
 	Compactor   StepCompactor        // G3
@@ -61,8 +62,8 @@ type PreparedSkillRuntime struct {
 // process. Neither call executes governed actions: those run inline in the
 // kernel.
 type StepHost interface {
-	ExecuteModelStep(ctx context.Context, req ModelStepRequest) (ModelStepResult, error)
-	ExecuteHostTool(ctx context.Context, req HostToolRequest) (HostToolResult, error)
+	ExecuteModelStep(ctx context.Context, req models.ModelStepRequest) (models.ModelStepResult, error)
+	ExecuteHostTool(ctx context.Context, req models.HostToolRequest) (models.HostToolResult, error)
 }
 
 // HostedAgentTarget is one active, same-scope Agent deployment eligible for

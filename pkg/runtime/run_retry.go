@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/google/uuid"
 )
 
@@ -19,37 +21,37 @@ func (s *RunCommandService) RetryConversationRun(ctx context.Context, req AgentR
 		return nil, err
 	}
 	if req.RunID == "" || req.ExpectedRevision <= 0 {
-		return nil, ErrInvalidRunCommand
+		return nil, portfolio.ErrInvalidRunCommand
 	}
 	if req.Instruction != "" || req.InterventionID != "" || req.HumanInterventionID != "" {
-		return nil, fmt.Errorf("%w: retry cannot change the saved request", ErrInvalidRunCommand)
+		return nil, fmt.Errorf("%w: retry cannot change the saved request", portfolio.ErrInvalidRunCommand)
 	}
 	current, err := s.store.GetAgentRun(ctx, req.Scope, req.RunID)
 	if err != nil {
 		return nil, err
 	}
 	if current == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if current.Scope != req.Scope || current.ID != req.RunID {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if err := authorizeRunSteering(current, req); err != nil {
 		return nil, err
 	}
 	if current.Revision != req.ExpectedRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	reason, err := s.conversationRetryBlocker(ctx, current)
 	if err != nil {
 		return nil, err
 	}
 	if reason != "" {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidRunCommand, reason)
+		return nil, fmt.Errorf("%w: %s", portfolio.ErrInvalidRunCommand, reason)
 	}
-	run := cloneAgentRun(current)
+	run := models.CloneAgentRun(current)
 	now := s.now()
-	run.Status, run.Error, run.CreditError, run.FailureExplanation, run.CompletedAt = AgentRunStatusQueued, "", nil, nil, nil
+	run.Status, run.Error, run.CreditError, run.FailureExplanation, run.CompletedAt = models.AgentRunStatusQueued, "", nil, nil, nil
 	run.LeaseOwner, run.LeaseExpiresAt = "", nil
 	run.AvailableAt, run.QueueEnteredAt, run.UpdatedAt = now, now, now
 	run.Revision++
@@ -58,11 +60,11 @@ func (s *RunCommandService) RetryConversationRun(ctx context.Context, req AgentR
 	// The normal worker budget admission still applies to the next attempt.
 	visibility := req.Visibility
 	if visibility == "" {
-		visibility = ActivityVisibilityScope
+		visibility = models.ActivityVisibilityScope
 	}
-	event := &ActivityEvent{
+	event := &models.ActivityEvent{
 		ID: uuid.NewString(), Scope: req.Scope, RunID: run.ID, AgentID: run.AssignedAgentID,
-		EventType: "run.retried", Severity: ActivitySeverityInfo, Visibility: visibility,
+		EventType: "run.retried", Severity: models.ActivitySeverityInfo, Visibility: visibility,
 		Actor: req.Actor, Summary: "Retrying the saved reply", CreatedAt: now,
 		Payload: map[string]interface{}{"previousRevision": current.Revision},
 	}
@@ -85,7 +87,7 @@ type RunRetryEligibility struct {
 
 // ConversationRetryEligibility performs the same checks as execution, without
 // modifying the run, budget, message or audit. Execution rechecks everything.
-func (s *RunCommandService) ConversationRetryEligibility(ctx context.Context, scope Scope, id string) (*RunRetryEligibility, error) {
+func (s *RunCommandService) ConversationRetryEligibility(ctx context.Context, scope models.Scope, id string) (*RunRetryEligibility, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("run command store is not configured")
 	}
@@ -97,7 +99,7 @@ func (s *RunCommandService) ConversationRetryEligibility(ctx context.Context, sc
 		return nil, err
 	}
 	if run == nil || run.ID != id || run.Scope != scope {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	reason, err := s.conversationRetryBlocker(ctx, run)
 	if err != nil {
@@ -106,35 +108,35 @@ func (s *RunCommandService) ConversationRetryEligibility(ctx context.Context, sc
 	return &RunRetryEligibility{RunID: id, Revision: run.Revision, Available: reason == "", Reason: reason}, nil
 }
 
-func (s *RunCommandService) conversationRetryBlocker(ctx context.Context, run *AgentRun) (string, error) {
-	if run.Status != AgentRunStatusFailed {
+func (s *RunCommandService) conversationRetryBlocker(ctx context.Context, run *models.AgentRun) (string, error) {
+	if run.Status != models.AgentRunStatusFailed {
 		return "not_failed", nil
 	}
 	if run.FailureExplanation != nil && run.FailureExplanation.Explained {
 		return "This attempt already has a reply. Send a new message to try again.", nil
 	}
-	if run.Kind != RunKindConversation || run.ParentRunID != "" {
+	if run.Kind != models.RunKindConversation || run.ParentRunID != "" {
 		return "task_recovery_required", nil
 	}
-	children, err := s.store.ListAgentRuns(ctx, AgentRunFilter{Scope: run.Scope, ParentRunID: run.ID, Limit: 1})
+	children, err := s.store.ListAgentRuns(ctx, models.AgentRunFilter{Scope: run.Scope, ParentRunID: run.ID, Limit: 1})
 	if err != nil {
 		return "", err
 	}
 	if len(children) != 0 {
 		return "task_recovery_required", nil
 	}
-	actions, err := s.store.ListActionCalls(ctx, ActionFilter{Scope: run.Scope, RunID: run.ID, Limit: 1})
+	actions, err := s.store.ListActionCalls(ctx, models.ActionFilter{Scope: run.Scope, RunID: run.ID, Limit: 1})
 	if err != nil {
 		return "", err
 	}
 	if len(actions) != 0 {
 		return "action_recovery_required", nil
 	}
-	turns, ok := s.store.(AgentTurnStore)
+	turns, ok := s.store.(models.AgentTurnStore)
 	if !ok {
 		return "recovery_unavailable", nil
 	}
-	pending, err := turns.ListAgentTurns(ctx, AgentTurnFilter{Scope: run.Scope, RunID: run.ID, AfterSequence: run.LastAppliedTurn, Limit: 1})
+	pending, err := turns.ListAgentTurns(ctx, models.AgentTurnFilter{Scope: run.Scope, RunID: run.ID, AfterSequence: run.LastAppliedTurn, Limit: 1})
 	if err != nil {
 		return "", err
 	}

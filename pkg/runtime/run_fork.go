@@ -11,6 +11,8 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +31,7 @@ type RunForkBranch struct {
 	Entrypoint      string                 `json:"entrypoint,omitempty"`
 	Context         map[string]interface{} `json:"context,omitempty"`
 	Checkpoint      map[string]interface{} `json:"checkpoint"`
-	Budget          *BudgetPolicy          `json:"budget,omitempty"`
+	Budget          *models.BudgetPolicy   `json:"budget,omitempty"`
 	Timeout         time.Duration          `json:"timeout,omitempty"`
 	Mode            runbook.DelegateMode   `json:"mode,omitempty"`
 }
@@ -41,14 +43,14 @@ type TurnRunbookProposal struct {
 	Entrypoint string                 `json:"entrypoint"`
 	Summary    string                 `json:"summary"`
 	Arguments  map[string]interface{} `json:"arguments,omitempty"`
-	Budget     *BudgetPolicy          `json:"budget,omitempty"`
+	Budget     *models.BudgetPolicy   `json:"budget,omitempty"`
 }
 
 func (p *TurnRunbookProposal) Validate() error {
-	if p == nil || !validOpaqueIdentifier(p.Entrypoint, 128) || strings.TrimSpace(p.Summary) == "" {
+	if p == nil || !models.IsValidOpaqueIdentifier(p.Entrypoint, 128) || strings.TrimSpace(p.Summary) == "" {
 		return errors.New("runbook proposal requires an exact entrypoint and summary")
 	}
-	if err := ValidateCredentialFreeContext(p.Arguments); err != nil {
+	if err := models.ValidateCredentialFreeContext(p.Arguments); err != nil {
 		return err
 	}
 	if p.Budget != nil {
@@ -61,9 +63,9 @@ func (p *TurnRunbookProposal) Validate() error {
 // materializes it into a sealed dependency group and child Runs only after the
 // Turn and continuation checkpoint have committed.
 type TurnForkProposal struct {
-	ForkID   string              `json:"forkId"`
-	Policy   RunDependencyPolicy `json:"policy"`
-	Branches []RunForkBranch     `json:"branches"`
+	ForkID   string                     `json:"forkId"`
+	Policy   models.RunDependencyPolicy `json:"policy"`
+	Branches []RunForkBranch            `json:"branches"`
 }
 
 type TurnDelegationProposal struct {
@@ -73,22 +75,22 @@ type TurnDelegationProposal struct {
 	Clarification   string                 `json:"clarification,omitempty"`
 	Context         map[string]interface{} `json:"context,omitempty"`
 	Checkpoint      map[string]interface{} `json:"checkpoint"`
-	Budget          *BudgetPolicy          `json:"budget,omitempty"`
+	Budget          *models.BudgetPolicy   `json:"budget,omitempty"`
 	Timeout         time.Duration          `json:"timeout,omitempty"`
 	Mode            runbook.DelegateMode   `json:"mode,omitempty"`
 }
 
 func (p *TurnDelegationProposal) Validate() error {
-	if p == nil || !validOpaqueIdentifier(p.StepID, 128) || !validOpaqueIdentifier(p.AssignedAgentID, 128) || strings.TrimSpace(p.Goal) == "" || p.Timeout < 0 {
+	if p == nil || !models.IsValidOpaqueIdentifier(p.StepID, 128) || !models.IsValidOpaqueIdentifier(p.AssignedAgentID, 128) || strings.TrimSpace(p.Goal) == "" || p.Timeout < 0 {
 		return errors.New("delegation proposal requires step, assigned Agent, goal, and non-negative timeout")
 	}
 	if len(p.Clarification) > 8192 {
 		return errors.New("delegation clarification exceeds 8192 bytes")
 	}
-	if err := ValidateCredentialFreeContext(p.Context); err != nil {
+	if err := models.ValidateCredentialFreeContext(p.Context); err != nil {
 		return err
 	}
-	if err := ValidateCredentialFreeContext(p.Checkpoint); err != nil {
+	if err := models.ValidateCredentialFreeContext(p.Checkpoint); err != nil {
 		return err
 	}
 	if p.Budget != nil {
@@ -101,13 +103,13 @@ func (p *TurnDelegationProposal) Validate() error {
 }
 
 func (p *TurnForkProposal) Validate() error {
-	if p == nil || !validOpaqueIdentifier(p.ForkID, 128) || len(p.Branches) < 2 {
+	if p == nil || !models.IsValidOpaqueIdentifier(p.ForkID, 128) || len(p.Branches) < 2 {
 		return errors.New("fork proposal requires an ID and at least two branches")
 	}
 	if err := p.Policy.Validate(); err != nil {
 		return err
 	}
-	if p.Policy.Mode != FanInModeAll && p.Policy.Mode != FanInModeAny {
+	if p.Policy.Mode != models.FanInModeAll && p.Policy.Mode != models.FanInModeAny {
 		return errors.New("fork proposal supports all or any fan-in")
 	}
 	seen := make(map[string]bool, len(p.Branches))
@@ -116,17 +118,17 @@ func (p *TurnForkProposal) Validate() error {
 		if id == "" || seen[id] || strings.TrimSpace(branch.Goal) == "" {
 			return errors.New("fork proposal branches require unique IDs and goals")
 		}
-		if !validOpaqueIdentifier(id, 128) || branch.AssignedAgentID != "" && !validOpaqueIdentifier(branch.AssignedAgentID, 128) {
+		if !models.IsValidOpaqueIdentifier(id, 128) || branch.AssignedAgentID != "" && !models.IsValidOpaqueIdentifier(branch.AssignedAgentID, 128) {
 			return errors.New("fork proposal branch and assigned Agent IDs must be portable opaque identifiers")
 		}
-		if branch.Entrypoint != "" && !validOpaqueIdentifier(branch.Entrypoint, 128) {
+		if branch.Entrypoint != "" && !models.IsValidOpaqueIdentifier(branch.Entrypoint, 128) {
 			return errors.New("fork proposal branch entrypoint must be a portable opaque identifier")
 		}
 		seen[id] = true
-		if err := ValidateCredentialFreeContext(branch.Context); err != nil {
+		if err := models.ValidateCredentialFreeContext(branch.Context); err != nil {
 			return fmt.Errorf("fork branch %s context: %w", id, err)
 		}
-		if err := ValidateCredentialFreeContext(branch.Checkpoint); err != nil {
+		if err := models.ValidateCredentialFreeContext(branch.Checkpoint); err != nil {
 			return fmt.Errorf("fork branch %s: %w", id, err)
 		}
 		if branch.Budget != nil {
@@ -145,18 +147,18 @@ func (p *TurnForkProposal) Validate() error {
 }
 
 type CreateRunForkRequest struct {
-	Scope                  Scope
+	Scope                  models.Scope
 	SourceRunID            string
 	ExpectedSourceRevision int64
 	WorkerID               string
 	ForkID                 string
-	Policy                 RunDependencyPolicy
+	Policy                 models.RunDependencyPolicy
 	Branches               []RunForkBranch
 	ContinuationCheckpoint map[string]interface{}
 	// ChildKind is the Kind of every child; empty keeps the source rule
 	// (source.Kind, or agent work for callable entrypoints and task work).
 	// Model forks pass RunKindAgentWork (DI-16).
-	ChildKind RunKind
+	ChildKind models.RunKind
 	// SessionForks maps a branch ID to the source session point its
 	// same-Agent child forks from (A3). The child session, seeded with the
 	// child's brief, is created in the same transaction as the child Run.
@@ -165,26 +167,26 @@ type CreateRunForkRequest struct {
 	SessionForks map[string]*SessionForkRef
 	// ToolTransition moves the source's control tool entry to awaiting_child
 	// in the same transaction (control_fork, run_operation).
-	ToolTransition *ToolEntryTransitionRequest
+	ToolTransition *models.ToolEntryTransitionRequest
 	// RequireInterventionCount refuses the create with ErrSteeringArrived
 	// unless the source still has exactly that many PendingInterventions.
 	RequireInterventionCount *int
-	Actor                    ActivityActor
-	Visibility               ActivityVisibility
+	Actor                    models.ActivityActor
+	Visibility               models.ActivityVisibility
 }
 
 type RunForkResult struct {
-	DependencyGroup *RunDependencyResult `json:"dependencyGroup"`
-	Children        []*AgentRun          `json:"children"`
+	DependencyGroup *models.RunDependencyResult `json:"dependencyGroup"`
+	Children        []*models.AgentRun          `json:"children"`
 }
 
 type RunForkCoordinator struct {
-	store             RunForkStore
-	executionPreparer AcceptedRunExecutionPreparer
+	store             models.RunForkStore
+	executionPreparer models.AcceptedRunExecutionPreparer
 	now               func() time.Time
 }
 
-func NewRunForkCoordinator(store RunForkStore, opts ...models.ServiceOption) *RunForkCoordinator {
+func NewRunForkCoordinator(store models.RunForkStore, opts ...models.ServiceOption) *RunForkCoordinator {
 	return &RunForkCoordinator{store: store, now: models.ClockFrom(opts)}
 }
 
@@ -203,10 +205,10 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 	if err := req.Policy.Validate(); err != nil {
 		return nil, err
 	}
-	if req.Policy.Mode != FanInModeAll && req.Policy.Mode != FanInModeAny {
+	if req.Policy.Mode != models.FanInModeAll && req.Policy.Mode != models.FanInModeAny {
 		return nil, errors.New("run forks support all or any fan-in")
 	}
-	if err := ValidateCredentialFreeContext(req.ContinuationCheckpoint); err != nil {
+	if err := models.ValidateCredentialFreeContext(req.ContinuationCheckpoint); err != nil {
 		return nil, err
 	}
 	for branchID, ref := range req.SessionForks {
@@ -226,9 +228,9 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		return nil, err
 	}
 	if source == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
-	allocations := make([]*BudgetPolicy, len(req.Branches))
+	allocations := make([]*models.BudgetPolicy, len(req.Branches))
 	seen := make(map[string]bool, len(req.Branches))
 	for index, branch := range req.Branches {
 		branch.ID = strings.TrimSpace(branch.ID)
@@ -236,16 +238,16 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			return nil, errors.New("fork branches require unique IDs and goals")
 		}
 		seen[branch.ID] = true
-		if err := ValidateCredentialFreeContext(branch.Checkpoint); err != nil {
+		if err := models.ValidateCredentialFreeContext(branch.Checkpoint); err != nil {
 			return nil, fmt.Errorf("branch %s checkpoint: %w", branch.ID, err)
 		}
-		if err := ValidateCredentialFreeContext(branch.Context); err != nil {
+		if err := models.ValidateCredentialFreeContext(branch.Context); err != nil {
 			return nil, fmt.Errorf("branch %s context: %w", branch.ID, err)
 		}
 		if branch.Timeout < 0 {
 			return nil, fmt.Errorf("branch %s timeout cannot be negative", branch.ID)
 		}
-		if branch.Entrypoint != "" && !validOpaqueIdentifier(branch.Entrypoint, 128) {
+		if branch.Entrypoint != "" && !models.IsValidOpaqueIdentifier(branch.Entrypoint, 128) {
 			return nil, fmt.Errorf("branch %s entrypoint is invalid", branch.ID)
 		}
 		if branch.Mode != "" && branch.Mode != runbook.DelegateBehavior && branch.Mode != runbook.DelegateReason {
@@ -262,12 +264,12 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		return c.replay(ctx, source, existing, req)
 	}
 	if source.Revision != req.ExpectedSourceRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	if source.Status != AgentRunStatusRunning || source.LeaseOwner != req.WorkerID {
-		return nil, ErrLeaseLost
+	if source.Status != models.AgentRunStatusRunning || source.LeaseOwner != req.WorkerID {
+		return nil, models.ErrLeaseLost
 	}
-	if err := validateGroupedBudgetAllocations(source, allocations); err != nil {
+	if err := models.ValidateGroupedBudgetAllocations(source, allocations); err != nil {
 		return nil, err
 	}
 	sourceTask, err := c.persistedForkTaskOrigin(ctx, source)
@@ -278,15 +280,15 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		for _, branch := range req.Branches {
 			assignedAgentID := strings.TrimSpace(branch.AssignedAgentID)
 			if assignedAgentID != "" && assignedAgentID != source.AssignedAgentID {
-				return nil, ErrInvalidConversationTask
+				return nil, models.ErrInvalidConversationTask
 			}
 		}
 	}
 	now := c.now().UTC()
 	groupID := stableForkIdentifier(source.ID, req.ForkID, "group")
-	children := make([]*AgentRun, 0, len(req.Branches))
-	edges := make([]*RunDependency, 0, len(req.Branches))
-	var childSessions []CreateRunAgentSessionTxRequest
+	children := make([]*models.AgentRun, 0, len(req.Branches))
+	edges := make([]*models.RunDependency, 0, len(req.Branches))
+	var childSessions []models.CreateRunAgentSessionTxRequest
 	for _, branch := range req.Branches {
 		branch.ID = strings.TrimSpace(branch.ID)
 		childID := stableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
@@ -314,18 +316,18 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			for key, value := range branch.Context {
 				if immutableForkTaskContextKey(key) {
 					if !reflect.DeepEqual(value, childContext[key]) {
-						return nil, ErrInvalidConversationTask
+						return nil, models.ErrInvalidConversationTask
 					}
 					continue
 				}
 				childContext[key] = cloneForkContextValue(value)
 			}
-			childContext[ConversationTaskContextKey] = sourceTask.ID
+			childContext[models.ConversationTaskContextKey] = sourceTask.ID
 		} else if !implicitAgent {
 			// Task lineage remains an authority checked through the persisted
 			// root. A branch cannot manufacture it in caller-owned context or
 			// transfer the source Agent's private context to another Agent.
-			delete(childContext, ConversationTaskContextKey)
+			delete(childContext, models.ConversationTaskContextKey)
 		}
 		if branch.Mode != "" {
 			if childContext == nil {
@@ -333,7 +335,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			}
 			childContext[DelegationModeContextKey] = string(branch.Mode)
 		}
-		childContext = inheritRoutineEventBatch(source, childContext)
+		childContext = models.InheritRoutineEventBatch(source, childContext)
 		childCheckpoint := maps.Clone(branch.Checkpoint)
 		if childCheckpoint == nil {
 			childCheckpoint = map[string]interface{}{}
@@ -350,14 +352,14 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		}
 		entrypoint := strings.TrimSpace(branch.Entrypoint)
 		if branch.Mode == runbook.DelegateReason && entrypoint != "" {
-			return nil, ErrAcceptedRunExecution
+			return nil, models.ErrAcceptedRunExecution
 		}
 		if implicitAgent && entrypoint == "" && branch.Mode != runbook.DelegateReason {
 			entrypoint = source.Entrypoint
 		}
 		childKind := source.Kind
 		if entrypoint != "" || sourceTask != nil {
-			childKind = RunKindAgentWork
+			childKind = models.RunKindAgentWork
 		}
 		if req.ChildKind != "" {
 			childKind = req.ChildKind
@@ -367,22 +369,22 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			// Another Agent never inherits the source Agent's session (DI-5).
 			return nil, fmt.Errorf("branch %s: only a same-Agent child can fork the source session", branch.ID)
 		}
-		childRequest := CreateAgentRunRequest{
+		childRequest := models.CreateAgentRunRequest{
 			Kind: childKind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID,
 			Owner: source.Owner, AssignedAgentID: assignedAgentID, ActingUser: source.ActingUser, Entrypoint: entrypoint,
 			ConcurrencyKey: "fork:" + groupID + ":" + branch.ID,
-			Goal:           strings.TrimSpace(branch.Goal), Source: RunSourceFork, Priority: source.Priority, Deadline: deadline,
+			Goal:           strings.TrimSpace(branch.Goal), Source: models.RunSourceFork, Priority: source.Priority, Deadline: deadline,
 			Context: childContext, Plan: childPlan, Checkpoint: childCheckpoint,
-			Budget: cloneBudgetPolicy(branch.Budget), Policy: maps.Clone(source.Policy),
+			Budget: models.CloneBudgetPolicy(branch.Budget), Policy: maps.Clone(source.Policy),
 		}
 		if sessionFork != nil {
-			childRequest.SessionID = RunAgentSessionID(source.Scope, childID)
+			childRequest.SessionID = models.RunAgentSessionID(source.Scope, childID)
 		}
 		inherit := entrypoint != "" && assignedAgentID == source.AssignedAgentID && entrypoint == source.Entrypoint
 		if err := prepareAcceptedChildRun(ctx, source, &childRequest, c.executionPreparer, inherit); err != nil {
 			return nil, err
 		}
-		child, err := buildAgentRun(ctx, c.store, childRequest, childID, now)
+		child, err := portfolio.BuildAgentRun(ctx, c.store, childRequest, childID, now)
 		if err != nil {
 			return nil, err
 		}
@@ -392,34 +394,34 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			if err != nil {
 				return nil, fmt.Errorf("branch %s seed: %w", branch.ID, err)
 			}
-			session, err := newChildSession(sessionFork.childSessionRequest(source.Scope, child.ID, assignedAgentID, seed))
+			session, err := models.NewChildSession(sessionFork.childSessionRequest(source.Scope, child.ID, assignedAgentID, seed))
 			if err != nil {
 				return nil, fmt.Errorf("branch %s session: %w", branch.ID, err)
 			}
 			session.Now = now
 			childSessions = append(childSessions, session)
 		}
-		edges = append(edges, &RunDependency{
+		edges = append(edges, &models.RunDependency{
 			ID: branch.ID, Scope: source.Scope, GroupID: groupID, SourceRunID: source.ID, TargetRunID: child.ID,
-			Kind: RunDependencyKindRun, State: RunDependencyStateRunning, Required: true,
+			Kind: models.RunDependencyKindRun, State: models.RunDependencyStateRunning, Required: true,
 			Revision: 1, CreatedAt: now, UpdatedAt: now,
 		})
 	}
 	sealedAt := now
-	group := &RunDependencyGroup{
+	group := &models.RunDependencyGroup{
 		ID: groupID, Scope: source.Scope, SourceRunID: source.ID, Policy: req.Policy,
-		ExpectedCount: len(edges), Status: RunDependencyGroupWaiting, Revision: 1,
+		ExpectedCount: len(edges), Status: models.RunDependencyGroupWaiting, Revision: 1,
 		CreatedAt: now, UpdatedAt: now, SealedAt: &sealedAt,
 		IdempotencyKey: key,
 	}
-	updatedSource := cloneAgentRun(source)
+	updatedSource := models.CloneAgentRun(source)
 	for index, child := range children {
-		if err := addRunBudgetAllocation(updatedSource, child.ID, req.Branches[index].Budget); err != nil {
+		if err := models.AddRunBudgetAllocation(updatedSource, child.ID, req.Branches[index].Budget); err != nil {
 			return nil, err
 		}
 	}
-	updatedSource.Status = AgentRunStatusWaitingForDependency
-	updatedSource.WakeCondition = &WakeCondition{Type: "run_dependencies", Reference: group.ID}
+	updatedSource.Status = models.AgentRunStatusWaitingForDependency
+	updatedSource.WakeCondition = &models.WakeCondition{Type: "run_dependencies", Reference: group.ID}
 	updatedSource.Checkpoint = maps.Clone(req.ContinuationCheckpoint)
 	updatedSource.Revision++
 	updatedSource.UpdatedAt = now
@@ -427,20 +429,20 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 	updatedSource.LeaseExpiresAt = nil
 	visibility := req.Visibility
 	if visibility == "" {
-		visibility = ActivityVisibilityScope
+		visibility = models.ActivityVisibilityScope
 	}
 	actor := req.Actor
 	if actor.Type == "" || actor.ID == "" {
-		actor = ActivityActor{Type: "worker", ID: req.WorkerID}
+		actor = models.ActivityActor{Type: "worker", ID: req.WorkerID}
 	}
-	event := &ActivityEvent{
+	event := &models.ActivityEvent{
 		ID: stableForkIdentifier(source.ID, req.ForkID, "event"), Scope: source.Scope, RunID: source.ID,
-		AgentID: source.AssignedAgentID, ObjectiveID: source.ObjectiveID, TeamID: teamIDForRun(source),
+		AgentID: source.AssignedAgentID, ObjectiveID: source.ObjectiveID, TeamID: models.TeamIDForRun(source),
 		EventType: "run.forked", Summary: fmt.Sprintf("Forked %d concurrent child Runs", len(children)),
 		Actor: actor, Visibility: visibility, CorrelationID: group.ID,
 		Payload: map[string]interface{}{"forkId": req.ForkID, "groupId": group.ID, "mode": req.Policy.Mode, "childCount": len(children)}, CreatedAt: now,
 	}
-	result, err := c.store.CreateRunDependencyGroup(ctx, RunDependencyGroupCreateRecord{
+	result, err := c.store.CreateRunDependencyGroup(ctx, models.RunDependencyGroupCreateRecord{
 		Group: group, Dependencies: edges, TargetRuns: children, SourceRun: updatedSource,
 		ExpectedSourceRevision: source.Revision, Event: event,
 		ToolTransition: req.ToolTransition, ChildSessions: childSessions, RequireInterventionCount: req.RequireInterventionCount,
@@ -519,25 +521,25 @@ func cloneForkContextValue(value interface{}) interface{} {
 
 func immutableForkTaskContextKey(key string) bool {
 	switch key {
-	case ConversationTaskContextKey, conversationRunContextConversationID, conversationRunContextTriggerID,
-		"threadRootMessageId", runReportingContextRootRunID, runReportingContextMilestones:
+	case models.ConversationTaskContextKey, models.ConversationRunConversationIDContextKey, models.ConversationRunTriggerIDContextKey,
+		"threadRootMessageId", models.RunReportingRootRunIDContextKey, models.RunReportingMilestonesContextKey:
 		return true
 	default:
 		return false
 	}
 }
 
-func (c *RunForkCoordinator) persistedForkTaskOrigin(ctx context.Context, source *AgentRun) (*ConversationTask, error) {
+func (c *RunForkCoordinator) persistedForkTaskOrigin(ctx context.Context, source *models.AgentRun) (*models.ConversationTask, error) {
 	return persistedTaskWorkOrigin(ctx, c.store, source)
 }
 
-func persistedTaskWorkOrigin(ctx context.Context, store PortfolioStore, source *AgentRun) (*ConversationTask, error) {
-	_, hinted := source.Context[ConversationTaskContextKey]
+func persistedTaskWorkOrigin(ctx context.Context, store models.PortfolioStore, source *models.AgentRun) (*models.ConversationTask, error) {
+	_, hinted := source.Context[models.ConversationTaskContextKey]
 	taskLike := hinted || strings.HasPrefix(source.ConcurrencyKey, "task:")
-	tasks, ok := store.(ConversationTaskStore)
+	tasks, ok := store.(models.ConversationTaskStore)
 	if !ok {
 		if taskLike {
-			return nil, ErrInvalidConversationTask
+			return nil, models.ErrInvalidConversationTask
 		}
 		return nil, nil
 	}
@@ -556,20 +558,20 @@ func persistedTaskWorkOrigin(ctx context.Context, store PortfolioStore, source *
 	if err != nil {
 		return nil, err
 	}
-	if !validConversationTaskAdmissionRoot(root, task) {
-		return nil, ErrInvalidConversationTask
+	if !models.IsValidConversationTaskAdmissionRoot(root, task) {
+		return nil, models.ErrInvalidConversationTask
 	}
-	if task.Mode == ConversationTaskModeContinuation {
-		proof, ok := store.(ConversationTaskProofStore)
+	if task.Mode == models.ConversationTaskModeContinuation {
+		proof, ok := store.(models.ConversationTaskProofStore)
 		if !ok {
-			return nil, ErrInvalidConversationTask
+			return nil, models.ErrInvalidConversationTask
 		}
 		valid, err := VerifyConversationTaskWorkRun(ctx, proof, task, root)
 		if err != nil {
 			return nil, err
 		}
 		if !valid {
-			return nil, ErrInvalidConversationTask
+			return nil, models.ErrInvalidConversationTask
 		}
 	}
 	current := source
@@ -577,19 +579,19 @@ func persistedTaskWorkOrigin(ctx context.Context, store PortfolioStore, source *
 	for depth := 0; depth < 64 && current != nil; depth++ {
 		if seen[current.ID] || current.Scope != task.Scope || current.Owner != task.Owner || current.AssignedAgentID != root.AssignedAgentID ||
 			current.RootRunID != task.WorkRunID {
-			return nil, ErrInvalidConversationTask
+			return nil, models.ErrInvalidConversationTask
 		}
-		if value, exists := current.Context[ConversationTaskContextKey]; exists && value != task.ID {
-			return nil, ErrInvalidConversationTask
+		if value, exists := current.Context[models.ConversationTaskContextKey]; exists && value != task.ID {
+			return nil, models.ErrInvalidConversationTask
 		}
 		if current.ID == task.WorkRunID {
-			if !ConversationTaskMatchesWorkRun(task, current) {
-				return nil, ErrInvalidConversationTask
+			if !models.ConversationTaskMatchesWorkRun(task, current) {
+				return nil, models.ErrInvalidConversationTask
 			}
 			return task, nil
 		}
-		if current.Kind != RunKindAgentWork || current.ParentRunID == "" || current.Source != RunSourceFork {
-			return nil, ErrInvalidConversationTask
+		if current.Kind != models.RunKindAgentWork || current.ParentRunID == "" || current.Source != models.RunSourceFork {
+			return nil, models.ErrInvalidConversationTask
 		}
 		seen[current.ID] = true
 		current, err = store.GetAgentRun(ctx, task.Scope, current.ParentRunID)
@@ -597,42 +599,42 @@ func persistedTaskWorkOrigin(ctx context.Context, store PortfolioStore, source *
 			return nil, err
 		}
 	}
-	return nil, ErrInvalidConversationTask
+	return nil, models.ErrInvalidConversationTask
 }
 
-func (c *RunForkCoordinator) replay(ctx context.Context, source *AgentRun, group *RunDependencyGroup, req CreateRunForkRequest) (*RunForkResult, error) {
+func (c *RunForkCoordinator) replay(ctx context.Context, source *models.AgentRun, group *models.RunDependencyGroup, req CreateRunForkRequest) (*RunForkResult, error) {
 	if group.SourceRunID != source.ID || group.Policy != req.Policy || group.ExpectedCount != len(req.Branches) || group.ID != stableForkIdentifier(source.ID, req.ForkID, "group") {
-		return nil, ErrDependencyConflict
+		return nil, models.ErrDependencyConflict
 	}
 	edges, err := c.store.ListRunDependencies(ctx, req.Scope, group.ID)
 	if err != nil {
 		return nil, err
 	}
-	byID := make(map[string]*RunDependency, len(edges))
+	byID := make(map[string]*models.RunDependency, len(edges))
 	for _, edge := range edges {
 		byID[edge.ID] = edge
 	}
-	children := make([]*AgentRun, 0, len(req.Branches))
+	children := make([]*models.AgentRun, 0, len(req.Branches))
 	for _, branch := range req.Branches {
 		edge := byID[branch.ID]
 		expectedChild := stableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
-		if edge == nil || edge.Kind != RunDependencyKindRun || edge.TargetRunID != expectedChild {
-			return nil, ErrDependencyConflict
+		if edge == nil || edge.Kind != models.RunDependencyKindRun || edge.TargetRunID != expectedChild {
+			return nil, models.ErrDependencyConflict
 		}
 		child, childErr := c.store.GetAgentRun(ctx, req.Scope, edge.TargetRunID)
 		if childErr != nil || child == nil {
 			if childErr == nil {
-				childErr = ErrRunNotFound
+				childErr = models.ErrRunNotFound
 			}
 			return nil, childErr
 		}
 		children = append(children, child)
 	}
-	evaluation, err := EvaluateRunDependencies(group, edges)
+	evaluation, err := models.EvaluateRunDependencies(group, edges)
 	if err != nil {
 		return nil, err
 	}
-	return &RunForkResult{DependencyGroup: &RunDependencyResult{Group: group, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}, Children: children}, nil
+	return &RunForkResult{DependencyGroup: &models.RunDependencyResult{Group: group, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}, Children: children}, nil
 }
 
 func stableForkIdentifier(runID, forkID, suffix string) string {
@@ -642,12 +644,12 @@ func stableForkIdentifier(runID, forkID, suffix string) string {
 // CompleteChild resolves a branch edge from the child Run's durable terminal
 // state. For join_any it also cancels and resolves every losing child so no
 // second wake or unnecessary background work survives the winner.
-func (c *RunForkCoordinator) CompleteChild(ctx context.Context, child *AgentRun, actor ActivityActor) (*RunDependencyResult, error) {
+func (c *RunForkCoordinator) CompleteChild(ctx context.Context, child *models.AgentRun, actor models.ActivityActor) (*models.RunDependencyResult, error) {
 	return c.completeChild(ctx, child, actor, true)
 }
 
-func (c *RunForkCoordinator) completeChild(ctx context.Context, child *AgentRun, actor ActivityActor, cancelLosers bool) (*RunDependencyResult, error) {
-	if c == nil || c.store == nil || child == nil || !isTerminalAgentRunStatus(child.Status) {
+func (c *RunForkCoordinator) completeChild(ctx context.Context, child *models.AgentRun, actor models.ActivityActor, cancelLosers bool) (*models.RunDependencyResult, error) {
+	if c == nil || c.store == nil || child == nil || !models.IsTerminalAgentRunStatus(child.Status) {
 		return nil, errors.New("terminal fork child is required")
 	}
 	metadata, ok := child.Checkpoint["forkChild"].(map[string]interface{})
@@ -658,12 +660,12 @@ func (c *RunForkCoordinator) completeChild(ctx context.Context, child *AgentRun,
 	dependencyID, _ := metadata["dependencyId"].(string)
 	sourceRunID, _ := metadata["sourceRunId"].(string)
 	if groupID == "" || dependencyID == "" || sourceRunID != child.ParentRunID {
-		return nil, ErrInvalidRunDependency
+		return nil, models.ErrInvalidRunDependency
 	}
 	group, err := c.store.GetRunDependencyGroup(ctx, child.Scope, groupID)
 	if err != nil || group == nil {
 		if err == nil {
-			err = ErrDependencyGroupNotFound
+			err = models.ErrDependencyGroupNotFound
 		}
 		return nil, err
 	}
@@ -671,7 +673,7 @@ func (c *RunForkCoordinator) completeChild(ctx context.Context, child *AgentRun,
 	if err != nil {
 		return nil, err
 	}
-	var edge *RunDependency
+	var edge *models.RunDependency
 	for _, candidate := range edges {
 		if candidate.ID == dependencyID && candidate.TargetRunID == child.ID {
 			edge = candidate
@@ -679,32 +681,32 @@ func (c *RunForkCoordinator) completeChild(ctx context.Context, child *AgentRun,
 		}
 	}
 	if edge == nil {
-		return nil, ErrRunDependencyNotFound
+		return nil, models.ErrRunDependencyNotFound
 	}
 	if !ownedForkChild(group, edge, child) {
-		return nil, ErrInvalidRunDependency
+		return nil, models.ErrInvalidRunDependency
 	}
-	state := RunDependencyStateSatisfied
+	state := models.RunDependencyStateSatisfied
 	errorMessage := ""
-	if child.Status == AgentRunStatusFailed {
-		state, errorMessage = RunDependencyStateFailed, child.Error
-	} else if child.Status == AgentRunStatusCanceled {
-		state, errorMessage = RunDependencyStateCanceled, child.Error
+	if child.Status == models.AgentRunStatusFailed {
+		state, errorMessage = models.RunDependencyStateFailed, child.Error
+	} else if child.Status == models.AgentRunStatusCanceled {
+		state, errorMessage = models.RunDependencyStateCanceled, child.Error
 	}
 	if actor.Type == "" || actor.ID == "" {
-		actor = ActivityActor{Type: "system", ID: "run-fork-coordinator"}
+		actor = models.ActivityActor{Type: "system", ID: "run-fork-coordinator"}
 	}
-	result, err := NewDependencyCoordinator(c.store, models.WithClock(c.now)).ResolveRunDependency(ctx, ResolveRunDependencyRequest{
+	result, err := portfolio.NewDependencyCoordinator(c.store, models.WithClock(c.now)).ResolveRunDependency(ctx, portfolio.ResolveRunDependencyRequest{
 		Scope: child.Scope, GroupID: group.ID, DependencyID: edge.ID, ExpectedDependencyRevision: edge.Revision,
 		State: state, Result: map[string]interface{}{
 			"branchId": dependencyID, "checkpoint": maps.Clone(child.Checkpoint), "output": maps.Clone(child.Output),
-		}, Error: errorMessage, Actor: actor, Visibility: ActivityVisibilityScope,
+		}, Error: errorMessage, Actor: actor, Visibility: models.ActivityVisibilityScope,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if cancelLosers && state == RunDependencyStateSatisfied && result.Source != nil && !isTerminalAgentRunStatus(result.Source.Status) &&
-		result.Group.Policy.Mode == FanInModeAny && result.Group.Status == RunDependencyGroupSatisfied {
+	if cancelLosers && state == models.RunDependencyStateSatisfied && result.Source != nil && !models.IsTerminalAgentRunStatus(result.Source.Status) &&
+		result.Group.Policy.Mode == models.FanInModeAny && result.Group.Status == models.RunDependencyGroupSatisfied {
 		if err := c.cancelLosingChildren(ctx, result, child.ID, actor); err != nil {
 			return nil, err
 		}
@@ -715,45 +717,45 @@ func (c *RunForkCoordinator) completeChild(ctx context.Context, child *AgentRun,
 // ReconcileRunDependencyGroup preserves typed fork cancellation before generic
 // fan-in repair. Terminal-source retirement never mutates target Runs. Only a
 // terminal child with exact kernel-created fork lineage can use CompleteChild.
-func (c *RunForkCoordinator) ReconcileRunDependencyGroup(ctx context.Context, req ReconcileRunDependencyGroupRequest) (*RunDependencyResult, error) {
+func (c *RunForkCoordinator) ReconcileRunDependencyGroup(ctx context.Context, req portfolio.ReconcileRunDependencyGroupRequest) (*models.RunDependencyResult, error) {
 	if c == nil || c.store == nil {
 		return nil, errors.New("run fork store is not configured")
 	}
-	coordinator := NewDependencyCoordinator(c.store, models.WithClock(c.now))
+	coordinator := portfolio.NewDependencyCoordinator(c.store, models.WithClock(c.now))
 	group, err := c.store.GetRunDependencyGroup(ctx, req.Scope, req.GroupID)
 	if err != nil || group == nil {
 		if err == nil {
-			err = ErrDependencyGroupNotFound
+			err = models.ErrDependencyGroupNotFound
 		}
 		return nil, err
 	}
-	if group.Policy.Mode != FanInModeAny {
+	if group.Policy.Mode != models.FanInModeAny {
 		return coordinator.ReconcileRunDependencyGroup(ctx, req)
 	}
 	source, err := c.store.GetAgentRun(ctx, req.Scope, group.SourceRunID)
 	if err != nil || source == nil {
 		if err == nil {
-			err = ErrRunNotFound
+			err = models.ErrRunNotFound
 		}
 		return nil, err
 	}
 	if group.Revision != req.ExpectedGroupRevision || source.Revision != req.ExpectedSourceRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	if waiting, _ := sourceWaitsForDependencyGroup(source, group.ID); waiting && group.Status == RunDependencyGroupWaiting {
+	if waiting, _ := models.SourceWaitsForDependencyGroup(source, group.ID); waiting && group.Status == models.RunDependencyGroupWaiting {
 		edges, err := c.store.ListRunDependencies(ctx, req.Scope, group.ID)
 		if err != nil {
 			return nil, err
 		}
 		for _, edge := range edges {
-			if edge.Kind != RunDependencyKindRun || edge.State != RunDependencyStatePending && edge.State != RunDependencyStateRunning {
+			if edge.Kind != models.RunDependencyKindRun || edge.State != models.RunDependencyStatePending && edge.State != models.RunDependencyStateRunning {
 				continue
 			}
 			child, err := c.store.GetAgentRun(ctx, req.Scope, edge.TargetRunID)
 			if err != nil {
 				return nil, err
 			}
-			if child != nil && isTerminalAgentRunStatus(child.Status) && ownedForkChild(group, edge, child) {
+			if child != nil && models.IsTerminalAgentRunStatus(child.Status) && ownedForkChild(group, edge, child) {
 				return c.CompleteChild(ctx, child, req.Actor)
 			}
 		}
@@ -761,8 +763,8 @@ func (c *RunForkCoordinator) ReconcileRunDependencyGroup(ctx context.Context, re
 	return coordinator.ReconcileRunDependencyGroup(ctx, req)
 }
 
-func ownedForkChild(group *RunDependencyGroup, edge *RunDependency, child *AgentRun) bool {
-	if group == nil || edge == nil || child == nil || edge.Kind != RunDependencyKindRun || child.Source != RunSourceFork ||
+func ownedForkChild(group *models.RunDependencyGroup, edge *models.RunDependency, child *models.AgentRun) bool {
+	if group == nil || edge == nil || child == nil || edge.Kind != models.RunDependencyKindRun || child.Source != models.RunSourceFork ||
 		child.Scope != group.Scope || edge.Scope != group.Scope || child.ParentRunID != group.SourceRunID ||
 		edge.GroupID != group.ID || edge.SourceRunID != group.SourceRunID || edge.TargetRunID != child.ID {
 		return false
@@ -776,50 +778,50 @@ func ownedForkChild(group *RunDependencyGroup, edge *RunDependency, child *Agent
 		group.ID == stableForkIdentifier(group.SourceRunID, forkID, "group") && child.ID == stableForkIdentifier(group.SourceRunID, forkID, "child:"+edge.ID)
 }
 
-func (c *RunForkCoordinator) cancelLosingChildren(ctx context.Context, winner *RunDependencyResult, winnerID string, actor ActivityActor) error {
-	activity := NewRunActivityService(c.store, c.store, models.WithClock(c.now))
+func (c *RunForkCoordinator) cancelLosingChildren(ctx context.Context, winner *models.RunDependencyResult, winnerID string, actor models.ActivityActor) error {
+	runActivity := activity.NewRunActivityService(c.store, c.store, models.WithClock(c.now))
 	for _, edge := range winner.Dependencies {
-		if edge.TargetRunID == winnerID || edge.State == RunDependencyStateSatisfied || edge.State == RunDependencyStateFailed || edge.State == RunDependencyStateCanceled {
+		if edge.TargetRunID == winnerID || edge.State == models.RunDependencyStateSatisfied || edge.State == models.RunDependencyStateFailed || edge.State == models.RunDependencyStateCanceled {
 			continue
 		}
-		child, err := c.cancelLosingChild(ctx, activity, edge, winner.Group, actor)
+		child, err := c.cancelLosingChild(ctx, runActivity, edge, winner.Group, actor)
 		if err != nil {
 			return err
 		}
-		if _, err := c.completeChild(ctx, child, actor, false); err != nil && !errors.Is(err, ErrDependencyConflict) {
+		if _, err := c.completeChild(ctx, child, actor, false); err != nil && !errors.Is(err, models.ErrDependencyConflict) {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *RunForkCoordinator) cancelLosingChild(ctx context.Context, activity *RunActivityService, edge *RunDependency, group *RunDependencyGroup, actor ActivityActor) (*AgentRun, error) {
+func (c *RunForkCoordinator) cancelLosingChild(ctx context.Context, runActivity *activity.RunActivityService, edge *models.RunDependency, group *models.RunDependencyGroup, actor models.ActivityActor) (*models.AgentRun, error) {
 	const revisionRetries = 8
 	for attempt := 0; attempt < revisionRetries; attempt++ {
 		child, err := c.store.GetAgentRun(ctx, edge.Scope, edge.TargetRunID)
 		if err != nil || child == nil {
 			if err == nil {
-				err = ErrRunNotFound
+				err = models.ErrRunNotFound
 			}
 			return nil, err
 		}
-		if isTerminalAgentRunStatus(child.Status) {
+		if models.IsTerminalAgentRunStatus(child.Status) {
 			return child, nil
 		}
 		if !ownedForkChild(group, edge, child) {
-			return nil, ErrInvalidRunDependency
+			return nil, models.ErrInvalidRunDependency
 		}
-		child, _, err = activity.TransitionRun(ctx, child.Scope, child.ID, RunTransitionRequest{
-			ExpectedRevision: child.Revision, Status: AgentRunStatusCanceled,
+		child, _, err = runActivity.TransitionRun(ctx, child.Scope, child.ID, activity.RunTransitionRequest{
+			ExpectedRevision: child.Revision, Status: models.AgentRunStatusCanceled,
 			Error: "canceled after another fork branch satisfied join_any", Actor: actor,
 			EventType: "run.fork_loser_canceled", Summary: "Canceled losing join_any branch", CorrelationID: group.ID,
 		})
-		if errors.Is(err, ErrRevisionConflict) {
+		if errors.Is(err, models.ErrRevisionConflict) {
 			continue
 		}
 		return child, err
 	}
-	return nil, fmt.Errorf("cancel fork child %s after concurrent revisions: %w", edge.TargetRunID, ErrRevisionConflict)
+	return nil, fmt.Errorf("cancel fork child %s after concurrent revisions: %w", edge.TargetRunID, models.ErrRevisionConflict)
 }
 
 // configured reports whether c has a store (false for a nil coordinator).
@@ -828,11 +830,11 @@ func (c *RunForkCoordinator) configured() bool {
 }
 
 // dependencyGroup reads a fork's dependency group.
-func (c *RunForkCoordinator) dependencyGroup(ctx context.Context, scope Scope, groupID string) (*RunDependencyGroup, error) {
+func (c *RunForkCoordinator) dependencyGroup(ctx context.Context, scope models.Scope, groupID string) (*models.RunDependencyGroup, error) {
 	return c.store.GetRunDependencyGroup(ctx, scope, groupID)
 }
 
 // dependencies lists the edges of a fork's dependency group.
-func (c *RunForkCoordinator) dependencies(ctx context.Context, scope Scope, groupID string) ([]*RunDependency, error) {
+func (c *RunForkCoordinator) dependencies(ctx context.Context, scope models.Scope, groupID string) ([]*models.RunDependency, error) {
 	return c.store.ListRunDependencies(ctx, scope, groupID)
 }
