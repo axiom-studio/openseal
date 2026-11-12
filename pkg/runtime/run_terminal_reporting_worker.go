@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/google/uuid"
 )
@@ -51,7 +52,9 @@ func NewRunTerminalReportingWorker(store interface {
 	}
 	return &RunTerminalReportingWorker{
 		store: store, options: options, now: models.ClockFrom(opts),
-		project: func(ctx context.Context, run *AgentRun) error { return projectTerminalRunReporting(ctx, store, run) },
+		project: func(ctx context.Context, run *AgentRun) error {
+			return conversationrun.ProjectTerminalRunReporting(ctx, store, run)
+		},
 	}, nil
 }
 
@@ -74,7 +77,7 @@ func (w *RunTerminalReportingWorker) SetExternalConversationDelivery(resolver Ex
 	transport := NewExternalConversationTransportService(store, resolver, models.WithClock(w.now))
 	conversations := w.store.(ConversationStore)
 	w.project = func(ctx context.Context, run *AgentRun) error {
-		if err := projectTerminalRunReporting(ctx, conversations, run); err != nil {
+		if err := conversationrun.ProjectTerminalRunReporting(ctx, conversations, run); err != nil {
 			return err
 		}
 		_, err := projectRoutineReportDelivery(ctx, store, transport, run)
@@ -169,7 +172,7 @@ func (w *RunTerminalReportingWorker) processReport(ctx context.Context, report *
 	if !runNeedsTerminalReporting(report.Run) {
 		// The outbox trigger enqueues broadly; a Run with nothing to report
 		// (a Team routing Run, for example) is acknowledged, not retried.
-		err = ErrRunTerminalReportUndeliverable
+		err = conversationrun.ErrRunTerminalReportUndeliverable
 	}
 	if err == nil && w.options.ScopeAllowed != nil {
 		var allowed bool
@@ -186,7 +189,7 @@ func (w *RunTerminalReportingWorker) processReport(ctx context.Context, report *
 		Scope: report.Scope, RunID: report.RunID, Status: report.Status, TerminalRevision: report.TerminalRevision, WorkerID: report.LeaseOwner,
 		LeaseExpiresAt: *report.LeaseExpiresAt, Now: now,
 	}
-	if errors.Is(err, ErrRunTerminalReportUndeliverable) {
+	if errors.Is(err, conversationrun.ErrRunTerminalReportUndeliverable) {
 		if completeErr := w.store.CompleteRunTerminalReport(ctx, completion); completeErr != nil {
 			return errors.Join(err, completeErr)
 		}

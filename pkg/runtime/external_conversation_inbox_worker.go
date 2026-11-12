@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 const externalConversationActorID = "openseal.external-conversation"
@@ -36,10 +37,10 @@ type ExternalConversationDispatcher interface {
 // CanonicalExternalConversationDispatcher hands Agent and Team handlers to
 // the canonical Conversation scheduler.
 type CanonicalExternalConversationDispatcher struct {
-	scheduler *ConversationRunScheduler
+	scheduler *conversationrun.ConversationRunScheduler
 }
 
-func NewCanonicalExternalConversationDispatcher(scheduler *ConversationRunScheduler) *CanonicalExternalConversationDispatcher {
+func NewCanonicalExternalConversationDispatcher(scheduler *conversationrun.ConversationRunScheduler) *CanonicalExternalConversationDispatcher {
 	return &CanonicalExternalConversationDispatcher{scheduler: scheduler}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -74,7 +75,7 @@ func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *Conve
 		t.Fatal(err)
 	}
 	message := postConversationRunTestMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion, "Read the community in the background", "task-setup-source")
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +91,7 @@ func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *Conve
 	}
 	settled := settleTaskSource(t, store, scope, source.ID, "worker", taskSourceProposal{
 		Goal: "Read the community and report the outcome", Acknowledgment: "I have started reading the community.", Budget: &BudgetPolicy{MaxTurns: 5}})
-	task, err := NewConversationTaskService(store).Start(t.Context(), settled.Request)
+	task, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +243,7 @@ func (f *skillSetupTaskWaitFixture) wait(t *testing.T) *AgentRun {
 	waiting, _, err := NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), f.request.Scope, f.request.RunID, RunTransitionRequest{
 		ExpectedRevision: current.Revision, TurnID: step.ID, AppliedTurn: step.Sequence, LeaseOwner: "setup-worker",
 		Status: AgentRunStatusWaitingForEvent, Summary: "Complete the Reddit setup form to continue this task.",
-		WakeCondition: &WakeCondition{Type: ConversationTaskSkillSetupWakeType, Reference: f.request.ID}, Checkpoint: checkpoint,
+		WakeCondition: &WakeCondition{Type: conversationrun.ConversationTaskSkillSetupWakeType, Reference: f.request.ID}, Checkpoint: checkpoint,
 	})
 	if err != nil {
 		t.Fatalf("park setup task: %v", err)
@@ -276,7 +277,7 @@ func (f *skillSetupTaskWaitFixture) resolve(t *testing.T, status string) {
 
 func (f *skillSetupTaskWaitFixture) reconcile(t *testing.T) (*agentrun.AgentRunCommandResult, bool, error) {
 	t.Helper()
-	scheduler, err := NewConversationRunScheduler(f.store, f.store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(f.store, f.store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +349,7 @@ func TestSkillSetupTaskReconciliationRecoversResolutionBeforeWait(t *testing.T) 
 		}
 		waiting := f.wait(t)
 		f.store = restart()
-		scheduler, err := NewConversationRunScheduler(f.store, f.store, ConversationRunSchedulerConfig{})
+		scheduler, err := conversationrun.NewConversationRunScheduler(f.store, f.store, conversationrun.ConversationRunSchedulerConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -552,7 +553,7 @@ func TestSkillSetupTaskOrdinaryConfigurationCannotForgeBindingRebase(t *testing.
 						request.ResolvedBindingID, request.ResolvedBindingRevision = "", 0
 					}
 				}}
-				scheduler, err := NewConversationRunScheduler(proof, proof, ConversationRunSchedulerConfig{})
+				scheduler, err := conversationrun.NewConversationRunScheduler(proof, proof, conversationrun.ConversationRunSchedulerConfig{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -594,7 +595,7 @@ func TestSkillSetupTaskUpgradeRejectsUnversionedOrRepurposedTarget(t *testing.T)
 						request.SourceIdentity = "https://unrelated.example::reddit.reader"
 					}
 				}}
-				scheduler, err := NewConversationRunScheduler(proof, proof, ConversationRunSchedulerConfig{})
+				scheduler, err := conversationrun.NewConversationRunScheduler(proof, proof, conversationrun.ConversationRunSchedulerConfig{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -743,7 +744,7 @@ func TestSkillSetupTaskResolutionRejectsForgedProvenance(t *testing.T) {
 						}
 					}
 				}
-				scheduler, err := NewConversationRunScheduler(proof, proof, ConversationRunSchedulerConfig{})
+				scheduler, err := conversationrun.NewConversationRunScheduler(proof, proof, conversationrun.ConversationRunSchedulerConfig{})
 				if err != nil {
 					t.Fatal(err)
 				}

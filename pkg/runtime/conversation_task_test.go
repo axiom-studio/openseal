@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -17,7 +18,7 @@ import (
 // taskStartRequest is the admission of the task a loop-built step
 // (settledWorkerTaskFixture) called conversation_start_task for: the request
 // names that step's pending tool entry.
-func taskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *AgentTurn) StartConversationTaskRequest {
+func taskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *AgentTurn) conversationrun.StartConversationTaskRequest {
 	t.Helper()
 	sessions, ok := store.(taskStartFixtureStore)
 	if !ok {
@@ -36,7 +37,7 @@ func taskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *A
 	if err != nil || current == nil {
 		t.Fatalf("get source: %#v %v", current, err)
 	}
-	return StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: current.Revision, WorkerID: "worker",
+	return conversationrun.StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: current.Revision, WorkerID: "worker",
 		TurnID: turn.ID, ToolEntryID: entryID, AssignedAgentID: source.AssignedAgentID, TaskKey: startTaskKey(entryID),
 		Goal: args.Goal, Acknowledgment: args.Acknowledgment}
 }
@@ -44,14 +45,14 @@ func taskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *A
 // proposedTaskStartRequest writes the [assistant, conversation_start_task]
 // entries of a hand-built source step turn (after the triggering message)
 // and returns the admission request naming that tool entry.
-func proposedTaskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *AgentTurn, proposal taskSourceProposal) StartConversationTaskRequest {
+func proposedTaskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *AgentTurn, proposal taskSourceProposal) conversationrun.StartConversationTaskRequest {
 	t.Helper()
 	sessions, ok := store.(taskStartFixtureStore)
 	if !ok {
 		t.Fatalf("task start fixture needs a session store")
 	}
 	entryID, revision := ensureStartTaskToolEntry(t, sessions, source, turn, proposal.Goal, proposal.Acknowledgment)
-	return StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: revision, WorkerID: "worker",
+	return conversationrun.StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: revision, WorkerID: "worker",
 		TurnID: turn.ID, ToolEntryID: entryID, AssignedAgentID: source.AssignedAgentID, TaskKey: startTaskKey(entryID),
 		Goal: proposal.Goal, Acknowledgment: proposal.Acknowledgment, Budget: cloneBudgetPolicy(proposal.Budget)}
 }
@@ -72,7 +73,7 @@ func taskProposalFixture() taskSourceProposal {
 type settledTaskSource struct {
 	Run     *AgentRun
 	Turn    *AgentTurn
-	Request StartConversationTaskRequest
+	Request conversationrun.StartConversationTaskRequest
 }
 
 // settleTaskSource settles one step on the claimed source Run runID (held by
@@ -93,7 +94,7 @@ func settleTaskSource(t *testing.T, store interface{}, scope Scope, runID, worke
 	if run, err = sessions.GetAgentRun(ctx, scope, runID); err != nil || run == nil {
 		t.Fatalf("reload source: %#v %v", run, err)
 	}
-	return settledTaskSource{Run: run, Turn: step, Request: StartConversationTaskRequest{Scope: scope, SourceRunID: runID, ExpectedSourceRevision: revision,
+	return settledTaskSource{Run: run, Turn: step, Request: conversationrun.StartConversationTaskRequest{Scope: scope, SourceRunID: runID, ExpectedSourceRevision: revision,
 		WorkerID: workerID, TurnID: step.ID, ToolEntryID: entryID, AssignedAgentID: run.AssignedAgentID, TaskKey: startTaskKey(entryID),
 		Goal: proposal.Goal, Acknowledgment: proposal.Acknowledgment, Budget: cloneBudgetPolicy(proposal.Budget)}}
 }
@@ -234,7 +235,7 @@ func ensureStartTaskToolEntry(t *testing.T, store taskStartFixtureStore, source 
 func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
 	store := newTestKernelStore(t)
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
-	service := NewConversationTaskService(store)
+	service := conversationrun.NewConversationTaskService(store)
 	req := taskStartRequest(t, store, source, turn)
 	var wg sync.WaitGroup
 	results := make(chan *ConversationTaskResult, 8)
@@ -284,8 +285,8 @@ func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
 	if _, err := service.Start(t.Context(), req); !errors.Is(err, ErrConversationTaskConflict) {
 		t.Fatalf("request mutation was accepted: %v", err)
 	}
-	for _, mutate := range []func(*GetConversationTaskRequest){func(r *GetConversationTaskRequest) { r.Scope.ID = "foreign" }, func(r *GetConversationTaskRequest) { r.AuthenticatedActor.ID = "foreign" }, func(r *GetConversationTaskRequest) { r.ThreadRootID = "foreign" }} {
-		r := GetConversationTaskRequest{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, TaskID: accepted.Task.ID, AuthenticatedActor: trigger.Sender}
+	for _, mutate := range []func(*conversationrun.GetConversationTaskRequest){func(r *conversationrun.GetConversationTaskRequest) { r.Scope.ID = "foreign" }, func(r *conversationrun.GetConversationTaskRequest) { r.AuthenticatedActor.ID = "foreign" }, func(r *conversationrun.GetConversationTaskRequest) { r.ThreadRootID = "foreign" }} {
+		r := conversationrun.GetConversationTaskRequest{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, TaskID: accepted.Task.ID, AuthenticatedActor: trigger.Sender}
 		mutate(&r)
 		if _, err := service.Get(t.Context(), r); !errors.Is(err, agentrun.ErrConversationTaskNotFound) {
 			t.Fatalf("task leaked canonical scope: %v", err)
@@ -306,7 +307,7 @@ func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) 
 			} else {
 				expireRunLease(t, store, source)
 			}
-			if _, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err == nil {
+			if _, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err == nil {
 				t.Fatal("non-current source admitted work")
 			}
 			tasks, err := store.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, Limit: 10})
@@ -328,7 +329,7 @@ func TestConversationTaskTransfersOnlyRemainingSourceBudget(t *testing.T) {
 	source.Revision++
 	source.UpdatedAt = time.Now()
 	updateConversationTaskSQLRun(t, store, source, previous)
-	result, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
+	result, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,17 +390,17 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 				t.Fatalf("claim: %#v %v", source, err)
 			}
 			settled := settleTaskSource(t, store, scope, source.ID, "worker", taskProposalFixture())
-			accepted, err := NewConversationTaskService(store).Start(t.Context(), settled.Request)
+			accepted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), settled.Request)
 			if err != nil {
 				t.Fatal(err)
 			}
 			work := terminalReportingContractComplete(t, store, accepted.WorkRun, time.Now())
 			// Deliver a final claim first, as a concurrent outbox worker or a fast
 			// completed task can do. It must durably post the acknowledgment first.
-			if err := projectTerminalRunReporting(t.Context(), store, work); err != nil {
+			if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, work); err != nil {
 				t.Fatal(err)
 			}
-			if err := projectTerminalRunReporting(t.Context(), store, accepted.SourceRun); err != nil {
+			if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, accepted.SourceRun); err != nil {
 				t.Fatal(err)
 			}
 			messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Limit: 100})
@@ -439,7 +440,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *testing.T) {
 	store := newTestKernelStore(t)
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
-	first, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
+	first, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +486,7 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	}
 	settled := settleTaskSource(t, store, source.Scope, claimed.ID, "worker", taskSourceProposal{
 		Goal: "Review documentation independently", Acknowledgment: "I will review the documentation in the background."})
-	second, err := NewConversationTaskService(store).Start(t.Context(), settled.Request)
+	second, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,10 +517,10 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := projectTerminalRunReporting(t.Context(), store, terminal); err != nil {
+	if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, terminal); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectTerminalRunReporting(t.Context(), store, terminal); err != nil {
+	if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, terminal); err != nil {
 		t.Fatal(err)
 	}
 	messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: source.Scope, ConversationID: conversation.ID, Limit: 100})
@@ -547,7 +548,7 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if ackSequence == 0 || resultSequence <= ackSequence {
 		t.Fatalf("final preceded durable acknowledgment: ack=%d final=%d", ackSequence, resultSequence)
 	}
-	snapshot, err := NewConversationTaskService(store).Get(t.Context(), GetConversationTaskRequest{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, AuthenticatedActor: trigger.Sender, TaskID: first.Task.ID})
+	snapshot, err := conversationrun.NewConversationTaskService(store).Get(t.Context(), conversationrun.GetConversationTaskRequest{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, AuthenticatedActor: trigger.Sender, TaskID: first.Task.ID})
 	if err != nil || snapshot.TerminalReportMessageID == "" {
 		t.Fatalf("terminal delivery receipt missing: %#v %v", snapshot, err)
 	}

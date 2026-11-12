@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 type channelReviewStore interface {
@@ -194,7 +195,7 @@ func (w *RunProgressAcknowledgementWorker) postReview(ctx context.Context, item 
 		}
 		posted, err := w.conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 			Scope: item.Scope, ConversationID: item.ConversationID, ExpectedRevision: conversation.Revision,
-			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: ChannelReviewParticipantID},
+			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: conversationrun.ChannelReviewParticipantID},
 			Intent: MessageIntentUpdate, Content: text,
 			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: item.ChannelMessageID,
 			References: references, IdempotencyKey: "channel-review-message:" + item.ID + ":" + key,

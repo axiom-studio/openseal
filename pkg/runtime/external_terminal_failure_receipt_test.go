@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/google/uuid"
 )
 
@@ -39,7 +40,7 @@ func TestExternalTerminalFailureUsesCapturedRevisionAfterMetadataUpdate(t *testi
 			if err != nil || captured.Revision != first.Revision {
 				t.Fatalf("metadata revision became a new failure attempt: %#v %v", captured, err)
 			}
-			if err := projectFailedConversationReply(t.Context(), store, captured); err != nil {
+			if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, captured); err != nil {
 				t.Fatal(err)
 			}
 			messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: first.Scope, ConversationID: trigger.ConversationID, Limit: 20})
@@ -55,7 +56,7 @@ func TestExternalTerminalFailurePrefersSavedNormalAnswerOverOlderFailure(t *test
 	now := runStoreContractEpoch
 	run, conversation, trigger := terminalFailureConversationFixture(t, store, now, false)
 	run = failTerminalConversation(t, store, run, now, "provider_rate_limited")
-	if err := projectFailedConversationReply(t.Context(), store, run); err != nil {
+	if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, run); err != nil {
 		t.Fatal(err)
 	}
 	conversation, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)

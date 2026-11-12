@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
@@ -129,7 +130,7 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 		{"default", agentrun.ControlAuthority{}, []string{"answer", "report", "files"}, []string{"answer"}, false, nil},
 		{"chat with skills", agentrun.ControlAuthority{SkillPromptRefs: []string{"s1", "s2"}, VisualAllowed: true, BroadcastAllowed: true},
 			[]string{"answer", "appliedSkillRefs", "visual", "broadcastToChannel", "report", "files"}, []string{"answer", "appliedSkillRefs"}, false, []string{"s1", "s2"}},
-		{"spoken", agentrun.ControlAuthority{FinalMode: FinalModeSpoken}, []string{"answer", "silent"}, []string{"answer", "silent"}, true, nil},
+		{"spoken", agentrun.ControlAuthority{FinalMode: conversationrun.FinalModeSpoken}, []string{"answer", "silent"}, []string{"answer", "silent"}, true, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -252,7 +253,7 @@ func TestSilentOnlySpoken(t *testing.T) {
 	if !strings.Contains(value["message"].(string), `"silent"`) {
 		t.Fatalf("message = %v", value["message"])
 	}
-	spoken := agentrun.ControlAuthority{FinalMode: FinalModeSpoken}
+	spoken := agentrun.ControlAuthority{FinalMode: conversationrun.FinalModeSpoken}
 	requireRejected(t, f, f.settleFinal("spoken-text", spoken), "spoken-text", finalSilentInvalidCode)
 	value = requireRejected(t, f, f.settleFinal("spoken-missing", spoken), "spoken-missing", controlArgumentsInvalidCode)
 	if value["message"] != `missing required field "silent"` {
@@ -266,7 +267,7 @@ func TestSilentOnlySpoken(t *testing.T) {
 
 func TestSpokenEmptyTextIsSilent(t *testing.T) {
 	f := newFinalFixture(t)
-	final := requireFinal(t, f.plain("step-2", 2, agentrun.ControlAuthority{FinalMode: FinalModeSpoken}, "  \n"))
+	final := requireFinal(t, f.plain("step-2", 2, agentrun.ControlAuthority{FinalMode: conversationrun.FinalModeSpoken}, "  \n"))
 	if !final.PlainText || !final.Silent() || final.Answer != "" {
 		t.Fatalf("final = %#v", final)
 	}
@@ -381,7 +382,7 @@ func TestReportTakesPrecedenceOverAnswer(t *testing.T) {
 	}
 	// report is not offered on spoken Runs.
 	g := newFinalFixture(t, finalCall("final", `{"answer":"Hi","silent":false,"report":"x"}`))
-	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{FinalMode: FinalModeSpoken}), "final", controlArgumentsInvalidCode)
+	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{FinalMode: conversationrun.FinalModeSpoken}), "final", controlArgumentsInvalidCode)
 }
 
 func TestBroadcastToChannelInOutput(t *testing.T) {
@@ -539,7 +540,7 @@ func TestTaskFinalParksOnPendingSetup(t *testing.T) {
 	final := requireFinal(t, f.settleFinal("final", agentrun.ControlAuthority{TaskWork: true, CanAskUser: true}))
 	park := final.Park
 	if park == nil || park.Deliver || park.Park.Status != AgentRunStatusWaitingForEvent || park.Park.Wake == nil ||
-		park.Park.Wake.Type != ConversationTaskSkillSetupWakeType || park.Park.Wake.Reference != "setup-1" ||
+		park.Park.Wake.Type != conversationrun.ConversationTaskSkillSetupWakeType || park.Park.Wake.Reference != "setup-1" ||
 		park.Park.Summary != skillSetupWaitSummary {
 		t.Fatalf("park = %#v", park)
 	}

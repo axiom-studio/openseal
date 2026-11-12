@@ -7,6 +7,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 type agentBuilderDraftFake struct {
@@ -54,7 +56,7 @@ func (f *agentBuilderDraftFake) ListChannelMessages(_ context.Context, filter Ch
 }
 
 func (f *agentBuilderDraftFake) ListAgentRuns(_ context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
-	if filter.AssignedAgentID != AgentBuilderDeploymentID || filter.Order != AgentRunOrderCreatedDesc {
+	if filter.AssignedAgentID != conversationrun.AgentBuilderDeploymentID || filter.Order != AgentRunOrderCreatedDesc {
 		return nil, errors.New("unexpected run filter")
 	}
 	return f.runs[filter.ConversationID], nil
@@ -79,7 +81,7 @@ func (f *agentBuilderDraftFake) add(id string, updated time.Time, sender Convers
 		f.messages, f.runs, f.approvals, f.created = map[string][]*ChannelMessage{}, map[string][]*AgentRun{}, map[string][]*ApprovalCheckpoint{}, map[string]bool{}
 	}
 	f.conversations = append(f.conversations, &Conversation{
-		ID: id, Scope: agentBuilderDraftScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: AgentBuilderDeploymentID},
+		ID: id, Scope: agentBuilderDraftScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: conversationrun.AgentBuilderDeploymentID},
 		Title: "New agent", Status: ConversationStatusActive, UpdatedAt: updated, SpaceID: "space-" + id,
 		Origin: &ConversationReference{Kind: ConversationReferenceAgentBuilder, ID: id},
 	})
@@ -102,7 +104,7 @@ func agentBuilderCard(id, operation string, status ApprovalStatus, approvers ...
 func TestAgentBuilderDraftsStatusesAndFiltering(t *testing.T) {
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	fake := &agentBuilderDraftFake{}
-	agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: AgentBuilderDeploymentID}
+	agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: conversationrun.AgentBuilderDeploymentID}
 	at := func(i int) time.Time { return now.Add(-time.Duration(i) * time.Minute) }
 
 	fake.add("drafting", at(0), agentBuilderDraftRequester)
@@ -191,7 +193,7 @@ func TestAgentBuilderDraftsStatusesAndFiltering(t *testing.T) {
 		}
 	}
 	filter := fake.filters[0]
-	if filter.OriginKind != ConversationReferenceAgentBuilder || filter.Owner == nil || filter.Owner.ID != AgentBuilderDeploymentID ||
+	if filter.OriginKind != ConversationReferenceAgentBuilder || filter.Owner == nil || filter.Owner.ID != conversationrun.AgentBuilderDeploymentID ||
 		len(filter.Statuses) != 1 || filter.Statuses[0] != ConversationStatusActive ||
 		filter.AgentBuilderDraftOf != "ana" || filter.Limit != defaultAgentBuilderDraftLimit || filter.Offset != 0 {
 		t.Fatalf("conversation filter = %#v", filter)
@@ -229,7 +231,7 @@ func TestAgentBuilderDraftsStatusesAndFiltering(t *testing.T) {
 func TestAgentBuilderDraftsTitleFromFirstMessagePastTheNewestPage(t *testing.T) {
 	fake := &agentBuilderDraftFake{}
 	fake.add("long", time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC), agentBuilderDraftRequester)
-	agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: AgentBuilderDeploymentID}
+	agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: conversationrun.AgentBuilderDeploymentID}
 	for sequence := int64(2); sequence <= agentBuilderDraftMessageScan+1; sequence++ {
 		fake.messages["long"] = append(fake.messages["long"], &ChannelMessage{ID: "update", Sequence: sequence, Sender: agent, Intent: MessageIntentUpdate})
 	}

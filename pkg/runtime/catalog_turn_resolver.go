@@ -16,6 +16,7 @@ import (
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -91,7 +92,7 @@ func (f SkillHostCapabilityResolverFunc) ResolveSkillHostCapabilities(ctx contex
 // here, so the advertised tools stay stable for the claim. Final is nil: the
 // loop completes the Run with the final output. The conversation runner adds
 // its own Final and hooks on top for chat replies.
-func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *AgentRun, config LoopBindingConfig) (*agentrun.TurnRunnerBinding, error) {
+func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCatalog, run *AgentRun, config LoopBindingConfig) (*agentrun.TurnRunnerBinding, error) {
 	if catalog == nil {
 		return nil, errors.New("canonical Agent turn catalog is unavailable")
 	}
@@ -310,7 +311,7 @@ func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *Agen
 // loopBindingResolution is one ResolveLoopBinding call.
 type loopBindingResolution struct {
 	config     LoopBindingConfig
-	catalog    AgentTurnCatalog
+	catalog    conversationrun.AgentTurnCatalog
 	run        *AgentRun
 	scope      skill.ScopeReference
 	deployment *kernelagent.AgentDeployment

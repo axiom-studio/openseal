@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -83,7 +84,7 @@ func quotedPhotoStepEntry(t *testing.T, store *sqlite.Store, content ArtifactCon
 		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model", Producer: &chatLoopProducer{},
 		Authority: agentrun.ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
 	}}
-	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, runtimeconversation.NewConversationService(store)), ConversationRunTurnRunnerConfig{
+	runner, err := conversationrun.NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, runtimeconversation.NewConversationService(store)), conversationrun.ConversationRunTurnRunnerConfig{
 		AttachmentContent: content, AgentTurns: agent,
 	})
 	if err != nil {

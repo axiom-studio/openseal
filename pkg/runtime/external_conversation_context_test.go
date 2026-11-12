@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -75,7 +76,7 @@ func contextTestHistory(event NormalizedExternalConversationEvent) *ExternalConv
 
 func newContextTestWorker(t *testing.T, store *sqlite.Store, resolver ExternalConversationAdapterResolver, host ExternalConversationContextHost, crash bool, opts ...models.ServiceOption) (*ExternalConversationInboxWorker, *crashAfterExternalConversationDispatch) {
 	t.Helper()
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

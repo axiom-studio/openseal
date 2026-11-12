@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 // externalItemReply is one Run whose answer an applied inbox item delivers.
@@ -61,7 +62,7 @@ func externalItemReplies(ctx context.Context, store externalItemReplyStore, item
 			verified = member.Context[runtimeconversation.TeamRoutingRunContextKey] == run.ID
 		} else {
 			verified = isTeamMemberRun(member) && member.Owner == run.Owner && member.Scope == run.Scope &&
-				member.Context[conversationRunContextConversationID] == item.ConversationID && externalInboxItemIsFollowUp(item, member)
+				member.Context[conversationRunContextConversationID] == item.ConversationID && conversationrun.ExternalInboxItemIsFollowUp(item, member)
 		}
 		if !verified {
 			return nil, ErrExternalConversationConflict

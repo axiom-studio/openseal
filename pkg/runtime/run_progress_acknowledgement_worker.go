@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -189,7 +190,7 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 	}
 	run := reply.run
 	now := w.now().UTC()
-	if strings.TrimSpace(run.AssignedAgentID) == "" || isTerminalAgentRunStatus(run.Status) || now.Sub(run.CreatedAt) < w.config.MinimumRunAge || externalInboxItemIsFollowUp(item, run) {
+	if strings.TrimSpace(run.AssignedAgentID) == "" || isTerminalAgentRunStatus(run.Status) || now.Sub(run.CreatedAt) < w.config.MinimumRunAge || conversationrun.ExternalInboxItemIsFollowUp(item, run) {
 		return nil, nil
 	}
 	events, err := w.store.ListActivity(ctx, ActivityFilter{Scope: item.Scope, RunID: run.ID, Descending: true, Limit: 1})

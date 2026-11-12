@@ -22,6 +22,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -107,7 +108,7 @@ func portRequireTypedFailure(t *testing.T, run *AgentRun) {
 // the worker's reporting outbox does, and returns the Agent's last message.
 func portReportFailure(f *loopFixture, conversationID string, failed *AgentRun) *ChannelMessage {
 	f.t.Helper()
-	if err := projectFailedConversationReply(f.ctx, f.chats, failed); err != nil {
+	if err := conversationrun.ProjectFailedConversationReply(f.ctx, f.chats, failed); err != nil {
 		f.t.Fatalf("report failed run: %v", err)
 	}
 	answers := portAgentMessages(f, conversationID)
@@ -329,7 +330,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 				return finalAnswer(map[string]any{"answer": "Revenue is up.", "visual": failurePortVisual()})
 			}}))
 			content := &answerVisualContent{}
-			convRunner(f, ConversationRunTurnRunnerConfig{AttachmentContent: content})
+			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{AttachmentContent: content})
 			conversation, run := f.startChat("how is revenue?")
 			trigger := f.messages(conversation.ID)[0]
 			done := f.driveToRest(run.ID, 3)
@@ -371,7 +372,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 				return finalAnswer(map[string]any{"answer": "Revenue is up.", "visual": bound})
 			}}))
 			content := &answerVisualContent{}
-			convRunner(f, ConversationRunTurnRunnerConfig{AttachmentContent: content, VisualChecks: func(*AgentRun) presentation.ValidateOptions {
+			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{AttachmentContent: content, VisualChecks: func(*AgentRun) presentation.ValidateOptions {
 				return presentation.ValidateOptions{Bindings: presentation.BindingResolverFunc(func(context.Context, presentation.Binding) error {
 					return errors.New("not in this chat")
 				})}

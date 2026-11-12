@@ -13,6 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -54,7 +55,7 @@ func TestConversationTaskContinuationReconcilesQueuedRunFromCreationTime(t *test
 	run = backdateContinuationLifecycleRun(t, store, db, run, now.Add(-ConversationTaskForegroundTimeout))
 	// A fresh activity timestamp is not a new foreground deadline.
 	storetest.RewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(stored *AgentRun) { stored.UpdatedAt = now })
-	reconciler, err := NewConversationTaskContinuationReconciler(store)
+	reconciler, err := conversationrun.NewConversationTaskContinuationReconciler(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestConversationTaskContinuationReconcilesQueuedRunFromCreationTime(t *test
 	if err != nil || len(foreground) != 0 {
 		t.Fatalf("promoted Run remained in foreground restore: %#v %v", foreground, err)
 	}
-	restarted, _ := NewConversationTaskContinuationReconciler(store)
+	restarted, _ := conversationrun.NewConversationTaskContinuationReconciler(store)
 	if results, err := restarted.ReconcileScope(t.Context(), run.Scope, now.Add(time.Second)); err != nil || len(results) != 0 {
 		t.Fatalf("restart duplicated continuation: %#v %v", results, err)
 	}
@@ -260,9 +261,9 @@ func TestConversationRunReconcilerKeepsAgedRunsForeground(t *testing.T) {
 					t.Fatalf("claim: %#v %v", claimed, err)
 				}
 			}
-			reconciler, err := NewConversationRunReconciler(mustConversationRunScheduler(t, store), workqueue.WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) {
+			reconciler, err := conversationrun.NewConversationRunReconciler(mustConversationRunScheduler(t, store), workqueue.WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) {
 				return []Scope{run.Scope}, nil
-			}), nil, ConversationRunReconcilerConfig{})
+			}), nil, conversationrun.ConversationRunReconcilerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -308,7 +309,7 @@ func TestConversationTaskContinuationReconcilerBoundsAndAdvancesPastIneligibleRu
 	for i := 0; i < 205; i++ {
 		store.runs = append(store.runs, &AgentRun{ID: fmt.Sprintf("run-%03d", i), CreatedAt: now.Add(-time.Minute)})
 	}
-	reconciler, _ := NewConversationTaskContinuationReconciler(store)
+	reconciler, _ := conversationrun.NewConversationTaskContinuationReconciler(store)
 	for range 3 {
 		if _, err := reconciler.ReconcileScope(t.Context(), scope, now); err != nil {
 			t.Fatal(err)

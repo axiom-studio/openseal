@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -30,7 +31,7 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 		t.Fatal(err)
 	}
 	first := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is the canary healthy?", "message-one")
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{ConversationPageSize: 1, MessagePageSize: 2})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{ConversationPageSize: 1, MessagePageSize: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +116,7 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler, err := NewConversationRunScheduler(reopened, reopened, ConversationRunSchedulerConfig{ConversationPageSize: 10, MessagePageSize: 1})
+	scheduler, err := conversationrun.NewConversationRunScheduler(reopened, reopened, conversationrun.ConversationRunSchedulerConfig{ConversationPageSize: 10, MessagePageSize: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,9 +208,9 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 	}
 }
 
-func mustConversationRunScheduler(t *testing.T, store *sqlite.Store) *ConversationRunScheduler {
+func mustConversationRunScheduler(t *testing.T, store *sqlite.Store) *conversationrun.ConversationRunScheduler {
 	t.Helper()
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +237,7 @@ func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *
 	}); err != nil {
 		t.Fatal(err)
 	}
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,9 +315,9 @@ func (r *chatRunResolver) ResolveTurnRunner(_ context.Context, run *AgentRun) (*
 	}, nil
 }
 
-func (f *chatLoopFixture) chatRunner(resolver runtimeconversation.TurnRunnerResolver, participation bool) *ConversationRunTurnRunner {
+func (f *chatLoopFixture) chatRunner(resolver runtimeconversation.TurnRunnerResolver, participation bool) *conversationrun.ConversationRunTurnRunner {
 	f.t.Helper()
-	runner, err := NewConversationRunTurnRunner(f.store, conversationRunTestCoordinator(f.t, f.service), ConversationRunTurnRunnerConfig{
+	runner, err := conversationrun.NewConversationRunTurnRunner(f.store, conversationRunTestCoordinator(f.t, f.service), conversationrun.ConversationRunTurnRunnerConfig{
 		AgentTurns: resolver, RequireParticipationOptIn: participation,
 	})
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
@@ -27,10 +28,10 @@ func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
 	}
 	child := &AgentRun{ID: "operation-run", Kind: RunKindAgentWork, Scope: scope, Owner: owner, AssignedAgentID: owner.ID}
 	summary := "Run the on-demand engagement operation"
-	if err := projectConversationRunbookStart(ctx, store, source, summary, child); err != nil {
+	if err := conversationrun.ProjectConversationRunbookStart(ctx, store, source, summary, child); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectConversationRunbookStart(ctx, store, source, summary, child); err != nil {
+	if err := conversationrun.ProjectConversationRunbookStart(ctx, store, source, summary, child); err != nil {
 		t.Fatal(err)
 	}
 	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})

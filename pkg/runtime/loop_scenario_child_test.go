@@ -27,6 +27,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -129,7 +130,7 @@ func newChildFixture(t *testing.T, store KernelStore, opts ...loopOption) *child
 	}
 	c.forks.SetAcceptedRunExecutionPreparer(childRunbookPreparer{c})
 	if tasks, ok := f.raw.(ConversationTaskKernelStore); ok {
-		f.control.Tasks = NewConversationTaskService(tasks, models.WithClock(f.clock.Now))
+		f.control.Tasks = conversationrun.NewConversationTaskService(tasks, models.WithClock(f.clock.Now))
 	}
 	f.control.Forks = c.forks
 	// The task completion review reads the task through the portfolio.
@@ -274,7 +275,7 @@ func (c *childFixture) resolveTerminal(run *AgentRun) {
 	tolerable := func(err error) bool {
 		return err == nil || errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidAgentRequestState) || errors.Is(err, ErrDependencyConflict)
 	}
-	if err := projectTerminalRunReporting(c.ctx, c.chats, run); err != nil {
+	if err := conversationrun.ProjectTerminalRunReporting(c.ctx, c.chats, run); err != nil {
 		c.t.Fatalf("terminal reporting of %s: %v", run.ID, err)
 	}
 	if run.ParentRunID != "" && run.Checkpoint["forkChild"] != nil {
@@ -673,7 +674,7 @@ func TestLoopForkCreatesChildSessionAndResumesWithItsFinalText(t *testing.T) {
 				t.Fatalf("branch %d = %v", i, branch)
 			}
 		}
-		if got := done.Output[finalOutputSummaryKey]; got != "There are 2 items and 3 boxes." {
+		if got := done.Output[conversationrun.FinalOutputSummaryKey]; got != "There are 2 items and 3 boxes." {
 			t.Fatalf("parent answer = %v", done.Output)
 		}
 		if c.claims[parent.ID] != 2 {
@@ -786,7 +787,7 @@ func TestLoopChildFailureIsAToolError(t *testing.T) {
 		if text := childResultText(entry); !strings.Contains(text, failed.FailureExplanation.Message) && !strings.Contains(text, failed.Error) {
 			t.Fatalf("fork result %q lacks the child's failure %q", text, failed.FailureExplanation.Message)
 		}
-		if got := c.mustRun(parent.ID).Output[finalOutputSummaryKey]; got != "One check failed." {
+		if got := c.mustRun(parent.ID).Output[conversationrun.FinalOutputSummaryKey]; got != "One check failed." {
 			t.Fatalf("parent answer = %v", got)
 		}
 	})
@@ -921,7 +922,7 @@ func TestLoopDelegationRunsDecisionExecutionAndReviewInChildSessions(t *testing.
 		if steps := c.requestsFor(parent.ID); len(steps) != 2 {
 			t.Fatalf("parent made %d model requests, want 2 (delegate, answer)", len(steps))
 		}
-		if got, _ := parent.Output[finalOutputSummaryKey].(string); !strings.Contains(got, "Release 7 has 2 open issues.") {
+		if got, _ := parent.Output[conversationrun.FinalOutputSummaryKey].(string); !strings.Contains(got, "Release 7 has 2 open issues.") {
 			t.Fatalf("parent answer = %q", got)
 		}
 	})
@@ -1266,7 +1267,7 @@ func TestLoopRunbookStartParksForChild(t *testing.T) {
 			value["entrypoint"] != childEngageOperation.Entrypoint {
 			t.Fatalf("operation entry = %s %s", entry.State, childResultText(entry))
 		}
-		if got, _ := c.mustRun(parent.ID).Output[finalOutputSummaryKey].(string); !strings.HasPrefix(got, "Done: ") {
+		if got, _ := c.mustRun(parent.ID).Output[conversationrun.FinalOutputSummaryKey].(string); !strings.HasPrefix(got, "Done: ") {
 			t.Fatalf("parent answer = %q", got)
 		}
 	})

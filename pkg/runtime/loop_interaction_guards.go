@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
@@ -219,7 +220,7 @@ func finalAnswerPark(run *AgentRun, views []governedToolView, canAskConversation
 		if id := pendingSkillSetupID(run, views, interventions); id != "" {
 			return &finalAnswerParkPlan{
 				Status: AgentRunStatusWaitingForEvent, Summary: skillSetupWaitSummary,
-				Wake: &WakeCondition{Type: ConversationTaskSkillSetupWakeType, Reference: id},
+				Wake: &WakeCondition{Type: conversationrun.ConversationTaskSkillSetupWakeType, Reference: id},
 			}
 		}
 	}

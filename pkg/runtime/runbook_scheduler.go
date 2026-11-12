@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 type RunbookScheduleResult struct {
@@ -128,7 +129,7 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 			return result, err
 		}
 		if existing != nil {
-			if err := projectRunReportingStartForRun(ctx, s.reportingStore, existing); err != nil {
+			if err := conversationrun.ProjectRunReportingStartForRun(ctx, s.reportingStore, existing); err != nil {
 				return result, fmt.Errorf("restore Runbook activation %s reporting: %w", activation.ID, err)
 			}
 			result.Replayed++

@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 // run_operation (section 04 §9): a settle-phase control tool that starts one
@@ -191,7 +192,7 @@ func (x *ControlExecutor) projectOperationStart(ctx context.Context, run *AgentR
 		err = ErrRunNotFound
 	}
 	if err == nil {
-		err = projectConversationRunbookStart(ctx, x.Reporting, run, summary, child)
+		err = conversationrun.ProjectConversationRunbookStart(ctx, x.Reporting, run, summary, child)
 	}
 	if err != nil {
 		slog.Warn("failed to project operation start into conversation", "runId", run.ID, "childRunId", childID, "error", err)
@@ -289,7 +290,7 @@ func (operationHandler) Resume(ctx context.Context, x *ControlExecutor, cc agent
 			"The operation can no longer be found; start it again if it is still needed.", nil), nil)
 		return ControlResume{Resolved: true, Result: result}, err
 	}
-	output, _ := conversationOperationSavedOutput(ctx, x.Portfolio, child)
+	output, _ := conversationrun.ConversationOperationSavedOutput(ctx, x.Portfolio, child)
 	value := map[string]interface{}{
 		"status": string(child.Status), "entrypoint": args.Entrypoint, "runId": child.ID,
 		"output": truncateControlText(output, child.ID),

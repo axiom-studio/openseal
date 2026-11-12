@@ -29,6 +29,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -294,8 +295,8 @@ type loopFixture struct {
 
 	config     loopFixtureConfig
 	portfolio  *PortfolioService
-	scheduler  *ConversationRunScheduler
-	runner     *ConversationRunTurnRunner
+	scheduler  *conversationrun.ConversationRunScheduler
+	runner     *conversationrun.ConversationRunTurnRunner
 	control    *ControlExecutor
 	dispatcher *StepToolDispatcher
 	offered    []capability.ModelAction
@@ -372,12 +373,12 @@ func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFi
 	clock := models.WithClock(f.clock.Now)
 	f.convs = runtimeconversation.NewConversationService(chats, clock)
 	f.portfolio = NewPortfolioService(f.store, clock)
-	scheduler, err := NewConversationRunScheduler(chats, chats, ConversationRunSchedulerConfig{}, clock)
+	scheduler, err := conversationrun.NewConversationRunScheduler(chats, chats, conversationrun.ConversationRunSchedulerConfig{}, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.scheduler = scheduler
-	runner, err := NewConversationRunTurnRunner(chats, f.coordinator(), ConversationRunTurnRunnerConfig{
+	runner, err := conversationrun.NewConversationRunTurnRunner(chats, f.coordinator(), conversationrun.ConversationRunTurnRunnerConfig{
 		AttachmentContent: &answerVisualContent{}, AgentTurns: TurnRunnerResolverFunc(f.agentBinding),
 	}, clock)
 	if err != nil {
@@ -444,7 +445,7 @@ func (f *loopFixture) build() {
 		Conversations: f.convs, Reporting: f.chats, Now: f.clock.Now,
 	}
 	if tasks, ok := f.store.(ConversationTaskKernelStore); ok {
-		f.control.Tasks = NewConversationTaskService(tasks)
+		f.control.Tasks = conversationrun.NewConversationTaskService(tasks)
 	}
 	f.dispatcher, err = NewStepToolDispatcher(StepToolDispatcherConfig{
 		Sessions: f.store.(AgentSessionStore), Turns: f.store, Actions: f.store, Coordinator: f.actions,
@@ -662,7 +663,7 @@ func (f *loopFixture) binding(run *AgentRun) *agentrun.TurnRunnerBinding {
 // Agent binding the fixture cannot build (Team members, threads, children).
 func (f *loopFixture) conversationBinding(run *AgentRun, agent func(*AgentRun) *agentrun.TurnRunnerBinding) *agentrun.TurnRunnerBinding {
 	f.t.Helper()
-	runner, err := NewConversationRunTurnRunner(f.chats, f.coordinator(), ConversationRunTurnRunnerConfig{
+	runner, err := conversationrun.NewConversationRunTurnRunner(f.chats, f.coordinator(), conversationrun.ConversationRunTurnRunnerConfig{
 		AttachmentContent: &answerVisualContent{},
 		AgentTurns: TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			return agent(run), nil
@@ -736,7 +737,7 @@ func (f *loopFixture) agentBinding(_ context.Context, run *AgentRun) (*agentrun.
 // Team-owned Run. It serves only the Team deployment: the fixture's members
 // are not delegation targets of each other (the rest of the catalog is nil).
 type loopFixtureTeamCatalog struct {
-	AgentTurnCatalog
+	conversationrun.AgentTurnCatalog
 	members []string
 }
 

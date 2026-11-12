@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -148,7 +149,7 @@ func finalFieldOffered(field string, a agentrun.ControlAuthority) bool {
 	case "report":
 		return mode == agentrun.FinalModeDefault
 	case "silent":
-		return mode == FinalModeSpoken || mode == agentrun.FinalModeDefault && a.RoutineOccurrence
+		return mode == conversationrun.FinalModeSpoken || mode == agentrun.FinalModeDefault && a.RoutineOccurrence
 	case "files":
 		return mode == agentrun.FinalModeDefault
 	}
@@ -162,7 +163,7 @@ func finalRequiredFields(a agentrun.ControlAuthority) []string {
 		required = append(required, "appliedSkillRefs")
 	}
 	switch a.EffectiveFinalMode() {
-	case FinalModeSpoken:
+	case conversationrun.FinalModeSpoken:
 		required = append(required, "silent")
 	}
 	return required
@@ -170,7 +171,7 @@ func finalRequiredFields(a agentrun.ControlAuthority) []string {
 
 func finalAnswerSchema(a agentrun.ControlAuthority) map[string]interface{} {
 	answer := map[string]interface{}{"type": "string", "description": "The user-facing answer."}
-	if a.EffectiveFinalMode() == FinalModeSpoken {
+	if a.EffectiveFinalMode() == conversationrun.FinalModeSpoken {
 		answer["description"] = "Only the words to speak; empty when silent is true."
 	}
 	properties := map[string]interface{}{"answer": answer}
@@ -210,7 +211,7 @@ func finalAnswerSchema(a agentrun.ControlAuthority) map[string]interface{} {
 	}
 	if finalFieldOffered("silent", a) {
 		description := "Write before answer. True when ambient speech needs no response; answer must then be empty. Do not announce silence."
-		if a.EffectiveFinalMode() != FinalModeSpoken {
+		if a.EffectiveFinalMode() != conversationrun.FinalModeSpoken {
 			description = "Set true, with an empty answer, when nothing needs the person's attention; nothing is posted."
 		}
 		properties["silent"] = map[string]interface{}{"type": "boolean", "description": description}
@@ -401,7 +402,7 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc agentrun.Con
 	// something always reports it.
 	if d.Args.Silent {
 		routine := mode == agentrun.FinalModeDefault && cc.Authority.RoutineOccurrence
-		if (mode != FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.Args.Visual != nil ||
+		if (mode != conversationrun.FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.Args.Visual != nil ||
 			len(d.Args.Files) > 0 || len(d.Extra) > 0 {
 			message := "silent is only for a spoken reply that needs no response: leave answer empty and send no visual or files."
 			if routine {
@@ -509,7 +510,7 @@ func (d *finalAnswerDraft) output(mode agentrun.FinalAnswerMode) map[string]inte
 	if d.ReactionsOnly {
 		return map[string]interface{}{agentrun.FinalOutputReactedKey: true}
 	}
-	output := map[string]interface{}{finalOutputSummaryKey: strings.TrimSpace(d.Args.Answer)}
+	output := map[string]interface{}{conversationrun.FinalOutputSummaryKey: strings.TrimSpace(d.Args.Answer)}
 	if report := strings.TrimSpace(d.Args.Report); report != "" {
 		output[finalOutputReportKey] = report
 	}
@@ -523,7 +524,7 @@ func (d *finalAnswerDraft) output(mode agentrun.FinalAnswerMode) map[string]inte
 		output[agentrun.FinalOutputVisualKey] = d.Visual
 	}
 	if d.VisualRejection != "" {
-		output[finalOutputVisualRejectionKey] = d.VisualRejection
+		output[conversationrun.FinalOutputVisualRejectionKey] = d.VisualRejection
 	}
 	if len(d.SkillSelections) > 0 {
 		output[finalOutputSkillSelectionsKey] = d.SkillSelections
@@ -839,7 +840,7 @@ func (x *ControlExecutor) PlainTextFinal(ctx context.Context, cc agentrun.Contro
 	draft := &finalAnswerDraft{Args: finalAnswerArgs{Answer: trimmed}, PlainText: true}
 	// 4. Empty text.
 	if trimmed == "" {
-		if mode == FinalModeSpoken {
+		if mode == conversationrun.FinalModeSpoken {
 			draft.Args.Silent = true
 			return x.acceptFinalAnswer(ctx, cc, draft)
 		}

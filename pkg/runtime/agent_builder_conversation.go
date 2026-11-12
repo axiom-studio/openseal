@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 
 	"github.com/axiom-studio/openseal/pkg/validation"
 )
@@ -68,7 +69,7 @@ func StartAgentBuilderConversation(ctx context.Context, writer AgentBuilderConve
 	}
 	conversation, conversationReplayed, err := writer.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope:          req.Scope,
-		Owner:          ObjectiveOwner{Type: OwnerTypeAgent, ID: AgentBuilderDeploymentID},
+		Owner:          ObjectiveOwner{Type: OwnerTypeAgent, ID: conversationrun.AgentBuilderDeploymentID},
 		Title:          agentBuilderConversationTitle(parameters),
 		Origin:         &ConversationReference{Kind: ConversationReferenceAgentBuilder, ID: key},
 		SpaceID:        strings.TrimSpace(req.SpaceID),
@@ -170,7 +171,7 @@ func ListAgentBuilderDrafts(ctx context.Context, reader AgentBuilderDraftReader,
 	if limit < 0 || limit > maximumAgentBuilderDraftLimit || filter.Offset < 0 {
 		return nil, fmt.Errorf("%w: limit must be 1 to %d and offset cannot be negative", ErrInvalidConversation, maximumAgentBuilderDraftLimit)
 	}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: AgentBuilderDeploymentID}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: conversationrun.AgentBuilderDeploymentID}
 	conversations, err := reader.ListConversations(ctx, ConversationFilter{
 		Scope: filter.Scope, Owner: &owner, OriginKind: ConversationReferenceAgentBuilder, AgentBuilderDraftOf: filter.Requester.ID,
 		SpaceID: strings.TrimSpace(filter.SpaceID), Statuses: []ConversationStatus{ConversationStatusActive}, Limit: limit, Offset: filter.Offset,
@@ -209,7 +210,7 @@ func agentBuilderDraft(ctx context.Context, reader AgentBuilderDraftReader, filt
 		}
 	}
 	runs, err := reader.ListAgentRuns(ctx, AgentRunFilter{
-		Scope: filter.Scope, ConversationID: conversation.ID, AssignedAgentID: AgentBuilderDeploymentID,
+		Scope: filter.Scope, ConversationID: conversation.ID, AssignedAgentID: conversationrun.AgentBuilderDeploymentID,
 		Order: AgentRunOrderCreatedDesc, Limit: agentBuilderDraftRunScan,
 	})
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
 )
@@ -137,7 +138,7 @@ func cutoverConversationRunFor(t *testing.T, store cutoverTestStore, key string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +251,7 @@ func TestCutoverCancelsOldInFlightRunsOncePerLane(t *testing.T) {
 				}
 			}
 			// The canceled-run reconciler finds both requests answered.
-			scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}

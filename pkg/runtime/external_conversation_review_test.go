@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -60,7 +61,7 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 			if err != nil || len(deliveries) != 2 {
 				t.Fatalf("duplicate/missing review links: %#v %v", deliveries, err)
 			}
-			scheduler, err := NewConversationRunScheduler(fixture.store, fixture.store, ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewConversationRunScheduler(fixture.store, fixture.store, conversationrun.ConversationRunSchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -77,7 +78,7 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 				}
 				presentation, _ := review["presentation"].(map[string]interface{})
 				message, err := fixture.store.GetChannelMessage(t.Context(), delivery.Scope, delivery.ConversationID, delivery.ChannelMessageID)
-				if err != nil || message.Sender != (ConversationParticipant{Type: ConversationParticipantService, ID: ChannelReviewParticipantID}) {
+				if err != nil || message.Sender != (ConversationParticipant{Type: ConversationParticipantService, ID: conversationrun.ChannelReviewParticipantID}) {
 					t.Fatalf("review message = %#v %v", message, err)
 				}
 				if started, _, err := scheduler.ScheduleMessage(t.Context(), delivery.Scope, delivery.ConversationID, delivery.ChannelMessageID); err != nil || started != nil {

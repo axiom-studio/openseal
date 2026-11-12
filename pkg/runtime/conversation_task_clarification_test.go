@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -21,7 +22,7 @@ type conversationTaskClarificationStore interface {
 type conversationTaskClarificationFixture struct {
 	store        conversationTaskClarificationStore
 	service      *runtimeconversation.ConversationService
-	scheduler    *ConversationRunScheduler
+	scheduler    *conversationrun.ConversationRunScheduler
 	conversation *Conversation
 	trigger      *ChannelMessage
 	task         *ConversationTask
@@ -73,7 +74,7 @@ func newConversationTaskClarificationFixture(t *testing.T, store conversationTas
 	}
 	proposal := taskSourceProposal{Goal: f.trigger.Content, Acknowledgment: "I have started the introduction."}
 	settled := settleTaskSource(t, store, conversation.Scope, claimed.ID, "worker", proposal)
-	accepted, err := NewConversationTaskService(store).Start(t.Context(), settled.Request)
+	accepted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil || accepted == nil || accepted.Task == nil || accepted.SourceRun == nil || accepted.WorkRun == nil {
 		t.Fatalf("admit independent task: %#v, %v", accepted, err)
 	}
@@ -101,7 +102,7 @@ func (f *conversationTaskClarificationFixture) ask(t *testing.T, question string
 func (f *conversationTaskClarificationFixture) resetScheduler(t *testing.T) {
 	t.Helper()
 	var err error
-	f.scheduler, err = NewConversationRunScheduler(f.store, f.store, ConversationRunSchedulerConfig{MessagePageSize: 2})
+	f.scheduler, err = conversationrun.NewConversationRunScheduler(f.store, f.store, conversationrun.ConversationRunSchedulerConfig{MessagePageSize: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,8 +306,8 @@ func TestConversationTaskClarificationRoundTrip(t *testing.T) {
 
 func (f *conversationTaskClarificationFixture) cancel(t *testing.T) {
 	t.Helper()
-	result, err := NewConversationTaskService(f.store).Cancel(t.Context(), CancelConversationTaskRequest{
-		GetConversationTaskRequest: GetConversationTaskRequest{
+	result, err := conversationrun.NewConversationTaskService(f.store).Cancel(t.Context(), conversationrun.CancelConversationTaskRequest{
+		GetConversationTaskRequest: conversationrun.GetConversationTaskRequest{
 			Scope: f.task.Scope, Owner: f.task.Owner, ConversationID: f.task.ConversationID, ThreadRootID: f.task.ThreadRootID,
 			TaskID: f.task.ID, AuthenticatedActor: f.task.AuthenticatedActor,
 		},

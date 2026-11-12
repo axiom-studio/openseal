@@ -7,12 +7,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	ctx := t.Context()
 	store, _, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

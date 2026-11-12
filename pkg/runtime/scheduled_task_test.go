@@ -18,6 +18,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -202,7 +203,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 						t.Fatal(err)
 					}
 					for i := 0; i < 2; i++ {
-						if err := projectTerminalRunReporting(t.Context(), reader, scheduled); err != nil {
+						if err := conversationrun.ProjectTerminalRunReporting(t.Context(), reader, scheduled); err != nil {
 							t.Fatal(err)
 						}
 					}

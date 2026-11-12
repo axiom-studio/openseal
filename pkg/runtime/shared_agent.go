@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -101,7 +102,7 @@ func (i *AgentInstaller) ExportSharedAgent(ctx context.Context, scope Scope, dep
 	if err != nil {
 		return nil, err
 	}
-	if deployment.ID == AgentBuilderDeploymentID || skillbinding.AgentDefinitionPolicyFixed(definition) {
+	if deployment.ID == conversationrun.AgentBuilderDeploymentID || skillbinding.AgentDefinitionPolicyFixed(definition) {
 		return nil, ErrSharedAgentNotShareable
 	}
 	if definition.Provenance.Source == SharedAgentProvenanceSource {

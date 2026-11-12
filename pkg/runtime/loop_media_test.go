@@ -28,6 +28,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -83,7 +84,7 @@ func newMediaFixture(t *testing.T, store KernelStore, vision bool, rules ...*mod
 	t.Helper()
 	f := &mediaFixture{loopFixture: newLoopFixture(t, store, withRules(rules...)), content: &mediaContent{byRef: map[string][]byte{}}, vision: vision}
 	// The kit's conversation turn runner, reading attachments from content.
-	runner, err := NewConversationRunTurnRunner(f.chats, f.coordinator(), ConversationRunTurnRunnerConfig{
+	runner, err := conversationrun.NewConversationRunTurnRunner(f.chats, f.coordinator(), conversationrun.ConversationRunTurnRunnerConfig{
 		AttachmentContent: f.content, AgentTurns: TurnRunnerResolverFunc(f.agentBinding),
 	}, models.WithClock(f.clock.Now))
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
@@ -173,15 +174,15 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	primaryScheduler, err := NewConversationRunScheduler(primary, primary, ConversationRunSchedulerConfig{})
+	primaryScheduler, err := conversationrun.NewConversationRunScheduler(primary, primary, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	replicaScheduler, err := NewConversationRunScheduler(replica, replica, ConversationRunSchedulerConfig{})
+	replicaScheduler, err := conversationrun.NewConversationRunScheduler(replica, replica, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	schedulers := []*ConversationRunScheduler{primaryScheduler, replicaScheduler}
+	schedulers := []*conversationrun.ConversationRunScheduler{primaryScheduler, replicaScheduler}
 	reconcileErrors := make(chan error, len(schedulers))
 	wait = sync.WaitGroup{}
 	for index := range schedulers {

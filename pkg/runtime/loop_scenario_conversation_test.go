@@ -24,6 +24,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -33,13 +34,13 @@ import (
 // config (Places, ImageStyle, HumanParticipants, participation opt-in), on
 // the fixture's clock. It resolves the Agent's own binding through the
 // fixture, as the fixture's runner does.
-func convRunner(f *loopFixture, config ConversationRunTurnRunnerConfig) {
+func convRunner(f *loopFixture, config conversationrun.ConversationRunTurnRunnerConfig) {
 	f.t.Helper()
 	if config.AttachmentContent == nil {
 		config.AttachmentContent = &answerVisualContent{}
 	}
 	config.AgentTurns = TurnRunnerResolverFunc(f.agentBinding)
-	runner, err := NewConversationRunTurnRunner(f.chats, f.coordinator(), config, models.WithClock(f.clock.Now))
+	runner, err := conversationrun.NewConversationRunTurnRunner(f.chats, f.coordinator(), config, models.WithClock(f.clock.Now))
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -187,7 +188,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	t.Run("card_state", func(t *testing.T) {
 		eachStore(t, "conv-cards", func(t *testing.T, store KernelStore) {
 			f := newLoopFixture(t, store)
-			convRunner(f, ConversationRunTurnRunnerConfig{})
+			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{})
 			first := true
 			f.model.add(&modelRule{name: "card", reply: func(v stepView) ModelStepResult {
 				if first {
@@ -248,7 +249,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 
 	t.Run("flashcards_and_recipe", func(t *testing.T) {
 		f := newLoopFixture(t, newTestKernelStore(t))
-		convRunner(f, ConversationRunTurnRunnerConfig{})
+		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{})
 		first := true
 		f.model.add(&modelRule{name: "card", reply: func(v stepView) ModelStepResult {
 			if first {
@@ -287,7 +288,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	t.Run("poll", func(t *testing.T) {
 		f := newLoopFixture(t, newTestKernelStore(t))
 		people := []ConversationParticipant{convActor("ana"), convActor("ben"), convActor("cy")}
-		convRunner(f, ConversationRunTurnRunnerConfig{
+		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{
 			HumanParticipants: func(_ context.Context, _ *Conversation) ([]ConversationParticipant, error) { return people, nil },
 		})
 		poll := presentation.Component{ID: "vote", Type: "poll", Title: "Dinner", Summary: "Where to eat.", Poll: &presentation.Poll{
@@ -335,7 +336,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	t.Run("places", func(t *testing.T) {
 		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
 		found := map[string][]runtimeconversation.ConversationPlace{}
-		convRunner(f, ConversationRunTurnRunnerConfig{Places: func(_ context.Context, run *AgentRun) []runtimeconversation.ConversationPlace {
+		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{Places: func(_ context.Context, run *AgentRun) []runtimeconversation.ConversationPlace {
 			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 			return found[conversationID]
 		}})
@@ -374,7 +375,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
 		// The host reads the style saved by the sender of the Run's trigger.
 		styles := map[string]string{"Draw a fox": " cartoon "}
-		convRunner(f, ConversationRunTurnRunnerConfig{ImageStyle: func(_ context.Context, run *AgentRun) string {
+		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{ImageStyle: func(_ context.Context, run *AgentRun) string {
 			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
 			message, err := f.convs.GetChannelMessage(f.ctx, f.scope, conversationID, triggerID)
@@ -508,7 +509,9 @@ func convMessageIDs(entries []*SessionEntry) []string {
 // convTeamCatalog is the Agent catalog seam a Team member's control authority
 // reads its delegation roster from: an active Team with no other eligible
 // member, so the member gets no delegate targets.
-type convTeamCatalog struct{ AgentTurnCatalog }
+type convTeamCatalog struct {
+	conversationrun.AgentTurnCatalog
+}
 
 func (convTeamCatalog) GetTeamDeployment(context.Context, skill.ScopeReference, string) (*kernelteam.Deployment, error) {
 	return &kernelteam.Deployment{Status: kernelteam.DeploymentActive}, nil
@@ -1028,7 +1031,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 
 	t.Run("participation_opt_in", func(t *testing.T) {
 		f := newLoopFixture(t, newTestKernelStore(t), withRules(convAnswer("ok: ")))
-		convRunner(f, ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
+		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
 		conversation := convChat(f, ObjectiveOwner{}, nil)
 
 		// Not opted in: the Run ends at once, with no model call and no post.
@@ -1060,7 +1063,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 	t.Run("participation_opt_out_discards_the_answer", func(t *testing.T) {
 		eachStore(t, "conv-optout", func(t *testing.T, store KernelStore) {
 			f := newLoopFixture(t, store)
-			convRunner(f, ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
+			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
 			conversation := convChat(f, ObjectiveOwner{}, nil)
 			convParticipation(f, conversation.ID, true)
 			f.dispatch.on("list_items", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {

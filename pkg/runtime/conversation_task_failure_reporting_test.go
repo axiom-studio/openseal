@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
@@ -45,7 +46,7 @@ func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore,
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +58,7 @@ func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore,
 		t.Fatalf("source claim: %#v %v", claimed, err)
 	}
 	settled := settleTaskSource(t, store, scope, claimed.ID, "worker", taskSourceProposal{Goal: "GOAL_SECRET prepare the complete result", Acknowledgment: "I will prepare the result."})
-	accepted, err := NewConversationTaskService(store).Start(t.Context(), settled.Request)
+	accepted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,7 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 					}
 					// Deliver work first, then replay through the actual durable outbox.
 					// The original source acknowledgment must still be published first.
-					if err := projectTerminalRunReporting(t.Context(), store, work); err != nil {
+					if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, work); err != nil {
 						t.Fatal(err)
 					}
 					worker := terminalReportingContractWorker(t, store, time.Now().Add(time.Second))
@@ -183,10 +184,10 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 						t.Fatal(err)
 					}
 					for range 2 {
-						if err := projectTerminalRunReporting(t.Context(), store, work); err != nil {
+						if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, work); err != nil {
 							t.Fatal(err)
 						}
-						if err := projectTerminalRunReporting(t.Context(), store, accepted.SourceRun); err != nil {
+						if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, accepted.SourceRun); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -226,7 +227,7 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 					for _, mutate := range []func(*AgentRun){func(r *AgentRun) { r.Scope.ID = "foreign" }, func(r *AgentRun) { r.Owner.ID = "foreign" }, func(r *AgentRun) { r.Context[conversationRunContextTriggerID] = "foreign" }} {
 						forged := cloneAgentRun(work)
 						mutate(forged)
-						if err := projectTerminalRunReporting(t.Context(), store, forged); !errors.Is(err, ErrInvalidConversationTask) {
+						if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, forged); !errors.Is(err, ErrInvalidConversationTask) {
 							t.Fatalf("forged origin accepted: %v", err)
 						}
 					}
@@ -248,11 +249,11 @@ func TestConversationTaskContinuationFailureUsesSanitizedReply(t *testing.T) {
 	store, result, _, _ := promotedContinuationFixture(t, "safe-continuation-failure")
 	run := finishContinuationRun(t, store, result.WorkRun, AgentRunStatusFailed)
 	for range 2 {
-		if err := projectTerminalRunReporting(t.Context(), store, run); err != nil {
+		if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, run); err != nil {
 			t.Fatal(err)
 		}
 	}
-	message, err := FindConversationTaskResultMessage(t.Context(), store, result.Task, run)
+	message, err := conversationrun.FindConversationTaskResultMessage(t.Context(), store, result.Task, run)
 	if err != nil || message == nil || message.Content != runtimeconversation.TerminalFailureReply("execution_failed") {
 		t.Fatalf("legacy failure lost safe reply: %#v %v", message, err)
 	}

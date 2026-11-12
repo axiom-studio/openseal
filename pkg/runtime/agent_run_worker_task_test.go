@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -71,7 +72,7 @@ func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks ConversationTas
 	activity := NewRunActivityService(store, store)
 	control := &ControlExecutor{
 		Portfolio: store, Sessions: store, Activity: activity, Conversations: conversation.NewConversationService(store),
-		Reporting: store, Tasks: NewConversationTaskService(tasks),
+		Reporting: store, Tasks: conversationrun.NewConversationTaskService(tasks),
 	}
 	dispatcher, err := NewStepToolDispatcher(StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: control})
 	if err != nil {

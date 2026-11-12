@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -83,7 +84,7 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...ModelT
 	}
 	message := postConversationRunTestMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion,
 		"Review the release in the background", "start-task-message")
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +157,7 @@ func newStartTaskFixture(t *testing.T, store startTaskTestStore, calls ...ModelT
 	}
 	f.authority = agentrun.ControlAuthority{AgentID: run.AssignedAgentID,
 		TaskStart: &HostedConversationTaskContext{ConversationID: conversation.ID, ThreadRootID: thread, CanStart: true}}
-	f.exec = &ControlExecutor{Portfolio: store, Sessions: store, Tasks: NewConversationTaskService(store)}
+	f.exec = &ControlExecutor{Portfolio: store, Sessions: store, Tasks: conversationrun.NewConversationTaskService(store)}
 	return f
 }
 
@@ -186,13 +187,13 @@ func (f *startTaskFixture) settle(callID string) ControlResult {
 }
 
 // request is the admission the settle of callID makes.
-func (f *startTaskFixture) request(callID string) StartConversationTaskRequest {
+func (f *startTaskFixture) request(callID string) conversationrun.StartConversationTaskRequest {
 	entry := f.entries[callID]
 	args := startTaskArguments(entry)
 	if args == nil {
 		f.t.Fatalf("entry %s has no start_task arguments", entry.ID)
 	}
-	return StartConversationTaskRequest{Scope: f.run.Scope, SourceRunID: f.run.ID, ExpectedSourceRevision: f.run.Revision,
+	return conversationrun.StartConversationTaskRequest{Scope: f.run.Scope, SourceRunID: f.run.ID, ExpectedSourceRevision: f.run.Revision,
 		WorkerID: startTaskTestWorker, TurnID: f.step.ID, ToolEntryID: entry.ID, AssignedAgentID: f.run.AssignedAgentID,
 		TaskKey: startTaskKey(entry.ID), Goal: args.Goal, Acknowledgment: args.Acknowledgment, Budget: &BudgetPolicy{}}
 }
@@ -285,14 +286,14 @@ func TestStartTaskProvenanceSourceTurnIsStepAndLastApplied(t *testing.T) {
 
 	// A request that does not match the step's entry is refused.
 	g := newStartTaskFixture(t, newTestKernelStore(t))
-	for name, mutate := range map[string]func(*StartConversationTaskRequest){
-		"tampered goal":     func(r *StartConversationTaskRequest) { r.Goal = "Something else entirely." },
-		"tampered ack":      func(r *StartConversationTaskRequest) { r.Acknowledgment = "Done already." },
-		"other task key":    func(r *StartConversationTaskRequest) { r.TaskKey = "task-other" },
-		"unknown entry":     func(r *StartConversationTaskRequest) { r.ToolEntryID = "missing-entry" },
-		"assistant entry":   func(r *StartConversationTaskRequest) { r.ToolEntryID = g.assistant.ID },
-		"no tool entry":     func(r *StartConversationTaskRequest) { r.ToolEntryID = "" },
-		"other step row id": func(r *StartConversationTaskRequest) { r.TurnID = "turn-other" },
+	for name, mutate := range map[string]func(*conversationrun.StartConversationTaskRequest){
+		"tampered goal":     func(r *conversationrun.StartConversationTaskRequest) { r.Goal = "Something else entirely." },
+		"tampered ack":      func(r *conversationrun.StartConversationTaskRequest) { r.Acknowledgment = "Done already." },
+		"other task key":    func(r *conversationrun.StartConversationTaskRequest) { r.TaskKey = "task-other" },
+		"unknown entry":     func(r *conversationrun.StartConversationTaskRequest) { r.ToolEntryID = "missing-entry" },
+		"assistant entry":   func(r *conversationrun.StartConversationTaskRequest) { r.ToolEntryID = g.assistant.ID },
+		"no tool entry":     func(r *conversationrun.StartConversationTaskRequest) { r.ToolEntryID = "" },
+		"other step row id": func(r *conversationrun.StartConversationTaskRequest) { r.TurnID = "turn-other" },
 	} {
 		req := g.request("call-task")
 		mutate(&req)
@@ -500,7 +501,7 @@ func TestOldTaskWithoutToolEntryStillValidates(t *testing.T) {
 		t.Fatal("old task no longer matches its work Run")
 	}
 	// Admission itself only starts tasks from a tool entry.
-	if _, err := NewConversationTaskService(store).Start(t.Context(), StartConversationTaskRequest{Scope: task.Scope, SourceRunID: task.SourceRunID,
+	if _, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationrun.StartConversationTaskRequest{Scope: task.Scope, SourceRunID: task.SourceRunID,
 		ExpectedSourceRevision: 1, WorkerID: record.WorkerID, TurnID: task.SourceTurnID, AssignedAgentID: task.TargetAgentID,
 		TaskKey: task.TaskKey, Goal: task.Goal, Acknowledgment: task.Acknowledgment}); !errors.Is(err, ErrInvalidConversationTask) {
 		t.Fatalf("start without a tool entry = %v", err)

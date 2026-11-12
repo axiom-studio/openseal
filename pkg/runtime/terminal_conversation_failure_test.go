@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/google/uuid"
 )
 
@@ -71,7 +72,7 @@ func failTerminalConversation(t *testing.T, store terminalReportingContractStore
 
 func assertTerminalConversationFailure(t *testing.T, store terminalReportingContractStore, run *AgentRun, trigger *ChannelMessage, code string) *ChannelMessage {
 	t.Helper()
-	message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, terminalConversationFailureReplyKey(run))
+	message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, conversationrun.TerminalConversationFailureReplyKey(run))
 	if err != nil || message == nil || message.Content != runtimeconversation.TerminalFailureReply(code) || message.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}) || message.Intent != MessageIntentAnswer || message.ReplyToMessageID != trigger.ID || message.ResolvesMessageID != trigger.ID || message.ThreadRootID != trigger.ID || message.ResponseMode != trigger.ResponseMode {
 		t.Fatalf("failure reply lost canonical actor, cause or call thread: %#v %v", message, err)
 	}
@@ -151,7 +152,7 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 		if err := store.CompleteRunTerminalReport(t.Context(), wrong); !errors.Is(err, ErrLeaseLost) {
 			t.Fatalf("old lease could acknowledge new attempt: %v", err)
 		}
-		if err := projectTerminalRunReporting(t.Context(), store, claims[0].Run); err != nil {
+		if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, claims[0].Run); err != nil {
 			t.Fatal(err)
 		}
 		if err := store.CompleteRunTerminalReport(t.Context(), completion); err != nil {
@@ -161,7 +162,7 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 			t.Fatalf("new failure receipt was lost: %d %v", count, err)
 		}
 		message := assertTerminalConversationFailure(t, store, second, trigger, "tool_call_cardinality")
-		old, err := store.FindChannelMessageByIdempotencyKey(t.Context(), first.Scope, trigger.ConversationID, terminalConversationFailureReplyKey(first))
+		old, err := store.FindChannelMessageByIdempotencyKey(t.Context(), first.Scope, trigger.ConversationID, conversationrun.TerminalConversationFailureReplyKey(first))
 		if err != nil || old == nil || old.ID == message.ID || old.Content != runtimeconversation.TerminalFailureReply("provider_rate_limited") {
 			t.Fatalf("manual attempts collapsed: %#v %#v %v", old, message, err)
 		}
@@ -180,7 +181,7 @@ func TestTerminalConversationFailureRejectsForgedOriginAndPreservesSavedAnswer(t
 	} {
 		forged := cloneAgentRun(run)
 		mutate(forged)
-		if err := projectFailedConversationReply(t.Context(), store, forged); err == nil {
+		if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, forged); err == nil {
 			t.Fatal("forged origin published an Agent answer")
 		}
 	}
@@ -191,7 +192,7 @@ func TestTerminalConversationFailureRejectsForgedOriginAndPreservesSavedAnswer(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := projectFailedConversationReply(t.Context(), store, run); err != nil {
+	if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, run); err != nil {
 		t.Fatal(err)
 	}
 	current, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)
@@ -221,7 +222,7 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 			if err != nil || posted.Message.RequiresResponse {
 				t.Fatalf("canonical source fixture unexpectedly opted into response flag: %#v %v", posted, err)
 			}
-			scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -261,7 +262,7 @@ func TestTerminalConversationFailureResponseFlagCannotAuthorizeControlSource(t *
 	forged := cloneAgentRun(run)
 	forged.Context[conversationRunContextTriggerID] = control.Message.ID
 	forged.Context["threadRootMessageId"] = control.Message.ID
-	if err := projectFailedConversationReply(t.Context(), store, forged); !errors.Is(err, ErrInvalidAgentRun) {
+	if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, forged); !errors.Is(err, ErrInvalidAgentRun) {
 		t.Fatalf("response flag authorized a source the kernel cannot schedule: %v", err)
 	}
 	current, err = store.GetConversation(t.Context(), run.Scope, conversation.ID)
@@ -282,7 +283,7 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 		if count, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 			t.Fatalf("credit stop report was not acknowledged: %d %v", count, err)
 		}
-		if message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, terminalConversationFailureReplyKey(run)); message != nil || !errors.Is(err, ErrChannelMessageNotFound) && err != nil {
+		if message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, conversationrun.TerminalConversationFailureReplyKey(run)); message != nil || !errors.Is(err, ErrChannelMessageNotFound) && err != nil {
 			t.Fatalf("an application chat received a failure answer for a credit stop: %#v %v", message, err)
 		}
 		retry, err := agentrun.NewRunCommandService(store).RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Actor: ActivityActor{Type: "user", ID: "kev"}})
@@ -316,7 +317,7 @@ func TestFailedConversationReplySkipsServiceWakeWithoutRetry(t *testing.T) {
 	woken := cloneAgentRun(run)
 	woken.Context[conversationRunContextTriggerID] = wake.Message.ID
 	woken.Context["threadRootMessageId"] = wake.Message.ID
-	if err := projectFailedConversationReply(t.Context(), store, woken); err != nil {
+	if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, woken); err != nil {
 		t.Fatalf("a service wake has nobody waiting and must not be retried: %v", err)
 	}
 	after, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)

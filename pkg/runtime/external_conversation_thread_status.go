@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 // Native working state is independent of public chat updates. Providers map
@@ -17,7 +18,7 @@ func (w *RunProgressAcknowledgementWorker) projectThreadStatus(ctx context.Conte
 		return nil, nil
 	}
 	run := reply.run
-	if run.Status == AgentRunStatusCompleted || run.Status == AgentRunStatusFailed || externalInboxItemIsFollowUp(item, run) {
+	if run.Status == AgentRunStatusCompleted || run.Status == AgentRunStatusFailed || conversationrun.ExternalInboxItemIsFollowUp(item, run) {
 		return nil, nil // Finished replies clear state after their answer or failure notice is delivered.
 	}
 	endpoint, adapter, err := w.resolveEndpoint(ctx, item)

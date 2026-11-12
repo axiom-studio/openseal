@@ -1,0 +1,156 @@
+package conversationrun
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+)
+
+const (
+	answerVisualNotShownEvent   = "turn.visual_not_shown"
+	answerVisualNotShownSummary = "The agent's visual was not shown: a visual can only go with a reply in a chat."
+	answerVisualRejectedEvent   = "turn.visual_rejected"
+	answerVisualRejectedSummary = "The agent's visual failed its checks and was left off the answer:"
+)
+
+// errInvalidAnswerVisual marks a visual rejected by validation, as opposed
+// to a storage failure.
+var errInvalidAnswerVisual = errors.New("invalid answer visual")
+
+// answerVisualArtifactID is stable per Run, trigger and (for Team members
+// answering in one round) participant, so a replayed answer references the
+// visual stored by its first attempt.
+func answerVisualArtifactID(runID, triggerID, participantID string) string {
+	key := runID + "\x00" + triggerID
+	if participantID != "" {
+		key += "\x00" + participantID
+	}
+	return "visual-" + strings.TrimPrefix(models.SHA256DigestString(key), "sha256:")[:40]
+}
+
+// storeAnswerVisual stores the visual that rides on an Agent's answer as an
+// interactive surface artifact (version 1) with the given ID and returns the
+// reference the answer message carries. No receipt is posted: the answer is
+// the delivery. One-to-one and Team answers share it. The routines its
+// routine components show are linked to the conversation (also on a
+// replay, in case the first attempt stopped in between).
+func (r *ConversationRunTurnRunner) storeAnswerVisual(ctx context.Context, run *models.AgentRun, participantID, id string, visual presentation.Visual) (models.ConversationReference, error) {
+	reference, err := r.storeAnswerVisualArtifact(ctx, run, participantID, id, visual)
+	if err != nil {
+		return models.ConversationReference{}, err
+	}
+	if routines := presentation.RoutineBindings(visual.Surface(presentation.StateReady)); len(routines) > 0 {
+		conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+		if _, err := r.conversations.LinkRunbooks(ctx, run.Scope, conversationID, routines); err != nil {
+			return models.ConversationReference{}, fmt.Errorf("link the visual's routines to the chat: %w", err)
+		}
+	}
+	return reference, nil
+}
+
+func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Context, run *models.AgentRun, participantID, id string, visual presentation.Visual) (models.ConversationReference, error) {
+	if r.artifacts == nil || r.config.AttachmentContent == nil {
+		return models.ConversationReference{}, errors.New("answer visuals require artifact and content storage")
+	}
+	reference := models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: id, Version: 1}
+	existing, err := r.artifacts.GetArtifact(ctx, run.Scope, id, 1)
+	if err != nil && !errors.Is(err, artifactcatalog.ErrArtifactNotFound) {
+		return models.ConversationReference{}, err
+	}
+	if existing != nil {
+		if existing.Type != presentation.ArtifactType || existing.Provenance.RunID != run.ID {
+			return models.ConversationReference{}, models.ErrArtifactImmutable
+		}
+		return reference, nil
+	}
+	surface := visual.Surface(presentation.StateReady)
+	content, err := presentation.Encode(surface)
+	if err != nil {
+		return models.ConversationReference{}, err
+	}
+	owner := run.Owner
+	stored, err := r.config.AttachmentContent.Put(ctx, models.ArtifactContentWrite{
+		Scope: run.Scope, MediaType: presentation.MediaType, Reader: bytes.NewReader(content), SizeBytes: int64(len(content)),
+		Digest: models.SHA256Digest(content), Owner: &owner,
+	})
+	if err != nil {
+		return models.ConversationReference{}, err
+	}
+	// The name is what a person sees if the card is ever listed: its title.
+	name := strings.TrimSpace(surface.Title)
+	if name == "" {
+		name = "Card"
+	}
+	for len(name) > 480 {
+		runes := []rune(name)
+		name = string(runes[:len(runes)-1])
+	}
+	componentTypes := make([]interface{}, 0, len(surface.Components))
+	for _, component := range surface.Components {
+		componentTypes = append(componentTypes, component.Type)
+	}
+	conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+	placement := artifactcatalog.ArtifactPlacement{}
+	if r.conversations != nil {
+		placement.Conversations = r.conversations
+	}
+	_, err = artifactcatalog.NewArtifactCatalog(r.artifacts, models.WithClock(r.now)).WithPlacement(placement).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &models.Artifact{
+		ID: id, Version: 1, Scope: run.Scope, Name: name,
+		Type: presentation.ArtifactType, MediaType: presentation.MediaType,
+		ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: models.ArtifactClassificationInternal,
+		MetadataSchema: map[string]interface{}{
+			"type": "object", "additionalProperties": false, "required": []interface{}{"schema", "state", "componentTypes"},
+			"properties": map[string]interface{}{
+				"schema":         map[string]interface{}{"const": presentation.Schema},
+				"state":          map[string]interface{}{"enum": []interface{}{string(presentation.StateStreaming), string(presentation.StateReady)}},
+				"componentTypes": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": presentation.MaxComponents, "items": map[string]interface{}{"type": "string"}},
+			},
+		},
+		Metadata: map[string]interface{}{"schema": presentation.Schema, "state": string(surface.State), "componentTypes": componentTypes},
+		Provenance: models.ArtifactProvenance{
+			Producer: models.ActivityActor{Type: "agent", ID: participantID}, Owner: &owner, RunID: run.ID, ObjectiveID: run.ObjectiveID,
+			ConversationID: conversationID,
+		},
+	}})
+	if err != nil {
+		return models.ConversationReference{}, err
+	}
+	return reference, nil
+}
+
+// visualRepeatsAttachedImages reports a visual made only of image and gallery
+// components whose every image is an artifact the answer already references.
+func visualRepeatsAttachedImages(visual presentation.Visual, references []models.ConversationReference) bool {
+	attached := make(map[string]bool, len(references))
+	for _, reference := range references {
+		if reference.Kind == models.ConversationReferenceArtifact {
+			attached[reference.ID] = true
+		}
+	}
+	if len(visual.Components) == 0 || len(attached) == 0 {
+		return false
+	}
+	for _, component := range visual.Components {
+		switch {
+		case component.Image != nil:
+			if !attached[component.Image.Image.ArtifactID] {
+				return false
+			}
+		case component.Gallery != nil:
+			for _, image := range component.Gallery.Images {
+				if !attached[image.Image.ArtifactID] {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}

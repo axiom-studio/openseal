@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -120,7 +121,7 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	}
 	settled := settleTaskSource(t, store, scope, source.ID, "worker", taskSourceProposal{
 		Goal: "Read the community and report the outcome", Acknowledgment: "I have started reading the community.", Budget: &BudgetPolicy{MaxTurns: 5}})
-	task, err := NewConversationTaskService(store).Start(ctx, settled.Request)
+	task, err := conversationrun.NewConversationTaskService(store).Start(ctx, settled.Request)
 	if err != nil {
 		t.Fatalf("Team member task start = %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -101,7 +102,7 @@ type AgentRunWorkerPool struct {
 	forks                *agentrun.RunForkCoordinator
 	dependencies         *DependencyCoordinator // pages waiting fork groups; nil unless the store indexes them
 	collaboration        *CollaborationService
-	conversationTasks    *ConversationTaskService
+	conversationTasks    *conversationrun.ConversationTaskService
 	requestInbox         *AgentRequestInboxReconciler
 	reportingStore       ConversationStore
 	resolver             conversation.TurnRunnerResolver
@@ -192,7 +193,7 @@ func newAgentRunWorkerPool(store KernelStore, resolver conversation.TurnRunnerRe
 		pool.collaboration = NewCollaborationService(collaborationStore, opts...)
 	}
 	if taskStore, ok := store.(ConversationTaskKernelStore); ok {
-		pool.conversationTasks = NewConversationTaskService(taskStore, opts...)
+		pool.conversationTasks = conversationrun.NewConversationTaskService(taskStore, opts...)
 	}
 	if inboxStore, ok := store.(AgentRequestInboxStore); ok {
 		pool.requestInbox, _ = NewAgentRequestInboxReconciler(inboxStore, opts...)
@@ -465,7 +466,7 @@ func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *
 	// terminal commit. This fast path improves latency; the durable reporting
 	// worker retries and acknowledges it independently using the same message
 	// idempotency key, including crashes immediately before or after this call.
-	if err := projectTerminalRunReporting(ctx, p.reportingStore, run); err != nil {
+	if err := conversationrun.ProjectTerminalRunReporting(ctx, p.reportingStore, run); err != nil {
 		p.logger.Warnw("failed to project terminal Run milestone", "runId", run.ID, "error", err)
 	}
 }

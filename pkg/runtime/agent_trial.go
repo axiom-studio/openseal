@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 // try_agent runs a drafted profile as a bounded child Run of the builder:
@@ -259,7 +260,7 @@ const finalOutputReportKey = "report"
 
 // forkChildAnswer is a child's final answer: its report, else its summary.
 func forkChildAnswer(child *AgentRun) string {
-	for _, key := range []string{finalOutputReportKey, finalOutputSummaryKey} {
+	for _, key := range []string{finalOutputReportKey, conversationrun.FinalOutputSummaryKey} {
 		if text, ok := child.Output[key].(string); ok && strings.TrimSpace(text) != "" {
 			return strings.TrimSpace(text)
 		}

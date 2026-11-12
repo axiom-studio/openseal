@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/validation"
 )
@@ -85,7 +86,7 @@ func validateScheduledTaskTarget(ctx context.Context, reader RunbookActivationRe
 
 func prepareActivationReporting(ctx context.Context, store ConversationStore, a *RunbookActivation, runID string, values map[string]interface{}) (*Conversation, string, error) {
 	if a.Task == nil {
-		return prepareRunReporting(ctx, store, a.Scope, a.Owner, a.Trigger.Reporting, activationActingUser(a), runID, values)
+		return conversationrun.PrepareRunReporting(ctx, store, a.Scope, a.Owner, a.Trigger.Reporting, activationActingUser(a), runID, values)
 	}
 	if store == nil {
 		return nil, "", errors.New("scheduled task reporting store unavailable")

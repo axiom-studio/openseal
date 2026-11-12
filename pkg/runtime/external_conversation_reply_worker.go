@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 // ExternalConversationReplyWorker projects applied inbox work after its
@@ -185,7 +186,7 @@ func (w *ExternalConversationReplyWorker) projectReply(
 	if run.Status == AgentRunStatusCanceled {
 		return nil, w.retireAnswerStream(ctx, item, reply.id)
 	}
-	if externalInboxItemIsFollowUp(item, run) {
+	if conversationrun.ExternalInboxItemIsFollowUp(item, run) {
 		return nil, nil // The Run's own trigger item delivers its single reply.
 	}
 	if run.Status != AgentRunStatusCompleted && run.Status != AgentRunStatusFailed {
@@ -269,7 +270,7 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		}
 		// Both workers publish through the same revision-specific failure key.
 		// The provider outbox then delivers that saved Agent answer once.
-		if err := projectFailedConversationReply(ctx, w.store, run); err != nil {
+		if err := conversationrun.ProjectFailedConversationReply(ctx, w.store, run); err != nil {
 			return nil, err
 		}
 	}
@@ -424,7 +425,7 @@ func (w *ExternalConversationReplyWorker) findCanonicalReply(
 		return message, nil
 	}
 	if run.Status == AgentRunStatusFailed {
-		message, err := w.store.FindChannelMessageByIdempotencyKey(ctx, item.Scope, item.ConversationID, terminalConversationFailureReplyKey(run))
+		message, err := w.store.FindChannelMessageByIdempotencyKey(ctx, item.Scope, item.ConversationID, conversationrun.TerminalConversationFailureReplyKey(run))
 		if err != nil && !errors.Is(err, ErrChannelMessageNotFound) {
 			return nil, err
 		}
@@ -536,7 +537,7 @@ func externalConversationRunReply(ctx context.Context, sessions conversation.Loo
 	if run.Status == AgentRunStatusFailed {
 		// Only a posted model explanation is the failed attempt's reply.
 		if f := run.FailureExplanation; f != nil && f.Explained {
-			if summary := strings.TrimSpace(conversationResultString(run.Output, "summary")); summary != "" && len(summary) <= 65536 {
+			if summary := strings.TrimSpace(conversationrun.ConversationResultString(run.Output, "summary")); summary != "" && len(summary) <= 65536 {
 				return summary, true
 			}
 		}

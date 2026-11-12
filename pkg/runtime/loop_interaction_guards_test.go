@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -207,7 +208,7 @@ func TestBackgroundTaskParksOnPendingSetup(t *testing.T) {
 		t.Fatal("expected the task Run to park on the pending setup")
 	}
 	if plan.Deliver || plan.Status != AgentRunStatusWaitingForEvent || plan.Wake == nil ||
-		plan.Wake.Type != ConversationTaskSkillSetupWakeType || plan.Wake.Reference != "setup-1" || plan.Summary != skillSetupWaitSummary {
+		plan.Wake.Type != conversationrun.ConversationTaskSkillSetupWakeType || plan.Wake.Reference != "setup-1" || plan.Summary != skillSetupWaitSummary {
 		t.Fatalf("unexpected setup park: %+v wake=%+v", plan, plan.Wake)
 	}
 

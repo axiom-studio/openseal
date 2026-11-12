@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 // Forward the Agent's already-rendered public updates as durable messages.
@@ -40,7 +41,7 @@ func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context
 			if run.Owner != endpoint.Owner {
 				return result, seen, ErrExternalConversationConflict
 			}
-			if externalInboxItemIsFollowUp(item, run) {
+			if conversationrun.ExternalInboxItemIsFollowUp(item, run) {
 				return nil, false, nil // The trigger's item already forwards this Run's updates.
 			}
 			if strings.TrimSpace(run.AssignedAgentID) == "" {

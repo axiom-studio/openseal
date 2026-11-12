@@ -9,13 +9,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type conversationFollowUpFixture struct {
 	store        *sqlite.Store
 	service      *conversation.ConversationService
-	scheduler    *ConversationRunScheduler
+	scheduler    *conversationrun.ConversationRunScheduler
 	conversation *Conversation
 }
 
@@ -203,13 +204,13 @@ func TestExternalInboxFollowUpItemDefersToTriggerItem(t *testing.T) {
 	}, {
 		ID: "operator-guidance", Instruction: "Keep going",
 	}}
-	if externalInboxItemIsFollowUp(&ExternalConversationInboxItem{ChannelMessageID: "trigger"}, run) {
+	if conversationrun.ExternalInboxItemIsFollowUp(&ExternalConversationInboxItem{ChannelMessageID: "trigger"}, run) {
 		t.Fatal("trigger item treated as follow-up")
 	}
-	if !externalInboxItemIsFollowUp(&ExternalConversationInboxItem{ChannelMessageID: "follow-up"}, run) {
+	if !conversationrun.ExternalInboxItemIsFollowUp(&ExternalConversationInboxItem{ChannelMessageID: "follow-up"}, run) {
 		t.Fatal("follow-up item would duplicate the Run's reply")
 	}
-	if externalInboxItemIsFollowUp(&ExternalConversationInboxItem{ChannelMessageID: "unrelated"}, run) {
+	if conversationrun.ExternalInboxItemIsFollowUp(&ExternalConversationInboxItem{ChannelMessageID: "unrelated"}, run) {
 		t.Fatal("unrelated item treated as follow-up")
 	}
 }
@@ -218,9 +219,9 @@ func TestExternalInboxFollowUpItemDefersToTriggerItem(t *testing.T) {
 // message-backed intervention (bumping the Run's revision), and the Run's
 // next step ingests it into its own session through catch-up.
 
-func (f *chatLoopFixture) scheduler() *ConversationRunScheduler {
+func (f *chatLoopFixture) scheduler() *conversationrun.ConversationRunScheduler {
 	f.t.Helper()
-	scheduler, err := NewConversationRunScheduler(f.store, f.store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(f.store, f.store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		f.t.Fatal(err)
 	}

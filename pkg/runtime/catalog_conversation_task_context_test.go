@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -41,7 +42,7 @@ func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
 		"empty trigger":      {conversationRunContextConversationID: "chat", conversationRunContextTriggerID: ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			result, err := resolveCatalogConversationTaskContext(t.Context(), nil, &AgentRun{ID: "ordinary", Kind: RunKindAgentWork, Context: input}, store)
+			result, err := conversationrun.ResolveCatalogConversationTaskContext(t.Context(), nil, &AgentRun{ID: "ordinary", Kind: RunKindAgentWork, Context: input}, store)
 			if err != nil || result != nil || store.runReads != 0 || store.taskReads != 0 || store.taskLists != 0 {
 				t.Fatalf("ordinary work added task reads: result=%#v err=%v runs=%d tasks=%d lists=%d", result, err, store.runReads, store.taskReads, store.taskLists)
 			}
@@ -60,7 +61,7 @@ func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *test
 		t.Fatal(err)
 	}
 	store := &countedCatalogTaskContextStore{Store: kernel}
-	result, err := resolveCatalogConversationTaskContext(t.Context(), nil, child, store)
+	result, err := conversationrun.ResolveCatalogConversationTaskContext(t.Context(), nil, child, store)
 	if err != nil || result != nil || store.runReads != 1 || store.taskReads != 0 || store.taskLists != 0 {
 		t.Fatalf("ordinary chat child added task lookups: result=%#v err=%v runs=%d tasks=%d lists=%d", result, err, store.runReads, store.taskReads, store.taskLists)
 	}
@@ -109,7 +110,7 @@ func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *Conversati
 		if _, err := store.CreateAgentTurn(t.Context(), turn); err != nil {
 			t.Fatal(err)
 		}
-		tasks := NewConversationTaskService(store, models.WithClock(func() time.Time { return record.Task.CreatedAt }))
+		tasks := conversationrun.NewConversationTaskService(store, models.WithClock(func() time.Time { return record.Task.CreatedAt }))
 		source, err := store.GetAgentRun(t.Context(), scope, record.Task.SourceRunID)
 		if err != nil {
 			t.Fatal(err)
@@ -130,7 +131,7 @@ func TestCatalogConversationTaskContextPrioritizesIndependentRootWithoutWidening
 		t.Run(fmt.Sprintf("active=%d", count), func(t *testing.T) {
 			store, conversation, admitted := catalogTaskPageFixture(t, count)
 			self := admitted[0]
-			context, err := resolveCatalogConversationTaskContext(t.Context(), nil, self.WorkRun, store)
+			context, err := conversationrun.ResolveCatalogConversationTaskContext(t.Context(), nil, self.WorkRun, store)
 			wantCount := min(count, 10)
 			if err != nil || context == nil || context.CanStart || len(context.Tasks) != wantCount || context.Tasks[0].TaskID != self.Task.ID || context.Tasks[0].WorkRunID != self.WorkRun.ID {
 				t.Fatalf("executing task missing from bounded first slot: %#v, %v", context, err)
@@ -152,7 +153,7 @@ func TestCatalogConversationTaskContextPrioritizesIndependentRootWithoutWidening
 			if count > 10 && ordinary[0].Task.ID == self.Task.ID {
 				t.Fatal("fixture did not place the executing task outside the ordinary recent page")
 			}
-			foreground, err := resolveCatalogConversationTaskContext(t.Context(), nil, self.SourceRun, store)
+			foreground, err := conversationrun.ResolveCatalogConversationTaskContext(t.Context(), nil, self.SourceRun, store)
 			if err != nil || foreground == nil || len(foreground.Tasks) != len(ordinary) {
 				t.Fatalf("foreground bounded projection changed: %#v, %v", foreground, err)
 			}
@@ -163,7 +164,7 @@ func TestCatalogConversationTaskContextPrioritizesIndependentRootWithoutWidening
 			}
 			foreign := cloneAgentRun(self.WorkRun)
 			foreign.Scope.ID = "foreign-tenant"
-			if context, err := resolveCatalogConversationTaskContext(t.Context(), nil, foreign, store); err != nil || context != nil {
+			if context, err := conversationrun.ResolveCatalogConversationTaskContext(t.Context(), nil, foreign, store); err != nil || context != nil {
 				t.Fatalf("foreign tenant acquired executing-task identity: %#v, %v", context, err)
 			}
 		})
@@ -180,7 +181,7 @@ func TestCatalogConversationTaskContextDoesNotPrioritizeForkRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	context, err := resolveCatalogConversationTaskContext(t.Context(), nil, child, store)
+	context, err := conversationrun.ResolveCatalogConversationTaskContext(t.Context(), nil, child, store)
 	if err != nil || context == nil || len(context.Tasks) != 10 {
 		t.Fatalf("fork task context = %#v, %v", context, err)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -24,7 +25,7 @@ type ControlAuthorityInput struct {
 	Run *AgentRun
 	// DeploymentID is the Agent deployment that speaks for the Run.
 	DeploymentID      string
-	Catalog           AgentTurnCatalog
+	Catalog           conversationrun.AgentTurnCatalog
 	Scope             skill.ScopeReference // zero = Run.Scope
 	SkillPromptRefs   []string
 	Operations        []agentrun.HostedRunbookOperation // binding.RunbookOperations
@@ -48,7 +49,7 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (age
 		return agentrun.ControlAuthority{}, errors.New("control authority requires the speaking Agent deployment")
 	}
 	authority := agentrun.ControlAuthority{AgentID: agentID, FinalMode: controlFinalMode(run),
-		RoutineOccurrence: routineOccurrenceRun(run) && run.Kind != RunKindConversation}
+		RoutineOccurrence: conversationrun.RoutineOccurrenceRun(run) && run.Kind != RunKindConversation}
 	if in.Deterministic {
 		return authority, nil
 	}
@@ -90,7 +91,7 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (age
 		authority.DelegateTargets = append([]agentrun.HostedAgentTarget(nil), targets...)
 	}
 
-	tasks, err := resolveCatalogConversationTaskContext(ctx, in.Catalog, run, in.ConversationTasks)
+	tasks, err := conversationrun.ResolveCatalogConversationTaskContext(ctx, in.Catalog, run, in.ConversationTasks)
 	if err != nil {
 		return agentrun.ControlAuthority{}, fmt.Errorf("resolve conversation task context: %w", err)
 	}
@@ -127,14 +128,14 @@ func controlFinalMode(run *AgentRun) agentrun.FinalAnswerMode {
 		return agentrun.FinalModeReview
 	}
 	if run.Context["responseMode"] == "spoken" {
-		return FinalModeSpoken
+		return conversationrun.FinalModeSpoken
 	}
 	return agentrun.FinalModeDefault
 }
 
 func resolveHostedAgentTargets(
 	ctx context.Context,
-	catalog AgentTurnCatalog,
+	catalog conversationrun.AgentTurnCatalog,
 	scope skill.ScopeReference,
 	run *AgentRun,
 	currentDeploymentID string,

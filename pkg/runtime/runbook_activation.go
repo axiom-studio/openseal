@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -288,7 +289,7 @@ func startActivationOccurrence(
 	if err != nil {
 		return nil, err
 	}
-	if err := projectRunReportingStart(ctx, reportingStore, channel, messageKey, created.Run); err != nil {
+	if err := conversationrun.ProjectRunReportingStart(ctx, reportingStore, channel, messageKey, created.Run); err != nil {
 		return nil, fmt.Errorf("project Runbook activation %s start: %w", activation.ID, err)
 	}
 	return created, nil
@@ -561,7 +562,7 @@ func (s *RunbookActivationService) ensureReportingChannel(ctx context.Context, a
 	if !ok {
 		return errors.New("active Runbook reporting requires a conversation store")
 	}
-	_, err := ensureRunReportingChannel(ctx, store, activation.Scope, activation.Owner, activation.Trigger.Reporting, activationActingUser(activation))
+	_, err := conversationrun.EnsureRunReportingChannel(ctx, store, activation.Scope, activation.Owner, activation.Trigger.Reporting, activationActingUser(activation))
 	return err
 }
 

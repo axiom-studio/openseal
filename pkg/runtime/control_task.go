@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -80,7 +81,7 @@ func (startTaskHandler) Run(ctx context.Context, x *ControlExecutor, cc agentrun
 		if err != nil {
 			return ControlResult{}, err
 		}
-		result, err := x.Tasks.Start(ctx, StartConversationTaskRequest{
+		result, err := x.Tasks.Start(ctx, conversationrun.StartConversationTaskRequest{
 			Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: cc.WorkerID,
 			TurnID: cc.Step.ID, ToolEntryID: cc.Entry.ID, AssignedAgentID: cc.Authority.AgentID,
 			TaskKey: startTaskKey(cc.Entry.ID), Goal: args.Goal, Acknowledgment: args.Acknowledgment,

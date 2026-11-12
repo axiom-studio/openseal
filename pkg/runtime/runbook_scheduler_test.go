@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -160,7 +161,7 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 	if err != nil || len(messages) != 1 || messages[0].Content != "Started: Contribute useful advice" || len(messages[0].References) != 1 || messages[0].References[0].ID != created.ID {
 		t.Fatalf("reporting messages=%#v err=%v", messages, err)
 	}
-	if err := projectRunReportingStartForRun(ctx, store, created); err != nil {
+	if err := conversationrun.ProjectRunReportingStartForRun(ctx, store, created); err != nil {
 		t.Fatal(err)
 	}
 	messages, _ = store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversations[0].ID, Limit: 10})
@@ -191,17 +192,17 @@ func TestRunReportingProjectsTerminalMilestoneOnce(t *testing.T) {
 		Milestones: []runbook.ReportingMilestone{runbook.ReportingStarted, runbook.ReportingCompleted},
 	}
 	seedTestSpace(t, store, scope)
-	channel, startKey, err := prepareRunReporting(ctx, store, scope, owner, policy, "", run.ID, run.Context)
+	channel, startKey, err := conversationrun.PrepareRunReporting(ctx, store, scope, owner, policy, "", run.ID, run.Context)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := projectRunReportingStart(ctx, store, channel, startKey, run); err != nil {
+	if err := conversationrun.ProjectRunReportingStart(ctx, store, channel, startKey, run); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectTerminalRunReporting(ctx, store, run); err != nil {
+	if err := conversationrun.ProjectTerminalRunReporting(ctx, store, run); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectTerminalRunReporting(ctx, store, run); err != nil {
+	if err := conversationrun.ProjectTerminalRunReporting(ctx, store, run); err != nil {
 		t.Fatal(err)
 	}
 	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: channel.ID, Limit: 10})

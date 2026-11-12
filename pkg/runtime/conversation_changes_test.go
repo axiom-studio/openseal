@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -49,7 +50,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			scheduler, err := NewConversationRunScheduler(conversationStore, store, ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewConversationRunScheduler(conversationStore, store, conversationrun.ConversationRunSchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}

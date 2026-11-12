@@ -9,13 +9,14 @@ import (
 
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) {
 	conversationtest.ForThreadStartStores(t, func(t *testing.T, store conversationtest.ThreadStartStore, _ func(*testing.T) conversationtest.ThreadStartStore) {
 		conversation := conversationtest.ThreadStartConversation(t, store)
 		service := runtimeconversation.NewConversationService(store)
-		scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+		scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 		if err != nil {
 			t.Fatal(err)
 		}

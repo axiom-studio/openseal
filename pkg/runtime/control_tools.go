@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -313,7 +314,7 @@ type ControlExecutor struct {
 	Activity      *RunActivityService
 	Forks         *agentrun.RunForkCoordinator
 	Collaboration *CollaborationService
-	Tasks         *ConversationTaskService
+	Tasks         *conversationrun.ConversationTaskService
 	Conversations *conversation.ConversationService
 	Reporting     ConversationStore // projectConversationRunbookStart / runbookSourceMessage
 	Now           func() time.Time

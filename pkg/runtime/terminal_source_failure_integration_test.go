@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
@@ -186,7 +187,7 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 				if count, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 					t.Fatalf("outbox: count=%d err=%v", count, err)
 				}
-				message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, terminalConversationFailureReplyKey(failed))
+				message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, conversationrun.TerminalConversationFailureReplyKey(failed))
 				if err != nil || message == nil || message.Scope != run.Scope || message.ThreadRootID != trigger.ID || message.ReplyToMessageID != trigger.ID || message.ResolvesMessageID != trigger.ID || message.ResponseMode != trigger.ResponseMode {
 					t.Fatalf("source failure lost provenance: %#v %v", message, err)
 				}

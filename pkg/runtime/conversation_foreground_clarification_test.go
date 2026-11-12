@@ -7,12 +7,13 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 type foregroundClarificationFixture struct {
 	store        conversationTaskClarificationStore
 	service      *conversation.ConversationService
-	scheduler    *ConversationRunScheduler
+	scheduler    *conversationrun.ConversationRunScheduler
 	conversation *Conversation
 	trigger      *ChannelMessage
 	run          *AgentRun
@@ -32,7 +33,7 @@ func newForegroundClarificationFixture(t *testing.T, store conversationTaskClari
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.scheduler, err = NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{MessagePageSize: 2})
+	f.scheduler, err = conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{MessagePageSize: 2})
 	if err != nil {
 		t.Fatal(err)
 	}

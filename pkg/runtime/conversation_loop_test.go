@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -100,7 +101,7 @@ type chatLoopFixture struct {
 	store        chatLoopStore
 	service      *conversation.ConversationService
 	conversation *Conversation
-	runner       *ConversationRunTurnRunner
+	runner       *conversationrun.ConversationRunTurnRunner
 	actions      *chatLoopActions
 	loop         *RunLoop
 	team         bool
@@ -143,7 +144,7 @@ func newChatLoopFixture(t *testing.T, base conversationtest.ThreadStartStore, op
 		},
 		PlainTextFinal: func(_ context.Context, cc agentrun.ControlContext, text string) (ControlResult, error) {
 			return ControlResult{Kind: ControlFinal, Final: &agentrun.FinalAnswer{
-				StepID: cc.Step.ID, PlainText: true, Answer: text, Output: map[string]interface{}{finalOutputSummaryKey: text},
+				StepID: cc.Step.ID, PlainText: true, Answer: text, Output: map[string]interface{}{conversationrun.FinalOutputSummaryKey: text},
 			}}, nil
 		},
 	})
@@ -156,16 +157,16 @@ func newChatLoopFixture(t *testing.T, base conversationtest.ThreadStartStore, op
 		now:     time.Now().UTC().Truncate(time.Millisecond),
 		agents:  chatLoopAgentTurns{},
 	}
-	f.runner = f.newRunner(ConversationRunTurnRunnerConfig{RequireParticipationOptIn: options.participation})
+	f.runner = f.newRunner(conversationrun.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: options.participation})
 	return f
 }
 
 // newRunner is a conversation turn runner over the fixture's store, with
 // config and the fixture's Agent bindings as its AgentTurns resolver.
-func (f *chatLoopFixture) newRunner(config ConversationRunTurnRunnerConfig) *ConversationRunTurnRunner {
+func (f *chatLoopFixture) newRunner(config conversationrun.ConversationRunTurnRunnerConfig) *conversationrun.ConversationRunTurnRunner {
 	f.t.Helper()
 	config.AgentTurns = f.agents
-	runner, err := NewConversationRunTurnRunner(chatLoopRunnerStore(f.t, f.store, f.actions), conversationRunTestCoordinator(f.t, f.service), config)
+	runner, err := conversationrun.NewConversationRunTurnRunner(chatLoopRunnerStore(f.t, f.store, f.actions), conversationRunTestCoordinator(f.t, f.service), config)
 	if err != nil {
 		f.t.Fatal(err)
 	}

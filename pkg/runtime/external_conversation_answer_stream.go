@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 // A connector-channel reply streams into the chat by editing one provider
@@ -134,7 +135,7 @@ func (w *RunProgressAcknowledgementWorker) projectAnswerStream(ctx context.Conte
 		return nil, nil
 	}
 	run := reply.run
-	if isTerminalAgentRunStatus(run.Status) || externalInboxItemIsFollowUp(item, run) {
+	if isTerminalAgentRunStatus(run.Status) || conversationrun.ExternalInboxItemIsFollowUp(item, run) {
 		return nil, nil
 	}
 	endpoint, adapter, err := w.resolveEndpoint(ctx, item)

@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
@@ -154,7 +155,7 @@ func TestTerminalRunReportingContractCrashAfterPostBeforeAck(t *testing.T) {
 		if err != nil || len(claims) != 1 {
 			t.Fatalf("claim: %#v, %v", claims, err)
 		}
-		if err := projectTerminalRunReporting(t.Context(), store, claims[0].Run); err != nil {
+		if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, claims[0].Run); err != nil {
 			t.Fatal(err)
 		}
 		if fixture.reopen != nil {
@@ -247,7 +248,7 @@ func TestTerminalRunReportingContractConcurrentFastpathAndDurableRetry(t *testin
 		for attempt := 0; attempt < 6; attempt++ {
 			group.Go(func() {
 				if attempt%2 == 0 {
-					if err := projectTerminalRunReporting(t.Context(), store, run); err != nil {
+					if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, run); err != nil {
 						failures <- err
 					}
 					return

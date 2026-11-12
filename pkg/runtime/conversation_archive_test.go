@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -78,7 +79,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 				len(replayed.Messages) != 2 {
 				t.Fatalf("replayed import = %#v, %v", replayed, err)
 			}
-			scheduler, err := NewConversationRunScheduler(store.(ConversationStore), store, ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewConversationRunScheduler(store.(ConversationStore), store, conversationrun.ConversationRunSchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -67,7 +68,7 @@ func newInteractionChangeFixture(t *testing.T, store KernelStore) *interactionCh
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler, err := NewConversationRunScheduler(conversationStore, store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(conversationStore, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

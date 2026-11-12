@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 // routineReportDeliveryKey is the outbox identity of one routine occurrence
@@ -80,7 +81,7 @@ func withRoutineReportHeader(delivery *ExternalConversationDelivery, message *Ch
 func projectRoutineReportDelivery(ctx context.Context, store ExternalConversationStore, transport *ExternalConversationTransportService, run *AgentRun) (*ExternalConversationDelivery, error) {
 	if store == nil || transport == nil || run == nil || !isTerminalAgentRunStatus(run.Status) ||
 		run.Context[scheduledTaskContextKey] != true || run.Context[ConversationTaskContextKey] != nil || !runNeedsTerminalReporting(run) ||
-		silentRoutineOccurrence(run) {
+		conversationrun.SilentRoutineOccurrence(run) {
 		return nil, nil
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 type crashAfterExternalConversationDispatch struct {
@@ -56,7 +57,7 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 	if _, replayed, err := store.ReceiveExternalConversationEvent(ctx, item); err != nil || replayed {
 		t.Fatalf("receive = replayed %v, %v", replayed, err)
 	}
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
