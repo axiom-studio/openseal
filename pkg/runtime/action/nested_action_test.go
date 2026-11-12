@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -177,10 +178,10 @@ func (f *nestedActionFixture) assertRunUnchanged(t *testing.T) {
 }
 
 func TestNestedReadActionRunsWithoutChangingTheRun(t *testing.T) {
-	for _, testCase := range nestedActionStores(t) {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
 			ctx := context.Background()
-			f := newNestedActionFixture(t, testCase.open(t))
+			f := newNestedActionFixture(t, testCase.Open(t))
 			result, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-1"))
 			if err != nil {
 				t.Fatal(err)
@@ -232,9 +233,9 @@ func TestNestedReadActionRunsWithoutChangingTheRun(t *testing.T) {
 }
 
 func TestNestedActionRefusesCapabilitiesTheStepDidNotOffer(t *testing.T) {
-	for _, testCase := range nestedActionStores(t) {
-		t.Run(testCase.name, func(t *testing.T) {
-			f := newNestedActionFixture(t, testCase.open(t))
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
+			f := newNestedActionFixture(t, testCase.Open(t))
 			for _, capability := range []string{"repo.delete_all", "other.read_file", "read_file"} {
 				if _, err := f.coordinator.ProposeNested(context.Background(), f.request(capability, "bridge-"+capability)); !errors.Is(err, action.ErrNestedActionNotAuthorized) {
 					t.Fatalf("%s: err = %v, want not authorized", capability, err)
@@ -250,10 +251,10 @@ func TestNestedActionRefusesCapabilitiesTheStepDidNotOffer(t *testing.T) {
 }
 
 func TestNestedActionRequiresTheRunsRunningStep(t *testing.T) {
-	for _, testCase := range nestedActionStores(t) {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
 			ctx := context.Background()
-			f := newNestedActionFixture(t, testCase.open(t))
+			f := newNestedActionFixture(t, testCase.Open(t))
 			other := f.request("repo.read_file", "bridge-other")
 			other.TurnID = "step-unknown"
 			if _, err := f.coordinator.ProposeNested(ctx, other); !errors.Is(err, models.ErrNestedTurnNotActive) {
@@ -324,10 +325,10 @@ func TestNestedActionRequiresTheRunsRunningStep(t *testing.T) {
 // A step admits nested calls only while it is leased, live, by the worker
 // holding the Run's lease.
 func TestNestedActionRequiresTheStepLeasedByTheRunsWorker(t *testing.T) {
-	for _, testCase := range nestedActionStores(t) {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
 			ctx := context.Background()
-			f := newNestedActionFixture(t, testCase.open(t))
+			f := newNestedActionFixture(t, testCase.Open(t))
 			for index, lease := range []struct {
 				owner   string
 				expires time.Time
@@ -361,10 +362,10 @@ func TestNestedActionRequiresTheStepLeasedByTheRunsWorker(t *testing.T) {
 }
 
 func TestNestedWriteActionWaitsForApprovalWithoutChangingTheRun(t *testing.T) {
-	for _, testCase := range nestedActionStores(t) {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
 			ctx := context.Background()
-			f := newNestedActionFixture(t, testCase.open(t))
+			f := newNestedActionFixture(t, testCase.Open(t))
 			result, err := f.coordinator.ProposeNested(ctx, f.request("repo.push", "bridge-push"))
 			if err != nil {
 				t.Fatal(err)
@@ -415,10 +416,10 @@ func TestNestedWriteActionWaitsForApprovalWithoutChangingTheRun(t *testing.T) {
 }
 
 func TestNestedActionBoundsArePerStep(t *testing.T) {
-	for _, testCase := range nestedActionStores(t) {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
 			ctx := context.Background()
-			f := newNestedActionFixture(t, testCase.open(t))
+			f := newNestedActionFixture(t, testCase.Open(t))
 			f.coordinator.SetNestedLimits(5, 2)
 			worker := f.worker(t)
 			exhaust := func(step int) {

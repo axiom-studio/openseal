@@ -10,6 +10,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -51,7 +52,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	arguments := map[string]interface{}{
 		"memberId": "ux-reviewer", "expectedDeploymentRevision": 1, "channelParticipation": "active",
 	}
-	proposal, err := coordinator.Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
+	proposal, err := coordinator.Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: owner.ID,
 		SkillID: TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion, Action: action.TeamActionUpdateMember,
 		Arguments: arguments, IdempotencyKey: "message-42:enable-ux-reviewer", Summary: "Let the UX Reviewer speak",

@@ -13,6 +13,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -112,7 +113,7 @@ func (f *channelActionFixture) propose(t *testing.T, extra map[string]interface{
 	for key, value := range extra {
 		arguments[key] = value
 	}
-	return f.coordinator.Propose(context.Background(), loopProposeRequest(action.ProposeActionRequest{
+	return f.coordinator.Propose(context.Background(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: f.scope, RunID: f.run.ID, WorkerID: "conversation-worker", DeploymentID: "slack-agent",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionConfigureChannel,
 		Arguments: arguments, IdempotencyKey: "configure-channel", Summary: "Configure channel",

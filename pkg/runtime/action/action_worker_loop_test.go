@@ -13,6 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
@@ -55,13 +56,13 @@ func newLoopWorkerFixture(t *testing.T, store models.KernelStore, budget *models
 	if err != nil || run == nil || run.ID != created.ID {
 		t.Fatalf("claim = %#v, %v", run, err)
 	}
-	return &loopWorkerFixture{t: t, store: store, catalog: loopWorkerCatalog(t, scope), scope: scope, now: now, clock: now.Add(2 * time.Second), run: run}
+	return &loopWorkerFixture{t: t, store: store, catalog: actiontest.LoopWorkerCatalog(t, scope), scope: scope, now: now, clock: now.Add(2 * time.Second), run: run}
 }
 
 func (f *loopWorkerFixture) propose(id, action string) *models.ActionCall {
 	f.t.Helper()
-	result := proposeLoopAction(f.t, f.store, f.catalog, f.run, loopWorkerID, f.now.Add(time.Second), loopActionSpec{
-		id: id, skillID: "release", version: "1.0.0", action: action, arguments: map[string]interface{}{"environment": "production"},
+	result := actiontest.ProposeLoopAction(f.t, f.store, f.catalog, f.run, loopWorkerID, f.now.Add(time.Second), actiontest.LoopActionSpec{
+		ID: id, SkillID: "release", Version: "1.0.0", Action: action, Arguments: map[string]interface{}{"environment": "production"},
 	})
 	f.run = f.currentRun()
 	return result.Call
@@ -75,7 +76,7 @@ func (f *loopWorkerFixture) worker(dispatch action.ActionDispatcherFunc) *action
 
 // workerWithClock is worker reading time from clock.
 func (f *loopWorkerFixture) workerWithClock(dispatch action.ActionDispatcherFunc, clock models.Clock) *action.ActionWorker {
-	worker := action.NewActionWorker(f.store, &actionLifecycleCountingCatalog{ActionExecutionCatalog: f.catalog, calls: &f.catalogCalls},
+	worker := action.NewActionWorker(f.store, &actiontest.CountingCatalog{ActionExecutionCatalog: f.catalog, Calls: &f.catalogCalls},
 		action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 			f.credentialCalls++
 			return map[string]string{"token": "loop-secret"}, nil
@@ -124,7 +125,7 @@ func (f *loopWorkerFixture) setRunStatus(status models.AgentRunStatus) {
 		completed := f.clock
 		updated.CompletedAt = &completed
 	}
-	event := actionLifecycleEvent(&models.ActionCall{Scope: f.scope, RunID: f.run.ID, DeploymentID: "release-agent"}, fmt.Sprintf("status-%s-%d", status, updated.Revision), "run.status_changed", f.clock)
+	event := actiontest.CallEvent(&models.ActionCall{Scope: f.scope, RunID: f.run.ID, DeploymentID: "release-agent"}, fmt.Sprintf("status-%s-%d", status, updated.Revision), "run.status_changed", f.clock)
 	if _, err := f.store.UpdateAgentRunWithEvent(context.Background(), updated, current.Revision, event, nil); err != nil {
 		f.t.Fatalf("set Run %s: %v", status, err)
 	}
@@ -143,7 +144,7 @@ func succeedDispatch(context.Context, agentrun.ActionDispatchInput) (map[string]
 }
 
 func TestExecuteOwnLoopCallDispatchesInlineUnderCallLease(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		call := f.propose("deploy-1", "deploy")
 		before := f.currentRun()
@@ -205,7 +206,7 @@ func TestExecuteOwnLoopCallDispatchesInlineUnderCallLease(t *testing.T) {
 }
 
 func TestExecuteOwnLoopCallNotClaimable(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		live := f.propose("live-lease", "deploy")
 		if claimed, err := store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: time.Hour, OwnActionID: live.ID}); err != nil || claimed == nil {
@@ -231,7 +232,7 @@ func TestExecuteOwnLoopCallNotClaimable(t *testing.T) {
 func TestExecuteOwnLoopCallNotOwnedAfterLeaseLossCancels(t *testing.T) {
 	for _, loss := range []string{"foreign_worker", "expired_run_lease", "parked_run", "canceled_during_credentials"} {
 		t.Run(loss, func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 				f := newLoopWorkerFixture(t, store, &models.BudgetPolicy{MaxActions: 10})
 				call := f.propose("deploy-1", "deploy")
 				worker := f.worker(succeedDispatch)
@@ -279,7 +280,7 @@ func TestExecuteOwnLoopCallNotOwnedAfterLeaseLossCancels(t *testing.T) {
 }
 
 func TestLoopRecoveredRunningWriteFailsWithoutDispatch(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, &models.BudgetPolicy{MaxActions: 10})
 		call := f.propose("deploy-1", "deploy")
 		first, err := store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: models.LoopActionLease, OwnActionID: call.ID})
@@ -300,12 +301,12 @@ func TestLoopRecoveredRunningWriteFailsWithoutDispatch(t *testing.T) {
 		if after.Status != models.AgentRunStatusRunning || after.LeaseOwner != loopWorkerID || after.BudgetUsage.Actions != 1 || len(after.BudgetReservations) != 0 {
 			t.Fatalf("recovered write changed the Run beyond its budget: %#v", after)
 		}
-		assertActionLifecycleUnclaimable(t, store, call, f.clock.Add(time.Hour))
+		actiontest.AssertUnclaimable(t, store, call, f.clock.Add(time.Hour))
 	})
 }
 
 func TestRecoveredRunningWriteHasInterruptedCode(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		write := f.propose("deploy-1", "deploy")
 		read := f.propose("status-1", "status")
@@ -335,7 +336,7 @@ func TestRecoveredRunningWriteHasInterruptedCode(t *testing.T) {
 }
 
 func TestLoopRecoveredRunningReadRedispatches(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		call := f.propose("status-1", "status")
 		first, err := store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: models.LoopActionLease, OwnActionID: call.ID})
@@ -361,7 +362,7 @@ func TestLoopRecoveredRunningReadRedispatches(t *testing.T) {
 func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 	for _, boundary := range []string{"before_claim", "after_claim", "after_catalog"} {
 		t.Run(boundary, func(t *testing.T) {
-			forActionLifecycleBackends(t, func(t *testing.T, store models.KernelStore, backend actionLifecycleBackend) {
+			actiontest.ForEachBackend(t, func(t *testing.T, store models.KernelStore, backend actiontest.Backend) {
 				if boundary == "before_claim" {
 					if _, ok := store.(*sqlite.Store); !ok {
 						t.Skip("the store-side claim gate is seeded through the SQLite store")
@@ -373,14 +374,14 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				gate := &models.SkillRuntimeMaintenance{Scope: f.scope, SkillID: "release", OperationID: "upgrade-release", Owner: "controller", Active: true, Revision: 1}
 				wrapped := &loopMaintenanceStore{KernelStore: store, gate: gate, active: boundary != "after_catalog"}
 				if boundary == "before_claim" {
-					if err := sqlstore.WriteSkillRuntimeMaintenance(t.Context(), backend.db, "skill_runtime_maintenance", gate, false); err != nil {
+					if err := sqlstore.WriteSkillRuntimeMaintenance(t.Context(), backend.DB, "skill_runtime_maintenance", gate, false); err != nil {
 						t.Fatal(err)
 					}
 				}
 				catalogCalls := 0
-				catalog := &actionRuntimeMaintenanceCatalog{ActionExecutionCatalog: f.catalog, calls: &catalogCalls}
+				catalog := &actiontest.MaintenanceCatalog{ActionExecutionCatalog: f.catalog, Calls: &catalogCalls}
 				if boundary == "after_catalog" {
-					catalog.afterResolve = func() { wrapped.active = true }
+					catalog.AfterResolve = func() { wrapped.active = true }
 				}
 				worker := action.NewActionWorker(wrapped, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 					f.credentialCalls++
@@ -412,9 +413,9 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				// Maintenance ends: the same call executes on resume.
 				wrapped.active = false
 				if boundary == "before_claim" {
-					storetest.ExecSQL(t, backend.db, `DELETE FROM skill_runtime_maintenance WHERE scope_kind = ? AND scope_id = ? AND skill_id = ?`, f.scope.Kind, f.scope.ID, "release")
+					storetest.ExecSQL(t, backend.DB, `DELETE FROM skill_runtime_maintenance WHERE scope_kind = ? AND scope_id = ? AND skill_id = ?`, f.scope.Kind, f.scope.ID, "release")
 				}
-				catalog.afterResolve = nil
+				catalog.AfterResolve = nil
 				f.clock = held.RetryAt
 				resumed, err := f.execute(worker, call.ID)
 				if err != nil || resumed.Call.Status != models.ActionCallStatusSucceeded || f.dispatches != 1 {
@@ -441,7 +442,7 @@ func (s *loopMaintenanceStore) GetSkillRuntimeMaintenance(ctx context.Context, s
 }
 
 func TestLoopOutcomeLeavesRunUnchangedExceptBudgetAndHumanIntervention(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		succeeded := f.propose("status-ok", "status")
 		failed := f.propose("deploy-fails", "deploy")
@@ -494,7 +495,7 @@ func TestLoopOutcomeLeavesRunUnchangedExceptBudgetAndHumanIntervention(t *testin
 		}
 	})
 	t.Run("budget", func(t *testing.T) {
-		forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+		actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 			f := newLoopWorkerFixture(t, store, &models.BudgetPolicy{MaxActions: 10})
 			call := f.propose("deploy-1", "deploy")
 			reserved := f.currentRun()
@@ -515,13 +516,13 @@ func TestLoopOutcomeLeavesRunUnchangedExceptBudgetAndHumanIntervention(t *testin
 }
 
 func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	now := time.Now().UTC()
-	catalog, scope := personActionCatalog(t)
-	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
-	proposal := proposeLoopAction(t, store, catalog, run, "agent-worker", now, loopActionSpec{
-		id: "send-1", skillID: "mail", version: "1.0.0", action: "send", arguments: map[string]interface{}{"to": "ana@example.com"},
-		externalOperation: &activity.ExternalOperationIdentity{Resource: "mailbox-ana", Operation: "send"},
+	catalog, scope := actiontest.PersonCatalog(t)
+	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
+	proposal := actiontest.ProposeLoopAction(t, store, catalog, run, "agent-worker", now, actiontest.LoopActionSpec{
+		ID: "send-1", SkillID: "mail", Version: "1.0.0", Action: "send", Arguments: map[string]interface{}{"to": "ana@example.com"},
+		ExternalOperation: &activity.ExternalOperationIdentity{Resource: "mailbox-ana", Operation: "send"},
 	})
 	if proposal.Call.ExternalOperationDigest == "" {
 		t.Fatal("test needs an external operation")
@@ -534,7 +535,7 @@ func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
 		dispatches++
 		return map[string]interface{}{"sent": true}, nil
 	}), models.WithClock(func() time.Time { return now.Add(time.Second) }))
-	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
+	worker.SetCredentialAvailabilityChecker(actiontest.AvailabilityFunc(func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
 		return action.CredentialAvailability{Gaps: map[string]action.CredentialGap{"google": action.CredentialGapPersonSignIn}}, nil
 	}))
 	result, err := worker.ExecuteOwnLoopCall(t.Context(), scope, proposal.Call.ID, "agent-worker")
@@ -565,7 +566,7 @@ func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
 func TestPoolClosesAbandonedLoopCallOfEndedRun(t *testing.T) {
 	for _, ended := range []models.AgentRunStatus{models.AgentRunStatusCanceled, models.AgentRunStatusFailed, models.AgentRunStatusCompleted} {
 		t.Run(string(ended), func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 				f := newLoopWorkerFixture(t, store, &models.BudgetPolicy{MaxActions: 10})
 				ready := f.propose("ready-call", "deploy")
 				running := f.propose("running-call", "status")
@@ -596,7 +597,7 @@ func TestPoolClosesAbandonedLoopCallOfEndedRun(t *testing.T) {
 				if after.Status != endedRun.Status || len(after.BudgetReservations) != 0 || after.BudgetUsage.Actions != 1 || !reflect.DeepEqual(after.Checkpoint, endedRun.Checkpoint) {
 					t.Fatalf("closing abandoned calls changed the ended Run beyond its budget: %#v", after)
 				}
-				assertActionLifecycleUnclaimable(t, store, ready, f.clock.Add(time.Hour))
+				actiontest.AssertUnclaimable(t, store, ready, f.clock.Add(time.Hour))
 			})
 		})
 	}
@@ -605,7 +606,7 @@ func TestPoolClosesAbandonedLoopCallOfEndedRun(t *testing.T) {
 func TestPoolWorkerNeverRunsLoopCallOfLiveRun(t *testing.T) {
 	for _, status := range []models.AgentRunStatus{models.AgentRunStatusRunning, models.AgentRunStatusQueued, models.AgentRunStatusWaitingForApproval, models.AgentRunStatusWaitingForEvent, models.AgentRunStatusPaused} {
 		t.Run(string(status), func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 				f := newLoopWorkerFixture(t, store, nil)
 				call := f.propose("deploy-1", "deploy")
 				if status != models.AgentRunStatusRunning {

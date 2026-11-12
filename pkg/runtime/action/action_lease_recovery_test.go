@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestActionClaimPersistsRunningRecoveryProvenance(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		now := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
 		_, proposal := createRunnableAction(t, store, now)
 		first, err := store.ClaimNextAction(t.Context(), models.ActionClaim{
@@ -46,7 +47,7 @@ func TestActionClaimPersistsRunningRecoveryProvenance(t *testing.T) {
 }
 
 func TestActionReadyDeferralIsNotRunningRecovery(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		now := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
 		_, proposal := createRunnableAction(t, store, now)
 		claimed, err := store.ClaimNextAction(t.Context(), models.ActionClaim{
@@ -114,7 +115,7 @@ func TestActionRunningRecoveryProvenanceSurvivesSQLiteRestart(t *testing.T) {
 
 func deferClaimedActionForRecoveryTest(t *testing.T, store models.KernelStore, claimed *models.ActionCall, now time.Time) *models.ActionCall {
 	t.Helper()
-	parent := getActionLifecycleRun(t, store, claimed)
+	parent := actiontest.ParentRun(t, store, claimed)
 	deferred := models.CloneActionCall(claimed)
 	deferred.Status = models.ActionCallStatusReady
 	deferred.LeaseOwner, deferred.LeaseExpiresAt = "", nil
@@ -124,7 +125,7 @@ func deferClaimedActionForRecoveryTest(t *testing.T, store models.KernelStore, c
 	result, err := store.PersistActionExecution(t.Context(), models.ActionExecutionRecord{
 		Call: deferred, ExpectedCallRevision: claimed.Revision, ExpectedRunRevision: parent.Revision,
 		WorkerID: claimed.LeaseOwner, Now: now,
-		Event: actionLifecycleEvent(deferred, fmt.Sprintf("deferred-%d", deferred.Revision), "action.deferred", now),
+		Event: actiontest.CallEvent(deferred, fmt.Sprintf("deferred-%d", deferred.Revision), "action.deferred", now),
 	})
 	if err != nil || result == nil || result.Call == nil {
 		t.Fatalf("persist Ready deferral = %#v, %v", result, err)

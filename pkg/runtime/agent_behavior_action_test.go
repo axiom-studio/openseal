@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -103,7 +104,7 @@ func TestGovernedAgentChannelActionComposesIngressAndApprovalDelivery(t *testing
 	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review routing", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour}, nil
 	})
-	proposal, err := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}).Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
+	proposal, err := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "slack-agent",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionConfigureChannel,
 		Arguments:      map[string]interface{}{"endpointId": endpoint.ID, "messageSelection": "all_messages", "replyMode": "thread", "purposes": []interface{}{"conversation", "approvals"}, "rationale": "Use Slack for work and approvals"},
@@ -167,7 +168,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 		}, nil
 	})
 	coordinator := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator})
-	proposal, err := coordinator.Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
+	proposal, err := coordinator.Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
 		Arguments: map[string]interface{}{
@@ -280,7 +281,7 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 		}, nil
 	})
 	propose := func(key string) (*ActionProposalResult, error) {
-		return action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}).Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
+		return action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 			Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
 			SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
 			Arguments:      map[string]interface{}{"displayName": "Team Researcher", "rationale": "The user asked for the rename"},
@@ -362,7 +363,7 @@ func TestGovernedAgentBehaviorActionUsesCheckpointApprovalAuthority(t *testing.T
 			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	proposal, err := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}).Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
+	proposal, err := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
 		Arguments:      map[string]interface{}{"displayName": "Agent 008", "rationale": "The user approved the rename"},
@@ -615,7 +616,7 @@ func TestOlderAgentManagementBindingsAlwaysRequireReviewInSkipMode(t *testing.T)
 				if claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: conversation.Scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil || claimed == nil || claimed.ID != run.ID {
 					t.Fatalf("claim: %#v %v", claimed, err)
 				}
-				result, err := action.NewActionCoordinator(store, store, catalog, policy, nil).Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
+				result, err := action.NewActionCoordinator(store, store, catalog, policy, nil).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 					Scope: conversation.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "assistant",
 					SkillID: AgentManagementSkillID, SkillVersion: version, Action: name,
 					Arguments: legacyAgentManagementArguments[name], IdempotencyKey: "legacy-" + name, Summary: "Apply legacy " + name,

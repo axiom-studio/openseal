@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -38,7 +39,7 @@ func TestDefaultActionPolicyProfileImageExceptionIsNarrow(t *testing.T) {
 func TestProfileImageProposalProceedsWithoutApproval(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	catalog, scope := governedActionCatalog(t)
+	catalog, scope := actiontest.GovernedCatalog(t)
 	definition := builtin.SkillDefinition()
 	if err := catalog.Register(ctx, definition); err != nil {
 		t.Fatal(err)
@@ -50,8 +51,8 @@ func TestProfileImageProposalProceedsWithoutApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	run := claimedActionRun(t, store, scope, now, "worker")
-	result, err := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), nil).Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
+	run := actiontest.ClaimedRun(t, store, scope, now, "worker")
+	result, err := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), nil).Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent",
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: builtin.GenerateProfileImage,
 		Arguments: map[string]interface{}{"prompt": "A friendly illustrated portrait"},

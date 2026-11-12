@@ -8,12 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
 
 func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store KernelStore) {
 		ctx := t.Context()
 		run := claimedFailureRun(t, store, "explained")
 		cause := errors.New("the model returned malformed tool arguments")
@@ -87,7 +88,7 @@ func TestNonExplainableFailureFailsWithKernelReply(t *testing.T) {
 			t.Fatalf("%v must not get an explanation step", err)
 		}
 	}
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store KernelStore) {
 		ctx := t.Context()
 		run := claimedFailureRun(t, store, "kernel-reply")
 		failed, _, err := NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
@@ -113,7 +114,7 @@ func TestNonExplainableFailureFailsWithKernelReply(t *testing.T) {
 }
 
 func TestCreditErrorFromTypedFailure(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store KernelStore) {
 		ctx := t.Context()
 		run := claimedFailureRun(t, store, "credits")
 		failed, _, err := NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{

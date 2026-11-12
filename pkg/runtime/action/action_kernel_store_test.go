@@ -7,9 +7,9 @@ import (
 )
 
 // newActionTestStore returns an empty in-memory kernel store that is closed
-// when the test ends. It copies runtime's newTestKernelStore for the action
-// tests that need action internals, which live with the action code and
-// cannot see runtime's test helpers. Change the copies together.
+// when the test ends. It copies runtime's newTestKernelStore for the
+// in-package action tests, which cannot see runtime's test helpers or import
+// actiontest (it imports action). Change the copies together.
 func newActionTestStore(t testing.TB) *sqlite.Store {
 	t.Helper()
 	store, err := sqlite.NewInMemorySQLiteStore()

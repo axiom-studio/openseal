@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
@@ -43,7 +44,7 @@ type forkCall struct {
 
 func forkStores(t *testing.T, fn func(t *testing.T, store forkTestStore)) {
 	t.Helper()
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		forks, ok := store.(forkTestStore)
 		if !ok {
 			t.Fatalf("%T has no dependency store", store)

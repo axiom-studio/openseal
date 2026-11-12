@@ -2,6 +2,8 @@ package action_test
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -28,21 +31,21 @@ type agentBuilderDraftSeed struct {
 func seedAgentBuilderDrafts(t *testing.T, store models.KernelStore) agentBuilderDraftSeed {
 	t.Helper()
 	f, card := cardApproval(t, store, "create", createAgentCard(), models.ApprovalTimeoutExpire)
-	ctx := f.ctx
+	ctx := f.Ctx
 	service := runtime.NewConversationService(store.(models.ConversationStore))
 	// Each requester's first space is their default; the plain chat has no
 	// person behind it and goes to the empty owner's.
-	seedTestSpaceFor(t, store.(models.SpaceStore), f.scope, "ana")
-	seedTestSpaceFor(t, store.(models.SpaceStore), f.scope, "bo")
-	seedTestSpace(t, store.(models.SpaceStore), f.scope)
-	second, err := portfolio.NewSpaceService(store.(models.SpaceStore)).CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: f.scope, Name: "Second", Look: models.DefaultSpaceLook, OwnerID: "ana"})
+	seedTestSpaceFor(t, store.(models.SpaceStore), f.Scope, "ana")
+	seedTestSpaceFor(t, store.(models.SpaceStore), f.Scope, "bo")
+	seedTestSpace(t, store.(models.SpaceStore), f.Scope)
+	second, err := portfolio.NewSpaceService(store.(models.SpaceStore)).CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: f.Scope, Name: "Second", Look: models.DefaultSpaceLook, OwnerID: "ana"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := func(requester, key, spaceID string) *models.Conversation {
 		t.Helper()
 		result, err := runtime.StartAgentBuilderConversation(ctx, service, models.StartAgentBuilderRequest{
-			Scope: f.scope, Requester: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: requester},
+			Scope: f.Scope, Requester: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: requester},
 			Prompt: "Build " + key, Parameters: models.AgentBuilderParameters{Name: key}, SpaceID: spaceID, IdempotencyKey: key,
 		})
 		if err != nil {
@@ -58,38 +61,38 @@ func seedAgentBuilderDrafts(t *testing.T, store models.KernelStore) agentBuilder
 	two := start("ana", "two", second.ID)
 	// A plain chat with the builder is nobody's draft.
 	plain, _, err := service.CreateConversation(ctx, runtime.CreateConversationRequest{
-		Scope: f.scope, Owner: made.Owner, Title: "Chat", IdempotencyKey: "plain",
+		Scope: f.Scope, Owner: made.Owner, Title: "Chat", IdempotencyKey: "plain",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.PostChannelMessage(ctx, runtime.PostChannelMessageRequest{
-		Scope: f.scope, ConversationID: plain.ID, ExpectedRevision: plain.Revision, Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "ana"},
+		Scope: f.Scope, ConversationID: plain.ID, ExpectedRevision: plain.Revision, Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "ana"},
 		Intent: models.MessageIntentUpdate, Content: "Hi", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "plain-1",
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// The card's Run belongs to "made"; approving it and succeeding its call creates the Agent.
-	run := f.currentRun()
+	run := f.CurrentRun()
 	withConversation := models.CloneAgentRun(run)
 	withConversation.Context = map[string]interface{}{"conversationId": made.ID}
 	withConversation.Revision++
-	if _, err := store.UpdateAgentRunWithEvent(ctx, withConversation, run.Revision, f.event("run-conversation", "run.updated"), nil); err != nil {
+	if _, err := store.UpdateAgentRunWithEvent(ctx, withConversation, run.Revision, f.Event("run-conversation", "run.updated"), nil); err != nil {
 		t.Fatal(err)
 	}
-	if created, err := action.CreatedAgentBuilderConversation(ctx, store, &models.ActionCall{Scope: f.scope, ApprovalID: card.ID}, withConversation); err != nil || created != "" {
+	if created, err := action.CreatedAgentBuilderConversation(ctx, store, &models.ActionCall{Scope: f.Scope, ApprovalID: card.ID}, withConversation); err != nil || created != "" {
 		t.Fatalf("a pending card finished its draft: %q, %v", created, err)
 	}
-	if _, err := f.resolveWith(builderApprovalHost{calls: new(int)}, card, models.ApprovalDecisionApprove, loopApprover, ""); err != nil {
+	if _, err := f.ResolveWith(builderApprovalHost{calls: new(int)}, card, models.ApprovalDecisionApprove, actiontest.LoopApprover, ""); err != nil {
 		t.Fatal(err)
 	}
-	at := f.now.Add(2 * time.Second)
-	claimed, err := store.ClaimNextAction(ctx, models.ActionClaim{Scope: f.scope, WorkerID: "worker", Now: at, LeaseDuration: time.Minute, OwnActionID: card.ActionCallID})
+	at := f.Now.Add(2 * time.Second)
+	claimed, err := store.ClaimNextAction(ctx, models.ActionClaim{Scope: f.Scope, WorkerID: "worker", Now: at, LeaseDuration: time.Minute, OwnActionID: card.ActionCallID})
 	if err != nil || claimed == nil {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	run = f.currentRun()
+	run = f.CurrentRun()
 	created, err := action.CreatedAgentBuilderConversation(ctx, store, claimed, run)
 	if err != nil || created != made.ID {
 		t.Fatalf("created from = %q, %v; want %s", created, err, made.ID)
@@ -101,11 +104,11 @@ func seedAgentBuilderDrafts(t *testing.T, store models.KernelStore) agentBuilder
 	succeeded.Revision++
 	if _, err := store.PersistActionExecution(ctx, models.ActionExecutionRecord{
 		Call: succeeded, ExpectedCallRevision: claimed.Revision, ExpectedRunRevision: run.Revision, WorkerID: "worker", Now: at,
-		Event: f.event("created", "action.succeeded"), CreatedFromBuilderConversationID: created,
+		Event: f.Event("created", "action.succeeded"), CreatedFromBuilderConversationID: created,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return agentBuilderDraftSeed{scope: f.scope, made: made.ID, one: one.ID, two: two.ID, theirs: theirs.ID, defaultSpace: one.SpaceID, secondSpace: second.ID}
+	return agentBuilderDraftSeed{scope: f.Scope, made: made.ID, one: one.ID, two: two.ID, theirs: theirs.ID, defaultSpace: one.SpaceID, secondSpace: second.ID}
 }
 
 // countingDraftReader records which conversations a drafts list read.
@@ -161,7 +164,7 @@ func assertAgentBuilderDrafts(t *testing.T, store models.KernelStore, seed agent
 }
 
 func TestAgentBuilderDraftsAreSelectedByTheStore(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		assertAgentBuilderDrafts(t, store, seedAgentBuilderDrafts(t, store))
 	})
 }
@@ -223,4 +226,47 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 		t.Cleanup(func() { _ = reopened.Close() })
 		assertAgentBuilderDrafts(t, reopened, seed)
 	})
+}
+
+// seedTestSpaceFor, seedTestSpace and openTestSQLiteDB are copies of
+// runtime's test helpers, which the action tests cannot see. Change the
+// copies together.
+
+// seedTestSpaceFor creates a space owned by ownerID. The owner's first space
+// in the scope is their default space. An owner who already has a default
+// space keeps it and gets no second one, so a fixture that is built more than
+// once on a store can seed every time.
+func seedTestSpaceFor(t testing.TB, store models.SpaceStore, scope models.Scope, ownerID string) *models.Space {
+	t.Helper()
+	if existing, err := store.DefaultSpace(context.Background(), scope, ownerID); err == nil {
+		return existing
+	} else if !errors.Is(err, models.ErrNoDefaultSpace) {
+		t.Fatalf("seed space: %v", err)
+	}
+	space, err := portfolio.NewSpaceService(store).CreateSpace(context.Background(), portfolio.CreateSpaceRequest{
+		Scope: scope, Name: "Home", Look: models.DefaultSpaceLook, OwnerID: ownerID,
+	})
+	if err != nil {
+		t.Fatalf("seed space: %v", err)
+	}
+	return space
+}
+
+// seedTestSpace gives the empty owner a default space in the scope, so a
+// conversation created with no space and no person behind it has one to go to.
+func seedTestSpace(t testing.TB, store models.SpaceStore, scope models.Scope) *models.Space {
+	t.Helper()
+	return seedTestSpaceFor(t, store, scope, "")
+}
+
+// openTestSQLiteDB opens the test's own connection to the SQLite file at
+// path, closed when the test ends.
+func openTestSQLiteDB(t testing.TB, path string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite3", path+"?_busy_timeout=5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
 }

@@ -7,11 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/google/uuid"
 )
 
 func TestSkillRuntimeMaintenanceSameIntentOwnerTakeoverAndStaleCompletion(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 		store := kernel.(SkillRuntimeMaintenanceStore)
 		request := skillRuntimeMaintenanceEmptyRequest()
 		original, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)
@@ -73,7 +74,7 @@ func TestSkillRuntimeMaintenanceSameIntentOwnerTakeoverAndStaleCompletion(t *tes
 }
 
 func TestSkillRuntimeMaintenanceRejectsImmutableIntentDrift(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 		store := kernel.(SkillRuntimeMaintenanceStore)
 		request := skillRuntimeMaintenanceEmptyRequest()
 		original, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)
@@ -115,7 +116,7 @@ func TestSkillRuntimeMaintenanceRejectsImmutableIntentDrift(t *testing.T) {
 }
 
 func TestSkillRuntimeMaintenanceRollbackIntentSurvivesReopenAndTakeover(t *testing.T) {
-	forActionLifecycleBackends(t, func(t *testing.T, kernel KernelStore, backend actionLifecycleBackend) {
+	actiontest.ForEachBackend(t, func(t *testing.T, kernel KernelStore, backend actiontest.Backend) {
 		store := kernel.(SkillRuntimeMaintenanceStore)
 		request := skillRuntimeMaintenanceEmptyRequest()
 		gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)
@@ -157,7 +158,7 @@ func TestSkillRuntimeMaintenanceRollbackIntentSurvivesReopenAndTakeover(t *testi
 }
 
 func TestSkillRuntimeMaintenanceCompletionRequiresCanonicalBindingsAtVerifiedVersion(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 		fixture := newActionRuntimeMaintenanceFixture(t, kernel)
 		store := kernel.(SkillRuntimeMaintenanceStore)
 		gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), actionRuntimeMaintenanceRequest(t, fixture))
@@ -182,7 +183,7 @@ func TestSkillRuntimeMaintenanceCompletionRequiresCanonicalBindingsAtVerifiedVer
 func TestSkillRuntimeMaintenanceBusyIncludesOtherVersionCallsAndLiveReceipts(t *testing.T) {
 	for _, status := range []string{"ready_call", "live_succeeded_receipt"} {
 		t.Run(status, func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 				fixture := newActionRuntimeMaintenanceFixture(t, kernel)
 				otherVersion := actionRuntimeMaintenanceBinding(t, fixture, "other-version", fixture.binding.SkillID, "1.1.0", fixture.binding.SourceIdentity)
 				fixture.proposal = actionRuntimeMaintenanceProposal(fixture.proposal, otherVersion)
@@ -206,7 +207,7 @@ func TestSkillRuntimeMaintenanceBusyIncludesOtherVersionCallsAndLiveReceipts(t *
 					t.Fatalf("busy attempt left an active or partial gate: %#v, %v", gate, err)
 				}
 				if status == "live_succeeded_receipt" {
-					transitionActionLifecycleRun(t, kernel, fixture.proposal.Call, AgentRunStatusCanceled, nil, fixture.now.Add(4*time.Second))
+					actiontest.TransitionParentRun(t, kernel, fixture.proposal.Call, AgentRunStatusCanceled, nil, fixture.now.Add(4*time.Second))
 					request.Now = fixture.now.Add(5 * time.Second)
 					gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)
 					if err != nil || gate == nil || !gate.Active {
@@ -243,7 +244,7 @@ func assertSkillRuntimeMaintenanceRecord(t *testing.T, store SkillRuntimeMainten
 
 // reopenSkillRuntimeMaintenanceStore opens the store again on backend's data,
 // as a restart would.
-func reopenSkillRuntimeMaintenanceStore(t *testing.T, backend actionLifecycleBackend) SkillRuntimeMaintenanceStore {
+func reopenSkillRuntimeMaintenanceStore(t *testing.T, backend actiontest.Backend) SkillRuntimeMaintenanceStore {
 	t.Helper()
-	return backend.reopen(t).(SkillRuntimeMaintenanceStore)
+	return backend.Reopen(t).(SkillRuntimeMaintenanceStore)
 }

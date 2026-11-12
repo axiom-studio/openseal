@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -98,7 +99,7 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 				}); !errors.Is(err, ErrApprovalResolved) {
 					t.Fatalf("closed approval accepted a late decision: %v", err)
 				}
-				assertActionLifecycleUnclaimable(t, f.raw, gotCall, f.clock.Now().Add(2*time.Hour))
+				actiontest.AssertUnclaimable(t, f.raw, gotCall, f.clock.Now().Add(2*time.Hour))
 				if busy, err := f.raw.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(f.ctx, SkillRuntimeUsageFilter{
 					Scope: f.scope, DeploymentID: gotCall.DeploymentID, BindingID: gotCall.BindingID, SkillID: gotCall.SkillID, SkillVersion: gotCall.SkillVersion,
 				}); err != nil || busy {
@@ -142,7 +143,7 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 			if f.dispatch.count("update_status") != 0 {
 				t.Fatal("an expired call was dispatched")
 			}
-			assertActionLifecycleUnclaimable(t, f.raw, result.Call, f.clock.Now().Add(2*time.Hour))
+			actiontest.AssertUnclaimable(t, f.raw, result.Call, f.clock.Now().Add(2*time.Hour))
 		})
 	})
 }

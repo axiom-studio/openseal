@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
@@ -95,7 +96,7 @@ func skillUpgradeDrainFixture(t *testing.T, store KernelStore) (*skill.Catalog, 
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
 	}), nil)
-	proposal, err := coordinator.Propose(t.Context(), loopProposeRequest(action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "chat-worker", DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "follow-up", SkillVersion: "1.0.0", Action: "read", Arguments: map[string]interface{}{}, Summary: "Read messages"}, "read"))
+	proposal, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "chat-worker", DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "follow-up", SkillVersion: "1.0.0", Action: "read", Arguments: map[string]interface{}{}, Summary: "Read messages"}, "read"))
 	if err != nil {
 		t.Fatal(err)
 	}

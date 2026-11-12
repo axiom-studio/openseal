@@ -6,11 +6,12 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 func TestSkillRuntimeMaintenanceResolverErrorParksBeforeStartingTurn(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store KernelStore) {
 		request := skillRuntimeMaintenanceEmptyRequest()
 		request.Now = time.Now().UTC()
 		request.LeaseDuration = 2 * time.Minute

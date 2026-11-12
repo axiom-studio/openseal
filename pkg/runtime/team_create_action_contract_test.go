@@ -6,6 +6,7 @@ import (
 	"time"
 
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -62,7 +63,7 @@ func teamCreateGetsBuilderCard(t *testing.T, definition *skill.Definition) bool 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := coordinator.Propose(ctx, loopProposeRequest(runtimeaction.ProposeActionRequest{
+	result, err := coordinator.Propose(ctx, actiontest.LoopProposeRequest(runtimeaction.ProposeActionRequest{
 		Scope: fixture.scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: runtimeaction.TeamActionCreateTeam,
 		Arguments: teamCreateArgumentsFor(""), Summary: "Review the team",

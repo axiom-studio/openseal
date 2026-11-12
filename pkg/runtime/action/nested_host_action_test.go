@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -72,7 +73,7 @@ func (f *nestedActionFixture) hostIssuer(t *testing.T, issued *atomic.Int64) act
 		if err != nil {
 			return nil, err
 		}
-		return action.SignActionCredentialLease(ctx, *lease, testCredentialLeaseSigner{key: []byte("host-lease-key")})
+		return action.SignActionCredentialLease(ctx, *lease, actiontest.CredentialLeaseSigner{Key: []byte("host-lease-key")})
 	})
 }
 
@@ -86,10 +87,10 @@ func (f *nestedActionFixture) refusingWorker(t *testing.T, at time.Time) *action
 }
 
 func TestNestedHostReadIsClaimedLeasedAndFinishedByItsHostOnly(t *testing.T) {
-	for _, testCase := range nestedActionStores(t) {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
 			ctx := context.Background()
-			f := newNestedHostFixture(t, testCase.open(t))
+			f := newNestedHostFixture(t, testCase.Open(t))
 			proposed, err := f.coordinator.ProposeNestedHost(ctx, f.hostRead("git-1"))
 			if err != nil {
 				t.Fatal(err)
@@ -158,10 +159,10 @@ func TestNestedHostReadIsClaimedLeasedAndFinishedByItsHostOnly(t *testing.T) {
 }
 
 func TestNestedHostCallsActOnlyAsOfferedActionsOfTheTurn(t *testing.T) {
-	for _, testCase := range nestedActionStores(t) {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
 			ctx := context.Background()
-			f := newNestedHostFixture(t, testCase.open(t))
+			f := newNestedHostFixture(t, testCase.Open(t))
 			for _, refused := range []action.NestedHostActionRequest{
 				{SkillID: "skill-github", Action: "issue-delete"},
 				{SkillID: "skill-gitlab", Action: "repository-get"},
@@ -214,10 +215,10 @@ func TestNestedHostCallsActOnlyAsOfferedActionsOfTheTurn(t *testing.T) {
 }
 
 func TestNestedHostPushWaitsForApprovalAndHonorsTheDecision(t *testing.T) {
-	for _, testCase := range nestedActionStores(t) {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
 			ctx := context.Background()
-			f := newNestedHostFixture(t, testCase.open(t))
+			f := newNestedHostFixture(t, testCase.Open(t))
 			var issued atomic.Int64
 			pushed, err := f.coordinator.ProposeNestedHost(ctx, f.hostPush("push-1"))
 			if err != nil {
@@ -276,10 +277,10 @@ func TestNestedHostPushWaitsForApprovalAndHonorsTheDecision(t *testing.T) {
 }
 
 func TestNestedHostCallsTheirHostAbandonedAreClosedWithoutDispatch(t *testing.T) {
-	for _, testCase := range nestedActionStores(t) {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
 			ctx := context.Background()
-			f := newNestedHostFixture(t, testCase.open(t))
+			f := newNestedHostFixture(t, testCase.Open(t))
 			var issued atomic.Int64
 
 			// A ready call its host never claimed waits out the grace, then
@@ -318,10 +319,10 @@ func TestNestedHostCallsTheirHostAbandonedAreClosedWithoutDispatch(t *testing.T)
 }
 
 func TestNestedHostCallEndsWithItsTurn(t *testing.T) {
-	for _, testCase := range nestedActionStores(t) {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
 			ctx := context.Background()
-			f := newNestedHostFixture(t, testCase.open(t))
+			f := newNestedHostFixture(t, testCase.Open(t))
 			var issued atomic.Int64
 			proposed, err := f.coordinator.ProposeNestedHost(ctx, f.hostRead("git-1"))
 			if err != nil {

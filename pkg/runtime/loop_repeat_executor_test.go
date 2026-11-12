@@ -12,6 +12,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -20,7 +21,7 @@ import (
 // repeatExecFixture is a claimed Run with its session in an in-memory store; it
 // plays the LoopToolExecutor around a loopRepeatGuard.
 type repeatExecFixture struct {
-	*loopStoreFixture
+	*actiontest.LoopStore
 	sessions    AgentSessionStore
 	coordinator *action.ActionCoordinator
 	step        int64
@@ -29,19 +30,19 @@ type repeatExecFixture struct {
 func newRepeatExecFixture(t *testing.T) *repeatExecFixture {
 	t.Helper()
 	store := newTestKernelStore(t)
-	f := newLoopStoreFixture(t, store)
-	lease := AgentRunLeaseGuard{WorkerID: loopStoreWorker, Now: f.now}
-	if _, err := store.CreateRunAgentSession(f.ctx, CreateRunAgentSessionRequest{
-		Scope: f.scope, OwnerRunID: f.run.ID, AgentID: f.run.AssignedAgentID, Lease: lease, Now: f.now,
+	f := actiontest.NewLoopStore(t, store)
+	lease := AgentRunLeaseGuard{WorkerID: actiontest.LoopStoreWorker, Now: f.Now}
+	if _, err := store.CreateRunAgentSession(f.Ctx, CreateRunAgentSessionRequest{
+		Scope: f.Scope, OwnerRunID: f.Run.ID, AgentID: f.Run.AssignedAgentID, Lease: lease, Now: f.Now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	f.run = f.currentRun()
-	if f.run.SessionID == "" {
+	f.Run = f.CurrentRun()
+	if f.Run.SessionID == "" {
 		t.Fatal("the Run has no session")
 	}
-	coordinator := action.NewActionCoordinator(store, store, nil, nil, nil, models.WithClock(func() time.Time { return f.now }))
-	return &repeatExecFixture{loopStoreFixture: f, sessions: store, coordinator: coordinator}
+	coordinator := action.NewActionCoordinator(store, store, nil, nil, nil, models.WithClock(func() time.Time { return f.Now }))
+	return &repeatExecFixture{LoopStore: f, sessions: store, coordinator: coordinator}
 }
 
 type execCall struct {
@@ -78,17 +79,17 @@ func mustArgs(raw string) map[string]interface{} {
 }
 
 func (f *repeatExecFixture) lease() AgentRunLeaseGuard {
-	return AgentRunLeaseGuard{WorkerID: loopStoreWorker, Now: f.now}
+	return AgentRunLeaseGuard{WorkerID: actiontest.LoopStoreWorker, Now: f.Now}
 }
 
 // appendStep appends one step's assistant entry and its tool entries pending,
 // stamped with their repeat fields.
 func (f *repeatExecFixture) appendStep(calls ...execCall) []loopRepeatCall {
-	f.t.Helper()
+	f.T.Helper()
 	f.step++
 	stepID := fmt.Sprintf("step-%d", f.step)
 	assistant := &SessionEntry{
-		ID: SessionEntryID(f.run.SessionID, AssistantEntryKey(stepID)), StepID: stepID, Step: f.step, Type: SessionEntryAssistant,
+		ID: SessionEntryID(f.Run.SessionID, AssistantEntryKey(stepID)), StepID: stepID, Step: f.step, Type: SessionEntryAssistant,
 		Assistant: &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls},
 	}
 	entries := []*SessionEntry{assistant}
@@ -97,12 +98,12 @@ func (f *repeatExecFixture) appendStep(calls ...execCall) []loopRepeatCall {
 		callID := fmt.Sprintf("toolu_%d_%d", f.step, i)
 		assistant.Assistant.ToolCalls = append(assistant.Assistant.ToolCalls, ModelToolCall{ID: callID, Name: call.name, Arguments: json.RawMessage(call.args)})
 		entry := &SessionEntry{
-			ID: SessionEntryID(f.run.SessionID, ToolEntryKey(stepID, callID)), StepID: stepID, Step: f.step,
+			ID: SessionEntryID(f.Run.SessionID, ToolEntryKey(stepID, callID)), StepID: stepID, Step: f.step,
 			Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: callID,
 			Tool: &ToolEntry{Name: call.name, Arguments: json.RawMessage(call.args), SideEffect: ToolSideEffectRead},
 		}
 		if err := stampRepeatFields(entry.Tool, call.subject); err != nil {
-			f.t.Fatal(err)
+			f.T.Fatal(err)
 		}
 		entries = append(entries, entry)
 		out[i] = loopRepeatCall{Entry: entry}
@@ -114,11 +115,11 @@ func (f *repeatExecFixture) appendStep(calls ...execCall) []loopRepeatCall {
 		}
 	}
 	lease := f.lease()
-	result, err := f.sessions.AppendAgentSessionEntries(f.ctx, AppendAgentSessionEntriesRequest{
-		Scope: f.scope, SessionID: f.run.SessionID, RunID: f.run.ID, Lease: &lease, Entries: entries, Now: f.now,
+	result, err := f.sessions.AppendAgentSessionEntries(f.Ctx, AppendAgentSessionEntriesRequest{
+		Scope: f.Scope, SessionID: f.Run.SessionID, RunID: f.Run.ID, Lease: &lease, Entries: entries, Now: f.Now,
 	})
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
 	for i := range out {
 		out[i].Entry = result.Entries[i+1]
@@ -127,13 +128,13 @@ func (f *repeatExecFixture) appendStep(calls ...execCall) []loopRepeatCall {
 }
 
 func (f *repeatExecFixture) guard(calls []loopRepeatCall, wait bool) *loopRepeatGuard {
-	f.t.Helper()
-	guard, err := startLoopRepeatGuard(f.ctx, loopRepeatGuardConfig{
-		Sessions: f.sessions, Refusals: f.coordinator, Run: f.run, WorkerID: loopStoreWorker,
-		WaitOffered: wait, Now: func() time.Time { return f.now },
+	f.T.Helper()
+	guard, err := startLoopRepeatGuard(f.Ctx, loopRepeatGuardConfig{
+		Sessions: f.sessions, Refusals: f.coordinator, Run: f.Run, WorkerID: actiontest.LoopStoreWorker,
+		WaitOffered: wait, Now: func() time.Time { return f.Now },
 	}, calls)
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
 	return guard
 }
@@ -141,12 +142,12 @@ func (f *repeatExecFixture) guard(calls []loopRepeatCall, wait bool) *loopRepeat
 // transition moves entry from its state to `to` through the executor path
 // (withRepeatKernelFields), observes it and returns it.
 func (f *repeatExecFixture) transition(guard *loopRepeatGuard, entry *SessionEntry, to ToolEntryState, req ToolEntryTransitionRequest) *SessionEntry {
-	f.t.Helper()
-	req.Scope, req.EntryID, req.RunID, req.Lease, req.Now = f.scope, entry.ID, f.run.ID, f.lease(), f.now
+	f.T.Helper()
+	req.Scope, req.EntryID, req.RunID, req.Lease, req.Now = f.Scope, entry.ID, f.Run.ID, f.lease(), f.Now
 	req.From, req.ExpectedRevision, req.To = entry.State, entry.Revision, to
-	result, err := f.sessions.TransitionToolEntry(f.ctx, withRepeatKernelFields(req))
+	result, err := f.sessions.TransitionToolEntry(f.Ctx, withRepeatKernelFields(req))
 	if err != nil {
-		f.t.Fatalf("transition %s %s -> %s: %v", entry.ToolCallID, entry.State, to, err)
+		f.T.Fatalf("transition %s %s -> %s: %v", entry.ToolCallID, entry.State, to, err)
 	}
 	if guard != nil {
 		guard.Observe(result.Entry)
@@ -165,11 +166,11 @@ func textResult(text string, failed bool) *ToolResult {
 // runStep plays a whole step: plan, refuse, execute what may run with
 // results[i] (by call), and finish.
 func (f *repeatExecFixture) runStep(results []string, calls ...execCall) ([]*SessionEntry, *agentrun.LoopFailure) {
-	f.t.Helper()
+	f.T.Helper()
 	planned := f.appendStep(calls...)
 	guard := f.guard(planned, false)
-	if _, err := guard.ApplyRefusals(f.ctx); err != nil {
-		f.t.Fatal(err)
+	if _, err := guard.ApplyRefusals(f.Ctx); err != nil {
+		f.T.Fatal(err)
 	}
 	for i, call := range planned {
 		if !guard.Dispatch(call.Entry.ID) {
@@ -177,20 +178,20 @@ func (f *repeatExecFixture) runStep(results []string, calls ...execCall) ([]*Ses
 		}
 		f.transition(guard, call.Entry, ToolEntryCompleted, ToolEntryTransitionRequest{Result: textResult(results[i], false)})
 	}
-	failure, err := guard.Finish(f.ctx)
+	failure, err := guard.Finish(f.Ctx)
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
 	return f.stepEntries(planned), failure
 }
 
 func (f *repeatExecFixture) stepEntries(calls []loopRepeatCall) []*SessionEntry {
-	f.t.Helper()
+	f.T.Helper()
 	out := make([]*SessionEntry, len(calls))
 	for i, call := range calls {
-		entry, err := f.sessions.GetSessionEntry(f.ctx, f.scope, call.Entry.ID)
+		entry, err := f.sessions.GetSessionEntry(f.Ctx, f.Scope, call.Entry.ID)
 		if err != nil {
-			f.t.Fatal(err)
+			f.T.Fatal(err)
 		}
 		out[i] = entry
 	}
@@ -198,12 +199,12 @@ func (f *repeatExecFixture) stepEntries(calls []loopRepeatCall) []*SessionEntry 
 }
 
 func (f *repeatExecFixture) notes() []*SessionEntry {
-	f.t.Helper()
-	notes, err := f.sessions.ListAgentSessionEntries(f.ctx, SessionEntryFilter{
-		Scope: f.scope, SessionID: f.run.SessionID, NoteKinds: []NoteKind{NoteRepeat},
+	f.T.Helper()
+	notes, err := f.sessions.ListAgentSessionEntries(f.Ctx, SessionEntryFilter{
+		Scope: f.Scope, SessionID: f.Run.SessionID, NoteKinds: []NoteKind{NoteRepeat},
 	})
 	if err != nil {
-		f.t.Fatal(err)
+		f.T.Fatal(err)
 	}
 	return notes
 }
@@ -337,13 +338,13 @@ func TestRepeatGuardGovernedRefusalRecordsRefusedRow(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		planned := f.appendStep(read)
 		guard := f.guard(planned, true)
-		if refused, err := guard.ApplyRefusals(f.ctx); err != nil || len(refused) != 0 || !guard.Dispatch(planned[0].Entry.ID) {
+		if refused, err := guard.ApplyRefusals(f.Ctx); err != nil || len(refused) != 0 || !guard.Dispatch(planned[0].Entry.ID) {
 			t.Fatalf("step %d refused %d, %v", i+1, len(refused), err)
 		}
-		call := f.propose(f.loopCall(fmt.Sprintf("call-%d", i+1)))
+		call := f.Propose(f.LoopCall(fmt.Sprintf("call-%d", i+1)))
 		priorCallID = call.ID
 		f.transition(guard, planned[0].Entry, ToolEntryCompleted, ToolEntryTransitionRequest{ActionCallID: call.ID, Result: textResult("same", false)})
-		if failure, err := guard.Finish(f.ctx); err != nil || failure != nil {
+		if failure, err := guard.Finish(f.Ctx); err != nil || failure != nil {
 			t.Fatalf("finish = %#v, %v", failure, err)
 		}
 	}
@@ -352,13 +353,13 @@ func TestRepeatGuardGovernedRefusalRecordsRefusedRow(t *testing.T) {
 	}
 	planned := f.appendStep(read)
 	guard := f.guard(planned, true)
-	refused, err := guard.ApplyRefusals(f.ctx)
+	refused, err := guard.ApplyRefusals(f.Ctx)
 	if err != nil || len(refused) != 1 || guard.Dispatch(planned[0].Entry.ID) {
 		t.Fatalf("refusals = %d, %v", len(refused), err)
 	}
 	entry := refused[0]
 	requireGuardRefusal(t, entry, action.RefusedLoopCallRepeat, 3, ToolResultRefused, "")
-	row, err := f.store.GetActionCall(f.ctx, f.scope, entry.ActionCallID)
+	row, err := f.Store.GetActionCall(f.Ctx, f.Scope, entry.ActionCallID)
 	if err != nil {
 		t.Fatalf("refused row %q: %v", entry.ActionCallID, err)
 	}
@@ -367,7 +368,7 @@ func TestRepeatGuardGovernedRefusalRecordsRefusedRow(t *testing.T) {
 		row.ErrorDetails["step"] != "2" || row.BindingID != "binding-1" {
 		t.Fatalf("refused row = %#v", row)
 	}
-	if failure, err := guard.Finish(f.ctx); err != nil || failure != nil {
+	if failure, err := guard.Finish(f.Ctx); err != nil || failure != nil {
 		t.Fatalf("finish = %#v, %v", failure, err)
 	}
 }
@@ -377,15 +378,15 @@ func TestRepeatGuardGovernedRefusalNeedsCoordinator(t *testing.T) {
 	read := governedReadCall(`{"path":"a.txt"}`)
 	for i := 0; i < 2; i++ {
 		planned := f.appendStep(read)
-		call := f.propose(f.loopCall(fmt.Sprintf("call-%d", i+1)))
+		call := f.Propose(f.LoopCall(fmt.Sprintf("call-%d", i+1)))
 		f.transition(nil, planned[0].Entry, ToolEntryCompleted, ToolEntryTransitionRequest{ActionCallID: call.ID, Result: textResult("same", false)})
 	}
 	planned := f.appendStep(read)
-	guard, err := startLoopRepeatGuard(f.ctx, loopRepeatGuardConfig{Sessions: f.sessions, Run: f.run, WorkerID: loopStoreWorker}, planned)
+	guard, err := startLoopRepeatGuard(f.Ctx, loopRepeatGuardConfig{Sessions: f.sessions, Run: f.Run, WorkerID: actiontest.LoopStoreWorker}, planned)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := guard.ApplyRefusals(f.ctx); err == nil {
+	if _, err := guard.ApplyRefusals(f.Ctx); err == nil {
 		t.Fatal("a governed refusal was written without its refused row")
 	}
 	if entry := f.stepEntries(planned)[0]; entry.State != ToolEntryPending {
@@ -406,7 +407,7 @@ func TestRepeatGuardResumeKeepsStepDecisions(t *testing.T) {
 		if _, ok := guard.Verdict(resumed[0].ID); ok || guard.Dispatch(resumed[0].ID) {
 			t.Fatal("a terminal entry was evaluated again")
 		}
-		if _, err := guard.ApplyRefusals(f.ctx); err != nil {
+		if _, err := guard.ApplyRefusals(f.Ctx); err != nil {
 			t.Fatal(err)
 		}
 		requireGuardRefusal(t, f.stepEntries(planned)[1], ToolGuardSameStepDuplicate, 0, ToolResultRefused, "")
@@ -433,11 +434,11 @@ func TestRepeatGuardResumeKeepsStepDecisions(t *testing.T) {
 		if !guard.Failed() || guard.Dispatch(resumed[1].ID) {
 			t.Fatal("resume dispatched a sibling of the failing call")
 		}
-		if _, err := guard.ApplyRefusals(f.ctx); err != nil {
+		if _, err := guard.ApplyRefusals(f.Ctx); err != nil {
 			t.Fatal(err)
 		}
 		requireGuardRefusal(t, f.stepEntries(planned)[1], ToolGuardRunStopping, 0, ToolResultRefused, repeatRunStoppingText)
-		failure, err := guard.Finish(f.ctx)
+		failure, err := guard.Finish(f.Ctx)
 		if err != nil || failure == nil || failure.Code != action.RunFailureCodeRepeatLimit {
 			t.Fatalf("finish = %#v, %v", failure, err)
 		}
@@ -451,12 +452,12 @@ func TestRepeatGuardFinishWaitsForOpenEntries(t *testing.T) {
 	approval := writeCall("deploy", `{"env":"prod"}`)
 	planned := f.appendStep(read, approval)
 	guard := f.guard(planned, false)
-	if _, err := guard.ApplyRefusals(f.ctx); err != nil {
+	if _, err := guard.ApplyRefusals(f.Ctx); err != nil {
 		t.Fatal(err)
 	}
 	f.transition(guard, planned[0].Entry, ToolEntryCompleted, ToolEntryTransitionRequest{Result: textResult("same", false)})
 	waiting := f.transition(guard, planned[1].Entry, ToolEntryAwaitingApproval, ToolEntryTransitionRequest{Wait: &ToolEntryWait{ApprovalID: "approval-1"}})
-	if failure, err := guard.Finish(f.ctx); err != nil || failure != nil || len(f.notes()) != 0 {
+	if failure, err := guard.Finish(f.Ctx); err != nil || failure != nil || len(f.notes()) != 0 {
 		t.Fatalf("parked finish = %#v, %v, notes %d", failure, err, len(f.notes()))
 	}
 	// The resume settles the held call; a guard opened for it finishes the step.
@@ -468,7 +469,7 @@ func TestRepeatGuardFinishWaitsForOpenEntries(t *testing.T) {
 	}
 	f.transition(again, running, ToolEntryCompleted, ToolEntryTransitionRequest{Result: textResult("deployed", false)})
 	for i := 0; i < 2; i++ {
-		if failure, err := again.Finish(f.ctx); err != nil || failure != nil {
+		if failure, err := again.Finish(f.Ctx); err != nil || failure != nil {
 			t.Fatalf("finish %d = %#v, %v", i, failure, err)
 		}
 	}
@@ -484,7 +485,7 @@ func TestRepeatGuardErrorStreakFailsRun(t *testing.T) {
 		planned := f.appendStep(readCall("read_file", fmt.Sprintf(`{"path":"missing-%d"}`, i)))
 		guard := f.guard(planned, false)
 		f.transition(guard, planned[0].Entry, ToolEntryError, ToolEntryTransitionRequest{Result: textResult("not found", true)})
-		failure, err := guard.Finish(f.ctx)
+		failure, err := guard.Finish(f.Ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -502,11 +503,11 @@ func TestRepeatGuardRejectsUnstampedEntries(t *testing.T) {
 	planned := f.appendStep(readCall("read_file", `{"path":"a"}`))
 	unstamped := cloneSessionEntry(planned[0].Entry)
 	unstamped.Tool.ArgumentsDigest = ""
-	if _, err := startLoopRepeatGuard(f.ctx, loopRepeatGuardConfig{Sessions: f.sessions, Run: f.run, WorkerID: loopStoreWorker},
+	if _, err := startLoopRepeatGuard(f.Ctx, loopRepeatGuardConfig{Sessions: f.sessions, Run: f.Run, WorkerID: actiontest.LoopStoreWorker},
 		[]loopRepeatCall{{Entry: unstamped}}); err == nil || !strings.Contains(err.Error(), "repeat key") {
 		t.Fatalf("unstamped entry = %v", err)
 	}
-	if _, err := startLoopRepeatGuard(f.ctx, loopRepeatGuardConfig{Sessions: f.sessions, Run: f.run}, planned); err == nil {
+	if _, err := startLoopRepeatGuard(f.Ctx, loopRepeatGuardConfig{Sessions: f.sessions, Run: f.Run}, planned); err == nil {
 		t.Fatal("a guard started without the lease owner")
 	}
 }
@@ -518,13 +519,13 @@ func TestRepeatGuardLostLeaseWritesNothing(t *testing.T) {
 		f.runStep([]string{"same"}, read)
 	}
 	planned := f.appendStep(read)
-	guard, err := startLoopRepeatGuard(f.ctx, loopRepeatGuardConfig{
-		Sessions: f.sessions, Run: f.run, WorkerID: "other-worker", Now: func() time.Time { return f.now },
+	guard, err := startLoopRepeatGuard(f.Ctx, loopRepeatGuardConfig{
+		Sessions: f.sessions, Run: f.Run, WorkerID: "other-worker", Now: func() time.Time { return f.Now },
 	}, planned)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := guard.ApplyRefusals(f.ctx); !errors.Is(err, ErrLeaseLost) {
+	if _, err := guard.ApplyRefusals(f.Ctx); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("refusal under a foreign lease = %v", err)
 	}
 	if entry := f.stepEntries(planned)[0]; entry.State != ToolEntryPending {
@@ -548,7 +549,7 @@ func TestRepeatGuardObserveIsConcurrent(t *testing.T) {
 		go func(entry *SessionEntry) {
 			defer wg.Done()
 			req := withRepeatKernelFields(ToolEntryTransitionRequest{
-				Scope: f.scope, EntryID: entry.ID, RunID: f.run.ID, Lease: f.lease(), Now: f.now,
+				Scope: f.Scope, EntryID: entry.ID, RunID: f.Run.ID, Lease: f.lease(), Now: f.Now,
 				From: ToolEntryPending, To: ToolEntryCompleted, Result: textResult("ok", false),
 			})
 			result, err := f.sessions.TransitionToolEntry(context.Background(), req)
@@ -560,7 +561,7 @@ func TestRepeatGuardObserveIsConcurrent(t *testing.T) {
 		}(call.Entry)
 	}
 	wg.Wait()
-	if failure, err := guard.Finish(f.ctx); err != nil || failure != nil || len(f.notes()) != 0 {
+	if failure, err := guard.Finish(f.Ctx); err != nil || failure != nil || len(f.notes()) != 0 {
 		t.Fatalf("finish = %#v, %v", failure, err)
 	}
 }

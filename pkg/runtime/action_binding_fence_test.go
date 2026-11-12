@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -20,9 +21,9 @@ import (
 func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *testing.T) {
 	for _, invalidAuthority := range []string{"missing", "unqualified", "stale", "disabled", "deleted", "foreign_scope", "foreign_deployment", "foreign_skill", "foreign_version"} {
 		t.Run(invalidAuthority, func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 				fixture := newActionBindingFenceFixture(t, kernel)
-				before := getActionLifecycleRun(t, kernel, fixture.proposal.Call)
+				before := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 				proposal := fixture.proposal
 				proposal.Call = cloneActionCall(proposal.Call)
 				proposal.Event = cloneActivityEvent(proposal.Event)
@@ -61,7 +62,7 @@ func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *tes
 				if result != nil || !errors.Is(err, skill.ErrBindingUnavailable) {
 					t.Fatalf("atomic proposal accepted invalid binding authority: %#v, %v", result, err)
 				}
-				after := getActionLifecycleRun(t, kernel, fixture.proposal.Call)
+				after := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 				if !reflect.DeepEqual(before, after) {
 					t.Fatalf("rejected proposal changed its parent: before=%#v after=%#v", before, after)
 				}
@@ -81,9 +82,9 @@ func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *tes
 func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *testing.T) {
 	for _, path := range []string{"ordinary", "duplicate_receipt"} {
 		t.Run(path, func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 				fixture := newActionBindingFenceFixture(t, kernel)
-				run := getActionLifecycleRun(t, kernel, fixture.proposal.Call)
+				run := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 				if path == "duplicate_receipt" {
 					completeActionBindingFenceFixture(t, fixture)
 					run = newActionBindingFenceRunningRun(t, fixture.store, fixture.proposal.Call.Scope, fixture.now)
@@ -107,7 +108,7 @@ func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *t
 				coordinator := action.NewActionCoordinator(fixture.store, intercepted, fixture.catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 					return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
 				}), nil, models.WithClock(func() time.Time { return fixture.now.Add(time.Second) }))
-				result, err := coordinator.Propose(t.Context(), loopProposeRequest(action.ProposeActionRequest{
+				result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
 					Scope: run.Scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
 					BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision,
 					SkillID: fixture.binding.SkillID, SkillVersion: fixture.binding.SkillVersion, Action: "deploy",
@@ -131,10 +132,10 @@ func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *t
 }
 
 func TestActionBindingFencePreservesIdempotentReceiptAfterUpgrade(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 		fixture := newActionBindingFenceFixture(t, kernel)
 		completeActionBindingFenceFixture(t, fixture)
-		before := getActionLifecycleRun(t, kernel, fixture.proposal.Call)
+		before := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 		baseline, err := fixture.store.ListActivity(t.Context(), ActivityFilter{Scope: before.Scope, RunID: before.ID})
 		if err != nil {
 			t.Fatal(err)
@@ -146,7 +147,7 @@ func TestActionBindingFencePreservesIdempotentReceiptAfterUpgrade(t *testing.T) 
 		if err != nil || replayed == nil || replayed.Created || replayed.Call.ID != fixture.proposal.Call.ID || replayed.Call.Status != ActionCallStatusSucceeded || replayed.Call.SkillVersion != "1.0.0" {
 			t.Fatalf("binding upgrade lost the immutable idempotent receipt: %#v, %v", replayed, err)
 		}
-		after := getActionLifecycleRun(t, kernel, fixture.proposal.Call)
+		after := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 		events, err := fixture.store.ListActivity(t.Context(), ActivityFilter{Scope: before.Scope, RunID: before.ID})
 		if err != nil || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(baseline, events) {
 			t.Fatalf("idempotent replay changed Run or activity: parent=%#v events=%#v, %v", after, events, err)
@@ -161,7 +162,7 @@ func TestActionBindingFencePreservesIdempotentReceiptAfterUpgrade(t *testing.T) 
 func TestActionBindingFenceSerializesProposalAndUpgrade(t *testing.T) {
 	for _, ordering := range []string{"proposal_first", "upgrade_first", "concurrent"} {
 		t.Run(ordering, func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 				fixture := newActionBindingFenceFixture(t, kernel)
 				mutation := actionBindingFenceUpgrade(fixture)
 				var proposed *ActionProposalResult
@@ -195,7 +196,7 @@ func TestActionBindingFenceSerializesProposalAndUpgrade(t *testing.T) {
 				if err != nil || len(bindings) != 1 {
 					t.Fatalf("get binding = %#v, %v", bindings, err)
 				}
-				run := getActionLifecycleRun(t, kernel, fixture.proposal.Call)
+				run := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 				calls, err := fixture.store.ListActionCalls(t.Context(), ActionFilter{Scope: run.Scope, RunID: run.ID})
 				if err != nil {
 					t.Fatal(err)
@@ -217,9 +218,9 @@ func TestActionBindingFenceSerializesProposalAndUpgrade(t *testing.T) {
 }
 
 func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 		fixture := newActionBindingFenceFixture(t, kernel)
-		firstRun := getActionLifecycleRun(t, kernel, fixture.proposal.Call)
+		firstRun := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 		secondRun := newActionBindingFenceRunningRun(t, fixture.store, firstRun.Scope, fixture.now)
 		runs := []*AgentRun{firstRun, secondRun}
 		var outcomes [2]*ActionProposalResult
@@ -234,7 +235,7 @@ func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.
 					return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
 				}), nil, models.WithClock(func() time.Time { return fixture.now.Add(time.Second) }))
 				<-start
-				outcomes[index], failures[index] = coordinator.Propose(t.Context(), loopProposeRequest(action.ProposeActionRequest{
+				outcomes[index], failures[index] = coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
 					Scope: run.Scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
 					BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision,
 					SkillID: fixture.binding.SkillID, SkillVersion: fixture.binding.SkillVersion, Action: "deploy",
@@ -310,7 +311,7 @@ func newActionBindingFenceFixture(t *testing.T, kernel KernelStore) *actionBindi
 		t.Fatal("binding fence fixture requires a durable catalog and upgrade store")
 	}
 	now := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
-	base, originalScope := governedActionCatalog(t)
+	base, originalScope := actiontest.GovernedCatalog(t)
 	definition, err := base.GetDefinition(t.Context(), "release", "1.0.0")
 	if err != nil {
 		t.Fatal(err)
@@ -351,7 +352,7 @@ func newActionBindingFenceFixture(t *testing.T, kernel KernelStore) *actionBindi
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal := loopProposalRecord(call, run, "agent-worker", now.Add(time.Second), actionLifecycleEvent(call, uuid.NewString(), "action.proposed", now.Add(time.Second)))
+	proposal := loopProposalRecord(call, run, "agent-worker", now.Add(time.Second), actiontest.CallEvent(call, uuid.NewString(), "action.proposed", now.Add(time.Second)))
 	proposal.RequireBindingFence = true
 	return &actionBindingFenceFixture{store: store, catalog: catalog, binding: binding, now: now, proposal: proposal}
 }
@@ -386,7 +387,7 @@ func completeActionBindingFenceFixture(t *testing.T, fixture *actionBindingFence
 	if err != nil || completed == nil || completed.Call.Status != ActionCallStatusSucceeded {
 		t.Fatalf("complete fixture = %#v, %v", completed, err)
 	}
-	transitionActionLifecycleRun(t, fixture.store, fixture.proposal.Call, AgentRunStatusCanceled, nil, fixture.now.Add(3*time.Second))
+	actiontest.TransitionParentRun(t, fixture.store, fixture.proposal.Call, AgentRunStatusCanceled, nil, fixture.now.Add(3*time.Second))
 }
 
 func actionBindingFenceUpgrade(fixture *actionBindingFenceFixture) *SkillReferenceUpgradeMutation {

@@ -8,63 +8,12 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
-
-const connectAccountTestUser = "7"
-
-// personActionCatalog binds an OAuth action of release-agent whose google
-// slot is per_person.
-func personActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
-	t.Helper()
-	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "one"}
-	catalog := skill.NewCatalog()
-	definition := &skill.Definition{
-		ID: "mail", Version: "1.0.0", Name: "Mail", Transport: skill.TransportReference{Kind: "http", Endpoint: "https://mail.invalid"},
-		Actions: map[string]skill.Action{"send": {
-			Name: "send", Description: "Send a message", SideEffect: skill.SideEffectExternal, Risk: skill.RiskLevelWrite,
-			InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false,
-				"properties": map[string]interface{}{"to": map[string]interface{}{"type": "string"}}, "required": []interface{}{"to"}},
-			Credentials: []skill.CredentialRequirement{{Name: "google", Kind: "oauth2", OAuth2: &skill.OAuth2Requirement{Provider: "google", Subject: "user", Scopes: []string{"mail.send"}}}},
-			Retry:       skill.ActionRetryPolicy{MaxAttempts: 3}, Idempotency: skill.IdempotencySupported,
-		}},
-	}
-	if err := catalog.Register(ctx, definition); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.Bind(ctx, &skill.Binding{
-		ID: "mail-binding", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "release-agent",
-		SkillID: "mail", SkillVersion: "1.0.0", AllowedActions: []string{"send"}, MaximumRisk: skill.RiskLevelWrite,
-		Credentials: map[string]skill.CredentialReference{"google": {Kind: "oauth2", ID: skill.PersonCredentialReferenceID}}, Revision: 1,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	return catalog, scope
-}
-
-// claimedPersonChatRun claims a 1:1 chat run of release-agent acting for
-// actingUser.
-func claimedPersonChatRun(t *testing.T, store *sqlite.Store, scope Scope, now time.Time, actingUser string) *AgentRun {
-	t.Helper()
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "send mail",
-		Source: RunSourceObjective, Kind: RunKindConversation, ActingUser: actingUser,
-		Context: map[string]interface{}{conversationRunContextConversationID: "conversation-1", conversationRunContextTriggerID: "message-1"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	claimed, err := store.ClaimNextAgentRun(context.Background(), AgentRunClaim{Scope: scope, WorkerID: "agent-worker", Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
-	if err != nil || claimed == nil || claimed.ID != run.ID {
-		t.Fatalf("claim = %#v, %v", claimed, err)
-	}
-	return claimed
-}
 
 // proposePersonAction proposes send as the governed tool call of run loop
 // step stepID, as the loop does for the Run's lease owner.
@@ -99,17 +48,11 @@ func executePersonAction(t *testing.T, worker *action.ActionWorker, scope Scope,
 	return result
 }
 
-type availabilityFunc func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error)
-
-func (f availabilityFunc) CheckCredentialAvailability(ctx context.Context, req action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
-	return f(ctx, req)
-}
-
 func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 	store := newTestKernelStore(t)
 	now := time.Now().UTC()
-	catalog, scope := personActionCatalog(t)
-	run := claimedPersonChatRun(t, store, scope, now, "")
+	catalog, scope := actiontest.PersonCatalog(t)
+	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, "")
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	dispatched := false
 	worker := action.NewActionWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
@@ -118,7 +61,7 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 		dispatched = true
 		return map[string]interface{}{}, nil
 	}))
-	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
+	worker.SetCredentialAvailabilityChecker(actiontest.AvailabilityFunc(func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
 		t.Fatal("a run without a person is refused before the host check")
 		return action.CredentialAvailability{}, nil
 	}))
@@ -142,15 +85,15 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 func TestParkedCallReleasesExternalOperation(t *testing.T) {
 	store := newTestKernelStore(t)
 	now := time.Now().UTC()
-	catalog, scope := personActionCatalog(t)
-	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
+	catalog, scope := actiontest.PersonCatalog(t)
+	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	worker := action.NewActionWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
 	}), action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{}, nil
 	}))
-	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
+	worker.SetCredentialAvailabilityChecker(actiontest.AvailabilityFunc(func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
 		return action.CredentialAvailability{Gaps: map[string]action.CredentialGap{"google": action.CredentialGapPersonSignIn}}, nil
 	}))
 	executePersonAction(t, worker, scope, proposal)
@@ -163,8 +106,8 @@ func TestParkedCallReleasesExternalOperation(t *testing.T) {
 func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
 	store := newTestKernelStore(t)
 	now := time.Now().UTC()
-	catalog, scope := personActionCatalog(t)
-	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
+	catalog, scope := actiontest.PersonCatalog(t)
+	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	worker := action.NewActionWorker(store, catalog, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
@@ -172,7 +115,7 @@ func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
 		t.Fatal("a shared gap must not dispatch")
 		return nil, nil
 	}))
-	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
+	worker.SetCredentialAvailabilityChecker(actiontest.AvailabilityFunc(func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
 		return action.CredentialAvailability{Gaps: map[string]action.CredentialGap{"google": action.CredentialGapSharedSignIn}}, nil
 	}))
 	result := executePersonAction(t, worker, scope, proposal)
@@ -189,14 +132,14 @@ func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
 func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
 	store := newTestKernelStore(t)
 	now := time.Now().UTC()
-	catalog, scope := personActionCatalog(t)
-	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
+	catalog, scope := actiontest.PersonCatalog(t)
+	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	worker := action.NewActionWorker(store, catalog, nil, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		t.Fatal("a no_person gap must not dispatch")
 		return nil, nil
 	}))
-	worker.SetCredentialAvailabilityChecker(availabilityFunc(func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
+	worker.SetCredentialAvailabilityChecker(actiontest.AvailabilityFunc(func(context.Context, action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
 		return action.CredentialAvailability{Gaps: map[string]action.CredentialGap{"google": action.CredentialGapNoPerson}}, nil
 	}))
 	result := executePersonAction(t, worker, scope, proposal)
@@ -212,12 +155,12 @@ func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
 func TestPersonActionApprovalOnlyByActingUser(t *testing.T) {
 	store := newTestKernelStore(t)
 	now := time.Now().UTC()
-	catalog, scope := personActionCatalog(t)
-	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
+	catalog, scope := actiontest.PersonCatalog(t)
+	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
 	}))
-	if proposal.Approval == nil || len(proposal.Approval.EligibleApprovers) != 1 || proposal.Approval.EligibleApprovers[0] != (ApprovalPrincipal{Type: "user", ID: connectAccountTestUser}) {
+	if proposal.Approval == nil || len(proposal.Approval.EligibleApprovers) != 1 || proposal.Approval.EligibleApprovers[0] != (ApprovalPrincipal{Type: "user", ID: actiontest.ActingUser}) {
 		t.Fatalf("approval = %#v", proposal.Approval)
 	}
 }

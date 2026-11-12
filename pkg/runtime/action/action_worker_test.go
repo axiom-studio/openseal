@@ -9,17 +9,18 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	baseCatalog, proposal := createRunnableAction(t, store, now)
 	catalog := &toolTransportActionCatalog{ActionExecutionCatalog: baseCatalog, endpoint: "release_deploy"}
-	signer := testCredentialLeaseSigner{key: []byte("lease-signing-key")}
+	signer := actiontest.CredentialLeaseSigner{Key: []byte("lease-signing-key")}
 	issuerCalls := 0
 	worker := action.NewActionWorkerWithCredentialLeaseIssuer(store, catalog, action.ActionCredentialLeaseIssuerFunc(func(ctx context.Context, request action.ActionCredentialLeaseIssueRequest) (*models.SignedActionCredentialLease, error) {
 		issuerCalls++
@@ -70,7 +71,7 @@ func (c *toolTransportActionCatalog) Resolve(ctx context.Context, scope skill.Sc
 }
 
 func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	catalog, proposal := createRunnableAction(t, store, now)
 	attempts := 0
@@ -105,7 +106,7 @@ func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
 // step-1 for a Run that agent-worker holds for a minute.
 func createRunnableAction(t *testing.T, store models.KernelStore, now time.Time) (*skill.Catalog, *models.ActionProposalResult) {
 	t.Helper()
-	catalog, scope := governedActionCatalog(t)
+	catalog, scope := actiontest.GovernedCatalog(t)
 	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: models.RunSourceObjective,
@@ -117,7 +118,7 @@ func createRunnableAction(t *testing.T, store models.KernelStore, now time.Time)
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	return catalog, proposeLoopAction(t, store, catalog, claimed, "agent-worker", now.Add(time.Second), loopActionSpec{
-		id: "call", skillID: "release", version: "1.0.0", action: "deploy", arguments: map[string]interface{}{"environment": "production"},
+	return catalog, actiontest.ProposeLoopAction(t, store, catalog, claimed, "agent-worker", now.Add(time.Second), actiontest.LoopActionSpec{
+		ID: "call", SkillID: "release", Version: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
 	})
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -12,13 +13,13 @@ import (
 // Deleting a binding removes its row in every durable store. Nothing resolves
 // through it afterwards, and its ID can carry a different Skill identity.
 func TestDeleteSkillBindingRemovesAuthorityAndFreesTheID(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 		store, ok := kernel.(skill.CatalogStore)
 		if !ok {
 			t.Fatal("store does not persist Skill bindings")
 		}
 		ctx := t.Context()
-		base, _ := governedActionCatalog(t)
+		base, _ := actiontest.GovernedCatalog(t)
 		definition, err := base.GetDefinition(ctx, "release", "1.0.0")
 		if err != nil {
 			t.Fatal(err)

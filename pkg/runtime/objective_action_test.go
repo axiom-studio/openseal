@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -120,7 +121,7 @@ func TestObjectiveActionsRejectInjectedOwnerForeignTargetAndStaleRevisionBeforeA
 	}
 	validator, _ := action.NewObjectiveActionValidator(store)
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
-	base := loopProposeRequest(action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion, Action: action.ObjectiveActionCreate, IdempotencyKey: "create"}, "create")
+	base := actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion, Action: action.ObjectiveActionCreate, IdempotencyKey: "create"}, "create")
 	base.Arguments = map[string]interface{}{"title": "Campaign", "goal": "Launch campaign", "owner": map[string]interface{}{"type": "team", "id": "finance"}}
 	if _, err := coordinator.Propose(ctx, base); err == nil {
 		t.Fatal("model-supplied owner should fail schema validation")

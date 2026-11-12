@@ -28,8 +28,8 @@ func TestWorkerPoolScopeWakeDoesNotWakeAnotherTenant(t *testing.T) {
 }
 
 // newScopeWakeTestPool is an idle action pool for scope that dispatches
-// nothing. It is a cut-down copy of runtime's newTestActionPool, which this
-// test cannot see once it lives with the action code.
+// nothing. It is a cut-down copy of actiontest.NewPool, which an in-package
+// test cannot import (actiontest imports action).
 func newScopeWakeTestPool(t *testing.T, scope models.Scope) *ActionWorkerPool {
 	t.Helper()
 	pool, err := NewActionWorkerPool(newActionTestStore(t), skill.NewCatalog(), CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {

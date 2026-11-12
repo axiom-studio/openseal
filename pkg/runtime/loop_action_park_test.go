@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
@@ -274,25 +275,25 @@ func withSteeringMessage(run *AgentRun, messageID string, at time.Time) *AgentRu
 	return steered
 }
 
-func requireSuperseded(t *testing.T, f *loopStoreFixture, outcome GovernedToolOutcome, toolCallID, approvalID, messageID string) {
+func requireSuperseded(t *testing.T, f *actiontest.LoopStore, outcome GovernedToolOutcome, toolCallID, approvalID, messageID string) {
 	t.Helper()
 	if outcome.ToolCallID != toolCallID || outcome.State != ToolEntryError || outcome.Result == nil || outcome.Result.Status != ToolResultSuperseded {
 		t.Fatalf("replaced = %#v", outcome)
 	}
-	stored, err := f.store.GetApproval(f.ctx, f.scope, approvalID)
+	stored, err := f.Store.GetApproval(f.Ctx, f.Scope, approvalID)
 	if err != nil || stored.Status != ApprovalStatusSuperseded || stored.SupersededByMessageID != messageID {
 		t.Fatalf("approval %s = %#v, %v", approvalID, stored, err)
 	}
 }
 
 func TestPlanParkSupersedesHeldApprovalsOnNewMessage(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
-		f := newLoopStoreFixture(t, store)
-		firstCall, first := f.proposeLoopApproval("first", loopApprovalOptions{})
-		secondCall, second := f.proposeLoopApproval("second", loopApprovalOptions{})
-		at := f.now.Add(time.Second)
-		p := newGovernedParker(store, f.approvalCoordinator(at), func() time.Time { return at })
-		before := f.currentRun()
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+		f := actiontest.NewLoopStore(t, store)
+		firstCall, first := f.ProposeLoopApproval("first", actiontest.LoopApprovalOptions{})
+		secondCall, second := f.ProposeLoopApproval("second", actiontest.LoopApprovalOptions{})
+		at := f.Now.Add(time.Second)
+		p := newGovernedParker(store, f.ApprovalCoordinator(at), func() time.Time { return at })
+		before := f.CurrentRun()
 		run := withSteeringMessage(before, "message-1", at)
 		cardCall := &ActionCall{ID: "card"}
 		outcomes := []GovernedToolOutcome{
@@ -300,7 +301,7 @@ func TestPlanParkSupersedesHeldApprovalsOnNewMessage(t *testing.T) {
 			governedCardOutcome("tool-card", cardCall, &WakeCondition{Type: skillbinding.ConnectAppWakeType, Reference: "setup-card"}, "Waiting for the user to connect Linear"),
 			governedApprovalOutcome("tool-second", secondCall, second),
 		}
-		plan, err := p.PlanPark(f.ctx, run, outcomes)
+		plan, err := p.PlanPark(f.Ctx, run, outcomes)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -312,7 +313,7 @@ func TestPlanParkSupersedesHeldApprovalsOnNewMessage(t *testing.T) {
 		if plan.Park == nil || plan.Park.Wake.Reference != "setup-card" {
 			t.Fatalf("park = %#v; want the card", plan.Park)
 		}
-		after := f.currentRun()
+		after := f.CurrentRun()
 		if plan.Run == nil || plan.Run.Revision != after.Revision || after.Revision != before.Revision+2 || after.Status != AgentRunStatusRunning {
 			t.Fatalf("plan Run = %#v, stored = %#v", plan.Run, after)
 		}
@@ -320,12 +321,12 @@ func TestPlanParkSupersedesHeldApprovalsOnNewMessage(t *testing.T) {
 }
 
 func TestPlanParkKeepsApprovalCreatedAfterMessage(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
-		f := newLoopStoreFixture(t, store)
-		call, approval := f.proposeLoopApproval("later", loopApprovalOptions{})
-		p := newGovernedParker(store, f.approvalCoordinator(f.now), nil)
-		run := withSteeringMessage(f.currentRun(), "message-1", f.now) // not before: same instant
-		plan, err := p.PlanPark(f.ctx, run, []GovernedToolOutcome{governedApprovalOutcome("tool-later", call, approval)})
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+		f := actiontest.NewLoopStore(t, store)
+		call, approval := f.ProposeLoopApproval("later", actiontest.LoopApprovalOptions{})
+		p := newGovernedParker(store, f.ApprovalCoordinator(f.Now), nil)
+		run := withSteeringMessage(f.CurrentRun(), "message-1", f.Now) // not before: same instant
+		plan, err := p.PlanPark(f.Ctx, run, []GovernedToolOutcome{governedApprovalOutcome("tool-later", call, approval)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -350,15 +351,15 @@ func awaitingEventEntry(toolCallID, actionCallID string, wait ToolEntryWait) *Se
 }
 
 func TestReplanParkSupersedesHeldApprovalOnNewMessage(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
-		f := newLoopStoreFixture(t, store)
-		call, approval := f.proposeLoopApproval("held", loopApprovalOptions{})
-		at := f.now.Add(time.Second)
-		p := newGovernedParker(store, f.approvalCoordinator(at), func() time.Time { return at })
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+		f := actiontest.NewLoopStore(t, store)
+		call, approval := f.ProposeLoopApproval("held", actiontest.LoopApprovalOptions{})
+		at := f.Now.Add(time.Second)
+		p := newGovernedParker(store, f.ApprovalCoordinator(at), func() time.Time { return at })
 		// A host-tool entry with no action call is not the governed executor's.
 		other := &SessionEntry{Type: SessionEntryTool, State: ToolEntryAwaitingEvent, ToolCallID: "tool-host", Tool: &ToolEntry{Name: "host", Wait: &ToolEntryWait{EventWaitID: "x"}}}
-		run := withSteeringMessage(f.currentRun(), "message-1", at)
-		plan, err := p.ReplanPark(f.ctx, run, []*SessionEntry{other, awaitingApprovalEntry("tool-held", call, approval.ID)})
+		run := withSteeringMessage(f.CurrentRun(), "message-1", at)
+		plan, err := p.ReplanPark(f.Ctx, run, []*SessionEntry{other, awaitingApprovalEntry("tool-held", call, approval.ID)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -366,7 +367,7 @@ func TestReplanParkSupersedesHeldApprovalOnNewMessage(t *testing.T) {
 			t.Fatalf("plan = %#v", plan)
 		}
 		requireSuperseded(t, f, plan.Replaced[0], "tool-held", approval.ID, "message-1")
-		stored, err := store.GetActionCall(f.ctx, f.scope, call.ID)
+		stored, err := store.GetActionCall(f.Ctx, f.Scope, call.ID)
 		if err != nil || stored.Status != ActionCallStatusDenied {
 			t.Fatalf("call = %#v, %v", stored, err)
 		}
@@ -374,16 +375,16 @@ func TestReplanParkSupersedesHeldApprovalOnNewMessage(t *testing.T) {
 }
 
 func TestReplanParkNilWhenApprovalDecided(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
-		f := newLoopStoreFixture(t, store)
-		firstCall, first := f.proposeLoopApproval("first", loopApprovalOptions{})
-		secondCall, second := f.proposeLoopApproval("second", loopApprovalOptions{})
-		at := f.now.Add(time.Second)
-		coordinator := f.approvalCoordinator(at)
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+		f := actiontest.NewLoopStore(t, store)
+		firstCall, first := f.ProposeLoopApproval("first", actiontest.LoopApprovalOptions{})
+		secondCall, second := f.ProposeLoopApproval("second", actiontest.LoopApprovalOptions{})
+		at := f.Now.Add(time.Second)
+		coordinator := f.ApprovalCoordinator(at)
 		p := newGovernedParker(store, coordinator, func() time.Time { return at })
 		entries := []*SessionEntry{awaitingApprovalEntry("tool-first", firstCall, first.ID), awaitingApprovalEntry("tool-second", secondCall, second.ID)}
 
-		plan, err := p.ReplanPark(f.ctx, f.currentRun(), entries)
+		plan, err := p.ReplanPark(f.Ctx, f.CurrentRun(), entries)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -391,10 +392,10 @@ func TestReplanParkNilWhenApprovalDecided(t *testing.T) {
 			t.Fatalf("pending plan = %#v", plan)
 		}
 
-		if _, err := f.decide(coordinator, second, ApprovalDecisionApprove, ""); err != nil {
+		if _, err := f.Decide(coordinator, second, ApprovalDecisionApprove, ""); err != nil {
 			t.Fatal(err)
 		}
-		plan, err = p.ReplanPark(f.ctx, f.currentRun(), entries)
+		plan, err = p.ReplanPark(f.Ctx, f.CurrentRun(), entries)
 		if err != nil {
 			t.Fatal(err)
 		}

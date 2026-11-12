@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
@@ -344,7 +345,7 @@ type acceptedRunInheritanceStore interface {
 
 func forAcceptedRunInheritanceStores(t *testing.T, test func(*testing.T, acceptedRunInheritanceStore)) {
 	t.Helper()
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 		store, ok := kernel.(acceptedRunInheritanceStore)
 		if !ok {
 			t.Fatal("accepted-child fixture requires fork, collaboration, and inbox contracts")

@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -37,7 +38,7 @@ func agentBuilderApprovalCoordinator(t *testing.T, policy runtimeaction.ActionPo
 }
 
 func agentBuilderApprovalRequest(fixture *agentBuilderFixture, run *AgentRun, action string, arguments map[string]interface{}, toolCallID string) runtimeaction.ProposeActionRequest {
-	return loopProposeRequest(runtimeaction.ProposeActionRequest{
+	return actiontest.LoopProposeRequest(runtimeaction.ProposeActionRequest{
 		Scope: fixture.scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "finn",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: action,
 		Arguments: arguments, Summary: "Review the agent",

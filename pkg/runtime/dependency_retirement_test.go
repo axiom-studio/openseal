@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
@@ -44,7 +45,7 @@ type dependencyRetirementSnapshot struct {
 func TestDependencyRetirementTerminalSourceDoesNotReviveOrCancelChildren(t *testing.T) {
 	for _, status := range []models.AgentRunStatus{models.AgentRunStatusCanceled, models.AgentRunStatusFailed, models.AgentRunStatusCompleted} {
 		t.Run(string(status), func(t *testing.T) {
-			forDependencyRetirementBackends(t, func(t *testing.T, store dependencyRetirementStore, backend actionLifecycleBackend) {
+			forDependencyRetirementBackends(t, func(t *testing.T, store dependencyRetirementStore, backend actiontest.Backend) {
 				fixture := newDependencyRetirementFixture(t, store)
 				completed := fixture.finishChild(t, "alpha", models.AgentRunStatusCompleted)
 				fixture.resolveChild(t, "alpha", completed)
@@ -522,12 +523,12 @@ func TestDependencyRetirementHistoricalTypedSourceCleansUpAfterAuthorityChanges(
 
 func forDependencyRetirementStores(t *testing.T, test func(*testing.T, dependencyRetirementStore)) {
 	t.Helper()
-	forDependencyRetirementBackends(t, func(t *testing.T, store dependencyRetirementStore, _ actionLifecycleBackend) { test(t, store) })
+	forDependencyRetirementBackends(t, func(t *testing.T, store dependencyRetirementStore, _ actiontest.Backend) { test(t, store) })
 }
 
-func forDependencyRetirementBackends(t *testing.T, test func(*testing.T, dependencyRetirementStore, actionLifecycleBackend)) {
+func forDependencyRetirementBackends(t *testing.T, test func(*testing.T, dependencyRetirementStore, actiontest.Backend)) {
 	t.Helper()
-	forActionLifecycleBackends(t, func(t *testing.T, kernel models.KernelStore, backend actionLifecycleBackend) {
+	actiontest.ForEachBackend(t, func(t *testing.T, kernel models.KernelStore, backend actiontest.Backend) {
 		store, ok := kernel.(dependencyRetirementStore)
 		if !ok {
 			t.Fatalf("%T does not implement atomic dependency reconciliation", kernel)
@@ -800,9 +801,9 @@ func dependencyRetirementChildResult(branch string, child *models.AgentRun) map[
 
 // reopenDependencyRetirementStore opens the store again on backend's data, as
 // a restart would.
-func reopenDependencyRetirementStore(t *testing.T, backend actionLifecycleBackend) dependencyRetirementStore {
+func reopenDependencyRetirementStore(t *testing.T, backend actiontest.Backend) dependencyRetirementStore {
 	t.Helper()
-	return backend.reopen(t).(dependencyRetirementStore)
+	return backend.Reopen(t).(dependencyRetirementStore)
 }
 
 // cloneRetirementBinding deep-copies a Skill binding through JSON, as the

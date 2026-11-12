@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -520,7 +521,7 @@ func governedToolExecutor(t *testing.T, f *governedFixture) (agentrun.LoopToolEx
 }
 
 func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
 		var deployed []string
@@ -602,7 +603,7 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 }
 
 func TestReplanParkNilWhenHeldApprovalDecided(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
 		tools, sessions := governedToolExecutor(t, f)

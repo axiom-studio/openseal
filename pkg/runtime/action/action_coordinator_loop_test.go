@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
@@ -36,7 +37,7 @@ type loopProposeFixture struct {
 
 func newLoopProposeFixture(t *testing.T, store models.KernelStore, mutate func(*models.CreateAgentRunRequest), validators ...action.ActionProposalValidator) *loopProposeFixture {
 	t.Helper()
-	catalog, scope := governedActionCatalog(t)
+	catalog, scope := actiontest.GovernedCatalog(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	f := &loopProposeFixture{t: t, ctx: context.Background(), store: store, scope: scope, now: now, decision: action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}}
 	f.run = claimLoopProposeRun(t, store, scope, now, loopProposeWorker, mutate)
@@ -71,7 +72,7 @@ func claimLoopProposeRun(t *testing.T, store models.KernelStore, scope models.Sc
 }
 
 func (f *loopProposeFixture) request(toolCallID string) action.ProposeActionRequest {
-	return loopProposeRequest(action.ProposeActionRequest{
+	return actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: f.scope, RunID: f.run.ID, WorkerID: loopProposeWorker, DeploymentID: "release-agent",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
 		Arguments: map[string]interface{}{"environment": "staging"}, Summary: "Deploy the release to staging",
@@ -142,7 +143,7 @@ func succeedLoopCall(t *testing.T, store models.KernelStore, call *models.Action
 }
 
 func TestLoopProposeAllowCreatesReadyLoopCallAndLeavesRun(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopProposeFixture(t, store, nil)
 		result := f.propose(f.request("call-1"))
 		call := result.Call
@@ -155,7 +156,7 @@ func TestLoopProposeAllowCreatesReadyLoopCallAndLeavesRun(t *testing.T) {
 			result.Event.Payload["origin"] != "loop" || result.Event.Payload["execution"] != "loop" {
 			t.Fatalf("proposal event = %#v", result.Event)
 		}
-		assertLoopRunUntouched(t, store, f.run)
+		actiontest.AssertRunUntouched(t, store, f.run)
 		// Only the loop runs its calls: the pool never takes it while the Run lives.
 		if claimed, err := store.ClaimNextAction(f.ctx, models.ActionClaim{Scope: f.scope, WorkerID: "pool", Now: f.now.Add(time.Minute), LeaseDuration: time.Minute}); err != nil || claimed != nil {
 			t.Fatalf("pool claimed a live loop call: %#v, %v", claimed, err)
@@ -164,7 +165,7 @@ func TestLoopProposeAllowCreatesReadyLoopCallAndLeavesRun(t *testing.T) {
 }
 
 func TestLoopProposeDenyLeavesRunRunning(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopProposeFixture(t, store, nil)
 		f.decision = action.ActionPolicyDecision{Disposition: action.ActionDispositionDeny, Reason: "production freeze"}
 		result := f.propose(f.request("call-1"))
@@ -172,12 +173,12 @@ func TestLoopProposeDenyLeavesRunRunning(t *testing.T) {
 			result.Approval != nil || result.Run != nil || result.Event.EventType != "action.denied" || result.Event.Payload["policyReason"] != "production freeze" {
 			t.Fatalf("denied loop proposal = %#v", result)
 		}
-		assertLoopRunUntouched(t, store, f.run)
+		actiontest.AssertRunUntouched(t, store, f.run)
 	})
 }
 
 func TestLoopProposeApprovalCreatesPendingApprovalWithoutRunChange(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopProposeFixture(t, store, nil)
 		f.requireApproval()
 		result := f.propose(f.request("call-1"))
@@ -190,12 +191,12 @@ func TestLoopProposeApprovalCreatesPendingApprovalWithoutRunChange(t *testing.T)
 		if err != nil || approval.Status != models.ApprovalStatusPending || approval.ActionCallID != result.Call.ID {
 			t.Fatalf("stored approval = %#v, %v", approval, err)
 		}
-		assertLoopRunUntouched(t, store, f.run)
+		actiontest.AssertRunUntouched(t, store, f.run)
 	})
 }
 
 func TestLoopProposeApprovalWithoutSummaryIsRejected(t *testing.T) {
-	f := newLoopProposeFixture(t, newTestKernelStore(t), nil)
+	f := newLoopProposeFixture(t, actiontest.NewStore(t), nil)
 	f.requireApproval()
 	req := f.request("call-1")
 	req.Summary = "   "
@@ -216,7 +217,7 @@ func TestLoopProposeApprovalWithoutSummaryIsRejected(t *testing.T) {
 }
 
 func TestLoopProposeBudgetExhaustedDenies(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopProposeFixture(t, store, func(req *models.CreateAgentRunRequest) {
 			req.Budget = &models.BudgetPolicy{MaxActions: 1}
 		})
@@ -241,7 +242,7 @@ func TestLoopProposeBudgetExhaustedDenies(t *testing.T) {
 		if replayed.Created || !replayed.BudgetExhausted || replayed.Call.ID != second.Call.ID {
 			t.Fatalf("replayed exhausted proposal = %#v", replayed)
 		}
-		assertLoopRunUntouched(t, store, reserved)
+		actiontest.AssertRunUntouched(t, store, reserved)
 	})
 }
 
@@ -259,7 +260,7 @@ func (v failingProposalValidator) ValidateActionProposal(_ context.Context, inpu
 
 func TestLoopProposeValidationErrorsAreRejections(t *testing.T) {
 	validatorErr := errors.New("the environment is not admitted for this Run")
-	f := newLoopProposeFixture(t, newTestKernelStore(t), nil, failingProposalValidator{err: validatorErr})
+	f := newLoopProposeFixture(t, actiontest.NewStore(t), nil, failingProposalValidator{err: validatorErr})
 
 	missing := f.request("missing")
 	missing.Action = "rollback"
@@ -281,11 +282,11 @@ func TestLoopProposeValidationErrorsAreRejections(t *testing.T) {
 	if calls := f.calls(); len(calls) != 0 || f.evaluations != 0 {
 		t.Fatalf("rejected proposals reached policy or the store: calls=%#v evaluations=%d", calls, f.evaluations)
 	}
-	assertLoopRunUntouched(t, f.store, f.run)
+	actiontest.AssertRunUntouched(t, f.store, f.run)
 }
 
 func TestLoopProposeCrossRunExternalReceiptSuppressesWithoutRunChange(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopProposeFixture(t, store, nil)
 		identity := &activity.ExternalOperationIdentity{Resource: "https://Forum.Example/topics/42?b=2&a=1#reply", Operation: "comment:create"}
 		first := f.request("comment")
@@ -310,7 +311,7 @@ func TestLoopProposeCrossRunExternalReceiptSuppressesWithoutRunChange(t *testing
 		if f.evaluations != 1 {
 			t.Fatalf("policy evaluations = %d, the duplicate is suppressed before policy", f.evaluations)
 		}
-		assertLoopRunUntouched(t, store, secondRun)
+		actiontest.AssertRunUntouched(t, store, secondRun)
 		receipt, err := store.GetActionCallByExternalOperation(f.ctx, f.scope, proposed.Call.ExternalOperationDigest)
 		if err != nil || receipt.ID != proposed.Call.ID {
 			t.Fatalf("authoritative receipt = %#v, %v", receipt, err)
@@ -323,7 +324,7 @@ func TestLoopProposeCrossRunExternalReceiptSuppressesWithoutRunChange(t *testing
 }
 
 func TestLoopProposeInFlightExternalOperationConflicts(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopProposeFixture(t, store, nil)
 		identity := &activity.ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}
 		first := f.request("comment")
@@ -343,12 +344,12 @@ func TestLoopProposeInFlightExternalOperationConflicts(t *testing.T) {
 		if err != nil || len(calls) != 0 {
 			t.Fatalf("conflicting proposal was recorded: %#v, %v", calls, err)
 		}
-		assertLoopRunUntouched(t, store, secondRun)
+		actiontest.AssertRunUntouched(t, store, secondRun)
 	})
 }
 
 func TestLoopProposeReplayWithSameKeyReturnsSameCall(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopProposeFixture(t, store, nil)
 		req := f.request("call-1")
 		req.ExternalOperation = &activity.ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}
@@ -374,7 +375,7 @@ func TestLoopProposeReplayWithSameKeyReturnsSameCall(t *testing.T) {
 }
 
 func TestLoopProposeRequiresLiveLeaseOfRunningRun(t *testing.T) {
-	f := newLoopProposeFixture(t, newTestKernelStore(t), nil)
+	f := newLoopProposeFixture(t, actiontest.NewStore(t), nil)
 	foreign := f.request("foreign")
 	foreign.WorkerID = "other-worker"
 	if _, err := f.coordinator.Propose(f.ctx, foreign); !errors.Is(err, models.ErrLeaseLost) {
@@ -404,9 +405,9 @@ func TestLoopProposeRequiresLiveLeaseOfRunningRun(t *testing.T) {
 }
 
 func TestLoopProposeValidatorsReadRunActionHistory(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	var seen []*models.ActionCall
-	f := newLoopProposeFixture(t, store, nil, proposalValidatorFunc(func(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
+	f := newLoopProposeFixture(t, store, nil, actiontest.ProposalValidatorFunc(func(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 		calls, err := input.History.Calls(ctx)
 		seen = calls
 		return nil, err
@@ -424,7 +425,7 @@ func TestLoopProposeValidatorsReadRunActionHistory(t *testing.T) {
 }
 
 func TestRunActionHistoryListsTerminalNonVMCallsNewestFirst(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	base := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	add := func(id, runID string, origin models.ActionOrigin, status models.ActionCallStatus, completed time.Duration) {
@@ -467,7 +468,7 @@ func TestRunActionHistoryListsTerminalNonVMCallsNewestFirst(t *testing.T) {
 // Stores cap one page at 500 and default to 100, oldest first; the history
 // pages until a short page so a long Run's newest calls are kept.
 func TestRunActionHistoryPagesPastStorePageLimits(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	base := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	const total = 1020
@@ -491,7 +492,7 @@ func TestRunActionHistoryPagesPastStorePageLimits(t *testing.T) {
 
 func TestNestedProposeHasNoCheckpointGuards(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	f := newNestedActionFixture(t, store)
 	current, err := store.GetAgentRun(ctx, f.scope, f.run.ID)
 	if err != nil {
@@ -515,14 +516,14 @@ func TestNestedProposeHasNoCheckpointGuards(t *testing.T) {
 }
 
 func TestLoopProposePersonCredentialApproverIsActingUser(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	now := time.Now().UTC()
-	catalog, scope := personActionCatalog(t)
-	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
+	catalog, scope := actiontest.PersonCatalog(t)
+	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
 	}), nil, models.WithClock(func() time.Time { return now }))
-	proposal, err := coordinator.Propose(context.Background(), loopProposeRequest(action.ProposeActionRequest{
+	proposal, err := coordinator.Propose(context.Background(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: "release-agent",
 		SkillID: "mail", SkillVersion: "1.0.0", Action: "send", Arguments: map[string]interface{}{"to": "ada@example.com"},
 		Summary: "Send the weekly update to Ada",
@@ -530,8 +531,8 @@ func TestLoopProposePersonCredentialApproverIsActingUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proposal.Approval == nil || len(proposal.Approval.EligibleApprovers) != 1 || proposal.Approval.EligibleApprovers[0] != (models.ApprovalPrincipal{Type: "user", ID: connectAccountTestUser}) {
+	if proposal.Approval == nil || len(proposal.Approval.EligibleApprovers) != 1 || proposal.Approval.EligibleApprovers[0] != (models.ApprovalPrincipal{Type: "user", ID: actiontest.ActingUser}) {
 		t.Fatalf("approval = %#v", proposal.Approval)
 	}
-	assertLoopRunUntouched(t, store, run)
+	actiontest.AssertRunUntouched(t, store, run)
 }

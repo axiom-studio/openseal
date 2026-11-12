@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
@@ -25,7 +26,7 @@ func TestActionWorkerLifecyclePreservesCompletedDispatchAcrossRunChanges(t *test
 		{name: "canceled_failure", status: models.AgentRunStatusCanceled, fail: true},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 				f := newLoopWorkerFixture(t, store, &models.BudgetPolicy{MaxActions: 10})
 				call := f.propose("deploy-1", "deploy")
 				var changed *models.AgentRun
@@ -57,7 +58,7 @@ func TestActionWorkerLifecyclePreservesCompletedDispatchAcrossRunChanges(t *test
 					t.Fatalf("completed dispatch changed its Run beyond the budget: before=%#v after=%#v", changed, after)
 				}
 				assertActionLifecycleTerminalEvents(t, store, call, expected, 1)
-				assertActionLifecycleUnclaimable(t, store, call, f.clock.Add(time.Hour))
+				actiontest.AssertUnclaimable(t, store, call, f.clock.Add(time.Hour))
 			})
 		})
 	}
@@ -66,7 +67,7 @@ func TestActionWorkerLifecyclePreservesCompletedDispatchAcrossRunChanges(t *test
 func TestActionWorkerLifecycleRetriesPersistenceWithoutRedispatch(t *testing.T) {
 	for _, runMutation := range []string{"heartbeat", "cancel"} {
 		t.Run(runMutation, func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 				f := newLoopWorkerFixture(t, store, &models.BudgetPolicy{MaxActions: 10})
 				call := f.propose("deploy-1", "deploy")
 				wrapped := &actionLifecycleConflictStore{KernelStore: store}
@@ -96,14 +97,14 @@ func TestActionWorkerLifecycleRetriesPersistenceWithoutRedispatch(t *testing.T) 
 					t.Fatalf("completion after a conflict changed its Run: %#v", after)
 				}
 				assertActionLifecycleTerminalEvents(t, store, call, models.ActionCallStatusSucceeded, 1)
-				assertActionLifecycleUnclaimable(t, store, call, f.clock.Add(time.Hour))
+				actiontest.AssertUnclaimable(t, store, call, f.clock.Add(time.Hour))
 			})
 		})
 	}
 }
 
 func TestActionWorkerLifecycleCallOnlyCompletionFencesParentRevision(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		proposed := f.propose("deploy-1", "deploy")
 		call, err := store.ClaimNextAction(t.Context(), models.ActionClaim{Scope: f.scope, WorkerID: loopWorkerID, Now: f.clock, LeaseDuration: time.Minute, OwnActionID: proposed.ID})
@@ -124,7 +125,7 @@ func TestActionWorkerLifecycleCallOnlyCompletionFencesParentRevision(t *testing.
 		completionTime := f.clock.Add(time.Second)
 		completed.UpdatedAt = completionTime
 		completed.CompletedAt = &completionTime
-		event := actionLifecycleEvent(completed, "call-only-completion", "action.succeeded", completionTime)
+		event := actiontest.CallEvent(completed, "call-only-completion", "action.succeeded", completionTime)
 		record := models.ActionExecutionRecord{
 			Call: completed, ExpectedCallRevision: call.Revision, ExpectedRunRevision: parent.Revision + 1,
 			WorkerID: loopWorkerID, Now: completionTime, Event: event,
@@ -188,7 +189,7 @@ func TestActionWorkerLifecycleCallOnlyCompletionFencesParentRevision(t *testing.
 }
 
 func TestActionWorkerLifecycleBoundsPersistenceConflicts(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store models.KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, store models.KernelStore) {
 		f := newLoopWorkerFixture(t, store, nil)
 		call := f.propose("deploy-1", "deploy")
 		before := f.currentRun()

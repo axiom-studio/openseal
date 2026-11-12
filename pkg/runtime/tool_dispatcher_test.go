@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
@@ -135,15 +136,15 @@ func TestToolActionDispatcherUsesOnlyBoundDefinitionIdentity(t *testing.T) {
 }
 
 func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *testing.T) {
-	now, call, run, fields := actionCredentialLeaseFixture()
+	now, call, run, fields := actiontest.CredentialLeaseFixture()
 	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
-		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
+		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: actiontest.CredentialLeaseTransport,
 		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-transport-00000001",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	envelope, err := action.SignActionCredentialLease(t.Context(), *lease, testCredentialLeaseSigner{key: []byte("lease-signing-key")})
+	envelope, err := action.SignActionCredentialLease(t.Context(), *lease, actiontest.CredentialLeaseSigner{Key: []byte("lease-signing-key")})
 	if err != nil {
 		t.Fatal(err)
 	}

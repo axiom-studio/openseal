@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/google/uuid"
 )
 
@@ -61,7 +62,7 @@ func (f *loopProposalFixture) request(req action.ProposeActionRequest, toolCallI
 	if req.TurnID == "" {
 		req.TurnID = loopProposalStep
 	}
-	return loopProposeRequest(req, toolCallID)
+	return actiontest.LoopProposeRequest(req, toolCallID)
 }
 
 func (f *loopProposalFixture) current() *AgentRun {
@@ -76,7 +77,7 @@ func (f *loopProposalFixture) current() *AgentRun {
 // assertUntouched checks the proposals so far left the Run as leased.
 func (f *loopProposalFixture) assertUntouched() {
 	f.t.Helper()
-	assertLoopRunUntouched(f.t, f.store, f.run)
+	actiontest.AssertRunUntouched(f.t, f.store, f.run)
 }
 
 // park moves the running Run to status waiting on wake, releasing its lease,

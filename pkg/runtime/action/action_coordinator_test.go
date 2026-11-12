@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -17,10 +18,10 @@ import (
 
 func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
-	catalog, scope := governedActionCatalog(t)
+	store := actiontest.NewStore(t)
+	catalog, scope := actiontest.GovernedCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	run := claimedActionRun(t, store, scope, now, "worker")
+	run := actiontest.ClaimedRun(t, store, scope, now, "worker")
 	storetest.SeedActionCall(t, store, &models.ActionCall{
 		ID: "prepared-comment", Scope: scope, RunID: run.ID, TurnID: "step-0", DeploymentID: "release-agent",
 		SkillID: "browser", SkillVersion: "2.0.0", Action: "fill", Status: models.ActionCallStatusSucceeded,
@@ -47,7 +48,7 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 		ids = ids[1:]
 		return id
 	})
-	result, err := coordinator.Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
+	result, err := coordinator.Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
 		Arguments: map[string]interface{}{"environment": "production", "credentialField": "username", "apiToken": "raw-secret", "nested": map[string]interface{}{"password": "also-secret", "region": "us"}},
@@ -95,40 +96,40 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 	if strings.Contains(string(eventJSON), "raw-secret") || strings.Contains(string(eventJSON), "release-secret") {
 		t.Fatalf("activity leaked secret material or credential references: %s", eventJSON)
 	}
-	assertLoopRunUntouched(t, store, run)
+	actiontest.AssertRunUntouched(t, store, run)
 }
 
 func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
-	catalog, scope := governedActionCatalog(t)
+	store := actiontest.NewStore(t)
+	catalog, scope := actiontest.GovernedCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	run := claimedActionRun(t, store, scope, now, "worker")
+	run := actiontest.ClaimedRun(t, store, scope, now, "worker")
 	decision := action.ActionDispositionAllow
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		return action.ActionPolicyDecision{Disposition: decision, Reason: "test"}, nil
 	}), nil, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	coordinator.SetNewID(func() string { return "id-" + string(decision) })
 	base := action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0", Action: "deploy"}
-	invalid := loopProposeRequest(base, "invalid")
+	invalid := actiontest.LoopProposeRequest(base, "invalid")
 	invalid.Arguments = map[string]interface{}{"environment": 42}
 	var rejection *action.ActionProposalRejection
 	if _, err := coordinator.Propose(ctx, invalid); !errors.As(err, &rejection) || rejection.Code != action.ProposalRejectionToolArgumentsInvalid {
 		t.Fatalf("invalid input schema error = %v", err)
 	}
-	missingKey := loopProposeRequest(base, "missing")
+	missingKey := actiontest.LoopProposeRequest(base, "missing")
 	missingKey.IdempotencyKey = ""
 	missingKey.Arguments = map[string]interface{}{"environment": "staging"}
 	if _, err := coordinator.Propose(ctx, missingKey); err == nil || !strings.Contains(err.Error(), "idempotency") || errors.As(err, &rejection) {
 		t.Fatalf("missing idempotency error = %v", err)
 	}
-	stale := loopProposeRequest(base, "stale")
+	stale := actiontest.LoopProposeRequest(base, "stale")
 	stale.Arguments = map[string]interface{}{"environment": "staging"}
 	stale.WorkerID = "other-worker"
 	if _, err := coordinator.Propose(ctx, stale); !errors.Is(err, models.ErrLeaseLost) {
 		t.Fatalf("stale worker error = %v", err)
 	}
-	allowed := loopProposeRequest(base, "allowed")
+	allowed := actiontest.LoopProposeRequest(base, "allowed")
 	allowed.Arguments = map[string]interface{}{"environment": "staging"}
 	result, err := coordinator.Propose(ctx, allowed)
 	if err != nil {
@@ -137,13 +138,13 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 	if result.Call.Status != models.ActionCallStatusReady || result.Approval != nil || result.Run != nil {
 		t.Fatalf("allowed call mismatch: %#v", result)
 	}
-	assertLoopRunUntouched(t, store, run)
+	actiontest.AssertRunUntouched(t, store, run)
 }
 
 func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
-	catalog, scope := governedActionCatalog(t)
+	store := actiontest.NewStore(t)
+	catalog, scope := actiontest.GovernedCatalog(t)
 	policyEvaluations := 0
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		policyEvaluations++
@@ -151,8 +152,8 @@ func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(
 	}), nil)
 	identity := &activity.ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}
 
-	firstRun := claimedActionRun(t, store, scope, time.Now().UTC(), "worker-one")
-	first, err := coordinator.Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
+	firstRun := actiontest.ClaimedRun(t, store, scope, time.Now().UTC(), "worker-one")
+	first, err := coordinator.Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: firstRun.ID, WorkerID: "worker-one", DeploymentID: "release-agent",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
 		ExternalOperation: identity,
@@ -160,8 +161,8 @@ func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondRun := claimedActionRun(t, store, scope, time.Now().UTC().Add(time.Second), "worker-two")
-	second, err := coordinator.Propose(ctx, loopProposeRequest(action.ProposeActionRequest{
+	secondRun := actiontest.ClaimedRun(t, store, scope, time.Now().UTC().Add(time.Second), "worker-two")
+	second, err := coordinator.Propose(ctx, actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: scope, RunID: secondRun.ID, WorkerID: "worker-two", DeploymentID: "release-agent",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
 		ExternalOperation: identity,
@@ -179,13 +180,13 @@ func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(
 
 func TestActionCoordinatorEnforcesExternalOperationPolicy(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	catalog, scope := externalOperationPolicyCatalog(t)
-	run := claimedActionRun(t, store, scope, time.Now().UTC(), "worker")
+	run := actiontest.ClaimedRun(t, store, scope, time.Now().UTC(), "worker")
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
 	}), nil)
-	base := loopProposeRequest(action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "browser-agent", SkillID: "browser", SkillVersion: "1.0.0", Arguments: map[string]interface{}{}}, "operation-policy")
+	base := actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "browser-agent", SkillID: "browser", SkillVersion: "1.0.0", Arguments: map[string]interface{}{}}, "operation-policy")
 	var rejection *action.ActionProposalRejection
 	forbidden := base
 	forbidden.Action = "click"

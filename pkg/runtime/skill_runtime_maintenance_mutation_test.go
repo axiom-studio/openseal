@@ -5,10 +5,12 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 )
 
 func TestSkillRuntimeMaintenanceMutationSerializesTakeoverAndRejectsStaleOwner(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 		store := kernel.(SkillRuntimeMaintenanceStore)
 		request := skillRuntimeMaintenanceEmptyRequest()
 		gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)
@@ -74,7 +76,7 @@ func TestSkillRuntimeMaintenanceMutationSerializesTakeoverAndRejectsStaleOwner(t
 }
 
 func TestSkillRuntimeMaintenanceMutationRechecksLeaseAfterWaitingForFence(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
 		store := kernel.(SkillRuntimeMaintenanceStore)
 		request := skillRuntimeMaintenanceEmptyRequest()
 		request.LeaseDuration = 600 * time.Millisecond

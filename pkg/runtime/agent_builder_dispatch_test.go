@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -649,23 +650,23 @@ func TestAgentBuilderDispatcherPassesOtherActionsOn(t *testing.T) {
 // against the Agent's concurrency: a new chat Run is still admitted
 // (spec-openseal risk 10).
 func TestAgentBuilderParkedRunDoesNotBlockNewChatRuns(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
-		f := newLoopStoreFixture(t, store)
-		_, approval := f.proposeLoopApproval("create-agent", loopApprovalOptions{alwaysReview: true})
-		f.parkOn(approval.ID)
-		if f.run.Status != AgentRunStatusWaitingForApproval {
-			t.Fatalf("parked Run = %s", f.run.Status)
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+		f := actiontest.NewLoopStore(t, store)
+		_, approval := f.ProposeLoopApproval("create-agent", actiontest.LoopApprovalOptions{AlwaysReview: true})
+		f.ParkOn(approval.ID)
+		if f.Run.Status != AgentRunStatusWaitingForApproval {
+			t.Fatalf("parked Run = %s", f.Run.Status)
 		}
-		portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return f.now }))
-		next, err := portfolio.CreateAgentRun(f.ctx, CreateAgentRunRequest{
-			Scope: f.scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
+		portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return f.Now }))
+		next, err := portfolio.CreateAgentRun(f.Ctx, CreateAgentRunRequest{
+			Scope: f.Scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 			AssignedAgentID: "agent", Goal: "Build another Agent", Source: RunSourceChat,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		claimed, err := store.ClaimNextAgentRun(f.ctx, AgentRunClaim{
-			Scope: f.scope, WorkerID: "chat-worker", Now: f.now.Add(time.Second), LeaseDuration: time.Minute,
+		claimed, err := store.ClaimNextAgentRun(f.Ctx, AgentRunClaim{
+			Scope: f.Scope, WorkerID: "chat-worker", Now: f.Now.Add(time.Second), LeaseDuration: time.Minute,
 			AgingInterval: time.Minute, AssignedAgentID: "agent", MaxActiveForAgent: 1,
 		})
 		if err != nil || claimed == nil || claimed.ID != next.ID {

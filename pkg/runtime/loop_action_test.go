@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
@@ -81,14 +82,14 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 		t.Fatalf("claimed %s, want %s", f.run.ID, created.ID)
 	}
 	f.step.RunID = f.run.ID
-	catalog := loopWorkerCatalog(t, scope)
+	catalog := actiontest.LoopWorkerCatalog(t, scope)
 	now := func() time.Time { return f.clock }
 	coordinator := runtimeaction.NewActionCoordinator(store, store, catalog, runtimeaction.ActionPolicyEvaluatorFunc(func(_ context.Context, input runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
 		if decision, ok := f.policy[input.Bound.Action.Name]; ok {
 			return decision, nil
 		}
 		return runtimeaction.ActionPolicyDecision{Disposition: runtimeaction.ActionDispositionAllow}, nil
-	}), []runtimeaction.ActionProposalValidator{proposalValidatorFunc(func(_ context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
+	}), []runtimeaction.ActionProposalValidator{actiontest.ProposalValidatorFunc(func(_ context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 		f.validations++
 		if f.validate != nil {
 			return nil, f.validate(input)
@@ -271,7 +272,7 @@ func requireGovernedState(t *testing.T, outcome GovernedToolOutcome, state ToolE
 }
 
 func TestGovernedExecuteAllowedReadRunsInlineWithoutPool(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		before := f.currentRun()
 		outcome := f.execute(f.call("tool-1", governedStatus, statusArguments()))
@@ -295,7 +296,7 @@ func TestGovernedExecuteAllowedReadRunsInlineWithoutPool(t *testing.T) {
 }
 
 func TestGovernedExecuteTeamMemberUsesActionDeploymentID(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		// A Team member Run: its own identity, Team actions resolved against
 		// the action deployment.
@@ -316,7 +317,7 @@ func TestGovernedExecuteTeamMemberUsesActionDeploymentID(t *testing.T) {
 }
 
 func TestGovernedExecuteUnknownToolRefused(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		if f.executor.IsGoverned(f.binding, "release_rollback") || !f.executor.IsGoverned(f.binding, governedDeploy) {
 			t.Fatal("IsGoverned does not follow the binding's actions")
@@ -339,7 +340,7 @@ func TestGovernedExecuteUnknownToolRefused(t *testing.T) {
 }
 
 func TestGovernedExecuteApprovalAwaitsAndParksAtStepEnd(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
 		before := f.currentRun()
@@ -372,7 +373,7 @@ func TestGovernedExecuteApprovalAwaitsAndParksAtStepEnd(t *testing.T) {
 }
 
 func TestGovernedResumeApprovedExecutesOnResumingReplica(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
 		outcome := f.execute(f.call("tool-1", governedDeploy, deployArguments("production")))
@@ -443,7 +444,7 @@ func TestGovernedResumeEachDecisionOutcome(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+			actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 				f := newGovernedFixture(t, store)
 				f.requireApprovalFor("deploy")
 				outcome := f.execute(f.call("tool-1", governedDeploy, deployArguments("production")))
@@ -481,7 +482,7 @@ func TestGovernedResumeEachDecisionOutcome(t *testing.T) {
 }
 
 func TestGovernedResumeSupersedesSiblingApprovals(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
 		first := f.execute(f.call("tool-1", governedDeploy, deployArguments("production")))
@@ -520,7 +521,7 @@ func TestGovernedResumeSupersedesSiblingApprovals(t *testing.T) {
 }
 
 func TestGovernedResumeEntryWithoutRowProposesAndRuns(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		// The entry was appended (and may have gone running) but the crash
 		// came before Propose: nothing was dispatched, so the write runs.
@@ -536,8 +537,8 @@ func TestGovernedResumeEntryWithoutRowProposesAndRuns(t *testing.T) {
 // under a one-minute call lease, as an inline execution that then crashed.
 func (f *governedFixture) runningCall(id, action, worker string) *ActionCall {
 	f.t.Helper()
-	proposed := proposeLoopAction(f.t, f.store, loopWorkerCatalog(f.t, f.scope), f.currentRun(), governedWorker, f.clock, loopActionSpec{
-		id: id, skillID: "release", version: "1.0.0", action: action, arguments: map[string]interface{}{"environment": "production"},
+	proposed := actiontest.ProposeLoopAction(f.t, f.store, actiontest.LoopWorkerCatalog(f.t, f.scope), f.currentRun(), governedWorker, f.clock, actiontest.LoopActionSpec{
+		ID: id, SkillID: "release", Version: "1.0.0", Action: action, Arguments: map[string]interface{}{"environment": "production"},
 	})
 	claimed, err := f.store.ClaimNextAction(f.ctx, ActionClaim{Scope: f.scope, WorkerID: worker, Now: f.clock, LeaseDuration: time.Minute, OwnActionID: proposed.Call.ID})
 	if err != nil || claimed == nil || claimed.Status != ActionCallStatusRunning {
@@ -547,7 +548,7 @@ func (f *governedFixture) runningCall(id, action, worker string) *ActionCall {
 }
 
 func TestGovernedResumeRunningWriteBecomesInterrupted(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		running := f.runningCall("deploy-1", "deploy", governedWorker)
 		f.advance(2 * time.Minute)
@@ -563,7 +564,7 @@ func TestGovernedResumeRunningWriteBecomesInterrupted(t *testing.T) {
 }
 
 func TestGovernedResumeRunningReadReruns(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		running := f.runningCall("status-1", "status", governedWorker)
 		f.advance(2 * time.Minute)
@@ -576,7 +577,7 @@ func TestGovernedResumeRunningReadReruns(t *testing.T) {
 }
 
 func TestGovernedResumeLiveForeignLeaseRetriesLater(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		running := f.runningCall("deploy-1", "deploy", "replica-gone")
 		resumed := f.resume(f.call("tool-1", governedDeploy, deployArguments("production")), governedEntry("tool-1", running.ID, ToolEntryRunning))
@@ -590,7 +591,7 @@ func TestGovernedResumeLiveForeignLeaseRetriesLater(t *testing.T) {
 // RetryAt path) resumes in a later step under the key it was proposed with:
 // the existing call is found, nothing is proposed or dispatched again.
 func TestGovernedResumeEarlierStepEntryKeepsItsKey(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
 		outcome := f.execute(f.call("tool-1", governedDeploy, deployArguments("production")))
@@ -622,7 +623,7 @@ func TestGovernedResumeEarlierStepEntryKeepsItsKey(t *testing.T) {
 }
 
 func TestGovernedResumeReplayDoesNotRevalidate(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
 		outcome := f.execute(f.call("tool-1", governedDeploy, deployArguments("production")))
@@ -650,7 +651,7 @@ func TestGovernedResumeReplayDoesNotRevalidate(t *testing.T) {
 }
 
 func TestGovernedCardSettledWhileHeldRequeuesAfterPark(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.dispatch = func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"requiresHuman": true, "challenges": []interface{}{"captcha"}}, nil
@@ -689,7 +690,7 @@ func TestGovernedCardSettledWhileHeldRequeuesAfterPark(t *testing.T) {
 }
 
 func TestGovernedObserverCalledOnceOnCreate(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		first := f.execute(f.call("tool-1", governedStatus, statusArguments()))
 		again := f.execute(f.call("tool-1", governedStatus, statusArguments()))
@@ -701,7 +702,7 @@ func TestGovernedObserverCalledOnceOnCreate(t *testing.T) {
 }
 
 func TestGovernedBudgetExhaustedTakesBudgetExit(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.updateRun(func(run *AgentRun) {
 			run.Budget = &BudgetPolicy{MaxActions: 1}
@@ -752,7 +753,7 @@ func (s approvalReadHookStore) GetApproval(ctx context.Context, scope Scope, id 
 }
 
 func TestGovernedHeldDecisionAfterSettleFailsStepEndPark(t *testing.T) {
-	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
 		decided := false

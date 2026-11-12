@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -85,7 +86,7 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 
 func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
 	coordinatorClock := func() time.Time { return now.Add(2 * time.Second) }
@@ -166,7 +167,7 @@ func TestApprovalCoordinatorAppliesReviewedTimeoutApprovalAcrossStores(t *testin
 }
 
 func TestApprovalCoordinatorExpiresApprovalAfterRunLeavesWaitingState(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
 	paused, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
@@ -231,7 +232,7 @@ func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 }
 
 func TestApprovalCoordinatorResumesRunWithReviewerGuidance(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := actiontest.NewStore(t)
 	now := time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
 	coordinator := action.NewApprovalCoordinator(store, store, action.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return now.Add(time.Second) }))
@@ -282,7 +283,7 @@ func createApprovalForStore(t *testing.T, store models.KernelStore, now time.Tim
 func createApprovalForStoreWithTimeout(t *testing.T, store models.KernelStore, now time.Time, timeout models.ApprovalTimeoutDecision) *models.ActionProposalResult {
 	t.Helper()
 	ctx := context.Background()
-	_, scope := governedActionCatalog(t)
+	_, scope := actiontest.GovernedCatalog(t)
 	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: models.RunSourceObjective,

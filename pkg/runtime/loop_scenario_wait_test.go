@@ -18,6 +18,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -276,7 +277,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			})))
 			waitCardSkills(f)
 			connected := false
-			f.executor.SetCredentialAvailabilityChecker(availabilityFunc(func(_ context.Context, req action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
+			f.executor.SetCredentialAvailabilityChecker(actiontest.AvailabilityFunc(func(_ context.Context, req action.CredentialAvailabilityRequest) (action.CredentialAvailability, error) {
 				if connected {
 					return action.CredentialAvailability{}, nil
 				}
