@@ -269,10 +269,7 @@ func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) 
 					t.Fatal(err)
 				}
 			} else {
-				current := getStoredRun(t, store, source.Scope, source.ID)
-				at := time.Now().Add(-time.Second)
-				current.LeaseExpiresAt = &at
-				putStoredRun(t, store, current)
+				expireRunLease(t, store, source)
 			}
 			if _, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err == nil {
 				t.Fatal("non-current source admitted work")

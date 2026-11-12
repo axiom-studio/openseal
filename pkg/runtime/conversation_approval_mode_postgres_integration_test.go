@@ -23,8 +23,13 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Simulate a conversation stored before migration 61 and re-run it.
-	if err := store.RollbackPostgresMigrations(ctx, conversationApprovalModeMigrationVersion-1); err != nil {
+	// Simulate a conversation stored before the approval mode migration (61)
+	// and re-run it. The ledger names the migration.
+	var approvalModeMigration int64
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT version FROM `+pgSchema.table("schema_migrations")+` WHERE name = 'conversation approval mode'`).Scan(&approvalModeMigration); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RollbackPostgresMigrations(ctx, approvalModeMigration-1); err != nil {
 		t.Fatal(err)
 	}
 	var raw string
@@ -36,7 +41,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 	if err := pgSchema.db.QueryRowContext(ctx, `SELECT payload->>'approvalMode' FROM `+pgSchema.table("conversations")).Scan(&raw); err != nil || raw != "auto" {

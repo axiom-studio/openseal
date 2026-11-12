@@ -6,65 +6,31 @@ import (
 	"reflect"
 	"testing"
 	"time"
-)
 
-func conversationReadSQLRun(id string, scope Scope, owner ObjectiveOwner, kind RunKind, status AgentRunStatus, at time.Time) *AgentRun {
-	run := &AgentRun{ID: id, Scope: scope, Owner: owner, Kind: kind, RootRunID: id, AssignedAgentID: owner.ID,
-		Goal: "Conversation read fixture", Source: RunSourceChat, Status: status, Priority: 10, AvailableAt: at, QueueEnteredAt: at,
-		Revision: 1, CreatedAt: at, UpdatedAt: at}
-	if isTerminalAgentRunStatus(status) {
-		run.CompletedAt = &at
-	}
-	return run
-}
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
+)
 
 func seedConversationReadSQLHistory(t *testing.T, store conversationTaskSQLTestStore, scope Scope, owner ObjectiveOwner, conversationID string) {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	run := conversationReadSQLRun("history", scope, owner, RunKindConversation, AgentRunStatusCompleted, now)
+	run := storetest.ConversationReadRun("history", scope, owner, RunKindConversation, AgentRunStatusCompleted, now)
 	run.Context = map[string]interface{}{conversationRunContextConversationID: conversationID}
 	if err := run.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	seed := func(insert func(*AgentRun) error) {
-		for i := 0; i < 10000; i++ {
-			run.ID = fmt.Sprintf("unrelated-root-%05d", i)
-			run.RootRunID = run.ID
-			if i%2 == 0 {
-				run.Context[conversationRunContextConversationID] = conversationID
-			} else {
-				run.Context[conversationRunContextConversationID] = "unrelated-conversation"
-			}
-			if err := insert(run); err != nil {
-				t.Fatal(err)
-			}
+	// No store method writes Runs in bulk, so the history takes a few
+	// seconds to build.
+	for i := 0; i < 10000; i++ {
+		run.ID = fmt.Sprintf("unrelated-root-%05d", i)
+		run.RootRunID = run.ID
+		if i%2 == 0 {
+			run.Context[conversationRunContextConversationID] = conversationID
+		} else {
+			run.Context[conversationRunContextConversationID] = "unrelated-conversation"
 		}
-	}
-	switch store := store.(type) {
-	case *SQLiteStore:
-		conn, err := beginImmediateSQLite(t.Context(), store.db)
-		if err != nil {
+		if err := store.CreateAgentRun(t.Context(), run); err != nil {
 			t.Fatal(err)
 		}
-		committed := false
-		defer rollbackSQLiteConn(conn, &committed)
-		seed(func(run *AgentRun) error { return insertSQLiteAgentRunConn(t.Context(), conn, run) })
-		if _, err := conn.ExecContext(t.Context(), "COMMIT"); err != nil {
-			t.Fatal(err)
-		}
-		committed = true
-	case *PostgresStore:
-		tx, err := store.db.BeginTx(t.Context(), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer tx.Rollback()
-		seed(func(run *AgentRun) error { return store.insertPostgresAgentRunTx(t.Context(), tx, run) })
-		if err := tx.Commit(); err != nil {
-			t.Fatal(err)
-		}
-	default:
-		t.Fatal("unsupported SQL history fixture store")
 	}
 }
 
@@ -74,14 +40,14 @@ func TestConversationActiveRunsSQLFindsOldRootAndTracksCanonicalMembership(t *te
 		scope := Scope{Kind: "tenant", ID: "legacy-read"}
 		owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "legacy-agent"}
 		old := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
-		root := conversationReadSQLRun("old-root", scope, owner, RunKindConversation, AgentRunStatusCompleted, old)
+		root := storetest.ConversationReadRun("old-root", scope, owner, RunKindConversation, AgentRunStatusCompleted, old)
 		root.Context = map[string]interface{}{conversationRunContextConversationID: "legacy-conversation"}
 		if err := fixture.store.CreateAgentRun(t.Context(), root); err != nil {
 			t.Fatal(err)
 		}
 		children := make([]*AgentRun, 0, 2)
 		for _, id := range []string{"old-child-a", "old-child-b"} {
-			child := conversationReadSQLRun(id, scope, owner, RunKindAgentWork, AgentRunStatusQueued, old)
+			child := storetest.ConversationReadRun(id, scope, owner, RunKindAgentWork, AgentRunStatusQueued, old)
 			child.RootRunID, child.ParentRunID = root.ID, root.ID
 			if err := fixture.store.CreateAgentRun(t.Context(), child); err != nil {
 				t.Fatal(err)
@@ -109,10 +75,10 @@ func TestConversationActiveRunsSQLFindsOldRootAndTracksCanonicalMembership(t *te
 			t.Fatalf("bounded active page = %#v, %v", page, err)
 		}
 		for _, unrelated := range []*AgentRun{
-			conversationReadSQLRun("independent-task", scope, owner, RunKindAgentWork, AgentRunStatusQueued, old),
-			conversationReadSQLRun("foreign-owner-child", scope, ObjectiveOwner{Type: OwnerTypeAgent, ID: "other-agent"}, RunKindAgentWork, AgentRunStatusQueued, old),
-			conversationReadSQLRun("foreign-scope-child", Scope{Kind: scope.Kind, ID: "other-tenant"}, owner, RunKindAgentWork, AgentRunStatusQueued, old),
-			conversationReadSQLRun("conversation-child", scope, owner, RunKindConversation, AgentRunStatusQueued, old),
+			storetest.ConversationReadRun("independent-task", scope, owner, RunKindAgentWork, AgentRunStatusQueued, old),
+			storetest.ConversationReadRun("foreign-owner-child", scope, ObjectiveOwner{Type: OwnerTypeAgent, ID: "other-agent"}, RunKindAgentWork, AgentRunStatusQueued, old),
+			storetest.ConversationReadRun("foreign-scope-child", Scope{Kind: scope.Kind, ID: "other-tenant"}, owner, RunKindAgentWork, AgentRunStatusQueued, old),
+			storetest.ConversationReadRun("conversation-child", scope, owner, RunKindConversation, AgentRunStatusQueued, old),
 		} {
 			unrelated.Context = map[string]interface{}{conversationRunContextConversationID: "legacy-conversation"}
 			if unrelated.ID != "independent-task" {
@@ -185,7 +151,7 @@ func TestConversationForegroundRunsSQLIncludesExactLegacyAndThreadRoots(t *testi
 			{"missing-thread", "conversation:thread:thread-message:agent:foreground-agent", "conversation", "", RunKindConversation},
 			{"work-root", "conversation", "conversation", "", RunKindAgentWork},
 		} {
-			run := conversationReadSQLRun(testCase.id, scope, owner, testCase.kind, AgentRunStatusCompleted, at)
+			run := storetest.ConversationReadRun(testCase.id, scope, owner, testCase.kind, AgentRunStatusCompleted, at)
 			run.ConcurrencyKey = testCase.key
 			run.Context = map[string]interface{}{conversationRunContextConversationID: testCase.conversation, "threadRootMessageId": testCase.thread}
 			if err := fixture.store.CreateAgentRun(t.Context(), run); err != nil {

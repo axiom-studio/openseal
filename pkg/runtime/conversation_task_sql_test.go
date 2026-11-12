@@ -11,21 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-type conversationTaskSQLTestStore interface {
-	PortfolioStore
-	RunActivityStore
-	ConversationTaskStore
-}
+type conversationTaskSQLTestStore = storetest.ConversationTaskStore
 
 type conversationTaskSQLTestFixture struct {
 	store  conversationTaskSQLTestStore
 	reopen func(*testing.T) conversationTaskSQLTestStore
 }
-
-var conversationTaskSQLFixtureTime = time.Now().UTC().Truncate(time.Microsecond)
 
 func forConversationTaskSQLStores(t *testing.T, test func(*testing.T, conversationTaskSQLTestFixture)) {
 	t.Helper()
@@ -66,69 +60,18 @@ func forConversationTaskSQLStores(t *testing.T, test func(*testing.T, conversati
 	})
 }
 
+// conversationTaskSQLRecord is storetest.ConversationTaskRecord for the
+// runtime tests that call it by this name.
 func conversationTaskSQLRecord(t *testing.T, store conversationTaskSQLTestStore, suffix string) ConversationTaskCreateRecord {
 	t.Helper()
-	now := conversationTaskSQLFixtureTime
-	expires := time.Now().UTC().Add(10 * time.Minute)
-	scope := Scope{Kind: "tenant", ID: "task-sql"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "task-agent"}
-	sourceID := "source-" + suffix
-	source := &AgentRun{ID: sourceID, Scope: scope, Kind: RunKindConversation, RootRunID: sourceID, Owner: owner,
-		AssignedAgentID: owner.ID, Goal: "Accept conversation work", Source: RunSourceChat, Status: AgentRunStatusRunning,
-		Priority: 90, AvailableAt: now, QueueEnteredAt: now, LeaseOwner: "task-worker", LeaseExpiresAt: &expires,
-		LastAppliedTurn: 1, Budget: &BudgetPolicy{MaxTurns: 20}, Policy: map[string]interface{}{"preserve": "source-policy"},
-		Context:  map[string]interface{}{conversationRunContextConversationID: "conversation", conversationRunContextTriggerID: "message-" + suffix},
-		Revision: 1, CreatedAt: now, UpdatedAt: now}
-	if err := store.CreateAgentRun(t.Context(), source); err != nil {
-		t.Fatal(err)
-	}
-	taskID := conversationTaskID(scope, sourceID, "task-"+suffix)
-	workID := "work-" + suffix
-	task := &ConversationTask{ID: taskID, Scope: scope, Owner: owner, ConversationID: "conversation", SourceMessageID: "message-" + suffix,
-		ThreadRootID: "thread", SourceRunID: sourceID, SourceTurnID: "turn-" + suffix, SourceTurnNumber: 1,
-		AuthenticatedActor: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, TargetAgentID: owner.ID,
-		WorkRunID: workID, TaskKey: "task-" + suffix, Goal: "Prepare the requested result", Acknowledgment: "I have started the work.",
-		RequestedBudget: &BudgetPolicy{MaxTurns: 5}, Revision: 1, CreatedAt: now}
-	var err error
-	task.RequestDigest, err = conversationTaskDigest(task)
-	if err != nil {
-		t.Fatal(err)
-	}
-	work := &AgentRun{ID: workID, Scope: scope, Kind: RunKindAgentWork, RootRunID: workID, Owner: owner, AssignedAgentID: owner.ID,
-		ConcurrencyKey: "task:" + taskID, Goal: task.Goal, Source: RunSourceChat, Status: AgentRunStatusQueued, Priority: source.Priority,
-		AvailableAt: now, QueueEnteredAt: now, Budget: cloneBudgetPolicy(task.RequestedBudget), Revision: 1, CreatedAt: now, UpdatedAt: now,
-		Context: map[string]interface{}{ConversationTaskContextKey: taskID, conversationRunContextConversationID: task.ConversationID,
-			conversationRunContextTriggerID: task.SourceMessageID, runReportingContextRootRunID: workID,
-			runReportingContextMilestones: []interface{}{"completed", "failed"}}}
-	updated := cloneAgentRun(source)
-	if err := addRunBudgetAllocation(updated, workID, work.Budget); err != nil {
-		t.Fatal(err)
-	}
-	updated.Status = AgentRunStatusCompleted
-	updated.Context[runReportingContextRootRunID] = source.ID
-	updated.Context[runReportingContextMilestones] = []interface{}{"completed", "failed"}
-	updated.Output = map[string]interface{}{"summary": task.Acknowledgment, "conversationTaskIds": []string{taskID}, "conversationTaskWorkRunId": workID}
-	updated.CompletedAt = &now
-	updated.LeaseOwner = ""
-	updated.LeaseExpiresAt = nil
-	updated.Revision++
-	event := &ActivityEvent{ID: "task-event-" + suffix, Scope: scope, RunID: sourceID, EventType: "conversation.task_started",
-		Summary: "Started independent work", Actor: ActivityActor{Type: "user", ID: "requester"}, CorrelationID: taskID,
-		Visibility: ActivityVisibilityScope, CreatedAt: now}
-	record := ConversationTaskCreateRecord{Task: task, WorkRun: work, SourceRun: updated, ExpectedSourceRevision: 1, WorkerID: "task-worker", Event: event}
-	if err := validateConversationTaskCreateRecord(record); err != nil {
-		t.Fatalf("invalid SQL fixture: %v", err)
-	}
-	return record
+	return storetest.ConversationTaskRecord(t, store, suffix)
 }
 
+// updateConversationTaskSQLRun is storetest.UpdateRun for the runtime tests
+// that call it by this name.
 func updateConversationTaskSQLRun(t *testing.T, store conversationTaskSQLTestStore, run *AgentRun, expectedRevision int64) {
 	t.Helper()
-	event := &ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: run.ID, EventType: "run.updated",
-		Summary: "Update SQL task test run", Actor: ActivityActor{Type: "user", ID: "requester"}, Visibility: ActivityVisibilityScope, CreatedAt: run.UpdatedAt}
-	if _, err := store.UpdateAgentRunWithEvent(t.Context(), run, expectedRevision, event, nil); err != nil {
-		t.Fatal(err)
-	}
+	storetest.UpdateRun(t, store, run, expectedRevision)
 }
 
 func TestConversationTaskSQLConcurrentReplayAndRestart(t *testing.T) {
@@ -340,67 +283,6 @@ func TestConversationTaskSQLScopedPaginationAndCurrentWorkStatus(t *testing.T) {
 		filter.Limit = 101
 		if _, err := fixture.store.ListConversationTasks(t.Context(), filter); !errors.Is(err, ErrInvalidConversationTask) {
 			t.Fatalf("unbounded list error = %v", err)
-		}
-	})
-}
-
-func TestConversationTaskSQLPostgresMigrationRollbackAndReapply(t *testing.T) {
-	forConversationTaskSQLStores(t, func(t *testing.T, fixture conversationTaskSQLTestFixture) {
-		store, ok := fixture.store.(*PostgresStore)
-		if !ok {
-			t.Skip("PostgreSQL migration ledger and rollback")
-		}
-		current, version, err := store.postgresSchemaCurrent(t.Context(), store.db)
-		if err != nil || !current || version != currentPostgresSchemaVersion {
-			t.Fatalf("fresh migration ledger = current:%v version:%d err:%v", current, version, err)
-		}
-		legacyScope := Scope{Kind: "tenant", ID: "migration-backfill"}
-		legacyOwner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "legacy-agent"}
-		legacyRoot := conversationReadSQLRun("pre-upgrade-root", legacyScope, legacyOwner, RunKindConversation, AgentRunStatusCompleted, conversationTaskSQLFixtureTime)
-		legacyRoot.Context = map[string]interface{}{conversationRunContextConversationID: "pre-upgrade-conversation"}
-		legacyChild := conversationReadSQLRun("pre-upgrade-child", legacyScope, legacyOwner, RunKindAgentWork, AgentRunStatusQueued, conversationTaskSQLFixtureTime)
-		legacyChild.RootRunID, legacyChild.ParentRunID = legacyRoot.ID, legacyRoot.ID
-		for _, run := range []*AgentRun{legacyRoot, legacyChild} {
-			if err := store.CreateAgentRun(t.Context(), run); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := store.RollbackPostgresMigrations(t.Context(), conversationTaskMigrationVersion-1); err != nil {
-			t.Fatal(err)
-		}
-		var relation sql.NullString
-		if err := store.db.QueryRowContext(t.Context(), `SELECT to_regclass($1)`, store.schema+".conversation_tasks").Scan(&relation); err != nil || relation.Valid {
-			t.Fatalf("rolled-back task table = %#v, %v", relation, err)
-		}
-		current, version, err = store.postgresSchemaCurrent(t.Context(), store.db)
-		if err != nil || current || version != conversationTaskMigrationVersion-1 {
-			t.Fatalf("rollback migration ledger = current:%v version:%d err:%v", current, version, err)
-		}
-		restarted := fixture.reopen(t).(*PostgresStore)
-		current, version, err = restarted.postgresSchemaCurrent(t.Context(), restarted.db)
-		if err != nil || !current || version != currentPostgresSchemaVersion {
-			t.Fatalf("reapplied migration ledger = current:%v version:%d err:%v", current, version, err)
-		}
-		legacy, err := restarted.ListConversationActiveRuns(t.Context(), legacyScope, legacyOwner, "pre-upgrade-conversation", 100)
-		if err != nil || len(legacy) != 1 || legacy[0].ID != legacyChild.ID {
-			t.Fatalf("reapplied migration lost existing legacy work: %#v, %v", legacy, err)
-		}
-		// A new run status update exercises the recreated trigger and function.
-		record := conversationTaskSQLRecord(t, restarted, "reapplied")
-		if _, err := restarted.CreateConversationTask(t.Context(), record); err != nil {
-			t.Fatal(err)
-		}
-		work, err := restarted.GetAgentRun(t.Context(), record.Task.Scope, record.WorkRun.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		now := work.CreatedAt.Add(time.Second)
-		work.Status, work.CompletedAt, work.Revision = AgentRunStatusCanceled, &now, work.Revision+1
-		updateConversationTaskSQLRun(t, restarted, work, work.Revision-1)
-		page, err := restarted.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: record.Task.Scope, Owner: record.Task.Owner,
-			ConversationID: record.Task.ConversationID, ActiveOnly: true, Limit: 100})
-		if err != nil || len(page) != 0 {
-			t.Fatalf("reapplied active projection = %#v, %v", page, err)
 		}
 	})
 }

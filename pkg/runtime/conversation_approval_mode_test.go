@@ -246,32 +246,44 @@ func TestTighteningApprovalModeLeavesPendingApprovals(t *testing.T) {
 	}
 }
 
+// runsByID is a Run reader over the Runs a test puts in it, for code that
+// only reads Runs.
+type runsByID map[string]*AgentRun
+
+func (r runsByID) GetAgentRun(_ context.Context, scope Scope, runID string) (*AgentRun, error) {
+	run, ok := r[runID]
+	if !ok || run.Scope != scope {
+		return nil, ErrRunNotFound
+	}
+	return cloneAgentRun(run), nil
+}
+
 func TestRunConversationIDFallsBackToRootRun(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "one"}
 	root := &AgentRun{ID: "root", Scope: scope, RootRunID: "root", Context: map[string]interface{}{"conversationId": "chat"}}
 	child := &AgentRun{ID: "child", Scope: scope, RootRunID: "root", ParentRunID: "root", Context: map[string]interface{}{}}
-	putStoredRun(t, store, root)
-	if id, err := RunConversationID(ctx, store, child); err != nil || id != "chat" {
+	runs := runsByID{root.ID: cloneAgentRun(root)}
+	if id, err := RunConversationID(ctx, runs, child); err != nil || id != "chat" {
 		t.Fatalf("child conversation = %q, %v", id, err)
 	}
 	own := &AgentRun{ID: "own", Scope: scope, RootRunID: "root", Context: map[string]interface{}{"conversationId": "direct"}}
-	if id, err := RunConversationID(ctx, store, own); err != nil || id != "direct" {
+	if id, err := RunConversationID(ctx, runs, own); err != nil || id != "direct" {
 		t.Fatalf("own conversation = %q, %v", id, err)
 	}
 	orphan := &AgentRun{ID: "orphan", Scope: scope, RootRunID: "missing"}
-	if id, err := RunConversationID(ctx, store, orphan); err != nil || id != "" {
+	if id, err := RunConversationID(ctx, runs, orphan); err != nil || id != "" {
 		t.Fatalf("orphan conversation = %q, %v", id, err)
 	}
 	// A Run acting for no stored conversation has no mode (manual behavior).
-	if id, mode, err := RunConversationApprovalMode(ctx, store, store, child); err != nil || id != "chat" || mode != "" {
+	if id, mode, err := RunConversationApprovalMode(ctx, runs, store, child); err != nil || id != "chat" || mode != "" {
 		t.Fatalf("missing conversation mode = %q %q %v", id, mode, err)
 	}
 	conversation := approvalModeConversation(t, store)
 	root.Context["conversationId"] = conversation.ID
-	putStoredRun(t, store, root)
-	if _, mode, err := RunConversationApprovalMode(ctx, store, store, child); err != nil || mode != ConversationApprovalAuto {
+	runs[root.ID] = cloneAgentRun(root)
+	if _, mode, err := RunConversationApprovalMode(ctx, runs, store, child); err != nil || mode != ConversationApprovalAuto {
 		t.Fatalf("root conversation mode = %q %v", mode, err)
 	}
 }
@@ -623,7 +635,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	scheduled := &AgentRun{ID: "scheduled", Scope: scope, RootRunID: "scheduled", Context: map[string]interface{}{
 		"conversationId": conversation.ID, scheduledTaskContextKey: true,
 	}}
-	putStoredRun(t, store, occurrence)
+	runs := runsByID{occurrence.ID: cloneAgentRun(occurrence)}
 	for _, test := range []struct {
 		run  *AgentRun
 		want ConversationApprovalMode
@@ -632,7 +644,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 		{child, ConversationApprovalManual},
 		{scheduled, ConversationApprovalAuto},
 	} {
-		id, mode, err := RunConversationApprovalMode(ctx, store, store, test.run)
+		id, mode, err := RunConversationApprovalMode(ctx, runs, store, test.run)
 		if err != nil || id != conversation.ID || mode != test.want {
 			t.Fatalf("%s mode = %q %q %v, want %q", test.run.ID, id, mode, err, test.want)
 		}

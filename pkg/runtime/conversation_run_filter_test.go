@@ -26,15 +26,7 @@ func (s *countedConversationPortfolio) ListAgentRuns(ctx context.Context, filter
 func TestConversationRunFilterAvoidsUnrelatedHistory(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store KernelStore = newTestKernelStore(t)
-			if backend == "sqlite" {
-				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "runs.db"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = db.Close() })
-				store = db
-			}
+			store, db := newTestSQLiteStore(t)
 			scope := Scope{Kind: "tenant", ID: "one"}
 			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"}
 			now := time.Now().UTC()
@@ -68,13 +60,11 @@ func TestConversationRunFilterAvoidsUnrelatedHistory(t *testing.T) {
 			if counted.rootCalls != 1 || counted.rootRows != 1 {
 				t.Fatalf("unrelated history fetched: calls=%d rows=%d", counted.rootCalls, counted.rootRows)
 			}
-			if db, ok := store.(*SQLiteStore); ok {
-				var id, parent, unused int
-				var detail string
-				err := db.db.QueryRowContext(t.Context(), `EXPLAIN QUERY PLAN SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND json_extract(payload, '$.concurrencyKey') = ?`, scope.Kind, scope.ID, "selected").Scan(&id, &parent, &unused, &detail)
-				if err != nil || !strings.Contains(detail, "idx_agent_runs_concurrency") {
-					t.Fatalf("conversation lookup did not use scoped index: %s (%v)", detail, err)
-				}
+			var id, parent, unused int
+			var detail string
+			err = db.QueryRowContext(t.Context(), `EXPLAIN QUERY PLAN SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND json_extract(payload, '$.concurrencyKey') = ?`, scope.Kind, scope.ID, "selected").Scan(&id, &parent, &unused, &detail)
+			if err != nil || !strings.Contains(detail, "idx_agent_runs_concurrency") {
+				t.Fatalf("conversation lookup did not use scoped index: %s (%v)", detail, err)
 			}
 		})
 	}

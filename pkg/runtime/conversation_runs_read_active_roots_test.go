@@ -3,19 +3,21 @@ package runtime
 import (
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestConversationActiveRunsTracksCanonicalRootChanges(t *testing.T) {
-	store := newTestKernelStore(t)
+	store, db := newTestSQLiteStore(t)
 	scope := Scope{Kind: "tenant", ID: "active-root"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
 	at := time.Now()
-	root := conversationReadSQLRun("root", scope, owner, RunKindConversation, AgentRunStatusCompleted, at)
+	root := storetest.ConversationReadRun("root", scope, owner, RunKindConversation, AgentRunStatusCompleted, at)
 	root.Context = map[string]interface{}{conversationRunContextConversationID: "original"}
 	if err := store.CreateAgentRun(t.Context(), root); err != nil {
 		t.Fatal(err)
 	}
-	child := conversationReadSQLRun("child", scope, owner, RunKindAgentWork, AgentRunStatusQueued, at)
+	child := storetest.ConversationReadRun("child", scope, owner, RunKindAgentWork, AgentRunStatusQueued, at)
 	child.ParentRunID = root.ID
 	child.RootRunID = root.ID
 	if err := store.CreateAgentRun(t.Context(), child); err != nil {
@@ -47,7 +49,7 @@ func TestConversationActiveRunsTracksCanonicalRootChanges(t *testing.T) {
 	child.Revision++
 	updateConversationTaskSQLRun(t, store, child, child.Revision-1)
 	check("moved", 0)
-	if countStoreRows(t, store, "conversation_active_runs") != 0 {
+	if countRows(t, db, "conversation_active_runs") != 0 {
 		t.Fatal("terminal children retained active root lookup entries")
 	}
 }
