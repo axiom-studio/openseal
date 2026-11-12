@@ -5,7 +5,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,25 +12,12 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/workforce"
-	"github.com/google/uuid"
 )
 
 func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	schema := "openseal_channel_atomic_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = store.db.ExecContext(context.Background(), `DROP SCHEMA `+store.quotedSchema()+` CASCADE`)
-		_ = store.Close()
-	})
+	store, pgSchema := openTestPostgresStore(t, "openseal_channel_atomic_")
 	_, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	endpoints := NewExternalConversationEndpointService(store, catalog)
 	endpoint, err := endpoints.Create(ctx, CreateExternalConversationEndpointRequest{
@@ -76,10 +62,10 @@ func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.ExecContext(ctx, `CREATE FUNCTION `+store.quotedSchema()+`.reject_channel_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'endpoint write rejected'; END $$`); err != nil {
+	if _, err := pgSchema.db.ExecContext(ctx, `CREATE FUNCTION `+pgSchema.quoted()+`.reject_channel_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'endpoint write rejected'; END $$`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.ExecContext(ctx, `CREATE TRIGGER reject_channel_update BEFORE UPDATE ON `+store.table("external_conversation_endpoints")+` FOR EACH ROW EXECUTE FUNCTION `+store.quotedSchema()+`.reject_channel_update()`); err != nil {
+	if _, err := pgSchema.db.ExecContext(ctx, `CREATE TRIGGER reject_channel_update BEFORE UPDATE ON `+pgSchema.table("external_conversation_endpoints")+` FOR EACH ROW EXECUTE FUNCTION `+pgSchema.quoted()+`.reject_channel_update()`); err != nil {
 		t.Fatal(err)
 	}
 	activate := func() error {
@@ -97,7 +83,7 @@ func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
 	if !equalJSON(unchanged, deployment) || len(versions) != 1 || len(activations) != 1 || !equalJSON(unchangedEndpoint, endpoint) || unchangedAmendment.Status == kernelagent.AmendmentActivated {
 		t.Fatalf("failed PostgreSQL transaction left partial changes: deployment=%#v endpoint=%#v amendment=%#v versions=%d activations=%d", unchanged, unchangedEndpoint, unchangedAmendment, len(versions), len(activations))
 	}
-	if _, err := store.db.ExecContext(ctx, `DROP TRIGGER reject_channel_update ON `+store.table("external_conversation_endpoints")); err != nil {
+	if _, err := pgSchema.db.ExecContext(ctx, `DROP TRIGGER reject_channel_update ON `+pgSchema.table("external_conversation_endpoints")); err != nil {
 		t.Fatal(err)
 	}
 	// A concurrent retirement must win even after a prepared, reviewed update.
