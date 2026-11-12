@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/callback"
 )
 
 // Producers of routine events from conversation and callback ingress
@@ -193,7 +194,7 @@ func NewRoutineCallbackConsumer(offerer RoutineEventOfferer) *RoutineCallbackCon
 	return &RoutineCallbackConsumer{offerer: offerer}
 }
 
-var _ CallbackEventConsumer = (*RoutineCallbackConsumer)(nil)
+var _ callback.CallbackEventConsumer = (*RoutineCallbackConsumer)(nil)
 
 // ConsumeCallbackEvent offers one GitHub event. Events of other providers
 // are not routine events and are skipped. An offer error fails the receipt,

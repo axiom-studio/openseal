@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/callback"
 )
 
 type ExternalConversationSupervisorConfig struct {
@@ -15,7 +17,7 @@ type ExternalConversationSupervisorConfig struct {
 	BatchSize        int
 	Inbox            ExternalConversationInboxWorkerConfig
 	Delivery         ExternalConversationDeliveryWorkerConfig
-	Callback         CallbackEventWorkerConfig
+	Callback         callback.CallbackEventWorkerConfig
 	Acknowledgements RunProgressAcknowledgementWorkerConfig
 }
 
@@ -40,7 +42,7 @@ type ExternalConversationSupervisor struct {
 	replies          *ExternalConversationReplyWorker
 	delivery         *ExternalConversationDeliveryWorker
 	approvals        *ApprovalNotificationWorker
-	callbacks        *CallbackEventWorker
+	callbacks        *callback.CallbackEventWorker
 	acknowledgements *RunProgressAcknowledgementWorker
 	scopes           WorkerScopeSource
 	config           ExternalConversationSupervisorConfig
@@ -55,7 +57,7 @@ type ExternalConversationSupervisor struct {
 	stopOnce         sync.Once
 }
 
-func (s *ExternalConversationSupervisor) SetCallbackWorker(worker *CallbackEventWorker) {
+func (s *ExternalConversationSupervisor) SetCallbackWorker(worker *callback.CallbackEventWorker) {
 	if s != nil {
 		s.callbacks = worker
 	}

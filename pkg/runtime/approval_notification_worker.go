@@ -10,13 +10,14 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/callback"
 )
 
 type ApprovalNotificationWorker struct {
 	store         ApprovalNotificationStore
 	conversations *ConversationService
 	transport     *ExternalConversationTransportService
-	callbacks     *CallbackRegistry
+	callbacks     *callback.CallbackRegistry
 	now           func() time.Time
 }
 
@@ -25,12 +26,12 @@ const approvalNotificationPostAttempts = 5
 func NewApprovalNotificationWorker(
 	store ApprovalNotificationStore,
 	transport *ExternalConversationTransportService,
-	callbackResolver CallbackAdapterResolver,
+	callbackResolver callback.CallbackAdapterResolver,
 	opts ...models.ServiceOption,
 ) *ApprovalNotificationWorker {
 	return &ApprovalNotificationWorker{
 		store: store, conversations: NewConversationService(store, opts...), transport: transport,
-		callbacks: NewCallbackRegistry(store, callbackResolver, opts...), now: models.ClockFrom(opts),
+		callbacks: callback.NewCallbackRegistry(store, callbackResolver, opts...), now: models.ClockFrom(opts),
 	}
 }
 
