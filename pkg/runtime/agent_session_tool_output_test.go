@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/toolfile"
 )
 
@@ -37,10 +38,10 @@ func (k *fakeToolOutputKeeper) KeepToolOutput(_ context.Context, invocation Tool
 	return paths, nil
 }
 
-func requireToolResultFitsCap(t *testing.T, result ToolResult) {
+func requireToolResultFitsCap(t *testing.T, result models.ToolResult) {
 	t.Helper()
-	if _, err := validateContentParts(result.Content, contentPartLimits{
-		Field: "tool result", MaxParts: MaxToolResultParts, MaxContent: MaxToolResultContentBytes,
+	if _, err := models.ValidateContentParts(result.Content, models.ContentPartLimits{
+		Field: "tool result", MaxParts: models.MaxToolResultParts, MaxContent: models.MaxToolResultContentBytes,
 	}); err != nil {
 		t.Fatalf("bounded result does not fit the cap: %v", err)
 	}
@@ -56,7 +57,7 @@ func bigJSONValue(t *testing.T) json.RawMessage {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(encoded) <= MaxToolResultContentBytes {
+	if len(encoded) <= models.MaxToolResultContentBytes {
 		t.Fatalf("fixture too small: %d", len(encoded))
 	}
 	return encoded
@@ -64,10 +65,10 @@ func bigJSONValue(t *testing.T) json.RawMessage {
 
 func TestBoundToolResultUnderCapUnchanged(t *testing.T) {
 	keeper := &fakeToolOutputKeeper{}
-	result := ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{
-		{Type: ContentPartText, Text: "hello"},
-		{Type: ContentPartJSON, Value: json.RawMessage(`{"a":1}`)},
-		{Type: ContentPartFile, Path: "tool-output/c/x.png", MimeType: "image/png", SizeBytes: 9 << 20},
+	result := models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{
+		{Type: models.ContentPartText, Text: "hello"},
+		{Type: models.ContentPartJSON, Value: json.RawMessage(`{"a":1}`)},
+		{Type: models.ContentPartFile, Path: "tool-output/c/x.png", MimeType: "image/png", SizeBytes: 9 << 20},
 	}}
 	got, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-1"}, result)
 	if err != nil {
@@ -84,9 +85,9 @@ func TestBoundToolResultUnderCapUnchanged(t *testing.T) {
 func TestBoundToolResultKeepsFullOutputAsFile(t *testing.T) {
 	keeper := &fakeToolOutputKeeper{}
 	value := bigJSONValue(t)
-	result := ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{
-		{Type: ContentPartText, Text: "found 400 items"},
-		{Type: ContentPartJSON, Value: value},
+	result := models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{
+		{Type: models.ContentPartText, Text: "found 400 items"},
+		{Type: models.ContentPartJSON, Value: value},
 	}}
 	got, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-1"}, result)
 	if err != nil {
@@ -99,22 +100,22 @@ func TestBoundToolResultKeepsFullOutputAsFile(t *testing.T) {
 	if keeper.paths[0] != "tool-output/call-1/output.json" || payload.MimeType != "application/json" {
 		t.Fatalf("payload kept at %q as %q", keeper.paths[0], payload.MimeType)
 	}
-	var parts []ContentPart
+	var parts []models.ContentPart
 	if err := json.Unmarshal(payload.Data, &parts); err != nil || len(parts) != 2 || string(parts[1].Value) != string(value) {
 		t.Fatalf("payload does not hold the full content: %v", err)
 	}
-	if got.Status != ToolResultSucceeded || len(got.Content) != 2 {
+	if got.Status != models.ToolResultSucceeded || len(got.Content) != 2 {
 		t.Fatalf("unexpected result: %#v", got)
 	}
 	preview, file := got.Content[0], got.Content[1]
-	if preview.Type != ContentPartText || !strings.HasPrefix(preview.Text, "found 400 items\n") ||
+	if preview.Type != models.ContentPartText || !strings.HasPrefix(preview.Text, "found 400 items\n") ||
 		!strings.Contains(preview.Text, "the full output is in tool-output/call-1/output.json") {
 		t.Fatalf("unexpected preview: %.200q", preview.Text)
 	}
 	if !utf8Valid(preview.Text) {
 		t.Fatal("preview splits a rune")
 	}
-	if file.Type != ContentPartFile || file.Path != "tool-output/call-1/output.json" || file.MimeType != "application/json" || file.SizeBytes != int64(len(payload.Data)) {
+	if file.Type != models.ContentPartFile || file.Path != "tool-output/call-1/output.json" || file.MimeType != "application/json" || file.SizeBytes != int64(len(payload.Data)) {
 		t.Fatalf("unexpected file part: %#v", file)
 	}
 	requireToolResultFitsCap(t, got)
@@ -123,8 +124,8 @@ func TestBoundToolResultKeepsFullOutputAsFile(t *testing.T) {
 func TestBoundToolResultTextUsesTxt(t *testing.T) {
 	keeper := &fakeToolOutputKeeper{}
 	text := strings.Repeat("line of log output\n", 5000)
-	got, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "entry-9"}, ToolResult{
-		Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: text}},
+	got, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "entry-9"}, models.ToolResult{
+		Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartText, Text: text}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -141,9 +142,9 @@ func TestBoundToolResultTextUsesTxt(t *testing.T) {
 func TestBoundToolResultNoChatCompactsToCap(t *testing.T) {
 	value := bigJSONValue(t)
 	text := strings.Repeat("ü", 50<<10)
-	result := ToolResult{Status: ToolResultFailed, IsError: true, Content: []ContentPart{
-		{Type: ContentPartText, Text: text},
-		{Type: ContentPartJSON, Value: value},
+	result := models.ToolResult{Status: models.ToolResultFailed, IsError: true, Content: []models.ContentPart{
+		{Type: models.ContentPartText, Text: text},
+		{Type: models.ContentPartJSON, Value: value},
 	}}
 	for name, keeper := range map[string]ToolOutputKeeper{
 		"nil keeper": nil,
@@ -156,7 +157,7 @@ func TestBoundToolResultNoChatCompactsToCap(t *testing.T) {
 				t.Fatal(err)
 			}
 			requireToolResultFitsCap(t, got)
-			if got.Status != ToolResultFailed || !got.IsError || len(got.Content) != 2 {
+			if got.Status != models.ToolResultFailed || !got.IsError || len(got.Content) != 2 {
 				t.Fatalf("unexpected result: %#v", got)
 			}
 			if !strings.Contains(got.Content[0].Text, "(truncated: 102400 bytes in total;") || !utf8Valid(got.Content[0].Text) {
@@ -172,7 +173,7 @@ func TestBoundToolResultNoChatCompactsToCap(t *testing.T) {
 			}
 		})
 	}
-	unshortenable := ToolResult{Status: ToolResultSucceeded, Content: make([]ContentPart, 0, MaxToolResultParts)}
+	unshortenable := models.ToolResult{Status: models.ToolResultSucceeded, Content: make([]models.ContentPart, 0, models.MaxToolResultParts)}
 	// Keys are never shortened, so long keys cannot be compacted to fit.
 	longKeys := map[string]int{}
 	for i := 0; i < 4; i++ {
@@ -180,7 +181,7 @@ func TestBoundToolResultNoChatCompactsToCap(t *testing.T) {
 	}
 	longKeyValue, _ := json.Marshal(longKeys)
 	for i := 0; i < 2; i++ {
-		unshortenable.Content = append(unshortenable.Content, ContentPart{Type: ContentPartJSON, Value: longKeyValue})
+		unshortenable.Content = append(unshortenable.Content, models.ContentPart{Type: models.ContentPartJSON, Value: longKeyValue})
 	}
 	got, err := BoundToolResult(context.Background(), nil, ToolInvocation{}, unshortenable)
 	if err != nil {
@@ -193,14 +194,14 @@ func TestBoundToolResultNoChatCompactsToCap(t *testing.T) {
 }
 
 func TestBoundToolResultKeepsExistingFileBlocks(t *testing.T) {
-	existing := []ContentPart{
-		{Type: ContentPartFile, Path: "tool-output/call-1/report.pdf", MimeType: "application/pdf", SizeBytes: 12345},
-		{Type: ContentPartImage, MediaType: "image/png", ActionCallID: "call-1"},
+	existing := []models.ContentPart{
+		{Type: models.ContentPartFile, Path: "tool-output/call-1/report.pdf", MimeType: "application/pdf", SizeBytes: 12345},
+		{Type: models.ContentPartImage, MediaType: "image/png", ActionCallID: "call-1"},
 	}
-	content := append([]ContentPart{{Type: ContentPartText, Text: strings.Repeat("x", 70<<10)}}, existing...)
+	content := append([]models.ContentPart{{Type: models.ContentPartText, Text: strings.Repeat("x", 70<<10)}}, existing...)
 	for name, keeper := range map[string]ToolOutputKeeper{"kept": &fakeToolOutputKeeper{}, "no chat": nil} {
 		t.Run(name, func(t *testing.T) {
-			got, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-1"}, ToolResult{Status: ToolResultSucceeded, Content: content})
+			got, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-1"}, models.ToolResult{Status: models.ToolResultSucceeded, Content: content})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -212,7 +213,7 @@ func TestBoundToolResultKeepsExistingFileBlocks(t *testing.T) {
 		})
 	}
 	keeper := &fakeToolOutputKeeper{}
-	if _, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-1"}, ToolResult{Status: ToolResultSucceeded, Content: content}); err != nil {
+	if _, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-1"}, models.ToolResult{Status: models.ToolResultSucceeded, Content: content}); err != nil {
 		t.Fatal(err)
 	}
 	if keeper.payloads[0].Name != "output.txt" || len(keeper.payloads[0].Data) != 70<<10 {
@@ -223,14 +224,14 @@ func TestBoundToolResultKeepsExistingFileBlocks(t *testing.T) {
 func TestBoundToolResultKeeperErrorFails(t *testing.T) {
 	boom := errors.New("chat files unavailable")
 	keeper := &fakeToolOutputKeeper{err: boom}
-	_, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-1"}, ToolResult{
-		Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: strings.Repeat("x", 70<<10)}},
+	_, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-1"}, models.ToolResult{
+		Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartText, Text: strings.Repeat("x", 70<<10)}},
 	})
 	if !errors.Is(err, boom) {
 		t.Fatalf("expected keeper error, got %v", err)
 	}
-	if _, err := BoundToolResult(context.Background(), &fakeToolOutputKeeper{}, ToolInvocation{}, ToolResult{
-		Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: strings.Repeat("x", 70<<10)}},
+	if _, err := BoundToolResult(context.Background(), &fakeToolOutputKeeper{}, ToolInvocation{}, models.ToolResult{
+		Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartText, Text: strings.Repeat("x", 70<<10)}},
 	}); err == nil {
 		t.Fatal("expected an error without an action call id")
 	}
@@ -243,13 +244,13 @@ func utf8Valid(s string) bool { return strings.ToValidUTF8(s, "�") == s }
 func TestBoundToolResultKeepsAMidSizeResultAsAFile(t *testing.T) {
 	keeper := &fakeToolOutputKeeper{}
 	text := strings.Repeat("page text ", 3<<10)
-	got, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-7"}, ToolResult{
-		Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: text}},
+	got, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-7"}, models.ToolResult{
+		Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartText, Text: text}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(text) <= toolOutputInlineBytes || len(text) > MaxToolResultContentBytes {
+	if len(text) <= toolOutputInlineBytes || len(text) > models.MaxToolResultContentBytes {
 		t.Fatalf("fixture: %d bytes", len(text))
 	}
 	if keeper.calls != 1 || string(keeper.payloads[0].Data) != text || len(got.Content) != 2 || got.Content[1].Path != "tool-output/call-7/output.txt" {
@@ -263,7 +264,7 @@ func TestBoundToolResultKeepsAMidSizeResultAsAFile(t *testing.T) {
 // When a mid-size result cannot be kept as a file it stays whole, as before:
 // the lower inline size never shortens or fails a result that fits the cap.
 func TestBoundToolResultLeavesAMidSizeResultWholeWithoutAFile(t *testing.T) {
-	result := ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: strings.Repeat("page text ", 3<<10)}}}
+	result := models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartText, Text: strings.Repeat("page text ", 3<<10)}}}
 	for name, c := range map[string]struct {
 		keeper ToolOutputKeeper
 		call   string

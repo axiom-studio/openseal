@@ -6,10 +6,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestTurnAnswerPreviewProjectionDoesNotExposePrivatePayload(t *testing.T) {
-	event := &ActivityEvent{EventType: "turn.answer_preview", Visibility: ActivityVisibilityScope, Payload: map[string]interface{}{
+	event := &models.ActivityEvent{EventType: "turn.answer_preview", Visibility: models.ActivityVisibilityScope, Payload: map[string]interface{}{
 		"attemptId": "attempt", "sequence": uint64(3), "text": "Public answer", "reset": false, "reasoning": "private", "arguments": map[string]interface{}{"token": "secret"},
 	}}
 	// Match the database's float64 representation of JSON numbers.
@@ -25,11 +27,11 @@ func TestTurnAnswerPreviewProjectionDoesNotExposePrivatePayload(t *testing.T) {
 	if strings.Contains(string(data), "private") || strings.Contains(string(data), "secret") {
 		t.Fatal("private payload escaped")
 	}
-	event.Visibility = ActivityVisibilityPrivate
+	event.Visibility = models.ActivityVisibilityPrivate
 	if projectActivityEvent(event, false).AnswerPreview != nil {
 		t.Fatal("private preview escaped")
 	}
-	event.Visibility = ActivityVisibilityScope
+	event.Visibility = models.ActivityVisibilityScope
 	event.Payload["sequence"] = 1.5
 	if projectActivityEvent(event, false).AnswerPreview != nil {
 		t.Fatal("invalid sequence accepted")
