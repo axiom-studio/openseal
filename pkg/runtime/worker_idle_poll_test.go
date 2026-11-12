@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -227,14 +228,14 @@ func createActionPoolWork(t *testing.T, store KernelStore, catalog *skill.Catalo
 }
 
 func TestWorkerPollSignalPreservesNotificationBeforeWait(t *testing.T) {
-	poll := newWorkerPollSignal()
-	generation, wake := poll.snapshot()
-	poll.notify()
-	current, _ := poll.snapshot()
+	poll := workqueue.NewWorkerPollSignal()
+	generation, wake := poll.Snapshot()
+	poll.Notify()
+	current, _ := poll.Snapshot()
 	if current == generation {
 		t.Fatalf("committed enqueue did not advance generation: %d", current)
 	}
-	if !waitForWorkerPoll(t.Context(), wake, time.Hour) {
+	if !workqueue.WaitForWorkerPoll(t.Context(), wake, time.Hour) {
 		t.Fatal("committed wake did not survive the later wait")
 	}
 }
@@ -315,25 +316,25 @@ func TestActionWorkerPoolSerializesStopBeforeConcurrentRestart(t *testing.T) {
 }
 
 func TestWorkerPollSignalBroadcastsAndCancelsAllWaiters(t *testing.T) {
-	poll := newWorkerPollSignal()
-	_, wake := poll.snapshot()
+	poll := workqueue.NewWorkerPollSignal()
+	_, wake := poll.Snapshot()
 	const waiters = 8
 	var group sync.WaitGroup
 	for range waiters {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			if !waitForWorkerPoll(t.Context(), wake, time.Hour) {
+			if !workqueue.WaitForWorkerPoll(t.Context(), wake, time.Hour) {
 				t.Error("pool notification did not wake a waiter")
 			}
 		}()
 	}
-	poll.notify()
+	poll.Notify()
 	group.Wait()
-	_, nextWake := poll.snapshot()
+	_, nextWake := poll.Snapshot()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if waitForWorkerPoll(ctx, nextWake, time.Hour) {
+	if workqueue.WaitForWorkerPoll(ctx, nextWake, time.Hour) {
 		t.Fatal("canceled worker waited on a pool wake")
 	}
 }

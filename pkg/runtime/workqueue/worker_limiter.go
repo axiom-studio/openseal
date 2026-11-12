@@ -1,4 +1,4 @@
-package runtime
+package workqueue
 
 import (
 	"context"
@@ -23,7 +23,7 @@ type WorkerLimiter struct {
 	acquireCount atomic.Int64
 }
 
-func workerPollDelay(base time.Duration, consecutiveFailures int, seed string) time.Duration {
+func WorkerPollDelay(base time.Duration, consecutiveFailures int, seed string) time.Duration {
 	if base <= 0 {
 		base = 500 * time.Millisecond
 	}
@@ -46,7 +46,7 @@ func workerPollDelay(base time.Duration, consecutiveFailures int, seed string) t
 	return delay
 }
 
-func waitForWorkerPoll(ctx context.Context, wake <-chan struct{}, delay time.Duration) bool {
+func WaitForWorkerPoll(ctx context.Context, wake <-chan struct{}, delay time.Duration) bool {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
@@ -74,7 +74,7 @@ func NewWorkerLimiter(limit int) (*WorkerLimiter, error) {
 	return &WorkerLimiter{limit: int64(limit), permits: make(chan struct{}, limit)}, nil
 }
 
-func (l *WorkerLimiter) acquire(ctx context.Context) (func(), error) {
+func (l *WorkerLimiter) Acquire(ctx context.Context) (func(), error) {
 	if l == nil {
 		return func() {}, nil
 	}

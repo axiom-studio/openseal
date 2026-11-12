@@ -1,4 +1,4 @@
-package runtime
+package workqueue
 
 import (
 	"container/heap"
@@ -110,7 +110,7 @@ func (p *workPublisher) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(workerPollDelay(100*time.Millisecond, failures, "work-publisher")):
+		case <-time.After(WorkerPollDelay(100*time.Millisecond, failures, "work-publisher")):
 		}
 	}
 }
@@ -248,11 +248,11 @@ const (
 	workScopeCacheLimit  = 65536
 )
 
-func newWorkScopeGate(source WorkerScopeSource, refresh time.Duration) *workScopeGate {
+func NewWorkScopeGate(source WorkerScopeSource, refresh time.Duration) *workScopeGate {
 	gate := &workScopeGate{source: source, cache: make(map[models.Scope]workScopeAnswer), now: time.Now}
 	gate.checker, _ = source.(WorkScopeChecker)
 	if gate.checker == nil {
-		gate.known = newKnownWorkerScopes(source, refresh)
+		gate.known = NewKnownWorkerScopes(source, refresh)
 	}
 	return gate
 }
@@ -260,7 +260,7 @@ func newWorkScopeGate(source WorkerScopeSource, refresh time.Duration) *workScop
 // filter keeps the scopes that may run workers. Lookup failures drop the
 // scope for this pass; its work stays durable and is retried when the
 // scope is next scheduled.
-func (g *workScopeGate) filter(ctx context.Context, scopes []models.Scope) ([]models.Scope, error) {
+func (g *workScopeGate) Filter(ctx context.Context, scopes []models.Scope) ([]models.Scope, error) {
 	if g.checker == nil {
 		g.mu.Lock()
 		defer g.mu.Unlock()
@@ -309,25 +309,25 @@ func (g *workScopeGate) active(ctx context.Context, scope models.Scope) (bool, e
 // poolActivity tracks whether a scope pool is doing anything, so a
 // queue-driven supervisor can retire pools of idle scopes. A retired scope
 // costs nothing until the queue delivers its next item.
-type poolActivity struct {
+type PoolActivity struct {
 	busy atomic.Int32
 	last atomic.Int64
 }
 
-func (a *poolActivity) touch() { a.last.Store(time.Now().UnixNano()) }
+func (a *PoolActivity) Touch() { a.last.Store(time.Now().UnixNano()) }
 
-func (a *poolActivity) begin() {
+func (a *PoolActivity) Begin() {
 	a.busy.Add(1)
-	a.touch()
+	a.Touch()
 }
 
-func (a *poolActivity) end() {
-	a.touch()
+func (a *PoolActivity) End() {
+	a.Touch()
 	a.busy.Add(-1)
 }
 
 // idleFor returns how long the pool has done nothing, or zero while busy.
-func (a *poolActivity) idleFor(now time.Time) time.Duration {
+func (a *PoolActivity) IdleFor(now time.Time) time.Duration {
 	if a.busy.Load() > 0 {
 		return 0
 	}
@@ -336,7 +336,7 @@ func (a *poolActivity) idleFor(now time.Time) time.Duration {
 
 // poolRetireAfter is how long a queue-driven scope pool stays idle before its
 // supervisor stops it. Its next deadline is already in the queue.
-const poolRetireAfter = time.Minute
+const PoolRetireAfter = time.Minute
 
 // BindQueue makes status schedule loop passes into queue. Call before the
 // loops start. The returned function publishes scheduled passes until its

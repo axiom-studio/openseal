@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/google/uuid"
 )
 
@@ -32,7 +33,7 @@ type RunTerminalReportingWorker struct {
 	store     RunTerminalReportingStore
 	project   func(context.Context, *AgentRun) error
 	options   RunTerminalReportingWorkerOptions
-	limiter   *WorkerLimiter
+	limiter   *workqueue.WorkerLimiter
 	now       func() time.Time
 	claimed   atomic.Uint64
 	delivered atomic.Uint64
@@ -54,7 +55,9 @@ func NewRunTerminalReportingWorker(store interface {
 	}, nil
 }
 
-func (w *RunTerminalReportingWorker) SetWorkerLimiter(limiter *WorkerLimiter) { w.limiter = limiter }
+func (w *RunTerminalReportingWorker) SetWorkerLimiter(limiter *workqueue.WorkerLimiter) {
+	w.limiter = limiter
+}
 
 // SetExternalConversationDelivery also sends each routine occurrence report to
 // the external conversation the routine was created from, through the same
@@ -97,7 +100,7 @@ func (w *RunTerminalReportingWorker) process(ctx context.Context, scope *Scope) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, w.options.LeaseDuration*2/3)
 	defer cancel()
-	release, err := w.limiter.acquire(ctx)
+	release, err := w.limiter.Acquire(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -128,7 +131,7 @@ func (w *RunTerminalReportingWorker) process(ctx context.Context, scope *Scope) 
 	for index := 0; index < w.options.Concurrency; index++ {
 		group.Go(func() {
 			for report := range jobs {
-				release, err := w.limiter.acquire(ctx)
+				release, err := w.limiter.Acquire(ctx)
 				if err != nil {
 					addFailure(err)
 					continue
@@ -191,7 +194,7 @@ func (w *RunTerminalReportingWorker) processReport(ctx context.Context, report *
 		return nil
 	}
 	if err != nil {
-		delay := workerPollDelay(time.Second, report.Attempts-1, "terminal-report:"+report.RunID)
+		delay := workqueue.WorkerPollDelay(time.Second, report.Attempts-1, "terminal-report:"+report.RunID)
 		if retryErr := w.store.RetryRunTerminalReport(ctx, RunTerminalReportingRetry{RunTerminalReportingCompletion: completion, AvailableAt: now.Add(delay)}); retryErr != nil {
 			return errors.Join(err, retryErr)
 		}

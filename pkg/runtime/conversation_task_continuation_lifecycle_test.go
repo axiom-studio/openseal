@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 )
 
 func continuationLifecycleFixture(t *testing.T, store *sqlite.Store, id string) (*AgentRun, *Conversation, *ChannelMessage) {
@@ -223,11 +224,11 @@ func TestAgentRunWorkerKeepsQueuedForegroundPastDeadlineWithSaturatedLimiter(t *
 			modelCalls.Add(1)
 			return StepOutput{}, errors.New("worker should remain queued behind limiter")
 		}})
-		limiter, err := NewWorkerLimiter(1)
+		limiter, err := workqueue.NewWorkerLimiter(1)
 		if err != nil {
 			t.Fatal(err)
 		}
-		release, err := limiter.acquire(t.Context())
+		release, err := limiter.Acquire(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -256,7 +257,7 @@ func TestConversationRunReconcilerKeepsAgedRunsForeground(t *testing.T) {
 					t.Fatalf("claim: %#v %v", claimed, err)
 				}
 			}
-			reconciler, err := NewConversationRunReconciler(mustConversationRunScheduler(t, store), WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) {
+			reconciler, err := NewConversationRunReconciler(mustConversationRunScheduler(t, store), workqueue.WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) {
 				return []Scope{run.Scope}, nil
 			}), nil, ConversationRunReconcilerConfig{})
 			if err != nil {

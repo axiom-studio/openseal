@@ -8,25 +8,26 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 )
 
 // queueHarness binds a status to a memory work queue, like the Engine does,
 // and hands each due item to the delivery function under test.
 type queueHarness struct {
-	status  *WorkSignalStatus
-	queue   *MemoryWorkQueue
-	deliver atomic.Pointer[func(WorkSignal)]
+	status  *workqueue.WorkSignalStatus
+	queue   *workqueue.MemoryWorkQueue
+	deliver atomic.Pointer[func(workqueue.WorkSignal)]
 }
 
 func newQueueHarness(t *testing.T) *queueHarness {
 	t.Helper()
-	h := &queueHarness{status: NewWorkSignalStatus(), queue: NewMemoryWorkQueue()}
+	h := &queueHarness{status: workqueue.NewWorkSignalStatus(), queue: workqueue.NewMemoryWorkQueue()}
 	publish := h.status.BindQueue(h.queue, nil)
 	go publish(t.Context())
 	go func() {
-		_ = h.queue.ConsumeWork(t.Context(), func(signal WorkSignal) {
+		_ = h.queue.ConsumeWork(t.Context(), func(signal workqueue.WorkSignal) {
 			h.status.Observe(signal)
-			if deliver := h.deliver.Load(); deliver != nil && signal.Kind == WorkSignalChanged {
+			if deliver := h.deliver.Load(); deliver != nil && signal.Kind == workqueue.WorkSignalChanged {
 				(*deliver)(signal)
 			}
 		})
@@ -35,7 +36,7 @@ func newQueueHarness(t *testing.T) *queueHarness {
 	return h
 }
 
-func (h *queueHarness) onDelivery(deliver func(WorkSignal)) { h.deliver.Store(&deliver) }
+func (h *queueHarness) onDelivery(deliver func(workqueue.WorkSignal)) { h.deliver.Store(&deliver) }
 
 // deadlineActionStore reports ActionCall deadlines with the PostgreSQL
 // store's semantics over the SQLite store, and counts every read.
@@ -66,10 +67,10 @@ func (s *deadlineActionStore) NextActionDeadline(ctx context.Context, scope Scop
 	var result *time.Time
 	for _, call := range calls {
 		if call.Status == ActionCallStatusReady && call.AvailableAt.After(now) {
-			result = earliestDeadline(result, &call.AvailableAt)
+			result = workqueue.EarliestDeadline(result, &call.AvailableAt)
 		}
 		if call.Status == ActionCallStatusRunning && call.LeaseExpiresAt != nil && call.LeaseExpiresAt.After(now) {
-			result = earliestDeadline(result, call.LeaseExpiresAt)
+			result = workqueue.EarliestDeadline(result, call.LeaseExpiresAt)
 		}
 	}
 	return result, nil
@@ -186,7 +187,7 @@ func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.
 			// which delivers it back when due.
 			harness := newQueueHarness(t)
 			delivered := atomic.Int64{}
-			harness.onDelivery(func(signal WorkSignal) {
+			harness.onDelivery(func(signal workqueue.WorkSignal) {
 				if signal.Family == WorkFamilyAction {
 					delivered.Add(1)
 					pool.WakeScope(signal.Scope)
@@ -220,11 +221,11 @@ func TestQueueDrivenActionPoolPollsWhileQueueIsUnhealthy(t *testing.T) {
 	pool.Start(t.Context())
 	defer pool.Stop()
 	waitForCondition(t, time.Second, func() bool { return store.deadlineReads.Load() > 0 }, "initial probe was not observed")
-	status.Observe(WorkSignal{Kind: WorkSignalDisconnected})
+	status.Observe(workqueue.WorkSignal{Kind: workqueue.WorkSignalDisconnected})
 	before := store.claims.Load()
 	waitForCondition(t, time.Second, func() bool { return store.claims.Load() >= before+3 }, "unhealthy queue did not restore polling")
 	// Reconnecting stops polling again.
-	status.Observe(WorkSignal{Kind: WorkSignalConnected})
+	status.Observe(workqueue.WorkSignal{Kind: workqueue.WorkSignalConnected})
 	time.Sleep(30 * time.Millisecond)
 	settled := store.claims.Load()
 	time.Sleep(150 * time.Millisecond)
@@ -276,7 +277,7 @@ func TestQueueDrivenAgentRunPoolIssuesNoReadsWhileIdleAndWakesOnDeadline(t *test
 		t.Fatal(err)
 	}
 	harness := newQueueHarness(t)
-	harness.onDelivery(func(signal WorkSignal) {
+	harness.onDelivery(func(signal workqueue.WorkSignal) {
 		if signal.Family == WorkFamilyRunDue {
 			pool.WakeScope(signal.Scope)
 		}
@@ -373,35 +374,35 @@ func TestQueueDrivenSupervisorAdmitsScopesWithoutListingAndRetiresIdlePools(t *t
 }
 
 func TestScopeWakeQueueDefersBusyScopes(t *testing.T) {
-	queue := newScopeWakeQueue()
+	queue := workqueue.NewScopeWakeQueue()
 	now := time.Now()
 	a, b := Scope{Kind: "tenant", ID: "a"}, Scope{Kind: "tenant", ID: "b"}
-	queue.wakeScope(b)
-	queue.wakeScope(a)
-	ready, deferred := queue.take(now, 0)
+	queue.WakeScope(b)
+	queue.WakeScope(a)
+	ready, deferred := queue.Take(now, 0)
 	if len(ready) != 2 || ready[0] != a || ready[1] != b || len(deferred) != 0 {
 		t.Fatalf("take = %#v %#v", ready, deferred)
 	}
 	// A scope that just ran is deferred to the end of its spacing.
-	queue.wakeScope(b)
-	ready, deferred = queue.take(now.Add(time.Second), 5*time.Second)
+	queue.WakeScope(b)
+	ready, deferred = queue.Take(now.Add(time.Second), 5*time.Second)
 	if len(ready) != 0 || !deferred[b].Equal(now.Add(5*time.Second)) {
 		t.Fatalf("busy scope = %#v %#v", ready, deferred)
 	}
-	queue.wakeScope(b)
-	if ready, _ := queue.take(now.Add(5*time.Second), 5*time.Second); len(ready) != 1 || ready[0] != b {
+	queue.WakeScope(b)
+	if ready, _ := queue.Take(now.Add(5*time.Second), 5*time.Second); len(ready) != 1 || ready[0] != b {
 		t.Fatalf("deferred scope did not run at the end of its spacing: %#v", ready)
 	}
-	if retry := queue.outcome(a, errors.New("down"), time.Second, now); retry == nil || !retry.After(now) {
+	if retry := queue.Outcome(a, errors.New("down"), time.Second, now); retry == nil || !retry.After(now) {
 		t.Fatalf("failure retry = %v", retry)
 	}
-	if retry := queue.outcome(a, nil, time.Second, now); retry != nil {
+	if retry := queue.Outcome(a, nil, time.Second, now); retry != nil {
 		t.Fatalf("success scheduled a retry at %v", retry)
 	}
 }
 
 func TestMemoryWorkQueueKeepsEarliestDueAndAsksForRebuild(t *testing.T) {
-	queue := NewMemoryWorkQueue()
+	queue := workqueue.NewMemoryWorkQueue()
 	scope := Scope{Kind: "tenant", ID: "a"}
 	now := time.Now()
 	if err := queue.PublishWork(t.Context(), []WorkItem{
@@ -413,9 +414,9 @@ func TestMemoryWorkQueueKeepsEarliestDueAndAsksForRebuild(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	signals := make(chan WorkSignal, 8)
-	go func() { _ = queue.ConsumeWork(t.Context(), func(signal WorkSignal) { signals <- signal }) }()
-	if connected := <-signals; connected.Kind != WorkSignalConnected || !connected.Rebuild {
+	signals := make(chan workqueue.WorkSignal, 8)
+	go func() { _ = queue.ConsumeWork(t.Context(), func(signal workqueue.WorkSignal) { signals <- signal }) }()
+	if connected := <-signals; connected.Kind != workqueue.WorkSignalConnected || !connected.Rebuild {
 		t.Fatalf("first signal = %#v", connected)
 	}
 	if run := <-signals; run.Family != WorkFamilyRun || run.Scope != scope {
@@ -461,7 +462,7 @@ func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) 
 		t.Fatal(err)
 	}
 	harness := newQueueHarness(t)
-	harness.onDelivery(func(signal WorkSignal) {
+	harness.onDelivery(func(signal workqueue.WorkSignal) {
 		if signal.Family == WorkFamilyConversationDue {
 			reconciler.WakeScope(signal.Scope)
 		}
@@ -487,6 +488,6 @@ func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) 
 		t.Fatalf("queued passes listed scopes %d times", scopes)
 	}
 	// Without a healthy queue the configured tick reconciles every scope.
-	harness.status.Observe(WorkSignal{Kind: WorkSignalDisconnected})
+	harness.status.Observe(workqueue.WorkSignal{Kind: workqueue.WorkSignalDisconnected})
 	waitForCondition(t, time.Second, func() bool { return source.lists.Load() >= 2 }, "unhealthy queue did not restore the tick")
 }

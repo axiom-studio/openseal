@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
 )
 
@@ -30,12 +31,12 @@ func (c *ConversationRunReconcilerConfig) applyDefaults() error {
 // idempotent Run creation and service cursors make multiple replicas safe.
 type ConversationRunReconciler struct {
 	scheduler *ConversationRunScheduler
-	scopes    WorkerScopeSource
+	scopes    workqueue.WorkerScopeSource
 	config    ConversationRunReconcilerConfig
 	logger    *zap.SugaredLogger
 	wake      chan struct{}
-	signals   atomic.Pointer[WorkSignalStatus]
-	queue     *scopeWakeQueue
+	signals   atomic.Pointer[workqueue.WorkSignalStatus]
+	queue     *workqueue.ScopeWakeQueue
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 	startOnce sync.Once
@@ -44,7 +45,7 @@ type ConversationRunReconciler struct {
 
 func NewConversationRunReconciler(
 	scheduler *ConversationRunScheduler,
-	scopes WorkerScopeSource,
+	scopes workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config ConversationRunReconcilerConfig,
 ) (*ConversationRunReconciler, error) {
@@ -59,7 +60,7 @@ func NewConversationRunReconciler(
 	}
 	reconciler := &ConversationRunReconciler{
 		scheduler: scheduler, scopes: scopes, config: config, logger: logger, wake: make(chan struct{}, 1),
-		queue: newScopeWakeQueue(),
+		queue: workqueue.NewScopeWakeQueue(),
 	}
 	return reconciler, nil
 }
@@ -92,13 +93,13 @@ func (r *ConversationRunReconciler) Wake() {
 
 // WakeScope reconciles one scope promptly instead of every listed scope.
 func (r *ConversationRunReconciler) WakeScope(scope Scope) {
-	r.queue.wakeScope(scope)
+	r.queue.WakeScope(scope)
 }
 
 // SetWorkSignals stops the fixed reconciliation tick while the work queue is
 // healthy: the reconciler then runs only for scopes the queue delivers. Call
 // before Start.
-func (r *ConversationRunReconciler) SetWorkSignals(status *WorkSignalStatus) {
+func (r *ConversationRunReconciler) SetWorkSignals(status *workqueue.WorkSignalStatus) {
 	r.signals.Store(status)
 }
 
@@ -107,7 +108,7 @@ func (r *ConversationRunReconciler) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return r.reconcileScopes(ctx, normalizedConversationRunScopes(scopes))
+	return r.reconcileScopes(ctx, workqueue.NormalizeScopes(scopes))
 }
 
 func (r *ConversationRunReconciler) loop(ctx context.Context) {
@@ -115,10 +116,10 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 	ticker := time.NewTicker(r.config.Interval)
 	defer ticker.Stop()
 	signals := r.signals.Load()
-	known := newKnownWorkerScopes(r.scopes, r.config.Interval)
-	gate := newWorkScopeGate(r.scopes, r.config.Interval)
+	known := workqueue.NewKnownWorkerScopes(r.scopes, r.config.Interval)
+	gate := workqueue.NewWorkScopeGate(r.scopes, r.config.Interval)
 	for {
-		healthy, healthChanged := signals.watch()
+		healthy, healthChanged := signals.Watch()
 		full := false
 		select {
 		case <-ctx.Done():
@@ -126,12 +127,12 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 		case <-r.wake:
 			// A bound queue rebuilds its schedule from the store, so a full
 			// scan is only the fallback while there is none.
-			full = !healthy && !signals.queueBound()
+			full = !healthy && !signals.QueueBound()
 		case <-ticker.C:
 			// While the queue is healthy every change and deadline arrives
 			// per scope, so the fixed tick is only the fallback.
 			full = !healthy
-		case <-r.queue.signals():
+		case <-r.queue.Signals():
 		case <-healthChanged:
 			continue
 		}
@@ -140,14 +141,14 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 			spacing = r.config.Interval
 		}
 		now := time.Now()
-		scopes, deferred := r.queue.take(now, spacing)
+		scopes, deferred := r.queue.Take(now, spacing)
 		for scope, at := range deferred {
-			signals.schedule(WorkFamilyConversationDue, scope, &at)
+			signals.Schedule(WorkFamilyConversationDue, scope, &at)
 		}
 		if full {
-			listed, err := known.list(ctx)
+			listed, err := known.List(ctx)
 			if err == nil {
-				r.queue.ran(listed, now)
+				r.queue.Ran(listed, now)
 				err = r.reconcileScopes(ctx, listed)
 			}
 			if err != nil && ctx.Err() == nil {
@@ -155,12 +156,12 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 			}
 			continue
 		}
-		allowed, err := gate.filter(ctx, scopes)
+		allowed, err := gate.Filter(ctx, scopes)
 		if err != nil && ctx.Err() == nil {
 			r.logger.Warnw("failed to check conversation Run scopes", "error", err)
 			if healthy {
 				for _, scope := range scopes {
-					signals.scheduleIn(WorkFamilyConversationDue, scope, r.config.Interval)
+					signals.ScheduleIn(WorkFamilyConversationDue, scope, r.config.Interval)
 				}
 			}
 		}
@@ -170,10 +171,10 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 				return
 			}
 			// A queue-driven scope has no tick to retry it; back off instead.
-			if retry := r.queue.outcome(scope, err, r.config.Interval, time.Now()); retry != nil {
+			if retry := r.queue.Outcome(scope, err, r.config.Interval, time.Now()); retry != nil {
 				r.logger.Warnw("failed to reconcile conversation Runs", "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
 				if healthy {
-					signals.schedule(WorkFamilyConversationDue, scope, retry)
+					signals.Schedule(WorkFamilyConversationDue, scope, retry)
 				}
 			}
 		}

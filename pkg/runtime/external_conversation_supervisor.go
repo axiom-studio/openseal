@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"go.uber.org/zap"
 )
 
@@ -42,12 +43,12 @@ type ExternalConversationSupervisor struct {
 	approvals        *ApprovalNotificationWorker
 	callbacks        *CallbackEventWorker
 	acknowledgements *RunProgressAcknowledgementWorker
-	scopes           WorkerScopeSource
+	scopes           workqueue.WorkerScopeSource
 	config           ExternalConversationSupervisorConfig
 	logger           *zap.SugaredLogger
 	wake             chan struct{}
-	signals          atomic.Pointer[WorkSignalStatus]
-	queue            *scopeWakeQueue
+	signals          atomic.Pointer[workqueue.WorkSignalStatus]
+	queue            *workqueue.ScopeWakeQueue
 	deadlines        ExternalConversationDeadlineStore
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
@@ -72,7 +73,7 @@ func NewExternalConversationSupervisor(
 	replies *ExternalConversationReplyWorker,
 	delivery *ExternalConversationDeliveryWorker,
 	approvals *ApprovalNotificationWorker,
-	scopes WorkerScopeSource,
+	scopes workqueue.WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config ExternalConversationSupervisorConfig,
 ) (*ExternalConversationSupervisor, error) {
@@ -87,7 +88,7 @@ func NewExternalConversationSupervisor(
 	}
 	supervisor := &ExternalConversationSupervisor{
 		inbox: inbox, replies: replies, delivery: delivery, approvals: approvals, scopes: scopes,
-		config: config, logger: logger, wake: make(chan struct{}, 1), queue: newScopeWakeQueue(),
+		config: config, logger: logger, wake: make(chan struct{}, 1), queue: workqueue.NewScopeWakeQueue(),
 	}
 	supervisor.deadlines, _ = inbox.store.(ExternalConversationDeadlineStore)
 	return supervisor, nil
@@ -121,14 +122,14 @@ func (s *ExternalConversationSupervisor) Wake() {
 
 // WakeScope reconciles one scope promptly instead of every listed scope.
 func (s *ExternalConversationSupervisor) WakeScope(scope Scope) {
-	s.queue.wakeScope(scope)
+	s.queue.WakeScope(scope)
 }
 
 // SetWorkSignals stops the fixed tick while the work queue is healthy: the
 // supervisor then runs for scopes the queue delivers, and schedules each
 // scope's next retry, lease or approval deadline into the queue. Call before
 // Start.
-func (s *ExternalConversationSupervisor) SetWorkSignals(status *WorkSignalStatus) {
+func (s *ExternalConversationSupervisor) SetWorkSignals(status *workqueue.WorkSignalStatus) {
 	s.signals.Store(status)
 }
 
@@ -137,7 +138,7 @@ func (s *ExternalConversationSupervisor) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return s.reconcileScopes(ctx, normalizedConversationRunScopes(scopes))
+	return s.reconcileScopes(ctx, workqueue.NormalizeScopes(scopes))
 }
 
 func (s *ExternalConversationSupervisor) reconcileScopes(ctx context.Context, scopes []Scope) error {
@@ -203,14 +204,14 @@ func (s *ExternalConversationSupervisor) reconcileScope(ctx context.Context, sco
 
 // scheduleScope schedules a queue-driven scope's next pass: its earliest
 // durable deadline, or a backed-off retry after a failed pass.
-func (s *ExternalConversationSupervisor) scheduleScope(ctx context.Context, signals *WorkSignalStatus, scope Scope, failed error) {
+func (s *ExternalConversationSupervisor) scheduleScope(ctx context.Context, signals *workqueue.WorkSignalStatus, scope Scope, failed error) {
 	now := time.Now().UTC()
 	next, err := s.deadlines.NextExternalConversationDeadline(ctx, scope, now)
 	if err != nil && ctx.Err() == nil {
 		s.logger.Warnw("external conversation deadline lookup failed", "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
 	}
-	retry := s.queue.outcome(scope, errors.Join(failed, err), s.config.Interval, now)
-	signals.schedule(WorkFamilyExternalDue, scope, earliestDeadline(next, retry))
+	retry := s.queue.Outcome(scope, errors.Join(failed, err), s.config.Interval, now)
+	signals.Schedule(WorkFamilyExternalDue, scope, workqueue.EarliestDeadline(next, retry))
 }
 
 func (s *ExternalConversationSupervisor) loop(ctx context.Context) {
@@ -218,10 +219,10 @@ func (s *ExternalConversationSupervisor) loop(ctx context.Context) {
 	ticker := time.NewTicker(s.config.Interval)
 	defer ticker.Stop()
 	signals := s.signals.Load()
-	known := newKnownWorkerScopes(s.scopes, 10*s.config.Interval)
-	gate := newWorkScopeGate(s.scopes, 10*s.config.Interval)
+	known := workqueue.NewKnownWorkerScopes(s.scopes, 10*s.config.Interval)
+	gate := workqueue.NewWorkScopeGate(s.scopes, 10*s.config.Interval)
 	for {
-		healthy, healthChanged := signals.watch()
+		healthy, healthChanged := signals.Watch()
 		queueDriven := healthy && s.deadlines != nil
 		full := false
 		select {
@@ -230,12 +231,12 @@ func (s *ExternalConversationSupervisor) loop(ctx context.Context) {
 		case <-s.wake:
 			// A bound queue rebuilds its schedule from the store, so a full
 			// pass is only the fallback while there is none.
-			full = !queueDriven && !(signals.queueBound() && s.deadlines != nil)
+			full = !queueDriven && !(signals.QueueBound() && s.deadlines != nil)
 		case <-ticker.C:
 			// While the queue drives this loop each scope runs when changed or
 			// due, so the fixed tick is only the fallback.
 			full = !queueDriven
-		case <-s.queue.signals():
+		case <-s.queue.Signals():
 		case <-healthChanged:
 			continue
 		}
@@ -244,12 +245,12 @@ func (s *ExternalConversationSupervisor) loop(ctx context.Context) {
 			spacing = s.config.Interval
 		}
 		now := time.Now()
-		scopes, deferred := s.queue.take(now, spacing)
+		scopes, deferred := s.queue.Take(now, spacing)
 		for scope, at := range deferred {
-			signals.schedule(WorkFamilyExternalDue, scope, &at)
+			signals.Schedule(WorkFamilyExternalDue, scope, &at)
 		}
 		if full {
-			listed, err := known.list(ctx)
+			listed, err := known.List(ctx)
 			if err != nil {
 				if ctx.Err() == nil {
 					s.logger.Warnw("failed to reconcile external conversations", "error", err)
@@ -257,14 +258,14 @@ func (s *ExternalConversationSupervisor) loop(ctx context.Context) {
 				continue
 			}
 			scopes = listed
-			s.queue.ran(listed, now)
+			s.queue.Ran(listed, now)
 		} else {
-			allowed, err := gate.filter(ctx, scopes)
+			allowed, err := gate.Filter(ctx, scopes)
 			if err != nil && ctx.Err() == nil {
 				s.logger.Warnw("failed to check external conversation scopes", "error", err)
 				if queueDriven {
 					for _, scope := range scopes {
-						signals.scheduleIn(WorkFamilyExternalDue, scope, 10*s.config.Interval)
+						signals.ScheduleIn(WorkFamilyExternalDue, scope, 10*s.config.Interval)
 					}
 				}
 			}
