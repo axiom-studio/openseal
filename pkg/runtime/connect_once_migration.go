@@ -12,8 +12,6 @@ import (
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
-const connectOnceMigrationVersion int64 = 74
-
 // connectOnceMigration repairs records that migrations 71 to 73 left
 // inconsistent and records the creator of every routine:
 //  1. setup-request copies in action outputs carry the request's umbrella;
@@ -451,30 +449,4 @@ func (m connectOnceMigration) channelMessage(ctx context.Context, scope Scope, c
 		return nil, fmt.Errorf("message %s: %w", messageID, err)
 	}
 	return message, nil
-}
-
-func (s *PostgresStore) migrateConnectOnce(ctx context.Context, tx *sql.Tx) error {
-	applied, err := s.postgresMigrationApplied(ctx, tx, connectOnceMigrationVersion)
-	if err != nil || applied {
-		return err
-	}
-	if err := (connectOnceMigration{db: tx, table: s.table}).run(ctx); err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name) VALUES($1,'connect once: event waits, setup copies, amendments, gateway owners, routine creators') ON CONFLICT(version) DO NOTHING`, connectOnceMigrationVersion)
-	return err
-}
-
-// migrateConnectOnceSQLite mirrors PostgreSQL migration 74 and is safe to
-// replay on every open.
-func migrateConnectOnceSQLite(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := (connectOnceMigration{db: tx, table: func(name string) string { return name }, sqlite: true}).run(context.Background()); err != nil {
-		return err
-	}
-	return tx.Commit()
 }

@@ -698,3 +698,5 @@ func (s *PostgresStore) PruneHooks(ctx context.Context, createdBefore time.Time)
 	removed, err := result.RowsAffected()
 	return int(removed), err
 }
+
+var _ RoutineEventStore = (*PostgresStore)(nil)

@@ -2,16 +2,10 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
 )
-
-// teamMembersMigrationVersion removes Team role slots. What a role carried
-// (name, purpose, channel participation, required Skills, approver and lead
-// designation) moves onto the roster members that held it.
-const teamMembersMigrationVersion int64 = 85
 
 // teamRetiredLeadRoleID was the lead role of a Team that named none.
 const teamRetiredLeadRoleID = "lead"
@@ -397,59 +391,4 @@ func (m teamMembersMigration) down() error {
 		}
 	}
 	return nil
-}
-
-func (s *PostgresStore) teamMembersMigration(ctx context.Context, tx *sql.Tx) teamMembersMigration {
-	return teamMembersMigration{
-		ctx: ctx, db: tx, table: s.table, placeholder: func(n int) string { return fmt.Sprintf("$%d", n) },
-		exists: func(table string) (bool, error) {
-			var relation sql.NullString
-			err := tx.QueryRowContext(ctx, `SELECT to_regclass($1)`, s.table(table)).Scan(&relation)
-			return relation.Valid, err
-		},
-	}
-}
-
-// migrateTeamMembers is PostgreSQL migration 85.
-func (s *PostgresStore) migrateTeamMembers(ctx context.Context, tx *sql.Tx) error {
-	applied, err := s.postgresMigrationApplied(ctx, tx, teamMembersMigrationVersion)
-	if err != nil || applied {
-		return err
-	}
-	if err := s.teamMembersMigration(ctx, tx).up(); err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version, name)
-		VALUES ($1, 'Team members replace role slots') ON CONFLICT (version) DO NOTHING`, teamMembersMigrationVersion)
-	return err
-}
-
-// rollbackTeamMembers restores role slots for a kernel that requires them.
-func (s *PostgresStore) rollbackTeamMembers(ctx context.Context, tx *sql.Tx) error {
-	return s.teamMembersMigration(ctx, tx).down()
-}
-
-func sqliteTeamMembersMigration(tx *sql.Tx) teamMembersMigration {
-	return teamMembersMigration{
-		ctx: context.Background(), db: tx, table: func(name string) string { return name }, placeholder: func(int) string { return "?" },
-		exists: func(table string) (bool, error) {
-			var count int
-			err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count)
-			return count > 0, err
-		},
-	}
-}
-
-// migrateTeamMembersSQLite mirrors PostgreSQL migration 85. It only touches
-// payloads that still carry role slots, so a later open does nothing.
-func migrateTeamMembersSQLite(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := sqliteTeamMembersMigration(tx).up(); err != nil {
-		return err
-	}
-	return tx.Commit()
 }

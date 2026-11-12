@@ -4,11 +4,6 @@ import (
 	"context"
 )
 
-var (
-	_ ChannelMessageBatchStore = (*SQLiteStore)(nil)
-	_ ChannelMessageBatchStore = (*PostgresStore)(nil)
-)
-
 func loadChannelMessageBatches(ctx context.Context, store ChannelMessageBatchStore, scope Scope, conversationID string, ids []string) (map[string]*ChannelMessage, error) {
 	unique := make([]string, 0, len(ids))
 	requested := make(map[string]bool, len(ids))

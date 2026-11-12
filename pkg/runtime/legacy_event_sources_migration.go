@@ -11,9 +11,6 @@ import (
 // them are retired.
 const legacyEventSourcesMigrationVersion int64 = 79
 
-// legacyEventSourceTables are dropped by migration 79, dependents first.
-var legacyEventSourceTables = []string{"event_source_health", "event_source_subscriptions", "event_source_checkpoints"}
-
 // migrateRemoveEventSources is PostgreSQL migration 79.
 func (s *PostgresStore) migrateRemoveEventSources(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, legacyEventSourcesMigrationVersion)
@@ -28,15 +25,4 @@ func (s *PostgresStore) migrateRemoveEventSources(ctx context.Context, tx *sql.T
 	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version, name)
 		VALUES ($1, 'remove event source subscriptions and checkpoints') ON CONFLICT (version) DO NOTHING`, legacyEventSourcesMigrationVersion)
 	return err
-}
-
-// migrateRemoveEventSourcesSQLite mirrors PostgreSQL migration 79. Every
-// statement is idempotent, so a later open does nothing.
-func migrateRemoveEventSourcesSQLite(db *sql.DB) error {
-	for _, table := range legacyEventSourceTables {
-		if _, err := db.Exec(`DROP TABLE IF EXISTS ` + table); err != nil {
-			return err
-		}
-	}
-	return nil
 }

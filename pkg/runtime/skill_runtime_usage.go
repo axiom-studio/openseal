@@ -67,14 +67,6 @@ func hasSkillRuntimeUsage(ctx context.Context, query skillRuntimeUsageQuerier, f
 	return busy, err
 }
 
-func (s *SQLiteStore) HasSkillRuntimeUsage(ctx context.Context, filter SkillRuntimeUsageFilter) (bool, error) {
-	return hasSkillRuntimeUsage(ctx, s.db, filter, "action_calls", "agent_runs", false)
-}
-
-func (s *PostgresStore) HasSkillRuntimeUsage(ctx context.Context, filter SkillRuntimeUsageFilter) (bool, error) {
-	return hasSkillRuntimeUsage(ctx, s.db, filter, s.table("action_calls"), s.table("agent_runs"), true)
-}
-
 func listReferencedSkillRuntimeVersionsQuery(bindings, actions, runs string, postgres bool) string {
 	kind, id := "?1", "?2"
 	enabled := "COALESCE(json_extract(payload,'$.disabled'),0)=0"
@@ -94,30 +86,6 @@ func listReferencedSkillRuntimeVersionsQuery(bindings, actions, runs string, pos
 		" UNION SELECT a.skill_id,a.skill_version,COALESCE(b.source_identity,'') FROM " + runs + " r CROSS JOIN " + receiptActions + bindingJoin +
 		" WHERE r.scope_kind=" + kind + " AND r.scope_id=" + id + " AND r.status IN (" + unfinishedSkillRunSQL + ") AND a.scope_kind=r.scope_kind AND a.scope_id=r.scope_id AND a.run_id=r.id AND a.status='succeeded'" +
 		" UNION SELECT skill_id,skill_version,'' FROM " + skillRuntimeDependencyTable(runs) + " WHERE scope_kind=" + kind + " AND scope_id=" + id + " ORDER BY 1,2,3"
-}
-
-func (s *SQLiteStore) ListReferencedSkillRuntimeVersions(ctx context.Context, scope Scope) ([]SkillRuntimeReference, error) {
-	if err := scope.Validate(); err != nil {
-		return nil, err
-	}
-	rows, err := s.db.QueryContext(ctx, listReferencedSkillRuntimeVersionsQuery("skill_bindings", "action_calls", "agent_runs", false), scope.Kind, scope.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanReferencedSkillRuntimeVersions(rows)
-}
-
-func (s *PostgresStore) ListReferencedSkillRuntimeVersions(ctx context.Context, scope Scope) ([]SkillRuntimeReference, error) {
-	if err := scope.Validate(); err != nil {
-		return nil, err
-	}
-	rows, err := s.db.QueryContext(ctx, listReferencedSkillRuntimeVersionsQuery(s.table("skill_bindings"), s.table("action_calls"), s.table("agent_runs"), true), scope.Kind, scope.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanReferencedSkillRuntimeVersions(rows)
 }
 
 func scanReferencedSkillRuntimeVersions(rows *sql.Rows) ([]SkillRuntimeReference, error) {

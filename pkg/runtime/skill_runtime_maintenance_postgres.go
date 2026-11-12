@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -131,4 +132,8 @@ func (s *PostgresStore) transitionSkillRuntimeMaintenance(ctx context.Context, r
 		}
 		return next, nil
 	})
+}
+
+func skillRuntimeMaintenanceLockKey(scope Scope, skillID string) string {
+	return fmt.Sprintf("skill-runtime-maintenance:%d:%s:%d:%s:%d:%s", len(scope.Kind), scope.Kind, len(scope.ID), scope.ID, len(skillID), skillID)
 }

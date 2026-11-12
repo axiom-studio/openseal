@@ -96,19 +96,3 @@ func (s *PostgresStore) ListConversationActiveRuns(ctx context.Context, scope Sc
 	defer rows.Close()
 	return scanConversationActiveRunsSQL(rows)
 }
-
-func scanConversationActiveRunsSQL(rows *sql.Rows) ([]*AgentRun, error) {
-	runs := make([]*AgentRun, 0)
-	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return nil, err
-		}
-		run, err := decodeAgentRun(payload)
-		if err != nil {
-			return nil, err
-		}
-		runs = append(runs, run)
-	}
-	return runs, rows.Err()
-}

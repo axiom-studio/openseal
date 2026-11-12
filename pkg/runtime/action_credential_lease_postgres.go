@@ -12,8 +12,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-const actionCredentialLeaseCleanupBatch = 128
-
 var _ ActionCredentialLeaseRedeemer = (*PostgresStore)(nil)
 
 func (s *PostgresStore) migrateActionCredentialLeaseRedemptions(ctx context.Context, tx *sql.Tx) error {

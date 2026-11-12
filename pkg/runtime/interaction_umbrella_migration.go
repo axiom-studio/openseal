@@ -2,13 +2,10 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
 )
-
-const interactionUmbrellaMigrationVersion int64 = 72
 
 // interactionUmbrellaMigrationActor dismisses a pending request whose asking
 // member is no longer on its conversation's roster.
@@ -150,29 +147,4 @@ func interactionConversationUmbrella(ctx context.Context, db teamSkillGrantMigra
 		return owner, false, nil
 	}
 	return ObjectiveOwner{}, false, nil
-}
-
-func (s *PostgresStore) migrateInteractionUmbrellas(ctx context.Context, tx *sql.Tx) error {
-	applied, err := s.postgresMigrationApplied(ctx, tx, interactionUmbrellaMigrationVersion)
-	if err != nil || applied {
-		return err
-	}
-	if err := stampInteractionUmbrellas(ctx, tx, s.table, func(n int) string { return fmt.Sprintf("$%d", n) }); err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name) VALUES($1,'setup and credential requests belong to the conversation umbrella') ON CONFLICT(version) DO NOTHING`, interactionUmbrellaMigrationVersion)
-	return err
-}
-
-// migrateInteractionUmbrellasSQLite mirrors PostgreSQL migration 72.
-func migrateInteractionUmbrellasSQLite(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := stampInteractionUmbrellas(context.Background(), tx, func(name string) string { return name }, func(int) string { return "?" }); err != nil {
-		return err
-	}
-	return tx.Commit()
 }

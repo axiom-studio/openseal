@@ -466,18 +466,6 @@ func (s *SQLiteStore) ListActivations(ctx context.Context, scope capability.Scop
 	return result, rows.Err()
 }
 
-func registryPayloads(deployment *kernelagent.AgentDeployment, activation kernelagent.DefinitionActivation) (string, string, error) {
-	deploymentPayload, err := json.Marshal(deployment)
-	if err != nil {
-		return "", "", err
-	}
-	activationPayload, err := json.Marshal(activation)
-	if err != nil {
-		return "", "", err
-	}
-	return string(deploymentPayload), string(activationPayload), nil
-}
-
 func insertActivation(ctx context.Context, tx *sql.Tx, activation kernelagent.DefinitionActivation, payload string) error {
 	result, err := tx.ExecContext(ctx, `INSERT INTO agent_definition_activations(id, scope_kind, scope_id, deployment_id, deployment_revision, created_at, payload) VALUES(?, ?, ?, ?, ?, ?, ?)`, activation.ID, activation.Scope.Kind, activation.Scope.ID, activation.DeploymentID, activation.DeploymentRevision, activation.CreatedAt, payload)
 	if err != nil {

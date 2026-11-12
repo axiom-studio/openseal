@@ -12,12 +12,6 @@ import (
 // and the Project activity projection.
 const kernelProjectRemovalMigrationVersion int64 = 77
 
-// retiredKernelProjectTables are dropped by migration 77, dependents first.
-var retiredKernelProjectTables = []string{
-	"project_skill_references", "outreach_threads", "source_monitor_checkpoints", "source_observations", "projects",
-	"source_policy_lifecycle_events", "source_policy_lifecycles", "source_policy_versions",
-}
-
 // migrateRemoveKernelProjects is PostgreSQL migration 77.
 func (s *PostgresStore) migrateRemoveKernelProjects(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, kernelProjectRemovalMigrationVersion)
@@ -44,33 +38,4 @@ func (s *PostgresStore) migrateRemoveKernelProjects(ctx context.Context, tx *sql
 	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version, name)
 		VALUES ($1, 'remove kernel Projects, source monitors, source policies and outreach') ON CONFLICT (version) DO NOTHING`, kernelProjectRemovalMigrationVersion)
 	return err
-}
-
-// migrateRemoveKernelProjectsSQLite mirrors PostgreSQL migration 77. Every
-// statement is idempotent, so a later open does nothing.
-func migrateRemoveKernelProjectsSQLite(db *sql.DB) error {
-	ctx := context.Background()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, table := range retiredKernelProjectTables {
-		if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+table); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_run_activity_project_feed`); err != nil {
-		return err
-	}
-	var present int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('run_activity') WHERE name = 'project_id'`).Scan(&present); err != nil {
-		return err
-	}
-	if present > 0 {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE run_activity DROP COLUMN project_id`); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }

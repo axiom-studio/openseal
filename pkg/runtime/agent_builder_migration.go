@@ -9,28 +9,10 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 )
 
-// agentBuilderMigrationVersion retires workforce_change_sets (spec §3.6): the
-// change-set work family, its outbox triggers and its Runs go, and the leaf
-// ready/review drafts are kept in agent_builder_cutover_drafts until
-// Engine.AgentBuilderCutover turns each into a builder conversation.
-const agentBuilderMigrationVersion int64 = 76
-
 const (
 	retiredChangeSetTable    = "workforce_change_sets"
 	agentBuilderCutoverTable = "agent_builder_cutover_drafts"
 )
-
-// retiredChangeSetIndexes are the change-set indexes; a rename keeps them,
-// so the migration drops them by name. The SQLite names carry the idx_
-// prefix.
-var retiredChangeSetIndexes = []string{
-	"workforce_change_sets_pending_work_idx", "workforce_change_sets_parent_idx",
-	"workforce_change_sets_status_idx", "workforce_change_sets_global_recovery_idx",
-}
-
-var retiredChangeSetIndexesSQLite = []string{
-	"idx_workforce_change_sets_parent", "idx_workforce_change_sets_status", "idx_workforce_change_sets_global_recovery",
-}
 
 // agentBuilderCutoverPayload is the part of a change-set payload the cutover
 // reads; pkg/authoring is gone, so it is decoded locally.
@@ -177,119 +159,6 @@ func foldChangeSetDrafts(ctx context.Context, tx agentBuilderMigrationExecer, ta
 		}
 	}
 	return nil
-}
-
-// migrateAgentBuilder is PostgreSQL migration 76 (spec §3.6).
-func (s *PostgresStore) migrateAgentBuilder(ctx context.Context, tx *sql.Tx) error {
-	applied, err := s.postgresMigrationApplied(ctx, tx, agentBuilderMigrationVersion)
-	if err != nil || applied {
-		return err
-	}
-	var relation sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, s.schema+"."+retiredChangeSetTable).Scan(&relation); err != nil {
-		return err
-	}
-	changeSets := relation.Valid
-	statements := []string{}
-	for _, name := range []string{"work_outbox_insert", "work_outbox_update"} {
-		trigger := workOutboxTrigger{table: retiredChangeSetTable, name: name}
-		if changeSets {
-			statements = append(statements, `DROP TRIGGER IF EXISTS `+name+` ON `+s.table(retiredChangeSetTable))
-		}
-		statements = append(statements, `DROP FUNCTION IF EXISTS `+s.table(trigger.function())+`()`)
-	}
-	// The agent_runs outbox functions still route workforce_authoring Runs
-	// to the authoring family; replace them with the current bodies.
-	for _, trigger := range workOutboxTriggers() {
-		if trigger.table == "agent_runs" {
-			statements = append(statements, s.workOutboxTriggerStatements(trigger)...)
-		}
-	}
-	statements = append(statements,
-		`DROP INDEX IF EXISTS `+s.table("agent_runs_global_recovery_idx"),
-		`UPDATE `+s.table("agent_runs")+` SET status = 'canceled', revision = revision + 1, lease_owner = '', lease_expires_at = NULL,
-			payload = (payload - 'leaseOwner' - 'leaseExpiresAt') || jsonb_build_object('status', 'canceled', 'revision', revision + 1,
-				'updatedAt', to_jsonb(now()), 'completedAt', to_jsonb(now()))
-			WHERE payload->>'kind' = 'workforce_authoring' AND status NOT IN ('completed', 'failed', 'canceled')`,
-		`UPDATE `+s.table("agent_deployments")+` SET payload = payload - 'activation' WHERE payload ? 'activation'`,
-		`UPDATE `+s.table("team_deployments")+` SET payload = payload - 'activation' WHERE payload ? 'activation'`,
-	)
-	for _, statement := range statements {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
-			return err
-		}
-	}
-	if changeSets {
-		table := s.table(retiredChangeSetTable)
-		if err := foldChangeSetDrafts(ctx, tx, retiredChangeSetTable,
-			`SELECT scope_kind, scope_id, id, status, payload->>'parentId', payload->>'prompt' FROM `+table+` ORDER BY created_at, id`,
-			`UPDATE `+table+` SET payload = jsonb_set(payload, '{cutoverPrompts}', $1::jsonb, true) WHERE scope_kind = $2 AND scope_id = $3 AND id = $4`,
-			`DELETE FROM `+table+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`,
-		); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE `+table+` RENAME TO `+agentBuilderCutoverTable); err != nil {
-			return err
-		}
-		for _, index := range retiredChangeSetIndexes {
-			if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS `+s.table(index)); err != nil {
-				return err
-			}
-		}
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version, name)
-		VALUES ($1, 'agent builder: retire workforce change sets') ON CONFLICT (version) DO NOTHING`, agentBuilderMigrationVersion)
-	return err
-}
-
-// migrateAgentBuilderSQLite mirrors PostgreSQL migration 76. SQLite has no
-// ledger: the retirement runs only while workforce_change_sets exists, so a
-// later open does nothing.
-func migrateAgentBuilderSQLite(db *sql.DB) error {
-	ctx := context.Background()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_agent_runs_global_recovery`); err != nil {
-		return err
-	}
-	var present int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, retiredChangeSetTable).Scan(&present); err != nil {
-		return err
-	}
-	if present == 0 {
-		return tx.Commit()
-	}
-	for _, statement := range []string{
-		`UPDATE agent_runs SET status = 'canceled', revision = revision + 1, lease_owner = '', lease_expires_at = NULL,
-			payload = json_set(json_remove(payload, '$.leaseOwner', '$.leaseExpiresAt'), '$.status', 'canceled', '$.revision', revision + 1,
-				'$.updatedAt', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), '$.completedAt', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-			WHERE json_extract(payload, '$.kind') = 'workforce_authoring' AND status NOT IN ('completed', 'failed', 'canceled')`,
-		`UPDATE agent_deployments SET payload = json_remove(payload, '$.activation') WHERE json_type(payload, '$.activation') IS NOT NULL`,
-		`UPDATE team_deployments SET payload = json_remove(payload, '$.activation') WHERE json_type(payload, '$.activation') IS NOT NULL`,
-	} {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
-			return err
-		}
-	}
-	if err := foldChangeSetDrafts(ctx, tx, retiredChangeSetTable,
-		`SELECT scope_kind, scope_id, id, status, json_extract(payload, '$.parentId'), json_extract(payload, '$.prompt') FROM workforce_change_sets ORDER BY created_at, id`,
-		`UPDATE workforce_change_sets SET payload = json_set(payload, '$.cutoverPrompts', json(?)) WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
-		`DELETE FROM workforce_change_sets WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
-	); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `ALTER TABLE workforce_change_sets RENAME TO `+agentBuilderCutoverTable); err != nil {
-		return err
-	}
-	for _, index := range retiredChangeSetIndexesSQLite {
-		if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS `+index); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }
 
 // scanAgentBuilderCutoverDrafts decodes (scope_kind, scope_id, id,

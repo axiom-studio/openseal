@@ -450,11 +450,3 @@ func updateSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun
 	}
 	return nil
 }
-
-func decodeAgentRequest(payload string) (*AgentRequest, error) {
-	var request AgentRequest
-	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		return nil, fmt.Errorf("decode agent request: %w", err)
-	}
-	return &request, nil
-}

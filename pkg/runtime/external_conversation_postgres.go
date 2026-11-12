@@ -821,8 +821,6 @@ func nullablePostgresTime(value time.Time) interface{} {
 var (
 	_ ExternalConversationEndpointStore  = (*PostgresStore)(nil)
 	_ ExternalConversationTransportStore = (*PostgresStore)(nil)
-	_ ExternalConversationEndpointStore  = (*SQLiteStore)(nil)
-	_ ExternalConversationTransportStore = (*SQLiteStore)(nil)
 )
 
 func (s *PostgresStore) SaveExternalConversationReplyProgress(ctx context.Context, scope Scope, id string, expectedRevision int64, progress ExternalConversationReplyProgress) error {

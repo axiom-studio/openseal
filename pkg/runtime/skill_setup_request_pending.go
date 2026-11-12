@@ -6,12 +6,6 @@ import (
 	"encoding/json"
 )
 
-func (s *PostgresStore) ListPendingSkillSetupRequests(ctx context.Context, scope Scope, limit, offset int) ([]*SkillSetupRequest, error) {
-	return listPendingSkillSetupRequests(ctx, s.db, s.table("skill_setup_requests"), scope, limit, offset)
-}
-func (s *SQLiteStore) ListPendingSkillSetupRequests(ctx context.Context, scope Scope, limit, offset int) ([]*SkillSetupRequest, error) {
-	return listPendingSkillSetupRequests(ctx, s.db, "skill_setup_requests", scope, limit, offset)
-}
 func listPendingSkillSetupRequests(ctx context.Context, db *sql.DB, table string, scope Scope, limit, offset int) ([]*SkillSetupRequest, error) {
 	if scope.Validate() != nil {
 		return nil, ErrInvalidSkillSetup

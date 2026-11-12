@@ -27,14 +27,6 @@ type RecordSurfaceInteractionRequest struct {
 	IdempotencyKey string
 }
 
-func decodeSurfaceInteraction(payload string) (*SurfaceInteraction, error) {
-	var value SurfaceInteraction
-	if err := json.Unmarshal([]byte(payload), &value); err != nil {
-		return nil, fmt.Errorf("decode surface interaction: %w", err)
-	}
-	return &value, nil
-}
-
 // RecordSurfaceInteraction stores one interaction for an existing
 // conversation. It returns the stored interaction and whether it replayed an
 // earlier one with the same idempotency key. MessageID must name a message of

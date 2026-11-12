@@ -10,8 +10,6 @@ import (
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
-const teamSkillGrantRemovalMigrationVersion int64 = 71
-
 // Team role Skill grants are gone: every roster member uses every Team
 // binding. These are the payload locations that can carry a Team definition,
 // with the JSON keys leading from the payload to that definition.
@@ -135,30 +133,4 @@ func stripTeamSkillGrants(ctx context.Context, db teamSkillGrantMigrationDB, tab
 		}
 	}
 	return nil
-}
-
-func (s *PostgresStore) migrateTeamSkillGrantRemoval(ctx context.Context, tx *sql.Tx) error {
-	applied, err := s.postgresMigrationApplied(ctx, tx, teamSkillGrantRemovalMigrationVersion)
-	if err != nil || applied {
-		return err
-	}
-	if err := stripTeamSkillGrants(ctx, tx, s.table, func(n int) string { return fmt.Sprintf("$%d", n) }); err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name) VALUES($1,'Team role Skill grants removed') ON CONFLICT(version) DO NOTHING`, teamSkillGrantRemovalMigrationVersion)
-	return err
-}
-
-// migrateTeamSkillGrantRemovalSQLite mirrors PostgreSQL migration 71 and is
-// safe to replay on every open.
-func migrateTeamSkillGrantRemovalSQLite(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := stripTeamSkillGrants(context.Background(), tx, func(name string) string { return name }, func(int) string { return "?" }); err != nil {
-		return err
-	}
-	return tx.Commit()
 }

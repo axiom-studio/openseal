@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"strings"
 	"time"
 
@@ -841,94 +840,6 @@ func (s *SQLiteStore) SaveExternalConversationDelivery(ctx context.Context, deli
 	return commitSQLiteConn(ctx, conn, &committed)
 }
 
-type sqliteExternalConversationScanner interface {
-	Scan(...interface{}) error
-}
-
-func scanSQLiteExternalConversationEndpoint(scanner sqliteExternalConversationScanner) (*ExternalConversationEndpoint, error) {
-	var payload string
-	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-	var value ExternalConversationEndpoint
-	if err := json.Unmarshal([]byte(payload), &value); err != nil {
-		return nil, err
-	}
-	return &value, value.Validate()
-}
-
-func scanSQLiteExternalConversationInbox(scanner sqliteExternalConversationScanner) (*ExternalConversationInboxItem, error) {
-	var payload string
-	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-	var value ExternalConversationInboxItem
-	if err := json.Unmarshal([]byte(payload), &value); err != nil {
-		return nil, err
-	}
-	return &value, value.Validate()
-}
-
-func scanSQLiteExternalConversationMapping(scanner sqliteExternalConversationScanner) (*ExternalConversationMapping, error) {
-	var payload string
-	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-	var value ExternalConversationMapping
-	if err := json.Unmarshal([]byte(payload), &value); err != nil {
-		return nil, err
-	}
-	return &value, value.Validate()
-}
-
-func scanSQLiteExternalParticipantMapping(scanner sqliteExternalConversationScanner) (*ExternalParticipantMapping, error) {
-	var payload string
-	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-	var value ExternalParticipantMapping
-	if err := json.Unmarshal([]byte(payload), &value); err != nil {
-		return nil, err
-	}
-	return &value, value.Validate()
-}
-
-func scanSQLiteExternalMessageMapping(scanner sqliteExternalConversationScanner) (*ExternalMessageMapping, error) {
-	var payload string
-	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-	var value ExternalMessageMapping
-	if err := json.Unmarshal([]byte(payload), &value); err != nil {
-		return nil, err
-	}
-	return &value, value.Validate()
-}
-
-func scanSQLiteExternalConversationDelivery(scanner sqliteExternalConversationScanner) (*ExternalConversationDelivery, error) {
-	var payload string
-	if err := scanner.Scan(&payload); errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-	var value ExternalConversationDelivery
-	if err := json.Unmarshal([]byte(payload), &value); err != nil {
-		return nil, err
-	}
-	return &value, value.Validate()
-}
-
 func commitSQLiteConn(ctx context.Context, conn *sql.Conn, committed *bool) error {
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return err
@@ -1009,3 +920,8 @@ func insertSQLiteExternalConversationDelivery(ctx context.Context, exec sqliteEx
 		delivery.AvailableAt, delivery.LeaseOwner, nullableSQLiteTime(delivery.LeaseExpiresAt), delivery.CreatedAt, delivery.Revision, string(payload))
 	return err
 }
+
+var (
+	_ ExternalConversationEndpointStore  = (*SQLiteStore)(nil)
+	_ ExternalConversationTransportStore = (*SQLiteStore)(nil)
+)

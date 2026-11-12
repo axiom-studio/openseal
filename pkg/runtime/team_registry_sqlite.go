@@ -324,18 +324,6 @@ func (s *SQLiteStore) ListTeamDefinitionActivations(ctx context.Context, scope c
 	return result, rows.Err()
 }
 
-func teamRegistryPayloads(deployment *kernelteam.Deployment, activation workforce.DefinitionActivation) (string, string, error) {
-	deploymentPayload, err := json.Marshal(deployment)
-	if err != nil {
-		return "", "", err
-	}
-	activationPayload, err := json.Marshal(activation)
-	if err != nil {
-		return "", "", err
-	}
-	return string(deploymentPayload), string(activationPayload), nil
-}
-
 func insertTeamActivation(ctx context.Context, tx *sql.Tx, activation workforce.DefinitionActivation, payload string) error {
 	result, err := tx.ExecContext(ctx, `INSERT INTO team_definition_activations(id, scope_kind, scope_id, deployment_id, deployment_revision, created_at, payload) VALUES(?, ?, ?, ?, ?, ?, ?)`,
 		activation.ID, activation.Scope.Kind, activation.Scope.ID, activation.DeploymentID, activation.DeploymentRevision, activation.CreatedAt, payload)

@@ -10,19 +10,6 @@ import (
 // every owner of spaces has one.
 const ownerDefaultSpaceMigrationVersion int64 = 86
 
-// markOwnerDefaultSpaces marks, for every (scope, owner) that owns spaces and
-// has no default space, their oldest space by (created_at, id). An owner who
-// has a default space keeps it, so running it again changes nothing.
-func markOwnerDefaultSpaces(spaces, isTrue string) string {
-	sameOwner := func(alias string) string {
-		return alias + `.scope_kind = s.scope_kind AND ` + alias + `.scope_id = s.scope_id AND ` + alias + `.owner_id = s.owner_id`
-	}
-	return `UPDATE ` + spaces + ` AS s SET is_default = ` + isTrue + `
-		WHERE NOT EXISTS (SELECT 1 FROM ` + spaces + ` d WHERE ` + sameOwner("d") + ` AND d.is_default = ` + isTrue + `)
-		AND NOT EXISTS (SELECT 1 FROM ` + spaces + ` o WHERE ` + sameOwner("o") + `
-			AND (o.created_at < s.created_at OR (o.created_at = s.created_at AND o.id < s.id)))`
-}
-
 // migrateOwnerDefaultSpace is PostgreSQL migration 86. The spaces that were
 // a scope's one default keep the flag for the owner they have.
 func (s *PostgresStore) migrateOwnerDefaultSpace(ctx context.Context, tx *sql.Tx) error {
@@ -63,25 +50,4 @@ func (s *PostgresStore) rollbackOwnerDefaultSpace(ctx context.Context, tx *sql.T
 			END IF;
 		END $$`)
 	return err
-}
-
-// migrateOwnerDefaultSpacesSQLite mirrors PostgreSQL migration 86. SQLite has
-// no ledger: it runs on every open, after owner_id exists, and changes
-// nothing once every owner has a default space.
-func migrateOwnerDefaultSpacesSQLite(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, statement := range []string{
-		`DROP INDEX IF EXISTS idx_spaces_default`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_spaces_owner_default ON spaces(scope_kind, scope_id, owner_id) WHERE is_default = 1`,
-		markOwnerDefaultSpaces("spaces", "1"),
-	} {
-		if _, err := tx.Exec(statement); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }

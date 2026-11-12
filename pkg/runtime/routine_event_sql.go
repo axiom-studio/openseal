@@ -38,8 +38,3 @@ func decodeRoutineEventRecordEvent(record *RoutineEventRecord, payload []byte, e
 	}
 	return nil
 }
-
-var (
-	_ RoutineEventStore = (*SQLiteStore)(nil)
-	_ RoutineEventStore = (*PostgresStore)(nil)
-)

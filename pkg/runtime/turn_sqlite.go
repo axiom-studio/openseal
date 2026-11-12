@@ -354,14 +354,6 @@ func (s *SQLiteStore) ClaimAgentTurn(ctx context.Context, scope Scope, turnID, w
 	return turn, nil
 }
 
-func decodeAgentTurnRecord(payload string) (*AgentTurn, error) {
-	var turn AgentTurn
-	if err := json.Unmarshal([]byte(payload), &turn); err != nil {
-		return nil, err
-	}
-	return &turn, nil
-}
-
 func insertSQLiteAgentTurn(ctx context.Context, exec sqliteExecer, turn *AgentTurn) error {
 	payload, err := json.Marshal(turn)
 	if err != nil {

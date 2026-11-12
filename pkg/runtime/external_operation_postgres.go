@@ -21,3 +21,11 @@ func (s *PostgresStore) migrateExternalOperationReceipts(ctx context.Context, tx
 		(version, name) VALUES ($1, 'durable external operation receipts') ON CONFLICT(version) DO NOTHING`, externalOperationReceiptMigrationVersion)
 	return err
 }
+
+// externalOperationLockKey is safe to bind as PostgreSQL TEXT. The canonical
+// digest is scope-local, but advisory locks share a database-wide namespace;
+// hashing the scope tuple preserves that separation without sending NUL
+// delimiters (which PostgreSQL text values cannot encode) across the driver.
+func externalOperationLockKey(scope Scope, digest string) string {
+	return hashString(scope.Kind + "\x00" + scope.ID + "\x00" + digest)
+}

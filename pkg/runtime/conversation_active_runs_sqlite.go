@@ -5,8 +5,6 @@ import (
 	"database/sql"
 )
 
-const conversationActiveRunProjectionColumns = `(scope_kind,scope_id,id,owner_type,owner_id,conversation_id,root_run_id,created_at)`
-
 const sqliteConversationActiveRunProjection = `SELECT child.scope_kind, child.scope_id, child.id,
 	json_extract(child.payload, '$.owner.type'), json_extract(child.payload, '$.owner.id'),
 	json_extract(root.payload, '$.context.conversationId'), child.root_run_id, child.created_at

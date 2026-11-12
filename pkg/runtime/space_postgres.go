@@ -84,8 +84,6 @@ func (s *PostgresStore) rollbackSpaces(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-const postgresSpaceColumns = `id, scope_kind, scope_id, name, look, position, is_default, access, owner_id, created_at, updated_at`
-
 func scanPostgresSpace(row interface{ Scan(...interface{}) error }) (*Space, error) {
 	var space Space
 	if err := row.Scan(&space.ID, &space.Scope.Kind, &space.Scope.ID, &space.Name, &space.Look, &space.Position,
@@ -279,8 +277,6 @@ func (s *PostgresStore) DeleteSpace(ctx context.Context, scope Scope, spaceID st
 	}
 	return tx.Commit()
 }
-
-const postgresSpaceMemberColumns = `space_id, member_type, member_id, position, added_at`
 
 func scanPostgresSpaceMember(row interface{ Scan(...interface{}) error }) (*SpaceMember, error) {
 	var member SpaceMember
@@ -551,17 +547,6 @@ func (s *PostgresStore) SetSpaceAccessState(ctx context.Context, scope Scope, sp
 		return nil, err
 	}
 	return space, tx.Commit()
-}
-
-const postgresSpacePersonColumns = `space_id, user_id, added_by, added_at`
-
-func scanSpacePerson(row interface{ Scan(...interface{}) error }) (*SpacePerson, error) {
-	var person SpacePerson
-	if err := row.Scan(&person.SpaceID, &person.UserID, &person.AddedBy, &person.AddedAt); err != nil {
-		return nil, err
-	}
-	person.AddedAt = person.AddedAt.UTC()
-	return &person, nil
 }
 
 func (s *PostgresStore) PutSpacePerson(ctx context.Context, scope Scope, person *SpacePerson) (*SpacePerson, bool, error) {
