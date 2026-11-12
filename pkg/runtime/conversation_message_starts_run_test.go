@@ -1,6 +1,10 @@
 package runtime
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+)
 
 func TestConversationMessageStartsRunSkipsApprovalCoordinatorProjections(t *testing.T) {
 	conversation := &Conversation{
@@ -34,13 +38,13 @@ func TestTeamMessagesStartRunsOnlyForUsersAndHandoffs(t *testing.T) {
 	if !conversationMessageStartsRun(conversation, message(user)) {
 		t.Fatal("user message did not start a Run")
 	}
-	if conversationMessageStartsRun(conversation, message(AgentParticipant("rio"))) {
+	if conversationMessageStartsRun(conversation, message(conversationtest.AgentParticipant("rio"))) {
 		t.Fatal("a member answer started a Run")
 	}
-	if conversationMessageStartsRun(conversation, message(AgentParticipant("rio"), AgentParticipant("rio"), user)) {
+	if conversationMessageStartsRun(conversation, message(conversationtest.AgentParticipant("rio"), conversationtest.AgentParticipant("rio"), user)) {
 		t.Fatal("a self or user mention started a Run")
 	}
-	if !conversationMessageStartsRun(conversation, message(AgentParticipant("rio"), AgentParticipant("maya"))) {
+	if !conversationMessageStartsRun(conversation, message(conversationtest.AgentParticipant("rio"), conversationtest.AgentParticipant("maya"))) {
 		t.Fatal("a handoff did not start a Run")
 	}
 }

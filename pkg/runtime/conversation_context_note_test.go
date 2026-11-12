@@ -8,45 +8,46 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 // The run_context note (run-loop section 05 §5, CONV-04), on the
 // SQLite store through the catch-up fixture.
 
-func (f *CatchUpFixture) noteRunner() *ConversationRunTurnRunner {
-	return &ConversationRunTurnRunner{conversations: f.service, portfolio: f.store, runbooks: f.store}
+func catchUpNoteRunner(f *conversationtest.CatchUpFixture) *ConversationRunTurnRunner {
+	return &ConversationRunTurnRunner{conversations: f.Service, portfolio: f.Store, runbooks: f.Store}
 }
 
-func (f *CatchUpFixture) noteInput(run *AgentRun, session *AgentSession, trigger *ChannelMessage) conversation.ConversationContextInput {
+func catchUpNoteInput(f *conversationtest.CatchUpFixture, run *AgentRun, session *AgentSession, trigger *ChannelMessage) conversation.ConversationContextInput {
 	return conversation.ConversationContextInput{
-		Run: run, Session: session, Sessions: f.store, Conversation: f.conversation, Trigger: trigger,
-		Viewer: f.viewer(), Step: 1,
+		Run: run, Session: session, Sessions: f.Store, Conversation: f.Conversation, Trigger: trigger,
+		Viewer: f.Viewer(), Step: 1,
 	}
 }
 
-// note builds the run_context note of in and appends it to the session.
-func (f *CatchUpFixture) note(runner *ConversationRunTurnRunner, in conversation.ConversationContextInput) *SessionEntry {
-	f.t.Helper()
-	note, err := runner.conversationRunContextNote(f.t.Context(), in)
+// catchUpNote builds the run_context note of in and appends it to the session.
+func catchUpNote(f *conversationtest.CatchUpFixture, runner *ConversationRunTurnRunner, in conversation.ConversationContextInput) *SessionEntry {
+	f.T.Helper()
+	note, err := runner.conversationRunContextNote(f.T.Context(), in)
 	if err != nil {
-		f.t.Fatalf("run context: %v", err)
+		f.T.Fatalf("run context: %v", err)
 	}
 	if note == nil {
 		return nil
 	}
-	if _, err := f.store.AppendAgentSessionEntries(f.t.Context(), AppendAgentSessionEntriesRequest{
-		Scope: in.Session.Scope, SessionID: in.Session.ID, RunID: in.Run.ID, Lease: &AgentRunLeaseGuard{WorkerID: "w1", Now: f.now},
-		Entries: []*SessionEntry{note}, Now: f.now,
+	if _, err := f.Store.AppendAgentSessionEntries(f.T.Context(), AppendAgentSessionEntriesRequest{
+		Scope: in.Session.Scope, SessionID: in.Session.ID, RunID: in.Run.ID, Lease: &AgentRunLeaseGuard{WorkerID: "w1", Now: f.Now},
+		Entries: []*SessionEntry{note}, Now: f.Now,
 	}); err != nil {
-		f.t.Fatalf("append run context: %v", err)
+		f.T.Fatalf("append run context: %v", err)
 	}
 	return note
 }
 
-// nextRun claims another Run of the lane session.
-func (f *CatchUpFixture) nextRun(session *AgentSession) *AgentRun {
-	f.t.Helper()
-	return f.run(session.ID, true)
+// catchUpNextRun claims another Run of the lane session.
+func catchUpNextRun(f *conversationtest.CatchUpFixture, session *AgentSession) *AgentRun {
+	f.T.Helper()
+	return f.Run(session.ID, true)
 }
 
 func runContextSectionNames(t *testing.T, note *SessionEntry) map[string]bool {
@@ -68,11 +69,11 @@ func runContextSectionNames(t *testing.T, note *SessionEntry) map[string]bool {
 }
 
 func TestRunContextNoteAlwaysHasRespondTo(t *testing.T) {
-	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
-		runner := f.noteRunner()
-		trigger := f.post(conversation.PostChannelMessageRequest{IdempotencyKey: "q1", Content: "What is on today?", SenderDisplayName: "Kev"})
-		run, session := f.open("")
-		first := f.note(runner, f.noteInput(run, session, trigger))
+	conversationtest.ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *conversationtest.CatchUpFixture) {
+		runner := catchUpNoteRunner(f)
+		trigger := f.Post(conversation.PostChannelMessageRequest{IdempotencyKey: "q1", Content: "What is on today?", SenderDisplayName: "Kev"})
+		run, session := f.Open("")
+		first := catchUpNote(f, runner, catchUpNoteInput(f, run, session, trigger))
 		if first == nil || first.Note.Kind != NoteRunContext || first.SourceKey != RunContextSourceKey(run.ID) ||
 			first.ID != SessionEntryID(session.ID, RunContextSourceKey(run.ID)) || first.Step != 1 {
 			t.Fatalf("first note = %#v", first)
@@ -85,7 +86,7 @@ func TestRunContextNoteAlwaysHasRespondTo(t *testing.T) {
 			t.Fatalf("first sections = %v", names)
 		}
 		// The next Run of the lane sees nothing new but still gets respond_to.
-		second := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
+		second := catchUpNote(f, runner, catchUpNoteInput(f, catchUpNextRun(f, session), session, trigger))
 		names := runContextSectionNames(t, second)
 		if second == nil || len(names) != 1 || !names[conversation.ContextSectionRespondTo] {
 			t.Fatalf("second note sections = %v (%v)", names, second)
@@ -94,27 +95,27 @@ func TestRunContextNoteAlwaysHasRespondTo(t *testing.T) {
 }
 
 func TestRunContextSectionsEmittedOnlyWhenChanged(t *testing.T) {
-	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
-		runner := f.noteRunner()
+	conversationtest.ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *conversationtest.CatchUpFixture) {
+		runner := catchUpNoteRunner(f)
 		style := "watercolor"
 		runner.config.ImageStyle = func(context.Context, *AgentRun) string { return style }
-		trigger := f.say("q1", "Draw me a cat")
-		run, session := f.open("")
-		first := f.note(runner, f.noteInput(run, session, trigger))
+		trigger := f.Say("q1", "Draw me a cat")
+		run, session := f.Open("")
+		first := catchUpNote(f, runner, catchUpNoteInput(f, run, session, trigger))
 		if names := runContextSectionNames(t, first); !names[conversation.ContextSectionImageStyle] || !names[conversation.ContextSectionChannel] {
 			t.Fatalf("first sections = %v", names)
 		}
-		if !strings.Contains(first.Note.Text, "Preferred picture style: watercolor.") || !strings.Contains(first.Note.Text, `Channel "Catch-up" (`+f.conversation.ID+`).`) {
+		if !strings.Contains(first.Note.Text, "Preferred picture style: watercolor.") || !strings.Contains(first.Note.Text, `Channel "Catch-up" (`+f.Conversation.ID+`).`) {
 			t.Fatalf("first text = %q", first.Note.Text)
 		}
 
-		unchanged := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
+		unchanged := catchUpNote(f, runner, catchUpNoteInput(f, catchUpNextRun(f, session), session, trigger))
 		if names := runContextSectionNames(t, unchanged); names[conversation.ContextSectionImageStyle] || names[conversation.ContextSectionChannel] || names[conversation.ContextSectionActiveRuns] {
 			t.Fatalf("unchanged sections re-sent: %v", names)
 		}
 
 		style = "ink"
-		changed := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
+		changed := catchUpNote(f, runner, catchUpNoteInput(f, catchUpNextRun(f, session), session, trigger))
 		if names := runContextSectionNames(t, changed); !names[conversation.ContextSectionImageStyle] || names[conversation.ContextSectionChannel] {
 			t.Fatalf("changed sections = %v", names)
 		}
@@ -124,11 +125,11 @@ func TestRunContextSectionsEmittedOnlyWhenChanged(t *testing.T) {
 
 		// A section that became empty is sent once with its none text.
 		style = ""
-		cleared := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
+		cleared := catchUpNote(f, runner, catchUpNoteInput(f, catchUpNextRun(f, session), session, trigger))
 		if !strings.Contains(cleared.Note.Text, "Preferred picture style: none.") {
 			t.Fatalf("cleared text = %q", cleared.Note.Text)
 		}
-		again := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
+		again := catchUpNote(f, runner, catchUpNoteInput(f, catchUpNextRun(f, session), session, trigger))
 		if names := runContextSectionNames(t, again); names[conversation.ContextSectionImageStyle] {
 			t.Fatalf("none text re-sent: %q", again.Note.Text)
 		}
@@ -138,18 +139,18 @@ func TestRunContextSectionsEmittedOnlyWhenChanged(t *testing.T) {
 // A person who works on their own computer by default is told so at the
 // Run's start; switching back to the VM sends the VM line once.
 func TestRunContextNamesTheWorkMachine(t *testing.T) {
-	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
-		runner := f.noteRunner()
+	conversationtest.ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *conversationtest.CatchUpFixture) {
+		runner := catchUpNoteRunner(f)
 		machine := "Files and commands: the person's computer krypton."
 		runner.config.WorkMachine = func(context.Context, *AgentRun) string { return machine }
-		trigger := f.say("q1", "can you do ls?")
-		run, session := f.open("")
-		first := f.note(runner, f.noteInput(run, session, trigger))
+		trigger := f.Say("q1", "can you do ls?")
+		run, session := f.Open("")
+		first := catchUpNote(f, runner, catchUpNoteInput(f, run, session, trigger))
 		if names := runContextSectionNames(t, first); !names[conversation.ContextSectionWorkMachine] || !strings.Contains(first.Note.Text, machine) {
 			t.Fatalf("first = %v %q", names, first.Note.Text)
 		}
 		machine = ""
-		back := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
+		back := catchUpNote(f, runner, catchUpNoteInput(f, catchUpNextRun(f, session), session, trigger))
 		if !strings.Contains(back.Note.Text, "Files and commands: the chat's secure VM.") {
 			t.Fatalf("back on the VM = %q", back.Note.Text)
 		}
@@ -157,24 +158,24 @@ func TestRunContextNamesTheWorkMachine(t *testing.T) {
 }
 
 func TestRunContextReEmittedAfterCompaction(t *testing.T) {
-	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
-		runner := f.noteRunner()
-		trigger := f.say("q1", "Hello")
-		run, session := f.open("")
-		session = f.commit(run, session, f.collect(f.request(run, session, trigger.Sequence)))
-		first := f.note(runner, f.noteInput(run, session, trigger))
+	conversationtest.ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *conversationtest.CatchUpFixture) {
+		runner := catchUpNoteRunner(f)
+		trigger := f.Say("q1", "Hello")
+		run, session := f.Open("")
+		session = f.Commit(run, session, f.Collect(f.Request(run, session, trigger.Sequence)))
+		first := catchUpNote(f, runner, catchUpNoteInput(f, run, session, trigger))
 
-		next := f.nextRun(session)
-		if _, err := f.store.AppendAgentSessionEntries(t.Context(), AppendAgentSessionEntriesRequest{
-			Scope: session.Scope, SessionID: session.ID, RunID: next.ID, Lease: &AgentRunLeaseGuard{WorkerID: "w1", Now: f.now},
+		next := catchUpNextRun(f, session)
+		if _, err := f.Store.AppendAgentSessionEntries(t.Context(), AppendAgentSessionEntriesRequest{
+			Scope: session.Scope, SessionID: session.ID, RunID: next.ID, Lease: &AgentRunLeaseGuard{WorkerID: "w1", Now: f.Now},
 			Entries: []*SessionEntry{{ID: "compaction-1", Type: SessionEntryCompaction, Compaction: &CompactionEntry{
 				Summary: "They said hello.", FirstKeptEntryID: first.ID, Trigger: CompactionTriggerThreshold, Provider: "openai", Model: "gpt-x",
 			}}},
-			Now: f.now,
+			Now: f.Now,
 		}); err != nil {
 			t.Fatalf("append compaction: %v", err)
 		}
-		after := f.note(runner, f.noteInput(next, session, trigger))
+		after := catchUpNote(f, runner, catchUpNoteInput(f, next, session, trigger))
 		if names := runContextSectionNames(t, after); !names[conversation.ContextSectionChannel] || !names[conversation.ContextSectionActiveRuns] {
 			t.Fatalf("sections after compaction = %v", names)
 		}
@@ -182,41 +183,41 @@ func TestRunContextReEmittedAfterCompaction(t *testing.T) {
 }
 
 func TestActiveRunsBecomesNoneWhenWorkEnds(t *testing.T) {
-	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
+	conversationtest.ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *conversationtest.CatchUpFixture) {
 		ctx := t.Context()
-		runner := f.noteRunner()
-		trigger := f.say("q1", "Run the report")
-		portfolio := NewPortfolioService(f.store)
+		runner := catchUpNoteRunner(f)
+		trigger := f.Say("q1", "Run the report")
+		portfolio := NewPortfolioService(f.Store)
 		root, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-			Scope: f.conversation.Scope, Owner: f.conversation.Owner, AssignedAgentID: f.agentID, Kind: RunKindConversation,
+			Scope: f.Conversation.Scope, Owner: f.Conversation.Owner, AssignedAgentID: f.AgentID, Kind: RunKindConversation,
 			Goal: "chat", Source: RunSourceChat,
-			Context: map[string]interface{}{conversationRunContextConversationID: f.conversation.ID, conversationRunContextTriggerID: trigger.ID},
+			Context: map[string]interface{}{conversationRunContextConversationID: f.Conversation.ID, conversationRunContextTriggerID: trigger.ID},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		child, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-			Scope: f.conversation.Scope, Owner: f.conversation.Owner, AssignedAgentID: f.agentID, ParentRunID: root.ID,
+			Scope: f.Conversation.Scope, Owner: f.Conversation.Owner, AssignedAgentID: f.AgentID, ParentRunID: root.ID,
 			Goal: "Build the weekly report", Source: RunSourceChat,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		run, session := f.open("")
-		first := f.note(runner, f.noteInput(run, session, trigger))
+		run, session := f.Open("")
+		first := catchUpNote(f, runner, catchUpNoteInput(f, run, session, trigger))
 		if !strings.Contains(first.Note.Text, "Active work:\n- run "+child.ID+" (") || !strings.Contains(first.Note.Text, `"Build the weekly report"`) {
 			t.Fatalf("active work = %q", first.Note.Text)
 		}
-		current, err := f.store.GetAgentRun(ctx, child.Scope, child.ID)
+		current, err := f.Store.GetAgentRun(ctx, child.Scope, child.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := NewRunActivityService(f.store, f.store).TransitionRun(ctx, child.Scope, child.ID, RunTransitionRequest{
+		if _, _, err := NewRunActivityService(f.Store, f.Store).TransitionRun(ctx, child.Scope, child.ID, RunTransitionRequest{
 			ExpectedRevision: current.Revision, Status: AgentRunStatusCanceled, Summary: "Canceled", EventType: "run.canceled",
 		}); err != nil {
 			t.Fatal(err)
 		}
-		ended := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
+		ended := catchUpNote(f, runner, catchUpNoteInput(f, catchUpNextRun(f, session), session, trigger))
 		if names := runContextSectionNames(t, ended); !names[conversation.ContextSectionActiveRuns] || !strings.Contains(ended.Note.Text, "Active work: none.") {
 			t.Fatalf("after the work ended = %q", ended.Note.Text)
 		}
@@ -224,25 +225,25 @@ func TestActiveRunsBecomesNoneWhenWorkEnds(t *testing.T) {
 }
 
 func TestTeamRosterSectionAndRoutingReason(t *testing.T) {
-	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}, func(t *testing.T, f *CatchUpFixture) {
+	conversationtest.ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}, func(t *testing.T, f *conversationtest.CatchUpFixture) {
 		participants := conversation.ConversationParticipantSourceFunc(func(context.Context, conversation.ConversationParticipantQuery) ([]conversation.ConversationParticipantBinding, error) {
-			return []conversation.ConversationParticipantBinding{{Participant: f.agent()}, {Participant: AgentParticipant("maya")}}, nil
+			return []conversation.ConversationParticipantBinding{{Participant: f.Agent()}, {Participant: conversationtest.AgentParticipant("maya")}}, nil
 		})
 		router := conversation.ConversationRouterFunc(func(context.Context, conversation.ConversationRouteRequest) (conversation.ConversationRouteDecision, error) {
-			return conversation.ConversationRouteDecision{AgentID: f.agentID}, nil
+			return conversation.ConversationRouteDecision{AgentID: f.AgentID}, nil
 		})
-		coordinator, err := conversation.NewConversationCoordinator(f.service, participants, router, conversation.DefaultConversationCoordinatorConfig())
+		coordinator, err := conversation.NewConversationCoordinator(f.Service, participants, router, conversation.DefaultConversationCoordinatorConfig())
 		if err != nil {
 			t.Fatal(err)
 		}
-		runner := f.noteRunner()
+		runner := catchUpNoteRunner(f)
 		runner.coordinator = coordinator
-		trigger := f.say("q1", "Who writes the launch post?")
-		run, session := f.open("")
+		trigger := f.Say("q1", "Who writes the launch post?")
+		run, session := f.Open("")
 		member := cloneAgentRun(run)
-		member.Kind, member.Owner = RunKindConversation, f.conversation.Owner
+		member.Kind, member.Owner = RunKindConversation, f.Conversation.Owner
 		member.Context = map[string]interface{}{routingReasonContextKey: "owns the launch copy"}
-		note := f.note(runner, f.noteInput(member, session, trigger))
+		note := catchUpNote(f, runner, catchUpNoteInput(f, member, session, trigger))
 		for _, want := range []string{
 			"You were picked to answer because: owns the launch copy.",
 			"Team roster:\n- agent (agent), you\n- maya (maya)",
@@ -255,7 +256,7 @@ func TestTeamRosterSectionAndRoutingReason(t *testing.T) {
 			t.Fatalf("sections = %v", names)
 		}
 		// A 1:1 Agent Run has no Team section.
-		solo := f.note(runner, f.noteInput(f.nextRun(session), session, trigger))
+		solo := catchUpNote(f, runner, catchUpNoteInput(f, catchUpNextRun(f, session), session, trigger))
 		if strings.Contains(solo.Note.Text, "Team roster:\n") || strings.Contains(solo.Note.Text, "picked to answer") {
 			t.Fatalf("non-member note = %q", solo.Note.Text)
 		}
@@ -263,23 +264,23 @@ func TestTeamRosterSectionAndRoutingReason(t *testing.T) {
 }
 
 func TestVoiceCallGreetingInRespondTo(t *testing.T) {
-	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
-		runner := f.noteRunner()
-		spoken := f.say("q1", "What's the weather?")
+	conversationtest.ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *conversationtest.CatchUpFixture) {
+		runner := catchUpNoteRunner(f)
+		spoken := f.Say("q1", "What's the weather?")
 		spoken.ResponseMode = "spoken"
-		run, session := f.open("")
-		text := f.note(runner, f.noteInput(run, session, spoken)).Note.Text
+		run, session := f.Open("")
+		text := catchUpNote(f, runner, catchUpNoteInput(f, run, session, spoken)).Note.Text
 		if !strings.Contains(text, "Spoken reply: answer in words to be spoken.") || strings.Contains(text, "Voice call just started.") {
 			t.Fatalf("spoken respond_to = %q", text)
 		}
 
 		call := &ChannelMessage{
-			ID: "call-start", Scope: f.conversation.Scope, ConversationID: f.conversation.ID, Sequence: spoken.Sequence + 1,
+			ID: "call-start", Scope: f.Conversation.Scope, ConversationID: f.Conversation.ID, Sequence: spoken.Sequence + 1,
 			Sender:    ConversationParticipant{Type: ConversationParticipantService, ID: VoiceCallCoordinatorParticipantID},
 			Initiator: &ConversationParticipant{Type: ConversationParticipantUser, ID: "user"},
 			Intent:    MessageIntentUpdate, ResponseMode: "spoken", RequiresResponse: true, Content: "Call started",
 		}
-		text = f.note(runner, f.noteInput(f.nextRun(session), session, call)).Note.Text
+		text = catchUpNote(f, runner, catchUpNoteInput(f, catchUpNextRun(f, session), session, call)).Note.Text
 		want := "Reply to message call-start from " + VoiceCallCoordinatorParticipantID + " (service " + VoiceCallCoordinatorParticipantID + ").\n" +
 			"Spoken reply: answer in words to be spoken.\nVoice call just started. " + voiceCallGreetingBehaviorInstruction
 		if !strings.Contains(text, want) {
@@ -290,7 +291,7 @@ func TestVoiceCallGreetingInRespondTo(t *testing.T) {
 
 // conversationTaskListStore returns fixed task rows.
 type conversationTaskListStore struct {
-	CatchUpStore
+	conversationtest.CatchUpStore
 	rows   []*ConversationTaskResult
 	filter ConversationTaskFilter
 }
@@ -300,12 +301,12 @@ func (s *conversationTaskListStore) ListConversationTasks(_ context.Context, fil
 	return s.rows, nil
 }
 
-func runContextTestTask(t *testing.T, f *CatchUpFixture, trigger *ChannelMessage, key, goal string, status AgentRunStatus, created time.Time) *ConversationTaskResult {
+func runContextTestTask(t *testing.T, f *conversationtest.CatchUpFixture, trigger *ChannelMessage, key, goal string, status AgentRunStatus, created time.Time) *ConversationTaskResult {
 	t.Helper()
 	task := &ConversationTask{
-		Mode: ConversationTaskModeIndependent, Scope: f.conversation.Scope, Owner: f.conversation.Owner, ConversationID: f.conversation.ID,
+		Mode: ConversationTaskModeIndependent, Scope: f.Conversation.Scope, Owner: f.Conversation.Owner, ConversationID: f.Conversation.ID,
 		SourceMessageID: trigger.ID, ThreadRootID: trigger.ID, SourceRunID: "source-" + key, SourceTurnID: "turn-" + key, SourceTurnNumber: 1,
-		AuthenticatedActor: trigger.Sender, TargetAgentID: f.agentID, WorkRunID: "work-" + key, TaskKey: key, Goal: goal,
+		AuthenticatedActor: trigger.Sender, TargetAgentID: f.AgentID, WorkRunID: "work-" + key, TaskKey: key, Goal: goal,
 		Acknowledgment: "On it.", Revision: 1, CreatedAt: created,
 	}
 	task.ID = conversationTaskID(task.Scope, task.SourceRunID, task.TaskKey)
@@ -315,7 +316,7 @@ func runContextTestTask(t *testing.T, f *CatchUpFixture, trigger *ChannelMessage
 	}
 	task.RequestDigest = digest
 	work := &AgentRun{
-		ID: task.WorkRunID, Scope: task.Scope, Owner: task.Owner, AssignedAgentID: f.agentID, Kind: RunKindAgentWork, Goal: goal,
+		ID: task.WorkRunID, Scope: task.Scope, Owner: task.Owner, AssignedAgentID: f.AgentID, Kind: RunKindAgentWork, Goal: goal,
 		Source: RunSourceChat, RootRunID: task.WorkRunID, ConcurrencyKey: "task:" + task.ID, Status: status, Revision: 3,
 		Context: map[string]interface{}{ConversationTaskContextKey: task.ID, conversationRunContextConversationID: task.ConversationID,
 			conversationRunContextTriggerID: task.SourceMessageID},
@@ -327,22 +328,22 @@ func runContextTestTask(t *testing.T, f *CatchUpFixture, trigger *ChannelMessage
 }
 
 func TestRunContextListsRecentConversationTasks(t *testing.T) {
-	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
-		trigger := f.say("q1", "How is the research going?")
-		running := runContextTestTask(t, f, trigger, "research", "Research the three vendors\nand compare prices", AgentRunStatusRunning, f.now)
-		done := runContextTestTask(t, f, trigger, "inbox", "Read the inbox", AgentRunStatusCompleted, f.now.Add(-time.Minute))
-		forged := runContextTestTask(t, f, trigger, "forged", "Forged", AgentRunStatusRunning, f.now)
+	conversationtest.ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *conversationtest.CatchUpFixture) {
+		trigger := f.Say("q1", "How is the research going?")
+		running := runContextTestTask(t, f, trigger, "research", "Research the three vendors\nand compare prices", AgentRunStatusRunning, f.Now)
+		done := runContextTestTask(t, f, trigger, "inbox", "Read the inbox", AgentRunStatusCompleted, f.Now.Add(-time.Minute))
+		forged := runContextTestTask(t, f, trigger, "forged", "Forged", AgentRunStatusRunning, f.Now)
 		forged.WorkRun.Goal = "something else"
-		other := runContextTestTask(t, f, trigger, "other", "Someone else's", AgentRunStatusRunning, f.now)
+		other := runContextTestTask(t, f, trigger, "other", "Someone else's", AgentRunStatusRunning, f.Now)
 		other.Task.AuthenticatedActor = ConversationParticipant{Type: ConversationParticipantUser, ID: "stranger"}
-		tasks := &conversationTaskListStore{CatchUpStore: f.store, rows: []*ConversationTaskResult{running, done, forged, other}}
-		runner := f.noteRunner()
+		tasks := &conversationTaskListStore{CatchUpStore: f.Store, rows: []*ConversationTaskResult{running, done, forged, other}}
+		runner := catchUpNoteRunner(f)
 		runner.portfolio = tasks
 
-		run, session := f.open("")
-		text := f.note(runner, f.noteInput(run, session, trigger)).Note.Text
+		run, session := f.Open("")
+		text := catchUpNote(f, runner, catchUpNoteInput(f, run, session, trigger)).Note.Text
 		want := "Conversation tasks you started for this person here, newest first:\n" +
-			"- task " + running.Task.ID + " (independent, running) workRunId work-research revision 3, started " + conversation.ConversationMessageTime(f.now) +
+			"- task " + running.Task.ID + " (independent, running) workRunId work-research revision 3, started " + conversation.ConversationMessageTime(f.Now) +
 			`: "Research the three vendors and compare prices"`
 		if !strings.Contains(text, want) || !strings.Contains(text, "- task "+done.Task.ID+" (independent, completed) workRunId work-inbox") {
 			t.Fatalf("tasks section = %q", text)
@@ -356,7 +357,7 @@ func TestRunContextListsRecentConversationTasks(t *testing.T) {
 
 		// When the tasks are gone the section says so once.
 		tasks.rows = nil
-		gone := f.note(runner, f.noteInput(f.nextRun(session), session, trigger)).Note.Text
+		gone := catchUpNote(f, runner, catchUpNoteInput(f, catchUpNextRun(f, session), session, trigger)).Note.Text
 		if !strings.Contains(gone, "Conversation tasks: none.") {
 			t.Fatalf("after tasks = %q", gone)
 		}

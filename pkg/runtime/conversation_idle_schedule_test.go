@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 type idleScheduleCountingStore struct {
@@ -54,13 +55,13 @@ func (s *idleScheduleCountingStore) PutConversationCursor(ctx context.Context, r
 }
 
 func TestConversationIdleSchedulingSkipsCaughtUpPayloadReads(t *testing.T) {
-	MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
 		for _, empty := range []bool{true, false} {
 			t.Run(fmt.Sprintf("empty=%t", empty), func(t *testing.T) {
 				store := kernel.(ConversationStore)
-				conversation := MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "caught-up"}, fmt.Sprintf("channel-%t", empty))
+				conversation := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "caught-up"}, fmt.Sprintf("channel-%t", empty))
 				if !empty {
-					CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "caught-up-message"})
+					conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "caught-up-message"})
 					idleScheduleAdvanceCursor(t, store, conversation)
 				}
 				counter := &idleScheduleCountingStore{ConversationStore: store, roundError: errors.New("caught-up history must not be loaded")}
@@ -78,11 +79,11 @@ func TestConversationIdleSchedulingSkipsCaughtUpPayloadReads(t *testing.T) {
 }
 
 func TestConversationIdleSchedulingPreservesUnreadPagesAndReplay(t *testing.T) {
-	MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
 		store := kernel.(ConversationStore)
-		conversation := MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "unread-pages"}, "channel")
+		conversation := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "unread-pages"}, "channel")
 		for index := range 5 {
-			CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: fmt.Sprintf("unread-%d", index)})
+			conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: fmt.Sprintf("unread-%d", index)})
 		}
 		counter := &idleScheduleCountingStore{ConversationStore: store}
 		scheduler := idleScheduleScheduler(t, counter, kernel)
@@ -109,10 +110,10 @@ func TestConversationIdleSchedulingPreservesUnreadPagesAndReplay(t *testing.T) {
 }
 
 func TestConversationIdleSchedulingDoesNotTreatDeliveryAsProcessed(t *testing.T) {
-	MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
 		store := kernel.(ConversationStore)
-		conversation := MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "delivered-unread"}, "channel")
-		CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "delivered"})
+		conversation := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "delivered-unread"}, "channel")
+		conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "delivered"})
 		if _, _, err := runtimeconversation.NewConversationService(store).AdvanceCursor(t.Context(), runtimeconversation.AdvanceConversationCursorRequest{
 			Scope: conversation.Scope, ConversationID: conversation.ID, Participant: idleScheduleParticipant(),
 			DeliveredSequence: 1, ReadSequence: 0,
@@ -128,12 +129,12 @@ func TestConversationIdleSchedulingDoesNotTreatDeliveryAsProcessed(t *testing.T)
 }
 
 func TestConversationIdleSchedulingRetainsCursorOnCoordinationOrCommitFailure(t *testing.T) {
-	MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
 		for _, failure := range []string{"cursor_read", "round_read", "cursor_commit"} {
 			t.Run(failure, func(t *testing.T) {
 				store := kernel.(ConversationStore)
-				conversation := MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: failure}, "channel")
-				CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "unread"})
+				conversation := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: failure}, "channel")
+				conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "unread"})
 				unavailable := errors.New("temporary " + failure + " failure")
 				counter := &idleScheduleCountingStore{ConversationStore: store}
 				switch failure {
@@ -166,14 +167,14 @@ func TestConversationIdleSchedulingRetainsCursorOnCoordinationOrCommitFailure(t 
 }
 
 func TestConversationIdleSchedulingRecoversConcurrentPostAfterCaughtUpSnapshot(t *testing.T) {
-	MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
 		store := kernel.(ConversationStore)
-		conversation := MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "concurrent-post"}, "channel")
-		CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "first"})
+		conversation := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "concurrent-post"}, "channel")
+		conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "first"})
 		idleScheduleAdvanceCursor(t, store, conversation)
 		staleSnapshot := cloneConversation(conversation)
 		counter := &idleScheduleCountingStore{ConversationStore: store, onCursor: func() {
-			CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "later"})
+			conversationtest.CommitChannelMessage(t, store, &conversation, &ChannelMessage{ID: "later"})
 		}}
 		if err := idleScheduleScheduler(t, counter, kernel).reconcileConversation(t.Context(), staleSnapshot, &ConversationRunReconcileResult{}); err != nil {
 			t.Fatal(err)
@@ -193,13 +194,13 @@ func TestConversationIdleSchedulingRecoversConcurrentPostAfterCaughtUpSnapshot(t
 }
 
 func TestConversationIdleSchedulingHonorsCommittedRoundAndScopedVisibility(t *testing.T) {
-	MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
 		store := kernel.(ConversationStore)
-		first := MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "first"}, "same-channel")
-		CommitChannelMessage(t, store, &first, &ChannelMessage{ID: "first-message"})
+		first := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "first"}, "same-channel")
+		conversationtest.CommitChannelMessage(t, store, &first, &ChannelMessage{ID: "first-message"})
 		idleScheduleAdvanceCursor(t, store, first)
-		second := MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "second"}, "same-channel")
-		CommitChannelMessage(t, store, &second, &ChannelMessage{ID: "coordinated"})
+		second := conversationtest.MessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "second"}, "same-channel")
+		conversationtest.CommitChannelMessage(t, store, &second, &ChannelMessage{ID: "coordinated"})
 		service := runtimeconversation.NewConversationService(store)
 		if _, err := service.CommitConversationRouting(t.Context(), runtimeconversation.CommitConversationRoutingRequest{
 			Scope: second.Scope, ConversationID: second.ID, ExpectedRevision: second.Revision,
@@ -208,7 +209,7 @@ func TestConversationIdleSchedulingHonorsCommittedRoundAndScopedVisibility(t *te
 			t.Fatal(err)
 		}
 		second, _ = store.GetConversation(t.Context(), second.Scope, second.ID)
-		CommitChannelMessage(t, store, &second, &ChannelMessage{ID: "private-unread", Audience: ConversationAudience{Kind: ConversationAudienceRoles, Roles: []string{"reviewer"}}})
+		conversationtest.CommitChannelMessage(t, store, &second, &ChannelMessage{ID: "private-unread", Audience: ConversationAudience{Kind: ConversationAudienceRoles, Roles: []string{"reviewer"}}})
 		counter := &idleScheduleCountingStore{ConversationStore: store}
 		result, err := idleScheduleScheduler(t, counter, kernel).ReconcileScope(t.Context(), second.Scope)
 		if err != nil || result.Messages != 2 || result.Skipped != 1 || result.Scheduled != 1 || counter.rounds != 1 {

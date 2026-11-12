@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
@@ -52,7 +53,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	}
 	service := runtimeconversation.NewConversationApprovalModeService(reopened)
 	result, err := service.SetApprovalMode(ctx, runtimeconversation.SetConversationApprovalModeRequest{
-		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalManual, Actor: ApprovalModeActor,
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalManual, Actor: conversationtest.ApprovalModeActor,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +75,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 		t.Fatalf("change set = %#v, %v", set, err)
 	}
 	if _, err := service.SetApprovalMode(ctx, runtimeconversation.SetConversationApprovalModeRequest{
-		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalSkip, Actor: ApprovalModeActor,
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalSkip, Actor: conversationtest.ApprovalModeActor,
 	}); !errors.Is(err, ErrRevisionConflict) {
 		t.Fatalf("stale revision error = %v", err)
 	}

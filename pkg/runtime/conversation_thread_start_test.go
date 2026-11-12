@@ -8,67 +8,12 @@ import (
 	"testing"
 
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
-type conversationThreadStartTestStore interface {
-	KernelStore
-	ConversationStore
-}
-
-func forConversationThreadStartStores(t *testing.T, test func(*testing.T, conversationThreadStartTestStore, func(*testing.T) conversationThreadStartTestStore)) {
-	t.Helper()
-	forConversationTaskSQLStores(t, func(t *testing.T, fixture conversationTaskSQLTestFixture) {
-		test(t, fixture.store.(conversationThreadStartTestStore), func(t *testing.T) conversationThreadStartTestStore {
-			return fixture.reopen(t).(conversationThreadStartTestStore)
-		})
-	})
-}
-
-func conversationThreadStartConversation(t *testing.T, store ConversationStore) *Conversation {
-	t.Helper()
-	seedTestSpace(t, store.(SpaceStore), Scope{Kind: "tenant", ID: "thread-start"})
-	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
-		Scope: Scope{Kind: "tenant", ID: "thread-start"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
-		Title: "Thread start contracts", IdempotencyKey: "thread-start",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return conversation
-}
-
-func conversationThreadStartPost(t *testing.T, service *runtimeconversation.ConversationService, conversation *Conversation, req runtimeconversation.PostChannelMessageRequest) *ChannelMessage {
-	t.Helper()
-	current, err := service.GetConversation(t.Context(), conversation.Scope, conversation.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Scope, req.ConversationID, req.ExpectedRevision = conversation.Scope, conversation.ID, current.Revision
-	if req.ID == "" {
-		req.ID = req.IdempotencyKey
-	}
-	if req.Sender.Type == "" {
-		req.Sender = ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}
-	}
-	if req.Intent == "" {
-		req.Intent = MessageIntentQuestion
-	}
-	if req.Content == "" {
-		req.Content = req.IdempotencyKey
-	}
-	if req.Audience.Kind == "" {
-		req.Audience.Kind = ConversationAudienceChannel
-	}
-	result, err := service.PostChannelMessage(t.Context(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return result.Message
-}
-
 func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) {
-	forConversationThreadStartStores(t, func(t *testing.T, store conversationThreadStartTestStore, _ func(*testing.T) conversationThreadStartTestStore) {
-		conversation := conversationThreadStartConversation(t, store)
+	conversationtest.ForThreadStartStores(t, func(t *testing.T, store conversationtest.ThreadStartStore, _ func(*testing.T) conversationtest.ThreadStartStore) {
+		conversation := conversationtest.ThreadStartConversation(t, store)
 		service := runtimeconversation.NewConversationService(store)
 		scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
 		if err != nil {
@@ -87,16 +32,16 @@ func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) 
 			}
 			return result.Run
 		}
-		ordinary := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "ordinary", RequiresResponse: true})
+		ordinary := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "ordinary", RequiresResponse: true})
 		ordinaryRun := schedule(ordinary, "")
 		initiator := ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}
-		rootOne := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
+		rootOne := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
 			IdempotencyKey: "call-one", StartThread: true, RequiresResponse: true,
 			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: VoiceCallCoordinatorParticipantID}, Initiator: &initiator,
 			Intent: MessageIntentUpdate, ResponseMode: "spoken",
 		})
 		rootOneRun := schedule(rootOne, rootOne.ID)
-		rootTwo := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
+		rootTwo := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
 			IdempotencyKey: "call-two", StartThread: true, ReplyToMessageID: rootOne.ID, RequiresResponse: true,
 			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: VoiceCallCoordinatorParticipantID}, Initiator: &initiator,
 			Intent: MessageIntentUpdate, ResponseMode: "spoken",
@@ -105,11 +50,11 @@ func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) 
 		if !rootOne.StartsThread || !rootTwo.StartsThread || rootOne.ThreadRootID != "" || rootTwo.ThreadRootID != "" || rootTwo.ReplyToMessageID != rootOne.ID {
 			t.Fatalf("new roots inherited an old lane or lost ancestry: %#v, %#v", rootOne, rootTwo)
 		}
-		one := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "utterance-one", ReplyToMessageID: rootOne.ID, RequiresResponse: true})
+		one := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "utterance-one", ReplyToMessageID: rootOne.ID, RequiresResponse: true})
 		oneRun := schedule(one, rootOne.ID)
-		two := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "utterance-two", ReplyToMessageID: rootTwo.ID, RequiresResponse: true})
+		two := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "utterance-two", ReplyToMessageID: rootTwo.ID, RequiresResponse: true})
 		twoRun := schedule(two, rootTwo.ID)
-		nextOne := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "next-one", ReplyToMessageID: one.ID, RequiresResponse: true})
+		nextOne := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "next-one", ReplyToMessageID: one.ID, RequiresResponse: true})
 		nextOneRun := schedule(nextOne, rootOne.ID)
 		if one.StartsThread || two.StartsThread || nextOne.StartsThread || one.ThreadRootID != rootOne.ID || two.ThreadRootID != rootTwo.ID || nextOne.ThreadRootID != rootOne.ID {
 			t.Fatal("ordinary replies no longer inherit their canonical thread")
@@ -134,7 +79,7 @@ func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) 
 				}
 			}
 		}
-		newOrdinary := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "new-ordinary", RequiresResponse: true})
+		newOrdinary := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "new-ordinary", RequiresResponse: true})
 		if delivered := schedule(newOrdinary, ""); delivered.ID != ordinaryRun.ID {
 			t.Fatalf("ordinary follow-up started a parallel Run: %#v", delivered)
 		}
@@ -145,20 +90,20 @@ func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) 
 			}
 		}
 		timeline, err := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: conversation.Scope, ConversationID: conversation.ID, ChannelTimeline: true, Limit: 100})
-		if err != nil || !reflect.DeepEqual(conversationThreadStartMessageIDs(timeline), []string{ordinary.ID, rootOne.ID, rootTwo.ID, newOrdinary.ID}) {
-			t.Fatalf("thread roots disappeared from the main timeline: ids=%v err=%v", conversationThreadStartMessageIDs(timeline), err)
+		if err != nil || !reflect.DeepEqual(conversationtest.ThreadStartMessageIDs(timeline), []string{ordinary.ID, rootOne.ID, rootTwo.ID, newOrdinary.ID}) {
+			t.Fatalf("thread roots disappeared from the main timeline: ids=%v err=%v", conversationtest.ThreadStartMessageIDs(timeline), err)
 		}
 		thread, err := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: conversation.Scope, ConversationID: conversation.ID, ThreadRootID: rootOne.ID, Limit: 100})
-		if err != nil || !reflect.DeepEqual(conversationThreadStartMessageIDs(thread), []string{rootOne.ID, one.ID, nextOne.ID}) {
-			t.Fatalf("retained ancestry merged independent threads: ids=%v err=%v", conversationThreadStartMessageIDs(thread), err)
+		if err != nil || !reflect.DeepEqual(conversationtest.ThreadStartMessageIDs(thread), []string{rootOne.ID, one.ID, nextOne.ID}) {
+			t.Fatalf("retained ancestry merged independent threads: ids=%v err=%v", conversationtest.ThreadStartMessageIDs(thread), err)
 		}
 		viewer := ConversationViewer{Participant: initiator}
 		page, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{Limit: 2}, rootOne.ID)
-		if err != nil || page == nil || !reflect.DeepEqual(conversationThreadStartHistoryIDs(page), []string{nextOne.ID, one.ID}) || page.NextBeforeSequence != one.Sequence {
+		if err != nil || page == nil || !reflect.DeepEqual(conversationtest.ThreadStartHistoryIDs(page), []string{nextOne.ID, one.ID}) || page.NextBeforeSequence != one.Sequence {
 			t.Fatalf("trusted local root did not page its own replies: page=%#v err=%v", page, err)
 		}
 		older, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{BeforeSequence: page.NextBeforeSequence, Limit: 2}, rootOne.ID)
-		if err != nil || older == nil || !reflect.DeepEqual(conversationThreadStartHistoryIDs(older), []string{rootOne.ID}) {
+		if err != nil || older == nil || !reflect.DeepEqual(conversationtest.ThreadStartHistoryIDs(older), []string{rootOne.ID}) {
 			t.Fatalf("trusted local history omitted its root or crossed lanes: page=%#v err=%v", older, err)
 		}
 		if _, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, runtimeconversation.ConversationHistoryReadRequest{MessageID: two.ID}, rootOne.ID); err == nil {
@@ -172,30 +117,11 @@ func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) 
 	})
 }
 
-func conversationThreadStartMessageIDs(messages []*ChannelMessage) []string {
-	ids := make([]string, 0, len(messages))
-	for _, message := range messages {
-		ids = append(ids, message.ID)
-	}
-	return ids
-}
-
-func conversationThreadStartHistoryIDs(page *runtimeconversation.ConversationHistoryReadResult) []string {
-	if page == nil {
-		return nil
-	}
-	ids := make([]string, 0, len(page.Messages))
-	for _, message := range page.Messages {
-		ids = append(ids, message.ID)
-	}
-	return ids
-}
-
 func TestConversationStartsThreadReplayJSONCloneAndRestart(t *testing.T) {
-	forConversationThreadStartStores(t, func(t *testing.T, store conversationThreadStartTestStore, reopen func(*testing.T) conversationThreadStartTestStore) {
-		conversation := conversationThreadStartConversation(t, store)
+	conversationtest.ForThreadStartStores(t, func(t *testing.T, store conversationtest.ThreadStartStore, reopen func(*testing.T) conversationtest.ThreadStartStore) {
+		conversation := conversationtest.ThreadStartConversation(t, store)
 		service := runtimeconversation.NewConversationService(store)
-		legacy := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "legacy-parent"})
+		legacy := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "legacy-parent"})
 		current, _ := service.GetConversation(t.Context(), conversation.Scope, conversation.ID)
 		initiator := ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}
 		req := runtimeconversation.PostChannelMessageRequest{ID: "new-root", Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
@@ -270,26 +196,26 @@ func TestConversationStartsThreadReplayJSONCloneAndRestart(t *testing.T) {
 }
 
 func TestConversationStartsThreadPreservesPrivateAncestryForScalarAndBatchReads(t *testing.T) {
-	forConversationThreadStartStores(t, func(t *testing.T, store conversationThreadStartTestStore, _ func(*testing.T) conversationThreadStartTestStore) {
-		conversation := conversationThreadStartConversation(t, store)
+	conversationtest.ForThreadStartStores(t, func(t *testing.T, store conversationtest.ThreadStartStore, _ func(*testing.T) conversationtest.ThreadStartStore) {
+		conversation := conversationtest.ThreadStartConversation(t, store)
 		service := runtimeconversation.NewConversationService(store)
 		allowed := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "allowed"}}
 		foreign := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "foreign"}}
-		private := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
+		private := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
 			IdempotencyKey: "private-parent", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "private-author"},
 			Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{allowed.Participant}},
 		})
-		directRoot := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
+		directRoot := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
 			IdempotencyKey: "direct-call-root", StartThread: true, ReplyToMessageID: private.ID,
 			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "calls"}, Initiator: &allowed.Participant,
 		})
-		publicParent := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "public-parent", ReplyToMessageID: private.ID, Sender: allowed.Participant})
-		root := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
+		publicParent := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "public-parent", ReplyToMessageID: private.ID, Sender: allowed.Participant})
+		root := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
 			IdempotencyKey: "public-call-root", StartThread: true, ReplyToMessageID: publicParent.ID,
 			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "calls"}, Initiator: &allowed.Participant,
 		})
-		utterance := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "utterance", ReplyToMessageID: root.ID, Sender: allowed.Participant})
-		answer := conversationThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
+		utterance := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "utterance", ReplyToMessageID: root.ID, Sender: allowed.Participant})
+		answer := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
 			IdempotencyKey: "answer", ReplyToMessageID: utterance.ID, Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: conversation.Owner.ID}, Intent: MessageIntentAnswer,
 		})
 		if root.ThreadRootID != "" || root.ReplyToMessageID != publicParent.ID || utterance.ThreadRootID != root.ID || answer.ThreadRootID != root.ID {
@@ -304,16 +230,16 @@ func TestConversationStartsThreadPreservesPrivateAncestryForScalarAndBatchReads(
 			t.Fatal("trusted local history bypassed private root ancestry")
 		}
 		allowedPage, err := runtimeconversation.ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, allowed, runtimeconversation.ConversationHistoryReadRequest{}, root.ID)
-		if err != nil || !reflect.DeepEqual(conversationThreadStartHistoryIDs(allowedPage), []string{answer.ID, utterance.ID, root.ID}) {
+		if err != nil || !reflect.DeepEqual(conversationtest.ThreadStartHistoryIDs(allowedPage), []string{answer.ID, utterance.ID, root.ID}) {
 			t.Fatalf("authorized local history lost canonical root descendants: page=%#v err=%v", allowedPage, err)
 		}
 		for _, batch := range []bool{false, true} {
 			t.Run(fmt.Sprintf("batch=%t", batch), func(t *testing.T) {
-				point := &CountedPointStore{ConversationStore: store}
+				point := &conversationtest.CountedPointStore{ConversationStore: store}
 				var readStore ConversationStore = point
-				var countedBatch *CountedBatchStore
+				var countedBatch *conversationtest.CountedBatchStore
 				if batch {
-					countedBatch = NewCountedBatchStore(store)
+					countedBatch = conversationtest.NewCountedBatchStore(store)
 					readStore = countedBatch
 				}
 				reader := runtimeconversation.NewConversationService(readStore)
@@ -325,20 +251,20 @@ func TestConversationStartsThreadPreservesPrivateAncestryForScalarAndBatchReads(
 						t.Fatalf("authorized viewer lost %s: %#v, %v", message.ID, visible, err)
 					}
 				}
-				point.points = 0
+				point.Points = 0
 				if countedBatch != nil {
-					countedBatch.points, countedBatch.calls = 0, 0
+					countedBatch.Points, countedBatch.Calls = 0, 0
 				}
 				visible, err := reader.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: conversation.Scope, ConversationID: conversation.ID, ThreadRootID: root.ID, Limit: 100, Viewer: &foreign})
 				if err != nil || len(visible) != 0 {
-					t.Fatalf("thread listing leaked private ancestry: %v, %v", conversationThreadStartMessageIDs(visible), err)
+					t.Fatalf("thread listing leaked private ancestry: %v, %v", conversationtest.ThreadStartMessageIDs(visible), err)
 				}
 				visible, err = reader.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: conversation.Scope, ConversationID: conversation.ID, ThreadRootID: root.ID, Limit: 100, Viewer: &allowed})
-				if err != nil || !reflect.DeepEqual(conversationThreadStartMessageIDs(visible), []string{root.ID, utterance.ID, answer.ID}) {
-					t.Fatalf("authorized thread listing changed: %v, %v", conversationThreadStartMessageIDs(visible), err)
+				if err != nil || !reflect.DeepEqual(conversationtest.ThreadStartMessageIDs(visible), []string{root.ID, utterance.ID, answer.ID}) {
+					t.Fatalf("authorized thread listing changed: %v, %v", conversationtest.ThreadStartMessageIDs(visible), err)
 				}
-				if point.points > 32 || (countedBatch != nil && (countedBatch.points != 0 || countedBatch.calls > 16)) {
-					t.Fatalf("small call thread retained unbounded ancestry reads: points=%d batch=%#v", point.points, countedBatch)
+				if point.Points > 32 || (countedBatch != nil && (countedBatch.Points != 0 || countedBatch.Calls > 16)) {
+					t.Fatalf("small call thread retained unbounded ancestry reads: points=%d batch=%#v", point.Points, countedBatch)
 				}
 			})
 		}
@@ -346,12 +272,12 @@ func TestConversationStartsThreadPreservesPrivateAncestryForScalarAndBatchReads(
 }
 
 func TestConversationStartsThreadMissingCyclicAndDeepAnchorsFailClosed(t *testing.T) {
-	MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
+	conversationtest.MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
 		store := kernel.(ConversationStore)
-		conversation := conversationThreadStartConversation(t, store)
+		conversation := conversationtest.ThreadStartConversation(t, store)
 		commit := func(message *ChannelMessage) {
 			t.Helper()
-			CommitChannelMessage(t, store, &conversation, message)
+			conversationtest.CommitChannelMessage(t, store, &conversation, message)
 		}
 		commit(&ChannelMessage{ID: "missing-anchor", StartsThread: true, ReplyToMessageID: "missing-parent"})
 		commit(&ChannelMessage{ID: "missing-child", ThreadRootID: "missing-anchor", ReplyToMessageID: "missing-anchor"})
@@ -368,11 +294,11 @@ func TestConversationStartsThreadMissingCyclicAndDeepAnchorsFailClosed(t *testin
 		viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "viewer"}}
 		for _, batch := range []bool{false, true} {
 			t.Run(fmt.Sprintf("batch=%t", batch), func(t *testing.T) {
-				point := &CountedPointStore{ConversationStore: store}
+				point := &conversationtest.CountedPointStore{ConversationStore: store}
 				var readStore ConversationStore = point
-				var countedBatch *CountedBatchStore
+				var countedBatch *conversationtest.CountedBatchStore
 				if batch {
-					countedBatch = NewCountedBatchStore(store)
+					countedBatch = conversationtest.NewCountedBatchStore(store)
 					readStore = countedBatch
 				}
 				reader := runtimeconversation.NewConversationService(readStore)
@@ -380,15 +306,15 @@ func TestConversationStartsThreadMissingCyclicAndDeepAnchorsFailClosed(t *testin
 					t.Fatalf("16 structurally valid thread anchors were hidden: %#v, %v", message, err)
 				}
 				for _, id := range []string{"missing-anchor", "missing-child", "cycle-a", "cycle-b", "cycle-child", "deep-anchor-16", parent, "deep-child"} {
-					point.points = 0
+					point.Points = 0
 					if countedBatch != nil {
-						countedBatch.points, countedBatch.calls = 0, 0
+						countedBatch.Points, countedBatch.Calls = 0, 0
 					}
 					if _, err := reader.GetVisibleChannelMessage(t.Context(), conversation.Scope, conversation.ID, id, viewer); !errors.Is(err, ErrChannelMessageNotFound) {
 						t.Fatalf("malformed StartsThread ancestry %s did not fail closed: %v", id, err)
 					}
-					if point.points > 40 || (countedBatch != nil && (countedBatch.points > 1 || countedBatch.calls > 20)) {
-						t.Fatalf("malformed ancestry exceeded the bounded walk: points=%d batch=%#v", point.points, countedBatch)
+					if point.Points > 40 || (countedBatch != nil && (countedBatch.Points > 1 || countedBatch.Calls > 20)) {
+						t.Fatalf("malformed ancestry exceeded the bounded walk: points=%d batch=%#v", point.Points, countedBatch)
 					}
 				}
 			})

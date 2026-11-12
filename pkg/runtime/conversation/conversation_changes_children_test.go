@@ -60,7 +60,7 @@ func TestConversationChangeBatchesHistoricalRootLookups(t *testing.T) {
 func TestConversationChangeProjectionIncludesScopedDelegatedWork(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store models.KernelStore = newConversationTestStore(t)
+			var store models.KernelStore = newTestKernelStore(t)
 			if backend == "sqlite" {
 				db, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "children.db"))
 				if err != nil {
@@ -71,7 +71,7 @@ func TestConversationChangeProjectionIncludesScopedDelegatedWork(t *testing.T) {
 			}
 			scope := models.Scope{Kind: "tenant", ID: "one"}
 			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "writer"}
-			seedConversationTestSpace(t, store.(models.SpaceStore), scope)
+			seedTestSpace(t, store.(models.SpaceStore), scope)
 			conversation, _, err := NewConversationService(store.(models.ConversationStore)).CreateConversation(t.Context(), CreateConversationRequest{
 				Scope: scope, Owner: owner, Title: "Draft report", IdempotencyKey: "report-chat",
 			})

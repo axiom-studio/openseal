@@ -8,13 +8,14 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 // A Team member's chat step gets the message's attachments exactly as a 1:1
 // chat step does: the same content parts on the trigger's user entry and the
 // same "Attached:" line. Only the member also gets the Team context.
 func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
-	forConversationThreadStartStores(t, func(t *testing.T, base conversationThreadStartTestStore, _ func(*testing.T) conversationThreadStartTestStore) {
+	conversationtest.ForThreadStartStores(t, func(t *testing.T, base conversationtest.ThreadStartStore, _ func(*testing.T) conversationtest.ThreadStartStore) {
 		content := "company,total\nAcme,42"
 		artifacts, ok := base.(interface {
 			CreateArtifactVersion(context.Context, *Artifact, int64) error
@@ -25,13 +26,13 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 		ask := func(team bool) (*SessionEntry, *SessionEntry, *agentrun.TurnRunnerBinding, *chatLoopFixture) {
 			t.Helper()
 			f := newChatLoopFixture(t, base, chatLoopOptions{team: team})
-			artifact := CSVArtifact()
+			artifact := conversationtest.CSVArtifact()
 			artifact.Scope = f.conversation.Scope
-			artifact.MediaType, artifact.SizeBytes, artifact.Digest = "text/csv", int64(len(content)), Digest(content)
+			artifact.MediaType, artifact.SizeBytes, artifact.Digest = "text/csv", int64(len(content)), conversationtest.Digest(content)
 			if err := artifacts.CreateArtifactVersion(f.ctx, artifact, 0); err != nil {
 				t.Fatal(err)
 			}
-			f.runner = f.newRunner(ConversationRunTurnRunnerConfig{AttachmentContent: &TextContent{text: content}})
+			f.runner = f.newRunner(ConversationRunTurnRunnerConfig{AttachmentContent: &conversationtest.TextContent{Text: content}})
 			posted, err := f.service.PostChannelMessage(f.ctx, conversation.PostChannelMessageRequest{
 				Scope: f.conversation.Scope, ConversationID: f.conversation.ID, ExpectedRevision: f.conversation.Revision,
 				Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,
@@ -83,7 +84,7 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 			t.Fatal("Team rules reached the 1:1 step or missed the member step")
 		}
 		answers := team.agentMessages()
-		if len(answers) != 1 || answers[0].Sender != AgentParticipant("agent-1") || answers[0].Content != "Acme totals 42." {
+		if len(answers) != 1 || answers[0].Sender != conversationtest.AgentParticipant("agent-1") || answers[0].Content != "Acme totals 42." {
 			t.Fatalf("member answer = %#v", answers)
 		}
 	})

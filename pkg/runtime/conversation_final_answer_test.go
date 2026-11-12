@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -23,7 +24,7 @@ import (
 const finalDeliveryWorker = "final-worker"
 
 type finalDeliveryStore interface {
-	conversationThreadStartTestStore
+	conversationtest.ThreadStartStore
 	AgentSessionStore
 	ArtifactStore
 }
@@ -73,12 +74,12 @@ type finalDeliveryOptions struct {
 
 func forFinalDeliveryStores(t *testing.T, options finalDeliveryOptions, test func(*testing.T, *finalDeliveryFixture)) {
 	t.Helper()
-	forConversationThreadStartStores(t, func(t *testing.T, base conversationThreadStartTestStore, _ func(*testing.T) conversationThreadStartTestStore) {
+	conversationtest.ForThreadStartStores(t, func(t *testing.T, base conversationtest.ThreadStartStore, _ func(*testing.T) conversationtest.ThreadStartStore) {
 		test(t, newFinalDeliveryFixture(t, base, options))
 	})
 }
 
-func newFinalDeliveryFixture(t *testing.T, base conversationThreadStartTestStore, options finalDeliveryOptions) *finalDeliveryFixture {
+func newFinalDeliveryFixture(t *testing.T, base conversationtest.ThreadStartStore, options finalDeliveryOptions) *finalDeliveryFixture {
 	t.Helper()
 	store, ok := base.(finalDeliveryStore)
 	if !ok {

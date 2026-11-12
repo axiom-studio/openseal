@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 // An event routine occurrence, and a Run under one, is manual whatever the
@@ -15,9 +16,9 @@ import (
 func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	conversation := ApprovalModeConversation(t, store)
+	conversation := conversationtest.ApprovalModeConversation(t, store)
 	service := runtimeconversation.NewConversationApprovalModeService(store)
-	coordinator := action.NewActionCoordinator(store, store, ApprovalModeCatalog(t), action.NewDefaultActionPolicy(), nil)
+	coordinator := action.NewActionCoordinator(store, store, conversationtest.ApprovalModeCatalog(t), action.NewDefaultActionPolicy(), nil)
 	scope := conversation.Scope
 
 	occurrence := &AgentRun{ID: "occurrence", Scope: scope, RootRunID: "occurrence", Context: map[string]interface{}{
@@ -27,7 +28,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	scheduled := &AgentRun{ID: "scheduled", Scope: scope, RootRunID: "scheduled", Context: map[string]interface{}{
 		"conversationId": conversation.ID, scheduledTaskContextKey: true,
 	}}
-	runs := RunsByID{occurrence.ID: cloneAgentRun(occurrence)}
+	runs := conversationtest.RunsByID{occurrence.ID: cloneAgentRun(occurrence)}
 	for _, test := range []struct {
 		run  *AgentRun
 		want ConversationApprovalMode
@@ -43,7 +44,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	}
 
 	// Under auto, an event occurrence's write still waits for review.
-	result, f, err := ProposeLoopForApprovalModeWithContext(t, store, coordinator, map[string]interface{}{
+	result, f, err := conversationtest.ProposeLoopForApprovalModeWithContext(t, store, coordinator, map[string]interface{}{
 		"conversationId": conversation.ID, scheduledTaskContextKey: true, RoutineEventBatchContextKey: "batch-2",
 	}, "note", "event-run", map[string]interface{}{})
 	if err != nil {
@@ -53,10 +54,10 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 		t.Fatalf("event occurrence write ran without review: %#v", result.Call)
 	}
 	f.ParkOnApproval(result.Approval.ID)
-	conversation = SetApprovalMode(t, service, conversation, ConversationApprovalManual).Conversation
-	plain := ProposeForApprovalMode(t, store, coordinator, conversation, "note")
+	conversation = conversationtest.SetApprovalMode(t, service, conversation, ConversationApprovalManual).Conversation
+	plain := conversationtest.ProposeForApprovalMode(t, store, coordinator, conversation, "note")
 
-	loosened := SetApprovalMode(t, service, conversation, ConversationApprovalSkip)
+	loosened := conversationtest.SetApprovalMode(t, service, conversation, ConversationApprovalSkip)
 	if len(loosened.ApprovedApprovalIDs) != 1 || loosened.ApprovedApprovalIDs[0] != plain.ID || loosened.ApprovalSweepIncomplete {
 		t.Fatalf("skip sweep = %#v", loosened)
 	}
@@ -81,7 +82,7 @@ func (r *countingRunReader) GetAgentRun(ctx context.Context, scope Scope, runID 
 func TestRoutineEventBatchInheritedWithoutRootRead(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	conversation := ApprovalModeConversation(t, store)
+	conversation := conversationtest.ApprovalModeConversation(t, store)
 	scope := conversation.Scope
 	chat := &AgentRun{ID: "chat", Kind: RunKindConversation, Scope: scope, RootRunID: "chat", Context: map[string]interface{}{
 		"conversationId": conversation.ID,

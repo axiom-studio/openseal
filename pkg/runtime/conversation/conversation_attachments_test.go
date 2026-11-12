@@ -32,7 +32,7 @@ func TestConversationImageBecomesReferencePart(t *testing.T) {
 	content := conversationTestPNG(t)
 	artifact := conversationTestArtifact()
 	artifact.Name, artifact.MediaType, artifact.SizeBytes, artifact.Digest = "chart.png", "image/png", int64(len(content)), conversationTestDigest(content)
-	store := newConversationTestStore(t)
+	store := newTestKernelStore(t)
 	if err := store.CreateArtifactVersion(t.Context(), artifact, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +81,10 @@ func TestConversationImageBecomesReferencePart(t *testing.T) {
 	})
 }
 
+// conversationTestContent, conversationTestDigest and
+// conversationTestArtifact copy conversationtest's TextContent, Digest and
+// CSVArtifact for the in-package tests, which cannot import
+// conversationtest. Change the copies together.
 type conversationTestContent struct {
 	text  string
 	opens int
@@ -133,7 +137,7 @@ func TestConversationAttachmentContent(t *testing.T) {
 
 func TestConversationAttachmentScopeAndProjection(t *testing.T) {
 	ctx := t.Context()
-	store := newConversationTestStore(t)
+	store := newTestKernelStore(t)
 	artifact := conversationTestArtifact()
 	content := "company,total\nAcme,42"
 	artifact.MediaType, artifact.SizeBytes, artifact.Digest = "text/csv", int64(len(content)), conversationTestDigest(content)

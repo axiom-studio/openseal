@@ -12,14 +12,16 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
+// teamRoutingAgent copies conversationtest.AgentParticipant for the
+// in-package tests.
 func teamRoutingAgent(id string) models.ConversationParticipant {
 	return models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: id}
 }
 
 func TestTeamRoutingAddressingOrder(t *testing.T) {
-	store := newConversationTestStore(t)
+	store := newTestKernelStore(t)
 	service := NewConversationService(store)
-	seedConversationTestSpace(t, store, models.Scope{Kind: "tenant", ID: "routing"})
+	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "routing"})
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "routing"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "launch"},
 		Title: "Launch", IdempotencyKey: "launch",
@@ -46,7 +48,7 @@ func TestTeamRoutingAddressingOrder(t *testing.T) {
 	}
 	post := func(key string, req PostChannelMessageRequest) *models.ChannelMessage {
 		req.IdempotencyKey = key
-		return ThreadStartPost(t, service, conversation, req)
+		return threadStartPost(t, service, conversation, req)
 	}
 	route := func(trigger *models.ChannelMessage) []models.ConversationResponder {
 		t.Helper()
@@ -165,7 +167,7 @@ func TestFindHandoffMentions(t *testing.T) {
 // and what each does on the Team.
 func TestConversationTeamRosterReadsLeadAndPurposeFromMembers(t *testing.T) {
 	ctx := context.Background()
-	store := newConversationTestStore(t)
+	store := newTestKernelStore(t)
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	if err := store.CreateTeamDefinition(ctx, &kernelteam.Definition{
 		ID: "launch", Version: "1", DisplayName: "Launch", Purpose: "Ship", Routing: kernelteam.RoutingPolicy{Notes: "Maya owns pricing"},

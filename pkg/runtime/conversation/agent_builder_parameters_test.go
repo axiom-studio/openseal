@@ -18,8 +18,8 @@ type agentBuilderParametersFixture struct {
 
 func newAgentBuilderParametersFixture(t *testing.T) agentBuilderParametersFixture {
 	t.Helper()
-	store, scope := newConversationTestStore(t), models.Scope{Kind: "organization", ID: "builder"}
-	seedConversationTestSpace(t, store, scope)
+	store, scope := newTestKernelStore(t), models.Scope{Kind: "organization", ID: "builder"}
+	seedTestSpace(t, store, scope)
 	return agentBuilderParametersFixture{
 		service: NewConversationService(store),
 		scope:   scope,

@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -577,8 +578,8 @@ func TestOlderAgentManagementBindingsAlwaysRequireReviewInSkipMode(t *testing.T)
 		t.Run(version, func(t *testing.T) {
 			ctx := t.Context()
 			store := newTestKernelStore(t)
-			conversation := ApprovalModeConversation(t, store)
-			SetApprovalMode(t, runtimeconversation.NewConversationApprovalModeService(store), conversation, ConversationApprovalSkip)
+			conversation := conversationtest.ApprovalModeConversation(t, store)
+			conversationtest.SetApprovalMode(t, runtimeconversation.NewConversationApprovalModeService(store), conversation, ConversationApprovalSkip)
 			// Published versions predate review: always, so their stored
 			// definitions carry no review floor.
 			legacy := AgentManagementSkill()

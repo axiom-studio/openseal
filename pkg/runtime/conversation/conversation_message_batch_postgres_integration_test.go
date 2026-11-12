@@ -1,6 +1,6 @@
 //go:build integration
 
-package conversation
+package conversation_test
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -25,19 +27,19 @@ func TestConversationMessageBatchPostgresScopesExactIDsAndBoundsHistoricalReads(
 		_ = store.Close()
 	})
 	conversation, runs := channelMessageBatchHistory(t, store, 100)
-	foreignConversation := channelMessageBatchConversation(t, store, conversation.Scope, "foreign")
-	channelMessageBatchCommit(t, store, &foreignConversation, &models.ChannelMessage{ID: "message-000"})
-	foreignTenant := channelMessageBatchConversation(t, store, models.Scope{Kind: "tenant", ID: "foreign"}, conversation.ID)
-	channelMessageBatchCommit(t, store, &foreignTenant, &models.ChannelMessage{ID: "message-000"})
+	foreignConversation := conversationtest.MessageBatchConversation(t, store, conversation.Scope, "foreign")
+	conversationtest.CommitChannelMessage(t, store, &foreignConversation, &models.ChannelMessage{ID: "message-000"})
+	foreignTenant := conversationtest.MessageBatchConversation(t, store, models.Scope{Kind: "tenant", ID: "foreign"}, conversation.ID)
+	conversationtest.CommitChannelMessage(t, store, &foreignTenant, &models.ChannelMessage{ID: "message-000"})
 	selected, err := store.GetChannelMessagesByIDs(ctx, conversation.Scope, conversation.ID, []string{"message-000", "missing", "message-000"})
 	if err != nil || len(selected) != 1 || selected[0].Scope != conversation.Scope || selected[0].ConversationID != conversation.ID {
 		t.Fatalf("PostgreSQL exact scoped batch = %#v, %v", selected, err)
 	}
-	counted := newCountedBatchConversationStore(store)
-	changes, _ := NewConversationChangeService(counted, store)
+	counted := conversationtest.NewCountedBatchStore(store)
+	changes, _ := runtimeconversation.NewConversationChangeService(counted, store)
 	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "viewer"}, Roles: []string{"reader"}}
-	visible, err := changes.filterVisibleRuns(ctx, conversation.Scope, conversation.ID, runs, viewer)
-	if err != nil || len(visible) != 100 || counted.points != 0 || len(counted.batches) != 2 {
-		t.Fatalf("PostgreSQL historical visibility retained point reads: visible=%d err=%v points=%d batches=%v", len(visible), err, counted.points, counted.batches)
+	visible, err := changes.FilterVisibleRuns(ctx, conversation.Scope, conversation.ID, runs, viewer)
+	if err != nil || len(visible) != 100 || counted.Points != 0 || len(counted.Batches) != 2 {
+		t.Fatalf("PostgreSQL historical visibility retained point reads: visible=%d err=%v points=%d batches=%v", len(visible), err, counted.Points, counted.Batches)
 	}
 }

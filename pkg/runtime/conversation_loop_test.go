@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -111,12 +112,12 @@ type chatLoopFixture struct {
 
 func forChatLoopStores(t *testing.T, options chatLoopOptions, test func(*testing.T, *chatLoopFixture)) {
 	t.Helper()
-	forConversationThreadStartStores(t, func(t *testing.T, base conversationThreadStartTestStore, _ func(*testing.T) conversationThreadStartTestStore) {
+	conversationtest.ForThreadStartStores(t, func(t *testing.T, base conversationtest.ThreadStartStore, _ func(*testing.T) conversationtest.ThreadStartStore) {
 		test(t, newChatLoopFixture(t, base, options))
 	})
 }
 
-func newChatLoopFixture(t *testing.T, base conversationThreadStartTestStore, options chatLoopOptions) *chatLoopFixture {
+func newChatLoopFixture(t *testing.T, base conversationtest.ThreadStartStore, options chatLoopOptions) *chatLoopFixture {
 	t.Helper()
 	store, ok := base.(chatLoopStore)
 	if !ok {

@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -26,7 +27,7 @@ func (s *externalFileContentStore) Put(_ context.Context, req ArtifactContentWri
 	s.data, _ = io.ReadAll(req.Reader)
 	s.scope = req.Scope
 	s.owner = req.Owner
-	return ArtifactStoredContent{ContentRef: "opaque-file", SizeBytes: int64(len(s.data)), Digest: Digest(string(s.data))}, nil
+	return ArtifactStoredContent{ContentRef: "opaque-file", SizeBytes: int64(len(s.data)), Digest: conversationtest.Digest(string(s.data))}, nil
 }
 func (s *externalFileContentStore) Open(_ context.Context, scope Scope, _ string) (io.ReadCloser, error) {
 	s.scope = scope
