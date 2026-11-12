@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -83,7 +84,7 @@ func (v *RunActionValidator) ResolveActionProposalArguments(ctx context.Context,
 	if !isRunManagementAction(input.Bound) {
 		return nil, false, nil
 	}
-	arguments := cloneMap(input.Arguments)
+	arguments := maps.Clone(input.Arguments)
 	if _, supplied := arguments["expectedRevision"]; supplied {
 		return arguments, true, nil
 	}

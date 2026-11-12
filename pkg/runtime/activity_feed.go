@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 )
@@ -134,7 +135,7 @@ func projectActivityEvent(event *ActivityEvent, includeDetails bool) ActivityPro
 		DetailAvailable: len(event.Payload) > 0 || len(event.ConversationRefs) > 0 || event.CorrelationID != "" || event.CausationID != "",
 	}
 	if includeDetails {
-		projection.Payload = cloneMap(event.Payload)
+		projection.Payload = maps.Clone(event.Payload)
 		projection.ConversationRefs = append([]string(nil), event.ConversationRefs...)
 		projection.CorrelationID = event.CorrelationID
 		projection.CausationID = event.CausationID

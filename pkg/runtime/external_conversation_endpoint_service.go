@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -76,7 +77,7 @@ func (s *ExternalConversationEndpointService) Create(ctx context.Context, req Cr
 		Name: strings.TrimSpace(req.Name), Adapter: normalizeExternalConversationAdapterReference(req.Adapter),
 		Mode: req.Mode, InstallationID: strings.TrimSpace(req.InstallationID), ApplicationID: strings.TrimSpace(req.ApplicationID),
 		Address: strings.TrimSpace(req.Address), InstallationWide: req.InstallationWide, Handler: normalizeExternalConversationHandler(req.Handler),
-		Policy: req.Policy, Configuration: cloneMap(req.Configuration), Status: status,
+		Policy: req.Policy, Configuration: maps.Clone(req.Configuration), Status: status,
 		CreatedBy: strings.TrimSpace(req.CreatedBy), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if endpoint.ID == "" {
@@ -181,7 +182,7 @@ func (s *ExternalConversationEndpointService) PrepareUpdate(ctx context.Context,
 		next.Policy = *req.Policy
 	}
 	if req.ReplaceConfig {
-		next.Configuration = cloneMap(req.Configuration)
+		next.Configuration = maps.Clone(req.Configuration)
 	}
 	if req.Status != nil {
 		if current.Status == ExternalConversationEndpointRetired && *req.Status != ExternalConversationEndpointRetired {

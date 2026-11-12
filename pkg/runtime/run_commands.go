@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -621,7 +622,7 @@ func runCreationFingerprint(req CreateAgentRunRequest) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		contextValues = cloneMap(contextValues)
+		contextValues = maps.Clone(contextValues)
 		delete(contextValues, AcceptedRunExecutionContextKey)
 		if pin.DerivedRunbookIdentity {
 			delete(contextValues, "runbookDefinitionId")

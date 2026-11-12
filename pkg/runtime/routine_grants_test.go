@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -70,7 +71,7 @@ func routineGrantFixture(t *testing.T) *routineGrantFixtureState {
 }
 
 func (f *routineGrantFixtureState) withGrants(grants ...map[string]interface{}) map[string]interface{} {
-	args := cloneMap(f.args)
+	args := maps.Clone(f.args)
 	items := make([]interface{}, 0, len(grants))
 	for _, grant := range grants {
 		items = append(items, grant)
@@ -126,7 +127,7 @@ func TestCreateTaskAlwaysAsksForItsBriefInEveryMode(t *testing.T) {
 func TestRoutineBriefValidation(t *testing.T) {
 	f := routineGrantFixture(t)
 	for name, args := range map[string]map[string]interface{}{
-		"missing brief":        func() map[string]interface{} { a := cloneMap(f.args); delete(a, "brief"); return a }(),
+		"missing brief":        func() map[string]interface{} { a := maps.Clone(f.args); delete(a, "brief"); return a }(),
 		"unknown action":       f.withGrants(map[string]interface{}{"action": "mail.forward"}),
 		"uninstalled skill":    f.withGrants(map[string]interface{}{"action": "bank.transfer"}),
 		"always reviewed pay":  f.withGrants(map[string]interface{}{"action": "mail.pay"}),
@@ -310,7 +311,7 @@ func TestRoutineRunsPerformGrantedActionsWithoutAsking(t *testing.T) {
 
 	// The same send from the chat itself, not a routine run, still asks.
 	chat := f.run
-	chat.Context = cloneMap(chat.Context)
+	chat.Context = maps.Clone(chat.Context)
 	if grant, err := resolveRoutineGrant(t.Context(), f.store, f.store, f.owners, chat, &skill.BoundAction{Definition: &skill.Definition{ID: "mail"}, Action: skill.Action{Name: "send"}}, map[string]interface{}{"to": "kev@example.com"}); err != nil || grant != nil {
 		t.Fatalf("chat run used a routine grant: %#v %v", grant, err)
 	}

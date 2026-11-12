@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -566,7 +567,7 @@ func (w *ApprovalNotificationWorker) approvalConversation(
 }
 
 func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall) map[string]interface{} {
-	proposedAction := cloneMap(approval.ProposedAction)
+	proposedAction := maps.Clone(approval.ProposedAction)
 	payload := map[string]interface{}{
 		"id": approval.ID, "revision": approval.Revision, "actionCallId": approval.ActionCallID,
 		"risk": approval.Risk, "summary": approval.Summary, "status": approval.Status,

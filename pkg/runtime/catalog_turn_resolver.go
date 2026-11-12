@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -620,7 +621,7 @@ func projectCallableRunbookOperations(definition *runbook.Definition) []HostedRu
 		operations = append(operations, HostedRunbookOperation{
 			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 			Entrypoint: entrypoint, Name: definition.Name + " · " + entrypoint,
-			Description: contract.Description, InputSchema: cloneMap(contract.InputSchema), OutputSchema: cloneMap(contract.OutputSchema),
+			Description: contract.Description, InputSchema: maps.Clone(contract.InputSchema), OutputSchema: maps.Clone(contract.OutputSchema),
 		})
 	}
 	return operations

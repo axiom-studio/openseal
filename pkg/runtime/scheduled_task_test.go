@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -72,9 +73,9 @@ func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ..
 // withScheduleArgument returns a copy of create_task arguments whose
 // trigger.schedule sets key to value, or drops key when drop is true.
 func withScheduleArgument(args map[string]interface{}, key string, value interface{}, drop bool) map[string]interface{} {
-	result := cloneMap(args)
-	trigger := cloneMap(result["trigger"].(map[string]interface{}))
-	schedule := cloneMap(trigger["schedule"].(map[string]interface{}))
+	result := maps.Clone(args)
+	trigger := maps.Clone(result["trigger"].(map[string]interface{}))
+	schedule := maps.Clone(trigger["schedule"].(map[string]interface{}))
 	if drop {
 		delete(schedule, key)
 	} else {
@@ -222,7 +223,7 @@ func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion
 			b := *bound
 			binding := *bound.Binding
 			b.Binding = &binding
-			a := cloneMap(args)
+			a := maps.Clone(args)
 			switch change {
 			case "scope":
 				candidate.Scope.ID = "foreign"
@@ -284,7 +285,7 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 				})
 			}
 			for _, required := range []string{"title", "goal", "trigger", "brief"} {
-				candidate := cloneMap(args)
+				candidate := maps.Clone(args)
 				candidate[required] = nil
 				if err := catalog.ValidateInput(t.Context(), bound, candidate); err == nil {
 					t.Fatalf("required %s became nullable", required)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -22,7 +23,7 @@ func (KernelResolvedActionArgumentResolver) ResolveActionProposalArguments(_ con
 		return nil, false, nil
 	}
 	properties, _ := input.Bound.Action.InputSchema["properties"].(map[string]interface{})
-	resolved := cloneMap(input.Arguments)
+	resolved := maps.Clone(input.Arguments)
 	handled := false
 	for name, raw := range properties {
 		property, _ := raw.(map[string]interface{})

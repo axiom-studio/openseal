@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -260,20 +261,20 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		bound = &reviewed
 	}
 	history := newRunActionHistory(c.actions, req.Scope, run.ID)
-	arguments := cloneMap(req.Arguments)
+	arguments := maps.Clone(req.Arguments)
 	for _, validator := range c.validators {
 		resolver, ok := validator.(ActionProposalArgumentResolver)
 		if !ok || resolver == nil {
 			continue
 		}
 		resolved, handled, resolveErr := resolver.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{
-			Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), History: history, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+			Run: cloneAgentRun(run), Bound: bound, Arguments: maps.Clone(arguments), History: history, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		})
 		if resolveErr != nil {
 			return nil, proposalValidationError(ctx, ProposalRejectionToolArgumentsInvalid, resolveErr)
 		}
 		if handled {
-			arguments = cloneMap(resolved)
+			arguments = maps.Clone(resolved)
 		}
 	}
 	if err := c.catalog.ValidateInput(ctx, bound, arguments); err != nil {
@@ -284,12 +285,12 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		if validator == nil {
 			continue
 		}
-		preview, validateErr := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), History: history, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey)})
+		preview, validateErr := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: cloneAgentRun(run), Bound: bound, Arguments: maps.Clone(arguments), History: history, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey)})
 		if validateErr != nil {
 			return nil, proposalValidationError(ctx, ProposalRejectionNotAdmitted, validateErr)
 		}
 		if preview != nil {
-			proposedAction = cloneMap(preview)
+			proposedAction = maps.Clone(preview)
 		}
 	}
 	if bound.Action.Idempotency == skill.IdempotencyRequired && strings.TrimSpace(req.IdempotencyKey) == "" {
@@ -329,7 +330,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		return nil, fmt.Errorf("resolve routine grant: %w", err)
 	}
 	decision, err := c.policy.EvaluateAction(ctx, ActionPolicyInput{
-		Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), ExternalOperation: req.ExternalOperation, Actor: req.Actor, Summary: req.Summary,
+		Run: cloneAgentRun(run), Bound: bound, Arguments: maps.Clone(arguments), ExternalOperation: req.ExternalOperation, Actor: req.Actor, Summary: req.Summary,
 		ConversationID: conversationID, ApprovalMode: approvalMode, RoutineGrant: routineGrant,
 	})
 	if err != nil {
@@ -786,7 +787,7 @@ func (c *ActionCoordinator) enrichApprovalPreview(
 	evidenceRefs []string,
 	externalOperation *ExternalOperationIdentity,
 ) map[string]interface{} {
-	result := cloneMap(preview)
+	result := maps.Clone(preview)
 	if result == nil {
 		result = map[string]interface{}{}
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -114,7 +115,7 @@ func (v *TeamCreateActionValidator) ResolveActionProposalArguments(ctx context.C
 	if v == nil || v.builder == nil || input.Run == nil {
 		return nil, true, errors.New("team create validator is not configured")
 	}
-	arguments := cloneMap(input.Arguments)
+	arguments := maps.Clone(input.Arguments)
 	if arguments == nil {
 		arguments = map[string]interface{}{}
 	}

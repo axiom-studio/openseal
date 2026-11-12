@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -136,7 +137,7 @@ func (s *EmbedSessionService) OpenSession(ctx context.Context, req OpenEmbedSess
 	if installation.Status != EmbedInstallationActive {
 		return nil, ErrEmbedSessionUnauthorized
 	}
-	claims := cloneMap(req.VerifiedClaims)
+	claims := maps.Clone(req.VerifiedClaims)
 	if installation.Identity.Mode == EmbedIdentitySigned {
 		if len(claims) == 0 {
 			return nil, ErrEmbedAuthentication
@@ -229,7 +230,7 @@ func (s *EmbedSessionService) ResolveConversationSessionContext(ctx context.Cont
 	}
 	return map[string]interface{}{
 		sessionContextIDKey:             session.ID,
-		sessionContextVerifiedClaimsKey: cloneMap(session.VerifiedClaims),
+		sessionContextVerifiedClaimsKey: maps.Clone(session.VerifiedClaims),
 		"authority":                     map[string]interface{}{"actionGrants": grants, "maximumActionRisk": string(installation.Permissions.MaximumActionRisk)},
 	}, nil
 }

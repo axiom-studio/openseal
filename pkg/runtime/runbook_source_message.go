@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 )
 
@@ -12,7 +13,7 @@ type runbookMessageReader interface {
 }
 
 func forwardRunbookInvocation(invocation map[string]interface{}, sameAgent bool) map[string]interface{} {
-	forwarded := cloneMap(invocation)
+	forwarded := maps.Clone(invocation)
 	if !sameAgent {
 		delete(forwarded, "sourceMessage")
 	}

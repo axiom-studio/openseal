@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -125,7 +126,7 @@ func (f *ActionRunTerminalFinalizer) FinalizeRun(ctx context.Context, run *Agent
 			Revision: 1, CreatedAt: f.now().UTC(), UpdatedAt: f.now().UTC(),
 		}
 		output, err := f.dispatcher.DispatchAction(ctx, ActionDispatchInput{
-			Call: finalizerCall, Run: cloneAgentRun(run), Bound: finalizer, Arguments: cloneMap(arguments),
+			Call: finalizerCall, Run: cloneAgentRun(run), Bound: finalizer, Arguments: maps.Clone(arguments),
 		})
 		if err != nil {
 			return fmt.Errorf("execute finalizer %s for action %s: %w", finalizerName, call.ID, err)
@@ -183,5 +184,5 @@ func terminalFinalizerArguments(schema map[string]interface{}, call *ActionCall)
 }
 
 func cloneTerminalFinalizerValue(value interface{}) interface{} {
-	return cloneMap(map[string]interface{}{"value": value})["value"]
+	return maps.Clone(map[string]interface{}{"value": value})["value"]
 }

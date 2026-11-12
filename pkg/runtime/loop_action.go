@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -433,7 +434,7 @@ func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall
 			return GovernedToolOutcome{}, err
 		}
 		return GovernedToolOutcome{
-			State: ToolEntryCompleted, ActionCallID: current.ID, Output: cloneMap(output),
+			State: ToolEntryCompleted, ActionCallID: current.ID, Output: maps.Clone(output),
 			Result: governedJSONResult(ToolResultSucceeded, map[string]interface{}{"evidenceRef": GovernedEvidenceRef(current.ID), "output": output}),
 		}, nil
 	}
@@ -449,7 +450,7 @@ func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall
 	}
 	outcome := GovernedToolOutcome{State: state, Result: result, ActionCallID: current.ID}
 	if current.Status == ActionCallStatusSucceeded && current.DuplicateOfActionCallID == "" {
-		outcome.Output = cloneMap(current.Output)
+		outcome.Output = maps.Clone(current.Output)
 	}
 	if current.Status == ActionCallStatusDenied && current.Error == actionBudgetExhaustedReason {
 		outcome.BudgetExhausted = true

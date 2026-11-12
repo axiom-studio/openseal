@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -244,7 +245,7 @@ func delegationIdempotencyKey(runID, stepID string) string {
 // context, the delegation mode, an explicitly requested entrypoint, the
 // Runbook origin and the forwarded Runbook invocation.
 func delegationSharedContext(run *AgentRun, spec DelegationSpec) (map[string]interface{}, error) {
-	shared := cloneMap(spec.Context)
+	shared := maps.Clone(spec.Context)
 	if shared == nil {
 		shared = make(map[string]interface{})
 	}

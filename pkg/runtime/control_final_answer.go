@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -272,7 +273,7 @@ func WithFinalOutputProperties(tools []ModelStepTool, run *AgentRun, publisher F
 		if tool.Name != string(ControlToolFinalAnswer) {
 			continue
 		}
-		schema := cloneMap(tool.InputSchema)
+		schema := maps.Clone(tool.InputSchema)
 		properties := map[string]interface{}{}
 		if existing, ok := schema["properties"].(map[string]interface{}); ok {
 			for key, value := range existing {

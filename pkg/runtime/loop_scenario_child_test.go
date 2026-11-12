@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -153,7 +154,7 @@ func newChildFixture(t *testing.T, store KernelStore, opts ...loopOption) *child
 type childRunbookPreparer struct{ c *childFixture }
 
 func (p childRunbookPreparer) PrepareAcceptedRunExecution(_ context.Context, request *CreateAgentRunRequest) error {
-	request.Context = cloneMap(request.Context)
+	request.Context = maps.Clone(request.Context)
 	if request.Context == nil {
 		request.Context = map[string]interface{}{}
 	}

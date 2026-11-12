@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -547,12 +548,12 @@ func TestAgentBuilderTryAgentValidation(t *testing.T) {
 	if preview, err := fixture.propose(t, AgentActionTryAgent, base); err != nil || preview != nil {
 		t.Fatalf("try_agent preview=%#v err=%v", preview, err)
 	}
-	withModel := cloneMap(base)
+	withModel := maps.Clone(base)
 	withModel["model"] = "gpt-6-luna"
 	if _, err := fixture.propose(t, AgentActionTryAgent, withModel); err == nil || err.Error() != "model selection is unavailable here" {
 		t.Fatalf("try_agent model without host = %v", err)
 	}
-	secret := cloneMap(base)
+	secret := maps.Clone(base)
 	secret["message"] = "my password: hunter2-correct-horse"
 	if _, err := fixture.propose(t, AgentActionTryAgent, secret); err == nil {
 		t.Fatal("try_agent accepted a secret in the message")

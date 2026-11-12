@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -54,7 +55,7 @@ func (f *loopStoreFixture) proposeLoopApproval(id string, opts loopApprovalOptio
 	call.Status, call.ApprovalID = ActionCallStatusWaitingApproval, "approval-"+id
 	call.InvocationDigest = ComputeActionInvocationDigest(call)
 	call.SemanticDigest = ComputeActionSemanticDigest(call)
-	proposed := map[string]interface{}{"skillId": call.SkillID, "action": call.Action, "arguments": cloneMap(call.Arguments)}
+	proposed := map[string]interface{}{"skillId": call.SkillID, "action": call.Action, "arguments": maps.Clone(call.Arguments)}
 	if opts.alwaysReview {
 		proposed["review"] = "always"
 	}

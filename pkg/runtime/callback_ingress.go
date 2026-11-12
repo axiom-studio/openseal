@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -59,7 +60,7 @@ func (e NormalizedCallbackEvent) envelope(registration *CallbackRegistration) Ev
 	return EventEnvelope{
 		ID: e.ID, Scope: registration.Scope, Type: e.Type, Source: e.Source,
 		Subject: e.Subject, Severity: e.Severity, OccurredAt: e.OccurredAt,
-		Attributes: cloneMap(e.Attributes), Payload: cloneMap(e.Payload),
+		Attributes: maps.Clone(e.Attributes), Payload: maps.Clone(e.Payload),
 		Actor: ActivityActor{Type: "callback", ID: registration.ID},
 	}
 }

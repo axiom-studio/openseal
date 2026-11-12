@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -17,7 +18,7 @@ func (f fixedActionCalls) GetActionCall(_ context.Context, _ Scope, id string) (
 		return nil, ErrActionNotFound
 	}
 	cloned := *call
-	cloned.Output = cloneMap(call.Output)
+	cloned.Output = maps.Clone(call.Output)
 	return &cloned, nil
 }
 

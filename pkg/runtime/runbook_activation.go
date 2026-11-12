@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -250,7 +251,7 @@ func startActivationOccurrence(
 	visibility ActivityVisibility,
 	preparer AcceptedRunExecutionPreparer,
 ) (*AgentRunCommandResult, error) {
-	contextValues := cloneMap(activation.Input)
+	contextValues := maps.Clone(activation.Input)
 	if contextValues == nil {
 		contextValues = make(map[string]interface{})
 	}
@@ -263,7 +264,7 @@ func startActivationOccurrence(
 		Scope: activation.Scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
 		ActingUser: activationActingUser(activation), ConcurrencyKey: "runbook:" + activation.ID,
 		Goal: activationGoal(activation, objective), Source: source, Priority: objective.Priority, Context: contextValues,
-		Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
+		Policy: maps.Clone(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
 		IdempotencyKey: idempotencyKey, Actor: actor, Visibility: visibility,
 	}
 	if activation.Task == nil {
@@ -402,7 +403,7 @@ func (s *RunbookActivationService) Create(ctx context.Context, request CreateRun
 		Task: cloneScheduledAgentTask(request.Task), ID: id, Scope: request.Scope, Owner: request.Owner, ObjectiveID: strings.TrimSpace(request.ObjectiveID),
 		AssignedAgentID: strings.TrimSpace(request.AssignedAgentID), DefinitionID: strings.TrimSpace(request.DefinitionID),
 		DefinitionVersion: strings.TrimSpace(request.DefinitionVersion), TriggerID: strings.TrimSpace(request.TriggerID), Trigger: request.Trigger,
-		Input: cloneMap(request.Input), Policy: cloneMap(request.Policy), Budget: cloneBudgetPolicy(request.Budget),
+		Input: maps.Clone(request.Input), Policy: maps.Clone(request.Policy), Budget: cloneBudgetPolicy(request.Budget),
 		MaximumConcurrent: request.MaximumConcurrent, Status: status, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if key != "" {

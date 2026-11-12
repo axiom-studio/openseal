@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"strconv"
@@ -98,7 +99,7 @@ func (p *RunbookStepProducer) Produce(ctx context.Context, in StepInput) (out St
 	if p == nil || p.definition == nil || in.Run == nil || in.Step == nil {
 		return StepOutput{}, errors.New("runbook step requires a definition, Run, and step")
 	}
-	checkpoint := cloneMap(in.Run.Checkpoint)
+	checkpoint := maps.Clone(in.Run.Checkpoint)
 	if checkpoint == nil {
 		checkpoint = map[string]interface{}{}
 	}
@@ -529,7 +530,7 @@ const runbookActionResultLimit = 64 << 10
 // the ActionCall output without its model media (screenshots and other
 // base64 payloads), compacted to runbookActionResultLimit when it is larger.
 func runbookActionResult(output map[string]interface{}) map[string]interface{} {
-	result := cloneMap(output)
+	result := maps.Clone(output)
 	delete(result, "modelMedia")
 	if len(result) == 0 {
 		return map[string]interface{}{}
@@ -702,7 +703,7 @@ func (p *RunbookStepProducer) consumeForkResult(checkpoint map[string]interface{
 			continue
 		}
 		result, _ := dependency["result"].(map[string]interface{})
-		results[id] = cloneMap(result)
+		results[id] = maps.Clone(result)
 		branchCheckpoint, _ := result["checkpoint"].(map[string]interface{})
 		for _, key := range []string{"state", "steps"} {
 			if branchValues, ok := branchCheckpoint[key].(map[string]interface{}); ok {
@@ -760,12 +761,12 @@ func (p *RunbookStepProducer) forkSpec(checkpoint map[string]interface{}, state 
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	source := cloneMap(checkpoint)
+	source := maps.Clone(checkpoint)
 	encodeRunbookState(source, state)
 	groupID := stableForkIdentifier(runID, state.Current, "group")
 	branches := make([]RunForkBranch, 0, len(names))
 	for _, name := range names {
-		branchCheckpoint := cloneMap(source)
+		branchCheckpoint := maps.Clone(source)
 		// Each child Run owns its own node trace. Parent history remains linked
 		// through the durable dependency rather than copied into every branch.
 		delete(branchCheckpoint, runbookTraceCheckpointKey)
@@ -881,7 +882,7 @@ func (p *RunbookStepProducer) consumeDelegationResult(checkpoint map[string]inte
 		output, _ = result["output"].(map[string]interface{})
 	}
 	step := p.definition.Steps[stepID]
-	if err := setRunbookPointer(checkpoint, string(step.Delegate.ResultPath), cloneMap(output)); err != nil {
+	if err := setRunbookPointer(checkpoint, string(step.Delegate.ResultPath), maps.Clone(output)); err != nil {
 		return false, "", stepError(stepID, err)
 	}
 	state.PendingDelegation, state.PendingCall = "", ""
@@ -967,7 +968,7 @@ func runbookKernelCall(cc ControlContext, pending func(runbookExecutionState) st
 	if cc.Run == nil || cc.Entry == nil {
 		return nil, nil, state, errors.New("runbook kernel calls need their Run and tool entry")
 	}
-	checkpoint := cloneMap(cc.Run.Checkpoint)
+	checkpoint := maps.Clone(cc.Run.Checkpoint)
 	state, err := decodeRunbookState(checkpoint)
 	if err != nil {
 		return nil, nil, state, err
@@ -1044,7 +1045,7 @@ func initializeRunbookInput(checkpoint map[string]interface{}, run *AgentRun) {
 	if _, ok := checkpoint["input"]; ok {
 		return
 	}
-	input := cloneMap(run.Context)
+	input := maps.Clone(run.Context)
 	if input == nil {
 		input = map[string]interface{}{}
 	}

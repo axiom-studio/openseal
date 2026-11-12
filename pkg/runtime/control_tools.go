@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"time"
 )
 
@@ -91,7 +92,7 @@ type ControlToolSpec struct {
 func (s ControlToolSpec) ModelStepTool() ModelStepTool {
 	return ModelStepTool{
 		Name: string(s.Name), Description: s.Description,
-		InputSchema: cloneMap(s.InputSchema), Group: ModelStepToolHarness,
+		InputSchema: maps.Clone(s.InputSchema), Group: ModelStepToolHarness,
 	}
 }
 

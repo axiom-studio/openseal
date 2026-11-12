@@ -3,6 +3,7 @@ package runtime
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -43,5 +44,5 @@ func resolveTurnActionInput(checkpoint map[string]interface{}, reference string)
 	if !ok {
 		return nil, fmt.Errorf("action inputRef %q must resolve to an object", reference)
 	}
-	return cloneMap(arguments), nil
+	return maps.Clone(arguments), nil
 }

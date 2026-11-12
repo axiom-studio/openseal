@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -308,7 +309,7 @@ func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input Ac
 	}
 	// Removals an earlier attempt already made are done; the rest must
 	// still be enabled bindings of the target.
-	arguments := cloneMap(input.Arguments)
+	arguments := maps.Clone(input.Arguments)
 	pendingRemovals := make([]interface{}, 0, len(args.RemoveSkillBindingIDs))
 	for _, bindingID := range args.RemoveSkillBindingIDs {
 		bindingID = strings.TrimSpace(bindingID)

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"maps"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *test
 	source, _, _, _ := settledWorkerTaskFixture(t, kernel)
 	child, err := NewPortfolioService(kernel).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: source.Scope, Owner: source.Owner, Kind: RunKindAgentWork, ParentRunID: source.ID, AssignedAgentID: source.AssignedAgentID,
-		Goal: "Ordinary delegated operation", Source: RunSourceFork, Context: cloneMap(source.Context),
+		Goal: "Ordinary delegated operation", Source: RunSourceFork, Context: maps.Clone(source.Context),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +174,7 @@ func TestCatalogConversationTaskContextDoesNotPrioritizeForkRoot(t *testing.T) {
 	root := admitted[0].WorkRun
 	child, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: root.Scope, Owner: root.Owner, Kind: RunKindAgentWork, ParentRunID: root.ID, AssignedAgentID: root.AssignedAgentID,
-		Goal: "Complete this fork's partial goal", Source: RunSourceFork, Context: cloneMap(root.Context),
+		Goal: "Complete this fork's partial goal", Source: RunSourceFork, Context: maps.Clone(root.Context),
 	})
 	if err != nil {
 		t.Fatal(err)

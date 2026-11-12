@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"maps"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -83,7 +84,7 @@ func finishOwnedDependencyRepairChild(t *testing.T, fixture *dependencyRetiremen
 	if err != nil || child == nil {
 		t.Fatalf("get child = %#v, %v", child, err)
 	}
-	checkpoint := cloneMap(child.Checkpoint)
+	checkpoint := maps.Clone(child.Checkpoint)
 	checkpoint["branch"] = branch
 	checkpoint["committed"] = "terminal"
 	service := NewRunActivityService(fixture.store, fixture.store)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -26,7 +27,7 @@ func (p *acceptedCreationTestPreparer) PrepareAcceptedRunExecution(_ context.Con
 	if p.err != nil {
 		return p.err
 	}
-	request.Context = cloneMap(request.Context)
+	request.Context = maps.Clone(request.Context)
 	if request.Context == nil {
 		request.Context = map[string]interface{}{}
 	}

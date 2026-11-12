@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -279,7 +280,7 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 	if err != nil || delayed["replayed"] != true || delayed["activation"].(*RunbookActivation).ID != replacement.ID {
 		t.Fatalf("replacement from distinct ActionCall did not converge = %#v err=%v", delayed, err)
 	}
-	conflicting := cloneMap(resolved)
+	conflicting := maps.Clone(resolved)
 	conflicting["maximumOccurrences"] = float64(6)
 	if _, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Call: &ActionCall{ID: "conflicting-replacement", Scope: scope, RunID: conversationRun.ID, DeploymentID: owner.ID}, Run: conversationRun, Bound: bound, Arguments: conflicting}); !errors.Is(err, ErrRunbookActivationIdempotency) {
 		t.Fatalf("conflicting replacement error = %v, want %v", err, ErrRunbookActivationIdempotency)

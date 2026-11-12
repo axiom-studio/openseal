@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -182,7 +183,7 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 	if !isRunbookAction(input.Bound) {
 		return nil, false, nil
 	}
-	arguments := cloneMap(input.Arguments)
+	arguments := maps.Clone(input.Arguments)
 	if input.Bound.Action.Name == RunbookActionCreateTask {
 		if err := resolveRoutineBriefArguments(ctx, v.grantCatalog, v.ownerAddresses, input.Run, arguments, scheduledTaskCreatesEventRoutine(arguments)); err != nil {
 			return nil, true, err

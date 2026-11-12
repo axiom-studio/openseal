@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -255,7 +256,7 @@ func (c *ActionCoordinator) FinishNestedHostAction(ctx context.Context, outcome 
 	} else if !outcome.Performed {
 		executionErr = errNestedHostActionNotDone
 	}
-	output := cloneMap(outcome.Output)
+	output := maps.Clone(outcome.Output)
 	if executionErr != nil {
 		output = nil
 	}

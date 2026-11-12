@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"strings"
@@ -365,8 +366,8 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		Requester: req.Requester, Recipient: req.Recipient, SourceRunID: source.ID, ObjectiveID: source.ObjectiveID,
 		DependencyGroupID: strings.TrimSpace(req.DependencyGroupID), DependencyID: strings.TrimSpace(req.DependencyID),
 		Goal: strings.TrimSpace(req.Goal), Instructions: strings.TrimSpace(req.Instructions), SemanticRole: strings.TrimSpace(req.SemanticRole),
-		AcceptanceCriteria: cloneMap(req.AcceptanceCriteria), ArtifactRequirements: cloneArtifactRequirements(req.ArtifactRequirements),
-		SharedContext: cloneMap(req.SharedContext), ChildCheckpoint: cloneMap(req.ChildCheckpoint),
+		AcceptanceCriteria: maps.Clone(req.AcceptanceCriteria), ArtifactRequirements: cloneArtifactRequirements(req.ArtifactRequirements),
+		SharedContext: maps.Clone(req.SharedContext), ChildCheckpoint: maps.Clone(req.ChildCheckpoint),
 		AcceptancePolicy: acceptancePolicy, DelegationPolicy: cloneAgentRequestDelegationPolicy(delegationPolicy),
 		ConversationRefs: append([]string(nil), req.ConversationRefs...),
 		BudgetAllocation: cloneBudgetPolicy(req.BudgetAllocation),
@@ -894,7 +895,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 		updatedRequest.Status = AgentRequestStatusCompletionReview
 	}
 	updatedRequest.CompletionSummary = strings.TrimSpace(req.Summary)
-	updatedRequest.AcceptanceEvidence = cloneMap(req.AcceptanceEvidence)
+	updatedRequest.AcceptanceEvidence = maps.Clone(req.AcceptanceEvidence)
 	updatedRequest.Artifacts = artifacts
 	updatedRequest.CompletionKey = strings.TrimSpace(req.CompletionKey)
 	updatedRequest.CompletionSubmittedAt = &now
@@ -905,7 +906,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 		updatedRequest.ResolvedAt = &now
 	}
 
-	sharedChildOutput := cloneMap(child.Output)
+	sharedChildOutput := maps.Clone(child.Output)
 	updatedChild := completedCollaborationChildRun(child, updatedRequest, now)
 	var updatedSource *AgentRun
 	var dependencyResolution *RunDependencyResolutionRecord
@@ -921,7 +922,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 			ExpectedDependencyRevision: edge.Revision, State: RunDependencyStateSatisfied,
 			Result: map[string]interface{}{
 				"requestId": updatedRequest.ID, "childRunId": updatedRequest.ChildRunID,
-				"summary": updatedRequest.CompletionSummary, "acceptanceEvidence": cloneMap(updatedRequest.AcceptanceEvidence),
+				"summary": updatedRequest.CompletionSummary, "acceptanceEvidence": maps.Clone(updatedRequest.AcceptanceEvidence),
 				"output": sharedChildOutput,
 			},
 			Artifacts: updatedRequest.Artifacts, Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID},
@@ -1105,9 +1106,9 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 	if approvals >= quorum {
 		updatedRequest.Status = AgentRequestStatusCompleted
 		updatedRequest.CompletedAt = &now
-		updatedChild.Output = collaborationCompletionOutput(updatedChild.Output, updatedRequest, cloneMap(child.Output))
+		updatedChild.Output = collaborationCompletionOutput(updatedChild.Output, updatedRequest, maps.Clone(child.Output))
 		if updatedRequest.DependencyGroupID == "" {
-			updatedSource, err = completedCollaborationSourceRun(source, updatedRequest, cloneMap(child.Output), now)
+			updatedSource, err = completedCollaborationSourceRun(source, updatedRequest, maps.Clone(child.Output), now)
 		}
 	} else {
 		updatedRequest.Status = AgentRequestStatusFailed
@@ -1138,7 +1139,7 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 			Result: map[string]interface{}{
 				"requestId": updatedRequest.ID, "childRunId": updatedRequest.ChildRunID,
 				"summary": updatedRequest.CompletionSummary, "review": summary,
-				"acceptanceEvidence": cloneMap(updatedRequest.AcceptanceEvidence), "output": cloneMap(child.Output),
+				"acceptanceEvidence": maps.Clone(updatedRequest.AcceptanceEvidence), "output": maps.Clone(child.Output),
 			},
 			Error: updatedRequest.ResolutionReason, Artifacts: updatedRequest.Artifacts,
 			Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: ActivityVisibilityTeam, OccurredAt: now,
@@ -1202,7 +1203,7 @@ func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Cont
 			if !present {
 				return &AgentRequestResult{Request: request, Child: child}, nil
 			}
-			evidence := map[string]interface{}{"runOutput": cloneMap(child.Output)}
+			evidence := map[string]interface{}{"runOutput": maps.Clone(child.Output)}
 			return s.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
 				Scope: child.Scope, RequestID: request.ID, ExpectedRevision: request.Revision, ExpectedChildRevision: child.Revision,
 				Principal: request.Recipient, Actor: request.Recipient, Summary: terminalChildSummary(child.Output),
@@ -1211,7 +1212,7 @@ func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Cont
 		}
 		evidence := map[string]interface{}{}
 		if len(request.AcceptanceCriteria) > 0 {
-			evidence["runOutput"] = cloneMap(child.Output)
+			evidence["runOutput"] = maps.Clone(child.Output)
 			if len(child.Output) == 0 {
 				evidence["runStatus"] = string(child.Status)
 			}
@@ -1372,7 +1373,7 @@ func (s *CollaborationService) ListAgentRequests(ctx context.Context, filter Age
 func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now time.Time, id string) *AgentRun {
 	owner := collaborationChildOwner(source, request)
 	assignedAgent := request.AssignedAgentID
-	context := cloneMap(request.SharedContext)
+	context := maps.Clone(request.SharedContext)
 	if context == nil {
 		context = make(map[string]interface{})
 	}
@@ -1380,7 +1381,7 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 	context["collaboration"] = map[string]interface{}{
 		"requestId": request.ID, "kind": request.Kind, "requester": request.Requester,
 		"recipient": request.Recipient, "semanticRole": request.SemanticRole,
-		"acceptanceCriteria": cloneMap(request.AcceptanceCriteria), "artifactRequirements": cloneArtifactRequirements(request.ArtifactRequirements),
+		"acceptanceCriteria": maps.Clone(request.AcceptanceCriteria), "artifactRequirements": cloneArtifactRequirements(request.ArtifactRequirements),
 	}
 	sourceKind := RunSourceRequest
 	if request.Kind == AgentRequestKindHandoff {
@@ -1397,8 +1398,8 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 		Owner: owner, AssignedAgentID: assignedAgent, ActingUser: source.ActingUser, ConcurrencyKey: lane,
 		Goal: request.Goal, Source: sourceKind, Status: AgentRunStatusQueued,
 		Priority: source.Priority, AvailableAt: now, QueueEnteredAt: now, Context: context,
-		Checkpoint: cloneMap(request.ChildCheckpoint), Budget: cloneBudgetPolicy(request.BudgetAllocation),
-		Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now, Engine: RunEngineLoop,
+		Checkpoint: maps.Clone(request.ChildCheckpoint), Budget: cloneBudgetPolicy(request.BudgetAllocation),
+		Policy: maps.Clone(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now, Engine: RunEngineLoop,
 	}
 	if child.Budget != nil {
 		child.BudgetState = BudgetStateActive
@@ -1712,7 +1713,7 @@ func cloneWakeCondition(condition *WakeCondition) *WakeCondition {
 		return nil
 	}
 	cloned := *condition
-	cloned.Predicate = cloneMap(condition.Predicate)
+	cloned.Predicate = maps.Clone(condition.Predicate)
 	if condition.WakeAt != nil {
 		wakeAt := *condition.WakeAt
 		cloned.WakeAt = &wakeAt
@@ -1766,7 +1767,7 @@ func sourceResumingAfterAgentRequestDecision(source *AgentRun, request *AgentReq
 		updated.Output = make(map[string]interface{})
 	}
 	results, _ := updated.Output["collaborationResults"].(map[string]interface{})
-	results = cloneMap(results)
+	results = maps.Clone(results)
 	if results == nil {
 		results = make(map[string]interface{})
 	}
@@ -1802,7 +1803,7 @@ func acceptedSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (
 
 func completedCollaborationChildRun(child *AgentRun, request *AgentRequest, now time.Time) *AgentRun {
 	updated := cloneAgentRun(child)
-	sharedOutput := cloneMap(updated.Output)
+	sharedOutput := maps.Clone(updated.Output)
 	updated.Status = AgentRunStatusCompleted
 	updated.Revision++
 	updated.UpdatedAt = now
@@ -1860,7 +1861,7 @@ func failedCollaborationSourceRun(source *AgentRun, request *AgentRequest, now t
 }
 
 func collaborationCompletionOutput(existing map[string]interface{}, request *AgentRequest, childOutput map[string]interface{}) map[string]interface{} {
-	result := cloneMap(existing)
+	result := maps.Clone(existing)
 	if result == nil {
 		result = make(map[string]interface{})
 	}
@@ -1873,15 +1874,15 @@ func collaborationCompletionOutput(existing map[string]interface{}, request *Age
 	results[request.ID] = map[string]interface{}{
 		"requestId": request.ID, "kind": request.Kind, "childRunId": request.ChildRunID,
 		"status":  request.Status,
-		"summary": request.CompletionSummary, "acceptanceEvidence": cloneMap(request.AcceptanceEvidence),
-		"artifacts": cloneArtifactReferences(request.Artifacts), "output": cloneMap(childOutput),
+		"summary": request.CompletionSummary, "acceptanceEvidence": maps.Clone(request.AcceptanceEvidence),
+		"artifacts": cloneArtifactReferences(request.Artifacts), "output": maps.Clone(childOutput),
 	}
 	result["collaborationResults"] = results
 	return result
 }
 
 func collaborationResolutionOutput(existing map[string]interface{}, request *AgentRequest) map[string]interface{} {
-	result := cloneMap(existing)
+	result := maps.Clone(existing)
 	if result == nil {
 		result = make(map[string]interface{})
 	}
@@ -2018,7 +2019,7 @@ func (s *CollaborationService) resolveArtifactReferences(ctx context.Context, sc
 		resolved = append(resolved, ArtifactReference{
 			ID: artifact.ID, Version: artifact.Version, RequirementName: strings.TrimSpace(reference.RequirementName),
 			Name: artifact.Name, Type: artifact.Type, MediaType: artifact.MediaType, ContentRef: artifact.ContentRef,
-			Digest: artifact.Digest, SizeBytes: artifact.SizeBytes, Metadata: cloneMap(artifact.Metadata), EvidenceRefs: evidenceRefs,
+			Digest: artifact.Digest, SizeBytes: artifact.SizeBytes, Metadata: maps.Clone(artifact.Metadata), EvidenceRefs: evidenceRefs,
 		})
 	}
 	if err := validateArtifactReferences(requirements, resolved); err != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -168,7 +169,7 @@ func producerToolResult(ctx context.Context, calls ActionCallReader, run *AgentR
 		return nil, nil, fmt.Errorf("action call %s of tool call %s is still %s", call.ID, toolCallID, call.Status)
 	}
 	if call.Status == ActionCallStatusSucceeded {
-		result.Output = cloneMap(call.Output)
+		result.Output = maps.Clone(call.Output)
 	}
 	return result, call, nil
 }

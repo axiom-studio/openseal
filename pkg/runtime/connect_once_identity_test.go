@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"errors"
+	"maps"
 	"testing"
 	"time"
 
@@ -165,7 +166,7 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	dispatch := func(as *AgentRun, b *skill.BoundAction, arguments map[string]interface{}, callID string) (map[string]interface{}, error) {
 		return dispatcher.DispatchAction(ctx, ActionDispatchInput{Run: as, Bound: b, Call: &ActionCall{ID: callID, Scope: as.Scope, RunID: as.ID, DeploymentID: as.AssignedAgentID, IdempotencyKey: callID}, Arguments: arguments})
 	}
-	proposed := cloneMap(args)
+	proposed := maps.Clone(args)
 	proposed["script"] = map[string]interface{}{"path": "scripts/weekly.py", "command": "python3 scripts/weekly.py"}
 	resolved, _, err := validator.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{Run: run, Bound: bound, Arguments: proposed})
 	if err != nil {
@@ -182,7 +183,7 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 
 	// Someone else in the same chat.
 	intruder, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: run.Scope, Kind: RunKindConversation, Owner: run.Owner, AssignedAgentID: run.AssignedAgentID,
-		ActingUser: "intruder", Goal: "Handle another request", Source: RunSourceChat, Context: cloneMap(run.Context), IdempotencyKey: "intruder"})
+		ActingUser: "intruder", Goal: "Handle another request", Source: RunSourceChat, Context: maps.Clone(run.Context), IdempotencyKey: "intruder"})
 	if err != nil {
 		t.Fatal(err)
 	}

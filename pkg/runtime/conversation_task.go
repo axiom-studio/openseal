@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -263,7 +264,7 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 		actingUser = task.AuthenticatedActor.ID
 	}
 	workRequest := CreateAgentRunRequest{Scope: req.Scope, Kind: RunKindAgentWork, Owner: source.Owner, AssignedAgentID: source.AssignedAgentID,
-		ActingUser: actingUser, ConcurrencyKey: "task:" + id, Goal: req.Goal, SessionID: RunAgentSessionID(req.Scope, workID), Source: RunSourceChat, Priority: source.Priority, Deadline: source.Deadline, Budget: budget, Policy: cloneMap(source.Policy),
+		ActingUser: actingUser, ConcurrencyKey: "task:" + id, Goal: req.Goal, SessionID: RunAgentSessionID(req.Scope, workID), Source: RunSourceChat, Priority: source.Priority, Deadline: source.Deadline, Budget: budget, Policy: maps.Clone(source.Policy),
 		Context: map[string]interface{}{ConversationTaskContextKey: id, conversationRunContextConversationID: conversation.ID,
 			conversationRunContextTriggerID: message.ID, "threadRootMessageId": threadID, runReportingContextRootRunID: workID,
 			runReportingContextMilestones: []interface{}{"completed", "failed"}}}

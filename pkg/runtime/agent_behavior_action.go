@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -215,7 +216,7 @@ func (v *AgentBehaviorActionValidator) ResolveActionProposalArguments(ctx contex
 	if !isAgentMutationAction(input.Bound) {
 		return nil, false, nil
 	}
-	arguments := cloneMap(input.Arguments)
+	arguments := maps.Clone(input.Arguments)
 	if v == nil || v.agents == nil || input.Run == nil {
 		return nil, true, errors.New("agent behavior action validator is not configured")
 	}

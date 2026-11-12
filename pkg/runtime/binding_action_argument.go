@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -31,7 +32,7 @@ func (BindingActionArgumentResolver) ResolveActionProposalArguments(_ context.Co
 	if len(bindings) == 0 {
 		return nil, false, nil
 	}
-	resolved := cloneMap(input.Arguments)
+	resolved := maps.Clone(input.Arguments)
 	for name, binding := range bindings {
 		value, err := resolveBindingActionArgument(input.Run, binding)
 		if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 
@@ -140,7 +141,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 		SkillID:               input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
 		SkillSourceIdentity: sourceIdentity, SkillDefinitionDigest: definitionDigest,
 		Action: input.Bound.Action.Name, Arguments: arguments, FileArguments: fileinput.Properties(input.Bound.Action.InputSchema),
-		FileReferences: fileReferences, OutputSchema: cloneMap(input.Bound.Action.OutputSchema), BindingConfig: cloneMap(input.Bound.Binding.Config), Credentials: input.Credentials,
+		FileReferences: fileReferences, OutputSchema: maps.Clone(input.Bound.Action.OutputSchema), BindingConfig: maps.Clone(input.Bound.Binding.Config), Credentials: input.Credentials,
 		CredentialLease: cloneSignedActionCredentialLease(input.CredentialLease), CredentialReferences: cloneCredentialReferences(input.CredentialReferences),
 	}
 	if input.Call != nil {

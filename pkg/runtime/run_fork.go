@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"time"
@@ -290,7 +291,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		childID := stableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
 		assignedAgentID := strings.TrimSpace(branch.AssignedAgentID)
 		implicitAgent := assignedAgentID == ""
-		childContext := cloneMap(branch.Context)
+		childContext := maps.Clone(branch.Context)
 		var childPlan map[string]interface{}
 		if assignedAgentID == "" {
 			assignedAgentID = source.AssignedAgentID
@@ -301,11 +302,11 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			if childContext, overlayErr = overlayForkBranchContext(source.Context, branch.Context); overlayErr != nil {
 				return nil, fmt.Errorf("branch %s: %w", branch.ID, overlayErr)
 			}
-			childPlan = cloneMap(source.Plan)
+			childPlan = maps.Clone(source.Plan)
 		}
 		if sourceTask != nil && assignedAgentID == source.AssignedAgentID {
-			childContext = cloneMap(source.Context)
-			childPlan = cloneMap(source.Plan)
+			childContext = maps.Clone(source.Context)
+			childPlan = maps.Clone(source.Plan)
 			if childContext == nil {
 				childContext = map[string]interface{}{}
 			}
@@ -332,7 +333,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			childContext[DelegationModeContextKey] = string(branch.Mode)
 		}
 		childContext = inheritRoutineEventBatch(source, childContext)
-		childCheckpoint := cloneMap(branch.Checkpoint)
+		childCheckpoint := maps.Clone(branch.Checkpoint)
 		if childCheckpoint == nil {
 			childCheckpoint = map[string]interface{}{}
 		}
@@ -371,7 +372,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			ConcurrencyKey: "fork:" + groupID + ":" + branch.ID,
 			Goal:           strings.TrimSpace(branch.Goal), Source: RunSourceFork, Priority: source.Priority, Deadline: deadline,
 			Context: childContext, Plan: childPlan, Checkpoint: childCheckpoint,
-			Budget: cloneBudgetPolicy(branch.Budget), Policy: cloneMap(source.Policy),
+			Budget: cloneBudgetPolicy(branch.Budget), Policy: maps.Clone(source.Policy),
 		}
 		if sessionFork != nil {
 			childRequest.SessionID = RunAgentSessionID(source.Scope, childID)
@@ -418,7 +419,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 	}
 	updatedSource.Status = AgentRunStatusWaitingForDependency
 	updatedSource.WakeCondition = &WakeCondition{Type: "run_dependencies", Reference: group.ID}
-	updatedSource.Checkpoint = cloneMap(req.ContinuationCheckpoint)
+	updatedSource.Checkpoint = maps.Clone(req.ContinuationCheckpoint)
 	updatedSource.Revision++
 	updatedSource.UpdatedAt = now
 	updatedSource.LeaseOwner = ""
@@ -463,7 +464,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 // source Agent: the source's context plus the branch's own data. A branch
 // cannot replace a lineage key of its source.
 func overlayForkBranchContext(source, branch map[string]interface{}) (map[string]interface{}, error) {
-	out := cloneMap(source)
+	out := maps.Clone(source)
 	if len(branch) == 0 {
 		return out, nil
 	}
@@ -695,7 +696,7 @@ func (c *RunForkCoordinator) completeChild(ctx context.Context, child *AgentRun,
 	result, err := NewDependencyCoordinator(c.store).ResolveRunDependency(ctx, ResolveRunDependencyRequest{
 		Scope: child.Scope, GroupID: group.ID, DependencyID: edge.ID, ExpectedDependencyRevision: edge.Revision,
 		State: state, Result: map[string]interface{}{
-			"branchId": dependencyID, "checkpoint": cloneMap(child.Checkpoint), "output": cloneMap(child.Output),
+			"branchId": dependencyID, "checkpoint": maps.Clone(child.Checkpoint), "output": maps.Clone(child.Output),
 		}, Error: errorMessage, Actor: actor, Visibility: ActivityVisibilityScope,
 	})
 	if err != nil {

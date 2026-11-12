@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -219,7 +220,7 @@ func (f *skillSetupTaskWaitFixture) wait(t *testing.T) *AgentRun {
 	if err != nil || current == nil {
 		t.Fatalf("load setup task run: %#v %v", current, err)
 	}
-	checkpoint := cloneMap(current.Checkpoint)
+	checkpoint := maps.Clone(current.Checkpoint)
 	if checkpoint == nil {
 		checkpoint = map[string]interface{}{}
 	}
@@ -633,7 +634,7 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 			t.Fatal("copied conversation context granted task setup access")
 		}
 		if _, err := dispatcher.requestSkillSetup(t.Context(), ActionDispatchInput{
-			Call: &ActionCall{ID: "model-invented-action", Scope: run.Scope, RunID: run.ID}, Arguments: cloneMap(f.call.Arguments),
+			Call: &ActionCall{ID: "model-invented-action", Scope: run.Scope, RunID: run.ID}, Arguments: maps.Clone(f.call.Arguments),
 		}, run, run.AssignedAgentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID}); err == nil {
 			t.Fatal("unpersisted action was allowed to create a task setup request")
 		}

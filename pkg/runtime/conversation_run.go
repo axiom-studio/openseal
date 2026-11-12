@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -801,7 +802,7 @@ type conversationOutputProducer struct {
 func (conversationOutputProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
 func (p conversationOutputProducer) Produce(context.Context, StepInput) (StepOutput, error) {
-	return StepOutput{Final: &LoopFinal{Status: AgentRunStatusCompleted, Output: cloneMap(p.output)}}, nil
+	return StepOutput{Final: &LoopFinal{Status: AgentRunStatusCompleted, Output: maps.Clone(p.output)}}, nil
 }
 
 // teamRoutingStepProducer is a Team channel's routing Run (section 05 §2): one

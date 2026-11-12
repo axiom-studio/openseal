@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func TestAgentBehaviorAmendmentSchemaRequiresAnActualChange(t *testing.T) {
 	if err := runbook.ValidateInterfaceInput(action.InputSchema, controlOnly); err == nil {
 		t.Fatal("amend_behavior accepted rationale without a changed behavior field")
 	}
-	withChange := cloneMap(controlOnly)
+	withChange := maps.Clone(controlOnly)
 	withChange["personality"] = "Utah-native engineer with Black heritage."
 	if err := runbook.ValidateInterfaceInput(action.InputSchema, withChange); err != nil {
 		t.Fatalf("amend_behavior rejected an actual personality change: %v", err)
@@ -694,7 +695,7 @@ func TestAgentChannelActionRefusesRemovedTrigger(t *testing.T) {
 	base := map[string]interface{}{"endpointId": "slack-channel", "replyMode": "thread", "rationale": "Reply in threads"}
 	for name, trigger := range map[string]interface{}{"named": "on-message", "padded": "  on-message ", "not a string": 7.0} {
 		t.Run(name, func(t *testing.T) {
-			arguments := cloneMap(base)
+			arguments := maps.Clone(base)
 			arguments["trigger"] = trigger
 			if _, err := withoutRemovedChannelTrigger(arguments); !errors.Is(err, ErrChannelTriggerRemoved) || err.Error() != "Channel triggers were removed" {
 				t.Fatalf("trigger %#v: err = %v", trigger, err)
@@ -704,7 +705,7 @@ func TestAgentChannelActionRefusesRemovedTrigger(t *testing.T) {
 			}
 		})
 	}
-	arguments := cloneMap(base)
+	arguments := maps.Clone(base)
 	arguments["trigger"] = " "
 	kept, err := withoutRemovedChannelTrigger(arguments)
 	if err != nil || len(kept) != len(base) || kept["trigger"] != nil || arguments["trigger"] != " " {

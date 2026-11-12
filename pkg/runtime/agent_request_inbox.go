@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -423,10 +424,10 @@ func (r *AgentRequestInboxReconciler) ensureCompletionReviewRun(
 		"requestId": request.ID, "completionKey": request.CompletionKey,
 		"requester": request.Requester, "recipient": request.Recipient,
 		"workerAgentId": request.AssignedAgentID, "goal": request.Goal,
-		"instructions": request.Instructions, "acceptanceCriteria": cloneMap(request.AcceptanceCriteria),
+		"instructions": request.Instructions, "acceptanceCriteria": maps.Clone(request.AcceptanceCriteria),
 		"artifactRequirements": cloneArtifactRequirements(request.ArtifactRequirements),
-		"completionSummary":    request.CompletionSummary, "acceptanceEvidence": cloneMap(request.AcceptanceEvidence),
-		"artifacts": request.Artifacts, "output": cloneMap(child.Output),
+		"completionSummary":    request.CompletionSummary, "acceptanceEvidence": maps.Clone(request.AcceptanceEvidence),
+		"artifacts": request.Artifacts, "output": maps.Clone(child.Output),
 		"conversationRefs": append([]string(nil), request.ConversationRefs...),
 	}
 	contextValue := map[string]interface{}{AgentRequestCompletionReviewContextKey: review}
@@ -526,9 +527,9 @@ func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, req
 		"requester": request.Requester, "recipient": request.Recipient, "goal": request.Goal,
 		"instructions": request.Instructions, "semanticRole": request.SemanticRole,
 		"clarificationQuestion": request.Clarification, "clarificationResponse": request.Response,
-		"acceptanceCriteria":   cloneMap(request.AcceptanceCriteria),
+		"acceptanceCriteria":   maps.Clone(request.AcceptanceCriteria),
 		"artifactRequirements": cloneArtifactRequirements(request.ArtifactRequirements),
-		"sharedContext":        cloneMap(request.SharedContext), "conversationRefs": append([]string(nil), request.ConversationRefs...),
+		"sharedContext":        maps.Clone(request.SharedContext), "conversationRefs": append([]string(nil), request.ConversationRefs...),
 	}
 	contextValue := map[string]interface{}{AgentRequestInboxContextKey: inbox}
 	key := fmt.Sprintf("agent-request-decision:%s:%d:%s", request.ID, request.Revision, assignedAgentID)

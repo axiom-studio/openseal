@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -305,7 +306,7 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 			return nil, ErrRunNotFound
 		}
 		rootID = parent.RootRunID
-		runContext = inheritRoutineEventBatch(parent, cloneMap(req.Context))
+		runContext = inheritRoutineEventBatch(parent, maps.Clone(req.Context))
 	}
 	source := req.Source
 	if source == "" {

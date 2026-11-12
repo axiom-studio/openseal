@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
@@ -171,11 +172,11 @@ func operationName(op HostedRunbookOperation) string {
 // operationChildContext is the child's context: the arguments, the
 // invocation record and the runbook definition identity.
 func (x *ControlExecutor) operationChildContext(ctx context.Context, run *AgentRun, op HostedRunbookOperation, arguments map[string]interface{}, summary string) (map[string]interface{}, error) {
-	childContext := cloneMap(arguments)
+	childContext := maps.Clone(arguments)
 	if childContext == nil {
 		childContext = map[string]interface{}{}
 	}
-	invocation := map[string]interface{}{"summary": summary, "arguments": cloneMap(arguments)}
+	invocation := map[string]interface{}{"summary": summary, "arguments": maps.Clone(arguments)}
 	var reader runbookMessageReader
 	if x.Reporting != nil {
 		reader = x.Reporting

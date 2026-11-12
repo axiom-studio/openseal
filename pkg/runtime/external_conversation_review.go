@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/url"
 	"strconv"
 	"strings"
@@ -262,7 +263,7 @@ func (w *RunProgressAcknowledgementWorker) syncReviewApprovalCards(ctx context.C
 			if err != nil {
 				return updates, err
 			}
-			parameters := cloneMap(original.Parameters)
+			parameters := maps.Clone(original.Parameters)
 			review, ok := parameters["reviewRequest"].(map[string]interface{})
 			if !ok {
 				continue

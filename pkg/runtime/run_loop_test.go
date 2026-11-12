@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -959,7 +960,7 @@ type scriptedRunbookProducer struct {
 func (p *scriptedRunbookProducer) Kind() StepProducerKind { return StepProducerDeterministic }
 
 func (p *scriptedRunbookProducer) Produce(ctx context.Context, in StepInput) (StepOutput, error) {
-	p.steps = append(p.steps, cloneMap(in.Run.Checkpoint))
+	p.steps = append(p.steps, maps.Clone(in.Run.Checkpoint))
 	if p.park {
 		return StepOutput{
 			Park:        &LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: &WakeCondition{Type: "user_message"}, Summary: "Waiting for the requester"},

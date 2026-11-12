@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -45,7 +46,7 @@ func proposeLoopAction(t *testing.T, store KernelStore, catalog ActionExecutionC
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
 		SkillID: spec.skillID, SkillVersion: spec.version, Action: spec.action, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
 		Status: ActionCallStatusReady, Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Review: bound.Action.Review,
-		Arguments: cloneMap(spec.arguments), CredentialRefs: boundCredentialReferences(bound), IdempotencyKey: "tool-call:step-1:" + spec.id,
+		Arguments: maps.Clone(spec.arguments), CredentialRefs: boundCredentialReferences(bound), IdempotencyKey: "tool-call:step-1:" + spec.id,
 		MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if spec.externalOperation != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -201,7 +202,7 @@ func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionR
 		Scope: req.Scope, RunID: req.RunID, TurnID: req.TurnID, WorkerID: authority.workerID, DeploymentID: deploymentID,
 		BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action,
-		Arguments:       selected.ActionInput(cloneMap(req.Arguments)),
+		Arguments:       selected.ActionInput(maps.Clone(req.Arguments)),
 		PreparedRuntime: preparedRuntimeForAction(binding, selected),
 		IdempotencyKey:  idempotencyPrefix + req.TurnID + ":" + strings.TrimSpace(req.IdempotencyKey),
 		Summary:         summary, Actor: ActivityActor{Type: "worker", ID: authority.workerID},

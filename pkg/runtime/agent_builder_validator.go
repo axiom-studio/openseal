@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"unicode/utf8"
 
@@ -70,7 +71,7 @@ func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context
 	if v == nil || input.Run == nil {
 		return nil, true, errors.New("agent builder validator is not configured")
 	}
-	arguments := cloneMap(input.Arguments)
+	arguments := maps.Clone(input.Arguments)
 	if arguments == nil {
 		arguments = map[string]interface{}{}
 	}

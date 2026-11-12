@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -112,9 +113,9 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 	default:
 		return d.stepError(ctx, st, fmt.Errorf("unknown final delivery kind %q", result.Kind), StepFailureProducerFailed)
 	}
-	output := cloneMap(result.Output)
+	output := maps.Clone(result.Output)
 	if output == nil {
-		output = cloneMap(final.Output)
+		output = maps.Clone(final.Output)
 	}
 	// 4. Host extension fields of turn_final_answer.
 	published, res, done := d.publishFinalOutput(ctx, st, final)
@@ -196,7 +197,7 @@ func (d *drive) finishLoopFinal(ctx context.Context, st *stepState, final *LoopF
 	if final.Status == AgentRunStatusFailed {
 		status = AgentRunStatusFailed
 	}
-	return d.finishFinal(ctx, st, &FinalAnswer{StepID: st.step.ID, Answer: final.Answer, Output: cloneMap(final.Output)}, status)
+	return d.finishFinal(ctx, st, &FinalAnswer{StepID: st.step.ID, Answer: final.Answer, Output: maps.Clone(final.Output)}, status)
 }
 
 // supersedeFinal discards a final answer because new guidance arrived: the

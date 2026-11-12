@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"sort"
 	"strings"
@@ -181,7 +182,7 @@ func (c *DependencyCoordinator) ResolveRunDependency(ctx context.Context, req Re
 	}
 	record := RunDependencyResolutionRecord{
 		Scope: req.Scope, GroupID: strings.TrimSpace(req.GroupID), DependencyID: strings.TrimSpace(req.DependencyID),
-		ExpectedDependencyRevision: req.ExpectedDependencyRevision, State: req.State, Result: cloneMap(req.Result),
+		ExpectedDependencyRevision: req.ExpectedDependencyRevision, State: req.State, Result: maps.Clone(req.Result),
 		Artifacts: cloneArtifactReferences(req.Artifacts), Error: strings.TrimSpace(req.Error), Actor: req.Actor,
 		Visibility: req.Visibility, OccurredAt: c.now().UTC(),
 	}

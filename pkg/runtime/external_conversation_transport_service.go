@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"strconv"
 	"strings"
@@ -323,7 +324,7 @@ func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req 
 		Operation: req.Operation, ConversationID: message.ConversationID, ChannelMessageID: message.ID,
 		ExternalConversationID: strings.TrimSpace(req.ExternalConversationID),
 		ExternalThreadID:       strings.TrimSpace(req.ExternalThreadID), OrderingKey: orderingKey,
-		Parameters: cloneMap(req.Parameters), IdempotencyKey: idempotencyKey,
+		Parameters: maps.Clone(req.Parameters), IdempotencyKey: idempotencyKey,
 		Correlation: cloneExternalConversationDeliveryCorrelation(req.Correlation),
 		Status:      ExternalConversationDeliveryPending, MaximumAttempts: maximumAttempts, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,

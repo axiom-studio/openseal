@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
@@ -128,7 +129,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 	// result) carries its own Run output; it posts only an answer it has.
 	kernelFinal := !answer.PlainText && answer.ToolEntryID == ""
 	if kernelFinal && content == "" {
-		return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: cloneMap(answer.Output)}, nil
+		return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: maps.Clone(answer.Output)}, nil
 	}
 
 	// 4. Silent.
@@ -136,7 +137,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 		if trigger.ResponseMode != "spoken" {
 			return FinalDeliveryResult{Kind: FinalDeliveryRetryFinal, RejectionText: conversationSilentNotSpokenText}, nil
 		}
-		output := cloneMap(base)
+		output := maps.Clone(base)
 		output[finalOutputSilentKey] = true
 		return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: output}, nil
 	}
@@ -154,7 +155,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 			return FinalDeliveryResult{}, err
 		}
 		if len(reactions) > 0 && visual == nil && reactionEcho(content, reactions) {
-			output := cloneMap(base)
+			output := maps.Clone(base)
 			output[finalOutputReactedKey] = true
 			return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: output}, nil
 		}
@@ -219,7 +220,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 	}
 
 	// 11. Output.
-	output := cloneMap(answer.Output)
+	output := maps.Clone(answer.Output)
 	if output == nil {
 		output = map[string]interface{}{}
 	}
@@ -243,11 +244,11 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 }
 
 func participationStoppedDelivery() FinalDeliveryResult {
-	return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: cloneMap(participationStoppedOutput())}
+	return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: maps.Clone(participationStoppedOutput())}
 }
 
 func withConversationOutput(base map[string]interface{}, message *ChannelMessage, replayed bool) map[string]interface{} {
-	output := cloneMap(base)
+	output := maps.Clone(base)
 	output["messageId"] = message.ID
 	output["replayed"] = replayed
 	return output

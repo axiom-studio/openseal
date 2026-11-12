@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -65,7 +66,7 @@ func (r *CallbackRegistry) Create(ctx context.Context, request CreateCallbackReg
 		ID: strings.TrimSpace(request.ID), IngressRoute: r.newID(), Scope: request.Scope, Owner: request.Owner,
 		DeploymentID: strings.TrimSpace(request.DeploymentID), Name: strings.TrimSpace(request.Name),
 		Provider: strings.TrimSpace(request.Provider), Adapter: request.Adapter,
-		Subscriptions: cloneCallbackSubscriptions(request.Subscriptions), Configuration: cloneMap(request.Configuration),
+		Subscriptions: cloneCallbackSubscriptions(request.Subscriptions), Configuration: maps.Clone(request.Configuration),
 		Status: CallbackRegistrationPaused, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		Lifecycle: []CallbackRegistrationLifecycleEntry{{
 			Revision: 1, Action: CallbackRegistrationCreated, Actor: request.Actor,
@@ -130,7 +131,7 @@ func (r *CallbackRegistry) Update(ctx context.Context, scope Scope, id string, r
 		current.Subscriptions = cloneCallbackSubscriptions(request.Subscriptions)
 	}
 	if request.Configuration != nil {
-		current.Configuration = cloneMap(request.Configuration)
+		current.Configuration = maps.Clone(request.Configuration)
 	}
 	if request.Status != nil {
 		current.Status = *request.Status

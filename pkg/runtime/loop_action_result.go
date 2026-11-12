@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"strings"
 	"time"
 
@@ -226,7 +227,7 @@ func renderGovernedInFlight(priorActionCallID string) (ToolEntryState, *ToolResu
 // The renderer resolves the bytes from the call (SPEC §3.6); persisted parts
 // never carry them. Invalid media is dropped without a part.
 func splitGovernedModelMedia(call *ActionCall) (map[string]interface{}, *ContentPart) {
-	output := cloneMap(call.Output)
+	output := maps.Clone(call.Output)
 	raw, present := output["modelMedia"]
 	if !present {
 		return output, nil

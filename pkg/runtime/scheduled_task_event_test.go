@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"errors"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -75,7 +76,7 @@ func TestCreateTaskEventTriggerResolves(t *testing.T) {
 		t.Fatalf("gmail preview=%#v", event)
 	}
 
-	both := cloneMap(args)
+	both := maps.Clone(args)
 	both["trigger"] = map[string]interface{}{"event": f.slackEvent("C1"), "schedule": map[string]interface{}{"cron": "0 0 * * * *", "timezone": "UTC"}}
 	if err := f.catalog.ValidateInput(t.Context(), f.bound, both); err == nil {
 		t.Fatal("contract accepted a schedule and an event")

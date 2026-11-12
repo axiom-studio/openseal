@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"reflect"
 	"slices"
 	"testing"
@@ -146,7 +147,7 @@ func (f *eventRoutineFixture) boundAction(t *testing.T, action string) *skill.Bo
 
 // withEvent returns create_task arguments whose trigger is this event.
 func (f *eventRoutineFixture) withEvent(event map[string]interface{}) map[string]interface{} {
-	args := cloneMap(f.args)
+	args := maps.Clone(f.args)
 	args["trigger"] = map[string]interface{}{"event": event}
 	return args
 }

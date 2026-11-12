@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -192,21 +193,21 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	callbackEvent := EventEnvelope{
 		ID: decision.ID, Scope: endpoint.Scope, Type: capability.CallbackEventApprovalDecided,
 		Source: "slack", Subject: decision.ExternalMessageID, OccurredAt: now,
-		Attributes: cloneMap(decision.Attributes), Payload: map[string]interface{}{"messageId": delivered.ProviderMessageID},
+		Attributes: maps.Clone(decision.Attributes), Payload: map[string]interface{}{"messageId": delivered.ProviderMessageID},
 		Actor: ActivityActor{Type: "callback", ID: "slack-approval"},
 	}
 	consumer := NewApprovalCallbackConsumer(store, transport)
 	consumer.now = func() time.Time { return now }
 	tampered := callbackEvent
 	tampered.ID = "slack:approval:T1:1720000000.2:U1"
-	tampered.Attributes = cloneMap(callbackEvent.Attributes)
+	tampered.Attributes = maps.Clone(callbackEvent.Attributes)
 	tampered.Attributes["invocationDigest"] = "edited-after-review"
 	if err := consumer.ConsumeCallbackEvent(ctx, registration, subscription, tampered); err == nil {
 		t.Fatal("tampered approval decision was accepted")
 	}
 	unauthorized := callbackEvent
 	unauthorized.ID = "slack:approval:T1:1720000000.3:U2"
-	unauthorized.Attributes = cloneMap(callbackEvent.Attributes)
+	unauthorized.Attributes = maps.Clone(callbackEvent.Attributes)
 	unauthorized.Attributes["principalId"] = "viewer"
 	if err := consumer.ConsumeCallbackEvent(ctx, registration, subscription, unauthorized); err == nil {
 		t.Fatal("ineligible approval principal was accepted")
@@ -263,7 +264,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	// Reconciliation may later observe more review context for the same durable
 	// terminal phase. The already-enqueued projection owns retries and must not
 	// conflict with a newly rendered payload under the same idempotency key.
-	resolvedApproval.ProposedAction = cloneMap(resolvedApproval.ProposedAction)
+	resolvedApproval.ProposedAction = maps.Clone(resolvedApproval.ProposedAction)
 	resolvedApproval.ProposedAction["reviewContext"] = map[string]interface{}{"additionalContext": "arrived after terminal projection"}
 	if err := worker.notifyOutcome(ctx, resolvedApproval, completedCall, resolvedApproval.Destinations[0]); err != nil {
 		t.Fatalf("outcome replay = %v", err)

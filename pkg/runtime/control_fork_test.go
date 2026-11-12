@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -265,7 +266,7 @@ const twoBranchFork = `{"branches":[{"goal":"Research vendor A","context":{"vend
 func TestForkParksSourceAndCreatesAgentWorkChildren(t *testing.T) {
 	forkStores(t, func(t *testing.T, store forkTestStore) {
 		c := newForkCall(t, store, nil, twoBranchFork)
-		checkpointBefore := cloneMap(c.run.Checkpoint)
+		checkpointBefore := maps.Clone(c.run.Checkpoint)
 		result := c.settle()
 		if result.Kind != ControlParked || result.Park == nil || !result.Park.Committed ||
 			result.Park.Status != AgentRunStatusWaitingForDependency || result.Park.Wake == nil || result.Park.Wake.Type != "run_dependencies" {

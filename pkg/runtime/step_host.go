@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"strings"
 
@@ -309,10 +310,10 @@ func cloneHostedModelActions(values []capability.ModelAction) []capability.Model
 	result := make([]capability.ModelAction, len(values))
 	for index, value := range values {
 		result[index] = value
-		result[index].InputSchema = cloneMap(value.InputSchema)
+		result[index].InputSchema = maps.Clone(value.InputSchema)
 		if value.BindingTool != nil {
 			tool := *value.BindingTool
-			tool.Arguments = cloneMap(value.BindingTool.Arguments)
+			tool.Arguments = maps.Clone(value.BindingTool.Arguments)
 			result[index].BindingTool = &tool
 		}
 		if value.SemanticArguments != nil {

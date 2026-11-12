@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"unicode/utf8"
 )
@@ -143,7 +144,7 @@ func (forkHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContex
 			agentID = arg.AgentID
 		}
 		branches[i] = RunForkBranch{
-			ID: id, Goal: arg.Goal, AssignedAgentID: agentID, Context: cloneMap(arg.Context),
+			ID: id, Goal: arg.Goal, AssignedAgentID: agentID, Context: maps.Clone(arg.Context),
 			Checkpoint: map[string]interface{}{},
 		}
 	}
@@ -232,9 +233,9 @@ func (x *ControlExecutor) Fork(ctx context.Context, cc ControlContext, spec Fork
 			sessionForks[strings.TrimSpace(branch.ID)] = ref
 		}
 	}
-	checkpoint := cloneMap(spec.SourceCheckpoint)
+	checkpoint := maps.Clone(spec.SourceCheckpoint)
 	if model {
-		checkpoint = cloneMap(run.Checkpoint)
+		checkpoint = maps.Clone(run.Checkpoint)
 	}
 	meta := ControlEntryMeta{Kind: cc.toolName(), ForkID: spec.ForkID, GroupID: groupID, ChildRunIDs: childIDs}
 	if meta.Kind == "" {

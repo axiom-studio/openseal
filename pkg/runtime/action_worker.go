@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -395,7 +396,7 @@ func (w *ActionWorker) executeClaimed(ctx context.Context, call *ActionCall, wor
 		}
 		dispatched = true
 		output, executionErr = w.dispatcher.DispatchAction(dispatchCtx, ActionDispatchInput{
-			Call: cloneActionCall(call), Run: cloneAgentRun(sourceRun), Bound: bound, Arguments: cloneMap(call.Arguments), Credentials: credentials,
+			Call: cloneActionCall(call), Run: cloneAgentRun(sourceRun), Bound: bound, Arguments: maps.Clone(call.Arguments), Credentials: credentials,
 			CredentialLease: credentialLease, CredentialReferences: credentialReferences,
 		})
 		cancel()

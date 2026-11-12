@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 
@@ -26,10 +27,10 @@ const (
 // the durable conversation Run.
 func ObjectiveManagementSkill() *skill.Definition {
 	fields := objectiveMutableSchema()
-	createFields := cloneMap(fields)
+	createFields := maps.Clone(fields)
 	delete(createFields, "objectiveId")
 	delete(createFields, "expectedRevision")
-	updateFields := cloneMap(fields)
+	updateFields := maps.Clone(fields)
 	return &skill.Definition{
 		ID: ObjectiveManagementSkillID, Version: ObjectiveManagementSkillVersion,
 		Name: "Objectives", Description: "Propose governed changes to the current Agent or Team's objectives.",
@@ -103,7 +104,7 @@ func (v *ObjectiveActionValidator) ResolveActionProposalArguments(ctx context.Co
 	if !isObjectiveAction(input.Bound) || input.Bound.Action.Name == ObjectiveActionCreate {
 		return nil, false, nil
 	}
-	arguments := cloneMap(input.Arguments)
+	arguments := maps.Clone(input.Arguments)
 	if target, _ := arguments["objectiveId"].(string); strings.TrimSpace(target) == "" && input.Run != nil {
 		if conversations, ok := v.store.(ConversationStore); ok {
 			objectiveID, err := conversationObjectiveOrigin(ctx, conversations, input.Run)
@@ -147,7 +148,7 @@ func (v *ObjectiveActionValidator) ValidateActionProposal(ctx context.Context, i
 	if err := input.Run.Owner.Validate(); err != nil {
 		return nil, fmt.Errorf("objective action run owner: %w", err)
 	}
-	preview := map[string]interface{}{"resourceType": "objective", "operation": input.Bound.Action.Name, "owner": input.Run.Owner, "changes": cloneMap(input.Arguments)}
+	preview := map[string]interface{}{"resourceType": "objective", "operation": input.Bound.Action.Name, "owner": input.Run.Owner, "changes": maps.Clone(input.Arguments)}
 	if input.Bound.Action.Name == ObjectiveActionCreate {
 		preview["resultingStatus"] = ObjectiveStatusDraft
 		return preview, validateObjectiveCreateArguments(input.Arguments)

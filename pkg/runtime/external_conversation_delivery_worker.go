@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -270,7 +271,7 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 		return err
 	}
 	if result.Progress != nil {
-		delivery.Progress = cloneMap(result.Progress)
+		delivery.Progress = maps.Clone(result.Progress)
 	}
 	switch result.Outcome {
 	case ExternalConversationDeliveryOutcomeDelivered:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 )
 
@@ -24,7 +25,7 @@ func (s *AgentRunWakeService) wakeCompletedSkillRuntimeMaintenances(ctx context.
 	}
 	result := &WakeResult{Runs: make([]WokenRun, 0, len(runs))}
 	for _, run := range runs {
-		checkpoint := cloneMap(run.Checkpoint)
+		checkpoint := maps.Clone(run.Checkpoint)
 		delete(checkpoint, skillRuntimeMaintenanceCheckpointKey)
 		id := fmt.Sprintf("skill-runtime-ready:%s:%d", run.ID, run.Revision)
 		woken, event, err := s.activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
@@ -48,7 +49,7 @@ func (p *AgentRunWorkerPool) parkSkillRuntimeMaintenance(ctx context.Context, wo
 	if !errors.As(cause, &held) {
 		return false
 	}
-	checkpoint := cloneMap(run.Checkpoint)
+	checkpoint := maps.Clone(run.Checkpoint)
 	if checkpoint == nil {
 		checkpoint = make(map[string]interface{})
 	}

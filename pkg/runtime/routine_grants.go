@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/mail"
 	"regexp"
 	"strings"
@@ -224,7 +225,7 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 			return nil, fmt.Errorf("routine grant %s is not an action this Agent can use", grant.Action)
 		}
 		// The pin always comes from the catalog, never from the model.
-		grant.ToolArguments = cloneMap(bound.pin)
+		grant.ToolArguments = maps.Clone(bound.pin)
 		if bound.action.AlwaysReview() {
 			return nil, fmt.Errorf("routine grant %s always asks first and cannot run without asking", grant.Action)
 		}
@@ -673,7 +674,7 @@ func routineBriefPreview(brief *RoutineBrief) map[string]interface{} {
 			item["toDestinations"] = destinations
 		}
 		if grant.ToolArguments != nil {
-			item["toolArguments"] = cloneMap(grant.ToolArguments)
+			item["toolArguments"] = maps.Clone(grant.ToolArguments)
 		}
 		grants = append(grants, item)
 	}

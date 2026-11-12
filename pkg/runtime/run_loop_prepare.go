@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"sort"
 	"strings"
 
@@ -199,7 +200,7 @@ func (p *catalogModelStepPreparer) tools(binding *TurnRunnerBinding, set *Capabi
 func hostModelStepTool(spec HostToolSpec, group ModelStepToolGroup) ModelStepTool {
 	return ModelStepTool{
 		Name: spec.ToolName, Description: spec.Description,
-		InputSchema: cloneMap(spec.InputSchema), Group: group,
+		InputSchema: maps.Clone(spec.InputSchema), Group: group,
 	}
 }
 

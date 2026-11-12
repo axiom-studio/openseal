@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -47,7 +48,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 		"allowedActions": []interface{}{"read"}, "enablePrompt": true, "maximumRisk": "read",
 		"config": map[string]interface{}{"subreddits": []interface{}{"kubernetes", "devops"}},
 	}
-	withCredential := cloneMap(arguments)
+	withCredential := maps.Clone(arguments)
 	withCredential["accessReferences"] = map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "credential://tenant-a/other"}}
 	if _, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
 		DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionUpsertBinding,
@@ -108,7 +109,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 		t.Fatalf("disabled binding = %#v", disabled)
 	}
 
-	reenable := cloneMap(arguments)
+	reenable := maps.Clone(arguments)
 	reenable["expectedRevision"] = 3
 	reenable["config"] = map[string]interface{}{"subreddits": []interface{}{"kubernetes"}}
 	reenableProposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
@@ -262,7 +263,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	}
 
 	selfRun := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a"}
-	unknown := cloneMap(base)
+	unknown := maps.Clone(base)
 	unknown["skillId"] = "missing"
 	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: unknown}); err == nil {
 		t.Fatal("unknown Skill reached approval")
@@ -274,13 +275,13 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	if err := catalog.Register(ctx, sourced); err != nil {
 		t.Fatal(err)
 	}
-	missingSource := cloneMap(base)
+	missingSource := maps.Clone(base)
 	missingSource["skillId"] = sourced.ID
 	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: missingSource}); err == nil || !strings.Contains(err.Error(), "sourceIdentity") {
 		t.Fatalf("sourced Skill without exact source error = %v", err)
 	}
 
-	secretConfig := cloneMap(base)
+	secretConfig := maps.Clone(base)
 	secretConfig["config"] = map[string]interface{}{"client_secret": "raw-secret"}
 	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: secretConfig}); err == nil || !strings.Contains(err.Error(), "opaque credential") {
 		t.Fatalf("secret config error = %v", err)
@@ -296,7 +297,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	}); err != nil {
 		t.Fatal(err)
 	}
-	stale := cloneMap(base)
+	stale := maps.Clone(base)
 	stale["bindingId"] = "reader"
 	stale["expectedRevision"] = 0
 	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: selfRun, Bound: bound, Arguments: stale}); !errors.Is(err, skill.ErrBindingRevisionConflict) {

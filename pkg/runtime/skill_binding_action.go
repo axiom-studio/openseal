@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"sort"
@@ -905,7 +906,7 @@ func withoutUnusableTargetAgent(activation *skill.ActivationSnapshot, actions []
 		if !hasTargetAgentProperty(action) {
 			continue
 		}
-		out[i].InputSchema = cloneMap(action.InputSchema)
+		out[i].InputSchema = maps.Clone(action.InputSchema)
 		properties := make(map[string]interface{}, len(action.InputSchema["properties"].(map[string]interface{})))
 		for name, property := range action.InputSchema["properties"].(map[string]interface{}) {
 			if name != SkillActionTargetAgentArgument {

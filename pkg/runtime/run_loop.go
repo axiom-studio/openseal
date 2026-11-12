@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -278,7 +279,7 @@ func (d *drive) commitRun(ctx context.Context, st *stepState, req RunTransitionR
 		if r.Actor == (ActivityActor{}) {
 			r.Actor = d.actor()
 		}
-		r.Payload = cloneMap(req.Payload)
+		r.Payload = maps.Clone(req.Payload)
 		if st != nil && st.finished && !st.applied {
 			d.fillStepApplication(&r, run, st)
 		}

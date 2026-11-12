@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
@@ -14,7 +15,7 @@ func prepareAcceptedChildRun(ctx context.Context, parent *AgentRun, request *Cre
 	if parent == nil || request == nil || request.Scope != parent.Scope {
 		return ErrAcceptedRunExecution
 	}
-	request.Context = cloneMap(request.Context)
+	request.Context = maps.Clone(request.Context)
 	delete(request.Context, AcceptedRunExecutionContextKey)
 	if request.Entrypoint == "" {
 		return nil
@@ -50,7 +51,7 @@ func prepareAcceptedChildRun(ctx context.Context, parent *AgentRun, request *Cre
 		return ErrAcceptedRunExecution
 	}
 	// Store the validated copy, rather than retaining preparer-owned pointers.
-	request.Context = cloneMap(request.Context)
+	request.Context = maps.Clone(request.Context)
 	request.Context[AcceptedRunExecutionContextKey] = pin
 	return nil
 }
