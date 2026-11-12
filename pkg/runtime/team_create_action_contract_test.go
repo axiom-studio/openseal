@@ -9,12 +9,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 	ctx := context.Background()
-	definition := TeamManagementSkill()
+	definition := collaboration.TeamManagementSkill()
 	if definition.Version != "2.2.0" {
 		t.Fatalf("version = %s", definition.Version)
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/google/uuid"
 )
 
@@ -157,7 +158,7 @@ func TestAcceptedRunInheritanceRejectsInvalidDelegationBeforeGroupAcceptance(t *
 			forAcceptedRunInheritanceStores(t, func(t *testing.T, kernel acceptedRunInheritanceStore) {
 				parent, parentPin := newAcceptedRunInheritanceParent(t, kernel, false)
 				wrapped := &acceptedRunInheritanceWriteStore{acceptedRunInheritanceStore: kernel}
-				service := NewCollaborationService(wrapped)
+				service := collaboration.NewCollaborationService(wrapped)
 				created := createAcceptedRunInheritanceRequestGroup(t, service, parent, map[string]interface{}{"runbookEntrypoint": "inspect", AcceptedRunExecutionContextKey: parentPin})
 				before, err := kernel.GetAgentRun(t.Context(), parent.Scope, parent.ID)
 				if err != nil {
@@ -180,7 +181,7 @@ func TestAcceptedRunInheritanceRejectsInvalidDelegationBeforeGroupAcceptance(t *
 				if err != nil {
 					t.Fatal(err)
 				}
-				result, err := service.RespondAgentRequest(t.Context(), RespondAgentRequestRequest{Scope: parent.Scope, RequestID: pending.ID, ExpectedRevision: pending.Revision, Decision: AgentRequestDecisionAccept, Principal: pending.Recipient})
+				result, err := service.RespondAgentRequest(t.Context(), collaboration.RespondAgentRequestRequest{Scope: parent.Scope, RequestID: pending.ID, ExpectedRevision: pending.Revision, Decision: collaboration.AgentRequestDecisionAccept, Principal: pending.Recipient})
 				if result != nil || !errors.Is(err, ErrAcceptedRunExecution) || wrapped.responseWrites != 0 {
 					t.Fatalf("invalid delegated method reached atomic acceptance: %#v, %v; writes=%d", result, err, wrapped.responseWrites)
 				}
@@ -220,7 +221,7 @@ func TestAcceptedRunInheritanceDelegationPreparesRequestedEntrypointAndInboxProp
 			forAcceptedRunInheritanceStores(t, func(t *testing.T, kernel acceptedRunInheritanceStore) {
 				parent, parentPin := newAcceptedRunInheritanceParent(t, kernel, false)
 				wrapped := &acceptedRunInheritanceWriteStore{acceptedRunInheritanceStore: kernel}
-				service := NewCollaborationService(wrapped)
+				service := collaboration.NewCollaborationService(wrapped)
 				shared := map[string]interface{}{"input": "retained", AcceptedRunExecutionContextKey: parentPin}
 				if delivery.invocation {
 					shared[agentrun.RunbookInvocationContextKey] = map[string]interface{}{"entrypoint": "inspect", "summary": "Requested target method"}
@@ -239,7 +240,7 @@ func TestAcceptedRunInheritanceDelegationPreparesRequestedEntrypointAndInboxProp
 				var child *AgentRun
 				if !delivery.inbox {
 					service.SetAcceptedRunExecutionPreparer(preparer)
-					accepted, err := service.RespondAgentRequest(t.Context(), RespondAgentRequestRequest{Scope: parent.Scope, RequestID: pending.ID, ExpectedRevision: pending.Revision, Decision: AgentRequestDecisionAccept, Principal: pending.Recipient})
+					accepted, err := service.RespondAgentRequest(t.Context(), collaboration.RespondAgentRequestRequest{Scope: parent.Scope, RequestID: pending.ID, ExpectedRevision: pending.Revision, Decision: collaboration.AgentRequestDecisionAccept, Principal: pending.Recipient})
 					if err != nil || accepted == nil {
 						t.Fatalf("delegation acceptance = %#v, %v", accepted, err)
 					}
@@ -254,7 +255,7 @@ func TestAcceptedRunInheritanceDelegationPreparesRequestedEntrypointAndInboxProp
 					if stored.AcceptancePolicy != AgentRequestAcceptancePreauthorized {
 						t.Fatalf("preauthorized fixture policy = %s", stored.AcceptancePolicy)
 					}
-					inbox, err := NewAgentRequestInboxReconciler(wrapped)
+					inbox, err := collaboration.NewAgentRequestInboxReconciler(wrapped)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -303,14 +304,14 @@ func TestAcceptedRunInheritanceReasonOnlyForkAndGenericDelegationStayUnpinned(t 
 			}
 		}
 		otherParent, _ := newAcceptedRunInheritanceParent(t, kernel, false)
-		service := NewCollaborationService(kernel)
+		service := collaboration.NewCollaborationService(kernel)
 		service.SetAcceptedRunExecutionPreparer(preparer)
 		group := createAcceptedRunInheritanceRequestGroup(t, service, otherParent, map[string]interface{}{
 			AcceptedRunExecutionContextKey: parentPin,
 			"triggerInput":                 map[string]interface{}{"runbookDefinitionId": parentPin.RunbookID, "runbookDefinitionVersion": parentPin.RunbookVersion, "runbookEntrypoint": parentPin.Entrypoint, "entrypoint": parentPin.Entrypoint},
 		})
 		pending := group.Requests[0]
-		accepted, err := service.RespondAgentRequest(t.Context(), RespondAgentRequestRequest{Scope: otherParent.Scope, RequestID: pending.ID, ExpectedRevision: pending.Revision, Decision: AgentRequestDecisionAccept, Principal: pending.Recipient})
+		accepted, err := service.RespondAgentRequest(t.Context(), collaboration.RespondAgentRequestRequest{Scope: otherParent.Scope, RequestID: pending.ID, ExpectedRevision: pending.Revision, Decision: collaboration.AgentRequestDecisionAccept, Principal: pending.Recipient})
 		if err != nil || accepted == nil || preparer.calls != 0 {
 			t.Fatalf("generic delegated work invoked current method admission: %#v, %v", accepted, err)
 		}
@@ -479,13 +480,13 @@ func acceptedRunInheritanceForkRequest(parent *AgentRun) agentrun.CreateRunForkR
 		ContinuationCheckpoint: map[string]interface{}{"committed": "preserved", "waiting": "fan-in"}}
 }
 
-func createAcceptedRunInheritanceRequestGroup(t *testing.T, service *CollaborationService, parent *AgentRun, shared map[string]interface{}) *AgentRequestGroupResult {
+func createAcceptedRunInheritanceRequestGroup(t *testing.T, service *collaboration.CollaborationService, parent *AgentRun, shared map[string]interface{}) *collaboration.AgentRequestGroupResult {
 	t.Helper()
-	created, err := service.CreateAgentRequestGroup(t.Context(), CreateAgentRequestGroupRequest{
+	created, err := service.CreateAgentRequestGroup(t.Context(), collaboration.CreateAgentRequestGroupRequest{
 		Scope: parent.Scope, SourceRunID: parent.ID, ExpectedSourceRevision: parent.Revision,
 		Requester:      CollaborationParty{Type: OwnerTypeAgent, ID: parent.AssignedAgentID},
 		Policy:         RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Requests:       []AgentRequestGroupSpec{{DependencyID: "accepted-method", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"}, Goal: "Inspect shared evidence", SharedContext: shared, ChildCheckpoint: map[string]interface{}{"input": "preserved"}, BudgetAllocation: &BudgetPolicy{MaxTurns: 2}, AcceptancePolicy: AgentRequestAcceptancePreauthorized}},
+		Requests:       []collaboration.AgentRequestGroupSpec{{DependencyID: "accepted-method", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"}, Goal: "Inspect shared evidence", SharedContext: shared, ChildCheckpoint: map[string]interface{}{"input": "preserved"}, BudgetAllocation: &BudgetPolicy{MaxTurns: 2}, AcceptancePolicy: AgentRequestAcceptancePreauthorized}},
 		IdempotencyKey: uuid.NewString(), Actor: ActivityActor{Type: "agent", ID: parent.AssignedAgentID}, Visibility: ActivityVisibilityScope,
 	})
 	if err != nil || created == nil || len(created.Requests) != 1 {

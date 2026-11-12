@@ -1,4 +1,4 @@
-package runtime
+package collaboration
 
 import "github.com/axiom-studio/openseal/pkg/models"
 

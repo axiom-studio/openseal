@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -216,13 +217,13 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 		}}, producer: "model", actions: 1, goalKind: "fork_branch"},
 		{name: "delegation execution", run: AgentRun{Goal: "Do the accepted work", Source: RunSourceRequest, Context: map[string]interface{}{
 			"collaboration": map[string]interface{}{"requestId": "request"},
-		}}, producer: "model", fork: true, actions: 1, instruction: AcceptedAgentRequestExecutionSystemInstruction, goalKind: "delegation"},
+		}}, producer: "model", fork: true, actions: 1, instruction: collaboration.AcceptedAgentRequestExecutionSystemInstruction, goalKind: "delegation"},
 		{name: "decision", run: AgentRun{Goal: "Evaluate incoming work", Source: RunSourceRequestDecision, Context: map[string]interface{}{
 			agentrun.AgentRequestInboxContextKey: map[string]interface{}{"requestId": "request", "requestRevision": int64(1)},
-		}}, producer: "model", finalMode: agentrun.FinalModeDecision, instruction: AgentRequestDecisionSystemInstruction, goalKind: "decision"},
+		}}, producer: "model", finalMode: agentrun.FinalModeDecision, instruction: collaboration.AgentRequestDecisionSystemInstruction, goalKind: "decision"},
 		{name: "review", run: AgentRun{Goal: "Review delegated work", Context: map[string]interface{}{
 			agentrun.AgentRequestCompletionReviewContextKey: map[string]interface{}{"requestId": "request"},
-		}}, producer: "model", finalMode: agentrun.FinalModeReview, instruction: AgentRequestCompletionReviewSystemInstruction, goalKind: "review"},
+		}}, producer: "model", finalMode: agentrun.FinalModeReview, instruction: collaboration.AgentRequestCompletionReviewSystemInstruction, goalKind: "review"},
 		{name: "runbook child", run: AgentRun{Goal: "Draft the summary", Source: RunSourceRequest, Entrypoint: "draft", Context: map[string]interface{}{
 			agentrun.DelegationModeContextKey: string(runbook.DelegateReason),
 		}}, producer: "model", fork: true, actions: 1, goalKind: "routine"},
@@ -274,7 +275,7 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 			if tc.instruction != "" && !slices.Contains(binding.Prompt.AgentInstructions, tc.instruction) {
 				t.Fatalf("prompt = %#v", binding.Prompt)
 			}
-			for _, other := range []string{AgentRequestDecisionSystemInstruction, AgentRequestCompletionReviewSystemInstruction, AcceptedAgentRequestExecutionSystemInstruction} {
+			for _, other := range []string{collaboration.AgentRequestDecisionSystemInstruction, collaboration.AgentRequestCompletionReviewSystemInstruction, collaboration.AcceptedAgentRequestExecutionSystemInstruction} {
 				if other != tc.instruction && slices.Contains(binding.Prompt.AgentInstructions, other) {
 					t.Fatalf("instruction of another kind leaked: %#v", binding.Prompt)
 				}
@@ -344,8 +345,8 @@ func TestDecisionRunOffersOnlyDecisionToolViaBinding(t *testing.T) {
 		key, tool, instruction string
 		value                  map[string]interface{}
 	}{
-		{agentrun.AgentRequestInboxContextKey, string(ControlToolRequestDecision), AgentRequestDecisionSystemInstruction, map[string]interface{}{"requestId": "request", "requestRevision": int64(1)}},
-		{agentrun.AgentRequestCompletionReviewContextKey, string(ControlToolCompletionReview), AgentRequestCompletionReviewSystemInstruction, map[string]interface{}{"requestId": "request"}},
+		{agentrun.AgentRequestInboxContextKey, string(ControlToolRequestDecision), collaboration.AgentRequestDecisionSystemInstruction, map[string]interface{}{"requestId": "request", "requestRevision": int64(1)}},
+		{agentrun.AgentRequestCompletionReviewContextKey, string(ControlToolCompletionReview), collaboration.AgentRequestCompletionReviewSystemInstruction, map[string]interface{}{"requestId": "request"}},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
 			catalog.activationDeployments = nil
@@ -767,8 +768,8 @@ func TestCatalogTurnResolverSeparatesAcceptedRequestExecutionFromIntake(t *testi
 	}
 	req := prepareBindingStep(t, binding, run)
 	tools := bindingToolNames(req)
-	if !slices.Contains(req.System.AgentInstructions, AcceptedAgentRequestExecutionSystemInstruction) ||
-		slices.Contains(req.System.AgentInstructions, AgentRequestDecisionSystemInstruction) ||
+	if !slices.Contains(req.System.AgentInstructions, collaboration.AcceptedAgentRequestExecutionSystemInstruction) ||
+		slices.Contains(req.System.AgentInstructions, collaboration.AgentRequestDecisionSystemInstruction) ||
 		slices.Contains(tools, string(ControlToolRequestDecision)) || !slices.Contains(tools, string(ControlToolFinalAnswer)) ||
 		len(binding.ModelActions) != 1 {
 		t.Fatalf("accepted execution system=%#v tools=%v", req.System.AgentInstructions, tools)

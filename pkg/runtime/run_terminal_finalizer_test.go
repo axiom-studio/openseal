@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimecollaboration "github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
@@ -266,8 +267,8 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	collaboration := NewCollaborationService(store)
-	created, err := collaboration.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+	collaboration := runtimecollaboration.NewCollaborationService(store)
+	created, err := collaboration.CreateAgentRequest(ctx, runtimecollaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: parent.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "scheduler"},
 		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "worker"}, Goal: "perform delegated work",
@@ -275,9 +276,9 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := collaboration.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+	accepted, err := collaboration.RespondAgentRequest(ctx, runtimecollaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "worker"},
+		Decision: runtimecollaboration.AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "worker"},
 	})
 	if err != nil {
 		t.Fatal(err)

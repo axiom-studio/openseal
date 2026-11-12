@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -121,11 +122,11 @@ func onlyRunWithSource(t *testing.T, store *sqlite.Store, scope Scope, parentID 
 	return found
 }
 
-func reconcileDecisionRun(t *testing.T) (*agentRequestInboxTeamStore, *AgentRequestInboxReconciler, *AgentRequest, *AgentRun) {
+func reconcileDecisionRun(t *testing.T) (*agentRequestInboxTeamStore, *collaboration.AgentRequestInboxReconciler, *AgentRequest, *AgentRun) {
 	t.Helper()
 	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
-	reconciler, err := NewAgentRequestInboxReconciler(store)
+	reconciler, err := collaboration.NewAgentRequestInboxReconciler(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +146,7 @@ func TestDecisionToolWritesOutputConsumedByResolveDecisionRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	final := requireFinal(t, result)
-	want := map[string]interface{}{AgentRequestDecisionOutputKey: map[string]interface{}{"decision": "reject", "message": "Outside my role."}}
+	want := map[string]interface{}{collaboration.AgentRequestDecisionOutputKey: map[string]interface{}{"decision": "reject", "message": "Outside my role."}}
 	if !reflect.DeepEqual(final.Output, want) || final.Answer != "Outside my role." || final.PlainText ||
 		final.ToolEntryID != f.entries["decide"].ID || final.ToolCallID != "decide" || final.StepID != f.step.ID {
 		t.Fatalf("final = %#v", final)
@@ -159,7 +160,7 @@ func TestDecisionToolWritesOutputConsumedByResolveDecisionRun(t *testing.T) {
 	if err != nil || !resolved {
 		t.Fatalf("resolve = %v, %v", resolved, err)
 	}
-	current, err := NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
+	current, err := collaboration.NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
 	if err != nil || current.Status != AgentRequestStatusRejected || current.Response != "Outside my role." {
 		t.Fatalf("request = %#v, %v", current, err)
 	}
@@ -206,8 +207,8 @@ func TestClarificationDecisionRequiresQuestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decision, message, err := ParseAgentRequestDecisionOutput(requireFinal(t, result).Output)
-	if err != nil || decision != AgentRequestDecisionRequestClarification || message != "Which launch region?" {
+	decision, message, err := collaboration.ParseAgentRequestDecisionOutput(requireFinal(t, result).Output)
+	if err != nil || decision != collaboration.AgentRequestDecisionRequestClarification || message != "Which launch region?" {
 		t.Fatalf("decision = %q %q %v", decision, message, err)
 	}
 }
@@ -240,8 +241,8 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
-	created, err := service.CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
+	service := collaboration.NewCollaborationService(store)
+	created, err := service.CreateAgentRequest(t.Context(), collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindHandoff,
 		Requester:   CollaborationParty{Type: OwnerTypeTeam, ID: "release-team"},
 		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: "specialist-agent"},
@@ -251,15 +252,15 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := service.RespondAgentRequest(t.Context(), RespondAgentRequestRequest{
+	accepted, err := service.RespondAgentRequest(t.Context(), collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: created.Request.Recipient,
+		Decision: collaboration.AgentRequestDecisionAccept, Principal: created.Request.Recipient,
 		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "specialist-agent"}, AssignedAgentID: "specialist-agent",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err := service.CompleteAgentRequest(t.Context(), CompleteAgentRequestRequest{
+	completed, err := service.CompleteAgentRequest(t.Context(), collaboration.CompleteAgentRequestRequest{
 		Scope: scope, RequestID: accepted.Request.ID, ExpectedRevision: accepted.Request.Revision,
 		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
 		Summary: "Release evidence prepared", AcceptanceEvidence: map[string]interface{}{"checks": "passed"},
@@ -268,7 +269,7 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 	if err != nil || completed.Request.Status != AgentRequestStatusCompletionReview {
 		t.Fatalf("completion submission = %#v, %v", completed, err)
 	}
-	reconciler, err := NewAgentRequestInboxReconciler(store)
+	reconciler, err := collaboration.NewAgentRequestInboxReconciler(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +296,7 @@ func TestReviewToolResolvesCompletionReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	final := requireFinal(t, result)
-	want := map[string]interface{}{AgentRequestCompletionReviewOutputKey: map[string]interface{}{"decision": "approve", "message": "The evidence meets the criteria."}}
+	want := map[string]interface{}{collaboration.AgentRequestCompletionReviewOutputKey: map[string]interface{}{"decision": "approve", "message": "The evidence meets the criteria."}}
 	if !reflect.DeepEqual(final.Output, want) {
 		t.Fatalf("output = %#v", final.Output)
 	}

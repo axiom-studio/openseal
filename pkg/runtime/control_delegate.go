@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -161,7 +162,7 @@ func (x *ControlExecutor) Delegate(ctx context.Context, cc agentrun.ControlConte
 	if err := ValidateCredentialFreeContext(spec.Context); err != nil {
 		return x.rejectDelegation(ctx, cc, err.Error())
 	}
-	if err := ValidateTaskDelegationSource(ctx, x.Portfolio, run); err != nil {
+	if err := collaboration.ValidateTaskDelegationSource(ctx, x.Portfolio, run); err != nil {
 		if errors.Is(err, ErrInvalidConversationTask) {
 			return x.rejectDelegation(ctx, cc, "Work inside a conversation task cannot be handed to another Agent; do it here.")
 		}
@@ -172,7 +173,7 @@ func (x *ControlExecutor) Delegate(ctx context.Context, cc agentrun.ControlConte
 		return x.rejectDelegation(ctx, cc, err.Error())
 	}
 	key := delegationIdempotencyKey(run.ID, spec.StepID)
-	requestID := StableCollaborationID(run.Scope, key, "request")
+	requestID := collaboration.StableCollaborationID(run.Scope, key, "request")
 	existing, err := x.Collaboration.GetAgentRequest(ctx, run.Scope, requestID)
 	if err != nil && !errors.Is(err, ErrAgentRequestNotFound) {
 		return ControlResult{}, err
@@ -196,7 +197,7 @@ func (x *ControlExecutor) Delegate(ctx context.Context, cc agentrun.ControlConte
 		acceptancePolicy = AgentRequestAcceptancePreauthorized
 	}
 	count := len(run.PendingInterventions)
-	request := CreateAgentRequestRequest{
+	request := collaboration.CreateAgentRequestRequest{
 		ID: requestID, Scope: run.Scope, Kind: AgentRequestKindRequest,
 		Requester:   CollaborationParty{Type: run.Owner.Type, ID: run.Owner.ID},
 		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: spec.AgentID},
@@ -304,7 +305,7 @@ func (x *ControlExecutor) delegationBudget(cc agentrun.ControlContext, spec Dele
 // authority, validation) rather than abort the claim.
 func delegationRejection(err error) bool {
 	for _, target := range []error{
-		ErrAgentRequestUnauthorized, ErrAgentRequestAssignment, ErrInvalidAgentRequestState,
+		collaboration.ErrAgentRequestUnauthorized, ErrAgentRequestAssignment, ErrInvalidAgentRequestState,
 		ErrInvalidConversationTask, ErrInvalidArtifact,
 	} {
 		if errors.Is(err, target) {
@@ -494,9 +495,9 @@ func (delegateReplyHandler) Run(ctx context.Context, x *ControlExecutor, cc agen
 // source on the recipient's next decision (a committed park). The entry is
 // already awaiting_child.
 func (x *ControlExecutor) answerClarification(ctx context.Context, cc agentrun.ControlContext, request *AgentRequest, answer string) (ControlResult, error) {
-	answered, err := x.Collaboration.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+	answered, err := x.Collaboration.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 		Scope: cc.Run.Scope, RequestID: request.ID, ExpectedRevision: request.Revision,
-		Decision: AgentRequestDecisionProvideClarification, Principal: request.Requester, Message: answer,
+		Decision: collaboration.AgentRequestDecisionProvideClarification, Principal: request.Requester, Message: answer,
 	})
 	if err != nil {
 		if delegationRejection(err) {

@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -508,8 +509,8 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(primary)
-	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+	service := collaboration.NewCollaborationService(primary)
+	created, err := service.CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
 		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, Goal: "Launch",
@@ -524,14 +525,14 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 		waitingSource.WakeCondition.Reference != created.Request.ID {
 		t.Fatalf("atomically waiting source = %#v, %v", waitingSource, err)
 	}
-	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+	accepted, err := service.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Decision: collaboration.AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := NewCollaborationService(replica).GetAgentRequest(ctx, scope, created.Request.ID)
+	restored, err := collaboration.NewCollaborationService(replica).GetAgentRequest(ctx, scope, created.Request.ID)
 	if err != nil || restored.ChildRunID != accepted.Child.ID || restored.Status != AgentRequestStatusAccepted {
 		t.Fatalf("restored request = %#v, %v", restored, err)
 	}
@@ -539,7 +540,7 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil || child.ParentRunID != source.ID || child.AssignedAgentID != "marketing" {
 		t.Fatalf("restored child = %#v, %v", child, err)
 	}
-	completed, err := NewCollaborationService(replica).CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+	completed, err := collaboration.NewCollaborationService(replica).CompleteAgentRequest(ctx, collaboration.CompleteAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: accepted.Request.Revision,
 		ExpectedChildRevision: child.Revision, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
 		Summary: "Launch completed", CompletionKey: "postgres-launch-complete",
@@ -547,7 +548,7 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil || completed.Request.Status != AgentRequestStatusCompleted || completed.Source.Status != AgentRunStatusQueued || completed.Child.Status != AgentRunStatusCompleted {
 		t.Fatalf("complete request = %#v, %v", completed, err)
 	}
-	restored, err = NewCollaborationService(primary).GetAgentRequest(ctx, scope, created.Request.ID)
+	restored, err = collaboration.NewCollaborationService(primary).GetAgentRequest(ctx, scope, created.Request.ID)
 	if err != nil || restored.Status != AgentRequestStatusCompleted || restored.CompletionKey != "postgres-launch-complete" {
 		t.Fatalf("restored completion = %#v, %v", restored, err)
 	}

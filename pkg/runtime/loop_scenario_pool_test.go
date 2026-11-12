@@ -15,6 +15,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimecollaboration "github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -356,8 +357,8 @@ func TestLoopPoolCompletesArtifactFreeHandoffFromTerminalChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	collaboration := NewCollaborationService(store)
-	created, err := collaboration.CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
+	collaboration := runtimecollaboration.NewCollaborationService(store)
+	created, err := collaboration.CreateAgentRequest(t.Context(), runtimecollaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindHandoff, Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
 		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, SourceRunID: source.ID,
 		Goal: "Draft the launch follow-up", AcceptanceCriteria: map[string]interface{}{"required": "one follow-up"},
@@ -366,9 +367,9 @@ func TestLoopPoolCompletesArtifactFreeHandoffFromTerminalChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := collaboration.RespondAgentRequest(t.Context(), RespondAgentRequestRequest{
+	accepted, err := collaboration.RespondAgentRequest(t.Context(), runtimecollaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Decision: runtimecollaboration.AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
 	})
 	if err != nil {
 		t.Fatal(err)

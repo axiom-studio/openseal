@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -17,7 +18,7 @@ func TestRunbookProducerReportsDelegatedAgentFailureReason(t *testing.T) {
 	producer := &RunbookStepProducer{definition: &runbook.Definition{}}
 	run := &AgentRun{ID: "run-1", Scope: Scope{Kind: "tenant", ID: "1"}, Output: map[string]interface{}{}}
 	stepID := "perform-hourly"
-	requestID := StableCollaborationID(run.Scope, delegationIdempotencyKey(run.ID, stepID), "request")
+	requestID := collaboration.StableCollaborationID(run.Scope, delegationIdempotencyKey(run.ID, stepID), "request")
 	run.Output["collaborationResults"] = map[string]interface{}{
 		requestID: map[string]interface{}{
 			"status": string(AgentRequestStatusFailed),
@@ -164,7 +165,7 @@ func TestRunbookValueRendersTypedTemplateSegments(t *testing.T) {
 
 func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
 	store := newTestKernelStore(t)
-	control := &ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: NewCollaborationService(store)}
+	control := &ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration.NewCollaborationService(store)}
 	producer := newTestRunbookProducer(t, concurrentRunbookDefinition(), "manual", store)
 	cc := agentrun.ControlContext{
 		Run:     &AgentRun{ID: "run", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "fork", "pendingFork": "fork", "pendingCall": "runbook.2.fork"}}},

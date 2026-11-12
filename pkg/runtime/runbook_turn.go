@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -861,7 +862,7 @@ func (p *RunbookStepProducer) consumeDelegationResult(checkpoint map[string]inte
 	var output map[string]interface{}
 	switch {
 	case status == "":
-		requestID := StableCollaborationID(run.Scope, delegationIdempotencyKey(run.ID, stepID), "request")
+		requestID := collaboration.StableCollaborationID(run.Scope, delegationIdempotencyKey(run.ID, stepID), "request")
 		collaborationResults, _ := run.Output["collaborationResults"].(map[string]interface{})
 		result, _ := collaborationResults[requestID].(map[string]interface{})
 		if len(result) == 0 {

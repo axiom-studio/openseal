@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -101,9 +102,9 @@ type AgentRunWorkerPool struct {
 	dependencyCursor     string
 	forks                *agentrun.RunForkCoordinator
 	dependencies         *DependencyCoordinator // pages waiting fork groups; nil unless the store indexes them
-	collaboration        *CollaborationService
+	collaboration        *collaboration.CollaborationService
 	conversationTasks    *conversationrun.ConversationTaskService
-	requestInbox         *AgentRequestInboxReconciler
+	requestInbox         *collaboration.AgentRequestInboxReconciler
 	reportingStore       ConversationStore
 	resolver             conversation.TurnRunnerResolver
 	logger               *zap.SugaredLogger
@@ -190,13 +191,13 @@ func newAgentRunWorkerPool(store KernelStore, resolver conversation.TurnRunnerRe
 		}
 	}
 	if collaborationStore, ok := store.(CollaborationKernelStore); ok {
-		pool.collaboration = NewCollaborationService(collaborationStore, opts...)
+		pool.collaboration = collaboration.NewCollaborationService(collaborationStore, opts...)
 	}
 	if taskStore, ok := store.(ConversationTaskKernelStore); ok {
 		pool.conversationTasks = conversationrun.NewConversationTaskService(taskStore, opts...)
 	}
 	if inboxStore, ok := store.(AgentRequestInboxStore); ok {
-		pool.requestInbox, _ = NewAgentRequestInboxReconciler(inboxStore, opts...)
+		pool.requestInbox, _ = collaboration.NewAgentRequestInboxReconciler(inboxStore, opts...)
 	}
 	if reportingStore, ok := store.(ConversationStore); ok {
 		pool.reportingStore = reportingStore

@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -36,26 +37,26 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	create := CreateAgentRequestGroupRequest{
+	create := collaboration.CreateAgentRequestGroupRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"},
 		Policy:    RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Requests: []AgentRequestGroupSpec{
+		Requests: []collaboration.AgentRequestGroupSpec{
 			{DependencyID: "reddit", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "reddit-researcher"}, Goal: "Analyze Reddit"},
 			{DependencyID: "forums", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "forum-research"}, Goal: "Analyze forums"},
 		},
 		IdempotencyKey: "competitor-wave-1", Actor: ActivityActor{Type: "agent", ID: "lead"}, Visibility: ActivityVisibilityTeam,
 	}
-	created, err := NewCollaborationService(primary).CreateAgentRequestGroup(ctx, create)
+	created, err := collaboration.NewCollaborationService(primary).CreateAgentRequestGroup(ctx, create)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stores := []*postgres.Store{primary, replica}
-	accepted := make([]*AgentRequestResult, len(created.Requests))
+	accepted := make([]*collaboration.AgentRequestResult, len(created.Requests))
 	for index, request := range created.Requests {
-		result, err := NewCollaborationService(stores[index%len(stores)]).RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		result, err := collaboration.NewCollaborationService(stores[index%len(stores)]).RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 			Scope: scope, RequestID: request.ID, ExpectedRevision: request.Revision,
-			Decision: AgentRequestDecisionAccept, Principal: request.Recipient,
+			Decision: collaboration.AgentRequestDecisionAccept, Principal: request.Recipient,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -71,7 +72,7 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			result, err := NewCollaborationService(stores[index%len(stores)]).CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+			result, err := collaboration.NewCollaborationService(stores[index%len(stores)]).CompleteAgentRequest(ctx, collaboration.CompleteAgentRequestRequest{
 				Scope: scope, RequestID: accepted[index].Request.ID, ExpectedRevision: accepted[index].Request.Revision,
 				ExpectedChildRevision: accepted[index].Child.Revision, Principal: accepted[index].Request.Recipient,
 				Summary: "Findings delivered", CompletionKey: "complete-" + accepted[index].Request.DependencyID,
@@ -105,7 +106,7 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 	if err != nil || persistedSource.Status != AgentRunStatusQueued || persistedSource.LastWakeSignalID != group.WakeSignalID {
 		t.Fatalf("restarted source = %#v, %v", persistedSource, err)
 	}
-	replayed, err := NewCollaborationService(restarted).CreateAgentRequestGroup(ctx, create)
+	replayed, err := collaboration.NewCollaborationService(restarted).CreateAgentRequestGroup(ctx, create)
 	if err != nil || !replayed.Group.Replayed || len(replayed.Events) != 0 {
 		t.Fatalf("replayed group = %#v, %v", replayed, err)
 	}
@@ -165,7 +166,7 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := NewCollaborationService(primary).CreateAgentRequest(ctx, CreateAgentRequestRequest{
+	created, err := collaboration.NewCollaborationService(primary).CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"}, Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "review-team"},
 		Goal: "Review evidence",
@@ -180,7 +181,7 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 		wait.Add(1)
 		go func(index int, agentID string) {
 			defer wait.Done()
-			_, bidErr := NewCollaborationService(stores[index]).SubmitAgentRequestBid(ctx, SubmitAgentRequestBidRequest{
+			_, bidErr := collaboration.NewCollaborationService(stores[index]).SubmitAgentRequestBid(ctx, collaboration.SubmitAgentRequestBidRequest{
 				Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
 				AgentDeploymentID: agentID, Decision: AgentRequestBidAccept, IdempotencyKey: agentID + "-accept",
 			})
@@ -200,7 +201,7 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 		t.Fatal(err)
 	}
 	defer restarted.Close()
-	persisted, err := NewCollaborationService(restarted).GetAgentRequest(ctx, scope, created.Request.ID)
+	persisted, err := collaboration.NewCollaborationService(restarted).GetAgentRequest(ctx, scope, created.Request.ID)
 	if err != nil || len(persisted.Bids) != 1 || persisted.Revision != 2 {
 		t.Fatalf("restarted bid = %#v, %v", persisted, err)
 	}

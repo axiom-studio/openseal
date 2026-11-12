@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 )
 
 // agent_request_decision and agent_request_review (section 04 §11.7): the
@@ -53,7 +54,7 @@ func (requestDecisionHandler) Spec(agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Record your decision on the incoming request and finish this run. Call it alone.",
 		InputSchema: requestFinalSchema(
-			[]string{string(AgentRequestDecisionAccept), string(AgentRequestDecisionReject), string(AgentRequestDecisionRequestClarification)},
+			[]string{string(collaboration.AgentRequestDecisionAccept), string(collaboration.AgentRequestDecisionReject), string(collaboration.AgentRequestDecisionRequestClarification)},
 			"accept/reject: a concise reason. request_clarification: one concrete question.",
 		),
 	}
@@ -68,8 +69,8 @@ func (requestDecisionHandler) Run(ctx context.Context, x *ControlExecutor, cc ag
 	if !ok || args == nil {
 		return ControlResult{}, errors.New("agent_request_decision arguments were not decoded")
 	}
-	output := requestFinalOutput(AgentRequestDecisionOutputKey, args)
-	_, message, err := ParseAgentRequestDecisionOutput(output)
+	output := requestFinalOutput(collaboration.AgentRequestDecisionOutputKey, args)
+	_, message, err := collaboration.ParseAgentRequestDecisionOutput(output)
 	return x.acceptRequestFinal(ctx, cc, output, message, err)
 }
 
@@ -91,8 +92,8 @@ func (completionReviewHandler) Run(ctx context.Context, x *ControlExecutor, cc a
 	if !ok || args == nil {
 		return ControlResult{}, errors.New("agent_request_review arguments were not decoded")
 	}
-	output := requestFinalOutput(AgentRequestCompletionReviewOutputKey, args)
-	_, message, err := ParseAgentRequestCompletionReviewOutput(output)
+	output := requestFinalOutput(collaboration.AgentRequestCompletionReviewOutputKey, args)
+	_, message, err := collaboration.ParseAgentRequestCompletionReviewOutput(output)
 	return x.acceptRequestFinal(ctx, cc, output, message, err)
 }
 

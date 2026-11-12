@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -128,7 +129,7 @@ type runbookActionStore interface {
 // the conversation owner before policy evaluation or approval persistence.
 type RunbookActionValidator struct {
 	store          runbookActionStore
-	routineTeams   RoutineTeamCatalog
+	routineTeams   collaboration.RoutineTeamCatalog
 	grantCatalog   RoutineGrantCatalog
 	ownerAddresses RoutineOwnerAddressResolver
 	chatFiles      ChatFileResolver
@@ -168,7 +169,7 @@ func (v *RunbookActionValidator) SetRoutineOwnerAddresses(resolver RoutineOwnerA
 }
 
 // SetRoutineTeams lets routine actions check a Team's current roster.
-func (v *RunbookActionValidator) SetRoutineTeams(teams RoutineTeamCatalog) {
+func (v *RunbookActionValidator) SetRoutineTeams(teams collaboration.RoutineTeamCatalog) {
 	if v != nil {
 		v.routineTeams = teams
 	}
@@ -305,7 +306,7 @@ func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, inp
 type RunbookActionDispatcher struct {
 	store             runbookActionStore
 	fallback          agentrun.ActionDispatcher
-	routineTeams      RoutineTeamCatalog
+	routineTeams      collaboration.RoutineTeamCatalog
 	executionPreparer AcceptedRunExecutionPreparer
 	chatFiles         ChatFileResolver
 	events            routineEventActions
@@ -333,7 +334,7 @@ func (d *RunbookActionDispatcher) SetAcceptedRunExecutionPreparer(preparer Accep
 }
 
 // SetRoutineTeams lets routine actions check a Team's current roster.
-func (d *RunbookActionDispatcher) SetRoutineTeams(teams RoutineTeamCatalog) {
+func (d *RunbookActionDispatcher) SetRoutineTeams(teams collaboration.RoutineTeamCatalog) {
 	if d != nil {
 		d.routineTeams = teams
 	}

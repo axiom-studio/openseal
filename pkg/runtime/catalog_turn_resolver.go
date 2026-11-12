@@ -16,6 +16,7 @@ import (
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
@@ -145,8 +146,8 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 		return r.model(ctx, r.identity(deployment.ID), nil, agentrun.PromptContribution{}, false)
 	}
 	for _, structured := range []struct{ key, instruction string }{
-		{agentrun.AgentRequestCompletionReviewContextKey, AgentRequestCompletionReviewSystemInstruction},
-		{agentrun.AgentRequestInboxContextKey, AgentRequestDecisionSystemInstruction},
+		{agentrun.AgentRequestCompletionReviewContextKey, collaboration.AgentRequestCompletionReviewSystemInstruction},
+		{agentrun.AgentRequestInboxContextKey, collaboration.AgentRequestDecisionSystemInstruction},
 	} {
 		if _, requested := run.Context[structured.key]; !requested {
 			continue
@@ -292,7 +293,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 	var prompt agentrun.PromptContribution
 	if run.Source == RunSourceRequest || run.Source == RunSourceHandoff || run.Source == RunSourceEscalation {
 		if _, ok := run.Context["collaboration"]; ok {
-			prompt.AgentInstructions = append(prompt.AgentInstructions, AcceptedAgentRequestExecutionSystemInstruction)
+			prompt.AgentInstructions = append(prompt.AgentInstructions, collaboration.AcceptedAgentRequestExecutionSystemInstruction)
 		}
 	}
 	if delegated, ok := run.Context["delegatedSystemPrompt"].(string); ok && strings.TrimSpace(delegated) != "" {

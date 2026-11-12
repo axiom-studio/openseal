@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -44,7 +45,7 @@ func createInboxRequest(t *testing.T, store models.AgentRequestInboxStore, polic
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := NewCollaborationService(store).CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
+	created, err := collaboration.NewCollaborationService(store).CreateAgentRequest(t.Context(), collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: models.AgentRequestKindRequest, Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "requester"},
 		Recipient: recipient, SourceRunID: source.ID, Goal: "Review the launch evidence",
 		Instructions:     "Check the evidence before accepting.",

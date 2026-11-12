@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -162,7 +163,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	_ = updateRunbookStepTrace(checkpoint, reviewSequence, RunbookStepTraceWaiting, "", "Waiting for delegated Agent work", "", nil, now.Add(2*time.Minute))
 
 	requestKey := strings.Join([]string{"delegation", run.ID, "review"}, ":")
-	requestID := StableCollaborationID(scope, requestKey, "request")
+	requestID := collaboration.StableCollaborationID(scope, requestKey, "request")
 	childID := "child-review"
 	persistedRun, err := store.GetAgentRun(ctx, scope, run.ID)
 	if err != nil {
@@ -339,7 +340,7 @@ func TestRunbookAuditPlacesDelegatedChildUnderVisit(t *testing.T) {
 			{Trace: RunbookStepTrace{Sequence: 4, StepID: "review", StartedAt: now.Add(10 * time.Minute)}},
 		}},
 	}}
-	requestID := StableCollaborationID(scope, delegationIdempotencyKey(parent.ID, "review"), "request")
+	requestID := collaboration.StableCollaborationID(scope, delegationIdempotencyKey(parent.ID, "review"), "request")
 	children := []*AgentRun{
 		{ID: "child-review", Scope: scope, ParentRunID: parent.ID, AssignedAgentID: "reviewer", CreatedAt: now.Add(2 * time.Minute)},
 		{ID: "child-unrelated", Scope: scope, ParentRunID: parent.ID, AssignedAgentID: "other", CreatedAt: now.Add(3 * time.Minute)},

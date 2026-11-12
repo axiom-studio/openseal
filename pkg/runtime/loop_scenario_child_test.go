@@ -27,6 +27,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -47,8 +48,8 @@ const (
 type childFixture struct {
 	*loopFixture
 	forks    *agentrun.RunForkCoordinator
-	collab   *CollaborationService
-	inbox    *AgentRequestInboxReconciler
+	collab   *collaboration.CollaborationService
+	inbox    *collaboration.AgentRequestInboxReconciler
 	runbooks map[string]*runbook.Definition // by definition id
 	// authority adjusts a model Run's control authority before its claim (a
 	// test grants delegation targets, task start or operations here).
@@ -119,8 +120,8 @@ func newChildFixture(t *testing.T, store KernelStore, opts ...loopOption) *child
 		t.Fatalf("%T lacks the dependency and collaboration stores", f.raw)
 	}
 	teams := childTeamStore{childTestStore: stores, childTeamCatalog: childTeamCatalog{scope: capability.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}}}
-	collab := NewCollaborationService(teams, models.WithClock(f.clock.Now))
-	inbox, err := NewAgentRequestInboxReconciler(teams, models.WithClock(f.clock.Now))
+	collab := collaboration.NewCollaborationService(teams, models.WithClock(f.clock.Now))
+	inbox, err := collaboration.NewAgentRequestInboxReconciler(teams, models.WithClock(f.clock.Now))
 	if err != nil {
 		t.Fatal(err)
 	}

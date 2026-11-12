@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -31,7 +32,7 @@ func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = NewCollaborationService(store).CreateAgentRequest(ctx, CreateAgentRequestRequest{
+	if _, err = collaboration.NewCollaborationService(store).CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "requester"},
 		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"},
@@ -39,7 +40,7 @@ func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	projector, err := NewAgentRequestConversationProjector(store)
+	projector, err := collaboration.NewAgentRequestConversationProjector(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,8 +90,8 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
-	created, err := service.CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
+	service := collaboration.NewCollaborationService(store)
+	created, err := service.CreateAgentRequest(t.Context(), collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindHandoff,
 		Requester:   CollaborationParty{Type: OwnerTypeTeam, ID: "release-team"},
 		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: "specialist-agent"},
@@ -101,16 +102,16 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	projector, err := NewAgentRequestConversationProjector(store)
+	projector, err := collaboration.NewAgentRequestConversationProjector(store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = projector.Reconcile(t.Context(), scope); err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := service.RespondAgentRequest(t.Context(), RespondAgentRequestRequest{
+	accepted, err := service.RespondAgentRequest(t.Context(), collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: created.Request.Recipient,
+		Decision: collaboration.AgentRequestDecisionAccept, Principal: created.Request.Recipient,
 		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "specialist-agent"}, AssignedAgentID: "specialist-agent",
 	})
 	if err != nil {
@@ -119,7 +120,7 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 	if _, err = projector.Reconcile(t.Context(), scope); err != nil {
 		t.Fatal(err)
 	}
-	completed, err := service.CompleteAgentRequest(t.Context(), CompleteAgentRequestRequest{
+	completed, err := service.CompleteAgentRequest(t.Context(), collaboration.CompleteAgentRequestRequest{
 		Scope: scope, RequestID: accepted.Request.ID, ExpectedRevision: accepted.Request.Revision,
 		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
 		Summary: "Evidence is ready", AcceptanceEvidence: map[string]interface{}{"reviewed": true},
@@ -131,7 +132,7 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 	if _, err = projector.Reconcile(t.Context(), scope); err != nil {
 		t.Fatal(err)
 	}
-	reviewed, err := service.ReviewAgentRequestCompletion(t.Context(), ReviewAgentRequestCompletionRequest{
+	reviewed, err := service.ReviewAgentRequestCompletion(t.Context(), collaboration.ReviewAgentRequestCompletionRequest{
 		Scope: scope, RequestID: completed.Request.ID, ExpectedRevision: completed.Request.Revision,
 		ExpectedChildRevision: completed.Child.Revision, Principal: completed.Request.Requester,
 		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer-agent"}, Approve: true,
@@ -202,8 +203,8 @@ func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
-	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+	service := collaboration.NewCollaborationService(store)
+	created, err := service.CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindEscalation, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "coordinator"},
 		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "incident-commander"},
@@ -213,16 +214,16 @@ func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	projector, err := NewAgentRequestConversationProjector(store)
+	projector, err := collaboration.NewAgentRequestConversationProjector(store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = projector.Reconcile(ctx, scope); err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+	accepted, err := service.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: created.Request.Recipient,
+		Decision: collaboration.AgentRequestDecisionAccept, Principal: created.Request.Recipient,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +232,7 @@ func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 		accepted.Source.WakeCondition == nil || accepted.Source.WakeCondition.Reference != created.Request.ID {
 		t.Fatalf("accepted escalation = %#v / %#v", accepted.Source, accepted.Child)
 	}
-	completed, err := service.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+	completed, err := service.CompleteAgentRequest(ctx, collaboration.CompleteAgentRequestRequest{
 		Scope: scope, RequestID: accepted.Request.ID, ExpectedRevision: accepted.Request.Revision,
 		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
 		Summary: "Production blocker resolved", CompletionKey: "escalation-complete",

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/google/uuid"
 )
@@ -29,7 +30,7 @@ var delegateTargets = []agentrun.HostedAgentTarget{{ID: "specialist", DisplayNam
 type delegateFixture struct {
 	t       *testing.T
 	store   delegateTestStore
-	collab  *CollaborationService
+	collab  *collaboration.CollaborationService
 	exec    *ControlExecutor
 	scope   Scope
 	run     *AgentRun
@@ -58,7 +59,7 @@ func newDelegateFixtureIn(t *testing.T, store delegateTestStore, scope Scope, mu
 	if err != nil {
 		t.Fatalf("create source: %v", err)
 	}
-	collab := NewCollaborationService(store)
+	collab := collaboration.NewCollaborationService(store)
 	f := &delegateFixture{
 		t: t, store: store, collab: collab, scope: scope,
 		exec: &ControlExecutor{Portfolio: store, Sessions: store, Collaboration: collab},
@@ -216,10 +217,10 @@ func (f *delegateFixture) currentEntry() *SessionEntry {
 }
 
 // respond is the recipient's decision on request id.
-func (f *delegateFixture) respond(id string, decision AgentRequestDecision, message string) *AgentRequestResult {
+func (f *delegateFixture) respond(id string, decision collaboration.AgentRequestDecision, message string) *collaboration.AgentRequestResult {
 	f.t.Helper()
 	request := f.request(id)
-	result, err := f.collab.RespondAgentRequest(f.t.Context(), RespondAgentRequestRequest{
+	result, err := f.collab.RespondAgentRequest(f.t.Context(), collaboration.RespondAgentRequestRequest{
 		Scope: f.scope, RequestID: id, ExpectedRevision: request.Revision, Decision: decision,
 		Principal: request.Recipient, Message: message,
 	})
@@ -232,7 +233,7 @@ func (f *delegateFixture) respond(id string, decision AgentRequestDecision, mess
 // finishChild accepts request id and ends its child Run with status/output.
 func (f *delegateFixture) finishChild(id string, status AgentRunStatus, output map[string]interface{}, failure string) {
 	f.t.Helper()
-	accepted := f.respond(id, AgentRequestDecisionAccept, "On it.")
+	accepted := f.respond(id, collaboration.AgentRequestDecisionAccept, "On it.")
 	activity := NewRunActivityService(f.store, f.store)
 	running, _, err := activity.TransitionRun(f.t.Context(), f.scope, accepted.Child.ID, RunTransitionRequest{
 		ExpectedRevision: accepted.Child.Revision, Status: AgentRunStatusRunning, Summary: "started",
@@ -292,7 +293,7 @@ func TestDelegateParksWaitingForAgentDecision(t *testing.T) {
 		len(request.ChildCheckpoint) != 0 || request.IdempotencyKey != delegationIdempotencyKey(f.run.ID, "delegate-"+f.entry.ID) {
 		t.Fatalf("request = %#v", request)
 	}
-	if want := StableCollaborationID(f.scope, request.IdempotencyKey, "request"); request.ID != want {
+	if want := collaboration.StableCollaborationID(f.scope, request.IdempotencyKey, "request"); request.ID != want {
 		t.Fatalf("request id %s, want %s", request.ID, want)
 	}
 	source := f.reload()
@@ -340,7 +341,7 @@ func TestDelegateCompletedResultCarriesAnswerAndArtifacts(t *testing.T) {
 func TestDelegateClarificationThenReplyParksAgain(t *testing.T) {
 	f := newDelegateFixture(t, newTestKernelStore(t), nil)
 	_, request := f.delegate()
-	f.respond(request.ID, AgentRequestDecisionRequestClarification, "Which region?")
+	f.respond(request.ID, collaboration.AgentRequestDecisionRequestClarification, "Which region?")
 	resumed := f.resume()
 	if !resumed.Resolved || f.entry.State != ToolEntryCompleted || f.entry.Tool.Result.IsError {
 		t.Fatalf("resume = %#v entry %s", resumed, f.entry.State)
@@ -378,7 +379,7 @@ func TestDelegateClarificationThenReplyParksAgain(t *testing.T) {
 func TestDelegateReplyCrashBeforeAnswerAnswersOnResume(t *testing.T) {
 	f := newDelegateFixture(t, newTestKernelStore(t), nil)
 	_, request := f.delegate()
-	f.respond(request.ID, AgentRequestDecisionRequestClarification, "Which region?")
+	f.respond(request.ID, collaboration.AgentRequestDecisionRequestClarification, "Which region?")
 	f.resume()
 	f.call(ControlToolDelegateReply, map[string]interface{}{"requestId": request.ID, "answer": "EU only."})
 	// Crash after the entry moved, before the answer was recorded.
@@ -402,7 +403,7 @@ func TestDelegateReplyCrashBeforeAnswerAnswersOnResume(t *testing.T) {
 func TestDelegateRejectedIsErrorResult(t *testing.T) {
 	f := newDelegateFixture(t, newTestKernelStore(t), nil)
 	_, request := f.delegate()
-	f.respond(request.ID, AgentRequestDecisionReject, "Out of scope for me.")
+	f.respond(request.ID, collaboration.AgentRequestDecisionReject, "Out of scope for me.")
 	resumed := f.resume()
 	if !resumed.Resolved || f.entry.State != ToolEntryError || !f.entry.Tool.Result.IsError {
 		t.Fatalf("resume = %#v entry %s", resumed, f.entry.State)
@@ -452,7 +453,7 @@ func TestReplyToForeignRequestIsRefused(t *testing.T) {
 	store := newTestKernelStore(t)
 	other := newDelegateFixture(t, store, nil)
 	_, foreign := other.delegate()
-	other.respond(foreign.ID, AgentRequestDecisionRequestClarification, "Which region?")
+	other.respond(foreign.ID, collaboration.AgentRequestDecisionRequestClarification, "Which region?")
 	other.claim() // the other source runs again; it is not queued
 
 	f := newDelegateFixtureIn(t, store, other.scope, nil) // same tenant, another source Run
@@ -475,7 +476,7 @@ func TestReplyToForeignRequestIsRefused(t *testing.T) {
 func TestDelegateReplyToUnaskedRequestIsRefused(t *testing.T) {
 	f := newDelegateFixture(t, newTestKernelStore(t), nil)
 	_, request := f.delegate()
-	f.respond(request.ID, AgentRequestDecisionReject, "No.")
+	f.respond(request.ID, collaboration.AgentRequestDecisionReject, "No.")
 	f.resume()
 	f.call(ControlToolDelegateReply, map[string]interface{}{"requestId": request.ID, "answer": "EU only."})
 	f.mustSettle()
@@ -625,7 +626,7 @@ func TestDelegateCrashBeforeRequestResettlesOnce(t *testing.T) {
 					t.Fatalf("entry = %s", entry.State)
 				}
 				// The recipient rejects; the resumed claim resumes (no re-settle).
-				f.respond(request.ID, AgentRequestDecisionReject, "No capacity.")
+				f.respond(request.ID, collaboration.AgentRequestDecisionReject, "No capacity.")
 				if resumed := f.resume(); !resumed.Resolved || f.entry.State != ToolEntryError {
 					t.Fatalf("resume = %#v entry %s", resumed, f.entry.State)
 				}

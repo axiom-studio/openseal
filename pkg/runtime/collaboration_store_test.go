@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 )
 
 func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
@@ -20,8 +22,8 @@ func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
-	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+	service := collaboration.NewCollaborationService(store)
+	created, err := service.CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
 		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
@@ -31,7 +33,7 @@ func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	duplicate, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+	duplicate, err := service.CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
 		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
@@ -41,9 +43,9 @@ func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	if err != nil || duplicate.Request.ID != created.Request.ID {
 		t.Fatalf("idempotent request = %#v, %v", duplicate, err)
 	}
-	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+	accepted, err := service.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Decision: collaboration.AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -77,8 +79,8 @@ func TestAgentRequestNegotiationAndSafety(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
-	base := CreateAgentRequestRequest{
+	service := collaboration.NewCollaborationService(store)
+	base := collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
 		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "analyst"}, Goal: "Measure impact",
@@ -92,16 +94,16 @@ func TestAgentRequestNegotiationAndSafety(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	question, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+	question, err := service.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: 1,
-		Decision: AgentRequestDecisionRequestClarification, Principal: base.Recipient, Message: "Which cohort?",
+		Decision: collaboration.AgentRequestDecisionRequestClarification, Principal: base.Recipient, Message: "Which cohort?",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	clarified, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+	clarified, err := service.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: question.Request.Revision,
-		Decision: AgentRequestDecisionProvideClarification, Principal: base.Requester, Message: "Platform engineers.",
+		Decision: collaboration.AgentRequestDecisionProvideClarification, Principal: base.Requester, Message: "Platform engineers.",
 	})
 	if err != nil || clarified.Request.Status != AgentRequestStatusPending {
 		t.Fatalf("clarification = %#v, %v", clarified, err)

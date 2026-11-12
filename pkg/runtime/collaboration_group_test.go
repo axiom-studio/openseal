@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -36,12 +37,12 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			service := NewCollaborationService(store)
-			create := CreateAgentRequestGroupRequest{
+			service := collaboration.NewCollaborationService(store)
+			create := collaboration.CreateAgentRequestGroupRequest{
 				Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 				Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"},
 				Policy:    RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-				Requests: []AgentRequestGroupSpec{
+				Requests: []collaboration.AgentRequestGroupSpec{
 					{DependencyID: "forums", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "forum-researcher"}, Goal: "Analyze forums"},
 					{DependencyID: "reviews", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "review-research"}, Goal: "Analyze product reviews"},
 				},
@@ -56,11 +57,11 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 				t.Fatalf("replayed group = %#v, %v", replayed, err)
 			}
 
-			accepted := make([]*AgentRequestResult, 0, 2)
+			accepted := make([]*collaboration.AgentRequestResult, 0, 2)
 			for _, request := range created.Requests {
-				result, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+				result, err := service.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 					Scope: scope, RequestID: request.ID, ExpectedRevision: request.Revision,
-					Decision: AgentRequestDecisionAccept, Principal: request.Recipient,
+					Decision: collaboration.AgentRequestDecisionAccept, Principal: request.Recipient,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -72,7 +73,7 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 				t.Fatalf("source after accepts = %#v, %v", waiting, err)
 			}
 
-			first, err := service.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+			first, err := service.CompleteAgentRequest(ctx, collaboration.CompleteAgentRequestRequest{
 				Scope: scope, RequestID: accepted[0].Request.ID, ExpectedRevision: accepted[0].Request.Revision,
 				ExpectedChildRevision: accepted[0].Child.Revision, Principal: accepted[0].Request.Recipient,
 				Summary: "Forum findings delivered", CompletionKey: "forums-complete-v1",
@@ -80,7 +81,7 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 			if err != nil || first.Source.Status != AgentRunStatusWaitingForDependency {
 				t.Fatalf("first completion = %#v, %v", first, err)
 			}
-			second, err := service.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+			second, err := service.CompleteAgentRequest(ctx, collaboration.CompleteAgentRequestRequest{
 				Scope: scope, RequestID: accepted[1].Request.ID, ExpectedRevision: accepted[1].Request.Revision,
 				ExpectedChildRevision: accepted[1].Child.Revision, Principal: accepted[1].Request.Recipient,
 				Actor:   CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer"},
@@ -113,12 +114,12 @@ func TestGroupedAgentRequestsRecordLosingCompletionWithoutSecondWake(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
-	created, err := service.CreateAgentRequestGroup(ctx, CreateAgentRequestGroupRequest{
+	service := collaboration.NewCollaborationService(store)
+	created, err := service.CreateAgentRequestGroup(ctx, collaboration.CreateAgentRequestGroupRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"},
 		Policy:    RunDependencyPolicy{Mode: FanInModeAny, FailureMode: DependencyFailureWait},
-		Requests: []AgentRequestGroupSpec{
+		Requests: []collaboration.AgentRequestGroupSpec{
 			{DependencyID: "a", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "a"}, Goal: "Answer A"},
 			{DependencyID: "b", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "b"}, Goal: "Answer B"},
 		},
@@ -127,11 +128,11 @@ func TestGroupedAgentRequestsRecordLosingCompletionWithoutSecondWake(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted := make([]*AgentRequestResult, len(created.Requests))
+	accepted := make([]*collaboration.AgentRequestResult, len(created.Requests))
 	for index, request := range created.Requests {
-		result, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		result, err := service.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 			Scope: scope, RequestID: request.ID, ExpectedRevision: request.Revision,
-			Decision: AgentRequestDecisionAccept, Principal: request.Recipient,
+			Decision: collaboration.AgentRequestDecisionAccept, Principal: request.Recipient,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -139,7 +140,7 @@ func TestGroupedAgentRequestsRecordLosingCompletionWithoutSecondWake(t *testing.
 		accepted[index] = result
 	}
 	for index, request := range accepted {
-		result, err := service.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+		result, err := service.CompleteAgentRequest(ctx, collaboration.CompleteAgentRequestRequest{
 			Scope: scope, RequestID: request.Request.ID, ExpectedRevision: request.Request.Revision,
 			ExpectedChildRevision: request.Child.Revision, Principal: request.Request.Recipient,
 			Summary: "Answer delivered", CompletionKey: "answer-" + request.Request.DependencyID,
@@ -175,12 +176,12 @@ func TestGroupedAgentRequestRejectionFailsRequiredFanIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
-	created, err := service.CreateAgentRequestGroup(ctx, CreateAgentRequestGroupRequest{
+	service := collaboration.NewCollaborationService(store)
+	created, err := service.CreateAgentRequestGroup(ctx, collaboration.CreateAgentRequestGroupRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"},
 		Policy:    RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Requests: []AgentRequestGroupSpec{
+		Requests: []collaboration.AgentRequestGroupSpec{
 			{DependencyID: "required", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewers"}, Goal: "Review"},
 		},
 		IdempotencyKey: "reject-v1", Actor: ActivityActor{Type: "agent", ID: "lead"}, Visibility: ActivityVisibilityTeam,
@@ -188,9 +189,9 @@ func TestGroupedAgentRequestRejectionFailsRequiredFanIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rejected, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+	rejected, err := service.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Requests[0].ID, ExpectedRevision: created.Requests[0].Revision,
-		Decision: AgentRequestDecisionReject, Principal: created.Requests[0].Recipient, Message: "No reviewer is available",
+		Decision: collaboration.AgentRequestDecisionReject, Principal: created.Requests[0].Recipient, Message: "No reviewer is available",
 	})
 	if err != nil || rejected.Request.Status != AgentRequestStatusRejected || rejected.Source.Status != AgentRunStatusQueued {
 		t.Fatalf("rejected request = %#v, %v", rejected, err)

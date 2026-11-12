@@ -2,7 +2,7 @@
 // opener, the chat roster Team catalog and the artifact digest helper that
 // runtime's tests use.
 
-package runtime
+package collaboration
 
 import (
 	"context"

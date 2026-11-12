@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -38,7 +39,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	catalog := teamMemberActionCatalog(t, ctx, scope, owner.ID)
-	validator, err := NewTeamMemberActionValidator(teams)
+	validator, err := collaboration.NewTeamMemberActionValidator(teams)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +77,7 @@ func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	if err != nil || resolved.Call.Status != ActionCallStatusReady {
 		t.Fatalf("resolve = %#v, %v", resolved, err)
 	}
-	dispatcher, err := NewTeamMemberActionDispatcher(store, teams, nil)
+	dispatcher, err := collaboration.NewTeamMemberActionDispatcher(store, teams, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,8 +130,8 @@ func TestTeamMemberActionRejectsStaleForeignAndPolicyForbiddenChangesBeforeAppro
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	teams, agentDeploymentID := teamMemberActionRegistry(t, ctx, scope)
-	validator, _ := NewTeamMemberActionValidator(teams)
-	bound := &skill.BoundAction{Definition: TeamManagementSkill(), Action: TeamManagementSkill().Actions[action.TeamActionUpdateMember]}
+	validator, _ := collaboration.NewTeamMemberActionValidator(teams)
+	bound := &skill.BoundAction{Definition: collaboration.TeamManagementSkill(), Action: collaboration.TeamManagementSkill().Actions[action.TeamActionUpdateMember]}
 
 	for name, testCase := range map[string]struct {
 		run       *AgentRun
@@ -224,7 +225,7 @@ func teamMemberActionRegistry(t *testing.T, ctx context.Context, scope Scope) (*
 func teamMemberActionCatalog(t *testing.T, ctx context.Context, scope Scope, deploymentID string) *skill.Catalog {
 	t.Helper()
 	catalog := skill.NewCatalog()
-	if err := catalog.Register(ctx, TeamManagementSkill()); err != nil {
+	if err := catalog.Register(ctx, collaboration.TeamManagementSkill()); err != nil {
 		t.Fatal(err)
 	}
 	if err := catalog.Bind(ctx, &skill.Binding{

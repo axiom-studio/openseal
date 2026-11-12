@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
@@ -369,7 +370,7 @@ func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runboo
 	t.Helper()
 	store := newTestKernelStore(t)
 	f := &runbookLoopFixture{t: t, ctx: context.Background(), store: store, scope: Scope{Kind: "tenant", ID: "runbook-loop"}}
-	collaboration := NewCollaborationService(store)
+	collaboration := collaboration.NewCollaborationService(store)
 	f.control = &ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration}
 	tools, err := NewStepToolDispatcher(StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: f.control})
 	if err != nil {
@@ -566,7 +567,7 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 	if err != nil || state.PendingDelegation != "delegate" || state.PendingCall == "" {
 		t.Fatalf("engine state was not applied before the delegation: %#v err=%v", state, err)
 	}
-	requestID := StableCollaborationID(f.scope, delegationIdempotencyKey(source.ID, "delegate"), "request")
+	requestID := collaboration.StableCollaborationID(f.scope, delegationIdempotencyKey(source.ID, "delegate"), "request")
 	request, err := f.control.Collaboration.GetAgentRequest(f.ctx, f.scope, requestID)
 	if err != nil || request.Recipient.ID != "specialist" || request.Goal != "Analyze the release" ||
 		request.SharedContext["release"] != "2026.07" || request.BudgetAllocation == nil || request.BudgetAllocation.MaxTurns != 2 {
@@ -579,8 +580,8 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 	}
 	// The specialist accepts and its child Run completes; the collaboration
 	// service writes the result to the source and re-queues it.
-	accepted, err := f.control.Collaboration.RespondAgentRequest(f.ctx, RespondAgentRequestRequest{
-		Scope: f.scope, RequestID: requestID, ExpectedRevision: request.Revision, Decision: AgentRequestDecisionAccept,
+	accepted, err := f.control.Collaboration.RespondAgentRequest(f.ctx, collaboration.RespondAgentRequestRequest{
+		Scope: f.scope, RequestID: requestID, ExpectedRevision: request.Revision, Decision: collaboration.AgentRequestDecisionAccept,
 		Principal: request.Recipient, Message: "On it.",
 	})
 	if err != nil || accepted.Child == nil {

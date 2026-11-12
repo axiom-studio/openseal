@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -453,7 +454,7 @@ func routineChangeCreator(a *RunbookActivation, run *AgentRun) string {
 	}
 	return run.ActingUser
 }
-func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams RoutineTeamCatalog, events routineEventActions, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
+func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams collaboration.RoutineTeamCatalog, events routineEventActions, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 	if err := runbookActionOwner(ctx, teams, input.Run, input.Bound); err != nil {
 		return nil, err
 	}
@@ -509,7 +510,7 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 	}
 	return nil, errors.New("unsupported scheduled task action")
 }
-func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams RoutineTeamCatalog, events routineEventActions, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams collaboration.RoutineTeamCatalog, events routineEventActions, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 	run, err := store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil {
 		return nil, err

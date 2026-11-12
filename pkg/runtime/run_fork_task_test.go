@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -113,18 +114,18 @@ func TestTaskWorkRejectsDelegationBeforeRequestOrGroupCommit(t *testing.T) {
 		for _, grouped := range []bool{false, true} {
 			t.Run(target+map[bool]string{false: "/singular", true: "/grouped"}[grouped], func(t *testing.T) {
 				store, source, _ := claimedForkTaskFixture(t)
-				service := NewCollaborationService(store)
+				service := collaboration.NewCollaborationService(store)
 				requester := CollaborationParty{Type: source.Owner.Type, ID: source.Owner.ID}
 				recipient := CollaborationParty{Type: OwnerTypeAgent, ID: target}
 				var err error
 				if grouped {
-					_, err = service.CreateAgentRequestGroup(t.Context(), CreateAgentRequestGroupRequest{
+					_, err = service.CreateAgentRequestGroup(t.Context(), collaboration.CreateAgentRequestGroupRequest{
 						Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision, Requester: requester,
 						Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast}, IdempotencyKey: "task-delegation-group",
-						Requests: []AgentRequestGroupSpec{{Kind: AgentRequestKindRequest, Recipient: recipient, Goal: "Review", BudgetAllocation: &BudgetPolicy{}}},
+						Requests: []collaboration.AgentRequestGroupSpec{{Kind: AgentRequestKindRequest, Recipient: recipient, Goal: "Review", BudgetAllocation: &BudgetPolicy{}}},
 					})
 				} else {
-					_, err = service.CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
+					_, err = service.CreateAgentRequest(t.Context(), collaboration.CreateAgentRequestRequest{
 						Scope: source.Scope, SourceRunID: source.ID, Kind: AgentRequestKindRequest, Requester: requester, Recipient: recipient,
 						Goal: "Review", BudgetAllocation: &BudgetPolicy{}, IdempotencyKey: "task-delegation",
 					})

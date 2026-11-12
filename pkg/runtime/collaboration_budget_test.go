@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 )
 
 func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
@@ -18,8 +20,8 @@ func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewCollaborationService(store)
-	request := CreateAgentRequestRequest{
+	service := collaboration.NewCollaborationService(store)
+	request := collaboration.CreateAgentRequestRequest{
 		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
 		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, Goal: "Prepare launch copy",
@@ -33,9 +35,9 @@ func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+	accepted, err := service.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: request.Recipient,
+		Decision: collaboration.AgentRequestDecisionAccept, Principal: request.Recipient,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -68,11 +70,11 @@ func TestGroupedDelegationCannotOverAllocateParentBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewCollaborationService(store).CreateAgentRequestGroup(ctx, CreateAgentRequestGroupRequest{
+	_, err = collaboration.NewCollaborationService(store).CreateAgentRequestGroup(ctx, collaboration.CreateAgentRequestGroupRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"},
 		Policy:    RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Requests: []AgentRequestGroupSpec{
+		Requests: []collaboration.AgentRequestGroupSpec{
 			{DependencyID: "one", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "one"}, Goal: "One", BudgetAllocation: &BudgetPolicy{MaxTurns: 6}},
 			{DependencyID: "two", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "two"}, Goal: "Two", BudgetAllocation: &BudgetPolicy{MaxTurns: 5}},
 		},

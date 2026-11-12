@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -61,7 +62,7 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 	t.Helper()
 	ctx := context.Background()
 	base := agentbuildertest.NewDispatchFixture(t)
-	if err := base.Catalog.Register(ctx, TeamManagementSkill()); err != nil {
+	if err := base.Catalog.Register(ctx, collaboration.TeamManagementSkill()); err != nil {
 		t.Fatal(err)
 	}
 	skillScope := skill.ScopeReference{Kind: base.Scope.Kind, ID: base.Scope.ID}
