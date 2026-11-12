@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 type askUserTestStore interface {
@@ -272,7 +273,7 @@ func TestAskUserPostsQuestionAndParks(t *testing.T) {
 }
 
 func TestAskUserResumeWithoutAnswerRepostsAndReparks(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	f := claimedForegroundRun(t, store)
 	call := newAskUserCall(t, store, f.run, "foreground-worker", askUserTestQuestion)
 	// Crash after the entry transition, before the post and the park: the
@@ -333,7 +334,7 @@ func TestAskUserQuestionReconcilerRepostsFromEntry(t *testing.T) {
 }
 
 func TestAskUserAnswerFromOtherActorIgnored(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	f := claimedForegroundRun(t, store)
 	parked, call := askUserParked(t, store, f.run, "foreground-worker", askUserTestQuestion)
 	f.run = parked

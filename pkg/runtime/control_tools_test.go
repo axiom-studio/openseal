@@ -12,6 +12,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -251,7 +252,7 @@ func newControlFixture(t *testing.T, calls []agentrun.LoopToolCall) *controlFixt
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "control-" + uuid.NewString()[:8]}
 	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
@@ -337,7 +338,7 @@ func newControlFixture(t *testing.T, calls []agentrun.LoopToolCall) *controlFixt
 // and task workflows. The store itself holds no action calls or tasks.
 type controlRecords struct {
 	*sqlite.Store
-	actions actionCallRecords
+	actions controlActionCallRecords
 	tasks   []*models.ConversationTask
 }
 

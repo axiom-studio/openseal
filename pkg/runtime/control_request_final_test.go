@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration/collaborationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -128,7 +129,7 @@ func onlyRunWithSource(t *testing.T, store *sqlite.Store, scope models.Scope, pa
 
 func reconcileDecisionRun(t *testing.T) (*collaborationtest.TeamStore, *collaboration.AgentRequestInboxReconciler, *models.AgentRequest, *models.AgentRun) {
 	t.Helper()
-	store := &collaborationtest.TeamStore{Store: newTestKernelStore(t)}
+	store := &collaborationtest.TeamStore{Store: conversationtest.NewStore(t)}
 	source, request := collaborationtest.CreateInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := collaboration.NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -220,7 +221,7 @@ func TestClarificationDecisionRequiresQuestion(t *testing.T) {
 func TestReviewToolResolvesCompletionReview(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "inbox"}
 	store := &collaborationtest.TeamStore{
-		Store: newTestKernelStore(t),
+		Store: conversationtest.NewStore(t),
 		Deployment: &kernelteam.Deployment{
 			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,

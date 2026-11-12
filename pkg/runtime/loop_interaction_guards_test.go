@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -344,7 +345,7 @@ func TestGovernedToolViewsReadsRunCallsInPathOrder(t *testing.T) {
 	}
 
 	// The store-backed loader returns the same views.
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	for _, call := range f.calls {
 		storetest.SeedActionCall(t, store, call)
 	}

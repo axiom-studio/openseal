@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
@@ -80,7 +81,7 @@ func newOperationCall(t *testing.T, store forkTestStore, setup func(scope models
 		reporting = conversations
 	}
 	forks := agentrun.NewRunForkCoordinator(store)
-	forks.SetAcceptedRunExecutionPreparer(&acceptedCreationTestPreparer{
+	forks.SetAcceptedRunExecutionPreparer(&controlAcceptedRunPreparer{
 		id: operationTestEngage.DefinitionID, version: operationTestEngage.DefinitionVersion,
 	})
 	return &operationCall{
@@ -325,12 +326,12 @@ func TestRunOperationTwiceInOneRunCreatesTwoChildren(t *testing.T) {
 }
 
 func TestRunOperationPostsStartedMessagePerChild(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	var trigger *models.ChannelMessage
 	var conversation *models.Conversation
 	c := newOperationCall(t, store, func(scope models.Scope, req *models.CreateAgentRunRequest) {
-		seedTestSpace(t, store, scope)
+		conversationtest.SeedSpace(t, store, scope)
 		created, _, err := service.CreateConversation(context.Background(), runtimeconversation.CreateConversationRequest{
 			Scope: scope, Owner: req.Owner, Title: "Agent work", IdempotencyKey: "op-channel",
 		})

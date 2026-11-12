@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -32,11 +33,11 @@ func offeredControlTools(a agentrun.ControlAuthority) []string {
 
 // controlAuthorityTeamCatalog is a Team whose roster holds the current Agent
 // (lead) and one delegation target (reviewer).
-func controlAuthorityTeamCatalog(scope models.Scope) *resolverCatalog {
+func controlAuthorityTeamCatalog(scope models.Scope) *controlTeamCatalog {
 	ref := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	lead := &kernelagent.AgentDeployment{ID: "lead", Scope: ref, DefinitionID: "lead-definition", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}
 	reviewer := &kernelagent.AgentDeployment{ID: "reviewer", Scope: ref, DefinitionID: "reviewer-definition", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}
-	return &resolverCatalog{
+	return &controlTeamCatalog{
 		deployment:  lead,
 		deployments: []*kernelagent.AgentDeployment{lead, reviewer},
 		definitions: map[string]*kernelagent.AgentDefinition{
@@ -75,7 +76,7 @@ func claimedForegroundChatRun(t *testing.T, store *sqlite.Store) *models.AgentRu
 	t.Helper()
 	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
 	conversations := conversation.NewConversationService(store)
-	seedTestSpace(t, store, scope)
+	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "control-authority-chat",
 	})
@@ -187,7 +188,7 @@ func TestForkChildCannotFork(t *testing.T) {
 }
 
 func TestVoiceCallDisablesTaskStart(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	run := claimedForegroundChatRun(t, store)
 
 	typed := resolveControlAuthorityForTest(t, chatAuthorityInput(store, run))
@@ -210,7 +211,7 @@ func TestVoiceCallDisablesTaskStart(t *testing.T) {
 }
 
 func TestChatReplyCannotWait(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	run := claimedForegroundChatRun(t, store)
 	chat := resolveControlAuthorityForTest(t, chatAuthorityInput(store, run))
 	if chat.CanWait {

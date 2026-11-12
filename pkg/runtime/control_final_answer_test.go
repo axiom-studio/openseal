@@ -803,7 +803,7 @@ func TestRoutineOccurrenceSilentRefusedAfterChildWrite(t *testing.T) {
 func TestFinalAnswerSchemaStableAcrossSkillRefs(t *testing.T) {
 	one := agentrun.ControlAuthority{AgentID: "agent-1", SkillPromptRefs: []string{"skill-notion@1"}}
 	two := agentrun.ControlAuthority{AgentID: "agent-1", SkillPromptRefs: []string{"skill-notion@1", "skill-slack@1"}}
-	if mustJSON(t, finalAnswerSchema(one)) != mustJSON(t, finalAnswerSchema(two)) || finalAnswerDescription(one) != finalAnswerDescription(two) {
+	if controlJSON(t, finalAnswerSchema(one)) != controlJSON(t, finalAnswerSchema(two)) || finalAnswerDescription(one) != finalAnswerDescription(two) {
 		t.Fatal("the final answer tool changes with the Skill refs")
 	}
 	if selections, rejection := finalSkillSelections([]string{"skill-gone@1"}, two.SkillPromptRefs); rejection != nil || len(selections) != 2 ||
@@ -820,7 +820,7 @@ func TestFinalAnswerSchemaStableAcrossSkillRefs(t *testing.T) {
 	more.Operations = append(more.Operations, agentrun.HostedRunbookOperation{Entrypoint: "audit", Name: "Audit"})
 	for _, name := range []models.ControlToolName{models.ControlToolDelegate, models.ControlToolFork, models.ControlToolRunOperation} {
 		handler := NewRegistry(BuiltinTools()...)[name]
-		if mustJSON(t, handler.Spec(targets)) != mustJSON(t, handler.Spec(more)) {
+		if controlJSON(t, handler.Spec(targets)) != controlJSON(t, handler.Spec(more)) {
 			t.Fatalf("%s changes with its targets", name)
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 // interactionFixture is a control fixture whose Run answers in a
@@ -23,7 +24,7 @@ func newInteractionFixture(t *testing.T, calls []agentrun.LoopToolCall) *interac
 	t.Helper()
 	f := newControlFixture(t, calls)
 	conversations := runtimeconversation.NewConversationService(f.store)
-	seedTestSpace(t, f.store, f.run.Scope)
+	conversationtest.SeedSpace(t, f.store, f.run.Scope)
 	conversation, _, err := conversations.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
 		Scope: f.run.Scope, Owner: f.run.Owner, Title: "Chat", IdempotencyKey: "chat",
 	})

@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 func TestAskUserOptionsDecodeLimits(t *testing.T) {
@@ -111,7 +112,7 @@ func TestAskUserOptionsPostedAndAnsweredWithSelectedOptions(t *testing.T) {
 }
 
 func TestAskUserWithoutOptionsResultHasNoSelectedOptions(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	f := claimedForegroundRun(t, store)
 	parked, call := askUserParked(t, store, f.run, "foreground-worker", askUserTestQuestion)
 	f.run = parked
@@ -131,7 +132,7 @@ func TestAskUserWithoutOptionsResultHasNoSelectedOptions(t *testing.T) {
 }
 
 func TestPostChannelMessageRefusesInvalidSelectedOptions(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	f := claimedForegroundRun(t, store)
 	single := `{"question":"` + askUserTestQuestion + `","options":[{"label":"Pricing"},{"label":"Docs"}]}`
 	call := newAskUserCallWithArguments(t, store, f.run, "foreground-worker", json.RawMessage(single))
@@ -185,8 +186,8 @@ func TestAgentBuilderConversationOriginValidates(t *testing.T) {
 	if err := (models.ConversationReference{Kind: models.ConversationReferenceAgentBuilder, ID: "k"}).Validate(); err != nil {
 		t.Fatal(err)
 	}
-	store := newTestKernelStore(t)
-	seedTestSpace(t, store, models.Scope{Kind: "organization", ID: "builder"})
+	store := conversationtest.NewStore(t)
+	conversationtest.SeedSpace(t, store, models.Scope{Kind: "organization", ID: "builder"})
 	service := conversation.NewConversationService(store)
 	origin := &models.ConversationReference{Kind: models.ConversationReferenceAgentBuilder, ID: "k"}
 	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
