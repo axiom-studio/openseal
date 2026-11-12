@@ -196,7 +196,7 @@ func ValidateStepModelRecordInput(turn *AgentTurn, expectedRevision int64, event
 }
 
 func validAgentTurnStatus(status AgentTurnStatus) bool {
-	return status == AgentTurnStatusRunning || TerminalAgentTurnStatus(status)
+	return status == AgentTurnStatusRunning || IsTerminalAgentTurnStatus(status)
 }
 
 func IsValidStepProducerKind(kind StepProducerKind) bool {
@@ -213,7 +213,7 @@ func IsValidStepStopReason(reason string) bool {
 	return false
 }
 
-func TerminalAgentTurnStatus(status AgentTurnStatus) bool {
+func IsTerminalAgentTurnStatus(status AgentTurnStatus) bool {
 	return status == AgentTurnStatusCompleted || status == AgentTurnStatusFailed || status == AgentTurnStatusCanceled
 }
 

@@ -51,9 +51,9 @@ func validateConversationTaskToolRecord(record ConversationTaskCreateRecord) err
 	return ValidateCreateRunAgentSessionTxRequest(*session)
 }
 
-// ConversationTaskSteeringSettled refuses an admission while the source Run
+// CheckConversationTaskSteeringSettled refuses an admission while the source Run
 // has steering its loop has not read yet (section 04 §7.2 rule 2).
-func ConversationTaskSteeringSettled(record ConversationTaskCreateRecord, current *AgentRun) error {
+func CheckConversationTaskSteeringSettled(record ConversationTaskCreateRecord, current *AgentRun) error {
 	if record.ToolTransition != nil && current != nil && current.ConsumedInterventions != len(current.PendingInterventions) {
 		return ErrSteeringArrived
 	}
@@ -86,9 +86,9 @@ func VerifyConversationTaskToolEntry(record ConversationTaskCreateRecord, curren
 	return nil
 }
 
-// ConversationTaskToolReplayMatches accepts a replayed admission only when
+// CheckConversationTaskToolReplay accepts a replayed admission only when
 // its tool entry already holds the same started result.
-func ConversationTaskToolReplayMatches(record ConversationTaskCreateRecord, entry *SessionEntry) error {
+func CheckConversationTaskToolReplay(record ConversationTaskCreateRecord, entry *SessionEntry) error {
 	if entry == nil || entry.State != ToolEntryCompleted || entry.Tool == nil || !SameToolResult(entry.Tool.Result, record.ToolTransition.Result) {
 		return ErrConversationTaskConflict
 	}

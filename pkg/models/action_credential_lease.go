@@ -145,7 +145,7 @@ type ActionCredentialLeaseRedeemer interface {
 	RedeemActionCredentialLease(context.Context, ActionCredentialLeaseRedemptionRequest) error
 }
 
-func MatchActionCredentialLeaseCore(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string) error {
+func CheckActionCredentialLeaseCore(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string) error {
 	if call == nil || run == nil || call.Status != ActionCallStatusRunning || call.LeaseExpiresAt == nil || call.Scope != run.Scope || call.RunID != run.ID {
 		return ErrActionCredentialLeaseMismatch
 	}

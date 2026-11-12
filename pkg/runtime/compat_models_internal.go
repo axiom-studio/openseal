@@ -62,7 +62,7 @@ type (
 )
 
 func matchActionCredentialLeaseCore(lease ActionCredentialLease, call *ActionCall, run *AgentRun, transport string) error {
-	return models.MatchActionCredentialLeaseCore(lease, call, run, transport)
+	return models.CheckActionCredentialLeaseCore(lease, call, run, transport)
 }
 
 func actionCredentialFields(references map[string]skill.CredentialReference, fields map[string][]string) ([]ActionCredentialFieldReference, error) {
@@ -258,7 +258,7 @@ func externalConversationThreadRoot(conversation *Conversation, trigger *Channel
 }
 
 func replyRunGuardHolds(run *AgentRun, guard *ReplyRunGuard, now time.Time) error {
-	return models.ReplyRunGuardHolds(run, guard, now)
+	return models.CheckReplyRunGuard(run, guard, now)
 }
 
 func sameRequestedSpace(existing *Conversation, spaceID string) bool {
@@ -350,7 +350,7 @@ func replayConversationTaskContinuation(task *ConversationTask, run *AgentRun) (
 }
 
 func conversationTaskSteeringSettled(record ConversationTaskCreateRecord, current *AgentRun) error {
-	return models.ConversationTaskSteeringSettled(record, current)
+	return models.CheckConversationTaskSteeringSettled(record, current)
 }
 
 func verifyConversationTaskToolEntry(record ConversationTaskCreateRecord, current *AgentRun, entry, assistant *SessionEntry) error {
@@ -358,7 +358,7 @@ func verifyConversationTaskToolEntry(record ConversationTaskCreateRecord, curren
 }
 
 func conversationTaskToolReplayMatches(record ConversationTaskCreateRecord, entry *SessionEntry) error {
-	return models.ConversationTaskToolReplayMatches(record, entry)
+	return models.CheckConversationTaskToolReplay(record, entry)
 }
 
 func sameToolResult(a, b *ToolResult) bool {
@@ -626,5 +626,5 @@ func failedConversationReportCandidate(run *AgentRun) bool {
 }
 
 func terminalAgentTurnStatus(status AgentTurnStatus) bool {
-	return models.TerminalAgentTurnStatus(status)
+	return models.IsTerminalAgentTurnStatus(status)
 }
