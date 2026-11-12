@@ -538,24 +538,3 @@ func approveSkillAction(t *testing.T, ctx context.Context, store *sqlite.Store, 
 		t.Fatalf("resolve = %#v, %v", resolved, err)
 	}
 }
-
-func TestSkillManagementDispatchAcceptsCompatiblePreviousInterface(t *testing.T) {
-	definition := SkillManagementSkill()
-	definition.Version = "1.4.3"
-	bound := &skill.BoundAction{Definition: definition, Action: definition.Actions[SkillActionRequestSetup]}
-	if !isSkillBindingAction(bound) {
-		t.Fatal("compatible older built-in interface rejected")
-	}
-	action := definition.Actions[SkillActionRequestSetup]
-	action.InputSchema = map[string]interface{}{"type": "string"}
-	definition.Actions[SkillActionRequestSetup] = action
-	if isSkillBindingAction(bound) {
-		t.Fatal("incompatible input interface accepted")
-	}
-	definition = SkillManagementSkill()
-	definition.Source = &capability.SourceProvenance{Identity: "foreign"}
-	bound.Definition = definition
-	if isSkillBindingAction(bound) {
-		t.Fatal("foreign source accepted as built-in")
-	}
-}

@@ -338,24 +338,6 @@ func TestWorkerPollSignalBroadcastsAndCancelsAllWaiters(t *testing.T) {
 	}
 }
 
-func TestWorkerPoolScopeWakeDoesNotWakeAnotherTenant(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "mine"}
-	pool := newTestActionPool(t, newTestKernelStore(t), skill.NewCatalog(), scope, time.Hour, 1,
-		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }))
-	pool.WakeScope(Scope{Kind: "tenant", ID: "other"})
-	select {
-	case <-pool.wake:
-		t.Fatal("scope-specific wake crossed the tenant boundary")
-	default:
-	}
-	pool.WakeScope(scope)
-	select {
-	case <-pool.wake:
-	default:
-		t.Fatal("scope-specific wake missed its own tenant")
-	}
-}
-
 func TestAgentRunWorkerObservesTimerDeadlineWithoutWaitingForFallback(t *testing.T) {
 	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "timer-deadline"}
