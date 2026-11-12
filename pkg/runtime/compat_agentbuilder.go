@@ -1,11 +1,13 @@
-// Re-exports of declarations moved to github.com/axiom-studio/openseal/pkg/runtime/agentbuilder,
-// kept so that importers of github.com/axiom-studio/openseal/pkg/runtime continue to compile.
+// Temporary compatibility for the pkg/runtime split. New code imports
+// pkg/runtime/agentbuilder. Remove once in-flight branches have landed.
+//
+// Exported declarations of pkg/runtime/agentbuilder, kept so that importers
+// of pkg/runtime continue to compile.
 
 package runtime
 
 import (
 	"context"
-	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/models"
@@ -106,70 +108,11 @@ func NewAgentInstaller(store models.KernelStore, agents *kernelagent.Registry, t
 	return agentbuilder.NewAgentInstaller(store, agents, teams, catalog, provision, host)
 }
 
-const AgentTrialWaitSummary = agentbuilder.AgentTrialWaitSummary
-
 const AgentTrialStatusCompleted = agentbuilder.AgentTrialStatusCompleted
 
 const AgentTrialStatusFailed = agentbuilder.AgentTrialStatusFailed
 
 const AgentTrialStatusTimedOut = agentbuilder.AgentTrialStatusTimedOut
-
-// AgentTrialChild forwards to agentbuilder.AgentTrialChild.
-func AgentTrialChild(ctx context.Context, store models.PortfolioStore, scope models.Scope, childID string) (*models.AgentRun, error) {
-	return agentbuilder.AgentTrialChild(ctx, store, scope, childID)
-}
-
-// AgentTrialContextForRun forwards to agentbuilder.AgentTrialContextForRun.
-func AgentTrialContextForRun(run *models.AgentRun) (*agentbuilder.AgentTrialContext, bool, error) {
-	return agentbuilder.AgentTrialContextForRun(run)
-}
-
-// AgentTrialSessionSeed forwards to agentbuilder.AgentTrialSessionSeed.
-func AgentTrialSessionSeed(run *models.AgentRun) (*models.SessionEntry, error) {
-	return agentbuilder.AgentTrialSessionSeed(run)
-}
-
-// IsAgentTrialCall forwards to agentbuilder.IsAgentTrialCall.
-func IsAgentTrialCall(call *models.ActionCall) bool {
-	return agentbuilder.IsAgentTrialCall(call)
-}
-
-// AgentTrialCallRunID forwards to agentbuilder.AgentTrialCallRunID.
-func AgentTrialCallRunID(call *models.ActionCall) string {
-	return agentbuilder.AgentTrialCallRunID(call)
-}
-
-// AgentTrialDeadline forwards to agentbuilder.AgentTrialDeadline.
-func AgentTrialDeadline(child *models.AgentRun) time.Time {
-	return agentbuilder.AgentTrialDeadline(child)
-}
-
-// AgentTrialTimedOut forwards to agentbuilder.AgentTrialTimedOut.
-func AgentTrialTimedOut(childID string) models.AgentTrialReceipt {
-	return agentbuilder.AgentTrialTimedOut(childID)
-}
-
-// AgentTrialReceiptFor forwards to agentbuilder.AgentTrialReceiptFor.
-func AgentTrialReceiptFor(callID, childID string, interventions []models.AgentRunIntervention) *models.AgentTrialReceipt {
-	return agentbuilder.AgentTrialReceiptFor(callID, childID, interventions)
-}
-
-// AgentTrialReceiptFromRun forwards to agentbuilder.AgentTrialReceiptFromRun.
-func AgentTrialReceiptFromRun(child *models.AgentRun, now time.Time) models.AgentTrialReceipt {
-	return agentbuilder.AgentTrialReceiptFromRun(child, now)
-}
-
-// AgentTrialToolOutput forwards to agentbuilder.AgentTrialToolOutput.
-func AgentTrialToolOutput(receipt models.AgentTrialReceipt) map[string]interface{} {
-	return agentbuilder.AgentTrialToolOutput(receipt)
-}
-
-const FinalOutputReportKey = agentbuilder.FinalOutputReportKey
-
-// ChildRunAnswer forwards to agentbuilder.ChildRunAnswer.
-func ChildRunAnswer(child *models.AgentRun) string {
-	return agentbuilder.ChildRunAnswer(child)
-}
 
 type AgentTrialFinalizer = agentbuilder.AgentTrialFinalizer
 
@@ -259,11 +202,6 @@ type SharedAgentRiskChange = agentbuilder.SharedAgentRiskChange
 type SharedAgentUpdatePreview = agentbuilder.SharedAgentUpdatePreview
 
 type SharedAgentUpdated = agentbuilder.SharedAgentUpdated
-
-// CreateTeamAction forwards to agentbuilder.CreateTeamAction.
-func CreateTeamAction() skill.Action {
-	return agentbuilder.CreateTeamAction()
-}
 
 type TeamCreateActionValidator = agentbuilder.TeamCreateActionValidator
 

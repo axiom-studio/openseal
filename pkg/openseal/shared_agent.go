@@ -9,7 +9,7 @@ import (
 )
 
 // Shared agents: a whitelisted snapshot of an Agent that others add as their
-// own copy. See pkg/runtime/shared_agent_types.go.
+// own copy. See pkg/runtime/agentbuilder/shared_agent_types.go.
 type (
 	SharedAgentProfile        = runtime.SharedAgentProfile
 	SharedAgentSlot           = runtime.SharedAgentSlot
