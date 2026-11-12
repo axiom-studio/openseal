@@ -24,12 +24,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type ActionProposalObserverFunc func(context.Context, *models.AgentRun, *models.AgentTurn, *models.ActionProposalResult) error
-
-func (f ActionProposalObserverFunc) ObserveActionProposal(ctx context.Context, run *models.AgentRun, turn *models.AgentTurn, proposal *models.ActionProposalResult) error {
-	return f(ctx, run, turn, proposal)
-}
-
 type AgentRunWorkerConfig struct {
 	Scope                             models.Scope
 	Kind                              models.RunKind

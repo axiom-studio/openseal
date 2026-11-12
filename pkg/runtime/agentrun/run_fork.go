@@ -68,40 +68,6 @@ type TurnForkProposal struct {
 	Branches []RunForkBranch            `json:"branches"`
 }
 
-type TurnDelegationProposal struct {
-	StepID          string                 `json:"stepId"`
-	AssignedAgentID string                 `json:"assignedAgentId"`
-	Goal            string                 `json:"goal"`
-	Clarification   string                 `json:"clarification,omitempty"`
-	Context         map[string]interface{} `json:"context,omitempty"`
-	Checkpoint      map[string]interface{} `json:"checkpoint"`
-	Budget          *models.BudgetPolicy   `json:"budget,omitempty"`
-	Timeout         time.Duration          `json:"timeout,omitempty"`
-	Mode            runbook.DelegateMode   `json:"mode,omitempty"`
-}
-
-func (p *TurnDelegationProposal) Validate() error {
-	if p == nil || !models.IsValidOpaqueIdentifier(p.StepID, 128) || !models.IsValidOpaqueIdentifier(p.AssignedAgentID, 128) || strings.TrimSpace(p.Goal) == "" || p.Timeout < 0 {
-		return errors.New("delegation proposal requires step, assigned Agent, goal, and non-negative timeout")
-	}
-	if len(p.Clarification) > 8192 {
-		return errors.New("delegation clarification exceeds 8192 bytes")
-	}
-	if err := models.ValidateCredentialFreeContext(p.Context); err != nil {
-		return err
-	}
-	if err := models.ValidateCredentialFreeContext(p.Checkpoint); err != nil {
-		return err
-	}
-	if p.Budget != nil {
-		return p.Budget.Validate()
-	}
-	if p.Mode != "" && p.Mode != runbook.DelegateBehavior && p.Mode != runbook.DelegateReason {
-		return errors.New("delegation mode must be behavior or reason")
-	}
-	return nil
-}
-
 func (p *TurnForkProposal) Validate() error {
 	if p == nil || !models.IsValidOpaqueIdentifier(p.ForkID, 128) || len(p.Branches) < 2 {
 		return errors.New("fork proposal requires an ID and at least two branches")

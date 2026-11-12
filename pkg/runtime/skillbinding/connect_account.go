@@ -196,12 +196,6 @@ func PendingConnectAccountRequestFromAction(ctx context.Context, store models.Sk
 	return current
 }
 
-// IsExactConnectAccountWait reports whether the run waits for this card.
-func IsExactConnectAccountWait(run *models.AgentRun, requestID string) bool {
-	return run != nil && run.Status == models.AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
-		run.WakeCondition.Type == models.ConnectAccountWakeType && run.WakeCondition.Reference == requestID
-}
-
 // ConnectAccountResolutionInstruction is the durable guidance given to a run
 // woken by its connect_account card.
 func ConnectAccountResolutionInstruction(r *models.SkillSetupRequest) string {

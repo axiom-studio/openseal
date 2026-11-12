@@ -6,10 +6,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// DeclinedRoutineBriefReply is the calm reply after the person declines a
-// routine brief. Declining is a decision, not a failure: the Run completes.
-const DeclinedRoutineBriefReply = "Okay, I didn't set up the routine."
-
 // RoutineTimezoneInstruction keeps routine times in the person's timezone.
 // The runtime does not know where the person is, so the Agent must not guess.
 const RoutineTimezoneInstruction = "A routine runs in the IANA timezone you pass to openseal.runbooks.create_task. The person's timezone is not supplied to you; never assume one (not Europe/London, UTC or the server's). Use the timezone they stated or that this conversation clearly establishes, for example a city or zone they named (IST is Asia/Kolkata). When timing depends on a timezone you do not know, ask one short question before proposing. Always name the time and timezone in brief.summary, for example \"every day at 8:00 AM India time\"."

@@ -154,12 +154,6 @@ func PendingCredentialRequestFromAction(ctx context.Context, store interface{}, 
 	return current
 }
 
-// IsExactCredentialRequestWait reports whether the Run waits for this request.
-func IsExactCredentialRequestWait(run *models.AgentRun, requestID string) bool {
-	return run != nil && run.Status == models.AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
-		run.WakeCondition.Type == CredentialRequestWakeType && run.WakeCondition.Reference == requestID
-}
-
 // CredentialRequestResolutionInstruction is the durable guidance given to a
 // Run woken by its credential request.
 func CredentialRequestResolutionInstruction(r *models.CredentialRequest) string {
