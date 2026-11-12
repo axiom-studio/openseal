@@ -4,39 +4,25 @@ package runtime
 
 import (
 	"context"
-	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
-	"github.com/google/uuid"
 )
 
 func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *testing.T) {
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	schema := "external_conversation_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
+	primary, pgSchema := openTestPostgresStore(t, "external_conversation_")
+	dsn, schema := pgSchema.dsn, pgSchema.name
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var migration string
-	if err := primary.db.QueryRowContext(ctx, `SELECT name FROM `+primary.table("schema_migrations")+`
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT name FROM `+pgSchema.table("schema_migrations")+`
 		WHERE version=$1`, externalConversationTransportMigrationVersion).Scan(&migration); err != nil ||
 		migration != "external conversation endpoints and transport" {
 		t.Fatalf("migration = %q, %v", migration, err)
