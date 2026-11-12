@@ -271,7 +271,7 @@ func expireRunLease(t *testing.T, store *sqlite.Store, run *AgentRun) {
 
 func TestActiveConversationRunsIncludeOnlyExactIndependentTaskThreadAndActor(t *testing.T) {
 	store := newTestKernelStore(t)
-	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
+	source, turn, conversation, trigger := settledTaskSourceFixture(t, store)
 	if _, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err != nil {
 		t.Fatal(err)
 	}

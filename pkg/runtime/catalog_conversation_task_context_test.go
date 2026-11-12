@@ -50,7 +50,7 @@ func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
 
 func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *testing.T) {
 	kernel := newTestKernelStore(t)
-	source, _, _, _ := settledWorkerTaskFixture(t, kernel)
+	source, _, _, _ := settledTaskSourceFixture(t, kernel)
 	child, err := NewPortfolioService(kernel).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: source.Scope, Owner: source.Owner, Kind: RunKindAgentWork, ParentRunID: source.ID, AssignedAgentID: source.AssignedAgentID,
 		Goal: "Ordinary delegated operation", Source: RunSourceFork, Context: maps.Clone(source.Context),

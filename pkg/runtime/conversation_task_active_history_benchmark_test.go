@@ -253,11 +253,12 @@ func conversationTaskBenchmarkRecord(t testing.TB, store conversationTaskSQLTest
 	}
 	taskID := conversationTaskID(scope, sourceID, "task-"+suffix)
 	workID := "work-" + suffix
+	// The task asks for the child minimum of 8 Turns.
 	task := &ConversationTask{ID: taskID, Scope: scope, Owner: owner, ConversationID: "conversation", SourceMessageID: "message-" + suffix,
 		ThreadRootID: "thread", SourceRunID: sourceID, SourceTurnID: "turn-" + suffix, SourceTurnNumber: 1,
 		AuthenticatedActor: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, TargetAgentID: owner.ID,
 		WorkRunID: workID, TaskKey: "task-" + suffix, Goal: "Prepare the requested result", Acknowledgment: "I have started the work.",
-		RequestedBudget: &BudgetPolicy{MaxTurns: controlMinimumChildTurns}, Revision: 1, CreatedAt: now}
+		RequestedBudget: &BudgetPolicy{MaxTurns: 8}, Revision: 1, CreatedAt: now}
 	var err error
 	task.RequestDigest, err = conversationTaskDigest(task)
 	if err != nil {
