@@ -630,7 +630,7 @@ func attachRunbookChildren(result *RunbookExecutionAudit, children []*AgentRun, 
 		if stepID == "" {
 			continue
 		}
-		requestID := stableCollaborationID(parent.Scope, delegationIdempotencyKey(parent.ID, stepID), "request")
+		requestID := StableCollaborationID(parent.Scope, delegationIdempotencyKey(parent.ID, stepID), "request")
 		if request := requestByID[requestID]; request != nil && request.ChildRunID != "" {
 			stepByChild[request.ChildRunID] = stepID
 		}

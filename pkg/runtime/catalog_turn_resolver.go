@@ -145,8 +145,8 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 		return r.model(ctx, r.identity(deployment.ID), nil, agentrun.PromptContribution{}, false)
 	}
 	for _, structured := range []struct{ key, instruction string }{
-		{agentrun.AgentRequestCompletionReviewContextKey, agentRequestCompletionReviewSystemInstruction},
-		{agentrun.AgentRequestInboxContextKey, agentRequestDecisionSystemInstruction},
+		{agentrun.AgentRequestCompletionReviewContextKey, AgentRequestCompletionReviewSystemInstruction},
+		{agentrun.AgentRequestInboxContextKey, AgentRequestDecisionSystemInstruction},
 	} {
 		if _, requested := run.Context[structured.key]; !requested {
 			continue
@@ -292,7 +292,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 	var prompt agentrun.PromptContribution
 	if run.Source == RunSourceRequest || run.Source == RunSourceHandoff || run.Source == RunSourceEscalation {
 		if _, ok := run.Context["collaboration"]; ok {
-			prompt.AgentInstructions = append(prompt.AgentInstructions, acceptedAgentRequestExecutionSystemInstruction)
+			prompt.AgentInstructions = append(prompt.AgentInstructions, AcceptedAgentRequestExecutionSystemInstruction)
 		}
 	}
 	if delegated, ok := run.Context["delegatedSystemPrompt"].(string); ok && strings.TrimSpace(delegated) != "" {

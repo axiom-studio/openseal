@@ -336,7 +336,7 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if !models.RequesterControlsRun(req.Requester, source) {
 		return nil, ErrAgentRequestUnauthorized
 	}
-	if err := validateTaskDelegationSource(ctx, s.runs, source); err != nil {
+	if err := ValidateTaskDelegationSource(ctx, s.runs, source); err != nil {
 		return nil, err
 	}
 	if err := s.validateChatDelegation(ctx, source, req.Recipient); err != nil {
@@ -475,7 +475,7 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 	}
 	groupID := strings.TrimSpace(req.ID)
 	if groupID == "" {
-		groupID = stableCollaborationID(req.Scope, key, "group")
+		groupID = StableCollaborationID(req.Scope, key, "group")
 	}
 	dependencySpecs := make([]models.RunDependencySpec, 0, len(req.Requests))
 	requestInputs := make([]CreateAgentRequestRequest, 0, len(req.Requests))
@@ -488,7 +488,7 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 		if err := spec.Recipient.Validate(); err != nil {
 			return nil, fmt.Errorf("request %d recipient: %w", index+1, err)
 		}
-		if err := validateTaskDelegationSource(ctx, s.runs, source); err != nil {
+		if err := ValidateTaskDelegationSource(ctx, s.runs, source); err != nil {
 			return nil, err
 		}
 		if err := s.validateChatDelegation(ctx, source, spec.Recipient); err != nil {
@@ -517,7 +517,7 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 		seenDependencies[dependencyID] = struct{}{}
 		requestID := strings.TrimSpace(spec.ID)
 		if requestID == "" {
-			requestID = stableCollaborationID(req.Scope, key, dependencyID)
+			requestID = StableCollaborationID(req.Scope, key, dependencyID)
 		}
 		dependencySpecs = append(dependencySpecs, models.RunDependencySpec{
 			ID: dependencyID, RequestID: requestID, Kind: models.RunDependencyKindAgentRequest, Required: spec.Required,
@@ -555,7 +555,7 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 	return result, nil
 }
 
-func validateTaskDelegationSource(ctx context.Context, store models.PortfolioStore, source *models.AgentRun) error {
+func ValidateTaskDelegationSource(ctx context.Context, store models.PortfolioStore, source *models.AgentRun) error {
 	task, err := agentrun.PersistedTaskWorkOrigin(ctx, store, source)
 	if err != nil {
 		return err
@@ -2059,7 +2059,7 @@ func sameBudgetPolicy(left, right *models.BudgetPolicy) bool {
 	return *left == *right
 }
 
-func stableCollaborationID(scope models.Scope, key, suffix string) string {
+func StableCollaborationID(scope models.Scope, key, suffix string) string {
 	seed := strings.Join([]string{"openseal", "collaboration", scope.Key(), strings.TrimSpace(key), strings.TrimSpace(suffix)}, ":")
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(seed)).String()
 }

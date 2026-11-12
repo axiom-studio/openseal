@@ -448,7 +448,7 @@ func TestParseAgentRequestDecisionOutputRejectsAmbiguousOrUnsafeShape(t *testing
 		{AgentRequestDecisionOutputKey: map[string]interface{}{"decision": "maybe", "message": "unsure"}},
 		{AgentRequestDecisionOutputKey: map[string]interface{}{"decision": string(AgentRequestDecisionRequestClarification)}},
 	} {
-		if _, _, err := parseAgentRequestDecisionOutput(output); err == nil {
+		if _, _, err := ParseAgentRequestDecisionOutput(output); err == nil {
 			t.Fatalf("output unexpectedly accepted: %#v", output)
 		}
 	}

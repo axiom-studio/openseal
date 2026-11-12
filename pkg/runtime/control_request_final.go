@@ -69,7 +69,7 @@ func (requestDecisionHandler) Run(ctx context.Context, x *ControlExecutor, cc ag
 		return ControlResult{}, errors.New("agent_request_decision arguments were not decoded")
 	}
 	output := requestFinalOutput(AgentRequestDecisionOutputKey, args)
-	_, message, err := parseAgentRequestDecisionOutput(output)
+	_, message, err := ParseAgentRequestDecisionOutput(output)
 	return x.acceptRequestFinal(ctx, cc, output, message, err)
 }
 
@@ -92,7 +92,7 @@ func (completionReviewHandler) Run(ctx context.Context, x *ControlExecutor, cc a
 		return ControlResult{}, errors.New("agent_request_review arguments were not decoded")
 	}
 	output := requestFinalOutput(AgentRequestCompletionReviewOutputKey, args)
-	_, message, err := parseAgentRequestCompletionReviewOutput(output)
+	_, message, err := ParseAgentRequestCompletionReviewOutput(output)
 	return x.acceptRequestFinal(ctx, cc, output, message, err)
 }
 

@@ -161,7 +161,7 @@ func (x *ControlExecutor) Delegate(ctx context.Context, cc agentrun.ControlConte
 	if err := ValidateCredentialFreeContext(spec.Context); err != nil {
 		return x.rejectDelegation(ctx, cc, err.Error())
 	}
-	if err := validateTaskDelegationSource(ctx, x.Portfolio, run); err != nil {
+	if err := ValidateTaskDelegationSource(ctx, x.Portfolio, run); err != nil {
 		if errors.Is(err, ErrInvalidConversationTask) {
 			return x.rejectDelegation(ctx, cc, "Work inside a conversation task cannot be handed to another Agent; do it here.")
 		}
@@ -172,7 +172,7 @@ func (x *ControlExecutor) Delegate(ctx context.Context, cc agentrun.ControlConte
 		return x.rejectDelegation(ctx, cc, err.Error())
 	}
 	key := delegationIdempotencyKey(run.ID, spec.StepID)
-	requestID := stableCollaborationID(run.Scope, key, "request")
+	requestID := StableCollaborationID(run.Scope, key, "request")
 	existing, err := x.Collaboration.GetAgentRequest(ctx, run.Scope, requestID)
 	if err != nil && !errors.Is(err, ErrAgentRequestNotFound) {
 		return ControlResult{}, err

@@ -861,7 +861,7 @@ func (p *RunbookStepProducer) consumeDelegationResult(checkpoint map[string]inte
 	var output map[string]interface{}
 	switch {
 	case status == "":
-		requestID := stableCollaborationID(run.Scope, delegationIdempotencyKey(run.ID, stepID), "request")
+		requestID := StableCollaborationID(run.Scope, delegationIdempotencyKey(run.ID, stepID), "request")
 		collaborationResults, _ := run.Output["collaborationResults"].(map[string]interface{})
 		result, _ := collaborationResults[requestID].(map[string]interface{})
 		if len(result) == 0 {

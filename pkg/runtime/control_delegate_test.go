@@ -292,7 +292,7 @@ func TestDelegateParksWaitingForAgentDecision(t *testing.T) {
 		len(request.ChildCheckpoint) != 0 || request.IdempotencyKey != delegationIdempotencyKey(f.run.ID, "delegate-"+f.entry.ID) {
 		t.Fatalf("request = %#v", request)
 	}
-	if want := stableCollaborationID(f.scope, request.IdempotencyKey, "request"); request.ID != want {
+	if want := StableCollaborationID(f.scope, request.IdempotencyKey, "request"); request.ID != want {
 		t.Fatalf("request id %s, want %s", request.ID, want)
 	}
 	source := f.reload()

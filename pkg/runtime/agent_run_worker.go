@@ -754,7 +754,7 @@ func (p *AgentRunWorkerPool) reconcileAgentRequestInbox(ctx context.Context) (*t
 		result.CompletionReviewsCreated > 0 || result.CompletionReviewsApplied > 0) {
 		p.Wake()
 	}
-	return p.requestInbox.deferredProjectionAt(), err != nil
+	return p.requestInbox.DeferredProjectionAt(), err != nil
 }
 
 // reconcileForkChildren returns when another dependency page is due, and

@@ -566,7 +566,7 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 	if err != nil || state.PendingDelegation != "delegate" || state.PendingCall == "" {
 		t.Fatalf("engine state was not applied before the delegation: %#v err=%v", state, err)
 	}
-	requestID := stableCollaborationID(f.scope, delegationIdempotencyKey(source.ID, "delegate"), "request")
+	requestID := StableCollaborationID(f.scope, delegationIdempotencyKey(source.ID, "delegate"), "request")
 	request, err := f.control.Collaboration.GetAgentRequest(f.ctx, f.scope, requestID)
 	if err != nil || request.Recipient.ID != "specialist" || request.Goal != "Analyze the release" ||
 		request.SharedContext["release"] != "2026.07" || request.BudgetAllocation == nil || request.BudgetAllocation.MaxTurns != 2 {

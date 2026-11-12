@@ -206,7 +206,7 @@ func TestClarificationDecisionRequiresQuestion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decision, message, err := parseAgentRequestDecisionOutput(requireFinal(t, result).Output)
+	decision, message, err := ParseAgentRequestDecisionOutput(requireFinal(t, result).Output)
 	if err != nil || decision != AgentRequestDecisionRequestClarification || message != "Which launch region?" {
 		t.Fatalf("decision = %q %q %v", decision, message, err)
 	}

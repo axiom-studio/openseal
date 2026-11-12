@@ -26,11 +26,11 @@ const (
 	AgentRequestCompletionReviewOutputKey = "agentRequestCompletionReviewDecision"
 )
 
-const agentRequestDecisionSystemInstruction = `Evaluate the incoming AgentRequest before doing any requested work. Decide whether the request is relevant, sufficiently clear, safe, and within your role. Do not execute Skills, delegate, fork, or perform the requested work during this review. Finish with agent_request_decision: accept or reject with a concise reason, or request_clarification with one concrete question.`
+const AgentRequestDecisionSystemInstruction = `Evaluate the incoming AgentRequest before doing any requested work. Decide whether the request is relevant, sufficiently clear, safe, and within your role. Do not execute Skills, delegate, fork, or perform the requested work during this review. Finish with agent_request_decision: accept or reject with a concise reason, or request_clarification with one concrete question.`
 
-const agentRequestCompletionReviewSystemInstruction = `Independently review the completed delegated work against its goal, acceptance criteria, required artifacts, evidence, and output. Do not execute Skills, invoke runbooks, delegate, fork, or modify the work during this review. Finish with agent_request_review: approve or reject with a concise evidence-based reason.`
+const AgentRequestCompletionReviewSystemInstruction = `Independently review the completed delegated work against its goal, acceptance criteria, required artifacts, evidence, and output. Do not execute Skills, invoke runbooks, delegate, fork, or modify the work during this review. Finish with agent_request_review: approve or reject with a concise evidence-based reason.`
 
-const acceptedAgentRequestExecutionSystemInstruction = `This Run is the execution child of an AgentRequest that has already passed intake and was accepted. Perform the requested goal now using the authorized Skills and durable work primitives available to this Run. Do not evaluate or accept the request again.`
+const AcceptedAgentRequestExecutionSystemInstruction = `This Run is the execution child of an AgentRequest that has already passed intake and was accepted. Perform the requested goal now using the authorized Skills and durable work primitives available to this Run. Do not evaluate or accept the request again.`
 
 const agentRequestConversationProjectionInterval = 5 * time.Second
 
@@ -191,9 +191,9 @@ func (r *AgentRequestInboxReconciler) conversationProjectionDue(now time.Time) b
 	return true
 }
 
-// deferredProjectionAt reports when a projection skipped by throttling is
+// DeferredProjectionAt reports when a projection skipped by throttling is
 // due, so signal-driven workers can schedule it instead of polling for it.
-func (r *AgentRequestInboxReconciler) deferredProjectionAt() *time.Time {
+func (r *AgentRequestInboxReconciler) DeferredProjectionAt() *time.Time {
 	if r == nil {
 		return nil
 	}
@@ -640,7 +640,7 @@ func (r *AgentRequestInboxReconciler) ResolveDecisionRun(ctx context.Context, ru
 		}
 		return r.failDecisionReview(ctx, request, source, run, status, reason)
 	}
-	decision, message, err := parseAgentRequestDecisionOutput(run.Output)
+	decision, message, err := ParseAgentRequestDecisionOutput(run.Output)
 	if err != nil {
 		return false, err
 	}
@@ -685,7 +685,7 @@ func (r *AgentRequestInboxReconciler) ResolveCompletionReviewRun(ctx context.Con
 	approve := false
 	message := strings.TrimSpace(run.Error)
 	if run.Status == models.AgentRunStatusCompleted {
-		approve, message, err = parseAgentRequestCompletionReviewOutput(run.Output)
+		approve, message, err = ParseAgentRequestCompletionReviewOutput(run.Output)
 		if err != nil {
 			return false, err
 		}
@@ -791,7 +791,7 @@ func (r *AgentRequestInboxReconciler) failDecisionReview(
 	return true, nil
 }
 
-func parseAgentRequestDecisionOutput(output map[string]interface{}) (AgentRequestDecision, string, error) {
+func ParseAgentRequestDecisionOutput(output map[string]interface{}) (AgentRequestDecision, string, error) {
 	raw, ok := output[AgentRequestDecisionOutputKey].(map[string]interface{})
 	if !ok {
 		return "", "", errors.New("AgentRequest decision output is missing")
@@ -812,7 +812,7 @@ func parseAgentRequestDecisionOutput(output map[string]interface{}) (AgentReques
 	return decision, message, nil
 }
 
-func parseAgentRequestCompletionReviewOutput(output map[string]interface{}) (bool, string, error) {
+func ParseAgentRequestCompletionReviewOutput(output map[string]interface{}) (bool, string, error) {
 	raw, ok := output[AgentRequestCompletionReviewOutputKey].(map[string]interface{})
 	if !ok {
 		return false, "", errors.New("AgentRequest completion review output is missing")

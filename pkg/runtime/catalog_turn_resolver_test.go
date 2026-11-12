@@ -216,13 +216,13 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 		}}, producer: "model", actions: 1, goalKind: "fork_branch"},
 		{name: "delegation execution", run: AgentRun{Goal: "Do the accepted work", Source: RunSourceRequest, Context: map[string]interface{}{
 			"collaboration": map[string]interface{}{"requestId": "request"},
-		}}, producer: "model", fork: true, actions: 1, instruction: acceptedAgentRequestExecutionSystemInstruction, goalKind: "delegation"},
+		}}, producer: "model", fork: true, actions: 1, instruction: AcceptedAgentRequestExecutionSystemInstruction, goalKind: "delegation"},
 		{name: "decision", run: AgentRun{Goal: "Evaluate incoming work", Source: RunSourceRequestDecision, Context: map[string]interface{}{
 			agentrun.AgentRequestInboxContextKey: map[string]interface{}{"requestId": "request", "requestRevision": int64(1)},
-		}}, producer: "model", finalMode: agentrun.FinalModeDecision, instruction: agentRequestDecisionSystemInstruction, goalKind: "decision"},
+		}}, producer: "model", finalMode: agentrun.FinalModeDecision, instruction: AgentRequestDecisionSystemInstruction, goalKind: "decision"},
 		{name: "review", run: AgentRun{Goal: "Review delegated work", Context: map[string]interface{}{
 			agentrun.AgentRequestCompletionReviewContextKey: map[string]interface{}{"requestId": "request"},
-		}}, producer: "model", finalMode: agentrun.FinalModeReview, instruction: agentRequestCompletionReviewSystemInstruction, goalKind: "review"},
+		}}, producer: "model", finalMode: agentrun.FinalModeReview, instruction: AgentRequestCompletionReviewSystemInstruction, goalKind: "review"},
 		{name: "runbook child", run: AgentRun{Goal: "Draft the summary", Source: RunSourceRequest, Entrypoint: "draft", Context: map[string]interface{}{
 			agentrun.DelegationModeContextKey: string(runbook.DelegateReason),
 		}}, producer: "model", fork: true, actions: 1, goalKind: "routine"},
@@ -274,7 +274,7 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 			if tc.instruction != "" && !slices.Contains(binding.Prompt.AgentInstructions, tc.instruction) {
 				t.Fatalf("prompt = %#v", binding.Prompt)
 			}
-			for _, other := range []string{agentRequestDecisionSystemInstruction, agentRequestCompletionReviewSystemInstruction, acceptedAgentRequestExecutionSystemInstruction} {
+			for _, other := range []string{AgentRequestDecisionSystemInstruction, AgentRequestCompletionReviewSystemInstruction, AcceptedAgentRequestExecutionSystemInstruction} {
 				if other != tc.instruction && slices.Contains(binding.Prompt.AgentInstructions, other) {
 					t.Fatalf("instruction of another kind leaked: %#v", binding.Prompt)
 				}
@@ -344,8 +344,8 @@ func TestDecisionRunOffersOnlyDecisionToolViaBinding(t *testing.T) {
 		key, tool, instruction string
 		value                  map[string]interface{}
 	}{
-		{agentrun.AgentRequestInboxContextKey, string(ControlToolRequestDecision), agentRequestDecisionSystemInstruction, map[string]interface{}{"requestId": "request", "requestRevision": int64(1)}},
-		{agentrun.AgentRequestCompletionReviewContextKey, string(ControlToolCompletionReview), agentRequestCompletionReviewSystemInstruction, map[string]interface{}{"requestId": "request"}},
+		{agentrun.AgentRequestInboxContextKey, string(ControlToolRequestDecision), AgentRequestDecisionSystemInstruction, map[string]interface{}{"requestId": "request", "requestRevision": int64(1)}},
+		{agentrun.AgentRequestCompletionReviewContextKey, string(ControlToolCompletionReview), AgentRequestCompletionReviewSystemInstruction, map[string]interface{}{"requestId": "request"}},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
 			catalog.activationDeployments = nil
@@ -767,8 +767,8 @@ func TestCatalogTurnResolverSeparatesAcceptedRequestExecutionFromIntake(t *testi
 	}
 	req := prepareBindingStep(t, binding, run)
 	tools := bindingToolNames(req)
-	if !slices.Contains(req.System.AgentInstructions, acceptedAgentRequestExecutionSystemInstruction) ||
-		slices.Contains(req.System.AgentInstructions, agentRequestDecisionSystemInstruction) ||
+	if !slices.Contains(req.System.AgentInstructions, AcceptedAgentRequestExecutionSystemInstruction) ||
+		slices.Contains(req.System.AgentInstructions, AgentRequestDecisionSystemInstruction) ||
 		slices.Contains(tools, string(ControlToolRequestDecision)) || !slices.Contains(tools, string(ControlToolFinalAnswer)) ||
 		len(binding.ModelActions) != 1 {
 		t.Fatalf("accepted execution system=%#v tools=%v", req.System.AgentInstructions, tools)
