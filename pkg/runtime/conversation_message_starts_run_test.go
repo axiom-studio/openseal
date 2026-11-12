@@ -34,13 +34,13 @@ func TestTeamMessagesStartRunsOnlyForUsersAndHandoffs(t *testing.T) {
 	if !conversationMessageStartsRun(conversation, message(user)) {
 		t.Fatal("user message did not start a Run")
 	}
-	if conversationMessageStartsRun(conversation, message(teamRoutingAgent("rio"))) {
+	if conversationMessageStartsRun(conversation, message(AgentParticipant("rio"))) {
 		t.Fatal("a member answer started a Run")
 	}
-	if conversationMessageStartsRun(conversation, message(teamRoutingAgent("rio"), teamRoutingAgent("rio"), user)) {
+	if conversationMessageStartsRun(conversation, message(AgentParticipant("rio"), AgentParticipant("rio"), user)) {
 		t.Fatal("a self or user mention started a Run")
 	}
-	if !conversationMessageStartsRun(conversation, message(teamRoutingAgent("rio"), teamRoutingAgent("maya"))) {
+	if !conversationMessageStartsRun(conversation, message(AgentParticipant("rio"), AgentParticipant("maya"))) {
 		t.Fatal("a handoff did not start a Run")
 	}
 }

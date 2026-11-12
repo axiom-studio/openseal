@@ -51,7 +51,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	}
 	service := NewConversationApprovalModeService(reopened)
 	result, err := service.SetApprovalMode(ctx, SetConversationApprovalModeRequest{
-		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalManual, Actor: approvalModeActor,
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalManual, Actor: ApprovalModeActor,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 		t.Fatalf("change set = %#v, %v", set, err)
 	}
 	if _, err := service.SetApprovalMode(ctx, SetConversationApprovalModeRequest{
-		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalSkip, Actor: approvalModeActor,
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalSkip, Actor: ApprovalModeActor,
 	}); !errors.Is(err, ErrRevisionConflict) {
 		t.Fatalf("stale revision error = %v", err)
 	}

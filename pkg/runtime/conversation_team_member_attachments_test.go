@@ -24,13 +24,13 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 		ask := func(team bool) (*SessionEntry, *SessionEntry, *agentrun.TurnRunnerBinding, *chatLoopFixture) {
 			t.Helper()
 			f := newChatLoopFixture(t, base, chatLoopOptions{team: team})
-			artifact := conversationTestArtifact()
+			artifact := CSVArtifact()
 			artifact.Scope = f.conversation.Scope
-			artifact.MediaType, artifact.SizeBytes, artifact.Digest = "text/csv", int64(len(content)), conversationTestDigest(content)
+			artifact.MediaType, artifact.SizeBytes, artifact.Digest = "text/csv", int64(len(content)), Digest(content)
 			if err := artifacts.CreateArtifactVersion(f.ctx, artifact, 0); err != nil {
 				t.Fatal(err)
 			}
-			f.runner = f.newRunner(ConversationRunTurnRunnerConfig{AttachmentContent: &conversationTestContent{text: content}})
+			f.runner = f.newRunner(ConversationRunTurnRunnerConfig{AttachmentContent: &TextContent{text: content}})
 			posted, err := f.service.PostChannelMessage(f.ctx, PostChannelMessageRequest{
 				Scope: f.conversation.Scope, ConversationID: f.conversation.ID, ExpectedRevision: f.conversation.Revision,
 				Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,
@@ -82,7 +82,7 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 			t.Fatal("Team rules reached the 1:1 step or missed the member step")
 		}
 		answers := team.agentMessages()
-		if len(answers) != 1 || answers[0].Sender != teamRoutingAgent("agent-1") || answers[0].Content != "Acme totals 42." {
+		if len(answers) != 1 || answers[0].Sender != AgentParticipant("agent-1") || answers[0].Content != "Acme totals 42." {
 			t.Fatalf("member answer = %#v", answers)
 		}
 	})

@@ -307,11 +307,11 @@ func TestConversationStartsThreadPreservesPrivateAncestryForScalarAndBatchReads(
 		}
 		for _, batch := range []bool{false, true} {
 			t.Run(fmt.Sprintf("batch=%t", batch), func(t *testing.T) {
-				point := &countedPointConversationStore{ConversationStore: store}
+				point := &CountedPointStore{ConversationStore: store}
 				var readStore ConversationStore = point
-				var countedBatch *countedBatchConversationStore
+				var countedBatch *CountedBatchStore
 				if batch {
-					countedBatch = newCountedBatchConversationStore(store)
+					countedBatch = NewCountedBatchStore(store)
 					readStore = countedBatch
 				}
 				reader := NewConversationService(readStore)
@@ -344,12 +344,12 @@ func TestConversationStartsThreadPreservesPrivateAncestryForScalarAndBatchReads(
 }
 
 func TestConversationStartsThreadMissingCyclicAndDeepAnchorsFailClosed(t *testing.T) {
-	channelMessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
+	MessageBatchStores(t, func(t *testing.T, kernel KernelStore) {
 		store := kernel.(ConversationStore)
 		conversation := conversationThreadStartConversation(t, store)
 		commit := func(message *ChannelMessage) {
 			t.Helper()
-			channelMessageBatchCommit(t, store, &conversation, message)
+			CommitChannelMessage(t, store, &conversation, message)
 		}
 		commit(&ChannelMessage{ID: "missing-anchor", StartsThread: true, ReplyToMessageID: "missing-parent"})
 		commit(&ChannelMessage{ID: "missing-child", ThreadRootID: "missing-anchor", ReplyToMessageID: "missing-anchor"})
@@ -366,11 +366,11 @@ func TestConversationStartsThreadMissingCyclicAndDeepAnchorsFailClosed(t *testin
 		viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "viewer"}}
 		for _, batch := range []bool{false, true} {
 			t.Run(fmt.Sprintf("batch=%t", batch), func(t *testing.T) {
-				point := &countedPointConversationStore{ConversationStore: store}
+				point := &CountedPointStore{ConversationStore: store}
 				var readStore ConversationStore = point
-				var countedBatch *countedBatchConversationStore
+				var countedBatch *CountedBatchStore
 				if batch {
-					countedBatch = newCountedBatchConversationStore(store)
+					countedBatch = NewCountedBatchStore(store)
 					readStore = countedBatch
 				}
 				reader := NewConversationService(readStore)

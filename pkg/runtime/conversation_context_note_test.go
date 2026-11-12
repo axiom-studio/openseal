@@ -11,11 +11,11 @@ import (
 // The run_context note (run-loop section 05 §5, CONV-04), on the
 // SQLite store through the catch-up fixture.
 
-func (f *catchUpFixture) noteRunner() *ConversationRunTurnRunner {
+func (f *CatchUpFixture) noteRunner() *ConversationRunTurnRunner {
 	return &ConversationRunTurnRunner{conversations: f.service, portfolio: f.store, runbooks: f.store}
 }
 
-func (f *catchUpFixture) noteInput(run *AgentRun, session *AgentSession, trigger *ChannelMessage) conversationContextInput {
+func (f *CatchUpFixture) noteInput(run *AgentRun, session *AgentSession, trigger *ChannelMessage) conversationContextInput {
 	return conversationContextInput{
 		Run: run, Session: session, Sessions: f.store, Conversation: f.conversation, Trigger: trigger,
 		Viewer: f.viewer(), Step: 1,
@@ -23,7 +23,7 @@ func (f *catchUpFixture) noteInput(run *AgentRun, session *AgentSession, trigger
 }
 
 // note builds the run_context note of in and appends it to the session.
-func (f *catchUpFixture) note(runner *ConversationRunTurnRunner, in conversationContextInput) *SessionEntry {
+func (f *CatchUpFixture) note(runner *ConversationRunTurnRunner, in conversationContextInput) *SessionEntry {
 	f.t.Helper()
 	note, err := runner.conversationRunContextNote(f.t.Context(), in)
 	if err != nil {
@@ -42,7 +42,7 @@ func (f *catchUpFixture) note(runner *ConversationRunTurnRunner, in conversation
 }
 
 // nextRun claims another Run of the lane session.
-func (f *catchUpFixture) nextRun(session *AgentSession) *AgentRun {
+func (f *CatchUpFixture) nextRun(session *AgentSession) *AgentRun {
 	f.t.Helper()
 	return f.run(session.ID, true)
 }
@@ -66,7 +66,7 @@ func runContextSectionNames(t *testing.T, note *SessionEntry) map[string]bool {
 }
 
 func TestRunContextNoteAlwaysHasRespondTo(t *testing.T) {
-	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *catchUpFixture) {
+	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
 		runner := f.noteRunner()
 		trigger := f.post(PostChannelMessageRequest{IdempotencyKey: "q1", Content: "What is on today?", SenderDisplayName: "Kev"})
 		run, session := f.open("")
@@ -92,7 +92,7 @@ func TestRunContextNoteAlwaysHasRespondTo(t *testing.T) {
 }
 
 func TestRunContextSectionsEmittedOnlyWhenChanged(t *testing.T) {
-	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *catchUpFixture) {
+	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
 		runner := f.noteRunner()
 		style := "watercolor"
 		runner.config.ImageStyle = func(context.Context, *AgentRun) string { return style }
@@ -136,7 +136,7 @@ func TestRunContextSectionsEmittedOnlyWhenChanged(t *testing.T) {
 // A person who works on their own computer by default is told so at the
 // Run's start; switching back to the VM sends the VM line once.
 func TestRunContextNamesTheWorkMachine(t *testing.T) {
-	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *catchUpFixture) {
+	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
 		runner := f.noteRunner()
 		machine := "Files and commands: the person's computer krypton."
 		runner.config.WorkMachine = func(context.Context, *AgentRun) string { return machine }
@@ -155,7 +155,7 @@ func TestRunContextNamesTheWorkMachine(t *testing.T) {
 }
 
 func TestRunContextReEmittedAfterCompaction(t *testing.T) {
-	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *catchUpFixture) {
+	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
 		runner := f.noteRunner()
 		trigger := f.say("q1", "Hello")
 		run, session := f.open("")
@@ -180,7 +180,7 @@ func TestRunContextReEmittedAfterCompaction(t *testing.T) {
 }
 
 func TestActiveRunsBecomesNoneWhenWorkEnds(t *testing.T) {
-	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *catchUpFixture) {
+	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
 		ctx := t.Context()
 		runner := f.noteRunner()
 		trigger := f.say("q1", "Run the report")
@@ -222,9 +222,9 @@ func TestActiveRunsBecomesNoneWhenWorkEnds(t *testing.T) {
 }
 
 func TestTeamRosterSectionAndRoutingReason(t *testing.T) {
-	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}, func(t *testing.T, f *catchUpFixture) {
+	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}, func(t *testing.T, f *CatchUpFixture) {
 		participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
-			return []ConversationParticipantBinding{{Participant: f.agent()}, {Participant: teamRoutingAgent("maya")}}, nil
+			return []ConversationParticipantBinding{{Participant: f.agent()}, {Participant: AgentParticipant("maya")}}, nil
 		})
 		router := ConversationRouterFunc(func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error) {
 			return ConversationRouteDecision{AgentID: f.agentID}, nil
@@ -261,7 +261,7 @@ func TestTeamRosterSectionAndRoutingReason(t *testing.T) {
 }
 
 func TestVoiceCallGreetingInRespondTo(t *testing.T) {
-	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *catchUpFixture) {
+	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
 		runner := f.noteRunner()
 		spoken := f.say("q1", "What's the weather?")
 		spoken.ResponseMode = "spoken"
@@ -288,7 +288,7 @@ func TestVoiceCallGreetingInRespondTo(t *testing.T) {
 
 // conversationTaskListStore returns fixed task rows.
 type conversationTaskListStore struct {
-	catchUpTestStore
+	CatchUpStore
 	rows   []*ConversationTaskResult
 	filter ConversationTaskFilter
 }
@@ -298,7 +298,7 @@ func (s *conversationTaskListStore) ListConversationTasks(_ context.Context, fil
 	return s.rows, nil
 }
 
-func runContextTestTask(t *testing.T, f *catchUpFixture, trigger *ChannelMessage, key, goal string, status AgentRunStatus, created time.Time) *ConversationTaskResult {
+func runContextTestTask(t *testing.T, f *CatchUpFixture, trigger *ChannelMessage, key, goal string, status AgentRunStatus, created time.Time) *ConversationTaskResult {
 	t.Helper()
 	task := &ConversationTask{
 		Mode: ConversationTaskModeIndependent, Scope: f.conversation.Scope, Owner: f.conversation.Owner, ConversationID: f.conversation.ID,
@@ -325,7 +325,7 @@ func runContextTestTask(t *testing.T, f *catchUpFixture, trigger *ChannelMessage
 }
 
 func TestRunContextListsRecentConversationTasks(t *testing.T) {
-	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *catchUpFixture) {
+	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
 		trigger := f.say("q1", "How is the research going?")
 		running := runContextTestTask(t, f, trigger, "research", "Research the three vendors\nand compare prices", AgentRunStatusRunning, f.now)
 		done := runContextTestTask(t, f, trigger, "inbox", "Read the inbox", AgentRunStatusCompleted, f.now.Add(-time.Minute))
@@ -333,7 +333,7 @@ func TestRunContextListsRecentConversationTasks(t *testing.T) {
 		forged.WorkRun.Goal = "something else"
 		other := runContextTestTask(t, f, trigger, "other", "Someone else's", AgentRunStatusRunning, f.now)
 		other.Task.AuthenticatedActor = ConversationParticipant{Type: ConversationParticipantUser, ID: "stranger"}
-		tasks := &conversationTaskListStore{catchUpTestStore: f.store, rows: []*ConversationTaskResult{running, done, forged, other}}
+		tasks := &conversationTaskListStore{CatchUpStore: f.store, rows: []*ConversationTaskResult{running, done, forged, other}}
 		runner := f.noteRunner()
 		runner.portfolio = tasks
 

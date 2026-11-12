@@ -11,7 +11,7 @@ import (
 )
 
 func TestCatchUpWatermarkConflictRetries(t *testing.T) {
-	forCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *catchUpFixture) {
+	ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *CatchUpFixture) {
 		runA, session := f.open("")
 		first := f.say("m1", "from Maya")
 		// Run A parks; Run B of another person runs on the same lane session.
@@ -40,7 +40,7 @@ func TestCatchUpWatermarkConflictRetries(t *testing.T) {
 			t.Fatalf("watermark = %d, want %d", result.Session.ChannelWatermark, third.Sequence)
 		}
 		entries := f.sessionEntries(session.ID)
-		if got := catchUpMessageIDs(entries); !reflect.DeepEqual(got, []string{first.ID, second.ID, third.ID}) {
+		if got := CatchUpMessageIDs(entries); !reflect.DeepEqual(got, []string{first.ID, second.ID, third.ID}) {
 			t.Fatalf("interleaved session entries = %v", got)
 		}
 		if entries[0].RunID != runB.ID || entries[2].RunID != runA.ID {
@@ -71,7 +71,7 @@ func TestCatchUpWatermarkConflictRetries(t *testing.T) {
 // catchUpPreparer is the conversation preparer's catch-up part, enough to
 // drive the loop's phase-3 append and its watermark-conflict retries.
 type catchUpPreparer struct {
-	f       *catchUpFixture
+	f       *CatchUpFixture
 	through int64
 	calls   int
 	before  func()

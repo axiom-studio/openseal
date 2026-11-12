@@ -25,7 +25,7 @@ func (s *externalFileContentStore) Put(_ context.Context, req ArtifactContentWri
 	s.data, _ = io.ReadAll(req.Reader)
 	s.scope = req.Scope
 	s.owner = req.Owner
-	return ArtifactStoredContent{ContentRef: "opaque-file", SizeBytes: int64(len(s.data)), Digest: conversationTestDigest(string(s.data))}, nil
+	return ArtifactStoredContent{ContentRef: "opaque-file", SizeBytes: int64(len(s.data)), Digest: Digest(string(s.data))}, nil
 }
 func (s *externalFileContentStore) Open(_ context.Context, scope Scope, _ string) (io.ReadCloser, error) {
 	s.scope = scope

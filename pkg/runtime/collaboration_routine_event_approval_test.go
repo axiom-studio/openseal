@@ -14,9 +14,9 @@ import (
 func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	conversation := approvalModeConversation(t, store)
+	conversation := ApprovalModeConversation(t, store)
 	service := NewConversationApprovalModeService(store)
-	coordinator := action.NewActionCoordinator(store, store, approvalModeCatalog(t), action.NewDefaultActionPolicy(), nil)
+	coordinator := action.NewActionCoordinator(store, store, ApprovalModeCatalog(t), action.NewDefaultActionPolicy(), nil)
 	scope := conversation.Scope
 
 	occurrence := &AgentRun{ID: "occurrence", Scope: scope, RootRunID: "occurrence", Context: map[string]interface{}{
@@ -26,7 +26,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	scheduled := &AgentRun{ID: "scheduled", Scope: scope, RootRunID: "scheduled", Context: map[string]interface{}{
 		"conversationId": conversation.ID, scheduledTaskContextKey: true,
 	}}
-	runs := runsByID{occurrence.ID: cloneAgentRun(occurrence)}
+	runs := RunsByID{occurrence.ID: cloneAgentRun(occurrence)}
 	for _, test := range []struct {
 		run  *AgentRun
 		want ConversationApprovalMode
@@ -42,7 +42,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	}
 
 	// Under auto, an event occurrence's write still waits for review.
-	result, f, err := proposeLoopForApprovalModeWithContext(t, store, coordinator, map[string]interface{}{
+	result, f, err := ProposeLoopForApprovalModeWithContext(t, store, coordinator, map[string]interface{}{
 		"conversationId": conversation.ID, scheduledTaskContextKey: true, RoutineEventBatchContextKey: "batch-2",
 	}, "note", "event-run", map[string]interface{}{})
 	if err != nil {
@@ -52,10 +52,10 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 		t.Fatalf("event occurrence write ran without review: %#v", result.Call)
 	}
 	f.ParkOnApproval(result.Approval.ID)
-	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalManual).Conversation
-	plain := proposeForApprovalMode(t, store, coordinator, conversation, "note")
+	conversation = SetApprovalMode(t, service, conversation, ConversationApprovalManual).Conversation
+	plain := ProposeForApprovalMode(t, store, coordinator, conversation, "note")
 
-	loosened := setApprovalModeForTest(t, service, conversation, ConversationApprovalSkip)
+	loosened := SetApprovalMode(t, service, conversation, ConversationApprovalSkip)
 	if len(loosened.ApprovedApprovalIDs) != 1 || loosened.ApprovedApprovalIDs[0] != plain.ID || loosened.ApprovalSweepIncomplete {
 		t.Fatalf("skip sweep = %#v", loosened)
 	}
@@ -80,7 +80,7 @@ func (r *countingRunReader) GetAgentRun(ctx context.Context, scope Scope, runID 
 func TestRoutineEventBatchInheritedWithoutRootRead(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	conversation := approvalModeConversation(t, store)
+	conversation := ApprovalModeConversation(t, store)
 	scope := conversation.Scope
 	chat := &AgentRun{ID: "chat", Kind: RunKindConversation, Scope: scope, RootRunID: "chat", Context: map[string]interface{}{
 		"conversationId": conversation.ID,

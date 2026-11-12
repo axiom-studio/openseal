@@ -576,8 +576,8 @@ func TestOlderAgentManagementBindingsAlwaysRequireReviewInSkipMode(t *testing.T)
 		t.Run(version, func(t *testing.T) {
 			ctx := t.Context()
 			store := newTestKernelStore(t)
-			conversation := approvalModeConversation(t, store)
-			setApprovalModeForTest(t, NewConversationApprovalModeService(store), conversation, ConversationApprovalSkip)
+			conversation := ApprovalModeConversation(t, store)
+			SetApprovalMode(t, NewConversationApprovalModeService(store), conversation, ConversationApprovalSkip)
 			// Published versions predate review: always, so their stored
 			// definitions carry no review floor.
 			legacy := AgentManagementSkill()
