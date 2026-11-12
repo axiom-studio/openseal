@@ -381,7 +381,7 @@ func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFi
 	}
 	f.scheduler = scheduler
 	runner, err := conversationrun.NewConversationRunTurnRunner(chats, f.coordinator(), conversationrun.ConversationRunTurnRunnerConfig{
-		AttachmentContent: &answerVisualContent{}, AgentTurns: TurnRunnerResolverFunc(f.agentBinding),
+		AttachmentContent: &answerVisualContent{}, AgentTurns: runtimeconversation.TurnRunnerResolverFunc(f.agentBinding),
 	}, clock)
 	if err != nil {
 		t.Fatal(err)
@@ -667,7 +667,7 @@ func (f *loopFixture) conversationBinding(run *AgentRun, agent func(*AgentRun) *
 	f.t.Helper()
 	runner, err := conversationrun.NewConversationRunTurnRunner(f.chats, f.coordinator(), conversationrun.ConversationRunTurnRunnerConfig{
 		AttachmentContent: &answerVisualContent{},
-		AgentTurns: TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		AgentTurns: runtimeconversation.TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			return agent(run), nil
 		}),
 	}, models.WithClock(f.clock.Now))

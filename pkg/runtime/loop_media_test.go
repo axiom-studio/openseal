@@ -86,7 +86,7 @@ func newMediaFixture(t *testing.T, store KernelStore, vision bool, rules ...*mod
 	f := &mediaFixture{loopFixture: newLoopFixture(t, store, withRules(rules...)), content: &mediaContent{byRef: map[string][]byte{}}, vision: vision}
 	// The kit's conversation turn runner, reading attachments from content.
 	runner, err := conversationrun.NewConversationRunTurnRunner(f.chats, f.coordinator(), conversationrun.ConversationRunTurnRunnerConfig{
-		AttachmentContent: f.content, AgentTurns: TurnRunnerResolverFunc(f.agentBinding),
+		AttachmentContent: f.content, AgentTurns: runtimeconversation.TurnRunnerResolverFunc(f.agentBinding),
 	}, models.WithClock(f.clock.Now))
 	if err != nil {
 		t.Fatal(err)

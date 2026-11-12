@@ -41,7 +41,7 @@ func convRunner(f *loopFixture, config conversationrun.ConversationRunTurnRunner
 	if config.AttachmentContent == nil {
 		config.AttachmentContent = &answerVisualContent{}
 	}
-	config.AgentTurns = TurnRunnerResolverFunc(f.agentBinding)
+	config.AgentTurns = runtimeconversation.TurnRunnerResolverFunc(f.agentBinding)
 	runner, err := conversationrun.NewConversationRunTurnRunner(f.chats, f.coordinator(), config, models.WithClock(f.clock.Now))
 	if err != nil {
 		f.t.Fatal(err)

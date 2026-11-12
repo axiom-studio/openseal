@@ -236,3 +236,5 @@ func TerminalFailureReply(code string) string {
 }
 
 type TurnRunnerResolver = runtimeconversation.TurnRunnerResolver
+
+type TurnRunnerResolverFunc = runtimeconversation.TurnRunnerResolverFunc

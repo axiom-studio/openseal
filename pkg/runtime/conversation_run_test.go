@@ -438,7 +438,7 @@ func TestConversationRunPinnedRunbookKeepsAgentBindingWithoutChatSeams(t *testin
 
 func TestConversationRunRefusesAgentBindingWithoutProducer(t *testing.T) {
 	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
-		runner := f.ChatRunner(TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		runner := f.ChatRunner(runtimeconversation.TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			return &agentrun.TurnRunnerBinding{DeploymentID: "agent-1"}, nil
 		}), false)
 		run := f.StartRun(f.Post("broken", "user-1", "Hello"))

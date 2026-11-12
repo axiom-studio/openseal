@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -90,7 +91,7 @@ func TestAgentRunWorkerDrivesRunLoopAcrossClaims(t *testing.T) {
 			}
 			producer := &workerLoopProducer{steps: 1, wakeIn: 40 * time.Millisecond}
 			var resolved atomic.Int32
-			resolver := TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+			resolver := conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 				resolved.Add(1)
 				return &agentrun.TurnRunnerBinding{
 					DefinitionID: "test-agent", DefinitionVersion: "1", ModelProvider: "fake", Model: "deterministic",
@@ -136,7 +137,7 @@ func TestAgentRunWorkerFailsRunWithoutStepProducer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	resolver := conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return &agentrun.TurnRunnerBinding{DefinitionID: "test-agent", DefinitionVersion: "1"}, nil
 	})
 	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{Scope: scope, AssignedAgentID: "agent", LeaseDuration: time.Second})

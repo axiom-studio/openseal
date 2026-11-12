@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -303,7 +304,7 @@ func TestAgentRunWorkerObservesTimerDeadlineWithoutWaitingForFallback(t *testing
 		t.Fatal(err)
 	}
 	producer := &timerStepProducer{steps: 1, wakeIn: 30 * time.Millisecond}
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	pool, err := NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return &agentrun.TurnRunnerBinding{DefinitionID: "agent", DefinitionVersion: "1", Producer: producer}, nil
 	}), nil, AgentRunWorkerConfig{Scope: scope, PollInterval: time.Hour})
 	if err != nil {

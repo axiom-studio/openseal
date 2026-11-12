@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"go.uber.org/zap"
 )
 
@@ -55,7 +56,7 @@ func TestAgentRunWorkerSupervisorExecutesOnlyConfiguredKindAcrossScopes(t *testi
 	}
 
 	seen := make(chan *AgentRun, 2)
-	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	resolver := conversation.TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		seen <- cloneAgentRun(run)
 		return &agentrun.TurnRunnerBinding{Producer: &timerStepProducer{}}, nil
 	})

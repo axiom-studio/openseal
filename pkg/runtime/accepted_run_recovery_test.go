@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -27,7 +28,7 @@ func TestAcceptedRunRecoveryPreservesUnprovableLegacyWorkWithoutAutomaticRetries
 		}
 		deployment, definition := workerAcceptedMethodFixture(scope)
 		catalog := &resolverCatalog{deployment: deployment, definition: definition, activation: &skill.ActivationSnapshot{SnapshotID: "live", Scope: skill.ScopeReference(scope), DeploymentID: deployment.ID}}
-		resolver := TurnRunnerResolverFunc(func(ctx context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		resolver := conversation.TurnRunnerResolverFunc(func(ctx context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			binding, err := ResolveLoopBinding(ctx, catalog, run, loopBindingTestConfig(t, store, nil))
 			if !errors.Is(err, models.ErrAcceptedRunExecution) {
 				t.Fatalf("legacy method guessed current implementation: %#v %v", binding, err)

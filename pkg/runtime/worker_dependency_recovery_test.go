@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun/agentruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
@@ -154,7 +155,7 @@ func TestAgentRunWorkerIdleDependencyMetadataDoesNotHydrateRunsOrHistory(t *test
 
 func newDependencyRepairTestPool(t *testing.T, store models.KernelStore, scope models.Scope) *AgentRunWorkerPool {
 	t.Helper()
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	pool, err := NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return nil, errors.New("reconciliation must not resolve provider authority")
 	}), nil, AgentRunWorkerConfig{Scope: scope})
 	if err != nil {

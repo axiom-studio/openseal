@@ -13,7 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
@@ -24,10 +24,10 @@ import (
 
 func continuationLifecycleFixture(t *testing.T, store *sqlite.Store, id string) (*models.AgentRun, *models.Conversation, *models.ChannelMessage) {
 	t.Helper()
-	service := conversation.NewConversationService(store)
+	service := runtimeconversation.NewConversationService(store)
 	scope := models.Scope{Kind: "tenant", ID: id}
 	conversationtest.SeedSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{
+	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: id,
 	})
 	if err != nil {
@@ -105,7 +105,7 @@ func testAgentRunWorkerKeepsForegroundPastDeadline(t *testing.T, resolving bool)
 			return answerStep("Reviewed release"), ctx.Err()
 		}}
 		resolve := workerTaskResolver(t, store, store, producer)
-		pool := workerTaskPoolWith(t, store, run.Scope, TurnRunnerResolverFunc(func(ctx context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		pool := workerTaskPoolWith(t, store, run.Scope, runtimeconversation.TurnRunnerResolverFunc(func(ctx context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			if resolving {
 				entered <- ctx
 				<-release

@@ -73,7 +73,7 @@ func answerStep(text string) agentrun.StepOutput {
 // binding does for the parts these tests need: the lane session (seeded with
 // the trigger message), the control authority and the claim tool executor,
 // whose control executor admits tasks through tasks.
-func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks models.ConversationTaskKernelStore, producer agentrun.StepProducer) TurnRunnerResolverFunc {
+func workerTaskResolver(t *testing.T, store *sqlite.Store, tasks models.ConversationTaskKernelStore, producer agentrun.StepProducer) conversation.TurnRunnerResolverFunc {
 	t.Helper()
 	activity := activity.NewRunActivityService(store, store)
 	control := &runtimecontrol.ControlExecutor{

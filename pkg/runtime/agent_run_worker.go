@@ -24,12 +24,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type TurnRunnerResolverFunc func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error)
-
-func (f TurnRunnerResolverFunc) ResolveTurnRunner(ctx context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
-	return f(ctx, run)
-}
-
 type ActionProposalObserverFunc func(context.Context, *models.AgentRun, *models.AgentTurn, *models.ActionProposalResult) error
 
 func (f ActionProposalObserverFunc) ObserveActionProposal(ctx context.Context, run *models.AgentRun, turn *models.AgentTurn, proposal *models.ActionProposalResult) error {

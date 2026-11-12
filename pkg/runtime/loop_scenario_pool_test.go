@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimecollaboration "github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
@@ -29,7 +30,7 @@ func poolFixturePool(t *testing.T, f *loopFixture, maxSteps int) *AgentRunWorker
 	if maxSteps <= 0 {
 		maxSteps = runloop.RunLoopMaxStepsPerClaim
 	}
-	pool, err := newAgentRunWorkerPool(f.store, TurnRunnerResolverFunc(func(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	pool, err := newAgentRunWorkerPool(f.store, conversation.TurnRunnerResolverFunc(func(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return f.binding(run), nil
 	}), nil, AgentRunWorkerConfig{Scope: f.scope, LeaseDuration: loopFixtureLease, TurnLeaseDuration: loopFixtureLease}, maxSteps, models.WithClock(f.clock.Now))
 	if err != nil {
@@ -72,7 +73,7 @@ func TestLoopPoolClaimsAndRunsToRest(t *testing.T) {
 	eachStore(t, "loop_pool_rest", func(t *testing.T, store models.KernelStore) {
 		f := newLoopFixture(t, store, withRules(lookupSteps(2)...))
 		var resolved atomic.Int32
-		pool, err := NewAgentRunWorkerPool(f.store, TurnRunnerResolverFunc(func(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		pool, err := NewAgentRunWorkerPool(f.store, conversation.TurnRunnerResolverFunc(func(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			resolved.Add(1)
 			return f.binding(run), nil
 		}), nil, AgentRunWorkerConfig{Scope: f.scope, LeaseDuration: loopFixtureLease, TurnLeaseDuration: loopFixtureLease}, models.WithClock(f.clock.Now))
@@ -258,7 +259,7 @@ func TestLoopPoolPreservesProducerBudgetPlanning(t *testing.T) {
 		t.Fatal(err)
 	}
 	producer := &plannedPoolProducer{planned: models.BudgetUsage{InputTokens: 5000, OutputTokens: 1000}, seen: make(chan models.BudgetUsage, 1)}
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	pool, err := NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return &agentrun.TurnRunnerBinding{DefinitionID: "researcher", DefinitionVersion: "1", Producer: producer}, nil
 	}), nil, AgentRunWorkerConfig{
 		Scope: scope, AssignedAgentID: "researcher", Concurrency: 1,
@@ -314,7 +315,7 @@ func TestLoopPoolRenewsLeaseDuringLongStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	pool, err := NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return &agentrun.TurnRunnerBinding{DefinitionID: "agent", DefinitionVersion: "1", Producer: &slowPoolProducer{wait: 220 * time.Millisecond}}, nil
 	}), nil, AgentRunWorkerConfig{
 		Scope: scope, AssignedAgentID: "agent", PollInterval: 5 * time.Millisecond,
@@ -382,7 +383,7 @@ func TestLoopPoolCompletesArtifactFreeHandoffFromTerminalChild(t *testing.T) {
 	if err := agentrun.NewRunCommandService(store).CascadeTerminalRun(t.Context(), accepted.Source); err != nil {
 		t.Fatal(err)
 	}
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	pool, err := NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return &agentrun.TurnRunnerBinding{DefinitionID: "marketing", DefinitionVersion: "1", Producer: handoffPoolProducer{}}, nil
 	}), nil, AgentRunWorkerConfig{
 		Scope: scope, AssignedAgentID: "marketing", Concurrency: 1,

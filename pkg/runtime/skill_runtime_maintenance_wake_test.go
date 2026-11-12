@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
@@ -29,7 +30,7 @@ func TestSkillRuntimeMaintenanceResolverErrorParksBeforeStartingTurn(t *testing.
 		if err != nil || claimed == nil {
 			t.Fatalf("claim: %#v %v", claimed, err)
 		}
-		resolver := TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		resolver := conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			return nil, &models.SkillRuntimeMaintenanceError{Maintenance: *gate}
 		})
 		pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{Scope: request.Scope, Concurrency: 1, PollInterval: time.Second, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute})
