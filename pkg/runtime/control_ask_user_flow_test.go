@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
@@ -18,7 +19,7 @@ func TestAskUserPostsQuestionAndParks(t *testing.T) {
 		f := claimedForegroundRun(t, store)
 		call := newAskUserCall(t, store, f.run, "foreground-worker", "  "+askUserTestQuestion+"  ")
 		result := call.settle(t)
-		if result.Kind != ControlParked || result.Park.Status != models.AgentRunStatusWaitingForEvent ||
+		if result.Kind != runtime.ControlParked || result.Park.Status != models.AgentRunStatusWaitingForEvent ||
 			result.Park.Wake.Type != "user_message" || result.Park.Wake.Reference != call.entry.ID {
 			t.Fatalf("park = %#v", result)
 		}
@@ -26,7 +27,7 @@ func TestAskUserPostsQuestionAndParks(t *testing.T) {
 			t.Fatalf("entry = %#v", call.entry)
 		}
 		key := "conversation-clarification:" + f.run.ID + ":" + call.entry.ID
-		meta, err := DecodeControlEntryMeta(call.entry)
+		meta, err := runtime.DecodeControlEntryMeta(call.entry)
 		if err != nil || meta == nil || meta.Kind != models.ControlToolAskUser || meta.QuestionMessageID != models.StableConversationID(f.run.Scope, key, "message") {
 			t.Fatalf("meta = %#v %v", meta, err)
 		}
@@ -61,7 +62,7 @@ func TestAskUserResumeWithoutAnswerRepostsAndReparks(t *testing.T) {
 	// next claim resumes the awaiting entry.
 	cc := call.context()
 	cc.Arguments = &models.AskUserArgs{Question: askUserTestQuestion}
-	entry, err := call.exec.transitionControlEntry(t.Context(), cc, models.ToolEntryAwaitingEvent, &models.ToolEntryWait{EventWaitID: call.entry.ID, Reason: askUserWaitReason}, nil, nil)
+	entry, err := call.exec.TransitionControlEntry(t.Context(), cc, models.ToolEntryAwaitingEvent, &models.ToolEntryWait{EventWaitID: call.entry.ID, Reason: runtime.AskUserWaitReason}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +97,7 @@ func TestAskUserQuestionReconcilerRepostsFromEntry(t *testing.T) {
 		call := newAskUserCall(t, store, f.run, "foreground-worker", askUserTestQuestion)
 		call.exec.Conversations = conversation.NewConversationService(conflictingQuestionStore{store})
 		result := call.settle(t)
-		if result.Kind != ControlParked {
+		if result.Kind != runtime.ControlParked {
 			t.Fatalf("settle = %#v", result)
 		}
 		key := conversation.ConversationClarificationKey(f.run.ID, call.entry.ID)
@@ -131,7 +132,7 @@ func TestAskUserAnswerFromOtherActorIgnored(t *testing.T) {
 	if current.Status != models.AgentRunStatusWaitingForEvent || len(current.PendingInterventions) != 0 {
 		t.Fatalf("foreign answer woke the Run: %#v", current)
 	}
-	if answer := askUserAnswer(current, call.entry, question.ID); answer != nil {
+	if answer := runtime.AskUserAnswer(current, call.entry, question.ID); answer != nil {
 		t.Fatalf("foreign answer bound to the entry: %#v", answer)
 	}
 }
@@ -144,7 +145,7 @@ func TestAskUserOptionsPostedAndAnsweredWithSelectedOptions(t *testing.T) {
 		f := claimedForegroundRun(t, store)
 		call := newAskUserCallWithArguments(t, store, f.run, "foreground-worker", json.RawMessage(askUserOptionsArguments))
 		result := call.settle(t)
-		if result.Kind != ControlParked {
+		if result.Kind != runtime.ControlParked {
 			t.Fatalf("settle = %#v", result)
 		}
 		f.run = call.park(t, result.Park)
