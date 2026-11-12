@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -820,4 +821,17 @@ func CanTransitionObjective(from, to ObjectiveStatus) bool {
 		ObjectiveStatusPaused: {ObjectiveStatusActive: true, ObjectiveStatusFailed: true, ObjectiveStatusRetired: true},
 	}
 	return allowed[from][to]
+}
+
+func CloneWakeCondition(condition *WakeCondition) *WakeCondition {
+	if condition == nil {
+		return nil
+	}
+	cloned := *condition
+	cloned.Predicate = maps.Clone(condition.Predicate)
+	if condition.WakeAt != nil {
+		wakeAt := *condition.WakeAt
+		cloned.WakeAt = &wakeAt
+	}
+	return &cloned
 }

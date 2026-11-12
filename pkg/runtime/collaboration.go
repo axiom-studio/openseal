@@ -742,7 +742,7 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		record.ExpectedSourceRevision = source.Revision
 		if groupedDependency != nil {
 			record.SourceRun.Status = source.Status
-			record.SourceRun.WakeCondition = cloneWakeCondition(source.WakeCondition)
+			record.SourceRun.WakeCondition = models.CloneWakeCondition(source.WakeCondition)
 		}
 		eventType = "collaboration.accepted"
 		if updated.Kind == models.AgentRequestKindHandoff {
@@ -1708,19 +1708,6 @@ func teamAssignmentReason(request *models.AgentRequest, selected string) string 
 		return "selected the only eligible roster member under the reviewed Team role policy"
 	}
 	return "selected explicitly from the eligible roster under the reviewed Team role policy"
-}
-
-func cloneWakeCondition(condition *models.WakeCondition) *models.WakeCondition {
-	if condition == nil {
-		return nil
-	}
-	cloned := *condition
-	cloned.Predicate = maps.Clone(condition.Predicate)
-	if condition.WakeAt != nil {
-		wakeAt := *condition.WakeAt
-		cloned.WakeAt = &wakeAt
-	}
-	return &cloned
 }
 
 func sourceWaitsForAgentRequestDecision(source *models.AgentRun, requestID string) bool {

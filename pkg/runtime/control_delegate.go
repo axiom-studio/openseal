@@ -384,7 +384,7 @@ func delegationCommittedPark(source *AgentRun, agentID string) (*agentrun.LoopPa
 		return nil, errors.New("delegation did not park its source Run")
 	}
 	return &agentrun.LoopPark{
-		Status: source.Status, Wake: cloneWakeCondition(source.WakeCondition),
+		Status: source.Status, Wake: models.CloneWakeCondition(source.WakeCondition),
 		Summary: "Delegated work to Agent " + agentID, Committed: true,
 	}, nil
 }

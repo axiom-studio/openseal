@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 )
@@ -351,7 +352,7 @@ func projectRunbookAuditRun(run *AgentRun, activationID string) RunbookExecution
 		AssignedAgentID: run.AssignedAgentID, ActivationID: activationID, Entrypoint: run.Entrypoint,
 		Goal: run.Goal, Source: run.Source, Status: run.Status, Attempt: run.Attempt, Error: run.Error,
 		CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt, StartedAt: run.StartedAt, CompletedAt: run.CompletedAt,
-		WakeCondition: cloneWakeCondition(run.WakeCondition), LastAppliedTurn: run.LastAppliedTurn,
+		WakeCondition: models.CloneWakeCondition(run.WakeCondition), LastAppliedTurn: run.LastAppliedTurn,
 		BudgetUsage: run.BudgetUsage, BudgetState: run.BudgetState,
 	}
 }
