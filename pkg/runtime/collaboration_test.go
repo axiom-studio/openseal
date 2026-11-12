@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -72,7 +73,7 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 	t.Parallel()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "developer",
 		Goal: "Coordinate the release", Source: models.RunSourceManual,
@@ -162,7 +163,7 @@ func TestTeamCompletionReviewQuorumEscalatesAndResolvesDisagreement(t *testing.T
 	t.Parallel()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "review-quorum"}
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "lead",
 		Goal: "Coordinate reviewed delivery", Source: models.RunSourceManual,
@@ -238,7 +239,7 @@ func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	newService := func(policy kernelteam.DelegationPolicy) (*sqlite.Store, *portfolio.PortfolioService, *CollaborationService) {
-		store := newTestKernelStore(t)
+		store := conversationtest.NewStore(t)
 		portfolio := portfolio.NewPortfolioService(store)
 		service := NewCollaborationService(store)
 		service.teams = collaborationTeamStoreStub{
@@ -628,7 +629,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 
 func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 	t.Parallel()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	portfolio := portfolio.NewPortfolioService(store)
@@ -759,7 +760,7 @@ func TestTeamWorkOfferFiltersMemberSkillsAndRecordsCapacity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "team-authority"}
-	kernel := newTestKernelStore(t)
+	kernel := conversationtest.NewStore(t)
 	store := &collaborationAgentCatalogStore{
 		Store: kernel,
 		deployments: map[string]*kernelagent.AgentDeployment{
@@ -859,7 +860,7 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 		})
 	}
 
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	portfolio := portfolio.NewPortfolioService(store)
 	activity := runtimeactivity.NewRunActivityService(store, store)
 	service := NewCollaborationService(store)
@@ -932,7 +933,7 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 
 func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *testing.T) {
 	t.Parallel()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	portfolio := portfolio.NewPortfolioService(store)
@@ -968,7 +969,7 @@ func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *test
 
 func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *testing.T) {
 	t.Parallel()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	portfolio := portfolio.NewPortfolioService(store)
@@ -1007,13 +1008,13 @@ func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *t
 	for _, artifact := range []*models.Artifact{
 		{
 			ID: "brief-1", Version: 1, Scope: scope, Name: "brief.md", Type: "document",
-			ContentRef: "artifact-store:brief-1", Digest: digestFor("brief-1"), Classification: models.ArtifactClassificationInternal,
+			ContentRef: "artifact-store:brief-1", Digest: collaborationDigest("brief-1"), Classification: models.ArtifactClassificationInternal,
 			Metadata:   map[string]interface{}{"reviewed": true},
 			Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "marketing-editor"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
 		},
 		{
 			ID: "brief-bad-schema", Version: 1, Scope: scope, Name: "brief.md", Type: "document",
-			ContentRef: "artifact-store:brief-bad-schema", Digest: digestFor("brief-bad-schema"), Classification: models.ArtifactClassificationInternal,
+			ContentRef: "artifact-store:brief-bad-schema", Digest: collaborationDigest("brief-bad-schema"), Classification: models.ArtifactClassificationInternal,
 			Metadata:   map[string]interface{}{"reviewed": false},
 			Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "marketing-editor"}, RunID: accepted.Child.ID, RequestID: created.Request.ID},
 		},
@@ -1110,7 +1111,7 @@ func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 }
 
 func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	portfolio := portfolio.NewPortfolioService(store)
@@ -1172,7 +1173,7 @@ func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
 }
 
 func TestTerminalChildCompletesArtifactBearingRequestFromRegisteredOutput(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "artifact-delegation"}
 	portfolio := portfolio.NewPortfolioService(store)

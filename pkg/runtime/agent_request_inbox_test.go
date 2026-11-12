@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -60,7 +61,7 @@ func createInboxRequest(t *testing.T, store models.AgentRequestInboxStore, polic
 }
 
 func TestAgentRequestInboxBoundsConversationProjectionCadence(t *testing.T) {
-	reconciler, err := NewAgentRequestInboxReconciler(newTestKernelStore(t))
+	reconciler, err := NewAgentRequestInboxReconciler(conversationtest.NewStore(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +78,7 @@ func TestAgentRequestInboxBoundsConversationProjectionCadence(t *testing.T) {
 }
 
 func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
 	source, request := createInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -156,7 +157,7 @@ func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *te
 }
 
 func TestAgentRequestInboxTerminalDecisionFailureResolvesRequestAndWakesSource(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
 	source, request := createInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -217,7 +218,7 @@ func TestAgentRequestInboxTerminalDecisionFailureResolvesRequestAndWakesSource(t
 }
 
 func TestAgentRequestInboxTerminalDecisionFailureConvergesAfterSourceAlreadyEnded(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
 	source, request := createInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -275,7 +276,7 @@ func TestAgentRequestInboxTerminalDecisionFailureConvergesAfterSourceAlreadyEnde
 }
 
 func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
 	source, request := createInboxRequest(t, store, models.AgentRequestAcceptanceRecipientReview, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	otherSource, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: request.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other"},
@@ -327,7 +328,7 @@ func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing
 }
 
 func TestAgentRequestInboxReconcilesEveryPaginatedRequest(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
 	scope := models.Scope{Kind: "tenant", ID: "paginated-inbox"}
 	portfolio := portfolio.NewPortfolioService(store)
 	collaboration := NewCollaborationService(store)
@@ -371,7 +372,7 @@ func TestAgentRequestInboxReconcilesEveryPaginatedRequest(t *testing.T) {
 }
 
 func TestAgentRequestInboxRecoversPreauthorizedDelegationWithoutReview(t *testing.T) {
-	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: conversationtest.NewStore(t)}
 	source, request := createInboxRequest(t, store, models.AgentRequestAcceptancePreauthorized, models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -399,7 +400,7 @@ func TestAgentRequestInboxUsesDeterministicTeamMemberAndAcceptancePolicy(t *test
 		t.Run(fmt.Sprintf("review-%t", requireAcceptance), func(t *testing.T) {
 			scope := models.Scope{Kind: "tenant", ID: "inbox"}
 			store := &agentRequestInboxTeamStore{
-				Store: newTestKernelStore(t),
+				Store: conversationtest.NewStore(t),
 				deployment: &kernelteam.Deployment{
 					ID: "marketing", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 					DefinitionID: "marketing", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,

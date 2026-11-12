@@ -12,7 +12,7 @@ import (
 // an Agent's 1:1 chat hands work to no one.
 func TestChatDelegationStaysOnTheRoster(t *testing.T) {
 	ctx, scope := context.Background(), models.Scope{Kind: "tenant", ID: "roster"}
-	service := &CollaborationService{teams: chatRosterTeams{team: chatRosterTeam(scope, "marlow", "harp")}}
+	service := &CollaborationService{teams: collaborationRosterTeams{team: collaborationRosterTeam(scope, "marlow", "harp")}}
 	source := &models.AgentRun{ID: "marlow-run", Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "marlow"}
 	for _, recipient := range []models.CollaborationParty{{Type: models.OwnerTypeAgent, ID: "harp"}, {Type: models.OwnerTypeTeam, ID: "crew"}} {
 		if err := service.validateChatDelegation(ctx, source, recipient); err != nil {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -24,8 +25,8 @@ func TestDelegateCreateTransitionsEntryAtomically(t *testing.T) {
 		name string
 		open func(t *testing.T) delegateTxStore
 	}{
-		{"Memory", func(*testing.T) delegateTxStore { return newTestKernelStore(t) }},
-		{"SQLite", func(t *testing.T) delegateTxStore { return openTestSQLiteSessionStore(t) }},
+		{"Memory", func(*testing.T) delegateTxStore { return conversationtest.NewStore(t) }},
+		{"SQLite", func(t *testing.T) delegateTxStore { return openCollaborationSessionStore(t) }},
 	}
 	for _, backend := range backends {
 		backend := backend
