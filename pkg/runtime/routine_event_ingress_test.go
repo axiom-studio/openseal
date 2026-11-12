@@ -286,7 +286,8 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 			},
 		},
 	}
-	consumer := NewRoutineCallbackConsumer(h.matcher)
+	offered := &recordingRoutineOfferer{RoutineEventOfferer: h.matcher}
+	consumer := NewRoutineCallbackConsumer(offered)
 	subscription := CallbackSubscription{EventType: "github.issues.opened", Consumer: "routines"}
 
 	if err := consumer.ConsumeCallbackEvent(h.ctx, registration, subscription, issue); err != nil {
@@ -336,19 +337,31 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 		"repository":  map[string]interface{}{"fullName": "acme/api"},
 		"workflowRun": map[string]interface{}{"name": "CI", "branch": "main", "conclusion": "failure"},
 	}
-	mapped := gitHubRoutineEvent(h.scope, RoutineCallbackSourceRef(registration.ID), run)
-	if mapped.Summary != "Workflow run completed in acme/api: CI (failure)" || mapped.Fields["branch"][0] != "main" || mapped.Fields["conclusion"][0] != "failure" {
+	if err := consumer.ConsumeCallbackEvent(h.ctx, registration, CallbackSubscription{EventType: run.Type, Consumer: "routines"}, run); err != nil {
+		t.Fatal(err)
+	}
+	mapped := offered.events[len(offered.events)-1]
+	if mapped.ID != run.ID || mapped.SourceRef != RoutineCallbackSourceRef(registration.ID) ||
+		mapped.Summary != "Workflow run completed in acme/api: CI (failure)" || mapped.Fields["branch"][0] != "main" || mapped.Fields["conclusion"][0] != "failure" {
 		t.Fatalf("workflow run event = %#v", mapped)
 	}
 	if err := mapped.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if err := consumer.ConsumeCallbackEvent(h.ctx, registration, CallbackSubscription{EventType: run.Type, Consumer: "routines"}, run); err != nil {
-		t.Fatal(err)
-	}
 	if stats := h.matcher.RoutineEventStats(); stats.In[RoutineEventGitHub] != 2 || stats.Matched[RoutineEventGitHub] != 1 {
 		t.Fatalf("github stats in=%d matched=%d", stats.In[RoutineEventGitHub], stats.Matched[RoutineEventGitHub])
 	}
+}
+
+// recordingRoutineOfferer records each event offered to its offerer.
+type recordingRoutineOfferer struct {
+	RoutineEventOfferer
+	events []*RoutineEvent
+}
+
+func (o *recordingRoutineOfferer) OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (RoutineEventOffer, error) {
+	o.events = append(o.events, event)
+	return o.RoutineEventOfferer.OfferRoutineEvent(ctx, event)
 }
 
 func unboundConversationMessage() (Scope, ExternalConversationAdapterReference, *NormalizedExternalConversationEvent) {
