@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -67,4 +68,29 @@ func openTestPostgresStore(t testing.TB, prefix string, options ...PostgresStore
 	t.Helper()
 	schema := newTestPostgresSchema(t, prefix)
 	return schema.open(t, options...), schema
+}
+
+// postgresHead caches the schema version a fresh schema migrates to.
+var postgresHead struct {
+	sync.Mutex
+	version int64
+}
+
+// postgresSchemaHead returns the version a store reaches when it migrates an
+// empty schema: the head of this binary's migrations. Tests outside the
+// store compare an upgraded schema with it; the store's own tests pin the
+// number itself.
+func postgresSchemaHead(t testing.TB) int64 {
+	t.Helper()
+	postgresHead.Lock()
+	defer postgresHead.Unlock()
+	if postgresHead.version == 0 {
+		store, _ := openTestPostgresStore(t, "openseal_head_")
+		version, err := store.PostgresSchemaVersion(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		postgresHead.version = version
+	}
+	return postgresHead.version
 }

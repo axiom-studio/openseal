@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"testing"
 )
 
@@ -39,4 +40,19 @@ func getStoredRun(t testing.TB, store *SQLiteStore, scope Scope, id string) *Age
 		t.Fatalf("get run %s: %v", id, err)
 	}
 	return run
+}
+
+// newTestSQLiteStore opens a SQLite store on a fresh file and the test's own
+// connection to that file, both closed when the test ends. Use it instead of
+// newTestKernelStore when the test reads or writes rows no store method
+// offers.
+func newTestSQLiteStore(t testing.TB) (*SQLiteStore, *sql.DB) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kernel.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store, openTestSQLiteDB(t, path)
 }
