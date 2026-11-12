@@ -14,6 +14,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
@@ -970,7 +971,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 	}
 	// The trial context is stored on the child as the JSON object of an
 	// AgentTrialContext.
-	encoded, err := json.Marshal(AgentTrialContext{
+	encoded, err := json.Marshal(agentbuilder.AgentTrialContext{
 		Profile: agentProfileArguments{
 			DisplayName: "Inbox Triage", Purpose: "Sort the support inbox.", SystemPrompt: "Sort mail by urgency.",
 			Personality: "Friendly", OperatingPrinciples: []string{"Flag anything legal."},
@@ -987,7 +988,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 	child := claimedBindingRun(t, store, &AgentRun{
 		ID: "child", Scope: scope, Kind: RunKindAgentWork, ParentRunID: parent.ID, RootRunID: parent.ID,
 		Owner: parent.Owner, AssignedAgentID: "finn", Goal: "Hello there", Source: RunSourceHandoff,
-		Context: map[string]interface{}{AgentTrialContextKey: trial, AgentTrialModelContextKey: "gpt-6-luna"},
+		Context: map[string]interface{}{agentbuilder.AgentTrialContextKey: trial, agentbuilder.AgentTrialModelContextKey: "gpt-6-luna"},
 	})
 	config := loopBindingTestConfig(t, store, &modelsteptest.RecordingStepHost{})
 	config.ChatWorkspaces = bindingTestChatWorkspaces{}

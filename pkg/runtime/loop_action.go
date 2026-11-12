@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -409,7 +410,7 @@ func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall
 	if wake != nil {
 		return governedCardOutcome(call.ToolCallID, current, wake, summary), nil
 	}
-	if IsAgentTrialCall(current) {
+	if agentbuilder.IsAgentTrialCall(current) {
 		// The trial's reply is the tool result, not the started-trial output.
 		output, err := x.agentTrialOutput(ctx, run, current, settled)
 		if err != nil {

@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -130,7 +131,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 		return nil, ErrAcceptedRunExecution
 	}
 	r := &loopBindingResolution{config: config, catalog: catalog, run: run, scope: scope, deployment: deployment, definition: definition}
-	if trial, ok, trialErr := AgentTrialContextForRun(run); trialErr != nil {
+	if trial, ok, trialErr := agentbuilder.AgentTrialContextForRun(run); trialErr != nil {
 		return nil, trialErr
 	} else if ok {
 		// A try_agent trial speaks as the drafted profile under the
@@ -790,7 +791,7 @@ func kernelManagementBindingID(skillID, version string) string {
 // identity (the host's model grant checks it), the drafted persona as the
 // Agent instructions, the drafted model, and no actions, workspace tools or
 // control tools beyond the final answer.
-func (r *loopBindingResolution) agentTrial(ctx context.Context, trial *AgentTrialContext) (*agentrun.TurnRunnerBinding, error) {
+func (r *loopBindingResolution) agentTrial(ctx context.Context, trial *agentbuilder.AgentTrialContext) (*agentrun.TurnRunnerBinding, error) {
 	if r.run.Kind != RunKindAgentWork || r.run.ParentRunID == "" || r.run.ParentRunID != trial.ParentRunID {
 		return nil, errors.New("agent trial context does not belong to this Run")
 	}
@@ -802,7 +803,7 @@ func (r *loopBindingResolution) agentTrial(ctx context.Context, trial *AgentTria
 	}
 	r.trial = true
 	binding := r.identity(r.deployment.ID)
-	binding.Model, _ = r.run.Context[AgentTrialModelContextKey].(string)
+	binding.Model, _ = r.run.Context[agentbuilder.AgentTrialModelContextKey].(string)
 	binding.Model = strings.TrimSpace(binding.Model)
 	return r.model(ctx, binding, nil, agentrun.PromptContribution{}, false)
 }

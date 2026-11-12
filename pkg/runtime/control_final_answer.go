@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -512,7 +513,7 @@ func (d *finalAnswerDraft) output(mode agentrun.FinalAnswerMode) map[string]inte
 	}
 	output := map[string]interface{}{conversationrun.FinalOutputSummaryKey: strings.TrimSpace(d.Args.Answer)}
 	if report := strings.TrimSpace(d.Args.Report); report != "" {
-		output[FinalOutputReportKey] = report
+		output[agentbuilder.FinalOutputReportKey] = report
 	}
 	if d.Args.BroadcastToChannel {
 		output[agentrun.FinalOutputBroadcastKey] = true

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
@@ -80,7 +81,7 @@ func (p *governedParker) governedCardWait(ctx context.Context, run *AgentRun, ca
 		if request := skillbinding.PendingConnectAppRequestFromAction(ctx, p.setups, call); request != nil {
 			return &WakeCondition{Type: skillbinding.ConnectAppWakeType, Reference: request.ID}, "Waiting for the user to connect " + request.SkillName, nil
 		}
-		if IsAgentTrialCall(call) {
+		if agentbuilder.IsAgentTrialCall(call) {
 			return p.agentTrialWait(ctx, call)
 		}
 	case ActionCallStatusFailed:

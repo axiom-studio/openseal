@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -34,7 +35,7 @@ func TeamManagementSkill() *skill.Definition {
 		Name: "Teams", Description: "Create Teams from existing Agents, and propose governed changes to the current Team's profile and its members' behavior.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: action.TeamManagementEndpoint},
 		Actions: map[string]skill.Action{
-			action.TeamActionCreateTeam: CreateTeamAction(),
+			action.TeamActionCreateTeam: agentbuilder.CreateTeamAction(),
 			action.TeamActionUpdateProfile: {
 				Name:        action.TeamActionUpdateProfile,
 				Description: "Change the current Team's name or description when the user asks the Team to rename or describe itself. Supply only the changed fields; each replaces the current value in full. The user approves the change before it applies.",

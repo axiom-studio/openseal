@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"go.uber.org/zap"
 )
@@ -428,8 +429,8 @@ func cutJSONEscaped(s string, budget int) string {
 // delegation), otherwise the Run's goal as a routine brief. nil when the Run
 // has no goal.
 func loopRunSessionSeed(run *AgentRun) (*SessionEntry, error) {
-	if _, trial := run.Context[AgentTrialContextKey]; trial {
-		return AgentTrialSessionSeed(run)
+	if _, trial := run.Context[agentbuilder.AgentTrialContextKey]; trial {
+		return agentbuilder.AgentTrialSessionSeed(run)
 	}
 	seed, err := agentrun.ControlChildSeed(run)
 	if err != nil || seed != nil {

@@ -1,4 +1,4 @@
-package runtime_test
+package agentbuilder_test
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 )
 
 func TestAgentTrialStartsChildWithoutDefinition(t *testing.T) {
@@ -19,11 +19,11 @@ func TestAgentTrialStartsChildWithoutDefinition(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, child := startAgentTrial(t, f, "trial-call")
-	if child.ID != runtime.AgentTrialRunID(f.run.ID, "trial-call") {
+	if child.ID != agentbuilder.AgentTrialRunID(f.run.ID, "trial-call") {
 		t.Fatalf("trial child id = %q", child.ID)
 	}
 
-	if _, err := f.agents.GetDefinition(ctx, runtime.AgentBuilderResourceID("agent-definition", f.scope, "trial-call"), runtime.AgentBuilderDefinitionVersion); !errors.Is(err, kernelagent.ErrDefinitionNotFound) {
+	if _, err := f.agents.GetDefinition(ctx, agentbuilder.AgentBuilderResourceID("agent-definition", f.scope, "trial-call"), agentbuilder.AgentBuilderDefinitionVersion); !errors.Is(err, kernelagent.ErrDefinitionNotFound) {
 		t.Fatalf("try_agent registered a definition: %v", err)
 	}
 	after, err := f.agents.ListDeployments(ctx, kernelagent.AgentDeploymentFilter{Scope: models.ScopeReference(f.scope)})
@@ -35,13 +35,13 @@ func TestAgentTrialStartsChildWithoutDefinition(t *testing.T) {
 		child.Goal != "What would you do with an angry refund mail?" {
 		t.Fatalf("child = %#v", child)
 	}
-	if child.Budget == nil || child.Budget.MaxTurns != runtime.AgentTrialMaxTurns || child.Budget.MaxOutputTokens != 0 {
+	if child.Budget == nil || child.Budget.MaxTurns != agentbuilder.AgentTrialMaxTurns || child.Budget.MaxOutputTokens != 0 {
 		t.Fatalf("child budget = %#v", child.Budget)
 	}
-	if child.Context[runtime.AgentTrialModelContextKey] != "gpt-6-luna" {
+	if child.Context[agentbuilder.AgentTrialModelContextKey] != "gpt-6-luna" {
 		t.Fatalf("child model = %#v", child.Context)
 	}
-	trial, ok, err := runtime.AgentTrialContextForRun(child)
+	trial, ok, err := agentbuilder.AgentTrialContextForRun(child)
 	if err != nil || !ok || trial.ParentRunID != f.run.ID || trial.ActionCallID != "trial-call" ||
 		trial.Profile.SystemPrompt != "Read new support mail and sort it by urgency." || trial.Profile.DisplayName != "Inbox Triage" ||
 		trial.Profile.Personality != "Friendly" || !slices.Equal(trial.Profile.OperatingPrinciples, []string{"Flag anything legal."}) ||
@@ -76,15 +76,15 @@ func TestAgentTrialRefusesSensitiveMessage(t *testing.T) {
 func TestAgentTrialFinalizerHeldParentKeepsStatus(t *testing.T) {
 	f := newAgentTrialFinalizerFixture(t, models.AgentRunStatusRunning)
 	child := f.endChild(t, models.AgentRunStatusFailed, nil, "model unavailable")
-	if err := runtime.NewAgentTrialFinalizer(f.store, nil, nil).FinalizeRun(context.Background(), child); err != nil {
+	if err := agentbuilder.NewAgentTrialFinalizer(f.store, nil, nil).FinalizeRun(context.Background(), child); err != nil {
 		t.Fatal(err)
 	}
 	parent := mustAgentRun(t, f.store, f.scope, f.parent.ID)
 	if parent.Status != models.AgentRunStatusRunning || parent.Revision != f.parent.Revision+1 {
 		t.Fatalf("parent = %s rev %d (was %d)", parent.Status, parent.Revision, f.parent.Revision)
 	}
-	receipt := runtime.AgentTrialReceiptFor(f.call.ID, child.ID, parent.PendingInterventions)
-	if receipt == nil || receipt.Status != runtime.AgentTrialStatusFailed || receipt.FailureMessage != "model unavailable" {
+	receipt := agentbuilder.AgentTrialReceiptFor(f.call.ID, child.ID, parent.PendingInterventions)
+	if receipt == nil || receipt.Status != agentbuilder.AgentTrialStatusFailed || receipt.FailureMessage != "model unavailable" {
 		t.Fatalf("receipt = %#v", receipt)
 	}
 }
@@ -97,7 +97,7 @@ func TestAgentTrialFinalizerIgnoresOtherRuns(t *testing.T) {
 	parent.Status, parent.WakeCondition = models.AgentRunStatusRunning, nil
 	putAgentTrialRun(t, f.store, parent)
 	child := f.endChild(t, models.AgentRunStatusCanceled, nil, "")
-	finalizer := runtime.NewAgentTrialFinalizer(f.store, nil, nil)
+	finalizer := agentbuilder.NewAgentTrialFinalizer(f.store, nil, nil)
 	if err := finalizer.FinalizeRun(context.Background(), child); err != nil {
 		t.Fatal(err)
 	}

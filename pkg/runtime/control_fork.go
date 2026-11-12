@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -454,7 +455,7 @@ func (x *ControlExecutor) forkResultValue(ctx context.Context, source *AgentRun,
 		if child.AssignedAgentID != source.AssignedAgentID {
 			branch["agentId"] = child.AssignedAgentID
 		}
-		if answer := ChildRunAnswer(child); answer != "" {
+		if answer := agentbuilder.ChildRunAnswer(child); answer != "" {
 			branch["answer"] = truncateControlText(answer, child.ID)
 		}
 		if len(edge.Artifacts) > 0 {

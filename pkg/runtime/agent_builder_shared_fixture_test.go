@@ -15,6 +15,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
@@ -99,16 +100,16 @@ func (p *Provisioner) PutSpaceMember(ctx context.Context, request portfolio.PutS
 type RecordingHost struct {
 	Host
 	PrepareErr error
-	Prepared   []AgentModelRequest
-	Created    []AgentCreated
+	Prepared   []agentbuilder.AgentModelRequest
+	Created    []agentbuilder.AgentCreated
 }
 
-func (h *RecordingHost) PrepareAgentModel(_ context.Context, request AgentModelRequest) error {
+func (h *RecordingHost) PrepareAgentModel(_ context.Context, request agentbuilder.AgentModelRequest) error {
 	h.Prepared = append(h.Prepared, request)
 	return h.PrepareErr
 }
 
-func (h *RecordingHost) AfterAgentCreated(_ context.Context, created AgentCreated) {
+func (h *RecordingHost) AfterAgentCreated(_ context.Context, created agentbuilder.AgentCreated) {
 	h.Created = append(h.Created, created)
 }
 
@@ -117,7 +118,7 @@ type DispatchFixture struct {
 	Store      *DispatchStore
 	Provision  *Provisioner
 	Recorder   *RecordingHost
-	Dispatcher *AgentBuilderActionDispatcher
+	Dispatcher *agentbuilder.AgentBuilderActionDispatcher
 }
 
 func NewDispatchFixture(t *testing.T) *DispatchFixture {
@@ -129,7 +130,7 @@ func NewDispatchFixture(t *testing.T) *DispatchFixture {
 	base.SalesID, base.HomeID = SeedSpaces(t, base.Spaces, base.Scope)
 	recorder := &RecordingHost{}
 	var err error
-	base.Validator, err = NewAgentBuilderActionValidator(base.Agents, base.Teams, base.Catalog, base.Spaces, store, store, recorder)
+	base.Validator, err = agentbuilder.NewAgentBuilderActionValidator(base.Agents, base.Teams, base.Catalog, base.Spaces, store, store, recorder)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,13 +212,13 @@ func (f *DispatchFixture) SpaceMember(t *testing.T, spaceID, deploymentID string
 // NewDispatcher builds a dispatcher over its own installer.
 func NewDispatcher(
 	store models.KernelStore, agents *kernelagent.Registry, teams *kernelteam.Registry, catalog *skill.Catalog,
-	provision AgentProvisioner, host AgentBuilderHost, fallback agentrun.ActionDispatcher,
-) (*AgentBuilderActionDispatcher, error) {
-	installer, err := NewAgentInstaller(store, agents, teams, catalog, provision, host)
+	provision agentbuilder.AgentProvisioner, host agentbuilder.AgentBuilderHost, fallback agentrun.ActionDispatcher,
+) (*agentbuilder.AgentBuilderActionDispatcher, error) {
+	installer, err := agentbuilder.NewAgentInstaller(store, agents, teams, catalog, provision, host)
 	if err != nil {
 		return nil, err
 	}
-	return NewAgentBuilderActionDispatcher(installer, fallback)
+	return agentbuilder.NewAgentBuilderActionDispatcher(installer, fallback)
 }
 
 type Host struct {
@@ -230,7 +231,7 @@ type Host struct {
 func (h *Host) AuthorizeAgentChange(_ context.Context, _ skill.ScopeReference, actingUserID, deploymentID string) error {
 	h.Authorized = append(h.Authorized, actingUserID+"/"+deploymentID)
 	if h.Forbidden[actingUserID+"/"+deploymentID] {
-		return ErrAgentChangeForbidden
+		return agentbuilder.ErrAgentChangeForbidden
 	}
 	return nil
 }
@@ -243,11 +244,11 @@ func (h *Host) ValidateAgentModel(_ context.Context, _ skill.ScopeReference, mod
 	return nil
 }
 
-func (h *Host) PrepareAgentModel(context.Context, AgentModelRequest) error {
+func (h *Host) PrepareAgentModel(context.Context, agentbuilder.AgentModelRequest) error {
 	return nil
 }
 
-func (h *Host) AfterAgentCreated(context.Context, AgentCreated) {}
+func (h *Host) AfterAgentCreated(context.Context, agentbuilder.AgentCreated) {}
 
 type Fixture struct {
 	Scope   models.Scope
@@ -260,7 +261,7 @@ type Fixture struct {
 	HomeID    string
 	Run       *models.AgentRun
 	Host      *Host
-	Validator *AgentBuilderActionValidator
+	Validator *agentbuilder.AgentBuilderActionValidator
 }
 
 func NewFixture(t *testing.T, withHost bool) *Fixture {
@@ -381,12 +382,12 @@ func NewFixture(t *testing.T, withHost bool) *Fixture {
 			AssignedAgentID: "finn", ActingUser: Approver.ID, Source: models.RunSourceChat,
 		},
 	}
-	var host AgentBuilderHost
+	var host agentbuilder.AgentBuilderHost
 	if withHost {
 		fixture.Host = &Host{}
 		host = fixture.Host
 	}
-	fixture.Validator, err = NewAgentBuilderActionValidator(agents, teams, catalog, spaces, nil, nil, host)
+	fixture.Validator, err = agentbuilder.NewAgentBuilderActionValidator(agents, teams, catalog, spaces, nil, nil, host)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -550,7 +551,7 @@ func NewTrialFinalizerFixture(t *testing.T, parentStatus models.AgentRunStatus) 
 	parent := MustRun(t, f.Store, f.Scope, f.Run.ID)
 	parent.Status = parentStatus
 	if parentStatus == models.AgentRunStatusWaitingForEvent {
-		deadline := AgentTrialDeadline(child)
+		deadline := agentbuilder.AgentTrialDeadline(child)
 		parent.WakeCondition = &models.WakeCondition{Type: agentrun.AgentTrialWakeType, Reference: child.ID, WakeAt: &deadline}
 	}
 	PutTrialRun(t, f.Store.Store, parent)

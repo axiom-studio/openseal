@@ -1,4 +1,4 @@
-package runtime_test
+package agentbuilder_test
 
 import (
 	"context"

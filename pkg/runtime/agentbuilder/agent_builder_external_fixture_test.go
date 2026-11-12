@@ -2,7 +2,7 @@
 // share. Runtime's in-package tests carry copies of them in
 // agent_builder_shared_fixture_test.go.
 
-package runtime_test
+package agentbuilder_test
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
@@ -37,7 +37,7 @@ type agentBuilderTestHost struct {
 func (h *agentBuilderTestHost) AuthorizeAgentChange(_ context.Context, _ skill.ScopeReference, actingUserID, deploymentID string) error {
 	h.authorized = append(h.authorized, actingUserID+"/"+deploymentID)
 	if h.forbidden[actingUserID+"/"+deploymentID] {
-		return runtime.ErrAgentChangeForbidden
+		return agentbuilder.ErrAgentChangeForbidden
 	}
 	return nil
 }
@@ -50,11 +50,11 @@ func (h *agentBuilderTestHost) ValidateAgentModel(_ context.Context, _ skill.Sco
 	return nil
 }
 
-func (h *agentBuilderTestHost) PrepareAgentModel(context.Context, runtime.AgentModelRequest) error {
+func (h *agentBuilderTestHost) PrepareAgentModel(context.Context, agentbuilder.AgentModelRequest) error {
 	return nil
 }
 
-func (h *agentBuilderTestHost) AfterAgentCreated(context.Context, runtime.AgentCreated) {}
+func (h *agentBuilderTestHost) AfterAgentCreated(context.Context, agentbuilder.AgentCreated) {}
 
 type agentBuilderFixture struct {
 	scope   models.Scope
@@ -67,7 +67,7 @@ type agentBuilderFixture struct {
 	homeID    string
 	run       *models.AgentRun
 	host      *agentBuilderTestHost
-	validator *runtime.AgentBuilderActionValidator
+	validator *agentbuilder.AgentBuilderActionValidator
 }
 
 func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
@@ -188,12 +188,12 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 			AssignedAgentID: "finn", ActingUser: agentBuilderApprover.ID, Source: models.RunSourceChat,
 		},
 	}
-	var host runtime.AgentBuilderHost
+	var host agentbuilder.AgentBuilderHost
 	if withHost {
 		fixture.host = &agentBuilderTestHost{}
 		host = fixture.host
 	}
-	fixture.validator, err = runtime.NewAgentBuilderActionValidator(agents, teams, catalog, spaces, nil, nil, host)
+	fixture.validator, err = agentbuilder.NewAgentBuilderActionValidator(agents, teams, catalog, spaces, nil, nil, host)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,16 +347,16 @@ func (p *agentBuilderTestProvisioner) PutSpaceMember(ctx context.Context, reques
 type agentBuilderRecordingHost struct {
 	agentBuilderTestHost
 	prepareErr error
-	prepared   []runtime.AgentModelRequest
-	created    []runtime.AgentCreated
+	prepared   []agentbuilder.AgentModelRequest
+	created    []agentbuilder.AgentCreated
 }
 
-func (h *agentBuilderRecordingHost) PrepareAgentModel(_ context.Context, request runtime.AgentModelRequest) error {
+func (h *agentBuilderRecordingHost) PrepareAgentModel(_ context.Context, request agentbuilder.AgentModelRequest) error {
 	h.prepared = append(h.prepared, request)
 	return h.prepareErr
 }
 
-func (h *agentBuilderRecordingHost) AfterAgentCreated(_ context.Context, created runtime.AgentCreated) {
+func (h *agentBuilderRecordingHost) AfterAgentCreated(_ context.Context, created agentbuilder.AgentCreated) {
 	h.created = append(h.created, created)
 }
 
@@ -365,7 +365,7 @@ type agentBuilderDispatchFixture struct {
 	store      *agentBuilderDispatchStore
 	provision  *agentBuilderTestProvisioner
 	recorder   *agentBuilderRecordingHost
-	dispatcher *runtime.AgentBuilderActionDispatcher
+	dispatcher *agentbuilder.AgentBuilderActionDispatcher
 }
 
 func newAgentBuilderDispatchFixture(t *testing.T) *agentBuilderDispatchFixture {
@@ -377,7 +377,7 @@ func newAgentBuilderDispatchFixture(t *testing.T) *agentBuilderDispatchFixture {
 	base.salesID, base.homeID = seedAgentBuilderSpaces(t, base.spaces, base.scope)
 	recorder := &agentBuilderRecordingHost{}
 	var err error
-	base.validator, err = runtime.NewAgentBuilderActionValidator(base.agents, base.teams, base.catalog, base.spaces, store, store, recorder)
+	base.validator, err = agentbuilder.NewAgentBuilderActionValidator(base.agents, base.teams, base.catalog, base.spaces, store, store, recorder)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,13 +459,13 @@ func (f *agentBuilderDispatchFixture) spaceMember(t *testing.T, spaceID, deploym
 // newTestAgentBuilderDispatcher builds a dispatcher over its own installer.
 func newTestAgentBuilderDispatcher(
 	store models.KernelStore, agents *kernelagent.Registry, teams *kernelteam.Registry, catalog *skill.Catalog,
-	provision runtime.AgentProvisioner, host runtime.AgentBuilderHost, fallback agentrun.ActionDispatcher,
-) (*runtime.AgentBuilderActionDispatcher, error) {
-	installer, err := runtime.NewAgentInstaller(store, agents, teams, catalog, provision, host)
+	provision agentbuilder.AgentProvisioner, host agentbuilder.AgentBuilderHost, fallback agentrun.ActionDispatcher,
+) (*agentbuilder.AgentBuilderActionDispatcher, error) {
+	installer, err := agentbuilder.NewAgentInstaller(store, agents, teams, catalog, provision, host)
 	if err != nil {
 		return nil, err
 	}
-	return runtime.NewAgentBuilderActionDispatcher(installer, fallback)
+	return agentbuilder.NewAgentBuilderActionDispatcher(installer, fallback)
 }
 
 func agentTrialArguments() map[string]interface{} {
@@ -551,7 +551,7 @@ func newAgentTrialFinalizerFixture(t *testing.T, parentStatus models.AgentRunSta
 	parent := mustAgentRun(t, f.store, f.scope, f.run.ID)
 	parent.Status = parentStatus
 	if parentStatus == models.AgentRunStatusWaitingForEvent {
-		deadline := runtime.AgentTrialDeadline(child)
+		deadline := agentbuilder.AgentTrialDeadline(child)
 		parent.WakeCondition = &models.WakeCondition{Type: agentrun.AgentTrialWakeType, Reference: child.ID, WakeAt: &deadline}
 	}
 	putAgentTrialRun(t, f.store.Store, parent)

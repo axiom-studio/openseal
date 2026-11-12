@@ -2,7 +2,7 @@
 // portfolio, the Slack conversation catalog, the switchable adapter resolver
 // and the Postgres test store opener that runtime's tests use.
 
-package runtime
+package agentbuilder
 
 import (
 	"context"

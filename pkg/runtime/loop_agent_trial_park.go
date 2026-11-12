@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -16,19 +17,19 @@ func (p *governedParker) agentTrialWait(ctx context.Context, call *ActionCall) (
 	if p.runs == nil {
 		return nil, "", nil
 	}
-	childID := AgentTrialCallRunID(call)
+	childID := agentbuilder.AgentTrialCallRunID(call)
 	if childID == "" {
 		return nil, "", nil
 	}
-	child, err := AgentTrialChild(ctx, p.runs, call.Scope, childID)
+	child, err := agentbuilder.AgentTrialChild(ctx, p.runs, call.Scope, childID)
 	if err != nil || child == nil || isTerminalAgentRunStatus(child.Status) {
 		return nil, "", err
 	}
-	deadline := AgentTrialDeadline(child)
+	deadline := agentbuilder.AgentTrialDeadline(child)
 	if !p.now().Before(deadline) {
 		return nil, "", nil
 	}
-	return &WakeCondition{Type: agentrun.AgentTrialWakeType, Reference: child.ID, WakeAt: &deadline}, AgentTrialWaitSummary, nil
+	return &WakeCondition{Type: agentrun.AgentTrialWakeType, Reference: child.ID, WakeAt: &deadline}, agentbuilder.AgentTrialWaitSummary, nil
 }
 
 // agentTrialOutput is the tool output of a settled try_agent call: the
@@ -36,27 +37,27 @@ func (p *governedParker) agentTrialWait(ctx context.Context, call *ActionCall) (
 // finalizer missed it). A child still running past its deadline is canceled
 // and reported timed_out.
 func (p *governedParker) agentTrialOutput(ctx context.Context, run *AgentRun, call *ActionCall, settled []AgentRunIntervention) (map[string]interface{}, error) {
-	childID := AgentTrialCallRunID(call)
+	childID := agentbuilder.AgentTrialCallRunID(call)
 	if childID == "" {
 		return nil, fmt.Errorf("try_agent call %s has no trial Run", call.ID)
 	}
-	if receipt := AgentTrialReceiptFor(call.ID, childID, settled); receipt != nil {
-		return AgentTrialToolOutput(*receipt), nil
+	if receipt := agentbuilder.AgentTrialReceiptFor(call.ID, childID, settled); receipt != nil {
+		return agentbuilder.AgentTrialToolOutput(*receipt), nil
 	}
 	if run != nil {
-		if receipt := AgentTrialReceiptFor(call.ID, childID, run.PendingInterventions); receipt != nil {
-			return AgentTrialToolOutput(*receipt), nil
+		if receipt := agentbuilder.AgentTrialReceiptFor(call.ID, childID, run.PendingInterventions); receipt != nil {
+			return agentbuilder.AgentTrialToolOutput(*receipt), nil
 		}
 	}
 	if p.runs == nil {
 		return nil, errors.New("governed parker cannot read the trial Run")
 	}
-	child, err := AgentTrialChild(ctx, p.runs, call.Scope, childID)
+	child, err := agentbuilder.AgentTrialChild(ctx, p.runs, call.Scope, childID)
 	if err != nil {
 		return nil, err
 	}
 	if child == nil {
-		return AgentTrialToolOutput(AgentTrialReceipt{RunID: childID, Status: AgentTrialStatusFailed, FailureMessage: "The trial Run is missing."}), nil
+		return agentbuilder.AgentTrialToolOutput(AgentTrialReceipt{RunID: childID, Status: agentbuilder.AgentTrialStatusFailed, FailureMessage: "The trial Run is missing."}), nil
 	}
 	if !isTerminalAgentRunStatus(child.Status) {
 		ended, canceled, err := p.cancelAgentTrial(ctx, child)
@@ -64,11 +65,11 @@ func (p *governedParker) agentTrialOutput(ctx context.Context, run *AgentRun, ca
 			return nil, err
 		}
 		if canceled {
-			return AgentTrialToolOutput(AgentTrialTimedOut(child.ID)), nil
+			return agentbuilder.AgentTrialToolOutput(agentbuilder.AgentTrialTimedOut(child.ID)), nil
 		}
 		child = ended
 	}
-	return AgentTrialToolOutput(AgentTrialReceiptFromRun(child, p.now())), nil
+	return agentbuilder.AgentTrialToolOutput(agentbuilder.AgentTrialReceiptFromRun(child, p.now())), nil
 }
 
 // cancelAgentTrial cancels a trial child that outlived its deadline;
@@ -83,7 +84,7 @@ func (p *governedParker) cancelAgentTrial(ctx context.Context, child *AgentRun) 
 	if err == nil && result != nil && result.Run != nil && result.Run.Status == AgentRunStatusCanceled {
 		return result.Run, true, nil
 	}
-	reloaded, getErr := AgentTrialChild(ctx, p.runs, child.Scope, child.ID)
+	reloaded, getErr := agentbuilder.AgentTrialChild(ctx, p.runs, child.Scope, child.ID)
 	if getErr != nil {
 		return nil, false, errors.Join(err, getErr)
 	}

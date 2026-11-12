@@ -1,4 +1,4 @@
-package runtime_test
+package agentbuilder_test
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
@@ -34,12 +34,12 @@ func TestAgentBuilderCreateAgentExecutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definitionID := runtime.AgentBuilderResourceID("agent-definition", f.scope, "call-create")
-	deploymentID := runtime.AgentBuilderResourceID("agent-deployment", f.scope, "call-create")
+	definitionID := agentbuilder.AgentBuilderResourceID("agent-definition", f.scope, "call-create")
+	deploymentID := agentbuilder.AgentBuilderResourceID("agent-deployment", f.scope, "call-create")
 	if len(definitionID) != 21 || len(deploymentID) != 21 || definitionID == deploymentID {
 		t.Fatalf("ids = %q, %q", definitionID, deploymentID)
 	}
-	if again := runtime.AgentBuilderResourceID("agent-deployment", f.scope, "call-create"); again != deploymentID {
+	if again := agentbuilder.AgentBuilderResourceID("agent-deployment", f.scope, "call-create"); again != deploymentID {
 		t.Fatalf("deployment id is not deterministic: %q != %q", again, deploymentID)
 	}
 	if output["resourceType"] != models.AgentProfileResourceType || output["operation"] != models.AgentActionCreateAgent ||
@@ -91,13 +91,13 @@ func TestAgentBuilderCreateAgentExecutes(t *testing.T) {
 	if message, _ := output["message"].(string); !strings.Contains(message, "targetAgentId="+deploymentID) {
 		t.Fatalf("message = %q", message)
 	}
-	if len(f.recorder.prepared) != 1 || f.recorder.prepared[0] != (runtime.AgentModelRequest{
+	if len(f.recorder.prepared) != 1 || f.recorder.prepared[0] != (agentbuilder.AgentModelRequest{
 		Scope: skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}, DeploymentID: deploymentID, Model: "gpt-6-luna",
 		OwnerUserID: agentBuilderApprover.ID, ActionCallID: "call-create",
 	}) {
 		t.Fatalf("prepared = %#v", f.recorder.prepared)
 	}
-	if len(f.recorder.created) != 1 || f.recorder.created[0] != (runtime.AgentCreated{
+	if len(f.recorder.created) != 1 || f.recorder.created[0] != (agentbuilder.AgentCreated{
 		Scope: f.scope, DeploymentID: deploymentID, DisplayName: "Inbox   Triage", Purpose: "Sort the support inbox every morning.",
 		ActionCallID: "call-create", RunID: f.run.ID, BillingUserID: agentBuilderApprover.ID,
 	}) {
@@ -160,7 +160,7 @@ func TestAgentBuilderCreateAgentRefusesNonUserApprover(t *testing.T) {
 			!strings.Contains(err.Error(), "only by a person") {
 			t.Fatalf("%s approver error = %v", approver.Type, err)
 		}
-		deploymentID := runtime.AgentBuilderResourceID("agent-deployment", f.scope, "call-"+approver.Type)
+		deploymentID := agentbuilder.AgentBuilderResourceID("agent-deployment", f.scope, "call-"+approver.Type)
 		if _, err := f.agents.GetDeployment(ctx, f.reference(), deploymentID); !errors.Is(err, kernelagent.ErrDeploymentNotFound) {
 			t.Fatalf("deployment after refused approver: %v", err)
 		}
@@ -209,7 +209,7 @@ func TestAgentBuilderCreateAgentRetriesAfterModelFailure(t *testing.T) {
 		t.Fatalf("AfterAgentCreated ran before the model was prepared: %#v", f.recorder.created)
 	}
 	// A failed model leaves no Agent holding the reviewed name.
-	failedID := runtime.AgentBuilderResourceID("agent-deployment", f.scope, "call-retry")
+	failedID := agentbuilder.AgentBuilderResourceID("agent-deployment", f.scope, "call-retry")
 	if _, err := f.agents.GetDeployment(ctx, f.reference(), failedID); f.provision.created != 0 || !errors.Is(err, kernelagent.ErrDeploymentNotFound) {
 		t.Fatalf("deployment after a failed model: created %d, %v", f.provision.created, err)
 	}
@@ -249,7 +249,7 @@ func TestAgentBuilderUpdateAgentProfileActivatesCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := runtime.AgentBehaviorActionCandidateVersion("1.0.0", "call-update")
+	want := agentbuilder.AgentBehaviorActionCandidateVersion("1.0.0", "call-update")
 	if !strings.Contains(want, ".action.") {
 		t.Fatalf("candidate version = %q", want)
 	}
@@ -309,7 +309,7 @@ func TestAgentBuilderUpdateAgentModelOnly(t *testing.T) {
 	if err != nil || len(amendments) != 0 {
 		t.Fatalf("amendments = %#v, %v", amendments, err)
 	}
-	if len(f.recorder.prepared) != 1 || f.recorder.prepared[0] != (runtime.AgentModelRequest{
+	if len(f.recorder.prepared) != 1 || f.recorder.prepared[0] != (agentbuilder.AgentModelRequest{
 		Scope: skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}, DeploymentID: "researcher", Model: "gpt-6-luna",
 		OwnerUserID: agentBuilderApprover.ID, ActionCallID: "call-model", Updated: true,
 	}) {
@@ -504,7 +504,7 @@ func TestAgentBuilderCreateAgentRetiresAgentOnLateFailure(t *testing.T) {
 		!strings.Contains(err.Error(), "space store unavailable") || !strings.Contains(err.Error(), "propose create_agent again") {
 		t.Fatalf("late failure error = %v", err)
 	}
-	deploymentID := runtime.AgentBuilderResourceID("agent-deployment", f.scope, "call-late")
+	deploymentID := agentbuilder.AgentBuilderResourceID("agent-deployment", f.scope, "call-late")
 	deployment, err := f.agents.GetDeployment(ctx, f.reference(), deploymentID)
 	if err != nil || f.provision.created != 1 || deployment.RolloutStatus != kernelagent.RolloutRetired {
 		t.Fatalf("deployment after a late failure = %#v, %v", deployment, err)
@@ -543,7 +543,7 @@ func TestAgentBuilderCreatedAgentKeepsGrantRiskInTeams(t *testing.T) {
 	if err != nil || definition.Authority.MaximumRisk != capability.RiskLevelWrite {
 		t.Fatalf("definition = %#v, %v", definition, err)
 	}
-	team := runtime.TeamBuilderDefinition("team-x", "Crew", []*kernelagent.AgentDefinition{definition}, "call-team", agentBuilderApprover.ID)
+	team := agentbuilder.TeamBuilderDefinition("team-x", "Crew", []*kernelagent.AgentDefinition{definition}, "call-team", agentBuilderApprover.ID)
 	// The Team Skill authority of the member in a Team deployment of that
 	// definition with no restrictions of its own.
 	validator, err := skillbinding.NewTeamSkillActionValidator(builderTeamAuthorityCatalog{
@@ -567,9 +567,9 @@ func TestAgentBuilderCreatedAgentKeepsGrantRiskInTeams(t *testing.T) {
 	if !allowsRisk(capability.RiskLevelWrite) || allowsRisk(capability.RiskLevelExternal) {
 		t.Fatalf("Team ceiling for the member: write %v, external %v", allowsRisk(capability.RiskLevelWrite), allowsRisk(capability.RiskLevelExternal))
 	}
-	external := runtime.CloneAgentDefinitionForAction(definition)
+	external := agentbuilder.CloneAgentDefinitionForAction(definition)
 	external.Authority.MaximumRisk = capability.RiskLevelExternal
-	if got := runtime.TeamMembersMaximumRisk([]*kernelagent.AgentDefinition{external}); got != capability.RiskLevelExternal {
+	if got := agentbuilder.TeamMembersMaximumRisk([]*kernelagent.AgentDefinition{external}); got != capability.RiskLevelExternal {
 		t.Fatalf("Team ceiling = %s, want the members' external", got)
 	}
 }
@@ -591,7 +591,7 @@ func TestAgentBuilderUpdateAgentRaisesAuthorityForAddedSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	deployment, err := f.agents.GetDeployment(ctx, f.reference(), "researcher")
-	if err != nil || deployment.ActiveVersion != runtime.AgentBehaviorActionCandidateVersion("1.0.0", "call-raise") {
+	if err != nil || deployment.ActiveVersion != agentbuilder.AgentBehaviorActionCandidateVersion("1.0.0", "call-raise") {
 		t.Fatalf("deployment = %#v, %v", deployment, err)
 	}
 	definition, err := f.agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)

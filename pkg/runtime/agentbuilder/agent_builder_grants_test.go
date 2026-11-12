@@ -1,7 +1,7 @@
 // In-package checks of the builder action contract and of how reviewed
 // grants set an Agent's risk ceiling.
 
-package runtime
+package agentbuilder
 
 import (
 	"context"

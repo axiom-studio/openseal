@@ -14,6 +14,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -52,7 +53,7 @@ func (p *teamCreateTestProvisioner) CreateTeamDeploymentInSpace(ctx context.Cont
 type teamCreateFixture struct {
 	*DispatchFixture
 	teamProvision *teamCreateTestProvisioner
-	teamValidator *TeamCreateActionValidator
+	teamValidator *agentbuilder.TeamCreateActionValidator
 }
 
 func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
@@ -92,7 +93,7 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 		t.Fatal(err)
 	}
 	base.Dispatcher = dispatcher
-	validator, err := NewTeamCreateActionValidator(base.Agents, base.Teams, base.Spaces, base.Store, base.Store)
+	validator, err := agentbuilder.NewTeamCreateActionValidator(base.Agents, base.Teams, base.Spaces, base.Store, base.Store)
 	if err != nil {
 		t.Fatal(err)
 	}
