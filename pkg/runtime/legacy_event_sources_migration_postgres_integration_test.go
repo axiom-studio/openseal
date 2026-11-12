@@ -5,11 +5,13 @@ package runtime
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
+
+// Postgres store test: it checks the store's own migration ledger, so it moves
+// to the Postgres store package with the store.
 
 // Migration 79 drops the event source tables. A fresh database never has
 // them; a database at 78 loses them with their rows, and the retired ledger
@@ -73,37 +75,6 @@ func TestPostgresMigration79DropsEventSources(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = again.Close() })
 	assertSchemaCurrent(t, ctx, again)
-}
-
-// The SQLite store drops the same tables on open and never creates them.
-func TestSQLiteStoreDropsEventSources(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "kernel.db")
-	db, err := sql.Open("sqlite3", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, table := range sqlstore.LegacyEventSourceTables {
-		if _, err := db.Exec(`CREATE TABLE ` + table + ` (id TEXT)`); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := db.Exec(`INSERT INTO ` + table + ` VALUES ('old')`); err != nil {
-			t.Fatal(err)
-		}
-	}
-	_ = db.Close()
-	for range 2 {
-		store, err := NewSQLiteStore(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, table := range sqlstore.LegacyEventSourceTables {
-			var count int
-			if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil || count != 0 {
-				t.Fatalf("SQLite table %s still exists: %d, %v", table, count, err)
-			}
-		}
-		_ = store.Close()
-	}
 }
 
 func assertNoEventSourceTables(t *testing.T, ctx context.Context, store *PostgresStore) {
