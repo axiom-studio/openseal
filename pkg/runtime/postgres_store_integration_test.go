@@ -464,7 +464,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	if err != nil || persistedExecution.Call.Status != ActionCallStatusSucceeded || persistedExecution.Run.Status != AgentRunStatusQueued {
 		t.Fatalf("persisted execution = %#v, %v", persistedExecution, err)
 	}
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 	if err := primary.RollbackPostgresMigrations(ctx, 4); err != nil {
@@ -481,10 +481,9 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('projects','agent_builder_cutover_drafts')`, pgSchema.name).Scan(&recentTables); err != nil || recentTables != 0 {
 		t.Fatalf("recent tables after rollback = %d, %v", recentTables, err)
 	}
-	if err := primary.migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+	// A store opened on the rolled-back schema migrates it forward again.
+	pgSchema.open(t)
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
 		t.Fatalf("reapplied schema version = %d, %v", version, err)
 	}
 }
@@ -556,7 +555,7 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	if err != nil || len(activity) != 5 || activity[0].EventType != "collaboration.completed" {
 		t.Fatalf("team activity = %#v, %v", activity, err)
 	}
-	if version, err := replica.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+	if version, err := replica.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 }

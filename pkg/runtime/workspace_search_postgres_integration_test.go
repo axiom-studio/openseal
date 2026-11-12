@@ -90,9 +90,8 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("schema_migrations")+` WHERE version=46`); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
+	// A store opened on the schema runs the upgrade.
+	pgSchema.open(t)
 	var indexCount int
 	if err := pgSchema.db.QueryRowContext(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname=$1 AND indexname IN ('conversations_search_idx','channel_messages_search_idx','artifacts_search_idx','agent_runs_search_idx')`, pgSchema.name).Scan(&indexCount); err != nil {
 		t.Fatal(err)

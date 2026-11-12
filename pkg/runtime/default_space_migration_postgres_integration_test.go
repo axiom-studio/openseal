@@ -78,7 +78,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	if err != nil || moved.SpaceID != newID {
 		t.Fatalf("conversation = %+v, err = %v", moved, err)
 	}
-	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 }

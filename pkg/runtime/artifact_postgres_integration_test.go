@@ -70,7 +70,7 @@ func TestPostgresArtifactCatalogIsConcurrentRecoverableAndScoped(t *testing.T) {
 	if crossScope, err := replica.GetArtifact(ctx, Scope{Kind: "tenant", ID: "other"}, artifact.ID, 0); err != nil || crossScope != nil {
 		t.Fatalf("cross-scope artifact = %#v, %v", crossScope, err)
 	}
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 }

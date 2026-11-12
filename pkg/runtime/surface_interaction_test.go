@@ -27,7 +27,7 @@ func surfaceInteractionStores(t *testing.T) []struct {
 			return store
 		}},
 		{name: "postgres", store: func(t *testing.T) KernelStore {
-			_, store := newSurfaceInteractionPostgresStore(t)
+			store, _ := openTestPostgresStore(t, "openseal_surface_interactions_")
 			return store
 		}},
 	}
