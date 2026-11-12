@@ -37,10 +37,10 @@ type TurnAction struct {
 const ActivityEventTurnNarration = "turn.narration"
 
 type BeginAgentTurnRequest struct {
-	Scope             Scope
+	Scope             models.Scope
 	RunID             string
 	SessionID         string
-	Producer          StepProducerKind
+	Producer          models.StepProducerKind
 	DefinitionID      string
 	DefinitionVersion string
 	ModelProvider     string
@@ -55,11 +55,11 @@ type BeginAgentTurnRequest struct {
 // step's reason); a zero Usage keeps the recorded usage.
 type FinishAgentTurnRequest struct {
 	ExpectedRevision int64
-	Status           AgentTurnStatus // completed | failed | canceled
+	Status           models.AgentTurnStatus // completed | failed | canceled
 	WorkerID         string
 	OutputSummary    string
-	Usage            TurnUsage
-	BudgetAdmission  *BudgetAdmission
+	Usage            models.TurnUsage
+	BudgetAdmission  *models.BudgetAdmission
 	FailureCode      string
 	Error            string
 }
@@ -79,21 +79,21 @@ type StepModelRecord struct {
 	ToolCallCount   int
 	StopReason      string
 	Final           bool
-	SkillSelections []HostedSkillSelection
-	Usage           TurnUsage
+	SkillSelections []models.HostedSkillSelection
+	Usage           models.TurnUsage
 }
 
 type AgentTurnService struct {
-	portfolio PortfolioStore
-	turns     AgentTurnStore
+	portfolio models.PortfolioStore
+	turns     models.AgentTurnStore
 	now       func() time.Time
 }
 
-func NewAgentTurnService(portfolio PortfolioStore, turns AgentTurnStore, opts ...models.ServiceOption) *AgentTurnService {
+func NewAgentTurnService(portfolio models.PortfolioStore, turns models.AgentTurnStore, opts ...models.ServiceOption) *AgentTurnService {
 	return &AgentTurnService{portfolio: portfolio, turns: turns, now: models.ClockFrom(opts)}
 }
 
-func (s *AgentTurnService) BeginTurn(ctx context.Context, req BeginAgentTurnRequest) (*AgentTurn, error) {
+func (s *AgentTurnService) BeginTurn(ctx context.Context, req BeginAgentTurnRequest) (*models.AgentTurn, error) {
 	if s == nil || s.portfolio == nil || s.turns == nil {
 		return nil, errors.New("agent turn service is not configured")
 	}
@@ -102,15 +102,15 @@ func (s *AgentTurnService) BeginTurn(ctx context.Context, req BeginAgentTurnRequ
 		return nil, err
 	}
 	if run == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
-	if run.Status != AgentRunStatusPlanning && run.Status != AgentRunStatusRunning {
+	if run.Status != models.AgentRunStatusPlanning && run.Status != models.AgentRunStatusRunning {
 		return nil, errors.New("agent run must be planning or running to begin a turn")
 	}
 	if strings.TrimSpace(req.WorkerID) == "" {
 		return nil, errors.New("agent turn worker id is required")
 	}
-	if !validStepProducerKind(req.Producer) {
+	if !models.IsValidStepProducerKind(req.Producer) {
 		return nil, errors.New("agent turn producer is invalid")
 	}
 	leaseDuration := req.LeaseDuration
@@ -119,8 +119,8 @@ func (s *AgentTurnService) BeginTurn(ctx context.Context, req BeginAgentTurnRequ
 	}
 	now := s.now()
 	leaseExpiresAt := now.Add(leaseDuration)
-	return s.turns.CreateAgentTurn(ctx, &AgentTurn{
-		ID: uuid.NewString(), Scope: req.Scope, RunID: req.RunID, Status: AgentTurnStatusRunning,
+	return s.turns.CreateAgentTurn(ctx, &models.AgentTurn{
+		ID: uuid.NewString(), Scope: req.Scope, RunID: req.RunID, Status: models.AgentTurnStatusRunning,
 		Producer: req.Producer, SessionID: strings.TrimSpace(req.SessionID),
 		DefinitionID: req.DefinitionID, DefinitionVersion: req.DefinitionVersion,
 		ModelProvider: req.ModelProvider, Model: req.Model, InputContextRefs: req.InputContextRefs,
@@ -129,7 +129,7 @@ func (s *AgentTurnService) BeginTurn(ctx context.Context, req BeginAgentTurnRequ
 	})
 }
 
-func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID string, req FinishAgentTurnRequest) (*AgentTurn, error) {
+func (s *AgentTurnService) FinishTurn(ctx context.Context, scope models.Scope, turnID string, req FinishAgentTurnRequest) (*models.AgentTurn, error) {
 	if s == nil || s.turns == nil {
 		return nil, errors.New("agent turn service is not configured")
 	}
@@ -138,23 +138,23 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 		return nil, err
 	}
 	if turn == nil {
-		return nil, ErrTurnNotFound
+		return nil, models.ErrTurnNotFound
 	}
 	if turn.Revision != req.ExpectedRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	if turn.Status != AgentTurnStatusRunning || !terminalAgentTurnStatus(req.Status) {
+	if turn.Status != models.AgentTurnStatusRunning || !models.IsTerminalAgentTurnStatus(req.Status) {
 		return nil, errors.New("agent turn can only finish once from running")
 	}
 	now := s.now()
 	if strings.TrimSpace(req.WorkerID) == "" || turn.LeaseOwner != req.WorkerID || turn.LeaseExpiresAt == nil || !turn.LeaseExpiresAt.After(now) {
-		return nil, ErrTurnLeaseHeld
+		return nil, models.ErrTurnLeaseHeld
 	}
 	turn.Status = req.Status
 	if req.OutputSummary != "" || turn.AssistantEntryID == "" {
 		turn.OutputSummary = req.OutputSummary
 	}
-	if req.Usage != (TurnUsage{}) {
+	if req.Usage != (models.TurnUsage{}) {
 		turn.Usage = req.Usage
 	}
 	turn.BudgetAdmission = req.BudgetAdmission
@@ -175,7 +175,7 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 // call count, stop reason, final flag, usage) and, when the step has
 // narration, appends the turn.narration activity event in the same store
 // transaction. It requires the caller's live lease and ExpectedRevision.
-func (s *AgentTurnService) RecordStepModel(ctx context.Context, scope Scope, turnID string, req StepModelRecord) (*AgentTurn, error) {
+func (s *AgentTurnService) RecordStepModel(ctx context.Context, scope models.Scope, turnID string, req StepModelRecord) (*models.AgentTurn, error) {
 	if s == nil || s.portfolio == nil || s.turns == nil {
 		return nil, errors.New("agent turn service is not configured")
 	}
@@ -185,17 +185,17 @@ func (s *AgentTurnService) RecordStepModel(ctx context.Context, scope Scope, tur
 	if req.ToolCallCount < 0 {
 		return nil, errors.New("agent turn tool call count cannot be negative")
 	}
-	if !validStepStopReason(req.StopReason) {
+	if !models.IsValidStepStopReason(req.StopReason) {
 		return nil, errors.New("agent turn stop reason is invalid")
 	}
 	if err := req.Usage.Validate(); err != nil {
 		return nil, err
 	}
-	narration := boundStepNarration(req.OutputSummary)
+	narration := models.BoundStepNarration(req.OutputSummary)
 	if narration != "" && req.ToolCallCount == 0 {
 		return nil, errors.New("step narration requires tool calls")
 	}
-	provider, model, err := normalizeModelIdentity(req.ModelProvider, req.Model)
+	provider, model, err := models.NormalizeModelIdentity(req.ModelProvider, req.Model)
 	if err != nil {
 		return nil, err
 	}
@@ -204,21 +204,21 @@ func (s *AgentTurnService) RecordStepModel(ctx context.Context, scope Scope, tur
 		return nil, err
 	}
 	if turn == nil {
-		return nil, ErrTurnNotFound
+		return nil, models.ErrTurnNotFound
 	}
 	if turn.Revision != req.ExpectedRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
 	now := s.now()
-	if turn.Status != AgentTurnStatusRunning || turn.LeaseOwner != req.WorkerID || turn.LeaseExpiresAt == nil || !turn.LeaseExpiresAt.After(now) {
-		return nil, ErrTurnLeaseHeld
+	if turn.Status != models.AgentTurnStatusRunning || turn.LeaseOwner != req.WorkerID || turn.LeaseExpiresAt == nil || !turn.LeaseExpiresAt.After(now) {
+		return nil, models.ErrTurnLeaseHeld
 	}
 	run, err := s.portfolio.GetAgentRun(ctx, scope, turn.RunID)
 	if err != nil {
 		return nil, err
 	}
 	if run == nil {
-		return nil, ErrRunNotFound
+		return nil, models.ErrRunNotFound
 	}
 	if provider != "" {
 		turn.ModelProvider, turn.Model = provider, model
@@ -227,21 +227,21 @@ func (s *AgentTurnService) RecordStepModel(ctx context.Context, scope Scope, tur
 	turn.OutputSummary = narration
 	turn.ToolCallCount = req.ToolCallCount
 	turn.StopReason = req.StopReason
-	turn.Final = req.Final || (turn.Producer != StepProducerDeterministic && req.ToolCallCount == 0)
-	turn.SkillSelections = append([]HostedSkillSelection(nil), req.SkillSelections...)
+	turn.Final = req.Final || (turn.Producer != models.StepProducerDeterministic && req.ToolCallCount == 0)
+	turn.SkillSelections = append([]models.HostedSkillSelection(nil), req.SkillSelections...)
 	turn.Usage = req.Usage
 	turn.UpdatedAt = now
 	turn.Revision++
-	var events []*ActivityEvent
+	var events []*models.ActivityEvent
 	if narration != "" {
-		events = append(events, &ActivityEvent{
+		events = append(events, &models.ActivityEvent{
 			ID: uuid.NewString(), Scope: scope, RunID: turn.RunID, TurnID: turn.ID,
-			AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: teamIDForRun(run),
-			EventType: ActivityEventTurnNarration, Severity: ActivitySeverityInfo,
-			Actor:      ActivityActor{Type: "worker", ID: req.WorkerID},
+			AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: models.TeamIDForRun(run),
+			EventType: ActivityEventTurnNarration, Severity: models.ActivitySeverityInfo,
+			Actor:      models.ActivityActor{Type: "worker", ID: req.WorkerID},
 			Summary:    narration,
 			Payload:    map[string]interface{}{"stepSequence": turn.Sequence},
-			Visibility: ActivityVisibilityScope,
+			Visibility: models.ActivityVisibilityScope,
 			CreatedAt:  now,
 		})
 	}
@@ -251,7 +251,7 @@ func (s *AgentTurnService) RecordStepModel(ctx context.Context, scope Scope, tur
 	return turn, nil
 }
 
-func (s *AgentTurnService) RenewTurn(ctx context.Context, scope Scope, turnID, workerID string, leaseDuration time.Duration) (*AgentTurn, error) {
+func (s *AgentTurnService) RenewTurn(ctx context.Context, scope models.Scope, turnID, workerID string, leaseDuration time.Duration) (*models.AgentTurn, error) {
 	if s == nil || s.turns == nil {
 		return nil, errors.New("agent turn service is not configured")
 	}
@@ -266,8 +266,8 @@ func (s *AgentTurnService) RenewTurn(ctx context.Context, scope Scope, turnID, w
 		return nil, err
 	}
 	now := s.now()
-	if turn.Status != AgentTurnStatusRunning || turn.LeaseOwner != workerID || turn.LeaseExpiresAt == nil || !turn.LeaseExpiresAt.After(now) {
-		return nil, ErrTurnLeaseHeld
+	if turn.Status != models.AgentTurnStatusRunning || turn.LeaseOwner != workerID || turn.LeaseExpiresAt == nil || !turn.LeaseExpiresAt.After(now) {
+		return nil, models.ErrTurnLeaseHeld
 	}
 	expectedRevision := turn.Revision
 	expires := now.Add(leaseDuration)
@@ -280,7 +280,7 @@ func (s *AgentTurnService) RenewTurn(ctx context.Context, scope Scope, turnID, w
 	return turn, nil
 }
 
-func (s *AgentTurnService) ReleaseTurn(ctx context.Context, scope Scope, turnID string, expectedRevision int64, workerID string) (*AgentTurn, error) {
+func (s *AgentTurnService) ReleaseTurn(ctx context.Context, scope models.Scope, turnID string, expectedRevision int64, workerID string) (*models.AgentTurn, error) {
 	if s == nil || s.turns == nil || strings.TrimSpace(workerID) == "" {
 		return nil, errors.New("agent turn service and worker id are required")
 	}
@@ -289,14 +289,14 @@ func (s *AgentTurnService) ReleaseTurn(ctx context.Context, scope Scope, turnID 
 		return nil, err
 	}
 	if turn == nil {
-		return nil, ErrTurnNotFound
+		return nil, models.ErrTurnNotFound
 	}
 	now := s.now()
 	if turn.Revision != expectedRevision {
-		return nil, ErrRevisionConflict
+		return nil, models.ErrRevisionConflict
 	}
-	if turn.Status != AgentTurnStatusRunning || turn.LeaseOwner != workerID || turn.LeaseExpiresAt == nil || !turn.LeaseExpiresAt.After(now) {
-		return nil, ErrTurnLeaseHeld
+	if turn.Status != models.AgentTurnStatusRunning || turn.LeaseOwner != workerID || turn.LeaseExpiresAt == nil || !turn.LeaseExpiresAt.After(now) {
+		return nil, models.ErrTurnLeaseHeld
 	}
 	turn.LeaseOwner, turn.LeaseExpiresAt = "", nil
 	turn.UpdatedAt = now
@@ -307,22 +307,22 @@ func (s *AgentTurnService) ReleaseTurn(ctx context.Context, scope Scope, turnID 
 	return turn, nil
 }
 
-func (s *AgentTurnService) GetTurn(ctx context.Context, scope Scope, turnID string) (*AgentTurn, error) {
+func (s *AgentTurnService) GetTurn(ctx context.Context, scope models.Scope, turnID string) (*models.AgentTurn, error) {
 	turn, err := s.turns.GetAgentTurn(ctx, scope, turnID)
 	if err != nil {
 		return nil, err
 	}
 	if turn == nil {
-		return nil, ErrTurnNotFound
+		return nil, models.ErrTurnNotFound
 	}
 	return turn, nil
 }
 
-func (s *AgentTurnService) ListTurns(ctx context.Context, filter AgentTurnFilter) ([]*AgentTurn, error) {
+func (s *AgentTurnService) ListTurns(ctx context.Context, filter models.AgentTurnFilter) ([]*models.AgentTurn, error) {
 	return s.turns.ListAgentTurns(ctx, filter)
 }
 
-func (s *AgentTurnService) ClaimTurn(ctx context.Context, scope Scope, turnID, workerID string, leaseDuration time.Duration) (*AgentTurn, error) {
+func (s *AgentTurnService) ClaimTurn(ctx context.Context, scope models.Scope, turnID, workerID string, leaseDuration time.Duration) (*models.AgentTurn, error) {
 	if s == nil || s.turns == nil {
 		return nil, errors.New("agent turn service is not configured")
 	}

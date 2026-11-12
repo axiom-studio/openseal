@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strings"
 	"unicode"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ExternalOperationIdentity is the stable, capability-independent identity of
@@ -24,7 +26,7 @@ func (i ExternalOperationIdentity) Validate() error {
 	if _, err := canonicalExternalOperationResource(i.Resource); err != nil {
 		return err
 	}
-	if !validOpaqueIdentifier(i.Operation, 256) {
+	if !models.IsValidOpaqueIdentifier(i.Operation, 256) {
 		return errors.New("external operation name must be a bounded opaque identifier")
 	}
 	return nil
@@ -44,13 +46,13 @@ func canonicalExternalOperationResource(value string) (string, error) {
 	// it as a malformed URL or requiring it to know the provider's internal ID.
 	if strings.HasPrefix(value, "#") {
 		handle := strings.TrimSpace(strings.TrimPrefix(value, "#"))
-		if validOpaqueIdentifier(handle, 2040) {
+		if models.IsValidOpaqueIdentifier(handle, 2040) {
 			return "channel-handle:" + strings.ToLower(handle), nil
 		}
 	}
 	parsed, err := url.Parse(value)
 	if err == nil && (strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) {
-		if err := validatePublicEvidenceURL(value); err != nil {
+		if err := models.ValidatePublicEvidenceURL(value); err != nil {
 			return "", errors.New("external operation resource URL is invalid or credential-bearing")
 		}
 		parsed.Scheme = strings.ToLower(parsed.Scheme)
@@ -81,13 +83,13 @@ func canonicalExternalOperationResource(value string) (string, error) {
 		at := strings.LastIndexByte(mailbox, '@')
 		return "mailto:" + mailbox[:at+1] + strings.ToLower(mailbox[at+1:]), nil
 	}
-	if !validOpaqueIdentifier(value, 2048) {
+	if !models.IsValidOpaqueIdentifier(value, 2048) {
 		return "", errors.New("external operation resource must be an HTTP(S) URL, a single email address, or opaque identifier")
 	}
 	return value, nil
 }
 
-func computeExternalOperationDigest(scope Scope, owner ObjectiveOwner, objectiveID string, identity *ExternalOperationIdentity, idempotencyKey string) (string, error) {
+func computeExternalOperationDigest(scope models.Scope, owner models.ObjectiveOwner, objectiveID string, identity *ExternalOperationIdentity, idempotencyKey string) (string, error) {
 	if identity == nil {
 		return "", nil
 	}
@@ -101,5 +103,5 @@ func computeExternalOperationDigest(scope Scope, owner ObjectiveOwner, objective
 	if ownerKey == "" {
 		ownerKey = string(owner.Type) + "\x00" + strings.TrimSpace(owner.ID)
 	}
-	return hashString(scope.Kind + "\x00" + scope.ID + "\x00" + ownerKey + "\x00" + resource + "\x00" + operation + "\x00" + occurrence), nil
+	return models.SHA256DigestString(scope.Kind + "\x00" + scope.ID + "\x00" + ownerKey + "\x00" + resource + "\x00" + operation + "\x00" + occurrence), nil
 }
