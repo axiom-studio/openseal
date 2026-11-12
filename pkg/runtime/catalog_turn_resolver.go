@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -272,7 +273,7 @@ func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *Agen
 		if err := validatePinnedRunbookPlan(definition.Runbook, run); err != nil {
 			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, err)
 		}
-		producer, resolveErr := NewRunbookStepProducer(definition.Runbook, strings.TrimSpace(run.Entrypoint), catalog)
+		producer, resolveErr := NewRunbookStepProducer(definition.Runbook, strings.TrimSpace(run.Entrypoint), catalog, models.WithClock(config.Now))
 		if resolveErr != nil {
 			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, resolveErr)
 		}
@@ -397,7 +398,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *TurnRunnerBi
 	binding.Producer = producer
 	binding.Compactor = &LoopCompactor{
 		Host: r.config.Host, Sessions: r.config.Store, Requests: preparer,
-		Budget: newRunActivityCompactionBudget(r.config.Store, NewRunActivityService(r.config.Store, r.config.Store), r.config.Now),
+		Budget: newRunActivityCompactionBudget(r.config.Store, NewRunActivityService(r.config.Store, r.config.Store, models.WithClock(r.config.Now)), r.config.Now),
 		Now:    r.config.Now,
 	}
 	binding.Preparers = []StepPreparer{newRunStartPreparer(r.config.Store, r.config.Store)}

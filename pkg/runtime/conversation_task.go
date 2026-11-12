@@ -356,7 +356,7 @@ func (s *ConversationTaskService) Get(ctx context.Context, req GetConversationTa
 		return nil, ErrConversationTaskNotFound
 	}
 	if req.Viewer != nil {
-		_, getErr := NewConversationService(s.store).GetVisibleChannelMessage(ctx, req.Scope, task.ConversationID, task.SourceMessageID, *req.Viewer)
+		_, getErr := NewConversationService(s.store, models.WithClock(s.now)).GetVisibleChannelMessage(ctx, req.Scope, task.ConversationID, task.SourceMessageID, *req.Viewer)
 		if getErr != nil {
 			if errors.Is(getErr, ErrChannelMessageNotFound) {
 				return nil, ErrConversationTaskNotFound
@@ -419,7 +419,7 @@ func (s *ConversationTaskService) Cancel(ctx context.Context, req CancelConversa
 	if req.ExpectedWorkRunRevision < 1 {
 		return nil, ErrInvalidConversationTask
 	}
-	command, err := NewRunCommandService(store).CommandAgentRun(ctx, AgentRunCommandRequest{Scope: req.Scope, RunID: result.WorkRun.ID,
+	command, err := NewRunCommandService(store, models.WithClock(s.now)).CommandAgentRun(ctx, AgentRunCommandRequest{Scope: req.Scope, RunID: result.WorkRun.ID,
 		ExpectedRevision: req.ExpectedWorkRunRevision, Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: string(req.Actor.Type), ID: req.Actor.ID}, Summary: req.Summary})
 	if err != nil {
 		return nil, err

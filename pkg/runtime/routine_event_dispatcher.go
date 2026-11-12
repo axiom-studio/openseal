@@ -544,7 +544,7 @@ func (d *RoutineEventDispatcher) hourlyLimitReached(ctx context.Context, activat
 }
 
 func (d *RoutineEventDispatcher) retire(ctx context.Context, activation *RunbookActivation, result *RoutineEventDispatchResult) error {
-	_, err := NewRunbookActivationService(d.store).Update(ctx, activation.Scope, activation.ID, UpdateRunbookActivationRequest{
+	_, err := NewRunbookActivationService(d.store, models.WithClock(d.now)).Update(ctx, activation.Scope, activation.ID, UpdateRunbookActivationRequest{
 		ExpectedRevision: activation.Revision, Status: RunbookActivationRetired, Exhausted: true,
 	})
 	if errors.Is(err, ErrRunbookActivationRevision) {
@@ -560,7 +560,7 @@ func (d *RoutineEventDispatcher) retire(ctx context.Context, activation *Runbook
 }
 
 func (d *RoutineEventDispatcher) pause(ctx context.Context, activation *RunbookActivation, reason RoutinePausedReason, result *RoutineEventDispatchResult) error {
-	_, err := NewRunbookActivationService(d.store).Update(ctx, activation.Scope, activation.ID, UpdateRunbookActivationRequest{
+	_, err := NewRunbookActivationService(d.store, models.WithClock(d.now)).Update(ctx, activation.Scope, activation.ID, UpdateRunbookActivationRequest{
 		ExpectedRevision: activation.Revision, Status: RunbookActivationPaused, PausedReason: reason,
 	})
 	if errors.Is(err, ErrRunbookActivationRevision) {
@@ -725,7 +725,7 @@ func (d *RoutineEventDispatcher) PauseRoutine(ctx context.Context, scope Scope, 
 			(activation.Status == RunbookActivationPaused && activation.PausedReason == reason) {
 			return false, nil
 		}
-		_, err = NewRunbookActivationService(d.store).Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{
+		_, err = NewRunbookActivationService(d.store, models.WithClock(d.now)).Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{
 			ExpectedRevision: activation.Revision, Status: RunbookActivationPaused, PausedReason: reason,
 		})
 		if errors.Is(err, ErrRunbookActivationRevision) {

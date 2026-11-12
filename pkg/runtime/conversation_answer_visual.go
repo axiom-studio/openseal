@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
@@ -98,7 +99,7 @@ func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Contex
 	if r.conversations != nil {
 		placement.Conversations = r.conversations
 	}
-	_, err = NewArtifactCatalog(r.artifacts).WithPlacement(placement).Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{
+	_, err = NewArtifactCatalog(r.artifacts, models.WithClock(r.now)).WithPlacement(placement).Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{
 		ID: id, Version: 1, Scope: run.Scope, Name: name,
 		Type: presentation.ArtifactType, MediaType: presentation.MediaType,
 		ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: ArtifactClassificationInternal,

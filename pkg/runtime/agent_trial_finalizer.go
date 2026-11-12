@@ -73,7 +73,7 @@ func (f *AgentTrialFinalizer) settleAgentTrial(ctx context.Context, child *Agent
 			status, wake = parent.Status, parent.WakeCondition
 		}
 		actor := ActivityActor{Type: "service", ID: "agent-trial-finalizer"}
-		_, _, err = NewRunActivityService(f.store, f.store).TransitionRun(ctx, parent.Scope, parent.ID, RunTransitionRequest{
+		_, _, err = NewRunActivityService(f.store, f.store, models.WithClock(f.now)).TransitionRun(ctx, parent.Scope, parent.ID, RunTransitionRequest{
 			ExpectedRevision: parent.Revision, Status: status, WakeCondition: wake,
 			Summary: "Received the trial reply; continuing", EventType: "run.agent_trial_settled",
 			Actor: actor, CorrelationID: child.ID, CausationID: trial.ActionCallID,

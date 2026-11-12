@@ -69,6 +69,8 @@ type ConversationRunScheduler struct {
 	// and runs, for the reads the services do not offer.
 	conversationStore ConversationStore
 	runStore          RunCommandStore
+	// now is the clock the scheduler gives the services it builds later.
+	now func() time.Time
 }
 
 type ConversationSessionContextResolver interface {
@@ -95,6 +97,7 @@ func NewConversationRunScheduler(
 		runStore:          runStore,
 		approvals:         NewApprovalCoordinator(runStore, runStore, nil, opts...),
 		config:            normalized,
+		now:               models.ClockFrom(opts),
 	}, nil
 }
 

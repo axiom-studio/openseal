@@ -694,7 +694,7 @@ func (c *RunForkCoordinator) completeChild(ctx context.Context, child *AgentRun,
 	if actor.Type == "" || actor.ID == "" {
 		actor = ActivityActor{Type: "system", ID: "run-fork-coordinator"}
 	}
-	result, err := NewDependencyCoordinator(c.store).ResolveRunDependency(ctx, ResolveRunDependencyRequest{
+	result, err := NewDependencyCoordinator(c.store, models.WithClock(c.now)).ResolveRunDependency(ctx, ResolveRunDependencyRequest{
 		Scope: child.Scope, GroupID: group.ID, DependencyID: edge.ID, ExpectedDependencyRevision: edge.Revision,
 		State: state, Result: map[string]interface{}{
 			"branchId": dependencyID, "checkpoint": maps.Clone(child.Checkpoint), "output": maps.Clone(child.Output),
@@ -719,7 +719,7 @@ func (c *RunForkCoordinator) ReconcileRunDependencyGroup(ctx context.Context, re
 	if c == nil || c.store == nil {
 		return nil, errors.New("run fork store is not configured")
 	}
-	coordinator := NewDependencyCoordinator(c.store)
+	coordinator := NewDependencyCoordinator(c.store, models.WithClock(c.now))
 	group, err := c.store.GetRunDependencyGroup(ctx, req.Scope, req.GroupID)
 	if err != nil || group == nil {
 		if err == nil {
@@ -777,7 +777,7 @@ func ownedForkChild(group *RunDependencyGroup, edge *RunDependency, child *Agent
 }
 
 func (c *RunForkCoordinator) cancelLosingChildren(ctx context.Context, winner *RunDependencyResult, winnerID string, actor ActivityActor) error {
-	activity := NewRunActivityService(c.store, c.store)
+	activity := NewRunActivityService(c.store, c.store, models.WithClock(c.now))
 	for _, edge := range winner.Dependencies {
 		if edge.TargetRunID == winnerID || edge.State == RunDependencyStateSatisfied || edge.State == RunDependencyStateFailed || edge.State == RunDependencyStateCanceled {
 			continue

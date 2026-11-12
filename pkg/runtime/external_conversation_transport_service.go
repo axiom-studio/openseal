@@ -191,7 +191,7 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 	// Neither authorizer above is an AgentBuilderApprovalAuthorizer, so an
 	// external channel reply can reject but never approve an agent-builder
 	// card (D11); those cards also get no external destinations.
-	coordinator := NewApprovalCoordinator(store, store, authorizer)
+	coordinator := NewApprovalCoordinator(store, store, authorizer, models.WithClock(s.now))
 	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: endpoint.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
 		DecisionID: event.ID, Decision: ApprovalDecision(decision),

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const conversationAnswerEvent = "run.conversation_answer_received"
@@ -215,7 +217,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 		payload["questionTurnSequence"] = receipt.QuestionTurnSequence
 		payload["questionTurnId"] = receipt.QuestionTurnID
 	}
-	activity := NewRunActivityService(s.runStore, s.runStore)
+	activity := NewRunActivityService(s.runStore, s.runStore, models.WithClock(s.now))
 	run, event, err := activity.TransitionRun(ctx, conversation.Scope, q.run.ID, RunTransitionRequest{
 		ExpectedRevision: q.run.Revision, Status: AgentRunStatusQueued,
 		Summary: "Received the user's answer; continuing the task", EventType: conversationAnswerEvent,

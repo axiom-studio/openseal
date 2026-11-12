@@ -10,6 +10,7 @@ import (
 	"mime"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -64,7 +65,7 @@ func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context,
 	if !ok {
 		return nil, nil, errors.New("artifact catalog is unavailable")
 	}
-	catalog := NewArtifactCatalog(store)
+	catalog := NewArtifactCatalog(store, models.WithClock(w.now))
 	remaining := MaximumExternalConversationAttachmentBytes
 	for _, file := range event.Attachments {
 		id := stableExternalConversationID(endpoint.Scope, endpoint.ID, "file", event.ExternalMessageID+":"+file.ID)

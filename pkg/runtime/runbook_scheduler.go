@@ -101,7 +101,7 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 		result.Examined++
 		if verifyErr := verifyRunbookActivationExecution(ctx, s.store, scope, activation.ID); verifyErr != nil {
 			if errors.Is(verifyErr, ErrRunbookActivationUnverified) {
-				if _, pauseErr := NewRunbookActivationService(s.store).Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused}); pauseErr != nil && !errors.Is(pauseErr, ErrRunbookActivationRevision) {
+				if _, pauseErr := NewRunbookActivationService(s.store, models.WithClock(s.now)).Update(ctx, scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused}); pauseErr != nil && !errors.Is(pauseErr, ErrRunbookActivationRevision) {
 					return result, pauseErr
 				}
 				result.Suspended++

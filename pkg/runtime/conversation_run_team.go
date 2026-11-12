@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // routeTeamMessage is a Team channel's routing Run: it records who answers the
@@ -33,7 +35,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 	// like a 1:1 chat's active Run; nobody's work is interrupted.
 	followUps := &ConversationRunScheduler{
 		conversations: r.conversations, runs: r.runs, conversationStore: r.conversationStore, runStore: r.runStore,
-		approvals: NewApprovalCoordinator(r.runStore, r.runStore, nil),
+		approvals: NewApprovalCoordinator(r.runStore, r.runStore, nil, models.WithClock(r.now)),
 	}
 	root, _ := run.Context["threadRootMessageId"].(string)
 	runIDs := make([]interface{}, 0, len(result.Round.Responders))

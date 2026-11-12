@@ -68,7 +68,7 @@ func (w *RunTerminalReportingWorker) SetExternalConversationDelivery(resolver Ex
 	if !ok {
 		return errors.New("terminal reporting store has no external conversations")
 	}
-	transport := NewExternalConversationTransportService(store, resolver)
+	transport := NewExternalConversationTransportService(store, resolver, models.WithClock(w.now))
 	conversations := w.store.(ConversationStore)
 	w.project = func(ctx context.Context, run *AgentRun) error {
 		if err := projectTerminalRunReporting(ctx, conversations, run); err != nil {

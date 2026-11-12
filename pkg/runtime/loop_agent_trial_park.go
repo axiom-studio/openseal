@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // agentTrialWait is the agent_trial card of a succeeded try_agent call while
@@ -72,7 +74,7 @@ func (p *governedParker) agentTrialOutput(ctx context.Context, run *AgentRun, ca
 // canceled reports that this call stopped it. A child that ended meanwhile
 // is returned as it ended.
 func (p *governedParker) cancelAgentTrial(ctx context.Context, child *AgentRun) (*AgentRun, bool, error) {
-	result, err := NewRunCommandService(p.runs).CommandAgentRun(ctx, AgentRunCommandRequest{
+	result, err := NewRunCommandService(p.runs, models.WithClock(p.now)).CommandAgentRun(ctx, AgentRunCommandRequest{
 		Scope: child.Scope, RunID: child.ID, ExpectedRevision: child.Revision, Kind: AgentRunCommandCancel,
 		Actor:   ActivityActor{Type: "runtime", ID: "agent-trial"},
 		Summary: "Canceled: the trial did not answer in time", Visibility: ActivityVisibilityScope,

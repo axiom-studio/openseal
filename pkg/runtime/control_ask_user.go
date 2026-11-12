@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ask_user (section 04 §10.2): a settle-phase control tool that posts one
@@ -73,7 +75,7 @@ func (x *ControlExecutor) conversationService() *ConversationService {
 		return x.Conversations
 	}
 	if x.Reporting != nil {
-		return NewConversationService(x.Reporting)
+		return NewConversationService(x.Reporting, models.WithClock(x.Now))
 	}
 	return nil
 }

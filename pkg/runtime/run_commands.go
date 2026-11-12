@@ -254,7 +254,7 @@ func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCom
 	if err != nil {
 		return nil, err
 	}
-	activity := NewRunActivityService(s.store, s.store)
+	activity := NewRunActivityService(s.store, s.store, models.WithClock(s.now))
 	run, event, err := activity.TransitionRun(ctx, req.Scope, req.RunID, transition)
 	if err != nil {
 		return nil, err

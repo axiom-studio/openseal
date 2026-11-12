@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const ConversationTaskSkillSetupWakeType = "skill_setup"
@@ -164,7 +166,7 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 	if request.Status == "resolved" {
 		instruction = "The requested Skill configuration was saved. Continue this task from its saved progress. Provider access is not yet verified; use only currently authorized actions to verify it and do not repeat completed work."
 	}
-	updated, event, err := NewRunActivityService(s.runStore, s.runStore).TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
+	updated, event, err := NewRunActivityService(s.runStore, s.runStore, models.WithClock(s.now)).TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: AgentRunStatusQueued,
 		Summary: "Received the Skill setup result; continuing the task", EventType: conversationTaskSetupEvent,
 		Actor: ActivityActor{Type: "service", ID: "skill-setup-coordinator"}, CorrelationID: request.ID, CausationID: request.ActionCallID,
