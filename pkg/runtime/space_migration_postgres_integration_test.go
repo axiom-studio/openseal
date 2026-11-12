@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func openSpacesPostgresStore(t *testing.T, prefix string) (*PostgresStore, string, string) {
@@ -28,15 +29,15 @@ func TestPostgresSpaceAccessBackfillAndRollback(t *testing.T) {
 	defer cancel()
 	store, dsn, schema := openSpacesPostgresStore(t, "openseal_space_access_backfill_")
 	scope := models.Scope{Kind: "tenant", ID: "legacy"}
-	spaces := NewSpaceService(store)
-	work, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Work", Look: models.DefaultSpaceLook, OwnerID: "7"})
+	now := time.Now().UTC()
+	work, err := store.CreateSpace(ctx, storetest.OwnedSpace(scope, "Work", "7", now))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := spaces.SetSpaceAccess(ctx, scope, work.ID, models.SpaceAccessEveryone); err != nil {
+	if _, err := store.SetSpaceAccess(ctx, scope, work.ID, models.SpaceAccessEveryone, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := spaces.AddSpacePerson(ctx, AddSpacePersonRequest{Scope: scope, SpaceID: work.ID, UserID: "8", AddedBy: "7"}); err != nil {
+	if _, _, err := store.PutSpacePerson(ctx, scope, &models.SpacePerson{SpaceID: work.ID, UserID: "8", AddedBy: "7", AddedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	// The shape before per-owner default spaces: the scope's one default
@@ -46,7 +47,7 @@ func TestPostgresSpaceAccessBackfillAndRollback(t *testing.T) {
 	}
 	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("spaces")+` (`+sqlstore.SpaceColumns+`)
 		VALUES ($1, $2, $3, 'Default', 'tidepool', 0, TRUE, 'everyone', $4, $5, $5)`,
-		legacyDefaultSpaceID(scope), scope.Kind, scope.ID, legacyDefaultSpaceOwner, work.CreatedAt.Add(-time.Hour)); err != nil {
+		storetest.LegacyDefaultSpaceID(scope), scope.Kind, scope.ID, storetest.LegacyDefaultSpaceOwner, work.CreatedAt.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.RollbackPostgresMigrations(ctx, spaceAccessMigrationVersion-1); err != nil {
@@ -69,7 +70,7 @@ func TestPostgresSpaceAccessBackfillAndRollback(t *testing.T) {
 	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
 		t.Fatalf("schema version = %d, err = %v", version, err)
 	}
-	assertSpaceAccessBackfilled(t, reopened, scope, work.ID)
+	storetest.AssertSpaceAccessBackfilled(t, reopened, scope, work.ID)
 }
 
 func TestPostgresSpacesBackfillAndRollback(t *testing.T) {
@@ -79,10 +80,12 @@ func TestPostgresSpacesBackfillAndRollback(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "legacy"}
 	agentOnly := models.Scope{Kind: "tenant", ID: "agents-only"}
 	// The conversation needs a space to be created; the rollback below drops it.
-	seedTestSpace(t, store, scope)
-	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
-	})
+	storetest.SeedSpace(t, store, scope)
+	created := time.Now().UTC()
+	conversation, _, err := store.CreateConversation(ctx, &models.Conversation{
+		ID: "old-chat", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "helper"}, Title: "Old chat",
+		Status: models.ConversationStatusActive, ApprovalMode: models.DefaultConversationApprovalMode, Revision: 1, CreatedAt: created, UpdatedAt: created,
+	}, "old")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,5 +128,5 @@ func TestPostgresSpacesBackfillAndRollback(t *testing.T) {
 		WHERE table_schema = $1 AND table_name = 'conversations' AND column_name = 'space_id'`, schema).Scan(&nullable); err != nil || nullable != "NO" {
 		t.Fatalf("space_id nullable = %q, err = %v", nullable, err)
 	}
-	assertSpacesBackfilled(t, reopened, scope, agentOnly, conversation.ID)
+	storetest.AssertSpacesBackfilled(t, reopened, scope, agentOnly, conversation.ID)
 }

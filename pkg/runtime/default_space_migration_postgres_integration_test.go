@@ -39,7 +39,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newID := legacyDefaultSpaceID(scope)
+	newID := storetest.LegacyDefaultSpaceID(scope)
 	oldID := "personal-" + strings.TrimPrefix(newID, "default-")
 	// Rewind to the Personal schema: one space per scope, owned by no person.
 	// The space keeps a name someone gave it.
@@ -51,7 +51,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 		`ALTER TABLE ` + pgSchema.Table("spaces") + ` RENAME COLUMN is_default TO is_personal`,
 		`CREATE UNIQUE INDEX spaces_personal_idx ON ` + pgSchema.Table("spaces") + ` (scope_kind, scope_id) WHERE is_personal`,
 		`ALTER TABLE ` + pgSchema.Table("space_members") + ` DROP CONSTRAINT space_members_scope_kind_scope_id_space_id_fkey`,
-		`UPDATE ` + pgSchema.Table("spaces") + ` SET id = '` + oldID + `', name = 'Shared', created_by = '` + legacyDefaultSpaceOwner + `'`,
+		`UPDATE ` + pgSchema.Table("spaces") + ` SET id = '` + oldID + `', name = 'Shared', created_by = '` + storetest.LegacyDefaultSpaceOwner + `'`,
 		`UPDATE ` + pgSchema.Table("space_members") + ` SET space_id = '` + oldID + `'`,
 		`ALTER TABLE ` + pgSchema.Table("space_members") + ` ADD FOREIGN KEY (scope_kind, scope_id, space_id) REFERENCES ` + pgSchema.Table("spaces") + ` (scope_kind, scope_id, id) ON DELETE CASCADE`,
 		`UPDATE ` + pgSchema.Table("conversations") + ` SET space_id = '` + oldID + `', payload = jsonb_set(payload, '{spaceId}', to_jsonb('` + oldID + `'::text))`,
@@ -69,7 +69,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	t.Cleanup(func() { _ = reopened.Close() })
 	listed, err := reopened.ListSpaces(ctx, scope)
 	if err != nil || len(listed) != 1 || listed[0].ID != newID || !listed[0].IsDefault || listed[0].Name != "Shared" ||
-		listed[0].Access != SpaceAccessOwner || listed[0].OwnerID != legacyDefaultSpaceOwner {
+		listed[0].Access != SpaceAccessOwner || listed[0].OwnerID != storetest.LegacyDefaultSpaceOwner {
 		t.Fatalf("spaces = %+v, err = %v", listed, err)
 	}
 	members, err := reopened.ListSpaceMembers(ctx, scope, newID)

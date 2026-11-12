@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // Migration 86 on a database with one default space per scope: the per-owner
@@ -21,12 +22,11 @@ func TestPostgresOwnerDefaultSpaceMigration(t *testing.T) {
 	store, dsn, schema := openSpacesPostgresStore(t, "openseal_owner_default_")
 	scope := models.Scope{Kind: "tenant", ID: "legacy"}
 	peopleOnly := models.Scope{Kind: "tenant", ID: "people-only"}
-	spaces := NewSpaceService(store)
 	at := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
-	spaces.now = func() time.Time { at = at.Add(time.Minute); return at }
 	create := func(scope models.Scope, name, ownerID string) *models.Space {
 		t.Helper()
-		space, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: name, Look: models.DefaultSpaceLook, OwnerID: ownerID})
+		at = at.Add(time.Minute)
+		space, err := store.CreateSpace(ctx, storetest.OwnedSpace(scope, name, ownerID, at))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -37,10 +37,10 @@ func TestPostgresOwnerDefaultSpaceMigration(t *testing.T) {
 	lab := create(scope, "Lab", "8")
 	solo := create(peopleOnly, "Solo", "7")
 	later := create(peopleOnly, "Later", "8")
-	legacyID := legacyDefaultSpaceID(scope)
+	legacyID := storetest.LegacyDefaultSpaceID(scope)
 	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("spaces")+` (`+sqlstore.SpaceColumns+`)
 		VALUES ($1, $2, $3, 'Default', 'tidepool', 5, TRUE, 'everyone', $4, $5, $5)`,
-		legacyID, scope.Kind, scope.ID, legacyDefaultSpaceOwner, work.CreatedAt.Add(-time.Hour)); err != nil {
+		legacyID, scope.Kind, scope.ID, storetest.LegacyDefaultSpaceOwner, work.CreatedAt.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -114,7 +114,7 @@ func TestPostgresOwnerDefaultSpaceMigration(t *testing.T) {
 		ownerID string
 		spaceID string
 	}{
-		{scope, legacyDefaultSpaceOwner, legacyID},
+		{scope, storetest.LegacyDefaultSpaceOwner, legacyID},
 		{scope, "7", work.ID},
 		{scope, "8", lab.ID},
 		{peopleOnly, "7", solo.ID},

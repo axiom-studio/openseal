@@ -9,7 +9,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
-	"github.com/google/uuid"
 )
 
 // Store test: each store keeps a Run's ActingUser fixed, and the postgres
@@ -18,73 +17,33 @@ import (
 // subtest (with actingUserPostgresStore) to store/postgres, the sqlite one to
 // store/sqlite.
 
+// TestAgentRunActingUserIsImmutable runs the acting-user contract on each
+// store; on Postgres it also checks the store's in-transaction Run update.
 func TestAgentRunActingUserIsImmutable(t *testing.T) {
-	stores := map[string]func(*testing.T) models.KernelStore{
-		"sqlite": func(t *testing.T) models.KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "acting-user.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = store.Close() })
-			return store
-		},
-		"postgres": func(t *testing.T) models.KernelStore { return actingUserPostgresStore(t) },
-	}
-	for name, open := range stores {
-		t.Run(name, func(t *testing.T) {
-			store := open(t)
-			ctx := context.Background()
-			scope := models.Scope{Kind: "tenant", ID: "1"}
-			run, err := NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
-				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-				Goal: "work", Source: models.RunSourceManual, ActingUser: "7",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			update := func(actingUser string) error {
-				current, err := store.GetAgentRun(ctx, scope, run.ID)
-				if err != nil {
-					return err
-				}
-				expected := current.Revision
-				current.ActingUser = actingUser
-				current.Priority++
-				current.Revision++
-				current.UpdatedAt = current.UpdatedAt.Add(time.Second)
-				event := &models.ActivityEvent{ID: uuid.NewString(), Scope: scope, EventType: "run.updated", Severity: models.ActivitySeverityInfo,
-					AgentID: "agent", RunID: run.ID, Actor: models.ActivityActor{Type: "system", ID: "openseal"}, Summary: "Run updated",
-					Visibility: models.ActivityVisibilityScope, CreatedAt: current.UpdatedAt}
-				_, err = store.UpdateAgentRunWithEvent(ctx, current, expected, event, nil)
-				return err
-			}
-			for _, changed := range []string{"8", ""} {
-				if err := update(changed); !errors.Is(err, models.ErrRevisionConflict) {
-					t.Fatalf("update to ActingUser %q error = %v", changed, err)
-				}
-			}
-			if err := update("7"); err != nil {
-				t.Fatalf("update keeping ActingUser: %v", err)
-			}
-			stored, err := store.GetAgentRun(ctx, scope, run.ID)
-			if err != nil || stored.ActingUser != "7" {
-				t.Fatalf("stored run = %#v, %v", stored, err)
-			}
-			if postgres, ok := store.(*PostgresStore); ok {
-				stored.ActingUser = "8"
-				expected := stored.Revision
-				stored.Revision++
-				tx, err := postgres.db.BeginTx(ctx, nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer tx.Rollback()
-				if err := postgres.updateAgentRunTx(ctx, tx, stored, expected); !errors.Is(err, models.ErrRevisionConflict) {
-					t.Fatalf("updateAgentRunTx changing ActingUser error = %v", err)
-				}
-			}
-		})
-	}
+	t.Run("sqlite", func(t *testing.T) {
+		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "acting-user.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		storetest.RunActingUserContract(t, store)
+	})
+	t.Run("postgres", func(t *testing.T) {
+		postgres := actingUserPostgresStore(t)
+		stored := storetest.RunActingUserContract(t, postgres)
+		ctx := context.Background()
+		stored.ActingUser = "8"
+		expected := stored.Revision
+		stored.Revision++
+		tx, err := postgres.db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		if err := postgres.updateAgentRunTx(ctx, tx, stored, expected); !errors.Is(err, models.ErrRevisionConflict) {
+			t.Fatalf("updateAgentRunTx changing ActingUser error = %v", err)
+		}
+	})
 }
 
 func actingUserPostgresStore(t *testing.T) *PostgresStore {

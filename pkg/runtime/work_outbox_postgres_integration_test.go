@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
 // Postgres store test (outbox triggers and migrations): it moves to
-// store/postgres in U2.8. It seeds its Runs through NewPortfolioService,
-// which a store package cannot import: the move seeds them with the store's
-// CreateAgentRun instead.
+// store/postgres in U2.8. It writes its Runs with the store's CreateAgentRun
+// (storetest.QueuedAgentRun), since a store package cannot import runtime.
 
 func newWorkSignalPostgresStore(t *testing.T, schema string) (context.Context, *PostgresStore) {
 	t.Helper()
@@ -82,10 +82,9 @@ func TestPostgresWorkOutboxRecordsOnlyClaimabilityChanges(t *testing.T) {
 	}
 
 	before := time.Now().UTC()
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
-		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "record", Source: models.RunSourceManual,
-	})
-	if err != nil {
+	run := storetest.QueuedAgentRun(scope, "agent", "record", time.Now())
+	run.Source = models.RunSourceManual
+	if err := store.CreateAgentRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -102,9 +101,9 @@ func TestPostgresWorkOutboxRecordsOnlyClaimabilityChanges(t *testing.T) {
 		t.Fatal("the relay's own commit raised a work hint")
 	default:
 	}
-	if _, err := NewPortfolioService(foreign).CreateAgentRun(ctx, models.CreateAgentRunRequest{
-		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "elsewhere", Source: models.RunSourceManual,
-	}); err != nil {
+	elsewhere := storetest.QueuedAgentRun(scope, "agent", "elsewhere", time.Now())
+	elsewhere.Source = models.RunSourceManual
+	if err := foreign.CreateAgentRun(ctx, elsewhere); err != nil {
 		t.Fatal(err)
 	}
 	expect("a foreign schema's Run", map[models.WorkFamily]int{})

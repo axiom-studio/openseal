@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,17 +35,22 @@ func TestPostgresWorkingFilesTableIsCreatedOnAnExistingDatabase(t *testing.T) {
 	}
 
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	catalog := NewArtifactCatalog(reopened)
 	for _, id := range []string{"report.pdf", "plot.py"} {
-		if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: validCatalogArtifact(id, 1)}); err != nil {
+		if err := reopened.CreateArtifactVersion(ctx, &models.Artifact{
+			ID: id, Version: 1, Scope: scope, Name: id, Type: "report", MediaType: "application/octet-stream",
+			ContentRef: "object-store:" + id, Digest: "sha256:" + strings.Repeat("a", 64), SizeBytes: 10,
+			Classification: models.ArtifactClassificationInternal, CreatedAt: time.Now().UTC(),
+			Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "agent", ID: "analyst"}, RunID: "run-research"},
+		}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := markRunFiles(ctx, reopened, scope, []savedArtifact{{Ref: artifactRef("report.pdf")}, {Ref: artifactRef("plot.py")}}, []models.ConversationReference{artifactRef("report.pdf")}); err != nil {
+	// The reply handed over report.pdf; plot.py stayed a working file.
+	if err := reopened.MarkArtifactFiles(ctx, scope, []string{"plot.py"}, []string{"report.pdf"}); err != nil {
 		t.Fatal(err)
 	}
 	for files, want := range map[models.ArtifactFiles]string{models.ArtifactFilesResults: "report.pdf", models.ArtifactFilesWorking: "plot.py"} {
-		listed, err := catalog.List(ctx, models.ArtifactFilter{Scope: scope, Files: files, LatestOnly: true, Limit: 10})
+		listed, err := reopened.ListArtifacts(ctx, models.ArtifactFilter{Scope: scope, Files: files, LatestOnly: true, Limit: 10})
 		if err != nil || len(listed) != 1 || listed[0].ID != want {
 			t.Fatalf("%s = %v, %v; want only %s", files, listed, err, want)
 		}

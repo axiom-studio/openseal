@@ -27,10 +27,9 @@ import (
 func seedPostgresChangeSets(t *testing.T, store *PostgresStore) string {
 	t.Helper()
 	ctx := context.Background()
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
-		Scope: storetest.BuilderCutoverScope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "author", Source: models.RunSourceManual,
-	})
-	if err != nil {
+	run := storetest.QueuedAgentRun(storetest.BuilderCutoverScope, "agent", "author", time.Now())
+	run.AssignedAgentID, run.Source = "", models.RunSourceManual
+	if err := store.CreateAgentRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
 	table := store.table(sqlstore.RetiredChangeSetTable)

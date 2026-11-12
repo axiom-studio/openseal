@@ -10,7 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/google/uuid"
 )
 
 func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *testing.T) {
@@ -30,30 +30,14 @@ func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *test
 	}
 
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	definition := slackConversationSkillDefinition()
-	catalog := skill.NewCatalogWithStore(primary)
-	if err := catalog.Register(ctx, definition); err != nil {
-		t.Fatal(err)
-	}
-	binding := &skill.Binding{
-		ID: "slack", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "slack-agent",
-		SkillID: definition.ID, SkillVersion: definition.Version,
-		EnabledConversationAdapters: []string{"conversations"}, MaximumRisk: skill.RiskLevelRead,
-		Credentials: map[string]skill.CredentialReference{
-			"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://tenant/one/slack"},
+	// The endpoint the endpoint service creates for a bound Slack adapter.
+	created := time.Now().UTC()
+	endpoint := &models.ExternalConversationEndpoint{
+		ID: "slack-channel", IngressRoute: uuid.NewString(), Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
+		DeploymentID: "slack-agent", Name: "Slack channel", Provider: "slack",
+		Adapter: models.ExternalConversationAdapterReference{
+			SkillID: "slack", SkillVersion: "1.0.0", BindingID: "slack", BindingRevision: 1, AdapterID: "conversations",
 		},
-		Revision: 1,
-	}
-	if err := catalog.Bind(ctx, binding); err != nil {
-		t.Fatal(err)
-	}
-	adapter := models.ExternalConversationAdapterReference{
-		SkillID: definition.ID, SkillVersion: definition.Version,
-		BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
-	}
-	endpoint, err := NewExternalConversationEndpointService(primary, catalog).Create(ctx, CreateExternalConversationEndpointRequest{
-		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
-		DeploymentID: "slack-agent", Name: "Slack channel", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Address: "C012345",
 		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: "slack-agent"},
 		Policy: models.ExternalConversationPolicy{
@@ -61,9 +45,9 @@ func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *test
 			ReplyMode:        models.ExternalConversationReplyThread,
 			IgnoreBots:       true,
 		},
-		Status: models.ExternalConversationEndpointActive,
-	})
-	if err != nil {
+		Status: models.ExternalConversationEndpointActive, Revision: 1, CreatedAt: created, UpdatedAt: created,
+	}
+	if err := primary.CreateExternalConversationEndpoint(ctx, endpoint); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)

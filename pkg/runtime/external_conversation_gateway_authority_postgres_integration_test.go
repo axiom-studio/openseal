@@ -5,8 +5,11 @@ package runtime
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/google/uuid"
 )
 
 func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testing.T) {
@@ -19,12 +22,31 @@ func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testin
 	}
 	t.Cleanup(func() { _ = replica.Close() })
 	ctx := t.Context()
-	memory, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-	legacy := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(memory), CreateExternalConversationGatewayRequest{
-		ID: "legacy-gateway", Name: "Legacy provider gateway",
-		Gateway: models.ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
-		Actor:   models.ActivityActor{Type: "test", ID: "operator"}, Reason: "Exercise upgrade from reviewed legacy routing",
-	})
+	// The endpoint and the reviewed, activated gateway the endpoint and
+	// gateway services create for a Slack Agent.
+	now := time.Now().UTC()
+	scope := models.Scope{Kind: "tenant", ID: "slack"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"}
+	adapter := models.ExternalConversationAdapterReference{SkillID: "slack", SkillVersion: "1.0.0", BindingID: "slack", BindingRevision: 1, AdapterID: "conversations"}
+	endpoint := &models.ExternalConversationEndpoint{
+		ID: "slack-endpoint", IngressRoute: uuid.NewString(), Scope: scope, Owner: owner, DeploymentID: owner.ID,
+		Name: "slack endpoint", Adapter: adapter, Provider: "slack", Mode: capability.ConversationEndpointChannel, Address: "slack-address",
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: owner.ID},
+		Policy: models.ExternalConversationPolicy{
+			MessageSelection: models.ExternalConversationSelectAllMessages, ReplyMode: models.ExternalConversationReplyThread, IgnoreBots: true,
+		},
+		Status: models.ExternalConversationEndpointActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	operator := models.ActivityActor{Type: "test", ID: "operator"}
+	legacy := &models.ExternalConversationGatewayRegistration{
+		ID: "legacy-gateway", IngressRoute: uuid.NewString(), Name: "Legacy provider gateway",
+		Gateway: models.ExternalConversationIngressGateway{Scope: scope, Owner: owner, DeploymentID: owner.ID, Adapter: adapter, Provider: "slack"},
+		Status:  models.ExternalConversationGatewayActive, Revision: 2, CreatedAt: now, UpdatedAt: now,
+		Lifecycle: []models.ExternalConversationGatewayLifecycleEntry{
+			{Revision: 1, Action: models.ExternalConversationGatewayCreated, Actor: operator, Reason: "Exercise upgrade from reviewed legacy routing", At: now},
+			{Revision: 2, Action: models.ExternalConversationGatewayActivated, Actor: operator, Reason: "activate reviewed provider route", At: now},
+		},
+	}
 	endpoint.InstallationID, endpoint.ApplicationID = "owned-installation", "owned-application"
 	if err := store.CreateExternalConversationEndpoint(ctx, endpoint); err != nil {
 		t.Fatal(err)
