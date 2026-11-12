@@ -463,3 +463,35 @@ func TestRoutineEventSeedOnlyForOccurrenceRoot(t *testing.T) {
 		}
 	})
 }
+
+func TestLoopRunSessionSeed(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "seed"}
+	plain := &AgentRun{Scope: scope, ID: "run-plain", Goal: "Send the weekly summary."}
+	entries, err := loopRunSessionSeedEntries(t.Context(), nil, nil, nil, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].SourceKey != GoalSourceKey(plain.ID) || entries[0].User.GoalKind != "routine" {
+		t.Fatalf("a non-routine Run gets one brief seed, got %+v", entries)
+	}
+	if err := entries[0].Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	empty := &AgentRun{Scope: scope, ID: "run-empty"}
+	if entries, err := loopRunSessionSeedEntries(t.Context(), nil, nil, nil, empty); err != nil || len(entries) != 0 {
+		t.Fatalf("a Run without a goal gets no seed, got %d entries, %v", len(entries), err)
+	}
+
+	occurrence, store := routineEventSeedFixture(2, 0)
+	entries, err = loopRunSessionSeedEntries(t.Context(), store, nil, nil, occurrence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].SourceKey != GoalSourceKey(occurrence.ID) || entries[1].SourceKey != RoutineEventEntrySourceKey(occurrence.ID) {
+		t.Fatalf("an event occurrence gets the brief then its events, got %+v", entries)
+	}
+	if entries[0].ID == entries[1].ID {
+		t.Fatal("brief and event entries share an id")
+	}
+}
