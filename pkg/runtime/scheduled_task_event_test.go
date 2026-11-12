@@ -14,18 +14,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 )
 
-func (f *eventRoutineFixture) slackEvent(channels ...string) map[string]interface{} {
-	condition := map[string]interface{}{"field": "channel", "op": "equals", "value": channels[0]}
-	if len(channels) > 1 {
-		values := make([]interface{}, 0, len(channels))
-		for _, channel := range channels {
-			values = append(values, channel)
-		}
-		condition = map[string]interface{}{"field": "channel", "op": "one_of", "values": values}
-	}
-	return map[string]interface{}{"kind": "slack.message", "source": f.slackRef, "filter": []interface{}{condition}}
-}
-
 func TestCreateTaskEventTriggerResolves(t *testing.T) {
 	f := newEventRoutineFixture(t, true)
 	args := f.withEvent(f.slackEvent("C1"))
@@ -183,42 +171,6 @@ func TestCreateTaskEventNeedsActingUser(t *testing.T) {
 	}
 }
 
-func TestCreateTaskEventSendGrantMustBePinned(t *testing.T) {
-	f := routineGrantFixture(t)
-	event := map[string]interface{}{"event": map[string]interface{}{"kind": "webhook", "source": "new"}}
-	schedule := f.args["trigger"]
-	free := map[string]interface{}{"action": "mail.send", "label": "Email the summary"}
-	owned := map[string]interface{}{"action": "mail.send", "label": "Email you the summary", "toOwnerOnly": true}
-	read := map[string]interface{}{"action": "mail.search", "label": "Search the web"}
-
-	f.args["trigger"] = event
-	if _, err := f.resolve(t, f.withGrants(read, free)); !errors.Is(err, ErrRoutineEventSendGrantNotPinned) {
-		t.Fatalf("free-recipient send in an event routine: %v", err)
-	}
-	if _, err := f.resolve(t, f.withGrants(read, owned)); err != nil {
-		t.Fatalf("owner-only send in an event routine: %v", err)
-	}
-	// Sends whose target the kernel cannot read from a known argument fail
-	// closed: a chat ID key must be pinned, and a raw message body never can.
-	freeChat := map[string]interface{}{"action": "mail.chat", "label": "Post the summary"}
-	if _, err := f.resolve(t, f.withGrants(freeChat)); !errors.Is(err, ErrRoutineEventSendGrantNotPinned) &&
-		(err == nil || !strings.Contains(err.Error(), "toDestinations")) {
-		t.Fatalf("free chat send in an event routine: %v", err)
-	}
-	pinnedChat := map[string]interface{}{"action": "mail.chat", "label": "Post the summary", "toDestinations": []interface{}{"12345"}}
-	if _, err := f.resolve(t, f.withGrants(pinnedChat)); err != nil {
-		t.Fatalf("pinned chat send in an event routine: %v", err)
-	}
-	raw := map[string]interface{}{"action": "mail.raw", "label": "Send the draft"}
-	if _, err := f.resolve(t, f.withGrants(raw)); !errors.Is(err, ErrRoutineEventSendGrantNotPinned) {
-		t.Fatalf("raw-body send in an event routine: %v", err)
-	}
-	f.args["trigger"] = schedule
-	if _, err := f.resolve(t, f.withGrants(read, free)); err != nil {
-		t.Fatalf("schedule routines keep free sends: %v", err)
-	}
-}
-
 func TestCreateTaskSlackNeedsEndpointChannel(t *testing.T) {
 	f := newEventRoutineFixture(t, true)
 	for name, event := range map[string]map[string]interface{}{
@@ -298,35 +250,6 @@ func TestSendTestEventRejectsNonCreator(t *testing.T) {
 	f.validator.SetRoutineEvents(nil, nil, true)
 	if _, err := f.validate(t, f.run, RunbookActionSendTestEvent, args); !errors.Is(err, ErrRoutineEventsUnavailable) {
 		t.Fatalf("without an offerer: %v", err)
-	}
-}
-
-// setRoutineStatus runs set_status the way a chat does.
-func (f *eventRoutineFixture) setRoutineStatus(t *testing.T, activationID string, status models.RunbookActivationStatus, callID string) (*models.RunbookActivation, error) {
-	t.Helper()
-	current, err := f.store.GetRunbookActivation(t.Context(), f.run.Scope, activationID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := f.dispatch(t, f.run, action.RunbookActionSetStatus, map[string]interface{}{
-		"activationId": activationID, "expectedRevision": float64(current.Revision), "status": string(status), "reason": "test",
-	}, callID)
-	if err != nil {
-		return nil, err
-	}
-	return result["activation"].(*models.RunbookActivation), nil
-}
-
-func (f *eventRoutineFixture) setEndpointStatus(t *testing.T, id string, status models.ExternalConversationEndpointStatus) {
-	t.Helper()
-	endpoint, err := f.store.GetExternalConversationEndpoint(t.Context(), f.run.Scope, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	next := *endpoint
-	next.Status, next.Revision = status, endpoint.Revision+1
-	if err := f.store.UpdateExternalConversationEndpoint(t.Context(), &next, endpoint.Revision); err != nil {
-		t.Fatal(err)
 	}
 }
 

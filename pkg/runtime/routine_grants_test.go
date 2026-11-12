@@ -355,3 +355,39 @@ func TestRoutineGrantWithoutOwnerLimitAndRevoke(t *testing.T) {
 		t.Fatal("revoked grant still ran without asking")
 	}
 }
+
+func TestCreateTaskEventSendGrantMustBePinned(t *testing.T) {
+	f := routineGrantFixture(t)
+	event := map[string]interface{}{"event": map[string]interface{}{"kind": "webhook", "source": "new"}}
+	schedule := f.args["trigger"]
+	free := map[string]interface{}{"action": "mail.send", "label": "Email the summary"}
+	owned := map[string]interface{}{"action": "mail.send", "label": "Email you the summary", "toOwnerOnly": true}
+	read := map[string]interface{}{"action": "mail.search", "label": "Search the web"}
+
+	f.args["trigger"] = event
+	if _, err := f.resolve(t, f.withGrants(read, free)); !errors.Is(err, ErrRoutineEventSendGrantNotPinned) {
+		t.Fatalf("free-recipient send in an event routine: %v", err)
+	}
+	if _, err := f.resolve(t, f.withGrants(read, owned)); err != nil {
+		t.Fatalf("owner-only send in an event routine: %v", err)
+	}
+	// Sends whose target the kernel cannot read from a known argument fail
+	// closed: a chat ID key must be pinned, and a raw message body never can.
+	freeChat := map[string]interface{}{"action": "mail.chat", "label": "Post the summary"}
+	if _, err := f.resolve(t, f.withGrants(freeChat)); !errors.Is(err, ErrRoutineEventSendGrantNotPinned) &&
+		(err == nil || !strings.Contains(err.Error(), "toDestinations")) {
+		t.Fatalf("free chat send in an event routine: %v", err)
+	}
+	pinnedChat := map[string]interface{}{"action": "mail.chat", "label": "Post the summary", "toDestinations": []interface{}{"12345"}}
+	if _, err := f.resolve(t, f.withGrants(pinnedChat)); err != nil {
+		t.Fatalf("pinned chat send in an event routine: %v", err)
+	}
+	raw := map[string]interface{}{"action": "mail.raw", "label": "Send the draft"}
+	if _, err := f.resolve(t, f.withGrants(raw)); !errors.Is(err, ErrRoutineEventSendGrantNotPinned) {
+		t.Fatalf("raw-body send in an event routine: %v", err)
+	}
+	f.args["trigger"] = schedule
+	if _, err := f.resolve(t, f.withGrants(read, free)); err != nil {
+		t.Fatalf("schedule routines keep free sends: %v", err)
+	}
+}

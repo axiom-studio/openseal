@@ -596,3 +596,21 @@ func TestRoutineTestEventDoesNotConsumeOccurrence(t *testing.T) {
 		t.Fatalf("test event after an hour err = %v", err)
 	}
 }
+
+// pauseRun sets a Run to paused, as budget exhaustion or recovery does.
+func (h *routineEventHarness) pauseRun(run *models.AgentRun) {
+	h.t.Helper()
+	current, err := h.store.GetAgentRun(h.ctx, h.scope, run.ID)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	updated := models.CloneAgentRun(current)
+	updated.Status, updated.Revision, updated.UpdatedAt = models.AgentRunStatusPaused, current.Revision+1, h.now
+	event := &models.ActivityEvent{
+		ID: "pause-" + run.ID, Scope: h.scope, EventType: "run.status_changed", Severity: models.ActivitySeverityInfo, AgentID: run.AssignedAgentID, RunID: run.ID,
+		Actor: models.ActivityActor{Type: "worker", ID: "test"}, Summary: "Paused", Visibility: models.ActivityVisibilityScope, CreatedAt: h.now,
+	}
+	if _, err := h.store.UpdateAgentRunWithEvent(h.ctx, updated, current.Revision, event, nil); err != nil {
+		h.t.Fatal(err)
+	}
+}

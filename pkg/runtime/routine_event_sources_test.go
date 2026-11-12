@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -265,5 +267,46 @@ func TestEventSourcesListsConnections(t *testing.T) {
 		if err != nil || got != check.want {
 			t.Fatalf("SourceExists(%s, %s, %s, %v)=%v, %v", check.kind, check.sourceRef, check.owner.ID, check.channels, got, err)
 		}
+	}
+}
+
+func (f *eventRoutineFixture) slackEvent(channels ...string) map[string]interface{} {
+	condition := map[string]interface{}{"field": "channel", "op": "equals", "value": channels[0]}
+	if len(channels) > 1 {
+		values := make([]interface{}, 0, len(channels))
+		for _, channel := range channels {
+			values = append(values, channel)
+		}
+		condition = map[string]interface{}{"field": "channel", "op": "one_of", "values": values}
+	}
+	return map[string]interface{}{"kind": "slack.message", "source": f.slackRef, "filter": []interface{}{condition}}
+}
+
+// setRoutineStatus runs set_status the way a chat does.
+func (f *eventRoutineFixture) setRoutineStatus(t *testing.T, activationID string, status models.RunbookActivationStatus, callID string) (*models.RunbookActivation, error) {
+	t.Helper()
+	current, err := f.store.GetRunbookActivation(t.Context(), f.run.Scope, activationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.dispatch(t, f.run, action.RunbookActionSetStatus, map[string]interface{}{
+		"activationId": activationID, "expectedRevision": float64(current.Revision), "status": string(status), "reason": "test",
+	}, callID)
+	if err != nil {
+		return nil, err
+	}
+	return result["activation"].(*models.RunbookActivation), nil
+}
+
+func (f *eventRoutineFixture) setEndpointStatus(t *testing.T, id string, status models.ExternalConversationEndpointStatus) {
+	t.Helper()
+	endpoint, err := f.store.GetExternalConversationEndpoint(t.Context(), f.run.Scope, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := *endpoint
+	next.Status, next.Revision = status, endpoint.Revision+1
+	if err := f.store.UpdateExternalConversationEndpoint(t.Context(), &next, endpoint.Revision); err != nil {
+		t.Fatal(err)
 	}
 }
