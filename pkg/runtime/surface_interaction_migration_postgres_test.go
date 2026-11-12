@@ -4,15 +4,17 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func newSurfaceInteractionPostgresStore(t *testing.T) (context.Context, *PostgresStore) {
 	t.Helper()
-	pgSchema := newTestPostgresSchema(t, "openseal_surface_interactions_")
-	dsn := pgSchema.dsn
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_surface_interactions_")
+	dsn := pgSchema.DSN
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(cancel)
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

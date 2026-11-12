@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // Postgres store test: it checks the store's own migration ledger, so it moves
@@ -17,16 +18,16 @@ import (
 // a database at 80 loses them with their rows, and the retired ledger rows
 // 47, 49 and 51 it keeps do not make the schema look incomplete.
 func TestPostgresMigration81DropsEventWaits(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "event_waits_")
-	dsn := pgSchema.dsn
-	schema := pgSchema.name
+	pgSchema := storetest.NewPostgresSchema(t, "event_waits_")
+	dsn := pgSchema.DSN
+	schema := pgSchema.Name
 	ctx := context.Background()
 	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
+		_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 		_ = store.Close()
 	})
 	assertNoEventWaitTables(t, ctx, store)
@@ -34,30 +35,30 @@ func TestPostgresMigration81DropsEventWaits(t *testing.T) {
 
 	// Put the database back at 80 as an old release left it.
 	for _, statement := range []string{
-		`CREATE TABLE ` + pgSchema.table("run_event_inbox") + ` (scope_kind TEXT, scope_id TEXT, source TEXT, event_id TEXT, payload JSONB,
+		`CREATE TABLE ` + pgSchema.Table("run_event_inbox") + ` (scope_kind TEXT, scope_id TEXT, source TEXT, event_id TEXT, payload JSONB,
 			PRIMARY KEY (scope_kind, scope_id, source, event_id))`,
-		`CREATE TABLE ` + pgSchema.table("run_event_waits") + ` (scope_kind TEXT, scope_id TEXT, run_id TEXT, wait_key TEXT, status TEXT, payload JSONB,
+		`CREATE TABLE ` + pgSchema.Table("run_event_waits") + ` (scope_kind TEXT, scope_id TEXT, run_id TEXT, wait_key TEXT, status TEXT, payload JSONB,
 			PRIMARY KEY (scope_kind, scope_id, run_id, wait_key))`,
-		`CREATE TABLE ` + pgSchema.table("run_event_wait_scopes") + ` (scope_kind TEXT, scope_id TEXT, PRIMARY KEY (scope_kind, scope_id))`,
-		`CREATE TABLE ` + pgSchema.table("run_event_consumptions") + ` (scope_kind TEXT, scope_id TEXT, source TEXT, event_id TEXT, run_id TEXT,
-			FOREIGN KEY (scope_kind, scope_id, source, event_id) REFERENCES ` + pgSchema.table("run_event_inbox") + ` (scope_kind, scope_id, source, event_id))`,
-		`CREATE TABLE ` + pgSchema.table("run_event_notifications") + ` (scope_kind TEXT, scope_id TEXT, source TEXT, event_id TEXT,
-			FOREIGN KEY (scope_kind, scope_id, source, event_id) REFERENCES ` + pgSchema.table("run_event_inbox") + ` (scope_kind, scope_id, source, event_id))`,
-		`CREATE TABLE ` + pgSchema.table("run_event_retention_cursor") + ` (id INTEGER PRIMARY KEY, received_at TIMESTAMPTZ)`,
-		`INSERT INTO ` + pgSchema.table("run_event_inbox") + ` VALUES ('tenant', 'one', 'binding:a', 'e1', '{}')`,
-		`INSERT INTO ` + pgSchema.table("run_event_waits") + ` VALUES ('tenant', 'one', 'run-1', 'reply', 'pending', '{}')`,
-		`INSERT INTO ` + pgSchema.table("run_event_wait_scopes") + ` VALUES ('tenant', 'one')`,
-		`INSERT INTO ` + pgSchema.table("run_event_consumptions") + ` VALUES ('tenant', 'one', 'binding:a', 'e1', 'run-1')`,
-		`INSERT INTO ` + pgSchema.table("run_event_notifications") + ` VALUES ('tenant', 'one', 'binding:a', 'e1')`,
-		`INSERT INTO ` + pgSchema.table("run_event_retention_cursor") + ` VALUES (1, now())`,
-		`INSERT INTO ` + pgSchema.table("schema_migrations") + ` (version, name) VALUES (47, 'durable run event waits'), (49, 'run event retention'), (51, 'run event notifications')`,
-		`DELETE FROM ` + pgSchema.table("schema_migrations") + ` WHERE version = 81`,
+		`CREATE TABLE ` + pgSchema.Table("run_event_wait_scopes") + ` (scope_kind TEXT, scope_id TEXT, PRIMARY KEY (scope_kind, scope_id))`,
+		`CREATE TABLE ` + pgSchema.Table("run_event_consumptions") + ` (scope_kind TEXT, scope_id TEXT, source TEXT, event_id TEXT, run_id TEXT,
+			FOREIGN KEY (scope_kind, scope_id, source, event_id) REFERENCES ` + pgSchema.Table("run_event_inbox") + ` (scope_kind, scope_id, source, event_id))`,
+		`CREATE TABLE ` + pgSchema.Table("run_event_notifications") + ` (scope_kind TEXT, scope_id TEXT, source TEXT, event_id TEXT,
+			FOREIGN KEY (scope_kind, scope_id, source, event_id) REFERENCES ` + pgSchema.Table("run_event_inbox") + ` (scope_kind, scope_id, source, event_id))`,
+		`CREATE TABLE ` + pgSchema.Table("run_event_retention_cursor") + ` (id INTEGER PRIMARY KEY, received_at TIMESTAMPTZ)`,
+		`INSERT INTO ` + pgSchema.Table("run_event_inbox") + ` VALUES ('tenant', 'one', 'binding:a', 'e1', '{}')`,
+		`INSERT INTO ` + pgSchema.Table("run_event_waits") + ` VALUES ('tenant', 'one', 'run-1', 'reply', 'pending', '{}')`,
+		`INSERT INTO ` + pgSchema.Table("run_event_wait_scopes") + ` VALUES ('tenant', 'one')`,
+		`INSERT INTO ` + pgSchema.Table("run_event_consumptions") + ` VALUES ('tenant', 'one', 'binding:a', 'e1', 'run-1')`,
+		`INSERT INTO ` + pgSchema.Table("run_event_notifications") + ` VALUES ('tenant', 'one', 'binding:a', 'e1')`,
+		`INSERT INTO ` + pgSchema.Table("run_event_retention_cursor") + ` VALUES (1, now())`,
+		`INSERT INTO ` + pgSchema.Table("schema_migrations") + ` (version, name) VALUES (47, 'durable run event waits'), (49, 'run event retention'), (51, 'run event notifications')`,
+		`DELETE FROM ` + pgSchema.Table("schema_migrations") + ` WHERE version = 81`,
 	} {
-		if _, err := pgSchema.db.ExecContext(ctx, statement); err != nil {
+		if _, err := pgSchema.DB.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
 	}
-	if current, _, err := store.postgresSchemaCurrent(ctx, pgSchema.db); err != nil || current {
+	if current, _, err := store.postgresSchemaCurrent(ctx, pgSchema.DB); err != nil || current {
 		t.Fatalf("a database at 80 looks current: %v, %v", current, err)
 	}
 	_ = store.Close()

@@ -10,14 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
 
 func TestPostgresConcurrentColdStartsSerializeMigrationLeadership(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "openseal_migration_race_")
-	dsn := pgSchema.dsn
-	schema := pgSchema.name
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_migration_race_")
+	dsn := pgSchema.DSN
+	schema := pgSchema.Name
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	cleanup, err := sql.Open("postgres", dsn)
@@ -92,8 +93,8 @@ func TestPostgresCurrentSchemaStartupIsBounded(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_, pgSchema := openTestPostgresStore(t, "openseal_migration_current_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
 
 	events := make(chan PostgresMigrationEvent, 4)
 	startedAt := time.Now()
@@ -123,22 +124,22 @@ func TestPostgresLaterMigrationDoesNotReplayActivityProjectionBackfill(t *testin
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	_, pgSchema := openTestPostgresStore(t, "openseal_migration_activity_gate_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
-	if _, err := pgSchema.db.ExecContext(ctx, `INSERT INTO `+pgSchema.table("run_activity")+`
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
+	if _, err := pgSchema.DB.ExecContext(ctx, `INSERT INTO `+pgSchema.Table("run_activity")+`
 		(scope_kind,scope_id,run_id,sequence,id,event_type,created_at,payload)
 		VALUES ('tenant','1','migration-proof',1,'migration-proof','proof',CURRENT_TIMESTAMP,'{}'::jsonb)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pgSchema.db.ExecContext(ctx, `
-		CREATE FUNCTION `+pgSchema.quoted()+`.reject_activity_backfill() RETURNS trigger
+	if _, err := pgSchema.DB.ExecContext(ctx, `
+		CREATE FUNCTION `+pgSchema.Quoted()+`.reject_activity_backfill() RETURNS trigger
 		LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'activity projection backfill replayed'; END $$;
-		CREATE TRIGGER reject_activity_backfill BEFORE UPDATE ON `+pgSchema.table("run_activity")+`
-		FOR EACH STATEMENT EXECUTE FUNCTION `+pgSchema.quoted()+`.reject_activity_backfill()
+		CREATE TRIGGER reject_activity_backfill BEFORE UPDATE ON `+pgSchema.Table("run_activity")+`
+		FOR EACH STATEMENT EXECUTE FUNCTION `+pgSchema.Quoted()+`.reject_activity_backfill()
 	`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("schema_migrations")+` WHERE version = $1`, currentPostgresSchemaVersion); err != nil {
+	if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("schema_migrations")+` WHERE version = $1`, currentPostgresSchemaVersion); err != nil {
 		t.Fatal(err)
 	}
 
@@ -157,9 +158,9 @@ func TestPostgresLaterMigrationDoesNotReplayActivityProjectionBackfill(t *testin
 }
 
 func TestPostgresMigrationLockWaitIsObservableAndBounded(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "openseal_migration_wait_")
-	dsn := pgSchema.dsn
-	schema := pgSchema.name
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_migration_wait_")
+	dsn := pgSchema.DSN
+	schema := pgSchema.Name
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	blocker, err := sql.Open("postgres", dsn)
@@ -247,8 +248,8 @@ func TestPostgresSkillCatalogSourceVariantsMigrateAndRestart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "openseal_skill_variants_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
 	catalog := skill.NewCatalogWithStore(primary)
 	identities := []string{"catalog::@alice/research", "catalog::@bob/research"}
 	for _, identity := range identities {
@@ -289,10 +290,10 @@ func TestPostgresSkillCatalogSourceVariantsMigrateAndRestart(t *testing.T) {
 	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
 		t.Fatalf("failed rollback changed schema version = %d, %v", version, err)
 	}
-	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("skill_bindings")+` WHERE source_identity = $1`, identities[1]); err != nil {
+	if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("skill_bindings")+` WHERE source_identity = $1`, identities[1]); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("skill_definitions")+` WHERE source_identity = $1`, identities[1]); err != nil {
+	if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("skill_definitions")+` WHERE source_identity = $1`, identities[1]); err != nil {
 		t.Fatal(err)
 	}
 	if err := primary.RollbackPostgresMigrations(ctx, 17); err != nil {

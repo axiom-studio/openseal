@@ -20,10 +20,10 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "openseal_test_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
 	var retiredTable sql.NullString
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, schema+".runs").Scan(&retiredTable); err != nil {
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, schema+".runs").Scan(&retiredTable); err != nil {
 		t.Fatal(err)
 	}
 	if retiredTable.Valid {
@@ -474,15 +474,15 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("rolled-back schema version = %d, %v", version, err)
 	}
 	var actionTables int
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('action_calls','approval_checkpoints')`, pgSchema.name).Scan(&actionTables); err != nil || actionTables != 0 {
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('action_calls','approval_checkpoints')`, pgSchema.Name).Scan(&actionTables); err != nil || actionTables != 0 {
 		t.Fatalf("action tables after rollback = %d, %v", actionTables, err)
 	}
 	var recentTables int
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('projects','agent_builder_cutover_drafts')`, pgSchema.name).Scan(&recentTables); err != nil || recentTables != 0 {
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name IN ('projects','agent_builder_cutover_drafts')`, pgSchema.Name).Scan(&recentTables); err != nil || recentTables != 0 {
 		t.Fatalf("recent tables after rollback = %d, %v", recentTables, err)
 	}
 	// A store opened on the rolled-back schema migrates it forward again.
-	pgSchema.open(t)
+	openPostgresStoreOn(t, pgSchema)
 	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
 		t.Fatalf("reapplied schema version = %d, %v", version, err)
 	}
@@ -492,8 +492,8 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "openseal_collab_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
@@ -564,8 +564,8 @@ func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "openseal_commands_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)

@@ -40,7 +40,7 @@ func TestConversationTaskSQLPostgresMigrationRollbackAndReapply(t *testing.T) {
 	if err != nil || current || version != conversationTaskMigrationVersion-1 {
 		t.Fatalf("rollback migration ledger = current:%v version:%d err:%v", current, version, err)
 	}
-	restarted := schema.open(t)
+	restarted := openPostgresStoreOn(t, schema)
 	current, version, err = restarted.postgresSchemaCurrent(t.Context(), restarted.db)
 	if err != nil || !current || version != currentPostgresSchemaVersion {
 		t.Fatalf("reapplied migration ledger = current:%v version:%d err:%v", current, version, err)

@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // Postgres store test (schema migrations): it moves to store/postgres in
@@ -14,16 +16,16 @@ import (
 
 func newAgentSessionMigrationStore(t *testing.T, prefix string) (*PostgresStore, string, string) {
 	t.Helper()
-	pgSchema := newTestPostgresSchema(t, prefix)
-	dsn := pgSchema.dsn
-	schema := pgSchema.name
+	pgSchema := storetest.NewPostgresSchema(t, prefix)
+	dsn := pgSchema.DSN
+	schema := pgSchema.Name
 	ctx := context.Background()
 	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
+		_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 		_ = store.Close()
 	})
 	return store, dsn, schema

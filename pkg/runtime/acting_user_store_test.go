@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -88,11 +89,11 @@ func TestAgentRunActingUserIsImmutable(t *testing.T) {
 
 func actingUserPostgresStore(t *testing.T) *PostgresStore {
 	t.Helper()
-	pgSchema := newTestPostgresSchema(t, "openseal_acting_user_")
-	dsn := pgSchema.dsn
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_acting_user_")
+	dsn := pgSchema.DSN
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

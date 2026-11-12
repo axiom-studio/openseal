@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -43,10 +44,10 @@ func forEachDependencySessionStore(t *testing.T, fn func(f *sessionConformance, 
 
 func openDependencySessionPostgres(t *testing.T) dependencySessionStore {
 	t.Helper()
-	pgSchema := newTestPostgresSchema(t, "dependency_session_")
-	dsn := pgSchema.dsn
+	pgSchema := storetest.NewPostgresSchema(t, "dependency_session_")
+	dsn := pgSchema.DSN
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

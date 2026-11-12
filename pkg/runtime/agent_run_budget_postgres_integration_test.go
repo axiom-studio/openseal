@@ -13,8 +13,8 @@ func TestPostgresAgentRunAttemptBudgetIsReplicaSafeAndRestartDurable(t *testing.
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "openseal_attempt_budget_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)

@@ -36,9 +36,9 @@ func forConversationTaskSQLStores(t *testing.T, test func(*testing.T, conversati
 		test(t, conversationTaskSQLTestFixture{store: open(t), reopen: open})
 	})
 	t.Run("postgres", func(t *testing.T) {
-		pgSchema := newTestPostgresSchema(t, "openseal_task_sql_")
-		dsn := pgSchema.dsn
-		schema := pgSchema.name
+		pgSchema := storetest.NewPostgresSchema(t, "openseal_task_sql_")
+		dsn := pgSchema.DSN
+		schema := pgSchema.Name
 		open := func(t *testing.T) conversationTaskSQLTestStore {
 			store, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
 			if err != nil {
@@ -54,7 +54,7 @@ func forConversationTaskSQLStores(t *testing.T, test func(*testing.T, conversati
 				return
 			}
 			defer cleanup.Close()
-			_, _ = cleanup.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
+			_, _ = cleanup.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 		})
 		test(t, conversationTaskSQLTestFixture{store: store, reopen: open})
 	})

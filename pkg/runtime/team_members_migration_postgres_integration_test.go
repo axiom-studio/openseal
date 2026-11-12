@@ -7,25 +7,27 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestPostgresTeamMembersMigrationReplacesRoleSlotsAndRollsBackTwice(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "members_")
-	dsn := pgSchema.dsn
-	schema := pgSchema.name
+	pgSchema := storetest.NewPostgresSchema(t, "members_")
+	dsn := pgSchema.DSN
+	schema := pgSchema.Name
 	ctx := context.Background()
 	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
+		_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 		_ = store.Close()
 	})
 	// query qualifies the bare table names and numbers the placeholders.
 	query := func(statement string) string {
 		for _, table := range []string{"team_definition_amendments", "team_definitions", "team_deployments", "agent_requests"} {
-			statement = strings.ReplaceAll(statement, " "+table+" ", " "+pgSchema.table(table)+" ")
+			statement = strings.ReplaceAll(statement, " "+table+" ", " "+pgSchema.Table(table)+" ")
 		}
 		statement = strings.ReplaceAll(statement, "SELECT payload FROM", "SELECT payload::text FROM")
 		for n := 1; strings.Contains(statement, "?"); n++ {
@@ -42,27 +44,27 @@ func TestPostgresTeamMembersMigrationReplacesRoleSlotsAndRollsBackTwice(t *testi
 			t.Fatal(err)
 		}
 	}
-	seedRoleSlotTeams(t, pgSchema.db, query)
-	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("schema_migrations")+` WHERE version = $1`, teamMembersMigrationVersion); err != nil {
+	seedRoleSlotTeams(t, pgSchema.DB, query)
+	if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("schema_migrations")+` WHERE version = $1`, teamMembersMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
 	reopen()
-	requireTeamRows(t, pgSchema.db, query, "migrated", memberTeamRows)
+	requireTeamRows(t, pgSchema.DB, query, "migrated", memberTeamRows)
 	requireMemberTeamsLoad(t, store)
 	// A second open finds the migration applied; one that lost only the
 	// ledger row runs it again and changes nothing.
 	reopen()
-	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("schema_migrations")+` WHERE version = $1`, teamMembersMigrationVersion); err != nil {
+	if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("schema_migrations")+` WHERE version = $1`, teamMembersMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
 	reopen()
-	requireTeamRows(t, pgSchema.db, query, "migrated again", memberTeamRows)
+	requireTeamRows(t, pgSchema.DB, query, "migrated again", memberTeamRows)
 
 	for _, stage := range []string{"rolled back", "rolled back again"} {
 		if err := store.RollbackPostgresMigrations(ctx, teamMembersMigrationVersion-1); err != nil {
 			t.Fatalf("%s: %v", stage, err)
 		}
-		requireTeamRows(t, pgSchema.db, query, stage, rolledBackTeamRows)
+		requireTeamRows(t, pgSchema.DB, query, stage, rolledBackTeamRows)
 		if version, err := store.PostgresSchemaVersion(ctx); err != nil || version != teamMembersMigrationVersion-1 {
 			t.Fatalf("%s: schema version = %d, %v", stage, version, err)
 		}
@@ -73,7 +75,7 @@ func TestPostgresTeamMembersMigrationReplacesRoleSlotsAndRollsBackTwice(t *testi
 	if err := store.RollbackPostgresMigrations(ctx, 10); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := pgSchema.db.BeginTx(ctx, nil)
+	tx, err := pgSchema.DB.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

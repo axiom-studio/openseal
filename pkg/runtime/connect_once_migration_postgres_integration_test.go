@@ -6,28 +6,30 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestPostgresConnectOnceMigration(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "connect_once_")
-	dsn := pgSchema.dsn
-	schema := pgSchema.name
+	pgSchema := storetest.NewPostgresSchema(t, "connect_once_")
+	dsn := pgSchema.DSN
+	schema := pgSchema.Name
 	ctx := context.Background()
 	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
+		_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 		_ = store.Close()
 	})
 	h := connectOnceMigrationHarness{
-		db:    func() *sql.DB { return pgSchema.db },
-		table: func(name string) string { return pgSchema.table(name) },
+		db:    func() *sql.DB { return pgSchema.DB },
+		table: func(name string) string { return pgSchema.Table(name) },
 		store: func() connectOnceMigrationStore { return store },
 		rerun: func(t *testing.T) {
 			t.Helper()
-			if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("schema_migrations")+` WHERE version = $1`, connectOnceMigrationVersion); err != nil {
+			if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("schema_migrations")+` WHERE version = $1`, connectOnceMigrationVersion); err != nil {
 				t.Fatal(err)
 			}
 		},

@@ -5,6 +5,8 @@ package runtime
 import (
 	"context"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // Store test: rolls back and reapplies the Postgres store's credential lease
@@ -12,8 +14,8 @@ import (
 
 func TestPostgresActionCredentialLeaseMigrationRollsBackAndReapplies(t *testing.T) {
 	ctx := context.Background()
-	pgSchema := newTestPostgresSchema(t, "openseal_credential_lease_")
-	primary := pgSchema.open(t)
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_credential_lease_")
+	primary := openPostgresStoreOn(t, pgSchema)
 	if err := primary.RollbackPostgresMigrations(ctx, 20); err != nil {
 		t.Fatal(err)
 	}
@@ -22,9 +24,9 @@ func TestPostgresActionCredentialLeaseMigrationRollsBackAndReapplies(t *testing.
 		t.Fatalf("rolled-back version = %d, %v", version, err)
 	}
 	var exists bool
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT EXISTS (
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT EXISTS (
 		SELECT 1 FROM information_schema.tables WHERE table_schema=$1 AND table_name='action_credential_lease_redemptions'
-	)`, pgSchema.name).Scan(&exists); err != nil || exists {
+	)`, pgSchema.Name).Scan(&exists); err != nil || exists {
 		t.Fatalf("redemption table after rollback exists=%t, err=%v", exists, err)
 	}
 	if err := primary.migrate(ctx); err != nil {
@@ -33,9 +35,9 @@ func TestPostgresActionCredentialLeaseMigrationRollsBackAndReapplies(t *testing.
 	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
 		t.Fatalf("reapplied version = %d, %v", version, err)
 	}
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT EXISTS (
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT EXISTS (
 		SELECT 1 FROM information_schema.tables WHERE table_schema=$1 AND table_name='action_credential_lease_redemptions'
-	)`, pgSchema.name).Scan(&exists); err != nil || !exists {
+	)`, pgSchema.Name).Scan(&exists); err != nil || !exists {
 		t.Fatalf("redemption table after reapply exists=%t, err=%v", exists, err)
 	}
 }

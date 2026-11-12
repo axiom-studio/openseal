@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -142,10 +143,10 @@ func TestSQLiteActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *tes
 }
 
 func TestPostgresActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "openseal_lease_umbrella_")
-	dsn := pgSchema.dsn
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_lease_umbrella_")
+	dsn := pgSchema.DSN
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +158,7 @@ func TestPostgresActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pgSchema.db.ExecContext(ctx, `INSERT INTO `+pgSchema.table("action_calls")+`
+		if _, err := pgSchema.DB.ExecContext(ctx, `INSERT INTO `+pgSchema.Table("action_calls")+`
 			(id,scope_kind,scope_id,run_id,status,available_at,lease_owner,lease_expires_at,revision,created_at,payload)
 			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`, call.ID, call.Scope.Kind, call.Scope.ID, call.RunID, call.Status,
 			call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload)); err != nil {

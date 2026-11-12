@@ -15,13 +15,13 @@ func TestPostgresWorkingFilesTableIsCreatedOnAnExistingDatabase(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	_, pgSchema := openTestPostgresStore(t, "openseal_working_files_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
 	// Put the database back to how the previous kernel left it.
-	if _, err := pgSchema.db.ExecContext(ctx, `DROP TABLE `+pgSchema.table("artifact_working_files")); err != nil {
+	if _, err := pgSchema.DB.ExecContext(ctx, `DROP TABLE `+pgSchema.Table("artifact_working_files")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("schema_migrations")+` WHERE version = $1`, artifactWorkingFilesMigrationVersion); err != nil {
+	if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("schema_migrations")+` WHERE version = $1`, artifactWorkingFilesMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
 	reopened, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))

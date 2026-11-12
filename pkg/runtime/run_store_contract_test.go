@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // These contracts use the same public commands and durable scheduling boundary
@@ -45,8 +47,8 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 		}, db: openTestSQLiteDB(t, path), table: func(name string) string { return name }})
 	})
 	t.Run("postgres", func(t *testing.T) {
-		pgSchema := newTestPostgresSchema(t, "run_store_contract_")
-		schema, dsn := pgSchema.name, pgSchema.dsn
+		pgSchema := storetest.NewPostgresSchema(t, "run_store_contract_")
+		schema, dsn := pgSchema.Name, pgSchema.DSN
 		current, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
 		if err != nil {
 			t.Fatal(err)
@@ -61,7 +63,7 @@ func runStoreContractFixtures(t *testing.T, test func(*testing.T, runStoreContra
 				t.Fatal(err)
 			}
 			return current
-		}, db: pgSchema.db, table: pgSchema.table})
+		}, db: pgSchema.DB, table: pgSchema.Table})
 	})
 }
 

@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func conversationOriginFilterStores() map[string]func(*testing.T) ConversationStore {
@@ -19,11 +21,11 @@ func conversationOriginFilterStores() map[string]func(*testing.T) ConversationSt
 			return store
 		},
 		"postgres": func(t *testing.T) ConversationStore {
-			pgSchema := newTestPostgresSchema(t, "openseal_origin_filter_")
-			dsn := pgSchema.dsn
+			pgSchema := storetest.NewPostgresSchema(t, "openseal_origin_filter_")
+			dsn := pgSchema.DSN
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
-			store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
+			store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
 			if err != nil {
 				t.Fatal(err)
 			}

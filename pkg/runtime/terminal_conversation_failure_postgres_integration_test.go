@@ -6,9 +6,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func terminalFailureMigrationPostgres(t *testing.T) (*PostgresStore, testPostgresSchema) {
+func terminalFailureMigrationPostgres(t *testing.T) (*PostgresStore, storetest.PostgresSchema) {
 	t.Helper()
 	return openTestPostgresStore(t, "failure_reporting_")
 }
@@ -23,18 +25,18 @@ func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrig
 		t.Fatal(err)
 	}
 	var oldFunction string
-	if err := schema.db.QueryRowContext(t.Context(), `SELECT pg_get_functiondef(($1||'.enqueue_run_terminal_report()')::regprocedure)`, schema.name).Scan(&oldFunction); err != nil || strings.Contains(oldFunction, "terminal_revision") {
+	if err := schema.DB.QueryRowContext(t.Context(), `SELECT pg_get_functiondef(($1||'.enqueue_run_terminal_report()')::regprocedure)`, schema.Name).Scan(&oldFunction); err != nil || strings.Contains(oldFunction, "terminal_revision") {
 		t.Fatalf("rollback did not restore exact old conflict contract: %v", err)
 	}
 	run = terminalReportingContractComplete(t, store, run, now)
 	expires := now.Add(time.Minute)
-	if _, err := schema.db.ExecContext(t.Context(), `UPDATE `+schema.table("run_terminal_reports")+` SET lease_owner='old-reader',lease_expires_at=$1,available_at=$1,attempts=1 WHERE run_id=$2`, expires, run.ID); err != nil {
+	if _, err := schema.DB.ExecContext(t.Context(), `UPDATE `+schema.Table("run_terminal_reports")+` SET lease_owner='old-reader',lease_expires_at=$1,available_at=$1,attempts=1 WHERE run_id=$2`, expires, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	// All old readers/writers are stopped before upgrade, as required by the
 	// explicit schema59 deployment barrier. A process reopen exercises the
 	// canonical migration ledger instead of hidden ad-hoc DDL.
-	upgraded := schema.open(t)
+	upgraded := openPostgresStoreOn(t, schema)
 	if version, err := upgraded.PostgresSchemaVersion(t.Context()); err != nil || version != postgresSchemaHead(t) {
 		t.Fatalf("ledger migration absent: %d %v", version, err)
 	}
@@ -50,7 +52,7 @@ func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrig
 	}
 	terminalReportingContractAssertMessage(t, upgraded, run, conversation, trigger)
 	var function string
-	if err := schema.db.QueryRowContext(t.Context(), `SELECT pg_get_functiondef(($1||'.enqueue_run_terminal_report()')::regprocedure)`, schema.name).Scan(&function); err != nil || !strings.Contains(function, "terminal_revision") || !strings.Contains(function, "OLD.status IS DISTINCT FROM NEW.status") {
+	if err := schema.DB.QueryRowContext(t.Context(), `SELECT pg_get_functiondef(($1||'.enqueue_run_terminal_report()')::regprocedure)`, schema.Name).Scan(&function); err != nil || !strings.Contains(function, "terminal_revision") || !strings.Contains(function, "OLD.status IS DISTINCT FROM NEW.status") {
 		t.Fatalf("version59 trigger lacks attempt identity/transition fence: %v", err)
 	}
 }

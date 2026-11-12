@@ -6,6 +6,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // The store scenarios of action_loop_store_test.go run on Postgres through
@@ -14,9 +16,9 @@ import (
 
 func openLoopActionPostgresStore(t *testing.T) *PostgresStore {
 	t.Helper()
-	pgSchema := newTestPostgresSchema(t, "openseal_loop_actions_")
-	dsn := pgSchema.dsn
-	store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(pgSchema.name))
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_loop_actions_")
+	dsn := pgSchema.DSN
+	store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

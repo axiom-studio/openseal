@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -23,9 +24,9 @@ import (
 // schema. The schema is dropped when the test ends.
 func newAgentSessionPostgresStores(t *testing.T, n int) []*PostgresStore {
 	t.Helper()
-	pgSchema := newTestPostgresSchema(t, "agent_session_")
-	dsn := pgSchema.dsn
-	schema := pgSchema.name
+	pgSchema := storetest.NewPostgresSchema(t, "agent_session_")
+	dsn := pgSchema.DSN
+	schema := pgSchema.Name
 	ctx := context.Background()
 	stores := make([]*PostgresStore, n)
 	for i := range stores {

@@ -11,8 +11,8 @@ import (
 
 func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testing.T) {
 	store, pgSchema := openTestPostgresStore(t, "gateway_authority_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
 	replica, err := NewPostgresStore(t.Context(), dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
@@ -55,11 +55,11 @@ func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testin
 	}
 	// The fixture began at the current schema. Remove only this isolated
 	// schema's migration marker to exercise an actual legacy-row upgrade.
-	if _, err := pgSchema.db.ExecContext(ctx, `DELETE FROM `+pgSchema.table("schema_migrations")+` WHERE version=$1`, externalConversationGatewayAuthorityMigrationVersion); err != nil {
+	if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("schema_migrations")+` WHERE version=$1`, externalConversationGatewayAuthorityMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		tx, err := pgSchema.db.BeginTx(ctx, nil)
+		tx, err := pgSchema.DB.BeginTx(ctx, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

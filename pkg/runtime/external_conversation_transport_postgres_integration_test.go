@@ -17,13 +17,13 @@ func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *test
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "external_conversation_")
-	dsn, schema := pgSchema.dsn, pgSchema.name
+	dsn, schema := pgSchema.DSN, pgSchema.Name
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var migration string
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT name FROM `+pgSchema.table("schema_migrations")+`
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT name FROM `+pgSchema.Table("schema_migrations")+`
 		WHERE version=$1`, externalConversationTransportMigrationVersion).Scan(&migration); err != nil ||
 		migration != "external conversation endpoints and transport" {
 		t.Fatalf("migration = %q, %v", migration, err)

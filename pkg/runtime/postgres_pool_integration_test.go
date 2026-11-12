@@ -7,12 +7,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestPostgresPoolBudgetBoundsConcurrentConnectionsAndExposesWaits(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "openseal_pool_budget_")
-	dsn := pgSchema.dsn
-	schema := pgSchema.name
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_pool_budget_")
+	dsn := pgSchema.DSN
+	schema := pgSchema.Name
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	store, err := NewPostgresStore(ctx, dsn,
@@ -57,9 +59,9 @@ func TestPostgresPoolBudgetBoundsConcurrentConnectionsAndExposesWaits(t *testing
 }
 
 func TestPostgresPoolBudgetBoundsTwoOverlappingReplicas(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "openseal_pool_replicas_")
-	dsn := pgSchema.dsn
-	schema := pgSchema.name
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_pool_replicas_")
+	dsn := pgSchema.DSN
+	schema := pgSchema.Name
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool := PostgresPoolConfig{

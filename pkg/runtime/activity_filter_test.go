@@ -5,6 +5,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // Every ActivityFilter field must narrow a read the same way on every store and in
@@ -87,11 +89,11 @@ func TestListActivityAppliesEveryFilterInBothDirections(t *testing.T) {
 
 func activityFilterPostgresStore(t *testing.T) *PostgresStore {
 	t.Helper()
-	pgSchema := newTestPostgresSchema(t, "openseal_activity_filter_")
-	dsn := pgSchema.dsn
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_activity_filter_")
+	dsn := pgSchema.DSN
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}

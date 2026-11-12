@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -18,7 +19,7 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 	ctx, primary, replica, pgSchema := newActionCredentialLeasePostgresStores(t)
 	request, _ := createPostgresActionCredentialLeaseFixture(t, ctx, primary, pgSchema, "nonce-concurrent-00000001")
 	cleanupCutoff := time.Now().UTC()
-	if _, err := pgSchema.db.ExecContext(ctx, `INSERT INTO `+pgSchema.table("action_credential_lease_redemptions")+`
+	if _, err := pgSchema.DB.ExecContext(ctx, `INSERT INTO `+pgSchema.Table("action_credential_lease_redemptions")+`
 		(issuer,audience,nonce_digest,scope_kind,scope_id,run_id,action_call_id,action_lease_id,deployment_id,binding_id,binding_revision,transport,credential_fields_digest,expires_at,consumed_at)
 		SELECT 'expired-issuer','expired-audience',md5(value::text),'tenant','expired','run','action','lease','agent','binding',1,'test',md5('fields'),$1,$1
 		FROM generate_series(1,130) AS value`, cleanupCutoff.Add(-time.Minute)); err != nil {
@@ -52,7 +53,7 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 		t.Fatalf("redemptions succeeded=%d replayed=%d, want 1/1", succeeded, replayed)
 	}
 	var expired int
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+pgSchema.table("action_credential_lease_redemptions")+`
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+pgSchema.Table("action_credential_lease_redemptions")+`
 		WHERE expires_at <= $1`, cleanupCutoff).Scan(&expired); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 		t.Fatalf("bounded cleanup left %d expired rows, want 2", expired)
 	}
 	var nonceDigest, transport, fieldsDigest string
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT nonce_digest, transport, credential_fields_digest FROM `+pgSchema.table("action_credential_lease_redemptions")+`
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT nonce_digest, transport, credential_fields_digest FROM `+pgSchema.Table("action_credential_lease_redemptions")+`
 		WHERE issuer=$1 AND audience=$2`, request.Lease.Issuer, request.Lease.Audience).Scan(&nonceDigest, &transport, &fieldsDigest); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +76,7 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 	if err := replica.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted := pgSchema.open(t)
+	restarted := openPostgresStoreOn(t, pgSchema)
 	if err := restarted.RedeemActionCredentialLease(ctx, request); !errors.Is(err, ErrActionCredentialLeaseReplay) {
 		t.Fatalf("restart replay error = %v, want %v", err, ErrActionCredentialLeaseReplay)
 	}
@@ -95,7 +96,7 @@ func TestPostgresActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testi
 		t.Fatalf("authority drift error = %v, want %v", err, ErrActionCredentialLeaseMismatch)
 	}
 	var consumed int
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+pgSchema.table("action_credential_lease_redemptions")+`
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+pgSchema.Table("action_credential_lease_redemptions")+`
 		WHERE issuer=$1 AND audience=$2`, request.Lease.Issuer, request.Lease.Audience).Scan(&consumed); err != nil {
 		t.Fatal(err)
 	}
@@ -106,15 +107,15 @@ func TestPostgresActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testi
 
 // newActionCredentialLeasePostgresStores opens two stores on one fresh schema,
 // as two replicas would, with the test's own schema connection.
-func newActionCredentialLeasePostgresStores(t *testing.T) (context.Context, *PostgresStore, *PostgresStore, testPostgresSchema) {
+func newActionCredentialLeasePostgresStores(t *testing.T) (context.Context, *PostgresStore, *PostgresStore, storetest.PostgresSchema) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
-	pgSchema := newTestPostgresSchema(t, "openseal_credential_lease_")
-	return ctx, pgSchema.open(t), pgSchema.open(t), pgSchema
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_credential_lease_")
+	return ctx, openPostgresStoreOn(t, pgSchema), openPostgresStoreOn(t, pgSchema), pgSchema
 }
 
-func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store *PostgresStore, pgSchema testPostgresSchema, nonce string) (ActionCredentialLeaseRedemptionRequest, *skill.Binding) {
+func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store *PostgresStore, pgSchema storetest.PostgresSchema, nonce string) (ActionCredentialLeaseRedemptionRequest, *skill.Binding) {
 	t.Helper()
 	now := time.Now().UTC().Round(0)
 	scope := Scope{Kind: "tenant", ID: "tenant-credential-lease"}
@@ -163,7 +164,7 @@ func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Contex
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pgSchema.db.ExecContext(ctx, `INSERT INTO `+pgSchema.table("action_calls")+`
+	if _, err := pgSchema.DB.ExecContext(ctx, `INSERT INTO `+pgSchema.Table("action_calls")+`
 		(id,scope_kind,scope_id,run_id,status,available_at,lease_owner,lease_expires_at,revision,created_at,payload)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`, call.ID, scope.Kind, scope.ID, run.ID, call.Status,
 		call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload)); err != nil {

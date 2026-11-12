@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -188,9 +189,9 @@ func TestReplyRunGuardMissingRunAndNilGuard(t *testing.T) {
 // that the guarded commit waits on it without having taken the
 // conversation's advisory lock or row (SPEC §4.1 lock order).
 func TestGuardedReplyLocksRunBeforeConversation(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "openseal_reply_guard_")
-	dsn := pgSchema.dsn
-	store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(pgSchema.name))
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_reply_guard_")
+	dsn := pgSchema.DSN
+	store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,13 +203,13 @@ func TestGuardedReplyLocksRunBeforeConversation(t *testing.T) {
 	defer cancel()
 	record := f.reply("final", f.guard())
 
-	blocker, err := pgSchema.db.BeginTx(ctx, nil)
+	blocker, err := pgSchema.DB.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer blocker.Rollback()
 	var revision int64
-	if err := blocker.QueryRowContext(ctx, `SELECT revision FROM `+pgSchema.table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`,
+	if err := blocker.QueryRowContext(ctx, `SELECT revision FROM `+pgSchema.Table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`,
 		f.scope.Kind, f.scope.ID, f.run.ID).Scan(&revision); err != nil {
 		t.Fatal(err)
 	}
@@ -219,8 +220,8 @@ func TestGuardedReplyLocksRunBeforeConversation(t *testing.T) {
 	}()
 	for {
 		var blocked int
-		if err := pgSchema.db.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND strpos(query,$1)>0 AND strpos(query,'FOR UPDATE')>0 AND pid<>pg_backend_pid()`,
-			pgSchema.table("agent_runs")).Scan(&blocked); err != nil {
+		if err := pgSchema.DB.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND strpos(query,$1)>0 AND strpos(query,'FOR UPDATE')>0 AND pid<>pg_backend_pid()`,
+			pgSchema.Table("agent_runs")).Scan(&blocked); err != nil {
 			t.Fatal(err)
 		}
 		if blocked > 0 {
@@ -234,7 +235,7 @@ func TestGuardedReplyLocksRunBeforeConversation(t *testing.T) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	probe, err := pgSchema.db.BeginTx(ctx, nil)
+	probe, err := pgSchema.DB.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +247,7 @@ func TestGuardedReplyLocksRunBeforeConversation(t *testing.T) {
 	if !free {
 		t.Fatal("guarded commit took the conversation advisory lock before the Run row")
 	}
-	if _, err := probe.ExecContext(ctx, `SELECT 1 FROM `+pgSchema.table("conversations")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE NOWAIT`,
+	if _, err := probe.ExecContext(ctx, `SELECT 1 FROM `+pgSchema.Table("conversations")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE NOWAIT`,
 		f.scope.Kind, f.scope.ID, f.conversation.ID); err != nil {
 		t.Fatalf("guarded commit locked the conversation row before the Run row: %v", err)
 	}

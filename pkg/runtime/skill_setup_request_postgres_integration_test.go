@@ -8,12 +8,14 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestPostgresSkillSetupLifecycleAndMigration(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "openseal_setup_")
-	dsn := pgSchema.dsn
-	schema := pgSchema.name
+	pgSchema := storetest.NewPostgresSchema(t, "openseal_setup_")
+	dsn := pgSchema.DSN
+	schema := pgSchema.Name
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	db, err := sql.Open("postgres", dsn)

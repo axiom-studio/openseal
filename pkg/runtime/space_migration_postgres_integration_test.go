@@ -14,8 +14,8 @@ import (
 func openSpacesPostgresStore(t *testing.T, prefix string) (*PostgresStore, string, string) {
 	t.Helper()
 	store, pgSchema := openTestPostgresStore(t, prefix)
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
 	return store, dsn, schema
 }
 

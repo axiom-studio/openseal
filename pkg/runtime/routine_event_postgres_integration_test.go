@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
@@ -20,15 +21,15 @@ import (
 
 func openPostgresRoutineEventStore(t *testing.T) *PostgresStore {
 	t.Helper()
-	pgSchema := newTestPostgresSchema(t, "routine_events_")
-	dsn := pgSchema.dsn
+	pgSchema := storetest.NewPostgresSchema(t, "routine_events_")
+	dsn := pgSchema.DSN
 	ctx := context.Background()
-	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.name))
+	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(pgSchema.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
+		_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 		_ = store.Close()
 	})
 	return store
@@ -166,16 +167,16 @@ func explainWithoutSeqScan(t *testing.T, ctx context.Context, store *PostgresSto
 // one at 79, fills the index columns of event Tasks written before it, and
 // rolls back by dropping the tables while keeping the two columns.
 func TestPostgresMigration80RoutineEvents(t *testing.T) {
-	pgSchema := newTestPostgresSchema(t, "routine_events_migration_")
-	dsn := pgSchema.dsn
-	schema := pgSchema.name
+	pgSchema := storetest.NewPostgresSchema(t, "routine_events_migration_")
+	dsn := pgSchema.DSN
+	schema := pgSchema.Name
 	ctx := context.Background()
 	store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
+		_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 		_ = store.Close()
 	})
 	assertRoutineEventTables(t, ctx, store, true)
@@ -195,7 +196,7 @@ func TestPostgresMigration80RoutineEvents(t *testing.T) {
 	if err := store.CreateRunbookActivation(ctx, activation); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pgSchema.db.ExecContext(ctx, `UPDATE `+pgSchema.table("runbook_activations")+` SET event_kind = NULL, event_source_ref = NULL`); err != nil {
+	if _, err := pgSchema.DB.ExecContext(ctx, `UPDATE `+pgSchema.Table("runbook_activations")+` SET event_kind = NULL, event_source_ref = NULL`); err != nil {
 		t.Fatal(err)
 	}
 	_ = store.Close()
@@ -212,7 +213,7 @@ func TestPostgresMigration80RoutineEvents(t *testing.T) {
 		t.Fatalf("keys after migrating = %#v, %v", keys, err)
 	}
 	var indexes int
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_indexes WHERE schemaname = $1
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_indexes WHERE schemaname = $1
 		AND indexname IN ('runbook_activations_event_idx', 'runbook_activations_event_kind_idx', 'routine_events_work_idx',
 			'routine_events_prune_idx', 'routine_event_batches_open_idx', 'routine_event_batches_started_idx')`, schema).Scan(&indexes); err != nil || indexes != 6 {
 		t.Fatalf("indexes = %d, %v", indexes, err)

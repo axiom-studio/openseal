@@ -20,8 +20,8 @@ func TestPostgresSkillSourceArtifactsAreReplicaSafeScopedDurableAndCollectable(t
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	primary, pgSchema := openTestPostgresStore(t, "openseal_skill_source_")
-	schema := pgSchema.name
-	dsn := pgSchema.dsn
+	schema := pgSchema.Name
+	dsn := pgSchema.DSN
 	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +103,7 @@ func TestPostgresSkillSourceArtifactsAreReplicaSafeScopedDurableAndCollectable(t
 		t.Fatal(err)
 	}
 	var tables int
-	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=$1 AND table_name IN ('skill_source_artifacts','skill_source_artifact_references')`, pgSchema.name).Scan(&tables); err != nil || tables != 0 {
+	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=$1 AND table_name IN ('skill_source_artifacts','skill_source_artifact_references')`, pgSchema.Name).Scan(&tables); err != nil || tables != 0 {
 		t.Fatalf("source artifact tables after rollback=%d err=%v", tables, err)
 	}
 	if err := primary.migrate(ctx); err != nil {
