@@ -45,14 +45,6 @@ func putStoredRun(t testing.TB, store *SQLiteStore, run *models.AgentRun) {
 	}
 }
 
-func putStoredTurn(t testing.TB, store *SQLiteStore, turn *models.AgentTurn) {
-	t.Helper()
-	deleteStoredRow(t, store, "agent_turns", turn.Scope, turn.ID)
-	if err := insertSQLiteAgentTurn(context.Background(), store.db, turn); err != nil {
-		t.Fatalf("put turn %s: %v", turn.ID, err)
-	}
-}
-
 func putStoredAction(t testing.TB, store *SQLiteStore, call *models.ActionCall) {
 	t.Helper()
 	deleteStoredRow(t, store, "action_calls", call.Scope, call.ID)
@@ -66,55 +58,6 @@ func putStoredApproval(t testing.TB, store *SQLiteStore, approval *models.Approv
 	deleteStoredRow(t, store, "approval_checkpoints", approval.Scope, approval.ID)
 	if err := insertSQLiteApprovalCheckpoint(context.Background(), store.db, approval); err != nil {
 		t.Fatalf("put approval %s: %v", approval.ID, err)
-	}
-}
-
-// putStoredConversationTask stores task with workRun as the state of its work
-// Run, which the store keeps beside the task.
-func putStoredConversationTask(t testing.TB, store *SQLiteStore, task *models.ConversationTask, workRun *models.AgentRun) {
-	t.Helper()
-	deleteStoredRow(t, store, "conversation_tasks", task.Scope, task.ID)
-	if err := insertSQLiteConversationTask(context.Background(), store.db, task, workRun.Status); err != nil {
-		t.Fatalf("put conversation task %s: %v", task.ID, err)
-	}
-}
-
-func putStoredExternalEndpoint(t testing.TB, store *SQLiteStore, endpoint *models.ExternalConversationEndpoint) {
-	t.Helper()
-	deleteStoredRow(t, store, "external_conversation_endpoints", endpoint.Scope, endpoint.ID)
-	if err := insertSQLiteExternalConversationEndpoint(context.Background(), store.db, endpoint); err != nil {
-		t.Fatalf("put endpoint %s: %v", endpoint.ID, err)
-	}
-}
-
-func putStoredExternalDelivery(t testing.TB, store *SQLiteStore, delivery *models.ExternalConversationDelivery) {
-	t.Helper()
-	deleteStoredRow(t, store, "external_conversation_deliveries", delivery.Scope, delivery.ID)
-	if err := insertSQLiteExternalConversationDelivery(context.Background(), store.db, delivery); err != nil {
-		t.Fatalf("put delivery %s: %v", delivery.ID, err)
-	}
-}
-
-func putStoredArtifact(t testing.TB, store *SQLiteStore, artifact *models.Artifact) {
-	t.Helper()
-	ctx := context.Background()
-	execStoreSQL(t, store, `DELETE FROM artifacts WHERE scope_kind = ? AND scope_id = ? AND id = ? AND version = ?`,
-		artifact.Scope.Kind, artifact.Scope.ID, artifact.ID, artifact.Version)
-	var latest int64
-	if err := store.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM artifacts WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
-		artifact.Scope.Kind, artifact.Scope.ID, artifact.ID).Scan(&latest); err != nil {
-		t.Fatal(err)
-	}
-	if err := insertSQLiteArtifactVersion(ctx, store.db, artifact, latest); err != nil {
-		t.Fatalf("put artifact %s: %v", artifact.ID, err)
-	}
-}
-
-func putStoredAgentRequest(t testing.TB, store *SQLiteStore, request *models.AgentRequest) {
-	t.Helper()
-	deleteStoredRow(t, store, "agent_requests", request.Scope, request.ID)
-	if err := insertSQLiteAgentRequest(context.Background(), store.db, request); err != nil {
-		t.Fatalf("put agent request %s: %v", request.ID, err)
 	}
 }
 
