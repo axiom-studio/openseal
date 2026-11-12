@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"sort"
 	"sync"
@@ -39,7 +38,7 @@ type dependencyRetirementSnapshot struct {
 func TestDependencyRetirementTerminalSourceDoesNotReviveOrCancelChildren(t *testing.T) {
 	for _, status := range []AgentRunStatus{AgentRunStatusCanceled, AgentRunStatusFailed, AgentRunStatusCompleted} {
 		t.Run(string(status), func(t *testing.T) {
-			forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
+			forDependencyRetirementBackends(t, func(t *testing.T, store dependencyRetirementStore, backend actionLifecycleBackend) {
 				fixture := newDependencyRetirementFixture(t, store)
 				completed := fixture.finishChild(t, "alpha", AgentRunStatusCompleted)
 				fixture.resolveChild(t, "alpha", completed)
@@ -70,7 +69,7 @@ func TestDependencyRetirementTerminalSourceDoesNotReviveOrCancelChildren(t *test
 				}
 				fixture.assertWaitingWork(t, 0)
 				fixture.assertReplayUnchanged(t, request, after)
-				fixture.store = reopenDependencyRetirementStore(t, store)
+				fixture.store = reopenDependencyRetirementStore(t, backend)
 				fixture.assertReplayUnchanged(t, request, fixture.snapshot(t))
 				fixture.assertWaitingWork(t, 0)
 			})
@@ -521,12 +520,17 @@ func TestDependencyRetirementHistoricalTypedSourceCleansUpAfterAuthorityChanges(
 
 func forDependencyRetirementStores(t *testing.T, test func(*testing.T, dependencyRetirementStore)) {
 	t.Helper()
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	forDependencyRetirementBackends(t, func(t *testing.T, store dependencyRetirementStore, _ actionLifecycleBackend) { test(t, store) })
+}
+
+func forDependencyRetirementBackends(t *testing.T, test func(*testing.T, dependencyRetirementStore, actionLifecycleBackend)) {
+	t.Helper()
+	forActionLifecycleBackends(t, func(t *testing.T, kernel KernelStore, backend actionLifecycleBackend) {
 		store, ok := kernel.(dependencyRetirementStore)
 		if !ok {
 			t.Fatalf("%T does not implement atomic dependency reconciliation", kernel)
 		}
-		test(t, store)
+		test(t, store, backend)
 	})
 }
 
@@ -799,33 +803,9 @@ func dependencyRetirementChildResult(branch string, child *AgentRun) map[string]
 	return map[string]interface{}{"branchId": branch, "checkpoint": child.Checkpoint, "output": child.Output}
 }
 
-func reopenDependencyRetirementStore(t *testing.T, store dependencyRetirementStore) dependencyRetirementStore {
+// reopenDependencyRetirementStore opens the store again on backend's data, as
+// a restart would.
+func reopenDependencyRetirementStore(t *testing.T, backend actionLifecycleBackend) dependencyRetirementStore {
 	t.Helper()
-	switch original := store.(type) {
-	case *SQLiteStore:
-		var sequence int
-		var name, path string
-		if err := original.db.QueryRowContext(t.Context(), `PRAGMA database_list`).Scan(&sequence, &name, &path); err != nil {
-			t.Fatal(err)
-		}
-		if err := original.Close(); err != nil {
-			t.Fatal(err)
-		}
-		reopened, err := NewSQLiteStore(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = reopened.Close() })
-		return reopened
-	case *PostgresStore:
-		reopened, err := NewPostgresStore(t.Context(), os.Getenv("OPENSEAL_TEST_POSTGRES_DSN"), WithPostgresSchema(original.schema))
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = reopened.Close() })
-		return reopened
-	default:
-		t.Fatalf("unsupported dependency store %T", store)
-		return nil
-	}
+	return backend.reopen(t).(dependencyRetirementStore)
 }

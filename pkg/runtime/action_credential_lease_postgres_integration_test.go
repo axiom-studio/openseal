@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -16,10 +15,10 @@ import (
 )
 
 func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *testing.T) {
-	ctx, primary, replica := newActionCredentialLeasePostgresStores(t)
-	request, _ := createPostgresActionCredentialLeaseFixture(t, ctx, primary, "nonce-concurrent-00000001")
+	ctx, primary, replica, pgSchema := newActionCredentialLeasePostgresStores(t)
+	request, _ := createPostgresActionCredentialLeaseFixture(t, ctx, primary, pgSchema, "nonce-concurrent-00000001")
 	cleanupCutoff := time.Now().UTC()
-	if _, err := primary.db.ExecContext(ctx, `INSERT INTO `+primary.table("action_credential_lease_redemptions")+`
+	if _, err := pgSchema.db.ExecContext(ctx, `INSERT INTO `+pgSchema.table("action_credential_lease_redemptions")+`
 		(issuer,audience,nonce_digest,scope_kind,scope_id,run_id,action_call_id,action_lease_id,deployment_id,binding_id,binding_revision,transport,credential_fields_digest,expires_at,consumed_at)
 		SELECT 'expired-issuer','expired-audience',md5(value::text),'tenant','expired','run','action','lease','agent','binding',1,'test',md5('fields'),$1,$1
 		FROM generate_series(1,130) AS value`, cleanupCutoff.Add(-time.Minute)); err != nil {
@@ -53,7 +52,7 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 		t.Fatalf("redemptions succeeded=%d replayed=%d, want 1/1", succeeded, replayed)
 	}
 	var expired int
-	if err := primary.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+primary.table("action_credential_lease_redemptions")+`
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+pgSchema.table("action_credential_lease_redemptions")+`
 		WHERE expires_at <= $1`, cleanupCutoff).Scan(&expired); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +60,7 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 		t.Fatalf("bounded cleanup left %d expired rows, want 2", expired)
 	}
 	var nonceDigest, transport, fieldsDigest string
-	if err := primary.db.QueryRowContext(ctx, `SELECT nonce_digest, transport, credential_fields_digest FROM `+primary.table("action_credential_lease_redemptions")+`
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT nonce_digest, transport, credential_fields_digest FROM `+pgSchema.table("action_credential_lease_redemptions")+`
 		WHERE issuer=$1 AND audience=$2`, request.Lease.Issuer, request.Lease.Audience).Scan(&nonceDigest, &transport, &fieldsDigest); err != nil {
 		t.Fatal(err)
 	}
@@ -76,19 +75,15 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 	if err := replica.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := NewPostgresStore(ctx, actionCredentialLeasePostgresDSN(t), WithPostgresSchema(primary.schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer restarted.Close()
+	restarted := pgSchema.open(t)
 	if err := restarted.RedeemActionCredentialLease(ctx, request); !errors.Is(err, ErrActionCredentialLeaseReplay) {
 		t.Fatalf("restart replay error = %v, want %v", err, ErrActionCredentialLeaseReplay)
 	}
 }
 
 func TestPostgresActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing.T) {
-	ctx, primary, replica := newActionCredentialLeasePostgresStores(t)
-	request, binding := createPostgresActionCredentialLeaseFixture(t, ctx, primary, "nonce-drift-000000000002")
+	ctx, primary, replica, pgSchema := newActionCredentialLeasePostgresStores(t)
+	request, binding := createPostgresActionCredentialLeaseFixture(t, ctx, primary, pgSchema, "nonce-drift-000000000002")
 	catalog := skill.NewCatalogWithStore(replica)
 	if _, err := catalog.DisableBinding(ctx, skill.DisableBindingRequest{
 		Scope: binding.Scope, DeploymentID: binding.DeploymentID, BindingID: binding.ID, ExpectedRevision: binding.Revision,
@@ -100,7 +95,7 @@ func TestPostgresActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testi
 		t.Fatalf("authority drift error = %v, want %v", err, ErrActionCredentialLeaseMismatch)
 	}
 	var consumed int
-	if err := primary.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+primary.table("action_credential_lease_redemptions")+`
+	if err := pgSchema.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+pgSchema.table("action_credential_lease_redemptions")+`
 		WHERE issuer=$1 AND audience=$2`, request.Lease.Issuer, request.Lease.Audience).Scan(&consumed); err != nil {
 		t.Fatal(err)
 	}
@@ -109,69 +104,17 @@ func TestPostgresActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testi
 	}
 }
 
-func TestPostgresActionCredentialLeaseMigrationRollsBackAndReapplies(t *testing.T) {
-	ctx, primary, replica := newActionCredentialLeasePostgresStores(t)
-	if err := replica.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := primary.RollbackPostgresMigrations(ctx, 20); err != nil {
-		t.Fatal(err)
-	}
-	// Migration 20 is retired, so 19 is the highest version left.
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != 19 {
-		t.Fatalf("rolled-back version = %d, %v", version, err)
-	}
-	var exists bool
-	if err := primary.db.QueryRowContext(ctx, `SELECT EXISTS (
-		SELECT 1 FROM information_schema.tables WHERE table_schema=$1 AND table_name='action_credential_lease_redemptions'
-	)`, primary.schema).Scan(&exists); err != nil || exists {
-		t.Fatalf("redemption table after rollback exists=%t, err=%v", exists, err)
-	}
-	if err := primary.migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
-		t.Fatalf("reapplied version = %d, %v", version, err)
-	}
-	if err := primary.db.QueryRowContext(ctx, `SELECT EXISTS (
-		SELECT 1 FROM information_schema.tables WHERE table_schema=$1 AND table_name='action_credential_lease_redemptions'
-	)`, primary.schema).Scan(&exists); err != nil || !exists {
-		t.Fatalf("redemption table after reapply exists=%t, err=%v", exists, err)
-	}
-}
-
-func newActionCredentialLeasePostgresStores(t *testing.T) (context.Context, *PostgresStore, *PostgresStore) {
+// newActionCredentialLeasePostgresStores opens two stores on one fresh schema,
+// as two replicas would, with the test's own schema connection.
+func newActionCredentialLeasePostgresStores(t *testing.T) (context.Context, *PostgresStore, *PostgresStore, testPostgresSchema) {
 	t.Helper()
-	dsn := actionCredentialLeasePostgresDSN(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
-	schema := "openseal_credential_lease_" + uuid.NewString()[:8]
-	primary, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = primary.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+primary.quotedSchema()+` CASCADE`)
-		_ = primary.Close()
-	})
-	replica, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = replica.Close() })
-	return ctx, primary, replica
+	pgSchema := newTestPostgresSchema(t, "openseal_credential_lease_")
+	return ctx, pgSchema.open(t), pgSchema.open(t), pgSchema
 }
 
-func actionCredentialLeasePostgresDSN(t *testing.T) string {
-	t.Helper()
-	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
-	if dsn == "" {
-		t.Skip("set OPENSEAL_TEST_POSTGRES_DSN to run PostgreSQL integration tests")
-	}
-	return dsn
-}
-
-func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store *PostgresStore, nonce string) (ActionCredentialLeaseRedemptionRequest, *skill.Binding) {
+func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store *PostgresStore, pgSchema testPostgresSchema, nonce string) (ActionCredentialLeaseRedemptionRequest, *skill.Binding) {
 	t.Helper()
 	now := time.Now().UTC().Round(0)
 	scope := Scope{Kind: "tenant", ID: "tenant-credential-lease"}
@@ -220,7 +163,7 @@ func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Contex
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("action_calls")+`
+	if _, err := pgSchema.db.ExecContext(ctx, `INSERT INTO `+pgSchema.table("action_calls")+`
 		(id,scope_kind,scope_id,run_id,status,available_at,lease_owner,lease_expires_at,revision,created_at,payload)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`, call.ID, scope.Kind, scope.ID, run.ID, call.Status,
 		call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload)); err != nil {

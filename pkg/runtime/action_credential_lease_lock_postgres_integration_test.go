@@ -15,8 +15,8 @@ import (
 // transaction held the Run and needed an exclusive binding lock while the
 // other held its binding lock and needed the same Run.
 func TestPostgresActionCredentialLeaseSerializesWithProposalWithoutDeadlock(t *testing.T) {
-	ctx, primary, replica := newActionCredentialLeasePostgresStores(t)
-	request, _ := createPostgresActionCredentialLeaseFixture(t, ctx, primary, "nonce-proposal-lock-order-0001")
+	ctx, primary, replica, pgSchema := newActionCredentialLeasePostgresStores(t)
+	request, _ := createPostgresActionCredentialLeaseFixture(t, ctx, primary, pgSchema, "nonce-proposal-lock-order-0001")
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	call, err := primary.GetActionCall(ctx, request.Lease.Scope, request.Lease.ActionCallID)
@@ -27,18 +27,18 @@ func TestPostgresActionCredentialLeaseSerializesWithProposalWithoutDeadlock(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocker, err := primary.db.BeginTx(ctx, nil)
+	blocker, err := pgSchema.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer blocker.Rollback()
 	var revision int64
-	if err := blocker.QueryRowContext(ctx, `SELECT revision FROM `+primary.table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`, run.Scope.Kind, run.Scope.ID, run.ID).Scan(&revision); err != nil {
+	if err := blocker.QueryRowContext(ctx, `SELECT revision FROM `+pgSchema.table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`, run.Scope.Kind, run.Scope.ID, run.ID).Scan(&revision); err != nil {
 		t.Fatal(err)
 	}
 	redeemed := make(chan error, 1)
 	go func() { redeemed <- replica.RedeemActionCredentialLease(ctx, request) }()
-	waitForBlockedPostgresActionRunQueries(t, ctx, primary, 1)
+	waitForBlockedPostgresActionRunQueries(t, ctx, pgSchema, 1)
 
 	now := time.Now().UTC()
 	proposedCall := cloneActionCall(call)
@@ -65,7 +65,7 @@ func TestPostgresActionCredentialLeaseSerializesWithProposalWithoutDeadlock(t *t
 		})
 		submitted <- err
 	}()
-	waitForBlockedPostgresActionRunQueries(t, ctx, primary, 2)
+	waitForBlockedPostgresActionRunQueries(t, ctx, pgSchema, 2)
 	if err := blocker.Commit(); err != nil {
 		t.Fatal(err)
 	}
@@ -81,13 +81,13 @@ func TestPostgresActionCredentialLeaseSerializesWithProposalWithoutDeadlock(t *t
 	}
 }
 
-func waitForBlockedPostgresActionRunQueries(t *testing.T, ctx context.Context, store *PostgresStore, minimum int) {
+func waitForBlockedPostgresActionRunQueries(t *testing.T, ctx context.Context, pgSchema testPostgresSchema, minimum int) {
 	t.Helper()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		var blocked int
-		if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND strpos(query,$1)>0 AND strpos(query,'FOR UPDATE')>0 AND pid<>pg_backend_pid()`, store.table("agent_runs")).Scan(&blocked); err != nil {
+		if err := pgSchema.db.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND strpos(query,$1)>0 AND strpos(query,'FOR UPDATE')>0 AND pid<>pg_backend_pid()`, pgSchema.table("agent_runs")).Scan(&blocked); err != nil {
 			t.Fatal(err)
 		}
 		if blocked >= minimum {

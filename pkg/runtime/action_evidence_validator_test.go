@@ -36,7 +36,7 @@ func (f *runHistoryFixture) add(call ActionCall) {
 	}
 	call.Scope, call.TurnID = f.scope, "step-1"
 	call.CreatedAt, call.UpdatedAt, call.CompletedAt = completed, completed, &completed
-	putStoredAction(f.t, f.store, &call)
+	seedActionCall(f.t, f.store, &call)
 }
 
 func (f *runHistoryFixture) history() RunActionHistory {

@@ -443,7 +443,7 @@ func TestLoopRecoveredRunningReadRedispatches(t *testing.T) {
 func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 	for _, boundary := range []string{"before_claim", "after_claim", "after_catalog"} {
 		t.Run(boundary, func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+			forActionLifecycleBackends(t, func(t *testing.T, store KernelStore, backend actionLifecycleBackend) {
 				if boundary == "before_claim" {
 					if _, ok := store.(*SQLiteStore); !ok {
 						t.Skip("the store-side claim gate is seeded through the SQLite store")
@@ -455,8 +455,7 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				gate := &SkillRuntimeMaintenance{Scope: f.scope, SkillID: "release", OperationID: "upgrade-release", Owner: "controller", Active: true, Revision: 1}
 				wrapped := &loopMaintenanceStore{KernelStore: store, gate: gate, active: boundary != "after_catalog"}
 				if boundary == "before_claim" {
-					sqlite := store.(*SQLiteStore)
-					if err := writeSkillRuntimeMaintenance(t.Context(), sqlite.db, "skill_runtime_maintenance", gate, false); err != nil {
+					if err := writeSkillRuntimeMaintenance(t.Context(), backend.db, "skill_runtime_maintenance", gate, false); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -496,7 +495,7 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				// Maintenance ends: the same call executes on resume.
 				wrapped.active = false
 				if boundary == "before_claim" {
-					execStoreSQL(t, store.(*SQLiteStore), `DELETE FROM skill_runtime_maintenance WHERE scope_kind = ? AND scope_id = ? AND skill_id = ?`, f.scope.Kind, f.scope.ID, "release")
+					execSQL(t, backend.db, `DELETE FROM skill_runtime_maintenance WHERE scope_kind = ? AND scope_id = ? AND skill_id = ?`, f.scope.Kind, f.scope.ID, "release")
 				}
 				catalog.afterResolve = nil
 				f.clock = held.RetryAt
