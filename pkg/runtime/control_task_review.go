@@ -236,9 +236,5 @@ func bindingModelCredential(binding *TurnRunnerBinding) *capability.CredentialRe
 	if producer == nil {
 		return nil
 	}
-	preparer, _ := producer.preparer.(*catalogModelStepPreparer)
-	if preparer == nil {
-		return nil
-	}
-	return cloneHostedCredentialReference(preparer.config.ModelCredential)
+	return producer.ModelCredential()
 }

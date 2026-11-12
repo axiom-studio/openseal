@@ -79,6 +79,12 @@ func loopControlRegistry() controlRegistry {
 	return newControlRegistry(append(builtinControlTools(), runbookControlTools()...)...)
 }
 
+// ModelCredential is a copy of the model credential the prepared steps send
+// (nil: the host's default).
+func (p *catalogModelStepPreparer) ModelCredential() *capability.CredentialReference {
+	return cloneHostedCredentialReference(p.config.ModelCredential)
+}
+
 // CapabilitySet is the visible capability set of the step: the binding's
 // authorized catalog with the loads on the session path. The tool executor
 // builds the same set to run load_capabilities and search_capabilities.

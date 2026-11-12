@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 // ModelStepProducer is the StepProducer of every model-driven Run: it builds
@@ -58,6 +60,22 @@ func NewModelStepProducer(host StepHost, preparer ModelStepPreparer, store Model
 }
 
 func (p *ModelStepProducer) Kind() StepProducerKind { return StepProducerModel }
+
+// modelCredentialSource is a preparer that knows the model credential its
+// steps send.
+type modelCredentialSource interface {
+	ModelCredential() *capability.CredentialReference
+}
+
+// ModelCredential is a copy of the model credential the producer's steps
+// send, nil when its preparer names none (the host's default).
+func (p *ModelStepProducer) ModelCredential() *capability.CredentialReference {
+	source, _ := p.preparer.(modelCredentialSource)
+	if source == nil {
+		return nil
+	}
+	return source.ModelCredential()
+}
 
 // PlanStepBudget is the step's token reservation on a bounded Run: the
 // request's input estimate for every provider attempt plus the host's
