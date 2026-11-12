@@ -228,7 +228,7 @@ func scanSQLiteExternalConversationDelivery(scanner sqliteExternalConversationSc
 }
 
 // stampInteractionUmbrellas forwards to sqlstore.StampInteractionUmbrellas.
-func stampInteractionUmbrellas(ctx context.Context, db sqlstore.MigrationDB, table func(string) string, placeholder func(int) string) error {
+func stampInteractionUmbrellas(ctx context.Context, db sqlstore.ExecQuerier, table func(string) string, placeholder func(int) string) error {
 	return sqlstore.StampInteractionUmbrellas(ctx, db, table, placeholder)
 }
 
@@ -394,7 +394,7 @@ func teamRegistryPayloads(deployment *kernelteam.Deployment, activation workforc
 }
 
 // stripTeamSkillGrants forwards to sqlstore.StripTeamSkillGrants.
-func stripTeamSkillGrants(ctx context.Context, db sqlstore.MigrationDB, table func(string) string, placeholder func(int) string) error {
+func stripTeamSkillGrants(ctx context.Context, db sqlstore.ExecQuerier, table func(string) string, placeholder func(int) string) error {
 	return sqlstore.StripTeamSkillGrants(ctx, db, table, placeholder)
 }
 

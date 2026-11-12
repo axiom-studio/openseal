@@ -108,6 +108,8 @@ func foldChangeSetLineages(rows []changeSetLineageRow) (map[string][]string, []c
 	return leaves, removed
 }
 
+// ExecQuerier is the part of *sql.DB, *sql.Tx and *sql.Conn the shared
+// migrations use, so each store runs them on its own transaction.
 type ExecQuerier interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)

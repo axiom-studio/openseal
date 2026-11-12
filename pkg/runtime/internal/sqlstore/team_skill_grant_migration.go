@@ -2,7 +2,6 @@ package sqlstore
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -23,16 +22,11 @@ var teamSkillGrantDefinitionPaths = []struct {
 	{"team_definition_amendments", []string{"candidate"}, []string{"scope_kind", "scope_id", "id"}},
 }
 
-type MigrationDB interface {
-	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
-}
-
 // stripTeamSkillGrants removes roles[].skillGrants from every stored Team
 // definition and recomputes the digest of each stored definition version.
 // table maps a bare table name to its qualified name; placeholder renders the
 // n-th bind parameter, and "?" selects SQLite.
-func StripTeamSkillGrants(ctx context.Context, db MigrationDB, table func(string) string, placeholder func(int) string) error {
+func StripTeamSkillGrants(ctx context.Context, db ExecQuerier, table func(string) string, placeholder func(int) string) error {
 	sqlite := placeholder(1) == "?"
 	for _, location := range teamSkillGrantDefinitionPaths {
 		payloadText, payloadValue := "payload::text", placeholder(1)+"::jsonb"

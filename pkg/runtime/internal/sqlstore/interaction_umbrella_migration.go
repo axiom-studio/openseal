@@ -23,7 +23,7 @@ type interactionUmbrellaRow struct {
 // dismissed when that member is no longer on the roster. Settled requests
 // without an owner are history and are deleted. Rows that already carry an
 // owner are left alone, so the step is safe to replay.
-func StampInteractionUmbrellas(ctx context.Context, db MigrationDB, table func(string) string, placeholder func(int) string) error {
+func StampInteractionUmbrellas(ctx context.Context, db ExecQuerier, table func(string) string, placeholder func(int) string) error {
 	sqlite := placeholder(1) == "?"
 	unstamped, payloadValue := `NOT (payload ? 'owner')`, placeholder(1)+`::jsonb`
 	if sqlite {
@@ -96,7 +96,7 @@ func jsonNumber(value interface{}) float64 {
 
 // interactionConversationUmbrella returns the owner of row's conversation and
 // whether the member that asked is still on its roster.
-func interactionConversationUmbrella(ctx context.Context, db MigrationDB, table func(string) string, placeholder func(int) string, row interactionUmbrellaRow) (models.ObjectiveOwner, bool, error) {
+func interactionConversationUmbrella(ctx context.Context, db ExecQuerier, table func(string) string, placeholder func(int) string, row interactionUmbrellaRow) (models.ObjectiveOwner, bool, error) {
 	var owner models.ObjectiveOwner
 	rows, err := db.QueryContext(ctx, `SELECT owner_type, owner_id FROM `+table("conversations")+` WHERE scope_kind = `+placeholder(1)+` AND scope_id = `+placeholder(2)+` AND id = `+placeholder(3), row.scopeKind, row.scopeID, row.conversationID)
 	if err != nil {

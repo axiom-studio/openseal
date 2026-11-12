@@ -18,7 +18,7 @@ const teamRetiredLeadRoleID = "lead"
 // pending amendment still has to match its base's.
 type TeamMembersMigration struct {
 	Ctx   context.Context
-	DB    MigrationDB
+	DB    ExecQuerier
 	Table func(string) string
 	// placeholder renders the n-th bind parameter; "?" selects SQLite.
 	Placeholder func(int) string

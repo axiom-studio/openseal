@@ -23,7 +23,7 @@ import (
 // Every step only rewrites a row that differs from its repaired value, so
 // the migration is safe to replay; SQLite replays it on every open.
 type ConnectOnceMigration struct {
-	DB     MigrationDB
+	DB     ExecQuerier
 	Table  func(string) string
 	SQLite bool
 }
