@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -24,8 +25,8 @@ func TestRunbookActionOwnerChecksTheCurrentRoster(t *testing.T) {
 	bound := func(deployment string) *skill.BoundAction {
 		return &skill.BoundAction{Binding: &skill.Binding{Scope: catalogScope, DeploymentID: deployment}}
 	}
-	team := chatRosterTeam(scope, "harp")
-	teams := chatRosterTeams{team: team}
+	team := routineRosterTeam(scope, "harp")
+	teams := routineRosterTeams{team: team}
 	member := &models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "harp"}
 	for _, deployment := range []string{"harp", "crew"} {
 		if err := runbookActionOwner(ctx, teams, member, bound(deployment)); err != nil {
@@ -55,10 +56,10 @@ func TestRunbookActionOwnerChecksTheCurrentRoster(t *testing.T) {
 // A Team member creates a routine in its Team chat as in its own chat: the
 // Team owns it and the member runs it, only while the member is on the roster.
 func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
-	ctx, store, scope := t.Context(), newTestKernelStore(t), models.Scope{Kind: "tenant", ID: "task-test"}
+	ctx, store, scope := t.Context(), conversationtest.NewStore(t), models.Scope{Kind: "tenant", ID: "task-test"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}
 	service := conversation.NewConversationService(store)
-	seedTestSpace(t, store, scope)
+	conversationtest.SeedSpace(t, store, scope)
 	chat, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Recurring research", IdempotencyKey: "chat"})
 	if err != nil {
 		t.Fatal(err)
@@ -86,9 +87,9 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 	}
 	args := map[string]interface{}{"title": "Forecast update", "goal": "Read the current public forecast and summarize it with its source.", "trigger": map[string]interface{}{"schedule": map[string]interface{}{"cron": "0 */30 * * * *", "timezone": "Asia/Kolkata", "maximumOccurrences": float64(2)}},
 		"brief": map[string]interface{}{"summary": "Reads the public forecast every thirty minutes and posts a summary here.", "grants": []interface{}{}}}
-	team := chatRosterTeam(scope, "writer")
+	team := routineRosterTeam(scope, "writer")
 	team.ID = owner.ID
-	teams := chatRosterTeams{team: team}
+	teams := routineRosterTeams{team: team}
 	validator, err := NewRunbookActionValidator(store)
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +116,7 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 		t.Fatalf("Team routine = %#v, %v", activations, err)
 	}
 	agents := kernelagent.NewRegistryWithStore(kernelagent.NewMemoryStore())
-	agentDefinition := sqliteAgentDefinition("1.0.0")
+	agentDefinition := routineAgentDefinition("1.0.0")
 	if _, err := agents.RegisterDefinition(ctx, agentDefinition); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +124,7 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Each firing rechecks the roster; a removed member's routine is unverified, so the scheduler pauses it.
-	reader := teamRosterPortfolio{Store: store, team: team}
+	reader := routineRosterPortfolio{Store: store, team: team}
 	if err := validateScheduledTaskTarget(ctx, reader, agents, activations[0]); err != nil {
 		t.Fatalf("member routine target = %v", err)
 	}

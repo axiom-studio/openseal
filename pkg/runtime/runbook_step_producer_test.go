@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	runtimecontrol "github.com/axiom-studio/openseal/pkg/runtime/control"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -40,15 +41,15 @@ func TestRunbookProducerEmitsPinnedGovernedCallAndConsumesActionCall(t *testing.
 		"done":  {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{"content": {Ref: "/steps/fetch/content"}}}},
 	}}
 	calls := modelsteptest.FixedActionCalls{}
-	producer := newTestRunbookProducer(t, definition, "manual", calls)
+	producer := newRoutineTestProducer(t, definition, "manual", calls)
 	if producer.Kind() != models.StepProducerDeterministic {
 		t.Fatalf("kind = %s", producer.Kind())
 	}
-	action := webFetchAction()
+	action := routineWebFetchAction()
 	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{action}}
 	run := &models.AgentRun{ID: "run-1", Context: map[string]interface{}{"url": "https://example.test/health"}}
 	path := &models.AgentSessionPath{}
-	first := produceRunbook(t, producer, runbookInput(run, 1, binding, path))
+	first := produceRoutineStep(t, producer, routineStepInput(run, 1, binding, path))
 	if len(first.ToolCalls) != 1 {
 		t.Fatalf("first = %#v", first)
 	}
@@ -75,8 +76,8 @@ func TestRunbookProducerEmitsPinnedGovernedCallAndConsumesActionCall(t *testing.
 	// The loop applies the step, the inline executor records the call.
 	run.Checkpoint = first.KernelState
 	calls["call-1"] = &models.ActionCall{ID: "call-1", RunID: run.ID, SkillID: "web", SkillVersion: "1", Action: "fetch", ApprovalID: "approval-1", Status: models.ActionCallStatusSucceeded, Output: map[string]interface{}{"content": "ok"}}
-	appendRunbookToolResult(path, run.ID, call.ID, models.ToolEntryCompleted, "call-1")
-	second := produceRunbook(t, producer, runbookInput(run, 2, binding, path))
+	appendRoutineToolResult(path, run.ID, call.ID, models.ToolEntryCompleted, "call-1")
+	second := produceRoutineStep(t, producer, routineStepInput(run, 2, binding, path))
 	if second.Final == nil || second.Final.Status != models.AgentRunStatusCompleted || second.Final.Output["content"] != "ok" || len(second.ToolCalls) != 0 {
 		t.Fatalf("second=%#v", second)
 	}
@@ -98,10 +99,10 @@ func TestRunbookProducerEmitsPinnedGovernedCallAndConsumesActionCall(t *testing.
 }
 
 func TestRunbookProducerEmitsKernelForkCallAndRunsBoundedForEach(t *testing.T) {
-	definition := concurrentRunbookDefinition()
-	parallel := newTestRunbookProducer(t, definition, "manual", nil)
+	definition := routineConcurrentDefinition()
+	parallel := newRoutineTestProducer(t, definition, "manual", nil)
 	run := &models.AgentRun{ID: "parallel", Context: map[string]interface{}{"parallel": true}}
-	out := produceRunbook(t, parallel, runbookInput(run, 1, nil, nil))
+	out := produceRoutineStep(t, parallel, routineStepInput(run, 1, nil, nil))
 	if len(out.ToolCalls) != 1 || out.ToolCalls[0].Name != string(models.ControlToolRunbookFork) || out.ToolCalls[0].Directive == nil {
 		t.Fatalf("parallel=%#v", out)
 	}
@@ -124,7 +125,7 @@ func TestRunbookProducerEmitsKernelForkCallAndRunsBoundedForEach(t *testing.T) {
 		if _, copied := branch.Checkpoint[runbookTraceCheckpointKey]; copied {
 			t.Fatalf("branch %d copied the parent trace", index)
 		}
-		child := produceRunbook(t, parallel, runbookInput(&models.AgentRun{ID: "child", Checkpoint: branch.Checkpoint}, 1, nil, nil))
+		child := produceRoutineStep(t, parallel, routineStepInput(&models.AgentRun{ID: "child", Checkpoint: branch.Checkpoint}, 1, nil, nil))
 		if child.Final == nil || child.Final.Output["branchId"] != branch.ID || child.Final.Output["forkId"] != "fork" {
 			t.Fatalf("branch %d=%#v", index, child)
 		}
@@ -143,12 +144,12 @@ func TestRunbookProducerEmitsKernelForkCallAndRunsBoundedForEach(t *testing.T) {
 			"b": map[string]interface{}{"state": string(models.RunDependencyStateSatisfied), "result": map[string]interface{}{"checkpoint": map[string]interface{}{"state": map[string]interface{}{"b": true}}}},
 		},
 	}}}
-	joined := produceRunbook(t, parallel, runbookInput(run, 2, nil, nil))
+	joined := produceRoutineStep(t, parallel, routineStepInput(run, 2, nil, nil))
 	if joined.Final == nil || !reflect.DeepEqual(joined.Final.Output["state"], map[string]interface{}{"a": true, "b": true}) {
 		t.Fatalf("joined=%#v", joined)
 	}
-	loop := newTestRunbookProducer(t, definition, "manual", nil)
-	looped := produceRunbook(t, loop, runbookInput(&models.AgentRun{ID: "loop", Context: map[string]interface{}{"parallel": false, "items": []interface{}{"one", "two"}}}, 1, nil, nil))
+	loop := newRoutineTestProducer(t, definition, "manual", nil)
+	looped := produceRoutineStep(t, loop, routineStepInput(&models.AgentRun{ID: "loop", Context: map[string]interface{}{"parallel": false, "items": []interface{}{"one", "two"}}}, 1, nil, nil))
 	if looped.Final == nil || looped.Final.Output["state"].(map[string]interface{})["last"] != "two" {
 		t.Fatalf("loop=%#v", looped)
 	}
@@ -166,9 +167,9 @@ func TestRunbookValueRendersTypedTemplateSegments(t *testing.T) {
 }
 
 func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	control := &runtimecontrol.ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration.NewCollaborationService(store)}
-	producer := newTestRunbookProducer(t, concurrentRunbookDefinition(), "manual", store)
+	producer := newRoutineTestProducer(t, routineConcurrentDefinition(), "manual", store)
 	cc := agentrun.ControlContext{
 		Run:     &models.AgentRun{ID: "run", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "fork", "pendingFork": "fork", "pendingCall": "runbook.2.fork"}}},
 		Binding: &agentrun.TurnRunnerBinding{Producer: producer}, Origin: runtimecontrol.ControlOriginKernel,
@@ -211,7 +212,7 @@ func TestRunbookProducerKeepsModelMediaAndOversizeOutputOutOfCheckpoint(t *testi
 		},
 	}
 	calls := modelsteptest.FixedActionCalls{}
-	producer := newTestRunbookProducer(t, definition, "daily", calls)
+	producer := newRoutineTestProducer(t, definition, "daily", calls)
 	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{
 		{Name: "browser_screenshot", SkillID: "browser", Version: "1", Action: "screenshot"},
 		{Name: "browser_dump", SkillID: "browser", Version: "1", Action: "dump"},
@@ -219,7 +220,7 @@ func TestRunbookProducerKeepsModelMediaAndOversizeOutputOutOfCheckpoint(t *testi
 	run := &models.AgentRun{ID: "run-shots", Context: map[string]interface{}{}}
 	path := &models.AgentSessionPath{}
 	step := func(sequence int64) agentrun.StepOutput {
-		out := produceRunbook(t, producer, runbookInput(run, sequence, binding, path))
+		out := produceRoutineStep(t, producer, routineStepInput(run, sequence, binding, path))
 		run.Checkpoint = out.KernelState
 		return out
 	}
@@ -232,7 +233,7 @@ func TestRunbookProducerKeepsModelMediaAndOversizeOutputOutOfCheckpoint(t *testi
 	}
 	shot := step(1)
 	calls["shot-call"] = &models.ActionCall{ID: "shot-call", RunID: run.ID, Status: models.ActionCallStatusSucceeded, Output: screenshot}
-	appendRunbookToolResult(path, run.ID, shot.ToolCalls[0].ID, models.ToolEntryCompleted, "shot-call")
+	appendRoutineToolResult(path, run.ID, shot.ToolCalls[0].ID, models.ToolEntryCompleted, "shot-call")
 	dump := step(2)
 	if len(dump.ToolCalls) != 1 || dump.ToolCalls[0].Name != "browser_dump" {
 		t.Fatalf("dump=%#v", dump)
@@ -245,7 +246,7 @@ func TestRunbookProducerKeepsModelMediaAndOversizeOutputOutOfCheckpoint(t *testi
 		rows[index] = map[string]interface{}{"index": index, "text": strings.Repeat("x", 100)}
 	}
 	calls["dump-call"] = &models.ActionCall{ID: "dump-call", RunID: run.ID, Status: models.ActionCallStatusSucceeded, Output: map[string]interface{}{"rows": rows}}
-	appendRunbookToolResult(path, run.ID, dump.ToolCalls[0].ID, models.ToolEntryCompleted, "dump-call")
+	appendRoutineToolResult(path, run.ID, dump.ToolCalls[0].ID, models.ToolEntryCompleted, "dump-call")
 	if done := step(3); done.Final == nil || done.Final.Status != models.AgentRunStatusCompleted {
 		t.Fatalf("done=%#v", done)
 	}

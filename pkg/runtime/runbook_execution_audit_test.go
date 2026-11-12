@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -28,7 +29,7 @@ import (
 type runbookAuditRecords struct {
 	*sqlite.Store
 	turns      []*models.AgentTurn
-	actions    actionCallRecords
+	actions    routineActionCalls
 	approvals  []*models.ApprovalCheckpoint
 	artifacts  []*models.Artifact
 	requests   []*models.AgentRequest
@@ -44,7 +45,7 @@ func (s *runbookAuditRecords) ListAgentTurns(_ context.Context, filter models.Ag
 		}
 	}
 	sort.Slice(matched, func(i, j int) bool { return matched[i].Sequence < matched[j].Sequence })
-	return recordPage(matched, 0, filter.Limit), nil
+	return routineRecordPage(matched, 0, filter.Limit), nil
 }
 
 func (s *runbookAuditRecords) ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
@@ -58,7 +59,7 @@ func (s *runbookAuditRecords) ListApprovals(_ context.Context, filter models.App
 			matched = append(matched, models.CloneApprovalCheckpoint(approval))
 		}
 	}
-	return recordPage(matched, filter.Offset, filter.Limit), nil
+	return routineRecordPage(matched, filter.Offset, filter.Limit), nil
 }
 
 func (s *runbookAuditRecords) ListArtifacts(_ context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
@@ -68,7 +69,7 @@ func (s *runbookAuditRecords) ListArtifacts(_ context.Context, filter models.Art
 			matched = append(matched, models.CloneArtifact(artifact))
 		}
 	}
-	return recordPage(matched, filter.Offset, filter.Limit), nil
+	return routineRecordPage(matched, filter.Offset, filter.Limit), nil
 }
 
 func (s *runbookAuditRecords) ListAgentRequests(_ context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
@@ -78,7 +79,7 @@ func (s *runbookAuditRecords) ListAgentRequests(_ context.Context, filter models
 			matched = append(matched, models.CloneAgentRequest(request))
 		}
 	}
-	return recordPage(matched, filter.Offset, filter.Limit), nil
+	return routineRecordPage(matched, filter.Offset, filter.Limit), nil
 }
 
 func (s *runbookAuditRecords) ListExternalConversationDeliveries(_ context.Context, filter models.ExternalConversationDeliveryFilter) ([]*models.ExternalConversationDelivery, error) {
@@ -89,7 +90,7 @@ func (s *runbookAuditRecords) ListExternalConversationDeliveries(_ context.Conte
 			matched = append(matched, models.CloneExternalConversationDelivery(delivery))
 		}
 	}
-	return recordPage(matched, filter.Offset, filter.Limit), nil
+	return routineRecordPage(matched, filter.Offset, filter.Limit), nil
 }
 
 func (s *runbookAuditRecords) GetExternalConversationEndpoint(_ context.Context, scope models.Scope, id string) (*models.ExternalConversationEndpoint, error) {
@@ -111,10 +112,10 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 		Entrypoints: map[string]string{"daily": "browse"},
 		Steps: map[string]runbook.Step{
 			"browse": {Kind: runbook.StepAction, Name: "Browse sources", Action: &runbook.ActionStep{
-				SkillID: "browser", SkillVersion: "1", Action: "browse", Arguments: map[string]runbook.Value{"url": runbookLiteral("https://example.test")}, ResultPath: "/steps/browse", Next: "review",
+				SkillID: "browser", SkillVersion: "1", Action: "browse", Arguments: map[string]runbook.Value{"url": routineRunbookLiteral("https://example.test")}, ResultPath: "/steps/browse", Next: "review",
 			}},
 			"review": {Kind: runbook.StepDelegate, Name: "Review findings", Delegate: &runbook.DelegateStep{
-				AgentID: runbookLiteral("reviewer"), Goal: runbook.Value{Template: []runbook.TemplateSegment{{Text: "Review "}, {Ref: "/steps/browse/title"}}}, ResultPath: "/steps/review", Next: "done",
+				AgentID: routineRunbookLiteral("reviewer"), Goal: runbook.Value{Template: []runbook.TemplateSegment{{Text: "Review "}, {Ref: "/steps/browse/title"}}}, ResultPath: "/steps/review", Next: "done",
 			}},
 			"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{"report": {Ref: "/steps/review"}}}},
 		},
@@ -133,7 +134,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	}, "user", "operator", "audit"); err != nil {
 		t.Fatal(err)
 	}
-	store := &runbookAuditRecords{Store: newTestKernelStore(t)}
+	store := &runbookAuditRecords{Store: conversationtest.NewStore(t)}
 	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Research", Goal: "Find evidence", Status: models.ObjectiveStatusActive,
 	})
@@ -174,7 +175,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	persistedRun.Checkpoint = checkpoint
 	persistedRun.Status = models.AgentRunStatusRunning
 	persistedRun.UpdatedAt = now.Add(2 * time.Minute)
-	putTestRun(t, store.Store, persistedRun)
+	putRoutineRun(t, store.Store, persistedRun)
 	store.turns = append(store.turns, &models.AgentTurn{ID: "turn-browse", Scope: scope, RunID: run.ID, Sequence: 1, Status: models.AgentTurnStatusCompleted, OutputSummary: "Requested browser", Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now})
 	store.turns = append(store.turns, &models.AgentTurn{ID: "turn-review", Scope: scope, RunID: run.ID, Sequence: 2, Status: models.AgentTurnStatusCompleted, OutputSummary: "Delegated review", Revision: 1, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute), StartedAt: now.Add(2 * time.Minute)})
 	store.actions.put(&models.ActionCall{
@@ -265,7 +266,7 @@ func TestRunExecutionAuditProjectsConversationalRunAsOneGraph(t *testing.T) {
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "conversation-audit"}
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	store := &runbookAuditRecords{Store: newTestKernelStore(t)}
+	store := &runbookAuditRecords{Store: conversationtest.NewStore(t)}
 	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"},
 		AssignedAgentID: "assistant", Goal: "Respond to an Agent channel message", Source: models.RunSourceRequest,
