@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type ArtifactRetentionDeletion struct {
@@ -28,11 +30,11 @@ type ArtifactRetentionService struct {
 	now       func() time.Time
 }
 
-func NewArtifactRetentionService(store ArtifactStore, inspector ArtifactContentInspector, deleter ArtifactContentDeleter) (*ArtifactRetentionService, error) {
+func NewArtifactRetentionService(store ArtifactStore, inspector ArtifactContentInspector, deleter ArtifactContentDeleter, opts ...models.ServiceOption) (*ArtifactRetentionService, error) {
 	if store == nil || inspector == nil || deleter == nil {
 		return nil, errors.New("artifact catalog, content inspector, and content deleter are required")
 	}
-	return &ArtifactRetentionService{catalog: NewArtifactCatalog(store), inspector: inspector, deleter: deleter, now: time.Now}, nil
+	return &ArtifactRetentionService{catalog: NewArtifactCatalog(store, opts...), inspector: inspector, deleter: deleter, now: models.ClockFrom(opts)}, nil
 }
 
 func (s *ArtifactRetentionService) Sweep(ctx context.Context, scope Scope, offset, limit int) (*ArtifactRetentionSweepResult, error) {

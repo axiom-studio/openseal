@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -32,8 +33,8 @@ type DependencyCoordinator struct {
 	newID func() string
 }
 
-func NewDependencyCoordinator(store DependencyKernelStore) *DependencyCoordinator {
-	return &DependencyCoordinator{store: store, runs: store, now: time.Now, newID: uuid.NewString}
+func NewDependencyCoordinator(store DependencyKernelStore, opts ...models.ServiceOption) *DependencyCoordinator {
+	return &DependencyCoordinator{store: store, runs: store, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
 func (c *DependencyCoordinator) CreateRunDependencyGroup(ctx context.Context, req CreateRunDependencyGroupRequest) (*RunDependencyResult, error) {

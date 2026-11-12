@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -50,8 +51,8 @@ type CallbackRegistry struct {
 	newID    func() string
 }
 
-func NewCallbackRegistry(store CallbackRegistrationStore, resolver CallbackAdapterResolver) *CallbackRegistry {
-	return &CallbackRegistry{store: store, resolver: resolver, now: time.Now, newID: uuid.NewString}
+func NewCallbackRegistry(store CallbackRegistrationStore, resolver CallbackAdapterResolver, opts ...models.ServiceOption) *CallbackRegistry {
+	return &CallbackRegistry{store: store, resolver: resolver, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
 // resolvesAdapters reports whether r can resolve a registration's callback

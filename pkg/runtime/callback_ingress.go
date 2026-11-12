@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -149,12 +150,12 @@ func (s *CallbackIngressService) SetDurableDispatcher(wake func()) {
 func NewCallbackIngressService(store interface {
 	CallbackRegistrationStore
 	CallbackEventStore
-}, resolver CallbackAdapterResolver, consumers map[string]CallbackEventConsumer) *CallbackIngressService {
+}, resolver CallbackAdapterResolver, consumers map[string]CallbackEventConsumer, opts ...models.ServiceOption) *CallbackIngressService {
 	copyConsumers := make(map[string]CallbackEventConsumer, len(consumers))
 	for name, consumer := range consumers {
 		copyConsumers[strings.TrimSpace(name)] = consumer
 	}
-	return &CallbackIngressService{store: store, resolver: resolver, consumers: copyConsumers, now: time.Now}
+	return &CallbackIngressService{store: store, resolver: resolver, consumers: copyConsumers, now: models.ClockFrom(opts)}
 }
 
 func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPublicRequest, host CallbackAdapterHost) (*CallbackIngressResult, error) {

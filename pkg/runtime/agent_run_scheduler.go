@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type AgentRunClaimRequest struct {
@@ -26,8 +28,8 @@ type AgentRunScheduler struct {
 	now   func() time.Time
 }
 
-func NewAgentRunScheduler(store AgentRunScheduleStore) *AgentRunScheduler {
-	return &AgentRunScheduler{store: store, now: time.Now}
+func NewAgentRunScheduler(store AgentRunScheduleStore, opts ...models.ServiceOption) *AgentRunScheduler {
+	return &AgentRunScheduler{store: store, now: models.ClockFrom(opts)}
 }
 
 func (s *AgentRunScheduler) ClaimNext(ctx context.Context, req AgentRunClaimRequest) (*AgentRun, error) {

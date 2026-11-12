@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
 )
@@ -124,8 +125,8 @@ func NewRunLoop(store KernelStore, actions *ActionCoordinator, logger *zap.Sugar
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	activity := newRunActivityServiceWithClock(store, store, config.Now)
-	turns := newAgentTurnServiceWithClock(store, store, config.Now)
+	activity := NewRunActivityService(store, store, models.WithClock(config.Now))
+	turns := NewAgentTurnService(store, store, models.WithClock(config.Now))
 	return &RunLoop{
 		store: store, sessions: sessions, activity: activity, turns: turns,
 		actions: actions, config: config, logger: logger,

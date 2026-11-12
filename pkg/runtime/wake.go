@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type WakeSignal struct {
@@ -35,9 +37,9 @@ type AgentRunWakeService struct {
 	now       func() time.Time
 }
 
-func NewAgentRunWakeService(portfolio PortfolioStore, activity RunActivityStore) *AgentRunWakeService {
+func NewAgentRunWakeService(portfolio PortfolioStore, activity RunActivityStore, opts ...models.ServiceOption) *AgentRunWakeService {
 	return &AgentRunWakeService{
-		portfolio: portfolio, activity: NewRunActivityService(portfolio, activity), now: time.Now,
+		portfolio: portfolio, activity: NewRunActivityService(portfolio, activity, opts...), now: models.ClockFrom(opts),
 	}
 }
 

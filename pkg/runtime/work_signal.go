@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // WorkSignalKind distinguishes a scoped change from queue lifecycle.
@@ -55,8 +57,8 @@ type WorkSignalStatus struct {
 	publisher *workPublisher
 }
 
-func NewWorkSignalStatus() *WorkSignalStatus {
-	return &WorkSignalStatus{changed: make(chan struct{}), now: time.Now}
+func NewWorkSignalStatus(opts ...models.ServiceOption) *WorkSignalStatus {
+	return &WorkSignalStatus{changed: make(chan struct{}), now: models.ClockFrom(opts)}
 }
 
 // bindPublisher connects the queue that scheduled passes go to.

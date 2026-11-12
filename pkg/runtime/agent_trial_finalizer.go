@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // AgentTrialFinalizer hands a terminal try_agent child's reply to its parent
@@ -19,8 +21,8 @@ type AgentTrialFinalizer struct {
 }
 
 // NewAgentTrialFinalizer wraps next (may be nil). wake may be nil.
-func NewAgentTrialFinalizer(store RunCommandStore, next RunTerminalFinalizer, wake func(Scope)) *AgentTrialFinalizer {
-	return &AgentTrialFinalizer{store: store, next: next, wake: wake, now: time.Now}
+func NewAgentTrialFinalizer(store RunCommandStore, next RunTerminalFinalizer, wake func(Scope), opts ...models.ServiceOption) *AgentTrialFinalizer {
+	return &AgentTrialFinalizer{store: store, next: next, wake: wake, now: models.ClockFrom(opts)}
 }
 
 func (f *AgentTrialFinalizer) FinalizeRun(ctx context.Context, run *AgentRun) error {

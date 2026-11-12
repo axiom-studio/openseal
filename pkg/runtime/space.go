@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/google/uuid"
 )
@@ -104,8 +105,8 @@ type SpaceService struct {
 	newID   func() string
 }
 
-func NewSpaceService(store SpaceStore) *SpaceService {
-	return &SpaceService{store: store, now: time.Now, newID: uuid.NewString}
+func NewSpaceService(store SpaceStore, opts ...models.ServiceOption) *SpaceService {
+	return &SpaceService{store: store, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
 // UseTeams ties Team rosters to spaces: a Team's Agents are in every space

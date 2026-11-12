@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 var (
@@ -31,8 +33,8 @@ type ArtifactCatalog struct {
 	now       func() time.Time
 }
 
-func NewArtifactCatalog(store ArtifactStore) *ArtifactCatalog {
-	return &ArtifactCatalog{store: store, now: time.Now}
+func NewArtifactCatalog(store ArtifactStore, opts ...models.ServiceOption) *ArtifactCatalog {
+	return &ArtifactCatalog{store: store, now: models.ClockFrom(opts)}
 }
 
 // WithPlacement records the chat and space of each artifact the catalog

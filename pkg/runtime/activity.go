@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -55,17 +56,8 @@ type RunActivityService struct {
 	now       func() time.Time
 }
 
-func NewRunActivityService(portfolio PortfolioStore, activity RunActivityStore) *RunActivityService {
-	return newRunActivityServiceWithClock(portfolio, activity, time.Now)
-}
-
-// newRunActivityServiceWithClock is NewRunActivityService stamping times
-// with now (nil: time.Now).
-func newRunActivityServiceWithClock(portfolio PortfolioStore, activity RunActivityStore, now func() time.Time) *RunActivityService {
-	if now == nil {
-		now = time.Now
-	}
-	return &RunActivityService{portfolio: portfolio, activity: activity, now: now}
+func NewRunActivityService(portfolio PortfolioStore, activity RunActivityStore, opts ...models.ServiceOption) *RunActivityService {
+	return &RunActivityService{portfolio: portfolio, activity: activity, now: models.ClockFrom(opts)}
 }
 
 func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, runID string, req RunTransitionRequest) (*AgentRun, *ActivityEvent, error) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/google/uuid"
 )
@@ -183,8 +184,8 @@ type RunForkCoordinator struct {
 	now               func() time.Time
 }
 
-func NewRunForkCoordinator(store RunForkStore) *RunForkCoordinator {
-	return &RunForkCoordinator{store: store, now: time.Now}
+func NewRunForkCoordinator(store RunForkStore, opts ...models.ServiceOption) *RunForkCoordinator {
+	return &RunForkCoordinator{store: store, now: models.ClockFrom(opts)}
 }
 
 // Create atomically seals the complete fan-out, persists every child Run, and

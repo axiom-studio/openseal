@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -59,8 +60,8 @@ type CreateObjectiveResult struct {
 	Created   bool       `json:"created"`
 }
 
-func NewPortfolioService(store PortfolioStore) *PortfolioService {
-	return &PortfolioService{store: store, now: time.Now}
+func NewPortfolioService(store PortfolioStore, opts ...models.ServiceOption) *PortfolioService {
+	return &PortfolioService{store: store, now: models.ClockFrom(opts)}
 }
 
 func (s *PortfolioService) CreateObjective(ctx context.Context, req CreateObjectiveRequest) (*Objective, error) {

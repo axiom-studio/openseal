@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -88,17 +89,8 @@ type AgentTurnService struct {
 	now       func() time.Time
 }
 
-func NewAgentTurnService(portfolio PortfolioStore, turns AgentTurnStore) *AgentTurnService {
-	return newAgentTurnServiceWithClock(portfolio, turns, time.Now)
-}
-
-// newAgentTurnServiceWithClock is NewAgentTurnService stamping times with
-// now (nil: time.Now).
-func newAgentTurnServiceWithClock(portfolio PortfolioStore, turns AgentTurnStore, now func() time.Time) *AgentTurnService {
-	if now == nil {
-		now = time.Now
-	}
-	return &AgentTurnService{portfolio: portfolio, turns: turns, now: now}
+func NewAgentTurnService(portfolio PortfolioStore, turns AgentTurnStore, opts ...models.ServiceOption) *AgentTurnService {
+	return &AgentTurnService{portfolio: portfolio, turns: turns, now: models.ClockFrom(opts)}
 }
 
 func (s *AgentTurnService) BeginTurn(ctx context.Context, req BeginAgentTurnRequest) (*AgentTurn, error) {

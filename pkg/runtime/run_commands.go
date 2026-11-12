@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -46,14 +47,14 @@ type RunCommandService struct {
 	now   func() time.Time
 }
 
-func NewRunCommandService(store RunCommandStore) *RunCommandService {
-	return &RunCommandService{store: store, now: time.Now}
+func NewRunCommandService(store RunCommandStore, opts ...models.ServiceOption) *RunCommandService {
+	return &RunCommandService{store: store, now: models.ClockFrom(opts)}
 }
 
 // transitionRun applies req to the Run through its activity log, stamped
 // with the service's clock.
 func (s *RunCommandService) transitionRun(ctx context.Context, scope Scope, runID string, req RunTransitionRequest) (*AgentRun, *ActivityEvent, error) {
-	return newRunActivityServiceWithClock(s.store, s.store, s.now).TransitionRun(ctx, scope, runID, req)
+	return NewRunActivityService(s.store, s.store, models.WithClock(s.now)).TransitionRun(ctx, scope, runID, req)
 }
 
 // FindCreatedAgentRun recovers an exact accepted request without creating work.

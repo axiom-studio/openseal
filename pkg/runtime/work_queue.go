@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"go.uber.org/zap"
 )
 
@@ -124,8 +125,8 @@ type MemoryWorkQueue struct {
 	now     func() time.Time
 }
 
-func NewMemoryWorkQueue() *MemoryWorkQueue {
-	return &MemoryWorkQueue{index: make(map[workItemKey]*workDueEntry), changed: make(chan struct{}, 1), now: time.Now}
+func NewMemoryWorkQueue(opts ...models.ServiceOption) *MemoryWorkQueue {
+	return &MemoryWorkQueue{index: make(map[workItemKey]*workDueEntry), changed: make(chan struct{}, 1), now: models.ClockFrom(opts)}
 }
 
 func (q *MemoryWorkQueue) PublishWork(_ context.Context, items []WorkItem) error {

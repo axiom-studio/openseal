@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type CallbackEventWorkerConfig struct {
@@ -55,7 +57,7 @@ type CallbackEventWorker struct {
 func NewCallbackEventWorker(store interface {
 	CallbackRegistrationStore
 	CallbackEventStore
-}, service *CallbackIngressService, config CallbackEventWorkerConfig) (*CallbackEventWorker, error) {
+}, service *CallbackIngressService, config CallbackEventWorkerConfig, opts ...models.ServiceOption) (*CallbackEventWorker, error) {
 	if store == nil || service == nil {
 		return nil, errors.New("callback event store and ingress service are required")
 	}
@@ -63,7 +65,7 @@ func NewCallbackEventWorker(store interface {
 	if err != nil {
 		return nil, err
 	}
-	return &CallbackEventWorker{store: store, service: service, config: normalized, now: time.Now}, nil
+	return &CallbackEventWorker{store: store, service: service, config: normalized, now: models.ClockFrom(opts)}, nil
 }
 
 func (w *CallbackEventWorker) ProcessOne(ctx context.Context, scope Scope) (*CallbackEventReceipt, error) {
