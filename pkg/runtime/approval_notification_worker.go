@@ -241,7 +241,7 @@ func (w *ApprovalNotificationWorker) resolveTimeout(ctx context.Context, approva
 // provider installation may serve several Agents and destinations, so provider
 // identity alone is never sufficient authority to render an interactive card.
 func (w *ApprovalNotificationWorker) requireApprovalCallback(ctx context.Context, endpoint *ExternalConversationEndpoint) error {
-	if w == nil || !w.callbacks.resolvesAdapters() || endpoint == nil {
+	if w == nil || !w.callbacks.ResolvesAdapters() || endpoint == nil {
 		return errors.New("approval callback coordination is not configured")
 	}
 	for offset := 0; ; offset += 100 {
@@ -256,7 +256,7 @@ func (w *ApprovalNotificationWorker) requireApprovalCallback(ctx context.Context
 			if !callbackRegistrationHandlesApprovals(registration, endpoint) {
 				continue
 			}
-			if err := w.callbacks.resolve(ctx, registration); err == nil {
+			if err := w.callbacks.VerifyAdapter(ctx, registration); err == nil {
 				return nil
 			}
 		}

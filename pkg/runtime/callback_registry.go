@@ -55,9 +55,9 @@ func NewCallbackRegistry(store models.CallbackRegistrationStore, resolver Callba
 	return &CallbackRegistry{store: store, resolver: resolver, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
-// resolvesAdapters reports whether r can resolve a registration's callback
+// ResolvesAdapters reports whether r can resolve a registration's callback
 // adapter (false for a nil registry).
-func (r *CallbackRegistry) resolvesAdapters() bool {
+func (r *CallbackRegistry) ResolvesAdapters() bool {
 	return r != nil && r.resolver != nil
 }
 
@@ -86,7 +86,7 @@ func (r *CallbackRegistry) Create(ctx context.Context, request CreateCallbackReg
 	if err := value.Validate(); err != nil {
 		return nil, err
 	}
-	if err := r.resolve(ctx, value); err != nil {
+	if err := r.VerifyAdapter(ctx, value); err != nil {
 		return nil, err
 	}
 	if err := r.store.CreateCallbackRegistration(ctx, value); err != nil {
@@ -157,7 +157,7 @@ func (r *CallbackRegistry) Update(ctx context.Context, scope models.Scope, id st
 		return nil, err
 	}
 	if current.Status == models.CallbackRegistrationActive {
-		if err := r.resolve(ctx, current); err != nil {
+		if err := r.VerifyAdapter(ctx, current); err != nil {
 			return nil, err
 		}
 	}
@@ -167,7 +167,10 @@ func (r *CallbackRegistry) Update(ctx context.Context, scope models.Scope, id st
 	return models.CloneCallbackRegistration(current), nil
 }
 
-func (r *CallbackRegistry) resolve(ctx context.Context, value *models.CallbackRegistration) error {
+// VerifyAdapter returns an error unless value's exact callback Skill adapter
+// is bound for its provider, has an ingress endpoint and declares every
+// event type value subscribes to.
+func (r *CallbackRegistry) VerifyAdapter(ctx context.Context, value *models.CallbackRegistration) error {
 	ref := value.Adapter
 	bound, err := r.resolver.ResolveCallbackAdapterBinding(
 		ctx, skill.ScopeReference{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.DeploymentID,
