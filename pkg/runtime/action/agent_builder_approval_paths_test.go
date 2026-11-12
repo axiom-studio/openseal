@@ -22,10 +22,13 @@ import (
 // approval resolver in pkg and internal (grep NewApprovalCoordinator and
 // ResolveTimeout), with the authorizer it builds:
 //
-//   - external_conversation_transport_service.go: EligibleApprovalAuthorizer, or an
-//     allow-all ApprovalAuthorizerFunc for origin-conversation participants.
-//   - callback_approval_consumer.go: EligibleApprovalAuthorizer.
-//   - approval_notification_worker.go: EligibleApprovalAuthorizer, ResolveTimeout.
+//   - externalconversation/external_conversation_transport_service.go:
+//     EligibleApprovalAuthorizer, or an allow-all ApprovalAuthorizerFunc for
+//     origin-conversation participants.
+//   - externalconversation/callback_approval_consumer.go:
+//     EligibleApprovalAuthorizer.
+//   - externalconversation/approval_notification_worker.go:
+//     EligibleApprovalAuthorizer, ResolveTimeout.
 //   - conversation/conversation_approval_mode.go: nil, ResolveByApprovalMode.
 //   - conversationrun/conversation_run.go (ConversationRunScheduler): nil.
 //   - conversation/conversation_team_responder.go (team follow-ups): nil.
@@ -167,9 +170,9 @@ func TestAgentBuilderApprovalPathsRefuseApprovalModeAndNilCoordinators(t *testin
 }
 
 func TestAgentBuilderApprovalPathsTimeoutNeverApproves(t *testing.T) {
-	// approval_notification_worker.go: ResolveTimeout with
-	// EligibleApprovalAuthorizer expires the card even under TimeoutDecision
-	// approve.
+	// externalconversation/approval_notification_worker.go: ResolveTimeout
+	// with EligibleApprovalAuthorizer expires the card even under
+	// TimeoutDecision approve.
 	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f, approval := cardApproval(t, store, "timeout", createAgentCard(), models.ApprovalTimeoutApprove)
 		coordinator := action.NewApprovalCoordinator(f.Store, f.Store, action.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(time.Second) }))

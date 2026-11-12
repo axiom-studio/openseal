@@ -8,13 +8,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-// channelActivationStore activates an Agent definition amendment and writes
+// ChannelActivationStore activates an Agent definition amendment and writes
 // the Agent's channel endpoint in one transaction.
 type ChannelActivationStore interface {
 	ActivateAmendmentWithEndpoint(ctx context.Context, registry kernelagent.Store, amendment *kernelagent.DefinitionAmendment, amendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, deploymentRevision int64, activation kernelagent.DefinitionActivation, next *models.ExternalConversationEndpoint, expectedRevision int64) error
 }
 
-// channelActivationCommit joins the endpoint CAS to the registry's activation
+// ChannelActivationCommit joins the endpoint CAS to the registry's activation
 // transaction. Separate databases and unknown stores fail closed rather than
 // activating a definition whose channel could not be materialized.
 func (s *ExternalConversationEndpointService) ChannelActivationCommit(next *models.ExternalConversationEndpoint, expectedRevision, expectedDeploymentRevision int64) kernelagent.AmendmentActivationCommit {

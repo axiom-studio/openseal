@@ -1138,8 +1138,8 @@ func (r *ConversationRunTurnRunner) participationStopped(ctx context.Context, ru
 var errConversationParticipationStopped = errors.New("channel participation is disabled for this message")
 
 // participationStoppedOutput is the output of a Run whose message is outside
-// the channel's participation opt-in. externalConversationRunReply posts its
-// reply.
+// the channel's participation opt-in. The external conversation reply
+// (externalconversation's externalConversationRunReply) posts its reply.
 func participationStoppedOutput() map[string]interface{} {
 	return map[string]interface{}{"participationSkipped": true, "reply": "No further participation will start for this message because it is outside the channel’s current participation opt-in. Previously started actions may still finish."}
 }

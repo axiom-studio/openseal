@@ -26,7 +26,7 @@ definition entrypoints.
 
 | Kind | SourceRef | Producer |
 | --- | --- | --- |
-| `slack.message`, `telegram.message` | `conversation:` + hash of deployment, binding, adapter and installation | conversation ingress (`routine_event_ingress.go`) |
+| `slack.message`, `telegram.message` | `conversation:` + hash of deployment, binding, adapter and installation | conversation ingress (`externalconversation/routine_event_ingress.go`) |
 | `github.event` | `callback:<registrationID>` | callback consumer `routines` |
 | `gmail.message`, `calendar.event` | `google:<userID>:<googleSub>` | host Google sync loop (cortex) |
 | `webhook` | `hook:<hookID>` | host hook ingress (cortex) |
