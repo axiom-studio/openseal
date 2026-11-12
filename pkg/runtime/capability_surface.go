@@ -3,6 +3,8 @@ package runtime
 import (
 	"sort"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // Surfaced tools (cache-stable capability loading). A load_capabilities call
@@ -18,14 +20,14 @@ import (
 // EntryID "" holds the tools carried over the latest compaction.
 type SurfacedLoad struct {
 	EntryID string
-	Tools   []SurfacedTool
+	Tools   []models.SurfacedTool
 }
 
 // surfacedTool freezes a step tool definition.
-func surfacedTool(capabilityID string, tool ModelStepTool) SurfacedTool {
-	return SurfacedTool{
+func surfacedTool(capabilityID string, tool models.ModelStepTool) models.SurfacedTool {
+	return models.SurfacedTool{
 		Capability: capabilityID, Name: tool.Name, Description: tool.Description,
-		InputSchema: cloneJSONObject(tool.InputSchema),
+		InputSchema: models.CloneJSONObject(tool.InputSchema),
 	}
 }
 
@@ -33,13 +35,13 @@ func surfacedTool(capabilityID string, tool ModelStepTool) SurfacedTool {
 // the latest compaction's carried tools (EntryID ""), then each completed
 // load_capabilities entry in path order. A tool name surfaces once; its first
 // surface wins.
-func SurfacedOnPath(path *AgentSessionPath) []SurfacedLoad {
+func SurfacedOnPath(path *models.AgentSessionPath) []SurfacedLoad {
 	if path == nil {
 		return nil
 	}
 	seen := map[string]bool{}
-	take := func(tools []SurfacedTool) []SurfacedTool {
-		var kept []SurfacedTool
+	take := func(tools []models.SurfacedTool) []models.SurfacedTool {
+		var kept []models.SurfacedTool
 		for _, tool := range tools {
 			if tool.Name == "" || seen[tool.Name] {
 				continue
@@ -66,14 +68,14 @@ func SurfacedOnPath(path *AgentSessionPath) []SurfacedLoad {
 	return loads
 }
 
-func completedLoadEntry(entry *SessionEntry) bool {
-	return entry != nil && entry.Type == SessionEntryTool && entry.Tool != nil &&
-		entry.Tool.Name == LoadCapabilitiesTool && entry.State == ToolEntryCompleted
+func completedLoadEntry(entry *models.SessionEntry) bool {
+	return entry != nil && entry.Type == models.SessionEntryTool && entry.Tool != nil &&
+		entry.Tool.Name == LoadCapabilitiesTool && entry.State == models.ToolEntryCompleted
 }
 
 // PathCarriedCapabilityIDs is the capabilities of the tools carried over the
 // path's latest compaction, in carried order.
-func PathCarriedCapabilityIDs(path *AgentSessionPath) []string {
+func PathCarriedCapabilityIDs(path *models.AgentSessionPath) []string {
 	if path == nil || path.Compaction == nil || path.Compaction.Compaction == nil {
 		return nil
 	}
@@ -93,7 +95,7 @@ func PathCarriedCapabilityIDs(path *AgentSessionPath) []string {
 // and the capabilities of the tools they surfaced. Tools carried over a
 // compaction are not in it (PathCarriedCapabilityIDs). NewCapabilitySet takes
 // it as loadedIDs.
-func PathLoadedCapabilityIDs(path *AgentSessionPath) []string {
+func PathLoadedCapabilityIDs(path *models.AgentSessionPath) []string {
 	if path == nil {
 		return nil
 	}
@@ -122,10 +124,10 @@ func PathLoadedCapabilityIDs(path *AgentSessionPath) []string {
 // carriedToolsAfter is the CarriedTools of a compaction that summarizes
 // summarized after previous: the previous carried tools, then the surfaced
 // tools of the summarized load entries, each name once.
-func carriedToolsAfter(previous *CompactionEntry, summarized []*SessionEntry) []SurfacedTool {
-	var carried []SurfacedTool
+func carriedToolsAfter(previous *models.CompactionEntry, summarized []*models.SessionEntry) []models.SurfacedTool {
+	var carried []models.SurfacedTool
 	seen := map[string]bool{}
-	add := func(tools []SurfacedTool) {
+	add := func(tools []models.SurfacedTool) {
 		for _, tool := range tools {
 			if tool.Name != "" && !seen[tool.Name] {
 				seen[tool.Name] = true
@@ -141,7 +143,7 @@ func carriedToolsAfter(previous *CompactionEntry, summarized []*SessionEntry) []
 			add(entry.Tool.SurfacedTools)
 		}
 	}
-	return cloneSurfacedTools(carried)
+	return models.CloneSurfacedTools(carried)
 }
 
 // applySurfaces completes the step's tools with the loaded group of the
@@ -150,11 +152,11 @@ func carriedToolsAfter(previous *CompactionEntry, summarized []*SessionEntry) []
 // tool carries the id of its load entry, which lists it in Surfaces. base
 // holds the harness and core tools; a surfaced name they already declare is
 // left out. Surfaced tools follow their entries' render order.
-func applySurfaces(base []ModelStepTool, path *AgentSessionPath, entries []SessionEntryView) []ModelStepTool {
-	tools := make([]ModelStepTool, 0, len(base))
+func applySurfaces(base []models.ModelStepTool, path *models.AgentSessionPath, entries []models.SessionEntryView) []models.ModelStepTool {
+	tools := make([]models.ModelStepTool, 0, len(base))
 	taken := map[string]bool{}
 	for _, tool := range base {
-		if tool.Group == ModelStepToolLoaded {
+		if tool.Group == models.ModelStepToolLoaded {
 			continue
 		}
 		tools = append(tools, tool)
@@ -165,11 +167,11 @@ func applySurfaces(base []ModelStepTool, path *AgentSessionPath, entries []Sessi
 	}
 	position := map[string]int{}
 	for i, entry := range entries {
-		if entry.Type == SessionEntryTool && entry.Tool != nil && entry.Tool.State == ToolEntryCompleted {
+		if entry.Type == models.SessionEntryTool && entry.Tool != nil && entry.Tool.State == models.ToolEntryCompleted {
 			position[entry.ID] = i
 		}
 	}
-	var carried []SurfacedTool
+	var carried []models.SurfacedTool
 	var surfacing []SurfacedLoad
 	for _, load := range SurfacedOnPath(path) {
 		if _, ok := position[load.EntryID]; load.EntryID == "" || !ok {
@@ -206,7 +208,7 @@ func applySurfaces(base []ModelStepTool, path *AgentSessionPath, entries []Sessi
 // surface, one whose entry lies before the chunk becomes callable from the
 // start, and one whose entry lies after it is dropped. Chunk entries keep only
 // the surfaces of tools still declared.
-func chunkSurfaces(tools []ModelStepTool, pathEntries, chunk []SessionEntryView) ([]ModelStepTool, []SessionEntryView) {
+func chunkSurfaces(tools []models.ModelStepTool, pathEntries, chunk []models.SessionEntryView) ([]models.ModelStepTool, []models.SessionEntryView) {
 	position := make(map[string]int, len(pathEntries))
 	for i, entry := range pathEntries {
 		position[entry.ID] = i
@@ -219,7 +221,7 @@ func chunkSurfaces(tools []ModelStepTool, pathEntries, chunk []SessionEntryView)
 			last = at
 		}
 	}
-	out := make([]ModelStepTool, 0, len(tools))
+	out := make([]models.ModelStepTool, 0, len(tools))
 	declared := map[string]bool{}
 	for _, tool := range tools {
 		if tool.Surface != "" && !present[tool.Surface] {
@@ -233,7 +235,7 @@ func chunkSurfaces(tools []ModelStepTool, pathEntries, chunk []SessionEntryView)
 		}
 		out = append(out, tool)
 	}
-	views := make([]SessionEntryView, len(chunk))
+	views := make([]models.SessionEntryView, len(chunk))
 	for i, entry := range chunk {
 		if len(entry.Surfaces) > 0 {
 			var kept []string

@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/google/uuid"
 )
@@ -19,8 +21,8 @@ import (
 // Compaction is not a step: it writes no agent_turns row and charges no Turns;
 // its usage is returned so the loop adds it to the step that triggered it.
 type LoopCompactor struct {
-	Host     agentrun.StepHost // only ExecuteModelStep is used
-	Sessions AgentSessionStore // appends the compaction entry and its event
+	Host     agentrun.StepHost        // only ExecuteModelStep is used
+	Sessions models.AgentSessionStore // appends the compaction entry and its event
 	// Requests builds the step's own model request (prep-2), so the summary
 	// call's System and Tools are byte-identical to the step's and it reads
 	// the step's prompt cache.
@@ -64,19 +66,19 @@ func compactionBudgetReservationID(stepID string) string { return "compaction:" 
 // Revision is not trusted, because heartbeats and steering bump it while the
 // summary calls run. Both return the updated Run.
 type compactionBudget interface {
-	ReserveCompaction(ctx context.Context, run *AgentRun, workerID, reservationID string, usage BudgetUsage) (*AgentRun, error)
-	SettleCompaction(ctx context.Context, run *AgentRun, workerID, reservationID string, usage BudgetUsage) (*AgentRun, error)
+	ReserveCompaction(ctx context.Context, run *models.AgentRun, workerID, reservationID string, usage models.BudgetUsage) (*models.AgentRun, error)
+	SettleCompaction(ctx context.Context, run *models.AgentRun, workerID, reservationID string, usage models.BudgetUsage) (*models.AgentRun, error)
 }
 
 // runActivityCompactionBudget is the store-backed compactionBudget: a
 // running→running TransitionRun under the lease, like the step reservation.
 type runActivityCompactionBudget struct {
-	runs     agentRunReader // re-reads the Run before each write
-	activity *RunActivityService
+	runs     models.AgentRunReader // re-reads the Run before each write
+	activity *activity.RunActivityService
 	now      func() time.Time
 }
 
-func newRunActivityCompactionBudget(runs agentRunReader, activity *RunActivityService, now func() time.Time) compactionBudget {
+func newRunActivityCompactionBudget(runs models.AgentRunReader, activity *activity.RunActivityService, now func() time.Time) compactionBudget {
 	if now == nil {
 		now = time.Now
 	}
@@ -87,13 +89,13 @@ func newRunActivityCompactionBudget(runs agentRunReader, activity *RunActivitySe
 // that loses a revision race against a heartbeat or a steering write.
 const compactionBudgetWriteAttempts = 4
 
-func (b *runActivityCompactionBudget) ReserveCompaction(ctx context.Context, run *AgentRun, workerID, reservationID string, usage BudgetUsage) (*AgentRun, error) {
-	return b.transition(ctx, run, func(revision int64) RunTransitionRequest {
-		return RunTransitionRequest{
-			ExpectedRevision: revision, Status: AgentRunStatusRunning, LeaseOwner: workerID,
+func (b *runActivityCompactionBudget) ReserveCompaction(ctx context.Context, run *models.AgentRun, workerID, reservationID string, usage models.BudgetUsage) (*models.AgentRun, error) {
+	return b.transition(ctx, run, func(revision int64) activity.RunTransitionRequest {
+		return activity.RunTransitionRequest{
+			ExpectedRevision: revision, Status: models.AgentRunStatusRunning, LeaseOwner: workerID,
 			Summary: "Reserved capacity to compact the session", EventType: "budget.reserved",
-			Actor:             ActivityActor{Type: "worker", ID: workerID},
-			BudgetReservation: &BudgetReservation{ID: reservationID, Usage: usage, CreatedAt: b.now()},
+			Actor:             models.ActivityActor{Type: "worker", ID: workerID},
+			BudgetReservation: &models.BudgetReservation{ID: reservationID, Usage: usage, CreatedAt: b.now()},
 		}
 	})
 }
@@ -101,13 +103,13 @@ func (b *runActivityCompactionBudget) ReserveCompaction(ctx context.Context, run
 // SettleCompaction charges the budget only. The compaction's usage reaches
 // the step's activity usage through the step that triggered it (section 08
 // §2), so no ActivityUsageDelta is written here.
-func (b *runActivityCompactionBudget) SettleCompaction(ctx context.Context, run *AgentRun, workerID, reservationID string, usage BudgetUsage) (*AgentRun, error) {
-	return b.transition(ctx, run, func(revision int64) RunTransitionRequest {
+func (b *runActivityCompactionBudget) SettleCompaction(ctx context.Context, run *models.AgentRun, workerID, reservationID string, usage models.BudgetUsage) (*models.AgentRun, error) {
+	return b.transition(ctx, run, func(revision int64) activity.RunTransitionRequest {
 		delta := usage
-		return RunTransitionRequest{
-			ExpectedRevision: revision, Status: AgentRunStatusRunning, LeaseOwner: workerID,
+		return activity.RunTransitionRequest{
+			ExpectedRevision: revision, Status: models.AgentRunStatusRunning, LeaseOwner: workerID,
 			Summary: "Recorded the usage of compacting the session", EventType: "budget.settled",
-			Actor:                     ActivityActor{Type: "worker", ID: workerID},
+			Actor:                     models.ActivityActor{Type: "worker", ID: workerID},
 			SettleBudgetReservationID: reservationID,
 			BudgetUsageDelta:          &delta,
 		}
@@ -116,23 +118,23 @@ func (b *runActivityCompactionBudget) SettleCompaction(ctx context.Context, run 
 
 // transition re-reads the Run before each attempt and writes at its current
 // revision; the lease owner check in TransitionRun is the real fence.
-func (b *runActivityCompactionBudget) transition(ctx context.Context, run *AgentRun, request func(revision int64) RunTransitionRequest) (*AgentRun, error) {
+func (b *runActivityCompactionBudget) transition(ctx context.Context, run *models.AgentRun, request func(revision int64) activity.RunTransitionRequest) (*models.AgentRun, error) {
 	if b == nil || b.activity == nil || b.runs == nil {
 		return nil, fmt.Errorf("%w: the compaction budget has no run store", ErrTurnHostConfiguration)
 	}
 	var err error
 	for attempt := 0; attempt < compactionBudgetWriteAttempts; attempt++ {
-		var current *AgentRun
+		var current *models.AgentRun
 		current, err = b.runs.GetAgentRun(ctx, run.Scope, run.ID)
 		if err != nil {
 			return nil, err
 		}
 		if current == nil {
-			return nil, ErrRunNotFound
+			return nil, models.ErrRunNotFound
 		}
-		var updated *AgentRun
+		var updated *models.AgentRun
 		updated, _, err = b.activity.TransitionRun(ctx, run.Scope, run.ID, request(current.Revision))
-		if !errors.Is(err, ErrRevisionConflict) {
+		if !errors.Is(err, models.ErrRevisionConflict) {
 			return updated, err
 		}
 	}
@@ -141,15 +143,15 @@ func (b *runActivityCompactionBudget) transition(ctx context.Context, run *Agent
 
 // compactionBudgetUsage is the budget charge of a compaction's model calls.
 // Turns stay 0 (D12) and duration is the step's, not charged twice.
-func compactionBudgetUsage(usage ModelStepUsage) BudgetUsage {
+func compactionBudgetUsage(usage models.ModelStepUsage) models.BudgetUsage {
 	costMicros := int64(0)
 	if usage.Cost > 0 {
 		costMicros = int64(math.Round(usage.Cost * 1_000_000))
 	}
-	return BudgetUsage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, CostMicros: costMicros}
+	return models.BudgetUsage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, CostMicros: costMicros}
 }
 
-func addModelStepUsage(total, delta ModelStepUsage) ModelStepUsage {
+func addModelStepUsage(total, delta models.ModelStepUsage) models.ModelStepUsage {
 	total.InputTokens += delta.InputTokens
 	total.OutputTokens += delta.OutputTokens
 	total.ReasoningTokens += delta.ReasoningTokens
@@ -222,10 +224,10 @@ func compactionModel(in agentrun.StepInput) string {
 		if entry == nil {
 			continue
 		}
-		if entry.Type == SessionEntryModelChange && newest == "" {
+		if entry.Type == models.SessionEntryModelChange && newest == "" {
 			newest = "-"
 		}
-		if entry.Type != SessionEntryAssistant || entry.Assistant == nil {
+		if entry.Type != models.SessionEntryAssistant || entry.Assistant == nil {
 			continue
 		}
 		if requested != "" && entry.Assistant.Model == requested {
@@ -252,22 +254,22 @@ func (c *LoopCompactor) Due(in agentrun.StepInput) bool {
 }
 
 // CompactIfNeeded runs a threshold compaction when Due.
-func (c *LoopCompactor) CompactIfNeeded(ctx context.Context, in agentrun.StepInput) (ModelStepUsage, error) {
+func (c *LoopCompactor) CompactIfNeeded(ctx context.Context, in agentrun.StepInput) (models.ModelStepUsage, error) {
 	if !c.Due(in) {
-		return ModelStepUsage{}, nil
+		return models.ModelStepUsage{}, nil
 	}
-	return c.compact(ctx, in, CompactionTriggerThreshold)
+	return c.compact(ctx, in, models.CompactionTriggerThreshold)
 }
 
 // Compact compacts now: force=true is the overflow compaction after a length
 // rejection (the loop attaches the rejection's pressure with
 // withCompactionPressure), force=false a threshold compaction without the
 // Due check.
-func (c *LoopCompactor) Compact(ctx context.Context, in agentrun.StepInput, force bool) (ModelStepUsage, error) {
+func (c *LoopCompactor) Compact(ctx context.Context, in agentrun.StepInput, force bool) (models.ModelStepUsage, error) {
 	if force {
-		return c.compact(ctx, in, CompactionTriggerOverflow)
+		return c.compact(ctx, in, models.CompactionTriggerOverflow)
 	}
-	return c.compact(ctx, in, CompactionTriggerThreshold)
+	return c.compact(ctx, in, models.CompactionTriggerThreshold)
 }
 
 func (c *LoopCompactor) now() time.Time {
@@ -307,33 +309,33 @@ type compactionWork struct {
 	pressure *HostedContextPressure
 	estimate PathEstimate
 	plan     compactionPlan
-	step     ModelStepRequest
-	chunks   [][]*SessionEntry // overflow only
+	step     models.ModelStepRequest
+	chunks   [][]*models.SessionEntry // overflow only
 }
 
-func (c *LoopCompactor) compact(ctx context.Context, in agentrun.StepInput, trigger string) (ModelStepUsage, error) {
+func (c *LoopCompactor) compact(ctx context.Context, in agentrun.StepInput, trigger string) (models.ModelStepUsage, error) {
 	if err := c.validate(in); err != nil {
-		return ModelStepUsage{}, err
+		return models.ModelStepUsage{}, err
 	}
 	work := compactionWork{trigger: trigger, model: compactionModel(in), pressure: compactionPressureFrom(ctx)}
 	work.window = pathModelWindow(in.Path, work.model)
-	if trigger == CompactionTriggerOverflow && !work.window.Known() && work.pressure != nil && work.pressure.LimitTokens > 0 {
+	if trigger == models.CompactionTriggerOverflow && !work.window.Known() && work.pressure != nil && work.pressure.LimitTokens > 0 {
 		work.window = ModelWindow{InputLimitTokens: work.pressure.LimitTokens}
 	}
 	work.estimate = estimatePathTokens(in.Path, work.model)
 	plan, err := planCompaction(in.Path.Entries, compactionKeepFor(trigger, work.window))
 	if err != nil {
 		if errors.Is(err, errCompactionImpossible) {
-			if trigger == CompactionTriggerThreshold {
+			if trigger == models.CompactionTriggerThreshold {
 				// Nothing to compact yet; the length-rejection path handles it.
-				return ModelStepUsage{}, nil
+				return models.ModelStepUsage{}, nil
 			}
-			return ModelStepUsage{}, compactionFailure(TurnHostContextExceeded)
+			return models.ModelStepUsage{}, compactionFailure(TurnHostContextExceeded)
 		}
-		return ModelStepUsage{}, err
+		return models.ModelStepUsage{}, err
 	}
 	work.plan = plan
-	if trigger == CompactionTriggerOverflow {
+	if trigger == models.CompactionTriggerOverflow {
 		pressure := work.pressure
 		if pressure == nil {
 			pressure = &HostedContextPressure{EstimatedTokens: work.estimate.Tokens}
@@ -345,15 +347,15 @@ func (c *LoopCompactor) compact(ctx context.Context, in agentrun.StepInput, trig
 		chunks, err := compactionChunks(plan.Summarized, previous, compactionChunkBudget(work.window, pressure))
 		if err != nil {
 			if errors.Is(err, errCompactionImpossible) {
-				return ModelStepUsage{}, compactionFailure(TurnHostContextExceeded)
+				return models.ModelStepUsage{}, compactionFailure(TurnHostContextExceeded)
 			}
-			return ModelStepUsage{}, err
+			return models.ModelStepUsage{}, err
 		}
 		work.chunks = chunks
 	}
 	step, err := c.Requests.PrepareModelStep(ctx, in)
 	if err != nil {
-		return ModelStepUsage{}, err
+		return models.ModelStepUsage{}, err
 	}
 	work.step = step
 
@@ -361,21 +363,21 @@ func (c *LoopCompactor) compact(ctx context.Context, in agentrun.StepInput, trig
 	reservationID := compactionBudgetReservationID(in.Step.ID)
 	if run.Budget != nil {
 		reserved, err := c.Budget.ReserveCompaction(ctx, run, in.WorkerID, reservationID, compactionReservation(work))
-		if errors.Is(err, ErrBudgetExhausted) {
-			return ModelStepUsage{}, compactionBudgetFailure()
+		if errors.Is(err, models.ErrBudgetExhausted) {
+			return models.ModelStepUsage{}, compactionBudgetFailure()
 		}
 		if err != nil {
-			return ModelStepUsage{}, err
+			return models.ModelStepUsage{}, err
 		}
 		run = reserved
-		*in.Run = *cloneAgentRun(reserved)
+		*in.Run = *models.CloneAgentRun(reserved)
 	}
 
 	usage, err := c.summarizeAndAppend(ctx, in, work)
 	if in.Run.Budget != nil {
 		settled, settleErr := c.Budget.SettleCompaction(ctx, run, in.WorkerID, reservationID, compactionBudgetUsage(usage))
 		if settleErr == nil {
-			*in.Run = *cloneAgentRun(settled)
+			*in.Run = *models.CloneAgentRun(settled)
 		} else if err == nil {
 			err = settleErr
 		}
@@ -385,15 +387,15 @@ func (c *LoopCompactor) compact(ctx context.Context, in agentrun.StepInput, trig
 
 // compactionReservation is the budget a compaction may use: its input
 // estimate and a full summary output per planned call.
-func compactionReservation(work compactionWork) BudgetUsage {
-	if work.trigger != CompactionTriggerOverflow {
-		return BudgetUsage{InputTokens: work.estimate.Tokens, OutputTokens: compactionSummaryMaxOutputTokens}
+func compactionReservation(work compactionWork) models.BudgetUsage {
+	if work.trigger != models.CompactionTriggerOverflow {
+		return models.BudgetUsage{InputTokens: work.estimate.Tokens, OutputTokens: compactionSummaryMaxOutputTokens}
 	}
 	var input int64
 	for _, chunk := range work.chunks {
 		input += defaultPrefixTokens + compactionSpanTokens(chunk)
 	}
-	return BudgetUsage{InputTokens: input, OutputTokens: compactionSummaryMaxOutputTokens * int64(len(work.chunks))}
+	return models.BudgetUsage{InputTokens: input, OutputTokens: compactionSummaryMaxOutputTokens * int64(len(work.chunks))}
 }
 
 // compactionSummary is the outcome of the summary calls.
@@ -403,13 +405,13 @@ type compactionSummary struct {
 	model    string
 }
 
-func (c *LoopCompactor) summarizeAndAppend(ctx context.Context, in agentrun.StepInput, work compactionWork) (ModelStepUsage, error) {
+func (c *LoopCompactor) summarizeAndAppend(ctx context.Context, in agentrun.StepInput, work compactionWork) (models.ModelStepUsage, error) {
 	var (
 		summary compactionSummary
-		usage   ModelStepUsage
+		usage   models.ModelStepUsage
 		err     error
 	)
-	if work.trigger == CompactionTriggerOverflow {
+	if work.trigger == models.CompactionTriggerOverflow {
 		summary, usage, err = c.summarizeOverflow(ctx, in, work)
 	} else {
 		summary, usage, err = c.summarize(ctx, compactionSummaryRequest(work.step))
@@ -428,13 +430,13 @@ func (c *LoopCompactor) summarizeAndAppend(ctx context.Context, in agentrun.Step
 // summarizeOverflow folds the summarized span chunk by chunk: chunk 0 after
 // the previous compaction, chunk k after a synthetic compaction view of
 // summary k−1. A chunk the host rejects for length is halved once.
-func (c *LoopCompactor) summarizeOverflow(ctx context.Context, in agentrun.StepInput, work compactionWork) (compactionSummary, ModelStepUsage, error) {
-	views := make(map[string]SessionEntryView, len(work.step.Entries))
+func (c *LoopCompactor) summarizeOverflow(ctx context.Context, in agentrun.StepInput, work compactionWork) (compactionSummary, models.ModelStepUsage, error) {
+	views := make(map[string]models.SessionEntryView, len(work.step.Entries))
 	for _, view := range work.step.Entries {
 		views[view.ID] = view
 	}
 	type pendingChunk struct {
-		entries []*SessionEntry
+		entries []*models.SessionEntry
 		split   bool
 	}
 	queue := make([]pendingChunk, 0, len(work.chunks))
@@ -443,7 +445,7 @@ func (c *LoopCompactor) summarizeOverflow(ctx context.Context, in agentrun.StepI
 	}
 	var (
 		summary compactionSummary
-		usage   ModelStepUsage
+		usage   models.ModelStepUsage
 		calls   int
 	)
 	for len(queue) > 0 {
@@ -458,7 +460,7 @@ func (c *LoopCompactor) summarizeOverflow(ctx context.Context, in agentrun.StepI
 			// the current summary stands.
 			continue
 		}
-		entries := make([]SessionEntryView, 0, len(chunkViews)+1)
+		entries := make([]models.SessionEntryView, 0, len(chunkViews)+1)
 		if calls == 0 {
 			if previous := previousCompactionView(in.Path, views); previous != nil {
 				entries = append(entries, *previous)
@@ -494,8 +496,8 @@ func (c *LoopCompactor) summarizeOverflow(ctx context.Context, in agentrun.StepI
 
 // compactionChunkViews picks the step request's views of chunk's entries, in
 // chunk order. Entries the renderer did not send are skipped.
-func compactionChunkViews(views map[string]SessionEntryView, chunk []*SessionEntry) []SessionEntryView {
-	out := make([]SessionEntryView, 0, len(chunk))
+func compactionChunkViews(views map[string]models.SessionEntryView, chunk []*models.SessionEntry) []models.SessionEntryView {
+	out := make([]models.SessionEntryView, 0, len(chunk))
 	for _, entry := range chunk {
 		if view, ok := views[entry.ID]; ok {
 			out = append(out, view)
@@ -506,16 +508,16 @@ func compactionChunkViews(views map[string]SessionEntryView, chunk []*SessionEnt
 
 // previousCompactionView is the view of the path's latest compaction as the
 // step sends it, or one built from the entry when the request lacks it.
-func previousCompactionView(path *AgentSessionPath, views map[string]SessionEntryView) *SessionEntryView {
+func previousCompactionView(path *models.AgentSessionPath, views map[string]models.SessionEntryView) *models.SessionEntryView {
 	if path == nil || path.Compaction == nil || path.Compaction.Compaction == nil {
 		return nil
 	}
 	if view, ok := views[path.Compaction.ID]; ok {
 		return &view
 	}
-	return &SessionEntryView{
-		ID: path.Compaction.ID, Sequence: path.Compaction.Sequence, Type: SessionEntryCompaction, CreatedAt: path.Compaction.CreatedAt,
-		Compaction: &CompactionEntryView{
+	return &models.SessionEntryView{
+		ID: path.Compaction.ID, Sequence: path.Compaction.Sequence, Type: models.SessionEntryCompaction, CreatedAt: path.Compaction.CreatedAt,
+		Compaction: &models.CompactionEntryView{
 			Summary:          CompactionSummaryText(path.Compaction.Compaction),
 			FirstKeptEntryID: path.Compaction.Compaction.FirstKeptEntryID,
 			TokensBefore:     path.Compaction.Compaction.TokensBefore,
@@ -527,13 +529,13 @@ func previousCompactionView(path *AgentSessionPath, views map[string]SessionEntr
 // carries summary k−1 into chunk k. It keeps the whole chunk as its "kept
 // tail" (sequence after the chunk, first kept = the chunk's first entry), so
 // the request validates whatever sequences the chunk has.
-func compactionFoldView(stepID string, fold int, summary string, chunk []SessionEntryView) SessionEntryView {
+func compactionFoldView(stepID string, fold int, summary string, chunk []models.SessionEntryView) models.SessionEntryView {
 	last := chunk[len(chunk)-1]
-	return SessionEntryView{
+	return models.SessionEntryView{
 		ID: fmt.Sprintf("compaction-fold:%s:%d", stepID, fold), Sequence: last.Sequence + 1,
-		Type: SessionEntryCompaction, CreatedAt: last.CreatedAt,
-		Compaction: &CompactionEntryView{
-			Summary:          CompactionSummaryText(&CompactionEntry{Summary: summary}),
+		Type: models.SessionEntryCompaction, CreatedAt: last.CreatedAt,
+		Compaction: &models.CompactionEntryView{
+			Summary:          CompactionSummaryText(&models.CompactionEntry{Summary: summary}),
 			FirstKeptEntryID: chunk[0].ID,
 		},
 	}
@@ -543,9 +545,9 @@ func compactionFoldView(stepID string, fold int, summary string, chunk []Session
 // over the step's own rendered path: same identity, System, Tools (with their
 // surfaces) and Entries, so the request reads the step's cached prefix and
 // only the summary instruction follows it.
-func compactionSummaryRequest(step ModelStepRequest) ModelStepRequest {
+func compactionSummaryRequest(step models.ModelStepRequest) models.ModelStepRequest {
 	req := step
-	req.Purpose = ModelStepPurposeSummary
+	req.Purpose = models.ModelStepPurposeSummary
 	req.SummaryInstruction = compactionSummaryInstruction
 	req.MaxOutputTokens = compactionSummaryMaxOutputTokens
 	req.Stream.AnswerPreview = false
@@ -559,7 +561,7 @@ func compactionSummaryRequest(step ModelStepRequest) ModelStepRequest {
 // from the start; tools surfaced after the chunk are left out, since nothing
 // in the chunk can call them. Tool order stays valid: carried, then folded,
 // then surfaced in entry order.
-func compactionChunkSummaryRequest(step ModelStepRequest, entries []SessionEntryView) ModelStepRequest {
+func compactionChunkSummaryRequest(step models.ModelStepRequest, entries []models.SessionEntryView) models.ModelStepRequest {
 	req := compactionSummaryRequest(step)
 	req.Tools, req.Entries = chunkSurfaces(step.Tools, step.Entries, entries)
 	return req
@@ -568,8 +570,8 @@ func compactionChunkSummaryRequest(step ModelStepRequest, entries []SessionEntry
 // summarize runs one summary call, retried once identically when the host
 // answers summary_failed or the summary is unusable. A second failure is
 // compaction_failed. Length rejections and host errors return unchanged.
-func (c *LoopCompactor) summarize(ctx context.Context, req ModelStepRequest) (compactionSummary, ModelStepUsage, error) {
-	var usage ModelStepUsage
+func (c *LoopCompactor) summarize(ctx context.Context, req models.ModelStepRequest) (compactionSummary, models.ModelStepUsage, error) {
+	var usage models.ModelStepUsage
 	if len(req.Entries) < compactionSummaryMinimumEntries {
 		// A summary request needs two entries (section 06); one entry alone
 		// that fills the window cannot be summarized, so it is a length
@@ -590,7 +592,7 @@ func (c *LoopCompactor) summarize(ctx context.Context, req ModelStepRequest) (co
 		}
 		usage = addModelStepUsage(usage, result.Assistant.Usage)
 		text := strings.TrimSpace(result.Assistant.Text)
-		if text == "" || len(text) > MaxCompactionSummaryBytes || !utf8.ValidString(text) || len(result.Assistant.ToolCalls) > 0 {
+		if text == "" || len(text) > models.MaxCompactionSummaryBytes || !utf8.ValidString(text) || len(result.Assistant.ToolCalls) > 0 {
 			continue
 		}
 		provider := string(result.Model.Provider)
@@ -617,17 +619,17 @@ func isContextExceeded(err error) bool {
 
 // appendCompaction appends the compaction entry and its session.compacted
 // event in one lease-fenced store call.
-func (c *LoopCompactor) appendCompaction(ctx context.Context, in agentrun.StepInput, work compactionWork, summary compactionSummary, usage ModelStepUsage) error {
+func (c *LoopCompactor) appendCompaction(ctx context.Context, in agentrun.StepInput, work compactionWork, summary compactionSummary, usage models.ModelStepUsage) error {
 	now := c.now()
-	var previous *CompactionEntry
+	var previous *models.CompactionEntry
 	if in.Path.Compaction != nil {
 		previous = in.Path.Compaction.Compaction
 	}
 	sessionID := in.Path.Session.ID
-	entry := &SessionEntry{
+	entry := &models.SessionEntry{
 		ID: c.newID(), Scope: in.Run.Scope, SessionID: sessionID, RunID: in.Run.ID,
-		StepID: in.Step.ID, Step: in.Step.Sequence, Type: SessionEntryCompaction, CreatedAt: now,
-		Compaction: &CompactionEntry{
+		StepID: in.Step.ID, Step: in.Step.Sequence, Type: models.SessionEntryCompaction, CreatedAt: now,
+		Compaction: &models.CompactionEntry{
 			Summary:          summary.text,
 			FirstKeptEntryID: work.plan.FirstKeptEntryID,
 			TokensBefore:     work.estimate.Tokens,
@@ -641,11 +643,11 @@ func (c *LoopCompactor) appendCompaction(ctx context.Context, in agentrun.StepIn
 	}
 	entry.Tokens = estimateEntryTokens(entry)
 	tokensAfter := entry.Tokens + compactionSpanTokens(work.plan.Kept) + defaultPrefixTokens
-	event := &ActivityEvent{
-		ID: c.newID(), Scope: in.Run.Scope, EventType: compactionEventType, Severity: ActivitySeverityInfo,
-		AgentID: in.Run.AssignedAgentID, ObjectiveID: in.Run.ObjectiveID, TeamID: teamIDForRun(in.Run),
-		RunID: in.Run.ID, TurnID: in.Step.ID, Actor: ActivityActor{Type: "worker", ID: in.WorkerID},
-		Summary: "Summarized earlier context", Visibility: ActivityVisibilityScope, CreatedAt: now,
+	event := &models.ActivityEvent{
+		ID: c.newID(), Scope: in.Run.Scope, EventType: compactionEventType, Severity: models.ActivitySeverityInfo,
+		AgentID: in.Run.AssignedAgentID, ObjectiveID: in.Run.ObjectiveID, TeamID: models.TeamIDForRun(in.Run),
+		RunID: in.Run.ID, TurnID: in.Step.ID, Actor: models.ActivityActor{Type: "worker", ID: in.WorkerID},
+		Summary: "Summarized earlier context", Visibility: models.ActivityVisibilityScope, CreatedAt: now,
 		Payload: map[string]interface{}{
 			"sessionId":        sessionID,
 			"entryId":          entry.ID,
@@ -655,10 +657,10 @@ func (c *LoopCompactor) appendCompaction(ctx context.Context, in agentrun.StepIn
 			"tokensAfter":      tokensAfter,
 		},
 	}
-	_, err := c.Sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
+	_, err := c.Sessions.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: in.Run.Scope, SessionID: sessionID, RunID: in.Run.ID,
-		Lease:   &AgentRunLeaseGuard{WorkerID: in.WorkerID, Now: now},
-		Entries: []*SessionEntry{entry}, Events: []*ActivityEvent{event}, Now: now,
+		Lease:   &models.AgentRunLeaseGuard{WorkerID: in.WorkerID, Now: now},
+		Entries: []*models.SessionEntry{entry}, Events: []*models.ActivityEvent{event}, Now: now,
 	})
 	return err
 }

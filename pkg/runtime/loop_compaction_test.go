@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -23,11 +25,11 @@ import (
 // validated as the real host would, so a malformed request fails the test.
 type fakeSummaryHost struct {
 	t        *testing.T
-	requests []ModelStepRequest
-	script   []func(req ModelStepRequest) (ModelStepResult, error)
+	requests []models.ModelStepRequest
+	script   []func(req models.ModelStepRequest) (models.ModelStepResult, error)
 }
 
-func (h *fakeSummaryHost) ExecuteModelStep(_ context.Context, req ModelStepRequest) (ModelStepResult, error) {
+func (h *fakeSummaryHost) ExecuteModelStep(_ context.Context, req models.ModelStepRequest) (models.ModelStepResult, error) {
 	h.t.Helper()
 	if err := req.Validate(); err != nil {
 		h.t.Fatalf("summary request %d is invalid: %v", len(h.requests), err)
@@ -39,71 +41,71 @@ func (h *fakeSummaryHost) ExecuteModelStep(_ context.Context, req ModelStepReque
 	return h.script[len(h.requests)-1](req)
 }
 
-func (h *fakeSummaryHost) ExecuteHostTool(context.Context, HostToolRequest) (HostToolResult, error) {
+func (h *fakeSummaryHost) ExecuteHostTool(context.Context, models.HostToolRequest) (models.HostToolResult, error) {
 	h.t.Helper()
 	h.t.Fatalf("the compactor ran a host tool")
-	return HostToolResult{}, nil
+	return models.HostToolResult{}, nil
 }
 
-func summaryAnswer(text string, input, output int64) func(ModelStepRequest) (ModelStepResult, error) {
-	return func(req ModelStepRequest) (ModelStepResult, error) {
-		return ModelStepResult{
-			APIVersion: ModelStepAPIVersion, StepID: req.StepID,
-			Assistant: AssistantEntry{
-				Provider: ModelStepProviderAnthropic, Model: "claude-x", Text: text, StopReason: ModelStopEnd,
-				Usage: ModelStepUsage{InputTokens: input, OutputTokens: output, Cost: 0.01, Attempts: 1},
+func summaryAnswer(text string, input, output int64) func(models.ModelStepRequest) (models.ModelStepResult, error) {
+	return func(req models.ModelStepRequest) (models.ModelStepResult, error) {
+		return models.ModelStepResult{
+			APIVersion: models.ModelStepAPIVersion, StepID: req.StepID,
+			Assistant: models.AssistantEntry{
+				Provider: models.ModelStepProviderAnthropic, Model: "claude-x", Text: text, StopReason: models.ModelStopEnd,
+				Usage: models.ModelStepUsage{InputTokens: input, OutputTokens: output, Cost: 0.01, Attempts: 1},
 			},
-			Model: ModelStepModelInfo{Provider: ModelStepProviderAnthropic, Model: "claude-x", ContextTokens: 64000},
+			Model: models.ModelStepModelInfo{Provider: models.ModelStepProviderAnthropic, Model: "claude-x", ContextTokens: 64000},
 		}, nil
 	}
 }
 
-func summaryHostFailure(code string) func(ModelStepRequest) (ModelStepResult, error) {
-	return func(ModelStepRequest) (ModelStepResult, error) {
-		return ModelStepResult{}, &TurnHostFailure{Code: code, Message: "host said " + code}
+func summaryHostFailure(code string) func(models.ModelStepRequest) (models.ModelStepResult, error) {
+	return func(models.ModelStepRequest) (models.ModelStepResult, error) {
+		return models.ModelStepResult{}, &TurnHostFailure{Code: code, Message: "host said " + code}
 	}
 }
 
 // fakeStepRequests renders the path the way the step would send it.
 type fakeStepRequests struct{}
 
-func (fakeStepRequests) PrepareModelStep(_ context.Context, in agentrun.StepInput) (ModelStepRequest, error) {
-	var views []SessionEntryView
+func (fakeStepRequests) PrepareModelStep(_ context.Context, in agentrun.StepInput) (models.ModelStepRequest, error) {
+	var views []models.SessionEntryView
 	if in.Path.Compaction != nil {
 		views = append(views, testEntryView(in.Path.Compaction))
 	}
 	for _, entry := range in.Path.Entries {
 		views = append(views, testEntryView(entry))
 	}
-	return ModelStepRequest{
-		APIVersion: ModelStepAPIVersion, Purpose: ModelStepPurposeStep, Scope: in.Run.Scope,
+	return models.ModelStepRequest{
+		APIVersion: models.ModelStepAPIVersion, Purpose: models.ModelStepPurposeStep, Scope: in.Run.Scope,
 		RunID: in.Run.ID, StepID: in.Step.ID, Attempt: in.Attempt, SessionID: in.Path.Session.ID,
 		AgentID: in.Run.AssignedAgentID, DefinitionID: "def", DefinitionVersion: "1", Model: "claude-x",
-		System:  ModelStepSystem{AgentInstructions: []string{"Be useful."}, Sections: []ModelStepSystemSection{{ID: "rules", Title: "Rules", Text: "Follow them."}}},
-		Tools:   []ModelStepTool{{Name: "turn_final_answer", Description: "answer", InputSchema: map[string]interface{}{"type": "object"}, Group: ModelStepToolHarness}},
+		System:  models.ModelStepSystem{AgentInstructions: []string{"Be useful."}, Sections: []models.ModelStepSystemSection{{ID: "rules", Title: "Rules", Text: "Follow them."}}},
+		Tools:   []models.ModelStepTool{{Name: "turn_final_answer", Description: "answer", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness}},
 		Entries: views, MaxOutputTokens: 4000,
-		Stream: ModelStepStream{AnswerPreview: true, FinalAnswerTool: "turn_final_answer"},
+		Stream: models.ModelStepStream{AnswerPreview: true, FinalAnswerTool: "turn_final_answer"},
 	}, nil
 }
 
-func testEntryView(entry *SessionEntry) SessionEntryView {
-	view := SessionEntryView{ID: entry.ID, Sequence: entry.Sequence, Type: entry.Type, CreatedAt: entry.CreatedAt}
+func testEntryView(entry *models.SessionEntry) models.SessionEntryView {
+	view := models.SessionEntryView{ID: entry.ID, Sequence: entry.Sequence, Type: entry.Type, CreatedAt: entry.CreatedAt}
 	switch entry.Type {
-	case SessionEntryUser:
-		view.User = &UserEntryView{Content: entry.User.Content}
-	case SessionEntryAssistant:
+	case models.SessionEntryUser:
+		view.User = &models.UserEntryView{Content: entry.User.Content}
+	case models.SessionEntryAssistant:
 		assistant := *entry.Assistant
 		assistant.Limits = nil
 		view.Assistant = &assistant
-	case SessionEntryTool:
-		view.Tool = &ToolEntryView{
+	case models.SessionEntryTool:
+		view.Tool = &models.ToolEntryView{
 			CallID: entry.ToolCallID, Name: entry.Tool.Name, Arguments: entry.Tool.Arguments, State: entry.State,
-			Result: ToolResultView{Content: entry.Tool.Result.Content, IsError: entry.Tool.Result.IsError}, ActionCallID: entry.ActionCallID,
+			Result: models.ToolResultView{Content: entry.Tool.Result.Content, IsError: entry.Tool.Result.IsError}, ActionCallID: entry.ActionCallID,
 		}
-	case SessionEntryNote:
-		view.Note = &NoteEntryView{Kind: string(entry.Note.Kind), Text: entry.Note.Text}
-	case SessionEntryCompaction:
-		view.Compaction = &CompactionEntryView{
+	case models.SessionEntryNote:
+		view.Note = &models.NoteEntryView{Kind: string(entry.Note.Kind), Text: entry.Note.Text}
+	case models.SessionEntryCompaction:
+		view.Compaction = &models.CompactionEntryView{
 			Summary: CompactionSummaryText(entry.Compaction), FirstKeptEntryID: entry.Compaction.FirstKeptEntryID,
 			TokensBefore: entry.Compaction.TokensBefore,
 		}
@@ -129,7 +131,7 @@ func newCompactionFixture(t *testing.T) *compactionFixture {
 	store := newTestKernelStore(t)
 	f := &storetest.SessionFixture{
 		T: t, Ctx: context.Background(), Store: store,
-		Scope: Scope{Kind: "tenant", ID: "compact-" + uuid.NewString()[:8]},
+		Scope: models.Scope{Kind: "tenant", ID: "compact-" + uuid.NewString()[:8]},
 		Now:   time.Now().UTC().Truncate(time.Millisecond),
 	}
 	run, session := f.ConversationRun("agent-a")
@@ -144,43 +146,43 @@ func newCompactionFixture(t *testing.T) *compactionFixture {
 	return fx
 }
 
-func (fx *compactionFixture) user(id string, tokens int64) *SessionEntry {
+func (fx *compactionFixture) user(id string, tokens int64) *models.SessionEntry {
 	return storetest.WithTokens(storetest.UserSessionEntry(id, "message "+id), tokens)
 }
 
-func (fx *compactionFixture) note(id string, tokens int64) *SessionEntry {
-	return storetest.WithTokens(storetest.NoteSessionEntry(id, NoteRunContext), tokens)
+func (fx *compactionFixture) note(id string, tokens int64) *models.SessionEntry {
+	return storetest.WithTokens(storetest.NoteSessionEntry(id, models.NoteRunContext), tokens)
 }
 
 // stepWithTool is one model step that called one tool, recorded with the
 // given action call id.
-func (fx *compactionFixture) stepWithTool(id, actionCallID string, assistantTokens, toolTokens int64) []*SessionEntry {
+func (fx *compactionFixture) stepWithTool(id, actionCallID string, assistantTokens, toolTokens int64) []*models.SessionEntry {
 	stepID := "step-" + id
-	assistant := storetest.WithTokens(&SessionEntry{ID: "a-" + id, StepID: stepID, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
-		Provider: ModelStepProviderAnthropic, Model: "claude-x", Text: "checking", StopReason: ModelStopToolCalls,
-		ToolCalls: []ModelToolCall{{ID: "call-" + id, Name: "read_file", Arguments: json.RawMessage(`{"path":"a"}`)}},
+	assistant := storetest.WithTokens(&models.SessionEntry{ID: "a-" + id, StepID: stepID, Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
+		Provider: models.ModelStepProviderAnthropic, Model: "claude-x", Text: "checking", StopReason: models.ModelStopToolCalls,
+		ToolCalls: []models.ModelToolCall{{ID: "call-" + id, Name: "read_file", Arguments: json.RawMessage(`{"path":"a"}`)}},
 	}}, assistantTokens)
-	tool := storetest.WithTokens(&SessionEntry{ID: "t-" + id, StepID: stepID, Type: SessionEntryTool, State: ToolEntryCompleted,
-		ToolCallID: "call-" + id, ActionCallID: actionCallID, Tool: &ToolEntry{
-			Name: "read_file", Arguments: json.RawMessage(`{"path":"a"}`), SideEffect: ToolSideEffectRead,
-			Result: &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{storetest.TextPart("contents " + id)}},
+	tool := storetest.WithTokens(&models.SessionEntry{ID: "t-" + id, StepID: stepID, Type: models.SessionEntryTool, State: models.ToolEntryCompleted,
+		ToolCallID: "call-" + id, ActionCallID: actionCallID, Tool: &models.ToolEntry{
+			Name: "read_file", Arguments: json.RawMessage(`{"path":"a"}`), SideEffect: models.ToolSideEffectRead,
+			Result: &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{storetest.TextPart("contents " + id)}},
 		}}, toolTokens)
-	return []*SessionEntry{assistant, tool}
+	return []*models.SessionEntry{assistant, tool}
 }
 
 // finalStep is a model step without tool calls that carries the window and
 // its real prompt size (the estimate's anchor).
-func (fx *compactionFixture) finalStep(id string, tokens, promptTokens int64, limits bool) *SessionEntry {
-	entry := storetest.WithTokens(&SessionEntry{ID: "a-" + id, StepID: "step-" + id, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
-		Provider: ModelStepProviderAnthropic, Model: "claude-x", Text: "done " + id, StopReason: ModelStopEnd,
+func (fx *compactionFixture) finalStep(id string, tokens, promptTokens int64, limits bool) *models.SessionEntry {
+	entry := storetest.WithTokens(&models.SessionEntry{ID: "a-" + id, StepID: "step-" + id, Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
+		Provider: models.ModelStepProviderAnthropic, Model: "claude-x", Text: "done " + id, StopReason: models.ModelStopEnd,
 	}}, tokens)
 	if limits {
-		entry.Assistant.Limits = &AssistantModelLimits{ContextTokens: 64000, PromptTokens: promptTokens}
+		entry.Assistant.Limits = &models.AssistantModelLimits{ContextTokens: 64000, PromptTokens: promptTokens}
 	}
 	return entry
 }
 
-func (fx *compactionFixture) add(entries ...*SessionEntry) {
+func (fx *compactionFixture) add(entries ...*models.SessionEntry) {
 	fx.T.Helper()
 	fx.MustAppend(fx.sessionID, fx.runID, entries...)
 }
@@ -203,31 +205,31 @@ func (fx *compactionFixture) input() agentrun.StepInput {
 	run := fx.Run(fx.runID)
 	path := fx.Path(fx.sessionID)
 	return agentrun.StepInput{
-		Run: run, Step: &AgentTurn{ID: fmt.Sprintf("step-now-%d", fx.step), Scope: fx.Scope, RunID: fx.runID, Sequence: int64(10 + fx.step), Status: AgentTurnStatusRunning},
+		Run: run, Step: &models.AgentTurn{ID: fmt.Sprintf("step-now-%d", fx.step), Scope: fx.Scope, RunID: fx.runID, Sequence: int64(10 + fx.step), Status: models.AgentTurnStatusRunning},
 		Session: path.Session, Path: path, Binding: &agentrun.TurnRunnerBinding{Model: "claude-x"},
 		Mode: agentrun.StepModeNormal, WorkerID: storetest.SessionWorker,
 	}
 }
 
-func (fx *compactionFixture) compactions() []*SessionEntry {
+func (fx *compactionFixture) compactions() []*models.SessionEntry {
 	fx.T.Helper()
-	entries, err := fx.store.ListAgentSessionEntries(fx.Ctx, SessionEntryFilter{Scope: fx.Scope, SessionID: fx.sessionID, Types: []SessionEntryType{SessionEntryCompaction}})
+	entries, err := fx.store.ListAgentSessionEntries(fx.Ctx, models.SessionEntryFilter{Scope: fx.Scope, SessionID: fx.sessionID, Types: []models.SessionEntryType{models.SessionEntryCompaction}})
 	if err != nil {
 		fx.T.Fatalf("list compactions: %v", err)
 	}
 	return entries
 }
 
-func (fx *compactionFixture) compactedEvents() []*ActivityEvent {
+func (fx *compactionFixture) compactedEvents() []*models.ActivityEvent {
 	fx.T.Helper()
-	events, err := fx.store.ListActivity(fx.Ctx, ActivityFilter{Scope: fx.Scope, RunID: fx.runID, EventTypes: []string{compactionEventType}, Limit: 100})
+	events, err := fx.store.ListActivity(fx.Ctx, models.ActivityFilter{Scope: fx.Scope, RunID: fx.runID, EventTypes: []string{compactionEventType}, Limit: 100})
 	if err != nil {
 		fx.T.Fatalf("list activity: %v", err)
 	}
 	return events
 }
 
-func viewIDs(views []SessionEntryView) string {
+func viewIDs(views []models.SessionEntryView) string {
 	ids := make([]string, len(views))
 	for i, view := range views {
 		ids[i] = view.ID
@@ -267,7 +269,7 @@ func TestCompactThresholdSendsStepRequestAsSummary(t *testing.T) {
 		t.Fatalf("summary calls = %d, want 1", len(fx.host.requests))
 	}
 	req := fx.host.requests[0]
-	if req.Purpose != ModelStepPurposeSummary || req.SummaryInstruction != compactionSummaryInstruction || req.MaxOutputTokens != compactionSummaryMaxOutputTokens {
+	if req.Purpose != models.ModelStepPurposeSummary || req.SummaryInstruction != compactionSummaryInstruction || req.MaxOutputTokens != compactionSummaryMaxOutputTokens {
 		t.Fatalf("summary request purpose=%s maxOutput=%d instruction set=%v", req.Purpose, req.MaxOutputTokens, req.SummaryInstruction != "")
 	}
 	if !reflect.DeepEqual(req.System, step.System) || !reflect.DeepEqual(req.Tools, step.Tools) {
@@ -288,7 +290,7 @@ func TestCompactThresholdSendsStepRequestAsSummary(t *testing.T) {
 		t.Fatal("no compaction on the path")
 	}
 	c := path.Compaction.Compaction
-	if c.Summary != "## Objective\nship it" || c.FirstKeptEntryID != "a-s2" || c.Trigger != CompactionTriggerThreshold ||
+	if c.Summary != "## Objective\nship it" || c.FirstKeptEntryID != "a-s2" || c.Trigger != models.CompactionTriggerThreshold ||
 		c.TokensBefore != 50000 || c.Provider != "anthropic" || c.Model != "claude-x" || c.Usage.InputTokens != 50500 {
 		t.Fatalf("compaction = %+v", c)
 	}
@@ -312,7 +314,7 @@ func TestCompactThresholdSkipsWhenNothingToCompact(t *testing.T) {
 	fx.add(fx.user("u0", 1000))
 	fx.add(fx.finalStep("s1", 1000, 60000, true))
 	usage, err := fx.compactor.Compact(fx.Ctx, fx.input(), false)
-	if err != nil || usage != (ModelStepUsage{}) || len(fx.host.requests) != 0 || len(fx.compactions()) != 0 {
+	if err != nil || usage != (models.ModelStepUsage{}) || len(fx.host.requests) != 0 || len(fx.compactions()) != 0 {
 		t.Fatalf("usage=%+v err=%v calls=%d", usage, err, len(fx.host.requests))
 	}
 }
@@ -322,7 +324,7 @@ func TestCompactThresholdSkipsWhenTheSummaryDoesNotFit(t *testing.T) {
 	fx.history(true)
 	fx.host.script = append(fx.host.script, summaryHostFailure(TurnHostContextExceeded))
 	usage, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input())
-	if err != nil || usage != (ModelStepUsage{}) || len(fx.compactions()) != 0 {
+	if err != nil || usage != (models.ModelStepUsage{}) || len(fx.compactions()) != 0 {
 		t.Fatalf("usage=%+v err=%v compactions=%d", usage, err, len(fx.compactions()))
 	}
 }
@@ -343,9 +345,9 @@ func TestCompactAppendsEntryAndEventUnderLease(t *testing.T) {
 	event := events[0]
 	payload := event.Payload
 	wantAfter := compaction.Tokens + 8000 + 2000 + 2000 + 3000 + defaultPrefixTokens
-	if event.Summary != "Summarized earlier context" || event.TurnID != compaction.StepID || event.Visibility != ActivityVisibilityScope ||
+	if event.Summary != "Summarized earlier context" || event.TurnID != compaction.StepID || event.Visibility != models.ActivityVisibilityScope ||
 		payload["sessionId"] != fx.sessionID || payload["entryId"] != compaction.ID || payload["firstKeptEntryId"] != "a-s2" ||
-		payload["trigger"] != CompactionTriggerThreshold || fmt.Sprint(payload["tokensBefore"]) != "50000" ||
+		payload["trigger"] != models.CompactionTriggerThreshold || fmt.Sprint(payload["tokensBefore"]) != "50000" ||
 		fmt.Sprint(payload["tokensAfter"]) != fmt.Sprint(wantAfter) {
 		t.Fatalf("event = %+v payload = %v (want tokensAfter %d)", event, payload, wantAfter)
 	}
@@ -359,7 +361,7 @@ func TestCompactAppendsEntryAndEventUnderLease(t *testing.T) {
 	in := fx.input()
 	in.WorkerID = "other-worker"
 	_, err := fx.compactor.Compact(fx.Ctx, in, false)
-	if !errors.Is(err, ErrLeaseLost) {
+	if !errors.Is(err, models.ErrLeaseLost) {
 		t.Fatalf("lost lease err = %v", err)
 	}
 	if len(fx.compactions()) != 1 || len(fx.compactedEvents()) != 1 {
@@ -384,7 +386,7 @@ func TestCompactInvalidSummaryRetriesOnceThenFails(t *testing.T) {
 	t.Run("oversized then valid", func(t *testing.T) {
 		fx := newCompactionFixture(t)
 		fx.history(true)
-		fx.host.script = append(fx.host.script, summaryAnswer(strings.Repeat("x", MaxCompactionSummaryBytes+1), 100, 16384), summaryAnswer("good", 120, 20))
+		fx.host.script = append(fx.host.script, summaryAnswer(strings.Repeat("x", models.MaxCompactionSummaryBytes+1), 100, 16384), summaryAnswer("good", 120, 20))
 		usage, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input())
 		if err != nil {
 			t.Fatalf("CompactIfNeeded: %v", err)
@@ -399,8 +401,8 @@ func TestCompactInvalidSummaryRetriesOnceThenFails(t *testing.T) {
 	t.Run("host error unchanged", func(t *testing.T) {
 		fx := newCompactionFixture(t)
 		fx.history(true)
-		fx.host.script = append(fx.host.script, func(ModelStepRequest) (ModelStepResult, error) {
-			return ModelStepResult{}, NewTurnHostFailure(StepHostFailureUnreachable, "down", true)
+		fx.host.script = append(fx.host.script, func(models.ModelStepRequest) (models.ModelStepResult, error) {
+			return models.ModelStepResult{}, NewTurnHostFailure(StepHostFailureUnreachable, "down", true)
 		})
 		_, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input())
 		if !errors.Is(err, ErrTurnHostUnavailable) {
@@ -455,11 +457,11 @@ func TestCompactOverflowSendsOnlySummarizedSpan(t *testing.T) {
 		t.Fatalf("overflow entries = %s, want only the summarized span", got)
 	}
 	step, _ := fakeStepRequests{}.PrepareModelStep(fx.Ctx, in)
-	if !reflect.DeepEqual(req.System, step.System) || !reflect.DeepEqual(req.Tools, step.Tools) || req.Purpose != ModelStepPurposeSummary {
+	if !reflect.DeepEqual(req.System, step.System) || !reflect.DeepEqual(req.Tools, step.Tools) || req.Purpose != models.ModelStepPurposeSummary {
 		t.Fatal("overflow summary must keep the step's system and tools")
 	}
 	c := fx.Path(fx.sessionID).Compaction.Compaction
-	if c.Trigger != CompactionTriggerOverflow || c.FirstKeptEntryID != "a-s2" || c.Summary != "overflow summary" {
+	if c.Trigger != models.CompactionTriggerOverflow || c.FirstKeptEntryID != "a-s2" || c.Summary != "overflow summary" {
 		t.Fatalf("compaction = %+v", c)
 	}
 }
@@ -495,10 +497,10 @@ func TestCompactOverflowFoldsChunks(t *testing.T) {
 		t.Fatalf("chunk 0 = %s", got)
 	}
 	second := fx.host.requests[1].Entries
-	if got := viewIDs(second[1:]); got != "a-s1,t-s1,u2" || second[0].Type != SessionEntryCompaction {
+	if got := viewIDs(second[1:]); got != "a-s1,t-s1,u2" || second[0].Type != models.SessionEntryCompaction {
 		t.Fatalf("chunk 1 = %s", viewIDs(second))
 	}
-	if second[0].Compaction.Summary != CompactionSummaryText(&CompactionEntry{Summary: "part one"}) {
+	if second[0].Compaction.Summary != CompactionSummaryText(&models.CompactionEntry{Summary: "part one"}) {
 		t.Fatalf("fold view = %q", second[0].Compaction.Summary)
 	}
 	if usage.InputTokens != 70000 || usage.OutputTokens != 1000 {
@@ -594,10 +596,10 @@ func TestCompactOverflowSingleEntryChunkIsContextOverflow(t *testing.T) {
 func TestCompactChargesBudgetNotTurns(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.history(true)
-	fx.UpdateRun(fx.runID, func(run *AgentRun) {
-		run.Budget = &BudgetPolicy{MaxTurns: 10, MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000}
+	fx.UpdateRun(fx.runID, func(run *models.AgentRun) {
+		run.Budget = &models.BudgetPolicy{MaxTurns: 10, MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000}
 	})
-	fx.compactor.Budget = newRunActivityCompactionBudget(fx.store, NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
+	fx.compactor.Budget = newRunActivityCompactionBudget(fx.store, activity.NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
 	fx.host.script = append(fx.host.script, summaryAnswer("summary", 50500, 900))
 	in := fx.input()
 	before := in.Run.Revision
@@ -618,7 +620,7 @@ func TestCompactChargesBudgetNotTurns(t *testing.T) {
 	if usage.InputTokens != 50500 {
 		t.Fatalf("usage = %+v", usage)
 	}
-	steps, err := fx.store.ListAgentTurns(fx.Ctx, AgentTurnFilter{Scope: fx.Scope, RunID: fx.runID})
+	steps, err := fx.store.ListAgentTurns(fx.Ctx, models.AgentTurnFilter{Scope: fx.Scope, RunID: fx.runID})
 	if err != nil || len(steps) != 0 {
 		t.Fatalf("compaction wrote %d agent_turns rows", len(steps))
 	}
@@ -627,10 +629,10 @@ func TestCompactChargesBudgetNotTurns(t *testing.T) {
 func TestCompactSettlesBudgetAfterAHeartbeatDuringTheSummary(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.history(true)
-	fx.UpdateRun(fx.runID, func(run *AgentRun) {
-		run.Budget = &BudgetPolicy{MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000}
+	fx.UpdateRun(fx.runID, func(run *models.AgentRun) {
+		run.Budget = &models.BudgetPolicy{MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000}
 	})
-	fx.compactor.Budget = newRunActivityCompactionBudget(fx.store, NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
+	fx.compactor.Budget = newRunActivityCompactionBudget(fx.store, activity.NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
 	in := fx.input()
 	// The Run moved on after the step read it: a heartbeat before the
 	// reservation, and another while the summary call runs.
@@ -638,7 +640,7 @@ func TestCompactSettlesBudgetAfterAHeartbeatDuringTheSummary(t *testing.T) {
 		t.Fatalf("renew: %v", err)
 	}
 	answer := summaryAnswer("summary", 50500, 900)
-	fx.host.script = append(fx.host.script, func(req ModelStepRequest) (ModelStepResult, error) {
+	fx.host.script = append(fx.host.script, func(req models.ModelStepRequest) (models.ModelStepResult, error) {
 		if _, err := fx.store.RenewAgentRunLease(fx.Ctx, fx.Scope, fx.runID, storetest.SessionWorker, fx.Now, time.Hour); err != nil {
 			t.Fatalf("renew: %v", err)
 		}
@@ -657,7 +659,7 @@ func TestCompactSettlesBudgetAfterAHeartbeatDuringTheSummary(t *testing.T) {
 	if in.Run.Revision != run.Revision || len(fx.compactions()) != 1 {
 		t.Fatalf("in.Run revision %d, stored %d, compactions %d", in.Run.Revision, run.Revision, len(fx.compactions()))
 	}
-	events, err := fx.store.ListActivity(fx.Ctx, ActivityFilter{Scope: fx.Scope, RunID: fx.runID, EventTypes: []string{"budget.settled"}, Limit: 10})
+	events, err := fx.store.ListActivity(fx.Ctx, models.ActivityFilter{Scope: fx.Scope, RunID: fx.runID, EventTypes: []string{"budget.settled"}, Limit: 10})
 	if err != nil || len(events) != 1 {
 		t.Fatalf("settled events = %d, %v", len(events), err)
 	}
@@ -669,10 +671,10 @@ func TestCompactSettlesBudgetAfterAHeartbeatDuringTheSummary(t *testing.T) {
 func TestCompactBudgetExhaustedFailsWithoutCalling(t *testing.T) {
 	fx := newCompactionFixture(t)
 	fx.history(true)
-	fx.UpdateRun(fx.runID, func(run *AgentRun) {
-		run.Budget = &BudgetPolicy{MaxOutputTokens: 1000}
+	fx.UpdateRun(fx.runID, func(run *models.AgentRun) {
+		run.Budget = &models.BudgetPolicy{MaxOutputTokens: 1000}
 	})
-	fx.compactor.Budget = newRunActivityCompactionBudget(fx.store, NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
+	fx.compactor.Budget = newRunActivityCompactionBudget(fx.store, activity.NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.Now })
 	_, err := fx.compactor.CompactIfNeeded(fx.Ctx, fx.input())
 	requireLoopFailure(t, err, "budget", "budget_exhausted")
 	if len(fx.host.requests) != 0 || len(fx.compactions()) != 0 {
@@ -684,14 +686,14 @@ func TestCompactBudgetExhaustedFailsWithoutCalling(t *testing.T) {
 // Rendering
 
 func TestCompactionSummaryTextFormat(t *testing.T) {
-	got := CompactionSummaryText(&CompactionEntry{Summary: "  ## Objective\nShip.\n", ActionCallIDs: []string{"ac_01JA", "ac_01JB"}})
+	got := CompactionSummaryText(&models.CompactionEntry{Summary: "  ## Objective\nShip.\n", ActionCallIDs: []string{"ac_01JA", "ac_01JB"}})
 	want := "The conversation and work before this point were compacted. This summary replaces them; the messages after it are verbatim.\n\n" +
 		"## Objective\nShip.\n\nAction calls recorded before this point: ac_01JA, ac_01JB"
 	if got != want {
 		t.Fatalf("text = %q", got)
 	}
-	view := compactionFoldView("s", 1, "S", []SessionEntryView{{ID: "x", Sequence: 4}, {ID: "y", Sequence: 9}})
-	if view.Sequence != 10 || view.Compaction.FirstKeptEntryID != "x" || view.Compaction.Summary != CompactionSummaryText(&CompactionEntry{Summary: "S"}) {
+	view := compactionFoldView("s", 1, "S", []models.SessionEntryView{{ID: "x", Sequence: 4}, {ID: "y", Sequence: 9}})
+	if view.Sequence != 10 || view.Compaction.FirstKeptEntryID != "x" || view.Compaction.Summary != CompactionSummaryText(&models.CompactionEntry{Summary: "S"}) {
 		t.Fatalf("fold view = %+v", view)
 	}
 }
@@ -699,7 +701,7 @@ func TestCompactionSummaryTextFormat(t *testing.T) {
 func TestCompactionModelPrefersStepThenBindingThenNewest(t *testing.T) {
 	path := windowPath(nil,
 		windowAssistant("a1", 1, "old", 10, 0),
-		&SessionEntry{ID: "mc", Sequence: 2, Type: SessionEntryModelChange, ModelChange: &ModelChangeEntry{Provider: "anthropic", Model: "new"}},
+		&models.SessionEntry{ID: "mc", Sequence: 2, Type: models.SessionEntryModelChange, ModelChange: &models.ModelChangeEntry{Provider: "anthropic", Model: "new"}},
 		windowAssistant("a3", 3, "resolved", 10, 0))
 	cases := []struct {
 		name    string
@@ -712,14 +714,14 @@ func TestCompactionModelPrefersStepThenBindingThenNewest(t *testing.T) {
 		{"newest after change", "", "auto", "resolved"},
 	}
 	for _, tc := range cases {
-		in := agentrun.StepInput{Step: &AgentTurn{Model: tc.step}, Binding: &agentrun.TurnRunnerBinding{Model: tc.binding}, Path: path}
+		in := agentrun.StepInput{Step: &models.AgentTurn{Model: tc.step}, Binding: &agentrun.TurnRunnerBinding{Model: tc.binding}, Path: path}
 		if got := compactionModel(in); got != tc.want {
 			t.Fatalf("%s: model = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 	stale := windowPath(nil, windowAssistant("a1", 1, "old", 10, 0),
-		&SessionEntry{ID: "mc", Sequence: 2, Type: SessionEntryModelChange, ModelChange: &ModelChangeEntry{Provider: "anthropic", Model: "new"}})
-	if got := compactionModel(agentrun.StepInput{Step: &AgentTurn{}, Binding: &agentrun.TurnRunnerBinding{Model: "auto"}, Path: stale}); got != "auto" {
+		&models.SessionEntry{ID: "mc", Sequence: 2, Type: models.SessionEntryModelChange, ModelChange: &models.ModelChangeEntry{Provider: "anthropic", Model: "new"}})
+	if got := compactionModel(agentrun.StepInput{Step: &models.AgentTurn{}, Binding: &agentrun.TurnRunnerBinding{Model: "auto"}, Path: stale}); got != "auto" {
 		t.Fatalf("model after a change = %q, want the binding's", got)
 	}
 }

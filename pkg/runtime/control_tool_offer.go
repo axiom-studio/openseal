@@ -1,39 +1,42 @@
 package runtime
 
-import "github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+import (
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+)
 
 // controlToolOffered is the authority rule for each tool. Decision and review
 // Runs are offered only their own final tool, whatever else is set.
-func controlToolOffered(name ControlToolName, a agentrun.ControlAuthority) bool {
+func controlToolOffered(name models.ControlToolName, a agentrun.ControlAuthority) bool {
 	mode := a.EffectiveFinalMode()
 	if mode == agentrun.FinalModeDecision {
-		return name == ControlToolRequestDecision
+		return name == models.ControlToolRequestDecision
 	}
 	if mode == agentrun.FinalModeReview {
-		return name == ControlToolCompletionReview
+		return name == models.ControlToolCompletionReview
 	}
 	switch name {
-	case ControlToolFinalAnswer:
+	case models.ControlToolFinalAnswer:
 		return true
-	case ControlToolRequestDecision, ControlToolCompletionReview:
+	case models.ControlToolRequestDecision, models.ControlToolCompletionReview:
 		return false
-	case ControlToolReportProgress:
+	case models.ControlToolReportProgress:
 		return a.CanReportProgress
-	case ControlToolWait:
+	case models.ControlToolWait:
 		return a.CanWait
-	case ControlToolAskUser:
+	case models.ControlToolAskUser:
 		return a.CanAskUser
-	case ControlToolReact:
+	case models.ControlToolReact:
 		return a.CanReact
-	case ControlToolStartTask:
+	case models.ControlToolStartTask:
 		return a.TaskStart != nil && a.TaskStart.CanStart && !a.VoiceCallStarted
-	case ControlToolFork:
+	case models.ControlToolFork:
 		return a.ForkAllowed
-	case ControlToolRunOperation:
+	case models.ControlToolRunOperation:
 		return len(a.Operations) > 0
-	case ControlToolDelegate, ControlToolDelegateReply:
+	case models.ControlToolDelegate, models.ControlToolDelegateReply:
 		return len(a.DelegateTargets) > 0
-	case ControlToolRunbookFork, ControlToolRunbookDelegate:
+	case models.ControlToolRunbookFork, models.ControlToolRunbookDelegate:
 		return false // kernel-only: runbook StepProducer calls carry a directive
 	}
 	return false

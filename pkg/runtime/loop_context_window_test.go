@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestCompactionThreshold(t *testing.T) {
@@ -52,12 +54,12 @@ func TestCompactionKeepTokens(t *testing.T) {
 func tokensFor(bytes int) int64 { return int64((bytes+3)/4) + estimatedEntryFraming }
 
 func TestEstimateEntryTokensCountsTextToolCallsImagesReasoningNotNative(t *testing.T) {
-	user := &SessionEntry{Type: SessionEntryUser, User: &UserEntry{
-		Author: SessionAuthor{Type: "user", ID: "u1", DisplayName: "Ana"},
-		Content: []ContentPart{
-			{Type: ContentPartText, Text: strings.Repeat("a", 100)},
-			{Type: ContentPartImage, MediaType: "image/png", SHA256: "x"},
-			{Type: ContentPartImage, MediaType: "image/png", SHA256: "y"},
+	user := &models.SessionEntry{Type: models.SessionEntryUser, User: &models.UserEntry{
+		Author: models.SessionAuthor{Type: "user", ID: "u1", DisplayName: "Ana"},
+		Content: []models.ContentPart{
+			{Type: models.ContentPartText, Text: strings.Repeat("a", 100)},
+			{Type: models.ContentPartImage, MediaType: "image/png", SHA256: "x"},
+			{Type: models.ContentPartImage, MediaType: "image/png", SHA256: "y"},
 		},
 	}}
 	if got, want := estimateEntryTokens(user), tokensFor(len("Ana:\n")+100)+2*estimatedImageTokens; got != want {
@@ -65,32 +67,32 @@ func TestEstimateEntryTokensCountsTextToolCallsImagesReasoningNotNative(t *testi
 	}
 
 	args := json.RawMessage(`{"query":"weather in paris"}`)
-	native := &AssistantNative{
+	native := &models.AssistantNative{
 		Anthropic: []json.RawMessage{
 			json.RawMessage(`{"type":"thinking","thinking":"` + strings.Repeat("t", 40) + `","signature":"` + strings.Repeat("s", 4000) + `"}`),
 			json.RawMessage(`{"type":"text","text":"` + strings.Repeat("x", 4000) + `"}`),
 			json.RawMessage(`{"type":"tool_use","id":"c1","name":"search","input":{"query":"weather in paris"}}`),
 		},
 	}
-	assistant := &SessionEntry{Type: SessionEntryAssistant, Assistant: &AssistantEntry{
+	assistant := &models.SessionEntry{Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
 		Model:     "m",
 		Text:      strings.Repeat("x", 60),
-		ToolCalls: []ModelToolCall{{ID: "c1", Name: "search", Arguments: args}},
+		ToolCalls: []models.ModelToolCall{{ID: "c1", Name: "search", Arguments: args}},
 		Native:    native,
-		Limits:    &AssistantModelLimits{PromptTokens: 999999},
+		Limits:    &models.AssistantModelLimits{PromptTokens: 999999},
 	}}
 	want := tokensFor(60 + len("search") + len(args) + 40)
 	if got := estimateEntryTokens(assistant); got != want {
 		t.Fatalf("assistant tokens = %d, want %d", got, want)
 	}
-	chat := &SessionEntry{Type: SessionEntryAssistant, Assistant: &AssistantEntry{
-		Text: "hi", Native: &AssistantNative{ChatReasoningField: "reasoning_content", ChatReasoning: strings.Repeat("r", 30)},
+	chat := &models.SessionEntry{Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
+		Text: "hi", Native: &models.AssistantNative{ChatReasoningField: "reasoning_content", ChatReasoning: strings.Repeat("r", 30)},
 	}}
 	if got, want := estimateEntryTokens(chat), tokensFor(2+30); got != want {
 		t.Fatalf("chat reasoning tokens = %d, want %d", got, want)
 	}
-	responses := &SessionEntry{Type: SessionEntryAssistant, Assistant: &AssistantEntry{
-		Native: &AssistantNative{Responses: []json.RawMessage{
+	responses := &models.SessionEntry{Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
+		Native: &models.AssistantNative{Responses: []json.RawMessage{
 			json.RawMessage(`{"type":"reasoning","summary":[{"type":"summary_text","text":"abcd"},{"type":"summary_text","text":"efgh"}]}`),
 			json.RawMessage(`{"type":"message","content":[{"type":"output_text","text":"` + strings.Repeat("x", 400) + `"}]}`),
 		}},
@@ -100,33 +102,33 @@ func TestEstimateEntryTokensCountsTextToolCallsImagesReasoningNotNative(t *testi
 	}
 
 	value := json.RawMessage(`{"ok":true}`)
-	file := ContentPart{Type: ContentPartFile, Path: "out/report.csv", MimeType: "text/csv", SizeBytes: 1 << 20}
-	tool := &SessionEntry{Type: SessionEntryTool, State: ToolEntryCompleted, Tool: &ToolEntry{
-		Name: "search", Arguments: args, Result: &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{
-			{Type: ContentPartText, Text: strings.Repeat("r", 20)},
-			{Type: ContentPartJSON, Value: value},
+	file := models.ContentPart{Type: models.ContentPartFile, Path: "out/report.csv", MimeType: "text/csv", SizeBytes: 1 << 20}
+	tool := &models.SessionEntry{Type: models.SessionEntryTool, State: models.ToolEntryCompleted, Tool: &models.ToolEntry{
+		Name: "search", Arguments: args, Result: &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{
+			{Type: models.ContentPartText, Text: strings.Repeat("r", 20)},
+			{Type: models.ContentPartJSON, Value: value},
 			file,
-			{Type: ContentPartImage, MediaType: "image/png", SHA256: "z"},
+			{Type: models.ContentPartImage, MediaType: "image/png", SHA256: "z"},
 		}},
 	}}
 	want = tokensFor(20+len(value)+len(contentPartFileLine(file))) + estimatedImageTokens
 	if got := estimateEntryTokens(tool); got != want {
 		t.Fatalf("tool tokens = %d, want %d", got, want)
 	}
-	pending := &SessionEntry{Type: SessionEntryTool, State: ToolEntryRunning, Tool: &ToolEntry{Name: "search", Arguments: args}}
+	pending := &models.SessionEntry{Type: models.SessionEntryTool, State: models.ToolEntryRunning, Tool: &models.ToolEntry{Name: "search", Arguments: args}}
 	if got := estimateEntryTokens(pending); got != 0 {
 		t.Fatalf("open tool entry tokens = %d, want 0", got)
 	}
 
-	compaction := &CompactionEntry{Summary: "## Objective\nShip it.", ActionCallIDs: []string{"ac_1", "ac_2"}}
-	if got, want := estimateEntryTokens(&SessionEntry{Type: SessionEntryCompaction, Compaction: compaction}), tokensFor(len(CompactionSummaryText(compaction))); got != want {
+	compaction := &models.CompactionEntry{Summary: "## Objective\nShip it.", ActionCallIDs: []string{"ac_1", "ac_2"}}
+	if got, want := estimateEntryTokens(&models.SessionEntry{Type: models.SessionEntryCompaction, Compaction: compaction}), tokensFor(len(CompactionSummaryText(compaction))); got != want {
 		t.Fatalf("compaction tokens = %d, want %d", got, want)
 	}
-	note := &SessionEntry{Type: SessionEntryNote, Note: &NoteEntry{Kind: NoteRepeat, Text: strings.Repeat("n", 12), Data: json.RawMessage(`{"big":"` + strings.Repeat("d", 1000) + `"}`)}}
+	note := &models.SessionEntry{Type: models.SessionEntryNote, Note: &models.NoteEntry{Kind: models.NoteRepeat, Text: strings.Repeat("n", 12), Data: json.RawMessage(`{"big":"` + strings.Repeat("d", 1000) + `"}`)}}
 	if got, want := estimateEntryTokens(note), tokensFor(12); got != want {
 		t.Fatalf("note tokens = %d, want %d", got, want)
 	}
-	change := &SessionEntry{Type: SessionEntryModelChange, ModelChange: &ModelChangeEntry{Provider: "anthropic", Model: "m2"}}
+	change := &models.SessionEntry{Type: models.SessionEntryModelChange, ModelChange: &models.ModelChangeEntry{Provider: "anthropic", Model: "m2"}}
 	if got := estimateEntryTokens(change); got != estimatedEntryFraming {
 		t.Fatalf("model change tokens = %d, want framing only", got)
 	}
@@ -136,21 +138,21 @@ func TestEstimateEntryTokensCountsTextToolCallsImagesReasoningNotNative(t *testi
 }
 
 func TestCompactionSummaryTextFormatInEstimate(t *testing.T) {
-	text := CompactionSummaryText(&CompactionEntry{Summary: "S", ActionCallIDs: []string{"ac_1", "ac_2"}})
+	text := CompactionSummaryText(&models.CompactionEntry{Summary: "S", ActionCallIDs: []string{"ac_1", "ac_2"}})
 	want := compactionSummaryPreamble + "\n\nS\n\nAction calls recorded before this point: ac_1, ac_2"
 	if text != want {
 		t.Fatalf("text = %q", text)
 	}
-	if got := CompactionSummaryText(&CompactionEntry{Summary: "S"}); got != compactionSummaryPreamble+"\n\nS" {
+	if got := CompactionSummaryText(&models.CompactionEntry{Summary: "S"}); got != compactionSummaryPreamble+"\n\nS" {
 		t.Fatalf("text without ids = %q", got)
 	}
 }
 
 // windowPath builds a single-session path from entries with Tokens set and
 // sequences assigned in order.
-func windowPath(compaction *SessionEntry, entries ...*SessionEntry) *AgentSessionPath {
-	session := &AgentSession{ID: "ses_1"}
-	path := &AgentSessionPath{Session: session, Chain: []*AgentSession{session}, Compaction: compaction}
+func windowPath(compaction *models.SessionEntry, entries ...*models.SessionEntry) *models.AgentSessionPath {
+	session := &models.AgentSession{ID: "ses_1"}
+	path := &models.AgentSessionPath{Session: session, Chain: []*models.AgentSession{session}, Compaction: compaction}
 	if compaction != nil {
 		path.Tokens += compaction.Tokens
 	}
@@ -164,19 +166,19 @@ func windowPath(compaction *SessionEntry, entries ...*SessionEntry) *AgentSessio
 	return path
 }
 
-func windowAssistant(id string, seq int64, model string, tokens, prompt int64) *SessionEntry {
-	return &SessionEntry{ID: id, Sequence: seq, Type: SessionEntryAssistant, Tokens: tokens,
-		Assistant: &AssistantEntry{Model: model, Limits: &AssistantModelLimits{ContextTokens: 200000, PromptTokens: prompt}}}
+func windowAssistant(id string, seq int64, model string, tokens, prompt int64) *models.SessionEntry {
+	return &models.SessionEntry{ID: id, Sequence: seq, Type: models.SessionEntryAssistant, Tokens: tokens,
+		Assistant: &models.AssistantEntry{Model: model, Limits: &models.AssistantModelLimits{ContextTokens: 200000, PromptTokens: prompt}}}
 }
 
-func windowUser(id string, seq, tokens int64) *SessionEntry {
-	return &SessionEntry{ID: id, Sequence: seq, Type: SessionEntryUser, Tokens: tokens,
-		User: &UserEntry{Origin: UserEntryChannelMessage, Content: []ContentPart{{Type: ContentPartText, Text: "x"}}}}
+func windowUser(id string, seq, tokens int64) *models.SessionEntry {
+	return &models.SessionEntry{ID: id, Sequence: seq, Type: models.SessionEntryUser, Tokens: tokens,
+		User: &models.UserEntry{Origin: models.UserEntryChannelMessage, Content: []models.ContentPart{{Type: models.ContentPartText, Text: "x"}}}}
 }
 
-func windowTool(id string, seq, tokens int64) *SessionEntry {
-	return &SessionEntry{ID: id, Sequence: seq, Type: SessionEntryTool, State: ToolEntryCompleted, Tokens: tokens,
-		Tool: &ToolEntry{Name: "t", Result: &ToolResult{Status: ToolResultSucceeded}}}
+func windowTool(id string, seq, tokens int64) *models.SessionEntry {
+	return &models.SessionEntry{ID: id, Sequence: seq, Type: models.SessionEntryTool, State: models.ToolEntryCompleted, Tokens: tokens,
+		Tool: &models.ToolEntry{Name: "t", Result: &models.ToolResult{Status: models.ToolResultSucceeded}}}
 }
 
 func TestEstimatePathTokensAnchorsOnLatestPromptTokens(t *testing.T) {
@@ -211,8 +213,8 @@ func TestEstimatePathTokensAnchorsOnLatestPromptTokens(t *testing.T) {
 }
 
 func TestEstimatePathTokensIgnoresAnchorBeforeCompaction(t *testing.T) {
-	compaction := &SessionEntry{ID: "c1", SessionID: "ses_1", Sequence: 5, Type: SessionEntryCompaction, Tokens: 900,
-		Compaction: &CompactionEntry{Summary: "s"}}
+	compaction := &models.SessionEntry{ID: "c1", SessionID: "ses_1", Sequence: 5, Type: models.SessionEntryCompaction, Tokens: 900,
+		Compaction: &models.CompactionEntry{Summary: "s"}}
 	// Kept tail (sequences 3-4) is before the compaction row; its anchor
 	// describes the uncompacted context.
 	path := windowPath(compaction,
@@ -238,24 +240,24 @@ func TestEstimatePathTokensIgnoresAnchorBeforeCompaction(t *testing.T) {
 	}
 
 	// Compaction in the parent, step in the child: the child step renders after it.
-	parent := &AgentSession{ID: "ses_p"}
-	child := &AgentSession{ID: "ses_c", ParentSessionID: "ses_p"}
-	parentCompaction := &SessionEntry{ID: "c2", SessionID: "ses_p", Sequence: 9, Type: SessionEntryCompaction, Tokens: 500,
-		Compaction: &CompactionEntry{Summary: "s"}}
+	parent := &models.AgentSession{ID: "ses_p"}
+	child := &models.AgentSession{ID: "ses_c", ParentSessionID: "ses_p"}
+	parentCompaction := &models.SessionEntry{ID: "c2", SessionID: "ses_p", Sequence: 9, Type: models.SessionEntryCompaction, Tokens: 500,
+		Compaction: &models.CompactionEntry{Summary: "s"}}
 	childStep := windowAssistant("a3", 1, "m", 40, 12000)
 	childStep.SessionID = "ses_c"
-	path = &AgentSessionPath{Session: child, Chain: []*AgentSession{parent, child}, Compaction: parentCompaction,
-		Entries: []*SessionEntry{childStep}, Tokens: 540}
+	path = &models.AgentSessionPath{Session: child, Chain: []*models.AgentSession{parent, child}, Compaction: parentCompaction,
+		Entries: []*models.SessionEntry{childStep}, Tokens: 540}
 	if got := estimatePathTokens(path, "m"); got.AnchorEntryID != "a3" || got.Tokens != 12040 {
 		t.Fatalf("child estimate = %+v", got)
 	}
 	// Compaction in the child, step in the parent: the parent step is before it.
 	parentStep := windowAssistant("a4", 3, "m", 40, 150000)
 	parentStep.SessionID = "ses_p"
-	childCompaction := &SessionEntry{ID: "c3", SessionID: "ses_c", Sequence: 2, Type: SessionEntryCompaction, Tokens: 500,
-		Compaction: &CompactionEntry{Summary: "s"}}
-	path = &AgentSessionPath{Session: child, Chain: []*AgentSession{parent, child}, Compaction: childCompaction,
-		Entries: []*SessionEntry{parentStep}, Tokens: 540}
+	childCompaction := &models.SessionEntry{ID: "c3", SessionID: "ses_c", Sequence: 2, Type: models.SessionEntryCompaction, Tokens: 500,
+		Compaction: &models.CompactionEntry{Summary: "s"}}
+	path = &models.AgentSessionPath{Session: child, Chain: []*models.AgentSession{parent, child}, Compaction: childCompaction,
+		Entries: []*models.SessionEntry{parentStep}, Tokens: 540}
 	if got := estimatePathTokens(path, "m"); got.AnchorEntryID != "" || got.Tokens != defaultPrefixTokens+540 {
 		t.Fatalf("parent-before-child-compaction estimate = %+v", got)
 	}
@@ -265,8 +267,8 @@ func TestEstimatePathTokensIgnoresAnchorAfterModelChange(t *testing.T) {
 	path := windowPath(nil,
 		windowAssistant("a1", 1, "m", 50, 20000),
 		windowTool("t1", 2, 300),
-		&SessionEntry{ID: "mc", Sequence: 3, Type: SessionEntryModelChange, Tokens: 8,
-			ModelChange: &ModelChangeEntry{FromModel: "m", Provider: "anthropic", Model: "m"}},
+		&models.SessionEntry{ID: "mc", Sequence: 3, Type: models.SessionEntryModelChange, Tokens: 8,
+			ModelChange: &models.ModelChangeEntry{FromModel: "m", Provider: "anthropic", Model: "m"}},
 		windowUser("u1", 4, 25),
 	)
 	if got := estimatePathTokens(path, "m"); got.AnchorEntryID != "" || got.Tokens != defaultPrefixTokens+path.Tokens {
@@ -276,9 +278,9 @@ func TestEstimatePathTokensIgnoresAnchorAfterModelChange(t *testing.T) {
 
 func TestPathModelWindowUsesNewestStepOfModel(t *testing.T) {
 	a1 := windowAssistant("a1", 1, "m", 50, 100)
-	a1.Assistant.Limits = &AssistantModelLimits{ContextTokens: 64000}
+	a1.Assistant.Limits = &models.AssistantModelLimits{ContextTokens: 64000}
 	a2 := windowAssistant("a2", 2, "n", 50, 100)
-	a2.Assistant.Limits = &AssistantModelLimits{ContextTokens: 400000, InputLimitTokens: 272000}
+	a2.Assistant.Limits = &models.AssistantModelLimits{ContextTokens: 400000, InputLimitTokens: 272000}
 	path := windowPath(nil, a1, a2)
 	if got := pathModelWindow(path, "m"); got != (ModelWindow{ContextTokens: 64000}) {
 		t.Fatalf("window m = %+v", got)
@@ -311,8 +313,8 @@ func TestCompactorDueSkipsSecondCompactionBeforeAStep(t *testing.T) {
 
 	// The kept tail alone is over the threshold right after a compaction: no
 	// second threshold compaction until a step has run.
-	compaction := &SessionEntry{ID: "c1", SessionID: "ses_1", Sequence: 10, Type: SessionEntryCompaction, Tokens: 2000,
-		Compaction: &CompactionEntry{Summary: "s"}}
+	compaction := &models.SessionEntry{ID: "c1", SessionID: "ses_1", Sequence: 10, Type: models.SessionEntryCompaction, Tokens: 2000,
+		Compaction: &models.CompactionEntry{Summary: "s"}}
 	tail := windowPath(compaction,
 		windowAssistant("a5", 8, "m", 50, 60000),
 		windowTool("t5", 9, 40000),
@@ -324,7 +326,7 @@ func TestCompactorDueSkipsSecondCompactionBeforeAStep(t *testing.T) {
 	if compactionDue(tail, "m", window) {
 		t.Fatal("second compaction before a step must not be due")
 	}
-	for _, entry := range []*SessionEntry{windowAssistant("a6", 12, "m", 50, 47000), windowTool("t6", 13, 2000)} {
+	for _, entry := range []*models.SessionEntry{windowAssistant("a6", 12, "m", 50, 47000), windowTool("t6", 13, 2000)} {
 		entry.SessionID = "ses_1"
 		tail.Entries = append(tail.Entries, entry)
 	}

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // Search-based discovery (section 07 §7.5, ported from Atlas
@@ -32,11 +34,11 @@ const (
 
 // SearchCapabilitiesSpec is the search_capabilities tool definition. It is
 // offered whenever the Run offers capabilities.
-func SearchCapabilitiesSpec() ModelStepTool {
-	return ModelStepTool{
+func SearchCapabilitiesSpec() models.ModelStepTool {
+	return models.ModelStepTool{
 		Name:        SearchCapabilitiesTool,
 		Description: capabilitySearchToolDescription,
-		Group:       ModelStepToolHarness,
+		Group:       models.ModelStepToolHarness,
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []string{"query"},
 			"properties": map[string]interface{}{
@@ -97,10 +99,10 @@ func ExecuteSearchCapabilities(set *CapabilitySet, arguments map[string]interfac
 
 // CapabilitySearchesThisRun counts the completed search_capabilities tool
 // entries of runID on the rendered path.
-func CapabilitySearchesThisRun(path []*SessionEntry, runID string) int {
+func CapabilitySearchesThisRun(path []*models.SessionEntry, runID string) int {
 	count := 0
 	for _, entry := range path {
-		if entry != nil && entry.Type == SessionEntryTool && entry.RunID == runID && entry.State == ToolEntryCompleted &&
+		if entry != nil && entry.Type == models.SessionEntryTool && entry.RunID == runID && entry.State == models.ToolEntryCompleted &&
 			entry.Tool != nil && entry.Tool.Name == SearchCapabilitiesTool {
 			count++
 		}
@@ -142,7 +144,7 @@ func (s *CapabilitySet) searchIndex() []capabilitySearchDoc {
 	groups := map[string]string{}
 	for _, a := range s.catalog.Actions {
 		if key, bound := capabilityActionGroup(a); bound {
-			groups[capabilityActionPrefix+a.Name] = key
+			groups[models.CapabilityActionPrefix+a.Name] = key
 		}
 	}
 	index := make([]capabilitySearchDoc, 0, len(s.entries))

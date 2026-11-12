@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // canonicalJSONValue round-trips value through JSON with UseNumber and
@@ -93,11 +95,11 @@ func encodeCanonicalJSON(value interface{}) ([]byte, error) {
 // image part's actionCallId) is left out: every governed call has its own
 // action_calls row, so two identical results would otherwise never match.
 // It returns "" for a nil result or content that cannot be encoded.
-func toolResultDigest(result *ToolResult) string {
+func toolResultDigest(result *models.ToolResult) string {
 	if result == nil {
 		return ""
 	}
-	content := make([]ContentPart, len(result.Content))
+	content := make([]models.ContentPart, len(result.Content))
 	copy(content, result.Content)
 	for i := range content {
 		content[i].ActionCallID = ""
@@ -108,7 +110,7 @@ func toolResultDigest(result *ToolResult) string {
 	}
 	if parts, ok := normalized.(map[string]interface{})["content"].([]interface{}); ok {
 		for _, part := range parts {
-			if typed, ok := part.(map[string]interface{}); ok && typed["type"] == ContentPartJSON {
+			if typed, ok := part.(map[string]interface{}); ok && typed["type"] == models.ContentPartJSON {
 				if value, ok := typed["value"].(map[string]interface{}); ok {
 					delete(value, "evidenceRef")
 				}

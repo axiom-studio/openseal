@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -18,8 +19,8 @@ import (
 // the governance fields out of it.
 type GovernedToolInput struct {
 	Arguments         map[string]interface{}
-	ReviewContext     *ApprovalReviewContext
-	ExternalOperation *ExternalOperationIdentity
+	ReviewContext     *activity.ApprovalReviewContext
+	ExternalOperation *activity.ExternalOperationIdentity
 	EvidenceRefs      []string
 	ReviewSummary     string // reviewContext.summary or _reviewSummary, trimmed
 }
@@ -30,8 +31,8 @@ type GovernedToolInput struct {
 // plain action arguments, never the review envelope.
 type governedInputDirective struct {
 	Summary           string
-	ExternalOperation *ExternalOperationIdentity
-	ReviewContext     *ApprovalReviewContext
+	ExternalOperation *activity.ExternalOperationIdentity
+	ReviewContext     *activity.ApprovalReviewContext
 	EvidenceRefs      []string
 }
 
@@ -83,10 +84,10 @@ func decodeGovernedObject(raw json.RawMessage) (map[string]interface{}, error) {
 
 func governedReviewedInput(action capability.ModelAction, raw json.RawMessage) (GovernedToolInput, error) {
 	var envelope struct {
-		Arguments         map[string]interface{}     `json:"arguments"`
-		ExternalOperation *ExternalOperationIdentity `json:"externalOperation"`
-		ReviewContext     *ApprovalReviewContext     `json:"reviewContext"`
-		EvidenceRefs      []string                   `json:"evidenceRefs"`
+		Arguments         map[string]interface{}              `json:"arguments"`
+		ExternalOperation *activity.ExternalOperationIdentity `json:"externalOperation"`
+		ReviewContext     *activity.ApprovalReviewContext     `json:"reviewContext"`
+		EvidenceRefs      []string                            `json:"evidenceRefs"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -154,7 +155,7 @@ func governedDirectiveInput(action capability.ModelAction, arguments map[string]
 	return input, nil
 }
 
-func checkGovernedExternalOperation(action capability.ModelAction, operation *ExternalOperationIdentity) error {
+func checkGovernedExternalOperation(action capability.ModelAction, operation *activity.ExternalOperationIdentity) error {
 	switch {
 	case operation == nil && governedExternalOperationRequired(action):
 		return &runtimeaction.ActionProposalRejection{Code: runtimeaction.ProposalRejectionExternalIdentityInvalid,
@@ -170,7 +171,7 @@ func checkGovernedExternalOperation(action capability.ModelAction, operation *Ex
 	return nil
 }
 
-func cloneExternalOperationIdentity(operation *ExternalOperationIdentity) *ExternalOperationIdentity {
+func cloneExternalOperationIdentity(operation *activity.ExternalOperationIdentity) *activity.ExternalOperationIdentity {
 	if operation == nil {
 		return nil
 	}

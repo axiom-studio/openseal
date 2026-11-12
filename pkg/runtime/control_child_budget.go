@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // Kernel floors for one child Run that a bounded parent funds through a
@@ -56,12 +57,12 @@ func (e *ControlBudgetInsufficientError) ToolError() map[string]interface{} {
 // controlRunBudget projects the capacity visible to the step stepID of run.
 // The step's own reservation is reported separately and is not subtracted
 // from Remaining. An unbounded Run has no budget (nil, nil).
-func controlRunBudget(run *AgentRun, stepID string) (*HostedRunBudget, error) {
+func controlRunBudget(run *models.AgentRun, stepID string) (*HostedRunBudget, error) {
 	if run == nil || run.Budget == nil {
 		return nil, nil
 	}
-	otherReservations := make(map[string]BudgetReservation, len(run.BudgetReservations))
-	currentReservation := BudgetUsage{}
+	otherReservations := make(map[string]models.BudgetReservation, len(run.BudgetReservations))
+	currentReservation := models.BudgetUsage{}
 	for id, reservation := range run.BudgetReservations {
 		if id == stepID {
 			currentReservation = reservation.Usage
@@ -69,13 +70,13 @@ func controlRunBudget(run *AgentRun, stepID string) (*HostedRunBudget, error) {
 		}
 		otherReservations[id] = reservation
 	}
-	effective, err := EffectiveBudgetUsage(run.BudgetUsage, otherReservations)
+	effective, err := models.EffectiveBudgetUsage(run.BudgetUsage, otherReservations)
 	if err != nil {
 		return nil, fmt.Errorf("project control Run budget: %w", err)
 	}
-	policy := *cloneBudgetPolicy(run.Budget)
-	allocated := sumBudgetPolicies(run.BudgetAllocations)
-	remaining := BudgetPolicy{
+	policy := *models.CloneBudgetPolicy(run.Budget)
+	allocated := models.SumBudgetPolicies(run.BudgetAllocations)
+	remaining := models.BudgetPolicy{
 		MaxAttempts:     remainingBudgetDimension(policy.MaxAttempts, effective.Attempts, allocated.MaxAttempts),
 		MaxTurns:        remainingBudgetDimension(policy.MaxTurns, effective.Turns, allocated.MaxTurns),
 		MaxInputTokens:  remainingBudgetDimension(policy.MaxInputTokens, effective.InputTokens, allocated.MaxInputTokens),
@@ -94,14 +95,14 @@ func controlRunBudget(run *AgentRun, stepID string) (*HostedRunBudget, error) {
 
 // controlMinimumChildBudget is the floor for one child of a parent bounded by
 // policy. A dimension the parent leaves unbounded stays unbounded (zero).
-func controlMinimumChildBudget(policy BudgetPolicy) BudgetPolicy {
+func controlMinimumChildBudget(policy models.BudgetPolicy) models.BudgetPolicy {
 	floor := func(limit, minimum int64) int64 {
 		if limit == 0 {
 			return 0
 		}
 		return minimum
 	}
-	return BudgetPolicy{
+	return models.BudgetPolicy{
 		MaxAttempts:     floor(policy.MaxAttempts, controlMinimumChildAttempts),
 		MaxTurns:        floor(policy.MaxTurns, controlMinimumChildTurns),
 		MaxInputTokens:  floor(policy.MaxInputTokens, controlMinimumChildInputTokens),
@@ -115,11 +116,11 @@ func controlMinimumChildBudget(policy BudgetPolicy) BudgetPolicy {
 
 // controlChildBudgetFloor rejects an allocation below budget.MinimumChild in
 // any bounded dimension.
-func controlChildBudgetFloor(allocation *BudgetPolicy, budget *HostedRunBudget) error {
+func controlChildBudgetFloor(allocation *models.BudgetPolicy, budget *HostedRunBudget) error {
 	if budget == nil {
 		return nil
 	}
-	actual := BudgetPolicy{}
+	actual := models.BudgetPolicy{}
 	if allocation != nil {
 		actual = *allocation
 	}
@@ -145,7 +146,7 @@ func controlChildBudgetFloor(allocation *BudgetPolicy, budget *HostedRunBudget) 
 
 // controlChildBudgetCapacity rejects allocations whose sum exceeds the
 // remaining capacity of any bounded dimension.
-func controlChildBudgetCapacity(allocations []*BudgetPolicy, budget *HostedRunBudget) error {
+func controlChildBudgetCapacity(allocations []*models.BudgetPolicy, budget *HostedRunBudget) error {
 	if budget == nil {
 		return nil
 	}
@@ -153,16 +154,16 @@ func controlChildBudgetCapacity(allocations []*BudgetPolicy, budget *HostedRunBu
 		name      string
 		bounded   bool
 		remaining int64
-		value     func(BudgetPolicy) int64
+		value     func(models.BudgetPolicy) int64
 	}{
-		{"maxAttempts", budget.Policy.MaxAttempts > 0, budget.Remaining.MaxAttempts, func(policy BudgetPolicy) int64 { return policy.MaxAttempts }},
-		{"maxTurns", budget.Policy.MaxTurns > 0, budget.Remaining.MaxTurns, func(policy BudgetPolicy) int64 { return policy.MaxTurns }},
-		{"maxInputTokens", budget.Policy.MaxInputTokens > 0, budget.Remaining.MaxInputTokens, func(policy BudgetPolicy) int64 { return policy.MaxInputTokens }},
-		{"maxOutputTokens", budget.Policy.MaxOutputTokens > 0, budget.Remaining.MaxOutputTokens, func(policy BudgetPolicy) int64 { return policy.MaxOutputTokens }},
-		{"maxTotalTokens", budget.Policy.MaxTotalTokens > 0, budget.Remaining.MaxTotalTokens, func(policy BudgetPolicy) int64 { return policy.MaxTotalTokens }},
-		{"maxCostMicros", budget.Policy.MaxCostMicros > 0, budget.Remaining.MaxCostMicros, func(policy BudgetPolicy) int64 { return policy.MaxCostMicros }},
-		{"maxDurationMs", budget.Policy.MaxDurationMS > 0, budget.Remaining.MaxDurationMS, func(policy BudgetPolicy) int64 { return policy.MaxDurationMS }},
-		{"maxActions", budget.Policy.MaxActions > 0, budget.Remaining.MaxActions, func(policy BudgetPolicy) int64 { return policy.MaxActions }},
+		{"maxAttempts", budget.Policy.MaxAttempts > 0, budget.Remaining.MaxAttempts, func(policy models.BudgetPolicy) int64 { return policy.MaxAttempts }},
+		{"maxTurns", budget.Policy.MaxTurns > 0, budget.Remaining.MaxTurns, func(policy models.BudgetPolicy) int64 { return policy.MaxTurns }},
+		{"maxInputTokens", budget.Policy.MaxInputTokens > 0, budget.Remaining.MaxInputTokens, func(policy models.BudgetPolicy) int64 { return policy.MaxInputTokens }},
+		{"maxOutputTokens", budget.Policy.MaxOutputTokens > 0, budget.Remaining.MaxOutputTokens, func(policy models.BudgetPolicy) int64 { return policy.MaxOutputTokens }},
+		{"maxTotalTokens", budget.Policy.MaxTotalTokens > 0, budget.Remaining.MaxTotalTokens, func(policy models.BudgetPolicy) int64 { return policy.MaxTotalTokens }},
+		{"maxCostMicros", budget.Policy.MaxCostMicros > 0, budget.Remaining.MaxCostMicros, func(policy models.BudgetPolicy) int64 { return policy.MaxCostMicros }},
+		{"maxDurationMs", budget.Policy.MaxDurationMS > 0, budget.Remaining.MaxDurationMS, func(policy models.BudgetPolicy) int64 { return policy.MaxDurationMS }},
+		{"maxActions", budget.Policy.MaxActions > 0, budget.Remaining.MaxActions, func(policy models.BudgetPolicy) int64 { return policy.MaxActions }},
 	} {
 		if !dimension.bounded {
 			continue
@@ -185,8 +186,8 @@ func controlChildBudgetCapacity(allocations []*BudgetPolicy, budget *HostedRunBu
 // controlTaskBudget is the budget of a conversation task started by a bounded
 // Run: every bounded dimension inherits the remaining capacity. An unbounded
 // Run (nil budget) starts an unbounded task (empty policy).
-func controlTaskBudget(budget *HostedRunBudget) *BudgetPolicy {
-	completed := &BudgetPolicy{}
+func controlTaskBudget(budget *HostedRunBudget) *models.BudgetPolicy {
+	completed := &models.BudgetPolicy{}
 	if budget == nil {
 		return completed
 	}
@@ -215,11 +216,11 @@ func controlTaskBudget(budget *HostedRunBudget) *BudgetPolicy {
 // child a nil, unbounded budget. A bounded Run gives each child the minimum
 // child budget and fails with *ControlBudgetInsufficientError when its
 // remaining capacity cannot fund all n.
-func controlBranchBudgets(run *AgentRun, stepID string, n int) ([]*BudgetPolicy, error) {
+func controlBranchBudgets(run *models.AgentRun, stepID string, n int) ([]*models.BudgetPolicy, error) {
 	if n < 0 {
 		return nil, fmt.Errorf("child Run count %d is negative", n)
 	}
-	allocations := make([]*BudgetPolicy, n)
+	allocations := make([]*models.BudgetPolicy, n)
 	if run == nil || run.Budget == nil {
 		return allocations, nil
 	}

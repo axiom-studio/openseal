@@ -7,25 +7,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
-func validModelStepResultFixture() (ModelStepRequest, ModelStepResult) {
-	req := ModelStepRequest{APIVersion: ModelStepAPIVersion, Purpose: ModelStepPurposeStep, StepID: "step-1"}
-	res := ModelStepResult{
-		APIVersion: ModelStepAPIVersion,
+func validModelStepResultFixture() (models.ModelStepRequest, models.ModelStepResult) {
+	req := models.ModelStepRequest{APIVersion: models.ModelStepAPIVersion, Purpose: models.ModelStepPurposeStep, StepID: "step-1"}
+	res := models.ModelStepResult{
+		APIVersion: models.ModelStepAPIVersion,
 		StepID:     "step-1",
-		Assistant: AssistantEntry{
-			Provider:   ModelStepProviderAnthropic,
+		Assistant: models.AssistantEntry{
+			Provider:   models.ModelStepProviderAnthropic,
 			Model:      "claude-x",
 			Text:       "I'll check the drive first.",
-			ToolCalls:  []ModelToolCall{{ID: "toolu_1", Name: "drive_search", Arguments: json.RawMessage(`{"query":"Q3"}`)}},
-			StopReason: ModelStopToolCalls,
-			Usage:      ModelStepUsage{InputTokens: 10, OutputTokens: 2, Attempts: 1},
+			ToolCalls:  []models.ModelToolCall{{ID: "toolu_1", Name: "drive_search", Arguments: json.RawMessage(`{"query":"Q3"}`)}},
+			StopReason: models.ModelStopToolCalls,
+			Usage:      models.ModelStepUsage{InputTokens: 10, OutputTokens: 2, Attempts: 1},
 		},
 		Narration: "I'll check the drive first.",
-		Model:     ModelStepModelInfo{Provider: ModelStepProviderAnthropic, Model: "claude-x", ContextTokens: 200000},
-		Render:    ModelStepRenderInfo{EstimatedInputTokens: 10},
+		Model:     models.ModelStepModelInfo{Provider: models.ModelStepProviderAnthropic, Model: "claude-x", ContextTokens: 200000},
+		Render:    models.ModelStepRenderInfo{EstimatedInputTokens: 10},
 	}
 	return req, res
 }
@@ -37,59 +38,69 @@ func TestValidateModelStepResultAcceptsToolStep(t *testing.T) {
 	}
 	// Oversize arguments and unknown tool names are left to the executor.
 	res.Assistant.ToolCalls[0].Name = "not_offered"
-	res.Assistant.ToolCalls[0].Arguments = json.RawMessage(`{"x":"` + strings.Repeat("a", MaxToolArgumentsBytes) + `"}`)
+	res.Assistant.ToolCalls[0].Arguments = json.RawMessage(`{"x":"` + strings.Repeat("a", models.MaxToolArgumentsBytes) + `"}`)
 	if err := ValidateModelStepResult(req, res); err != nil {
 		t.Fatalf("unknown tool / oversize arguments must not be a host error: %v", err)
 	}
 	// A refusal is a result, not an error.
 	_, res = validModelStepResultFixture()
-	res.Assistant.ToolCalls, res.Narration, res.Assistant.StopReason = nil, "", ModelStopRefusal
+	res.Assistant.ToolCalls, res.Narration, res.Assistant.StopReason = nil, "", models.ModelStopRefusal
 	if err := ValidateModelStepResult(req, res); err != nil {
 		t.Fatalf("refusal rejected: %v", err)
 	}
 }
 
 func TestValidateModelStepResultRejects(t *testing.T) {
-	cases := map[string]func(*ModelStepRequest, *ModelStepResult){
-		"api version":     func(_ *ModelStepRequest, r *ModelStepResult) { r.APIVersion = "v0" },
-		"step id":         func(_ *ModelStepRequest, r *ModelStepResult) { r.StepID = "step-2" },
-		"provider":        func(_ *ModelStepRequest, r *ModelStepResult) { r.Assistant.Provider = "other" },
-		"model":           func(_ *ModelStepRequest, r *ModelStepResult) { r.Assistant.Model = " " },
-		"model info":      func(_ *ModelStepRequest, r *ModelStepResult) { r.Model.Provider = ModelStepProviderChat },
-		"model info name": func(_ *ModelStepRequest, r *ModelStepResult) { r.Model.Model = "" },
-		"stop reason":     func(_ *ModelStepRequest, r *ModelStepResult) { r.Assistant.StopReason = "tool_use" },
-		"limits":          func(_ *ModelStepRequest, r *ModelStepResult) { r.Assistant.Limits = &AssistantModelLimits{} },
-		"usage":           func(_ *ModelStepRequest, r *ModelStepResult) { r.Assistant.Usage.OutputTokens = -1 },
-		"usage cost":      func(_ *ModelStepRequest, r *ModelStepResult) { r.Assistant.Usage.Cost = math.NaN() },
-		"negative render": func(_ *ModelStepRequest, r *ModelStepResult) { r.Render.EstimatedInputTokens = -1 },
-		"text size": func(_ *ModelStepRequest, r *ModelStepResult) {
+	cases := map[string]func(*models.ModelStepRequest, *models.ModelStepResult){
+		"api version": func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.APIVersion = "v0" },
+		"step id":     func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.StepID = "step-2" },
+		"provider":    func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.Assistant.Provider = "other" },
+		"model":       func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.Assistant.Model = " " },
+		"model info": func(_ *models.ModelStepRequest, r *models.ModelStepResult) {
+			r.Model.Provider = models.ModelStepProviderChat
+		},
+		"model info name": func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.Model.Model = "" },
+		"stop reason":     func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.Assistant.StopReason = "tool_use" },
+		"limits": func(_ *models.ModelStepRequest, r *models.ModelStepResult) {
+			r.Assistant.Limits = &models.AssistantModelLimits{}
+		},
+		"usage":           func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.Assistant.Usage.OutputTokens = -1 },
+		"usage cost":      func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.Assistant.Usage.Cost = math.NaN() },
+		"negative render": func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.Render.EstimatedInputTokens = -1 },
+		"text size": func(_ *models.ModelStepRequest, r *models.ModelStepResult) {
 			r.Assistant.Text = strings.Repeat("a", maxModelStepResultTextBytes+1)
 		},
-		"empty call id": func(_ *ModelStepRequest, r *ModelStepResult) { r.Assistant.ToolCalls[0].ID = "" },
-		"duplicate call id": func(_ *ModelStepRequest, r *ModelStepResult) {
+		"empty call id": func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.Assistant.ToolCalls[0].ID = "" },
+		"duplicate call id": func(_ *models.ModelStepRequest, r *models.ModelStepResult) {
 			r.Assistant.ToolCalls = append(r.Assistant.ToolCalls, r.Assistant.ToolCalls[0])
 		},
-		"empty call name": func(_ *ModelStepRequest, r *ModelStepResult) { r.Assistant.ToolCalls[0].Name = "" },
-		"array arguments": func(_ *ModelStepRequest, r *ModelStepResult) {
+		"empty call name": func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.Assistant.ToolCalls[0].Name = "" },
+		"array arguments": func(_ *models.ModelStepRequest, r *models.ModelStepResult) {
 			r.Assistant.ToolCalls[0].Arguments = json.RawMessage(`[1]`)
 		},
-		"missing arguments": func(_ *ModelStepRequest, r *ModelStepResult) { r.Assistant.ToolCalls[0].Arguments = nil },
-		"tool_calls without calls": func(_ *ModelStepRequest, r *ModelStepResult) {
+		"missing arguments": func(_ *models.ModelStepRequest, r *models.ModelStepResult) { r.Assistant.ToolCalls[0].Arguments = nil },
+		"tool_calls without calls": func(_ *models.ModelStepRequest, r *models.ModelStepResult) {
 			r.Assistant.ToolCalls, r.Narration = nil, ""
 		},
-		"narration without calls": func(_ *ModelStepRequest, r *ModelStepResult) {
-			r.Assistant.ToolCalls, r.Assistant.StopReason = nil, ModelStopEnd
+		"narration without calls": func(_ *models.ModelStepRequest, r *models.ModelStepResult) {
+			r.Assistant.ToolCalls, r.Assistant.StopReason = nil, models.ModelStopEnd
 		},
-		"native json": func(_ *ModelStepRequest, r *ModelStepResult) {
-			r.Assistant.Native = &AssistantNative{Anthropic: []json.RawMessage{json.RawMessage(`{`)}}
+		"native json": func(_ *models.ModelStepRequest, r *models.ModelStepResult) {
+			r.Assistant.Native = &models.AssistantNative{Anthropic: []json.RawMessage{json.RawMessage(`{`)}}
 		},
-		"summary with calls": func(q *ModelStepRequest, _ *ModelStepResult) { q.Purpose = ModelStepPurposeSummary },
-		"summary without text": func(q *ModelStepRequest, r *ModelStepResult) {
-			q.Purpose = ModelStepPurposeSummary
-			r.Assistant.ToolCalls, r.Narration, r.Assistant.StopReason, r.Assistant.Text = nil, "", ModelStopEnd, " "
+		"summary with calls": func(q *models.ModelStepRequest, _ *models.ModelStepResult) {
+			q.Purpose = models.ModelStepPurposeSummary
 		},
-		"explanation with calls":     func(q *ModelStepRequest, _ *ModelStepResult) { q.Purpose = ModelStepPurposeExplanation },
-		"acknowledgement with calls": func(q *ModelStepRequest, _ *ModelStepResult) { q.Purpose = ModelStepPurposeAcknowledgement },
+		"summary without text": func(q *models.ModelStepRequest, r *models.ModelStepResult) {
+			q.Purpose = models.ModelStepPurposeSummary
+			r.Assistant.ToolCalls, r.Narration, r.Assistant.StopReason, r.Assistant.Text = nil, "", models.ModelStopEnd, " "
+		},
+		"explanation with calls": func(q *models.ModelStepRequest, _ *models.ModelStepResult) {
+			q.Purpose = models.ModelStepPurposeExplanation
+		},
+		"acknowledgement with calls": func(q *models.ModelStepRequest, _ *models.ModelStepResult) {
+			q.Purpose = models.ModelStepPurposeAcknowledgement
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -105,8 +116,8 @@ func TestValidateModelStepResultRejects(t *testing.T) {
 
 func TestValidateModelStepResultAcceptsSummaryText(t *testing.T) {
 	req, res := validModelStepResultFixture()
-	req.Purpose = ModelStepPurposeSummary
-	res.Assistant.ToolCalls, res.Narration, res.Assistant.StopReason = nil, "", ModelStopEnd
+	req.Purpose = models.ModelStepPurposeSummary
+	res.Assistant.ToolCalls, res.Narration, res.Assistant.StopReason = nil, "", models.ModelStopEnd
 	res.Assistant.Text = "Summary of the work so far."
 	if err := ValidateModelStepResult(req, res); err != nil {
 		t.Fatalf("summary rejected: %v", err)
@@ -116,17 +127,17 @@ func TestValidateModelStepResultAcceptsSummaryText(t *testing.T) {
 func modelStepOutputFixture() agentrun.StepOutput {
 	_, res := validModelStepResultFixture()
 	assistant := res.Assistant
-	assistant.Limits = &AssistantModelLimits{ContextTokens: 200000, PromptTokens: 10}
-	return agentrun.StepOutput{ModelProvider: "anthropic", Model: "claude-x", Usage: TurnUsage{InputTokens: 10}, Assistant: &assistant}
+	assistant.Limits = &models.AssistantModelLimits{ContextTokens: 200000, PromptTokens: 10}
+	return agentrun.StepOutput{ModelProvider: "anthropic", Model: "claude-x", Usage: models.TurnUsage{InputTokens: 10}, Assistant: &assistant}
 }
 
 func TestValidateStepOutputModel(t *testing.T) {
 	out := modelStepOutputFixture()
-	if err := validateStepOutput(StepProducerModel, out); err != nil {
+	if err := validateStepOutput(models.StepProducerModel, out); err != nil {
 		t.Fatalf("valid model output rejected: %v", err)
 	}
 	out.Failure = &agentrun.LoopFailure{Kind: "execution", Code: "refusal", Message: "The model refused."}
-	if err := validateStepOutput(StepProducerModel, out); err != nil {
+	if err := validateStepOutput(models.StepProducerModel, out); err != nil {
 		t.Fatalf("model failure rejected: %v", err)
 	}
 	bad := map[string]func(*agentrun.StepOutput){
@@ -134,7 +145,7 @@ func TestValidateStepOutputModel(t *testing.T) {
 		"tool calls":   func(o *agentrun.StepOutput) { o.ToolCalls = []agentrun.LoopToolCall{{ID: "a", Name: "x"}} },
 		"final":        func(o *agentrun.StepOutput) { o.Final = &agentrun.LoopFinal{} },
 		"park": func(o *agentrun.StepOutput) {
-			o.Park = &agentrun.LoopPark{Status: AgentRunStatusSleeping, Wake: &WakeCondition{Type: "timer"}}
+			o.Park = &agentrun.LoopPark{Status: models.AgentRunStatusSleeping, Wake: &models.WakeCondition{Type: "timer"}}
 		},
 		"kernel state":    func(o *agentrun.StepOutput) { o.KernelState = map[string]interface{}{} },
 		"assistant shape": func(o *agentrun.StepOutput) { o.Assistant.StopReason = "" },
@@ -148,7 +159,7 @@ func TestValidateStepOutputModel(t *testing.T) {
 	for name, mutate := range bad {
 		t.Run(name, func(t *testing.T) {
 			o := modelStepOutputFixture()
-			kind := StepProducerModel
+			kind := models.StepProducerModel
 			if mutate == nil {
 				kind = "other"
 			} else {
@@ -162,7 +173,7 @@ func TestValidateStepOutputModel(t *testing.T) {
 }
 
 func TestValidateStepOutputDeterministic(t *testing.T) {
-	wake := &WakeCondition{Type: "event"}
+	wake := &models.WakeCondition{Type: "event"}
 	good := map[string]agentrun.StepOutput{
 		"tool calls": {
 			ToolCalls: []agentrun.LoopToolCall{
@@ -171,34 +182,34 @@ func TestValidateStepOutputDeterministic(t *testing.T) {
 			},
 			KernelState: map[string]interface{}{"cursor": 1},
 		},
-		"final":        {Final: &agentrun.LoopFinal{Answer: "done", Status: AgentRunStatusCompleted}},
-		"failed final": {Final: &agentrun.LoopFinal{Status: AgentRunStatusFailed}},
-		"park":         {Park: &agentrun.LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: wake}},
+		"final":        {Final: &agentrun.LoopFinal{Answer: "done", Status: models.AgentRunStatusCompleted}},
+		"failed final": {Final: &agentrun.LoopFinal{Status: models.AgentRunStatusFailed}},
+		"park":         {Park: &agentrun.LoopPark{Status: models.AgentRunStatusWaitingForEvent, Wake: wake}},
 		"failure":      {Failure: &agentrun.LoopFailure{Kind: "execution", Code: "routine_script", Message: "The script failed."}},
 	}
 	for name, out := range good {
-		if err := validateStepOutput(StepProducerDeterministic, out); err != nil {
+		if err := validateStepOutput(models.StepProducerDeterministic, out); err != nil {
 			t.Fatalf("%s rejected: %v", name, err)
 		}
 	}
 	bad := map[string]agentrun.StepOutput{
 		"nothing":        {},
 		"two results":    {Final: &agentrun.LoopFinal{}, Failure: &agentrun.LoopFailure{Kind: "k", Code: "c", Message: "m"}},
-		"assistant":      {Assistant: &AssistantEntry{}, Final: &agentrun.LoopFinal{}},
+		"assistant":      {Assistant: &models.AssistantEntry{}, Final: &agentrun.LoopFinal{}},
 		"empty call id":  {ToolCalls: []agentrun.LoopToolCall{{Name: "x"}}},
 		"duplicate call": {ToolCalls: []agentrun.LoopToolCall{{ID: "a", Name: "x"}, {ID: "a", Name: "y"}}},
 		"empty name":     {ToolCalls: []agentrun.LoopToolCall{{ID: "a"}}},
 		"bad arguments":  {ToolCalls: []agentrun.LoopToolCall{{ID: "a", Name: "x", Arguments: json.RawMessage(`"s"`)}}},
 		"bad directive":  {ToolCalls: []agentrun.LoopToolCall{{ID: "a", Name: "x", Directive: &agentrun.ToolCallDirective{BindingRevision: -1}}}},
-		"committed park": {Park: &agentrun.LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: wake, Committed: true}},
-		"park no wake":   {Park: &agentrun.LoopPark{Status: AgentRunStatusWaitingForEvent}},
-		"park status":    {Park: &agentrun.LoopPark{Status: AgentRunStatusPaused, Wake: wake}},
-		"final status":   {Final: &agentrun.LoopFinal{Status: AgentRunStatusCanceled}},
-		"usage":          {Final: &agentrun.LoopFinal{}, Usage: TurnUsage{Cost: -1}},
+		"committed park": {Park: &agentrun.LoopPark{Status: models.AgentRunStatusWaitingForEvent, Wake: wake, Committed: true}},
+		"park no wake":   {Park: &agentrun.LoopPark{Status: models.AgentRunStatusWaitingForEvent}},
+		"park status":    {Park: &agentrun.LoopPark{Status: models.AgentRunStatusPaused, Wake: wake}},
+		"final status":   {Final: &agentrun.LoopFinal{Status: models.AgentRunStatusCanceled}},
+		"usage":          {Final: &agentrun.LoopFinal{}, Usage: models.TurnUsage{Cost: -1}},
 	}
 	for name, out := range bad {
 		t.Run(name, func(t *testing.T) {
-			if err := validateStepOutput(StepProducerDeterministic, out); !errors.Is(err, agentrun.ErrInvalidStepOutput) {
+			if err := validateStepOutput(models.StepProducerDeterministic, out); !errors.Is(err, agentrun.ErrInvalidStepOutput) {
 				t.Fatalf("got %v, want ErrInvalidStepOutput", err)
 			}
 		})

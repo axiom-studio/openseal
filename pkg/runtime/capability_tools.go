@@ -6,6 +6,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // load_capabilities and search_capabilities are kernel tools (section 07 §7.4,
@@ -47,11 +49,11 @@ const capabilitySkillDiscoveryInstructions = ` Discovery finds Skills, which are
 // byte-identical across steps and catalogs: it carries no per-step enum and
 // no search-mode wording, and every ID is validated against the step's
 // authorized catalog when it runs.
-func LoadCapabilitiesSpec() ModelStepTool {
-	return ModelStepTool{
+func LoadCapabilitiesSpec() models.ModelStepTool {
+	return models.ModelStepTool{
 		Name:        LoadCapabilitiesTool,
 		Description: capabilityLoadToolDescription,
-		Group:       ModelStepToolHarness,
+		Group:       models.ModelStepToolHarness,
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []string{"ids"},
 			"properties": map[string]interface{}{"ids": map[string]interface{}{
@@ -268,7 +270,7 @@ func fitCapabilityInstructions(c capabilityLoadContent, first int) (capabilityLo
 		low, high := 0, len(full[i])
 		for low < high {
 			mid := (low + high + 1) / 2
-			loaded[i].Instructions = cutUTF8(full[i], mid)
+			loaded[i].Instructions = models.TruncateUTF8(full[i], mid)
 			loaded[i].InstructionsTruncated = true
 			if capabilityContentFits(finishCapabilityLoad(c)) {
 				low = mid
@@ -276,7 +278,7 @@ func fitCapabilityInstructions(c capabilityLoadContent, first int) (capabilityLo
 				high = mid - 1
 			}
 		}
-		loaded[i].Instructions = cutUTF8(full[i], low)
+		loaded[i].Instructions = models.TruncateUTF8(full[i], low)
 		loaded[i].InstructionsTruncated = true
 		// Nothing after a cut prompt has room for instructions.
 		for j := i + 1; j < len(loaded); j++ {
@@ -364,7 +366,7 @@ func capabilityLoadArguments(arguments map[string]interface{}) ([]string, error)
 
 func capabilityContentFits(content interface{}) bool {
 	encoded, err := json.Marshal(content)
-	return err == nil && len(encoded) <= MaxToolResultContentBytes
+	return err == nil && len(encoded) <= models.MaxToolResultContentBytes
 }
 
 func encodeCapabilityContent(content interface{}) json.RawMessage {

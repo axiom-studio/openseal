@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
@@ -22,14 +23,14 @@ import (
 type renderFixture struct {
 	t       *testing.T
 	session string
-	entries []*SessionEntry
+	entries []*models.SessionEntry
 }
 
 func newRenderFixture(t *testing.T, session string) *renderFixture {
 	return &renderFixture{t: t, session: session}
 }
 
-func (f *renderFixture) add(e *SessionEntry) *SessionEntry {
+func (f *renderFixture) add(e *models.SessionEntry) *models.SessionEntry {
 	e.Scope = testSessionScope
 	e.SessionID = f.session
 	e.Sequence = int64(len(f.entries) + 1)
@@ -40,67 +41,67 @@ func (f *renderFixture) add(e *SessionEntry) *SessionEntry {
 	return e
 }
 
-func (f *renderFixture) user(run, text string, parts ...ContentPart) *SessionEntry {
-	content := append([]ContentPart{{Type: ContentPartText, Text: text}}, parts...)
-	return f.add(&SessionEntry{RunID: run, Type: SessionEntryUser, User: &UserEntry{
-		Origin: UserEntryChannelMessage, Author: SessionAuthor{Type: "user", ID: "u1", DisplayName: "Ana"}, Content: content,
+func (f *renderFixture) user(run, text string, parts ...models.ContentPart) *models.SessionEntry {
+	content := append([]models.ContentPart{{Type: models.ContentPartText, Text: text}}, parts...)
+	return f.add(&models.SessionEntry{RunID: run, Type: models.SessionEntryUser, User: &models.UserEntry{
+		Origin: models.UserEntryChannelMessage, Author: models.SessionAuthor{Type: "user", ID: "u1", DisplayName: "Ana"}, Content: content,
 	}})
 }
 
-func (f *renderFixture) assistant(run, step string, calls ...string) *SessionEntry {
+func (f *renderFixture) assistant(run, step string, calls ...string) *models.SessionEntry {
 	a := modelStepTestAssistant(calls...)
-	a.Limits = &AssistantModelLimits{ContextTokens: 200000, PromptTokens: 1200}
-	return f.add(&SessionEntry{RunID: run, StepID: step, Type: SessionEntryAssistant, Assistant: a})
+	a.Limits = &models.AssistantModelLimits{ContextTokens: 200000, PromptTokens: 1200}
+	return f.add(&models.SessionEntry{RunID: run, StepID: step, Type: models.SessionEntryAssistant, Assistant: a})
 }
 
-func (f *renderFixture) tool(run, step, call string, state ToolEntryState, parts ...ContentPart) *SessionEntry {
-	tool := &ToolEntry{Name: "lookup", Arguments: json.RawMessage(`{"q":"x"}`), SideEffect: ToolSideEffectRead}
+func (f *renderFixture) tool(run, step, call string, state models.ToolEntryState, parts ...models.ContentPart) *models.SessionEntry {
+	tool := &models.ToolEntry{Name: "lookup", Arguments: json.RawMessage(`{"q":"x"}`), SideEffect: models.ToolSideEffectRead}
 	if state.Terminal() {
-		status := ToolResultSucceeded
+		status := models.ToolResultSucceeded
 		switch state {
-		case ToolEntryError:
-			status = ToolResultFailed
-		case ToolEntryInterrupted:
-			status = ToolResultInterrupted
+		case models.ToolEntryError:
+			status = models.ToolResultFailed
+		case models.ToolEntryInterrupted:
+			status = models.ToolResultInterrupted
 		}
 		if len(parts) == 0 {
-			parts = []ContentPart{{Type: ContentPartText, Text: "result of " + call}}
+			parts = []models.ContentPart{{Type: models.ContentPartText, Text: "result of " + call}}
 		}
-		tool.Result = &ToolResult{Status: status, IsError: status != ToolResultSucceeded, Content: parts}
+		tool.Result = &models.ToolResult{Status: status, IsError: status != models.ToolResultSucceeded, Content: parts}
 	}
-	return f.add(&SessionEntry{RunID: run, StepID: step, Type: SessionEntryTool, State: state, ToolCallID: call, Tool: tool})
+	return f.add(&models.SessionEntry{RunID: run, StepID: step, Type: models.SessionEntryTool, State: state, ToolCallID: call, Tool: tool})
 }
 
-func (f *renderFixture) note(run, text string) *SessionEntry {
-	return f.add(&SessionEntry{RunID: run, Type: SessionEntryNote, Note: &NoteEntry{Kind: NoteRunContext, Text: text}})
+func (f *renderFixture) note(run, text string) *models.SessionEntry {
+	return f.add(&models.SessionEntry{RunID: run, Type: models.SessionEntryNote, Note: &models.NoteEntry{Kind: models.NoteRunContext, Text: text}})
 }
 
-func (f *renderFixture) compaction(run, firstKept string) *SessionEntry {
-	return f.add(&SessionEntry{RunID: run, Type: SessionEntryCompaction, Compaction: &CompactionEntry{
+func (f *renderFixture) compaction(run, firstKept string) *models.SessionEntry {
+	return f.add(&models.SessionEntry{RunID: run, Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntry{
 		Summary: "Ana asked for the guest list; the lookup found 12 guests.", FirstKeptEntryID: firstKept,
 		TokensBefore: 42000, ActionCallIDs: []string{"ac-old-1", "ac-old-2"},
-		Provider: "anthropic", Model: "claude-test", Trigger: CompactionTriggerThreshold,
+		Provider: "anthropic", Model: "claude-test", Trigger: models.CompactionTriggerThreshold,
 	}})
 }
 
-func (f *renderFixture) agentSession(parent *AgentSession, forkSequence int64) *AgentSession {
-	s := &AgentSession{ID: f.session, Scope: testSessionScope, NextSequence: int64(len(f.entries) + 1)}
+func (f *renderFixture) agentSession(parent *models.AgentSession, forkSequence int64) *models.AgentSession {
+	s := &models.AgentSession{ID: f.session, Scope: testSessionScope, NextSequence: int64(len(f.entries) + 1)}
 	if parent != nil {
 		s.ParentSessionID, s.ForkSequence, s.Depth = parent.ID, forkSequence, parent.Depth+1
 	}
 	return s
 }
 
-func (f *renderFixture) path() *AgentSessionPath {
+func (f *renderFixture) path() *models.AgentSessionPath {
 	f.t.Helper()
-	path, err := buildAgentSessionPath([]*AgentSession{f.agentSession(nil, 0)}, [][]*SessionEntry{f.entries}, nil)
+	path, err := models.BuildAgentSessionPath([]*models.AgentSession{f.agentSession(nil, 0)}, [][]*models.SessionEntry{f.entries}, nil)
 	if err != nil {
 		f.t.Fatalf("buildAgentSessionPath: %v", err)
 	}
 	return path
 }
 
-func renderIDs(views []SessionEntryView) []string {
+func renderIDs(views []models.SessionEntryView) []string {
 	ids := make([]string, len(views))
 	for i, v := range views {
 		ids[i] = v.ID
@@ -108,20 +109,20 @@ func renderIDs(views []SessionEntryView) []string {
 	return ids
 }
 
-func requireRenderOrder(t *testing.T, views []SessionEntryView, want ...string) {
+func requireRenderOrder(t *testing.T, views []models.SessionEntryView, want ...string) {
 	t.Helper()
 	got := renderIDs(views)
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("render order = %v, want %v", got, want)
 	}
 	for i, v := range views {
-		if i > 0 && v.Type != SessionEntryCompaction && views[i-1].Type != SessionEntryCompaction && v.Sequence <= views[i-1].Sequence {
+		if i > 0 && v.Type != models.SessionEntryCompaction && views[i-1].Type != models.SessionEntryCompaction && v.Sequence <= views[i-1].Sequence {
 			t.Fatalf("view %s sequence %d does not follow %d", v.ID, v.Sequence, views[i-1].Sequence)
 		}
 	}
 }
 
-func requireRenderedStep(t *testing.T, views []SessionEntryView) {
+func requireRenderedStep(t *testing.T, views []models.SessionEntryView) {
 	t.Helper()
 	req := validModelStepRequest()
 	req.Entries = views
@@ -130,7 +131,7 @@ func requireRenderedStep(t *testing.T, views []SessionEntryView) {
 	}
 }
 
-func viewByID(t *testing.T, views []SessionEntryView, id string) SessionEntryView {
+func viewByID(t *testing.T, views []models.SessionEntryView, id string) models.SessionEntryView {
 	t.Helper()
 	for _, v := range views {
 		if v.ID == id {
@@ -138,12 +139,12 @@ func viewByID(t *testing.T, views []SessionEntryView, id string) SessionEntryVie
 		}
 	}
 	t.Fatalf("no view %s in %v", id, renderIDs(views))
-	return SessionEntryView{}
+	return models.SessionEntryView{}
 }
 
-func onlyText(t *testing.T, parts []ContentPart) string {
+func onlyText(t *testing.T, parts []models.ContentPart) string {
 	t.Helper()
-	if len(parts) != 1 || parts[0].Type != ContentPartText {
+	if len(parts) != 1 || parts[0].Type != models.ContentPartText {
 		t.Fatalf("parts = %+v, want one text part", parts)
 	}
 	return parts[0].Text
@@ -152,15 +153,17 @@ func onlyText(t *testing.T, parts []ContentPart) string {
 // Image sources.
 
 type renderArtifacts struct {
-	artifacts map[string]*Artifact
+	artifacts map[string]*models.Artifact
 	gets      int
 }
 
-func (s *renderArtifacts) CreateArtifactVersion(context.Context, *Artifact, int64) error { return nil }
-func (s *renderArtifacts) ListArtifacts(context.Context, ArtifactFilter) ([]*Artifact, error) {
+func (s *renderArtifacts) CreateArtifactVersion(context.Context, *models.Artifact, int64) error {
+	return nil
+}
+func (s *renderArtifacts) ListArtifacts(context.Context, models.ArtifactFilter) ([]*models.Artifact, error) {
 	return nil, nil
 }
-func (s *renderArtifacts) GetArtifact(_ context.Context, scope Scope, id string, version int64) (*Artifact, error) {
+func (s *renderArtifacts) GetArtifact(_ context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
 	s.gets++
 	a, ok := s.artifacts[fmt.Sprintf("%s@%d", id, version)]
 	if !ok || a.Scope != scope {
@@ -171,10 +174,10 @@ func (s *renderArtifacts) GetArtifact(_ context.Context, scope Scope, id string,
 
 type renderContent map[string][]byte
 
-func (c renderContent) Put(context.Context, ArtifactContentWrite) (ArtifactStoredContent, error) {
-	return ArtifactStoredContent{}, nil
+func (c renderContent) Put(context.Context, models.ArtifactContentWrite) (models.ArtifactStoredContent, error) {
+	return models.ArtifactStoredContent{}, nil
 }
-func (c renderContent) Open(_ context.Context, _ Scope, ref string) (io.ReadCloser, error) {
+func (c renderContent) Open(_ context.Context, _ models.Scope, ref string) (io.ReadCloser, error) {
 	data, ok := c[ref]
 	if !ok {
 		return nil, artifactcatalog.ErrArtifactNotFound
@@ -183,15 +186,15 @@ func (c renderContent) Open(_ context.Context, _ Scope, ref string) (io.ReadClos
 }
 
 type renderCalls struct {
-	calls map[string]*ActionCall
+	calls map[string]*models.ActionCall
 	gets  int
 }
 
-func (s *renderCalls) GetActionCall(_ context.Context, scope Scope, id string) (*ActionCall, error) {
+func (s *renderCalls) GetActionCall(_ context.Context, scope models.Scope, id string) (*models.ActionCall, error) {
 	s.gets++
 	call, ok := s.calls[id]
 	if !ok || call.Scope != scope {
-		return nil, ErrActionNotFound
+		return nil, models.ErrActionNotFound
 	}
 	return call, nil
 }
@@ -209,13 +212,13 @@ func newRenderImageSources() *renderImageSources {
 	shot := []byte("\xff\xd8\xffscreenshot-bytes")
 	return &renderImageSources{
 		photo: photo, shot: shot,
-		artifacts: &renderArtifacts{artifacts: map[string]*Artifact{
+		artifacts: &renderArtifacts{artifacts: map[string]*models.Artifact{
 			"photo@2": {ID: "photo", Version: 2, Scope: testSessionScope, MediaType: "image/png", ContentRef: "ref-photo",
 				SizeBytes: int64(len(photo)), Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(photo))},
 		}},
 		content: renderContent{"ref-photo": photo},
-		calls: &renderCalls{calls: map[string]*ActionCall{
-			"ac-shot": {ID: "ac-shot", Scope: testSessionScope, Status: ActionCallStatusSucceeded, Output: map[string]interface{}{
+		calls: &renderCalls{calls: map[string]*models.ActionCall{
+			"ac-shot": {ID: "ac-shot", Scope: testSessionScope, Status: models.ActionCallStatusSucceeded, Output: map[string]interface{}{
 				"url": "https://example.test",
 				"modelMedia": map[string]interface{}{
 					"mediaType": "image/jpeg", "detail": "high", "contentBase64": base64.StdEncoding.EncodeToString(shot),
@@ -234,12 +237,12 @@ func hexDigest(data []byte) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func photoPart(sum string) ContentPart {
-	return ContentPart{Type: ContentPartImage, MediaType: "image/png", Detail: "auto", ArtifactID: "photo", ArtifactVersion: "2", SHA256: sum}
+func photoPart(sum string) models.ContentPart {
+	return models.ContentPart{Type: models.ContentPartImage, MediaType: "image/png", Detail: "auto", ArtifactID: "photo", ArtifactVersion: "2", SHA256: sum}
 }
 
-func shotPart(sum string) ContentPart {
-	return ContentPart{Type: ContentPartImage, MediaType: "image/jpeg", Detail: "high", ActionCallID: "ac-shot", SHA256: sum}
+func shotPart(sum string) models.ContentPart {
+	return models.ContentPart{Type: models.ContentPartImage, MediaType: "image/jpeg", Detail: "high", ActionCallID: "ac-shot", SHA256: sum}
 }
 
 // ---------------------------------------------------------------------------
@@ -250,11 +253,11 @@ func TestRenderOpenEntryOfOtherRunIsSynthetic(t *testing.T) {
 	uA := f.user("run-a", "book the venue")
 	aA := f.assistant("run-a", "step-a", "a1")
 	uB := f.user("run-b", "what's the guest count?") // another Run of the lane appends between
-	tA := f.tool("run-a", "step-a", "a1", ToolEntryAwaitingApproval)
+	tA := f.tool("run-a", "step-a", "a1", models.ToolEntryAwaitingApproval)
 	aB := f.assistant("run-b", "step-b", "b1", "b2")
-	tB2 := f.tool("run-b", "step-b", "b2", ToolEntryCompleted)
-	tB1 := f.tool("run-b", "step-b", "b1", ToolEntryError)
-	f.tool("run-gone", "step-gone", "x1", ToolEntryCompleted) // R3: no assistant on the path
+	tB2 := f.tool("run-b", "step-b", "b2", models.ToolEntryCompleted)
+	tB1 := f.tool("run-b", "step-b", "b1", models.ToolEntryError)
+	f.tool("run-gone", "step-gone", "x1", models.ToolEntryCompleted) // R3: no assistant on the path
 
 	views, err := projectSessionPath(context.Background(), f.path(), sessionRenderOptions{})
 	if err != nil {
@@ -264,14 +267,14 @@ func TestRenderOpenEntryOfOtherRunIsSynthetic(t *testing.T) {
 	requireRenderOrder(t, views, uA.ID, aA.ID, tA.ID, uB.ID, aB.ID, tB1.ID, tB2.ID)
 
 	open := viewByID(t, views, tA.ID).Tool
-	if open.State != ToolEntryCompleted || open.Result.IsError || onlyText(t, open.Result.Content) != renderOpenToolText {
+	if open.State != models.ToolEntryCompleted || open.Result.IsError || onlyText(t, open.Result.Content) != renderOpenToolText {
 		t.Fatalf("open entry of other Run = %+v, want completed with %q", open, renderOpenToolText)
 	}
 	if open.CallID != "a1" || open.Name != "lookup" || string(open.Arguments) != `{"q":"x"}` {
 		t.Fatalf("open entry identity = %+v", open)
 	}
 	failed := viewByID(t, views, tB1.ID).Tool
-	if failed.State != ToolEntryError || !failed.Result.IsError || onlyText(t, failed.Result.Content) != "result of b1" {
+	if failed.State != models.ToolEntryError || !failed.Result.IsError || onlyText(t, failed.Result.Content) != "result of b1" {
 		t.Fatalf("error entry = %+v", failed)
 	}
 	if a := viewByID(t, views, aB.ID).Assistant; a.Limits != nil {
@@ -287,11 +290,11 @@ func TestRenderMissingToolEntryIsSynthetic(t *testing.T) {
 	f := newRenderFixture(t, "lane")
 	u := f.user("run-a", "compare two venues")
 	a := f.assistant("run-a", "step-a", "c1", "c2")
-	t1 := f.tool("run-a", "step-a", "c1", ToolEntryCompleted)
-	f.tool("run-a", "step-other", "c2", ToolEntryCompleted)                                                    // same call id, other step: not this assistant's
-	f.add(&SessionEntry{RunID: "run-det", Type: SessionEntryTool, State: ToolEntryCompleted, ToolCallID: "c2", // directive entry: no step
-		Tool: &ToolEntry{Name: "lookup", Arguments: json.RawMessage(`{}`), SideEffect: ToolSideEffectRead,
-			Result: &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: "directive"}}}}})
+	t1 := f.tool("run-a", "step-a", "c1", models.ToolEntryCompleted)
+	f.tool("run-a", "step-other", "c2", models.ToolEntryCompleted)                                                                  // same call id, other step: not this assistant's
+	f.add(&models.SessionEntry{RunID: "run-det", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, ToolCallID: "c2", // directive entry: no step
+		Tool: &models.ToolEntry{Name: "lookup", Arguments: json.RawMessage(`{}`), SideEffect: models.ToolSideEffectRead,
+			Result: &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartText, Text: "directive"}}}}})
 
 	views, err := projectSessionPath(context.Background(), f.path(), sessionRenderOptions{})
 	if err != nil {
@@ -301,7 +304,7 @@ func TestRenderMissingToolEntryIsSynthetic(t *testing.T) {
 		t.Fatalf("render order = %v", renderIDs(views))
 	}
 	missing := views[3]
-	if missing.Type != SessionEntryTool || missing.Tool.CallID != "c2" || missing.Tool.State != ToolEntryCompleted ||
+	if missing.Type != models.SessionEntryTool || missing.Tool.CallID != "c2" || missing.Tool.State != models.ToolEntryCompleted ||
 		onlyText(t, missing.Tool.Result.Content) != renderMissingToolText {
 		t.Fatalf("missing call view = %+v", missing.Tool)
 	}
@@ -313,8 +316,8 @@ func TestRenderImageRefResolvesBytes(t *testing.T) {
 	f := newRenderFixture(t, "lane")
 	u := f.user("run-a", "[Ana · m1] here is the room", photoPart(hexDigest(src.photo)), photoPart(""))
 	f.assistant("run-a", "step-a", "c1")
-	tool := f.tool("run-a", "step-a", "c1", ToolEntryCompleted,
-		ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"evidenceRef":"action:ac-shot"}`)}, shotPart(hexDigest(src.shot)))
+	tool := f.tool("run-a", "step-a", "c1", models.ToolEntryCompleted,
+		models.ContentPart{Type: models.ContentPartJSON, Value: json.RawMessage(`{"evidenceRef":"action:ac-shot"}`)}, shotPart(hexDigest(src.shot)))
 
 	views, err := projectSessionPath(context.Background(), f.path(), src.options(true))
 	if err != nil {
@@ -326,7 +329,7 @@ func TestRenderImageRefResolvesBytes(t *testing.T) {
 	}
 	for _, i := range []int{1, 2} {
 		part := user.Content[i]
-		if part.Type != ContentPartImage || part.DataBase64 != base64.StdEncoding.EncodeToString(src.photo) || part.SHA256 != hexDigest(src.photo) {
+		if part.Type != models.ContentPartImage || part.DataBase64 != base64.StdEncoding.EncodeToString(src.photo) || part.SHA256 != hexDigest(src.photo) {
 			t.Fatalf("user image %d = %+v", i, part)
 		}
 	}
@@ -334,10 +337,10 @@ func TestRenderImageRefResolvesBytes(t *testing.T) {
 		t.Fatalf("artifact reads = %d, want 1 (cached per render)", src.artifacts.gets)
 	}
 	result := viewByID(t, views, tool.ID).Tool.Result.Content
-	if len(result) != 2 || result[0].Type != ContentPartJSON || string(result[0].Value) != `{"evidenceRef":"action:ac-shot"}` {
+	if len(result) != 2 || result[0].Type != models.ContentPartJSON || string(result[0].Value) != `{"evidenceRef":"action:ac-shot"}` {
 		t.Fatalf("json part did not pass through: %+v", result)
 	}
-	if shot := result[1]; shot.Type != ContentPartImage || shot.MediaType != "image/jpeg" || shot.Detail != "high" ||
+	if shot := result[1]; shot.Type != models.ContentPartImage || shot.MediaType != "image/jpeg" || shot.Detail != "high" ||
 		shot.ActionCallID != "ac-shot" || shot.DataBase64 != base64.StdEncoding.EncodeToString(src.shot) {
 		t.Fatalf("screenshot part = %+v", shot)
 	}
@@ -349,19 +352,19 @@ func TestRenderImageRefResolvesBytes(t *testing.T) {
 
 func TestRenderUnavailableImageBecomesText(t *testing.T) {
 	src := newRenderImageSources()
-	src.calls.calls["ac-big"] = &ActionCall{ID: "ac-big", Scope: testSessionScope, Output: map[string]interface{}{
+	src.calls.calls["ac-big"] = &models.ActionCall{ID: "ac-big", Scope: testSessionScope, Output: map[string]interface{}{
 		"modelMedia": map[string]interface{}{"mediaType": "image/png",
-			"contentBase64": base64.StdEncoding.EncodeToString(make([]byte, maxModelStepMediaBytes+1))},
+			"contentBase64": base64.StdEncoding.EncodeToString(make([]byte, models.MaxModelStepMediaBytes+1))},
 	}}
-	src.artifacts.artifacts["tampered@1"] = &Artifact{ID: "tampered", Version: 1, Scope: testSessionScope, MediaType: "image/png",
+	src.artifacts.artifacts["tampered@1"] = &models.Artifact{ID: "tampered", Version: 1, Scope: testSessionScope, MediaType: "image/png",
 		ContentRef: "ref-photo", SizeBytes: int64(len(src.photo)), Digest: "sha256:00"}
 	f := newRenderFixture(t, "lane")
 	u := f.user("run-a", "pictures",
 		photoPart("deadbeef"), // digest mismatch
-		ContentPart{Type: ContentPartImage, MediaType: "image/png", ArtifactID: "gone", ArtifactVersion: "1"},
-		ContentPart{Type: ContentPartImage, MediaType: "image/png", ArtifactID: "tampered", ArtifactVersion: "1"},
-		ContentPart{Type: ContentPartImage, MediaType: "image/png", ActionCallID: "ac-big"},
-		ContentPart{Type: ContentPartImage, MediaType: "image/webp", ActionCallID: "ac-missing"},
+		models.ContentPart{Type: models.ContentPartImage, MediaType: "image/png", ArtifactID: "gone", ArtifactVersion: "1"},
+		models.ContentPart{Type: models.ContentPartImage, MediaType: "image/png", ArtifactID: "tampered", ArtifactVersion: "1"},
+		models.ContentPart{Type: models.ContentPartImage, MediaType: "image/png", ActionCallID: "ac-big"},
+		models.ContentPart{Type: models.ContentPartImage, MediaType: "image/webp", ActionCallID: "ac-missing"},
 	)
 
 	views, err := projectSessionPath(context.Background(), f.path(), src.options(true))
@@ -375,7 +378,7 @@ func TestRenderUnavailableImageBecomesText(t *testing.T) {
 		t.Fatalf("content = %+v", content)
 	}
 	for i, text := range want {
-		if content[i].Type != ContentPartText || content[i].Text != text {
+		if content[i].Type != models.ContentPartText || content[i].Text != text {
 			t.Fatalf("part %d = %+v, want text %q", i, content[i], text)
 		}
 	}
@@ -387,18 +390,18 @@ func TestRenderNonVisionReplacesImage(t *testing.T) {
 	f := newRenderFixture(t, "lane")
 	u := f.user("run-a", "look", photoPart(hexDigest(src.photo)))
 	f.assistant("run-a", "step-a", "c1")
-	tool := f.tool("run-a", "step-a", "c1", ToolEntryCompleted, ContentPart{Type: ContentPartText, Text: "opened"}, shotPart(""))
+	tool := f.tool("run-a", "step-a", "c1", models.ToolEntryCompleted, models.ContentPart{Type: models.ContentPartText, Text: "opened"}, shotPart(""))
 
 	views, err := projectSessionPath(context.Background(), f.path(), src.options(false))
 	if err != nil {
 		t.Fatalf("projectSessionPath: %v", err)
 	}
 	user := viewByID(t, views, u.ID).User.Content
-	if len(user) != 2 || user[1].Type != ContentPartText || user[1].Text != "[image omitted: image/png]" {
+	if len(user) != 2 || user[1].Type != models.ContentPartText || user[1].Text != "[image omitted: image/png]" {
 		t.Fatalf("user content = %+v", user)
 	}
 	result := viewByID(t, views, tool.ID).Tool.Result.Content
-	if len(result) != 2 || result[1].Type != ContentPartText || result[1].Text != "[image omitted: image/jpeg]" {
+	if len(result) != 2 || result[1].Type != models.ContentPartText || result[1].Text != "[image omitted: image/jpeg]" {
 		t.Fatalf("tool content = %+v", result)
 	}
 	if src.artifacts.gets != 0 || src.calls.gets != 0 {
@@ -411,10 +414,10 @@ func TestRenderCompactionUsesSummaryText(t *testing.T) {
 	f := newRenderFixture(t, "lane")
 	f.user("run-a", "old request")
 	f.assistant("run-a", "step-1", "c1")
-	f.tool("run-a", "step-1", "c1", ToolEntryCompleted)
+	f.tool("run-a", "step-1", "c1", models.ToolEntryCompleted)
 	kept := f.user("run-a", "recent request")
 	keptA := f.assistant("run-a", "step-2", "c2")
-	keptT := f.tool("run-a", "step-2", "c2", ToolEntryCompleted)
+	keptT := f.tool("run-a", "step-2", "c2", models.ToolEntryCompleted)
 	compaction := f.compaction("run-a", kept.ID)
 	after := f.note("run-a", "Run context")
 	afterA := f.assistant("run-a", "step-3")
@@ -436,7 +439,7 @@ func TestRenderCompactionUsesSummaryText(t *testing.T) {
 	if views[1].Sequence != 1 || views[3].Sequence != 3 || views[0].Sequence != 4 || views[4].Sequence != 5 {
 		t.Fatalf("sequences = %d %d %d %d", views[0].Sequence, views[1].Sequence, views[3].Sequence, views[4].Sequence)
 	}
-	if note := views[4].Note; note.Kind != string(NoteRunContext) || note.Text != "Run context" {
+	if note := views[4].Note; note.Kind != string(models.NoteRunContext) || note.Text != "Run context" {
 		t.Fatalf("note view = %+v", note)
 	}
 	requireRenderedStep(t, views)
@@ -463,26 +466,26 @@ func TestRenderedViewPassesModelStepValidate(t *testing.T) {
 	parent := newRenderFixture(t, "chat")
 	parent.user("run-a", "plan the launch", photoPart(""))
 	parent.assistant("run-a", "step-1", "c1")
-	parent.tool("run-a", "step-1", "c1", ToolEntryCompleted, ContentPart{Type: ContentPartText, Text: "found"}, shotPart(""))
+	parent.tool("run-a", "step-1", "c1", models.ToolEntryCompleted, models.ContentPart{Type: models.ContentPartText, Text: "found"}, shotPart(""))
 	keep := parent.user("run-a", "now the guest list")
 	parent.assistant("run-a", "step-2", "c2", "c3")
 	parent.user("run-b", "interleaved message")
-	parent.tool("run-a", "step-2", "c3", ToolEntryInterrupted)
-	parent.tool("run-a", "step-2", "c2", ToolEntryRunning)
+	parent.tool("run-a", "step-2", "c3", models.ToolEntryInterrupted)
+	parent.tool("run-a", "step-2", "c2", models.ToolEntryRunning)
 	parentSession := parent.agentSession(nil, 0)
 
 	child := newRenderFixture(t, "task")
-	child.add(&SessionEntry{RunID: "run-t", Type: SessionEntryUser, User: &UserEntry{
-		Origin: UserEntryIntervention, InterventionID: "i1", Author: SessionAuthor{Type: "user", ID: "u1", DisplayName: "Ana"},
-		Content: []ContentPart{{Type: ContentPartText, Text: "also invite Kim"}},
+	child.add(&models.SessionEntry{RunID: "run-t", Type: models.SessionEntryUser, User: &models.UserEntry{
+		Origin: models.UserEntryIntervention, InterventionID: "i1", Author: models.SessionAuthor{Type: "user", ID: "u1", DisplayName: "Ana"},
+		Content: []models.ContentPart{{Type: models.ContentPartText, Text: "also invite Kim"}},
 	}})
 	child.compaction("run-t", keep.ID)
 	child.assistant("run-t", "step-t1", "t1")
-	child.tool("run-t", "step-t1", "t1", ToolEntryCompleted)
-	child.add(&SessionEntry{RunID: "run-t", Type: SessionEntryModelChange, ModelChange: &ModelChangeEntry{Provider: "openai-responses", Model: "gpt-test"}})
+	child.tool("run-t", "step-t1", "t1", models.ToolEntryCompleted)
+	child.add(&models.SessionEntry{RunID: "run-t", Type: models.SessionEntryModelChange, ModelChange: &models.ModelChangeEntry{Provider: "openai-responses", Model: "gpt-test"}})
 	childSession := child.agentSession(parentSession, int64(len(parent.entries)))
 
-	path, err := buildAgentSessionPath([]*AgentSession{parentSession, childSession}, [][]*SessionEntry{parent.entries, child.entries}, nil)
+	path, err := models.BuildAgentSessionPath([]*models.AgentSession{parentSession, childSession}, [][]*models.SessionEntry{parent.entries, child.entries}, nil)
 	if err != nil {
 		t.Fatalf("buildAgentSessionPath: %v", err)
 	}
@@ -490,11 +493,11 @@ func TestRenderedViewPassesModelStepValidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("projectSessionPath: %v", err)
 	}
-	if views[0].Type != SessionEntryCompaction || views[0].Compaction.FirstKeptEntryID != keep.ID {
+	if views[0].Type != models.SessionEntryCompaction || views[0].Compaction.FirstKeptEntryID != keep.ID {
 		t.Fatalf("first view = %+v", views[0])
 	}
 	intervention := viewByID(t, views, child.entries[0].ID).User
-	if intervention.Author == nil || intervention.Author.Kind != EntryAuthorPerson || intervention.Author.Label != "Ana" {
+	if intervention.Author == nil || intervention.Author.Kind != models.EntryAuthorPerson || intervention.Author.Label != "Ana" {
 		t.Fatalf("intervention author = %+v", intervention.Author)
 	}
 	running := viewByID(t, views, parent.entries[7].ID).Tool

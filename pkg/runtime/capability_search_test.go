@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 var capabilitySearchFixtureTools = []string{
@@ -17,7 +18,7 @@ var capabilitySearchFixtureTools = []string{
 // capabilitySearchFixture is an Agent with servers connected MCP servers of
 // toolsPerServer binding tools each, named like the kernel names them.
 func capabilitySearchFixture(servers, toolsPerServer int) CapabilityCatalog {
-	catalog := CapabilityCatalog{Scope: Scope{Kind: "tenant", ID: "11"}, AgentID: "agent"}
+	catalog := CapabilityCatalog{Scope: models.Scope{Kind: "tenant", ID: "11"}, AgentID: "agent"}
 	for server := 0; server < servers; server++ {
 		slug := fmt.Sprintf("svc%04d", server)
 		for tool := 0; tool < toolsPerServer; tool++ {
@@ -97,7 +98,7 @@ func TestSearchCapabilitiesMarksLoaded(t *testing.T) {
 
 func TestSearchCapabilitiesLimitEightPerRun(t *testing.T) {
 	s := NewCapabilitySet(capabilitySearchFixture(100, 20), nil, CapabilitySetConfig{})
-	var path []*SessionEntry
+	var path []*models.SessionEntry
 	for i := 0; i < MaxCapabilitySearchesPerRun; i++ {
 		count := CapabilitySearchesThisRun(path, "run-1")
 		if count != i {
@@ -107,14 +108,14 @@ func TestSearchCapabilitiesLimitEightPerRun(t *testing.T) {
 		if isError || decodeCapabilityContent(t, content)["status"] != "search_results" {
 			t.Fatalf("search %d = %s", i, content)
 		}
-		path = append(path, &SessionEntry{ID: fmt.Sprintf("s%d", i), RunID: "run-1", Type: SessionEntryTool, State: ToolEntryCompleted,
-			Tool: &ToolEntry{Name: SearchCapabilitiesTool}})
+		path = append(path, &models.SessionEntry{ID: fmt.Sprintf("s%d", i), RunID: "run-1", Type: models.SessionEntryTool, State: models.ToolEntryCompleted,
+			Tool: &models.ToolEntry{Name: SearchCapabilitiesTool}})
 	}
 	// Errored searches and other Runs' searches do not count.
 	path = append(path,
-		&SessionEntry{ID: "err", RunID: "run-1", Type: SessionEntryTool, State: ToolEntryError, Tool: &ToolEntry{Name: SearchCapabilitiesTool}},
-		&SessionEntry{ID: "other", RunID: "run-0", Type: SessionEntryTool, State: ToolEntryCompleted, Tool: &ToolEntry{Name: SearchCapabilitiesTool}},
-		capabilityLoadEntry("load", "run-1", ToolEntryCompleted, "action:mcp.svc0001.get_user"))
+		&models.SessionEntry{ID: "err", RunID: "run-1", Type: models.SessionEntryTool, State: models.ToolEntryError, Tool: &models.ToolEntry{Name: SearchCapabilitiesTool}},
+		&models.SessionEntry{ID: "other", RunID: "run-0", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, Tool: &models.ToolEntry{Name: SearchCapabilitiesTool}},
+		capabilityLoadEntry("load", "run-1", models.ToolEntryCompleted, "action:mcp.svc0001.get_user"))
 	count := CapabilitySearchesThisRun(path, "run-1")
 	if count != MaxCapabilitySearchesPerRun {
 		t.Fatalf("count = %d", count)
@@ -171,7 +172,7 @@ func TestSearchCapabilitiesAtCatalogScale(t *testing.T) {
 			t.Fatalf("ranked an unrelated server: %v", results)
 		}
 	}
-	if len(content) > MaxToolResultContentBytes {
+	if len(content) > models.MaxToolResultContentBytes {
 		t.Fatalf("content is %d bytes", len(content))
 	}
 }

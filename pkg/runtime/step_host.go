@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -26,9 +27,9 @@ func invalidModelStepResult(format string, args ...interface{}) error {
 // It does not check tool names against req.Tools, nor argument size: an
 // unknown tool, arguments the host flagged in ArgumentsError and oversize
 // arguments become error tool entries so the model can correct itself.
-func ValidateModelStepResult(req ModelStepRequest, res ModelStepResult) error {
-	if res.APIVersion != ModelStepAPIVersion {
-		return invalidModelStepResult("apiVersion %q, want %q", res.APIVersion, ModelStepAPIVersion)
+func ValidateModelStepResult(req models.ModelStepRequest, res models.ModelStepResult) error {
+	if res.APIVersion != models.ModelStepAPIVersion {
+		return invalidModelStepResult("apiVersion %q, want %q", res.APIVersion, models.ModelStepAPIVersion)
 	}
 	if res.StepID != req.StepID {
 		return invalidModelStepResult("stepId %q does not match the request's %q", res.StepID, req.StepID)
@@ -54,7 +55,7 @@ func ValidateModelStepResult(req ModelStepRequest, res ModelStepResult) error {
 		return invalidModelStepResult("narration without tool calls")
 	}
 	switch {
-	case req.Purpose == ModelStepPurposeSummary:
+	case req.Purpose == models.ModelStepPurposeSummary:
 		if len(a.ToolCalls) > 0 {
 			return invalidModelStepResult("summary step returned tool calls")
 		}
@@ -72,7 +73,7 @@ func ValidateModelStepResult(req ModelStepRequest, res ModelStepResult) error {
 // checkProducedAssistant is the shape check shared by ValidateModelStepResult
 // and validateStepOutput. Unlike AssistantEntry.validate it does not cap
 // argument size, because oversize arguments become an error tool entry.
-func checkProducedAssistant(a *AssistantEntry) error {
+func checkProducedAssistant(a *models.AssistantEntry) error {
 	if !a.Provider.Valid() {
 		return fmt.Errorf("unknown assistant provider %q", a.Provider)
 	}
@@ -107,7 +108,7 @@ func checkProducedAssistant(a *AssistantEntry) error {
 			return fmt.Errorf("tool call %q arguments are not a JSON object", call.ID)
 		}
 	}
-	if a.StopReason == ModelStopToolCalls && len(a.ToolCalls) == 0 {
+	if a.StopReason == models.ModelStopToolCalls && len(a.ToolCalls) == 0 {
 		return fmt.Errorf("stop reason %q with no tool calls", a.StopReason)
 	}
 	if a.Native != nil {
@@ -186,15 +187,15 @@ func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurn
 // has already accounted for committed usage, live reservations and durable
 // child allocations.
 type HostedRunBudget struct {
-	Policy          BudgetPolicy `json:"policy"`
-	CommittedUsage  BudgetUsage  `json:"committedUsage,omitempty"`
-	EffectiveUsage  BudgetUsage  `json:"effectiveUsage,omitempty"`
-	Allocated       BudgetPolicy `json:"allocated,omitempty"`
-	TurnReservation BudgetUsage  `json:"turnReservation,omitempty"`
-	Remaining       BudgetPolicy `json:"remaining"`
+	Policy          models.BudgetPolicy `json:"policy"`
+	CommittedUsage  models.BudgetUsage  `json:"committedUsage,omitempty"`
+	EffectiveUsage  models.BudgetUsage  `json:"effectiveUsage,omitempty"`
+	Allocated       models.BudgetPolicy `json:"allocated,omitempty"`
+	TurnReservation models.BudgetUsage  `json:"turnReservation,omitempty"`
+	Remaining       models.BudgetPolicy `json:"remaining"`
 	// MinimumChild is the floor for one delegated, forked or task child. A
 	// positive value applies only when the parent dimension is bounded.
-	MinimumChild BudgetPolicy `json:"minimumChild,omitempty"`
+	MinimumChild models.BudgetPolicy `json:"minimumChild,omitempty"`
 }
 
 func remainingBudgetDimension(limit, used, allocated int64) int64 {

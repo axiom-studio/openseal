@@ -8,20 +8,21 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 // capabilityCatalogFixture is a deferred catalog: eight Notion-like actions
 // bound to one prompt each, four research prompts, and the built-in Skill.
 func capabilityCatalogFixture() CapabilityCatalog {
-	catalog := CapabilityCatalog{Scope: Scope{Kind: "tenant", ID: "tenant-1"}, AgentID: "agent-1"}
+	catalog := CapabilityCatalog{Scope: models.Scope{Kind: "tenant", ID: "tenant-1"}, AgentID: "agent-1"}
 	for i := 0; i < 4; i++ {
-		catalog.SkillPrompts = append(catalog.SkillPrompts, HostedSkillPrompt{
+		catalog.SkillPrompts = append(catalog.SkillPrompts, models.HostedSkillPrompt{
 			SkillID: fmt.Sprintf("research.%d", i), Version: "1.0.0", Reference: fmt.Sprintf("skill-research-%d@1", i),
 			Name: fmt.Sprintf("Research %d", i), Description: "Research guidance", Instructions: fmt.Sprintf("Research instructions %d.", i),
 		})
 	}
-	catalog.SkillPrompts = append(catalog.SkillPrompts, HostedSkillPrompt{
+	catalog.SkillPrompts = append(catalog.SkillPrompts, models.HostedSkillPrompt{
 		SkillID: "notion", Version: "3", Reference: "skill-notion@3", Name: "Notion", Description: "Notion workspace", Instructions: "Use Notion carefully.",
 	})
 	for i := 0; i < 8; i++ {
@@ -30,9 +31,9 @@ func capabilityCatalogFixture() CapabilityCatalog {
 			Description: fmt.Sprintf("Notion operation %d", i), InputSchema: map[string]interface{}{"type": "object"},
 		})
 	}
-	catalog.SkillPrompts = append(catalog.SkillPrompts, HostedSkillPrompt{
+	catalog.SkillPrompts = append(catalog.SkillPrompts, models.HostedSkillPrompt{
 		SkillID: builtin.SkillID, Version: "1", Reference: "builtin-z@1", Name: "Built-in", Instructions: "Built-in instructions.",
-	}, HostedSkillPrompt{
+	}, models.HostedSkillPrompt{
 		SkillID: builtin.SkillID, Version: "1", Reference: "builtin-a@1", Name: "Built-in A", Instructions: "Built-in A instructions.",
 	})
 	catalog.Actions = append(catalog.Actions, capability.ModelAction{
@@ -53,7 +54,7 @@ func TestPinnedCapabilitySkillIDIsBuiltin(t *testing.T) {
 func TestCapabilitySetSmallCatalogIsDeferred(t *testing.T) {
 	catalog := CapabilityCatalog{
 		Actions:      []capability.ModelAction{{Name: "notion.search", SkillID: "notion", Version: "1"}},
-		SkillPrompts: []HostedSkillPrompt{{SkillID: "notion", Version: "1", Reference: "skill-notion@1"}},
+		SkillPrompts: []models.HostedSkillPrompt{{SkillID: "notion", Version: "1", Reference: "skill-notion@1"}},
 		HostTools:    HostToolSpecs(workspace.ChatAuthority("chat-1")),
 	}
 	s := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
@@ -289,7 +290,7 @@ func TestCapabilityDirectorySearchModeBounded(t *testing.T) {
 	catalog := capabilityCatalogFixture()
 	for server := 0; server < 30; server++ {
 		bindingID := fmt.Sprintf("binding-%02d", server)
-		catalog.SkillPrompts = append(catalog.SkillPrompts, HostedSkillPrompt{SkillID: "mcp", Version: "1", BindingID: bindingID,
+		catalog.SkillPrompts = append(catalog.SkillPrompts, models.HostedSkillPrompt{SkillID: "mcp", Version: "1", BindingID: bindingID,
 			Reference: fmt.Sprintf("mcp-%02d@1", server), Name: fmt.Sprintf("Server %02d", server), Instructions: "Use the server."})
 		for tool := 0; tool < 4; tool++ {
 			catalog.Actions = append(catalog.Actions, capability.ModelAction{
@@ -332,51 +333,51 @@ func TestCapabilityDirectorySearchModeBounded(t *testing.T) {
 
 // capabilityLoadEntry is a load_capabilities tool entry: action and
 // workspace IDs become frozen tools, other IDs loaded instructions.
-func capabilityLoadEntry(id, runID string, state ToolEntryState, loaded ...string) *SessionEntry {
-	tool := &ToolEntry{Name: LoadCapabilitiesTool}
+func capabilityLoadEntry(id, runID string, state models.ToolEntryState, loaded ...string) *models.SessionEntry {
+	tool := &models.ToolEntry{Name: LoadCapabilitiesTool}
 	for _, capabilityID := range loaded {
 		switch {
-		case strings.HasPrefix(capabilityID, capabilityActionPrefix):
-			name := "action_" + strings.ReplaceAll(strings.TrimPrefix(capabilityID, capabilityActionPrefix), ".", "_")
-			tool.SurfacedTools = append(tool.SurfacedTools, SurfacedTool{Capability: capabilityID, Name: name,
+		case strings.HasPrefix(capabilityID, models.CapabilityActionPrefix):
+			name := "action_" + strings.ReplaceAll(strings.TrimPrefix(capabilityID, models.CapabilityActionPrefix), ".", "_")
+			tool.SurfacedTools = append(tool.SurfacedTools, models.SurfacedTool{Capability: capabilityID, Name: name,
 				Description: "Frozen " + name, InputSchema: map[string]interface{}{"type": "object"}})
 		case strings.HasPrefix(capabilityID, capabilityWorkspacePrefix):
 			name := strings.ReplaceAll(strings.TrimPrefix(capabilityID, capabilityWorkspacePrefix), ".", "_")
-			tool.SurfacedTools = append(tool.SurfacedTools, SurfacedTool{Capability: capabilityID, Name: name,
+			tool.SurfacedTools = append(tool.SurfacedTools, models.SurfacedTool{Capability: capabilityID, Name: name,
 				InputSchema: map[string]interface{}{"type": "object"}})
 		default:
 			tool.LoadedInstructions = append(tool.LoadedInstructions, capabilityID)
 		}
 	}
-	return &SessionEntry{ID: id, RunID: runID, Type: SessionEntryTool, State: state, Tool: tool}
+	return &models.SessionEntry{ID: id, RunID: runID, Type: models.SessionEntryTool, State: state, Tool: tool}
 }
 
 func TestPathLoadedCapabilityIDsIgnoresErroredAndPreCompactionLoads(t *testing.T) {
-	entries := []*SessionEntry{
-		capabilityLoadEntry("e1", "run-1", ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op0"),
-		capabilityLoadEntry("e2", "run-1", ToolEntryCompleted, "action:notion.op1"),
-		{ID: "e3", RunID: "run-1", Type: SessionEntryUser, User: &UserEntry{}},
-		capabilityLoadEntry("e4", "run-1", ToolEntryError, "action:notion.op2"),
-		capabilityLoadEntry("e5", "run-1", ToolEntryPending, "action:notion.op3"),
-		{ID: "e6", Type: SessionEntryTool, State: ToolEntryCompleted, Tool: &ToolEntry{Name: "search_capabilities",
-			SurfacedTools: []SurfacedTool{{Capability: "action:notion.op4", Name: "action_notion_op4"}}}},
-		capabilityLoadEntry("e7", "run-1", ToolEntryCompleted, "action:notion.op5", "action:notion.op1"),
+	entries := []*models.SessionEntry{
+		capabilityLoadEntry("e1", "run-1", models.ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op0"),
+		capabilityLoadEntry("e2", "run-1", models.ToolEntryCompleted, "action:notion.op1"),
+		{ID: "e3", RunID: "run-1", Type: models.SessionEntryUser, User: &models.UserEntry{}},
+		capabilityLoadEntry("e4", "run-1", models.ToolEntryError, "action:notion.op2"),
+		capabilityLoadEntry("e5", "run-1", models.ToolEntryPending, "action:notion.op3"),
+		{ID: "e6", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, Tool: &models.ToolEntry{Name: "search_capabilities",
+			SurfacedTools: []models.SurfacedTool{{Capability: "action:notion.op4", Name: "action_notion_op4"}}}},
+		capabilityLoadEntry("e7", "run-1", models.ToolEntryCompleted, "action:notion.op5", "action:notion.op1"),
 	}
-	if got, want := PathLoadedCapabilityIDs(&AgentSessionPath{Entries: entries}), []string{"prompt:skill-notion@3", "action:notion.op0", "action:notion.op1", "action:notion.op5"}; !reflect.DeepEqual(got, want) {
+	if got, want := PathLoadedCapabilityIDs(&models.AgentSessionPath{Entries: entries}), []string{"prompt:skill-notion@3", "action:notion.op0", "action:notion.op1", "action:notion.op5"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 
 	// The store path builder drops pre-compaction entries; the compaction
 	// carries the tools of the summarized loads (not their instructions).
-	session := &AgentSession{ID: "s1", NextSequence: 6}
-	segment := []*SessionEntry{
-		withSessionSequence(capabilityLoadEntry("p1", "run-1", ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op0"), "s1", 1),
-		withSessionSequence(capabilityLoadEntry("p2", "run-1", ToolEntryCompleted, "action:notion.op1"), "s1", 2),
-		withSessionSequence(&SessionEntry{ID: "p3", Type: SessionEntryCompaction, Compaction: &CompactionEntry{Summary: "s", FirstKeptEntryID: "p2",
+	session := &models.AgentSession{ID: "s1", NextSequence: 6}
+	segment := []*models.SessionEntry{
+		withSessionSequence(capabilityLoadEntry("p1", "run-1", models.ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op0"), "s1", 1),
+		withSessionSequence(capabilityLoadEntry("p2", "run-1", models.ToolEntryCompleted, "action:notion.op1"), "s1", 2),
+		withSessionSequence(&models.SessionEntry{ID: "p3", Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntry{Summary: "s", FirstKeptEntryID: "p2",
 			CarriedTools: carriedToolsAfter(nil, segmentPrefix(1))}}, "s1", 3),
-		withSessionSequence(capabilityLoadEntry("p4", "run-1", ToolEntryCompleted, "action:notion.op2"), "s1", 4),
+		withSessionSequence(capabilityLoadEntry("p4", "run-1", models.ToolEntryCompleted, "action:notion.op2"), "s1", 4),
 	}
-	rendered, err := buildAgentSessionPath([]*AgentSession{session}, [][]*SessionEntry{segment}, nil)
+	rendered, err := models.BuildAgentSessionPath([]*models.AgentSession{session}, [][]*models.SessionEntry{segment}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,12 +390,12 @@ func TestPathLoadedCapabilityIDsIgnoresErroredAndPreCompactionLoads(t *testing.T
 }
 
 // segmentPrefix is the summarized part of the compaction fixture above.
-func segmentPrefix(n int) []*SessionEntry {
-	entries := []*SessionEntry{capabilityLoadEntry("p1", "run-1", ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op0")}
+func segmentPrefix(n int) []*models.SessionEntry {
+	entries := []*models.SessionEntry{capabilityLoadEntry("p1", "run-1", models.ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op0")}
 	return entries[:n]
 }
 
-func withSessionSequence(entry *SessionEntry, sessionID string, sequence int64) *SessionEntry {
+func withSessionSequence(entry *models.SessionEntry, sessionID string, sequence int64) *models.SessionEntry {
 	entry.SessionID = sessionID
 	entry.Sequence = sequence
 	return entry
@@ -402,14 +403,14 @@ func withSessionSequence(entry *SessionEntry, sessionID string, sequence int64) 
 
 func TestPathLoadedCapabilityIDsCarryAcrossRunsInSession(t *testing.T) {
 	catalog := capabilityCatalogFixture()
-	session := &AgentSession{ID: "conv", NextSequence: 5}
-	segment := []*SessionEntry{
-		withSessionSequence(capabilityLoadEntry("r1-load", "run-1", ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op4"), "conv", 1),
-		withSessionSequence(&SessionEntry{ID: "r2-user", RunID: "run-2", Type: SessionEntryUser, User: &UserEntry{}}, "conv", 2),
-		withSessionSequence(capabilityLoadEntry("r2-load", "run-2", ToolEntryCompleted, "action:notion.op6"), "conv", 3),
-		withSessionSequence(capabilityLoadEntry("r2-again", "run-2", ToolEntryCompleted), "conv", 4),
+	session := &models.AgentSession{ID: "conv", NextSequence: 5}
+	segment := []*models.SessionEntry{
+		withSessionSequence(capabilityLoadEntry("r1-load", "run-1", models.ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op4"), "conv", 1),
+		withSessionSequence(&models.SessionEntry{ID: "r2-user", RunID: "run-2", Type: models.SessionEntryUser, User: &models.UserEntry{}}, "conv", 2),
+		withSessionSequence(capabilityLoadEntry("r2-load", "run-2", models.ToolEntryCompleted, "action:notion.op6"), "conv", 3),
+		withSessionSequence(capabilityLoadEntry("r2-again", "run-2", models.ToolEntryCompleted), "conv", 4),
 	}
-	path, err := buildAgentSessionPath([]*AgentSession{session}, [][]*SessionEntry{segment}, nil)
+	path, err := models.BuildAgentSessionPath([]*models.AgentSession{session}, [][]*models.SessionEntry{segment}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,17 +425,17 @@ func TestPathLoadedCapabilityIDsCarryAcrossRunsInSession(t *testing.T) {
 }
 
 func TestPathLoadedCapabilityIDsChildSessionInheritsParentUpToFork(t *testing.T) {
-	parent := &AgentSession{ID: "parent", NextSequence: 4}
-	child := &AgentSession{ID: "child", ParentSessionID: "parent", ForkEntryID: "p-load-1", ForkSequence: 1, NextSequence: 2}
-	parentEntries := []*SessionEntry{
-		withSessionSequence(capabilityLoadEntry("p-load-1", "run-parent", ToolEntryCompleted, "action:notion.op0"), "parent", 1),
-		withSessionSequence(capabilityLoadEntry("p-load-2", "run-parent", ToolEntryCompleted, "action:notion.op1"), "parent", 2),
-		withSessionSequence(capabilityLoadEntry("p-load-3", "run-parent", ToolEntryCompleted, "action:notion.op2"), "parent", 3),
+	parent := &models.AgentSession{ID: "parent", NextSequence: 4}
+	child := &models.AgentSession{ID: "child", ParentSessionID: "parent", ForkEntryID: "p-load-1", ForkSequence: 1, NextSequence: 2}
+	parentEntries := []*models.SessionEntry{
+		withSessionSequence(capabilityLoadEntry("p-load-1", "run-parent", models.ToolEntryCompleted, "action:notion.op0"), "parent", 1),
+		withSessionSequence(capabilityLoadEntry("p-load-2", "run-parent", models.ToolEntryCompleted, "action:notion.op1"), "parent", 2),
+		withSessionSequence(capabilityLoadEntry("p-load-3", "run-parent", models.ToolEntryCompleted, "action:notion.op2"), "parent", 3),
 	}
-	childEntries := []*SessionEntry{
-		withSessionSequence(capabilityLoadEntry("c-load-1", "run-child", ToolEntryCompleted, "action:notion.op3"), "child", 1),
+	childEntries := []*models.SessionEntry{
+		withSessionSequence(capabilityLoadEntry("c-load-1", "run-child", models.ToolEntryCompleted, "action:notion.op3"), "child", 1),
 	}
-	path, err := buildAgentSessionPath([]*AgentSession{parent, child}, [][]*SessionEntry{parentEntries, childEntries}, nil)
+	path, err := models.BuildAgentSessionPath([]*models.AgentSession{parent, child}, [][]*models.SessionEntry{parentEntries, childEntries}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -52,10 +53,10 @@ const (
 
 // CapabilityCatalog is the authorized catalog of one claim (from the resolved binding).
 type CapabilityCatalog struct {
-	Scope             Scope
+	Scope             models.Scope
 	AgentID           string
 	Actions           []capability.ModelAction
-	SkillPrompts      []HostedSkillPrompt
+	SkillPrompts      []models.HostedSkillPrompt
 	HostTools         []HostToolSpec
 	RunbookOperations []agentrun.HostedRunbookOperation
 }
@@ -112,7 +113,7 @@ type CapabilitySet struct {
 	searching bool
 
 	entries   []capabilityEntry
-	prompts   map[string]HostedSkillPrompt
+	prompts   map[string]models.HostedSkillPrompt
 	actions   map[string]capability.ModelAction
 	hostTools map[string]HostToolSpec
 	runbooks  map[string]agentrun.HostedRunbookOperation
@@ -138,7 +139,7 @@ func NewCapabilitySet(catalog CapabilityCatalog, loadedIDs []string, config Capa
 
 // NewPathCapabilitySet is the visible set of a step over path: the tools
 // carried over its latest compaction, then what the path's loads loaded.
-func NewPathCapabilitySet(catalog CapabilityCatalog, path *AgentSessionPath, config CapabilitySetConfig) *CapabilitySet {
+func NewPathCapabilitySet(catalog CapabilityCatalog, path *models.AgentSessionPath, config CapabilitySetConfig) *CapabilitySet {
 	return newCapabilitySet(catalog, PathCarriedCapabilityIDs(path), PathLoadedCapabilityIDs(path), config)
 }
 
@@ -149,7 +150,7 @@ func newCapabilitySet(catalog CapabilityCatalog, carriedIDs, loadedIDs []string,
 	s := &CapabilitySet{
 		catalog:   catalog,
 		config:    config.withDefaults(),
-		prompts:   map[string]HostedSkillPrompt{},
+		prompts:   map[string]models.HostedSkillPrompt{},
 		actions:   map[string]capability.ModelAction{},
 		hostTools: map[string]HostToolSpec{},
 		runbooks:  map[string]agentrun.HostedRunbookOperation{},
@@ -199,7 +200,7 @@ func (s *CapabilitySet) indexCatalog() {
 		}
 	}
 	for _, a := range s.catalog.Actions {
-		id := capabilityActionPrefix + a.Name
+		id := models.CapabilityActionPrefix + a.Name
 		if addEntry(capabilityEntry{id, "action", "", capabilityDiscoveryDescription(a.Description)}) {
 			s.actions[id] = a
 		}
@@ -350,7 +351,7 @@ func (s *CapabilitySet) skillSiblings(id string, pending map[string]bool) []stri
 	used := s.toolCost(id)
 	var siblings []string
 	for _, candidate := range s.catalog.Actions {
-		sibling := capabilityActionPrefix + candidate.Name
+		sibling := models.CapabilityActionPrefix + candidate.Name
 		if sibling == id || s.loaded[sibling] || pending[sibling] || slices.Contains(siblings, sibling) {
 			continue
 		}
@@ -406,7 +407,7 @@ func (s *CapabilitySet) pinnedIDs() []string {
 	}
 	for _, a := range s.catalog.Actions {
 		if s.pinnedSkill(a.SkillID) {
-			actions = append(actions, capabilityActionPrefix+a.Name)
+			actions = append(actions, models.CapabilityActionPrefix+a.Name)
 		}
 	}
 	sort.Strings(prompts)
@@ -455,7 +456,7 @@ func (s *CapabilitySet) Offered() bool { return s != nil && len(s.entries) > 0 }
 func (s *CapabilitySet) Searching() bool { return s != nil && s.searching }
 
 // Visible returns the visible catalog subset in load order (pinned, then loads).
-func (s *CapabilitySet) Visible() (actions []capability.ModelAction, prompts []HostedSkillPrompt, hostTools []HostToolSpec, runbooks []agentrun.HostedRunbookOperation) {
+func (s *CapabilitySet) Visible() (actions []capability.ModelAction, prompts []models.HostedSkillPrompt, hostTools []HostToolSpec, runbooks []agentrun.HostedRunbookOperation) {
 	if s == nil {
 		return nil, nil, nil, nil
 	}

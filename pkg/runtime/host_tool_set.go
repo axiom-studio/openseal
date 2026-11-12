@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -17,13 +18,13 @@ type ChatWorkspaces interface {
 	// host keeps no chat files. It may make the triggering message's
 	// attachments available as uploads/ (idempotent). A non-nil error fails
 	// nothing: the claim runs without host tools and logs it.
-	PrepareChatWorkspace(ctx context.Context, run *AgentRun) (conversationID string, err error)
+	PrepareChatWorkspace(ctx context.Context, run *models.AgentRun) (conversationID string, err error)
 }
 
 // prepareChatWorkspace resolves a claim's chat Workspace. A nil resolver, a
 // Run with no chat, or a resolver error gives nil (no host tools); the error is
 // returned for the caller to log and never fails the claim.
-func prepareChatWorkspace(ctx context.Context, resolver ChatWorkspaces, run *AgentRun) (*workspace.Authority, error) {
+func prepareChatWorkspace(ctx context.Context, resolver ChatWorkspaces, run *models.AgentRun) (*workspace.Authority, error) {
 	if resolver == nil || run == nil {
 		return nil, nil
 	}

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestCapabilityNoteRelistsWhenOnlyAnUpdateSurvives(t *testing.T) {
@@ -19,17 +21,17 @@ func TestCapabilityNoteRelistsWhenOnlyAnUpdateSurvives(t *testing.T) {
 	if updateData.Full || !strings.HasPrefix(updateText, "<capabilities_update>") {
 		t.Fatalf("second note = %q full=%v", updateText, updateData.Full)
 	}
-	note := func(id, text string, data capabilityNoteData) *SessionEntry {
+	note := func(id, text string, data capabilityNoteData) *models.SessionEntry {
 		encoded, _ := json.Marshal(data)
-		return &SessionEntry{ID: id, Type: SessionEntryNote, Note: &NoteEntry{Kind: NoteCapabilities, Text: text, Data: encoded}}
+		return &models.SessionEntry{ID: id, Type: models.SessionEntryNote, Note: &models.NoteEntry{Kind: models.NoteCapabilities, Text: text, Data: encoded}}
 	}
-	both := &AgentSessionPath{Entries: []*SessionEntry{note("n1", fullText, fullData), note("n2", updateText, updateData)}}
+	both := &models.AgentSessionPath{Entries: []*models.SessionEntry{note("n1", fullText, fullData), note("n2", updateText, updateData)}}
 	if latest := latestCapabilityNote(both); latest == nil || latest.Digest != updateData.Digest {
 		t.Fatalf("latest with both notes = %+v", latest)
 	}
 	// A compaction summarized the full note but kept the update: the
 	// listing is gone, so the next step lists everything again.
-	onlyUpdate := &AgentSessionPath{Entries: []*SessionEntry{note("n2", updateText, updateData)}}
+	onlyUpdate := &models.AgentSessionPath{Entries: []*models.SessionEntry{note("n2", updateText, updateData)}}
 	if latest := latestCapabilityNote(onlyUpdate); latest != nil {
 		t.Fatalf("an update without its full note counts as the listing: %+v", latest)
 	}

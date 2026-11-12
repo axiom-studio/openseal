@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestCompactionSummaryRequestKeepsStepPrefix(t *testing.T) {
@@ -20,8 +22,8 @@ func TestCompactionSummaryRequestKeepsStepPrefix(t *testing.T) {
 	if carried := carriedToolsAfter(nil, f.entries[:3]); !reflect.DeepEqual(carried, early.Tool.SurfacedTools) {
 		t.Fatalf("carried after the first load = %+v", carried)
 	}
-	carried := carriedToolsAfter(&CompactionEntry{CarriedTools: []SurfacedTool{{Capability: "action:drive.list", Name: "action_drive_list",
-		InputSchema: map[string]interface{}{"type": "object"}}}}, []*SessionEntry{early})
+	carried := carriedToolsAfter(&models.CompactionEntry{CarriedTools: []models.SurfacedTool{{Capability: "action:drive.list", Name: "action_drive_list",
+		InputSchema: map[string]interface{}{"type": "object"}}}}, []*models.SessionEntry{early})
 	if got := []string{carried[0].Name, carried[1].Name}; len(carried) != 2 || !reflect.DeepEqual(got, []string{"action_drive_list", "action_notion_fetch"}) {
 		t.Fatalf("carried = %+v", carried)
 	}
@@ -44,7 +46,7 @@ func TestCompactionSummaryRequestKeepsStepPrefix(t *testing.T) {
 		t.Fatalf("entry %s not rendered", id)
 		return -1
 	}
-	surfaceOf := func(req ModelStepRequest, name string) (string, bool) {
+	surfaceOf := func(req models.ModelStepRequest, name string) (string, bool) {
 		for _, tool := range req.Tools {
 			if tool.Name == name {
 				return tool.Surface, true
@@ -76,31 +78,31 @@ func TestCompactionSummaryRequestKeepsStepPrefix(t *testing.T) {
 
 // addSurfacingLoad appends a load_capabilities call and its completed entry
 // that surfaced one tool, frozen as the tool executor freezes it.
-func addSurfacingLoad(f *renderFixture, step, call, capabilityID, name string) *SessionEntry {
+func addSurfacingLoad(f *renderFixture, step, call, capabilityID, name string) *models.SessionEntry {
 	arguments := json.RawMessage(`{"ids":["` + capabilityID + `"]}`)
-	f.add(&SessionEntry{RunID: "run-1", StepID: step, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
-		Provider: ModelStepProviderAnthropic, Model: "claude-test", StopReason: ModelStopToolCalls,
-		ToolCalls: []ModelToolCall{{ID: call, Name: LoadCapabilitiesTool, Arguments: arguments}},
+	f.add(&models.SessionEntry{RunID: "run-1", StepID: step, Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
+		Provider: models.ModelStepProviderAnthropic, Model: "claude-test", StopReason: models.ModelStopToolCalls,
+		ToolCalls: []models.ModelToolCall{{ID: call, Name: LoadCapabilitiesTool, Arguments: arguments}},
 	}})
-	tool := ModelStepTool{Name: name, Description: "Read " + name, InputSchema: map[string]interface{}{"type": "object"}}
-	return f.add(&SessionEntry{RunID: "run-1", StepID: step, Type: SessionEntryTool, State: ToolEntryCompleted, ToolCallID: call, Tool: &ToolEntry{
-		Name: LoadCapabilitiesTool, Arguments: arguments, SideEffect: ToolSideEffectNone,
-		SurfacedTools: []SurfacedTool{surfacedTool(capabilityID, tool)},
-		Result:        &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: `{"status":"loaded"}`}}},
+	tool := models.ModelStepTool{Name: name, Description: "Read " + name, InputSchema: map[string]interface{}{"type": "object"}}
+	return f.add(&models.SessionEntry{RunID: "run-1", StepID: step, Type: models.SessionEntryTool, State: models.ToolEntryCompleted, ToolCallID: call, Tool: &models.ToolEntry{
+		Name: LoadCapabilitiesTool, Arguments: arguments, SideEffect: models.ToolSideEffectNone,
+		SurfacedTools: []models.SurfacedTool{surfacedTool(capabilityID, tool)},
+		Result:        &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartText, Text: `{"status":"loaded"}`}}},
 	}})
 }
 
 // surfacedModelStep is a step over path as the step preparer completes it:
 // the rendered entries, and the base tools with the loaded group of the path.
-func surfacedModelStep(t *testing.T, path *AgentSessionPath) ModelStepRequest {
+func surfacedModelStep(t *testing.T, path *models.AgentSessionPath) models.ModelStepRequest {
 	t.Helper()
 	step := validModelStepRequest()
 	entries, err := projectSessionPath(context.Background(), path, sessionRenderOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	load := ModelStepTool{Name: LoadCapabilitiesTool, Description: "Load.", InputSchema: map[string]interface{}{"type": "object"}, Group: ModelStepToolHarness}
-	step.Tools = applySurfaces(append([]ModelStepTool{step.Tools[0], load}, step.Tools[1]), path, entries)
+	load := models.ModelStepTool{Name: LoadCapabilitiesTool, Description: "Load.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness}
+	step.Tools = applySurfaces(append([]models.ModelStepTool{step.Tools[0], load}, step.Tools[1]), path, entries)
 	step.Entries = entries
 	if err := step.Validate(); err != nil {
 		t.Fatalf("surfaced step does not validate: %v", err)

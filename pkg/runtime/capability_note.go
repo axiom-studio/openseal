@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -159,14 +160,14 @@ func writeCapabilitySections(items []capabilityNoteItem, mode string) []string {
 // path (the path starts at the latest compaction's kept tail), nil when no
 // full note is on the path: an update note whose full note was summarized
 // away describes changes to a listing the model can no longer see.
-func latestCapabilityNote(path *AgentSessionPath) *capabilityNoteData {
+func latestCapabilityNote(path *models.AgentSessionPath) *capabilityNoteData {
 	if path == nil {
 		return nil
 	}
 	var latest *capabilityNoteData
 	for i := len(path.Entries) - 1; i >= 0; i-- {
 		entry := path.Entries[i]
-		if entry == nil || entry.Type != SessionEntryNote || entry.Note == nil || entry.Note.Kind != NoteCapabilities {
+		if entry == nil || entry.Type != models.SessionEntryNote || entry.Note == nil || entry.Note.Kind != models.NoteCapabilities {
 			continue
 		}
 		var data capabilityNoteData
@@ -261,13 +262,13 @@ func CapabilityNoteSourceKey(stepID, compactionID, digest string) string {
 }
 
 type capabilityNoteAppender interface {
-	AppendAgentSessionEntries(ctx context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error)
+	AppendAgentSessionEntries(ctx context.Context, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error)
 }
 
 // ensureCapabilityNote appends the capabilities note the step's path needs
 // (none when it already shows the listing). It runs right before the step's
 // model request is rendered, after the step's context and any compaction.
-func ensureCapabilityNote(ctx context.Context, store capabilityNoteAppender, in agentrun.StepInput, path *AgentSessionPath, listing capabilityListing, now time.Time) (bool, error) {
+func ensureCapabilityNote(ctx context.Context, store capabilityNoteAppender, in agentrun.StepInput, path *models.AgentSessionPath, listing capabilityListing, now time.Time) (bool, error) {
 	text, data := capabilityNoteText(listing, latestCapabilityNote(path))
 	if text == "" {
 		return false, nil
@@ -281,16 +282,16 @@ func ensureCapabilityNote(ctx context.Context, store capabilityNoteAppender, in 
 		return false, err
 	}
 	key := CapabilityNoteSourceKey(in.Step.ID, compactionID, data.Digest)
-	entry := &SessionEntry{
-		ID: SessionEntryID(in.Session.ID, key), Scope: in.Run.Scope, SessionID: in.Session.ID, RunID: in.Run.ID,
-		Step: in.Step.Sequence, Type: SessionEntryNote, SourceKey: key, CreatedAt: now,
-		Note: &NoteEntry{Kind: NoteCapabilities, Text: text, Data: encoded},
+	entry := &models.SessionEntry{
+		ID: models.SessionEntryID(in.Session.ID, key), Scope: in.Run.Scope, SessionID: in.Session.ID, RunID: in.Run.ID,
+		Step: in.Step.Sequence, Type: models.SessionEntryNote, SourceKey: key, CreatedAt: now,
+		Note: &models.NoteEntry{Kind: models.NoteCapabilities, Text: text, Data: encoded},
 	}
 	entry.Tokens = estimateEntryTokens(entry)
-	_, err = store.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
+	_, err = store.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: in.Run.Scope, SessionID: in.Session.ID, RunID: in.Run.ID,
-		Lease:   &AgentRunLeaseGuard{WorkerID: in.WorkerID, Now: now},
-		Entries: []*SessionEntry{entry}, Now: now,
+		Lease:   &models.AgentRunLeaseGuard{WorkerID: in.WorkerID, Now: now},
+		Entries: []*models.SessionEntry{entry}, Now: now,
 	})
 	if err != nil {
 		return false, fmt.Errorf("append capabilities note: %w", err)
@@ -321,13 +322,13 @@ func controlTargetItems(a agentrun.ControlAuthority) []capabilityNoteItem {
 			items = append(items, capabilityNoteItem{Key: "agent:" + target.ID, Section: capabilityNoteAgents, Text: line})
 		}
 	}
-	if controlToolOffered(ControlToolDelegate, a) {
+	if controlToolOffered(models.ControlToolDelegate, a) {
 		addAgents(a.DelegateTargets)
 	}
-	if controlToolOffered(ControlToolFork, a) {
+	if controlToolOffered(models.ControlToolFork, a) {
 		addAgents(a.ForkTargets)
 	}
-	if controlToolOffered(ControlToolRunOperation, a) {
+	if controlToolOffered(models.ControlToolRunOperation, a) {
 		for _, op := range a.Operations {
 			if op.Entrypoint == "" {
 				continue

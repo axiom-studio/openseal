@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -23,10 +24,10 @@ const capabilityInvocationToolCallID = "capability-invocation"
 // durable Objective/Event template.
 type CapabilityInvocationStepProducer struct {
 	actions []capability.ModelAction
-	calls   ActionCallReader
+	calls   models.ActionCallReader
 }
 
-func NewCapabilityInvocationStepProducer(actions []capability.ModelAction, calls ActionCallReader) (*CapabilityInvocationStepProducer, error) {
+func NewCapabilityInvocationStepProducer(actions []capability.ModelAction, calls models.ActionCallReader) (*CapabilityInvocationStepProducer, error) {
 	if len(actions) == 0 {
 		return nil, errors.New("deterministic capability invocation requires authorized actions")
 	}
@@ -36,13 +37,15 @@ func NewCapabilityInvocationStepProducer(actions []capability.ModelAction, calls
 	return &CapabilityInvocationStepProducer{actions: cloneHostedModelActions(actions), calls: calls}, nil
 }
 
-func (p *CapabilityInvocationStepProducer) Kind() StepProducerKind { return StepProducerDeterministic }
+func (p *CapabilityInvocationStepProducer) Kind() models.StepProducerKind {
+	return models.StepProducerDeterministic
+}
 
 func (p *CapabilityInvocationStepProducer) Produce(ctx context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	if p == nil || in.Run == nil || in.Step == nil {
 		return agentrun.StepOutput{}, errors.New("deterministic capability invocation requires a durable Run and step")
 	}
-	requested, ok := in.Run.Context[capabilityInvocationContextKey].(map[string]interface{})
+	requested, ok := in.Run.Context[models.CapabilityInvocationContextKey].(map[string]interface{})
 	if !ok {
 		return agentrun.StepOutput{}, errors.New("Run has no typed capability invocation")
 	}
@@ -92,7 +95,7 @@ func (p *CapabilityInvocationStepProducer) Produce(ctx context.Context, in agent
 	}
 	// The ActionCall is authoritative: a succeeded call completes the Run
 	// whatever state its tool entry ended in.
-	if call.Status != ActionCallStatusSucceeded {
+	if call.Status != models.ActionCallStatusSucceeded {
 		return agentrun.StepOutput{Failure: &agentrun.LoopFailure{
 			Kind: "execution", Code: "capability_invocation_failed",
 			Message: fmt.Sprintf("The scheduled capability %s did not complete (%s).", selected.Name, call.Status),
@@ -101,7 +104,7 @@ func (p *CapabilityInvocationStepProducer) Produce(ctx context.Context, in agent
 	return agentrun.StepOutput{Final: &agentrun.LoopFinal{
 		Answer: "Completed " + selected.Name + ".",
 		Output: map[string]interface{}{"capabilityResult": result.Output},
-		Status: AgentRunStatusCompleted,
+		Status: models.AgentRunStatusCompleted,
 	}}, nil
 }
 
@@ -118,7 +121,7 @@ func producerGovernedToolCall(id string, selected *capability.ModelAction, argum
 	return agentrun.LoopToolCall{ID: id, Name: selected.Name, Arguments: raw, Directive: directive}, nil
 }
 
-func producerCallMatches(call *ActionCall, selected *capability.ModelAction) bool {
+func producerCallMatches(call *models.ActionCall, selected *capability.ModelAction) bool {
 	if selected.BindingID != "" && (call.BindingID != selected.BindingID || call.BindingRevision != selected.BindingRevision) {
 		return false
 	}
@@ -131,14 +134,14 @@ func producerCallMatches(call *ActionCall, selected *capability.ModelAction) boo
 // the producer has not asked for that call yet. An entry that is still open
 // is an error: the loop resumes open tool entries before it asks a
 // deterministic producer for the next step.
-func producerToolResult(ctx context.Context, calls ActionCallReader, run *AgentRun, path *AgentSessionPath, toolCallID string) (*LoopToolResult, *ActionCall, error) {
+func producerToolResult(ctx context.Context, calls models.ActionCallReader, run *models.AgentRun, path *models.AgentSessionPath, toolCallID string) (*LoopToolResult, *models.ActionCall, error) {
 	if path == nil {
 		return nil, nil, nil
 	}
-	var entry *SessionEntry
+	var entry *models.SessionEntry
 	for index := len(path.Entries) - 1; index >= 0; index-- {
 		candidate := path.Entries[index]
-		if candidate != nil && candidate.Type == SessionEntryTool && candidate.Tool != nil &&
+		if candidate != nil && candidate.Type == models.SessionEntryTool && candidate.Tool != nil &&
 			candidate.RunID == run.ID && candidate.ToolCallID == toolCallID {
 			entry = candidate
 			break
@@ -148,13 +151,13 @@ func producerToolResult(ctx context.Context, calls ActionCallReader, run *AgentR
 		return nil, nil, nil
 	}
 	switch entry.State {
-	case ToolEntryCompleted, ToolEntryError, ToolEntryInterrupted:
+	case models.ToolEntryCompleted, models.ToolEntryError, models.ToolEntryInterrupted:
 	default:
 		return nil, nil, fmt.Errorf("tool call %s is still %s", toolCallID, entry.State)
 	}
 	result := &LoopToolResult{ToolCallID: entry.ToolCallID, Name: entry.Tool.Name, State: entry.State, ActionCallID: entry.ActionCallID}
 	if entry.Tool.Result != nil {
-		result.Content = append([]ContentPart(nil), entry.Tool.Result.Content...)
+		result.Content = append([]models.ContentPart(nil), entry.Tool.Result.Content...)
 	}
 	if strings.TrimSpace(entry.ActionCallID) == "" {
 		return result, nil, nil
@@ -169,16 +172,16 @@ func producerToolResult(ctx context.Context, calls ActionCallReader, run *AgentR
 	if !terminalApprovalActionStatus(call.Status) {
 		return nil, nil, fmt.Errorf("action call %s of tool call %s is still %s", call.ID, toolCallID, call.Status)
 	}
-	if call.Status == ActionCallStatusSucceeded {
+	if call.Status == models.ActionCallStatusSucceeded {
 		result.Output = maps.Clone(call.Output)
 	}
 	return result, call, nil
 }
 
-func terminalApprovalActionStatus(status ActionCallStatus) bool {
+func terminalApprovalActionStatus(status models.ActionCallStatus) bool {
 	switch status {
-	case ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied,
-		ActionCallStatusCanceled, ActionCallStatusCompensated, ActionCallStatusRefused:
+	case models.ActionCallStatusSucceeded, models.ActionCallStatusFailed, models.ActionCallStatusDenied,
+		models.ActionCallStatusCanceled, models.ActionCallStatusCompensated, models.ActionCallStatusRefused:
 		return true
 	default:
 		return false
@@ -190,8 +193,8 @@ func terminalApprovalActionStatus(status ActionCallStatus) bool {
 type LoopToolResult struct {
 	ToolCallID   string
 	Name         string
-	State        ToolEntryState // completed | error | interrupted
-	Content      []ContentPart
+	State        models.ToolEntryState // completed | error | interrupted
+	Content      []models.ContentPart
 	ActionCallID string
 	Output       map[string]interface{} // governed action output (deterministic producers)
 }

@@ -3,6 +3,8 @@ package runtime
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ModelWindow is the model's limits as the host resolved them from the gateway
@@ -72,13 +74,13 @@ func compactionKeepTokens(w ModelWindow) int64 {
 // pathModelWindow is the window of the newest assistant entry on the path
 // whose model is model. Unknown (zero) when there is none: a new session or a
 // model change relies on the host preflight and the overflow path.
-func pathModelWindow(path *AgentSessionPath, model string) ModelWindow {
+func pathModelWindow(path *models.AgentSessionPath, model string) ModelWindow {
 	if path == nil {
 		return ModelWindow{}
 	}
 	for i := len(path.Entries) - 1; i >= 0; i-- {
 		entry := path.Entries[i]
-		if entry == nil || entry.Type != SessionEntryAssistant || entry.Assistant == nil {
+		if entry == nil || entry.Type != models.SessionEntryAssistant || entry.Assistant == nil {
 			continue
 		}
 		if entry.Assistant.Model != model || entry.Assistant.Limits == nil {
@@ -110,25 +112,25 @@ const (
 // provider reads: text, tool calls, reasoning text and result blocks, never
 // AssistantNative's raw provider JSON (which repeats the same content) or
 // kernel-only fields.
-func estimateEntryTokens(entry *SessionEntry) int64 {
+func estimateEntryTokens(entry *models.SessionEntry) int64 {
 	if entry == nil {
 		return 0
 	}
 	var bytes, images int64
 	switch entry.Type {
-	case SessionEntryUser:
+	case models.SessionEntryUser:
 		if entry.User == nil {
 			return 0
 		}
 		bytes += int64(len(sessionAuthorLine(entry.User.Author)))
 		b, n := contentPartsBytes(entry.User.Content)
 		bytes, images = bytes+b, images+n
-	case SessionEntryNote:
+	case models.SessionEntryNote:
 		if entry.Note == nil {
 			return 0
 		}
 		bytes += int64(len(entry.Note.Text))
-	case SessionEntryAssistant:
+	case models.SessionEntryAssistant:
 		if entry.Assistant == nil {
 			return 0
 		}
@@ -137,25 +139,25 @@ func estimateEntryTokens(entry *SessionEntry) int64 {
 			bytes += int64(len(call.Name) + len(call.Arguments))
 		}
 		bytes += assistantReasoningBytes(entry.Assistant.Native)
-	case SessionEntryTool:
+	case models.SessionEntryTool:
 		if entry.Tool == nil || !entry.State.Terminal() || entry.Tool.Result == nil {
 			return 0
 		}
 		b, n := contentPartsBytes(entry.Tool.Result.Content)
 		bytes, images = bytes+b, images+n
-	case SessionEntryCompaction:
+	case models.SessionEntryCompaction:
 		if entry.Compaction == nil {
 			return 0
 		}
 		bytes += int64(len(CompactionSummaryText(entry.Compaction)))
-	case SessionEntryModelChange:
+	case models.SessionEntryModelChange:
 	default:
 		return 0
 	}
 	return (bytes+estimatedBytesPerToken-1)/estimatedBytesPerToken + estimatedEntryFraming + images*estimatedImageTokens
 }
 
-func sessionAuthorLine(author SessionAuthor) string {
+func sessionAuthorLine(author models.SessionAuthor) string {
 	name := strings.TrimSpace(author.DisplayName)
 	if name == "" {
 		name = strings.TrimSpace(author.ID)
@@ -167,17 +169,17 @@ func sessionAuthorLine(author SessionAuthor) string {
 }
 
 // contentPartsBytes is the text byte count of parts plus the number of images.
-func contentPartsBytes(parts []ContentPart) (int64, int64) {
+func contentPartsBytes(parts []models.ContentPart) (int64, int64) {
 	var bytes, images int64
 	for _, part := range parts {
 		switch part.Type {
-		case ContentPartText:
+		case models.ContentPartText:
 			bytes += int64(len(part.Text))
-		case ContentPartJSON:
+		case models.ContentPartJSON:
 			bytes += int64(len(part.Value))
-		case ContentPartFile:
+		case models.ContentPartFile:
 			bytes += int64(len(contentPartFileLine(part)))
-		case ContentPartImage:
+		case models.ContentPartImage:
 			images++
 		}
 	}
@@ -185,7 +187,7 @@ func contentPartsBytes(parts []ContentPart) (int64, int64) {
 }
 
 // contentPartFileLine is the one line a file block costs in the estimate.
-func contentPartFileLine(part ContentPart) string {
+func contentPartFileLine(part models.ContentPart) string {
 	line := "[file " + part.Path
 	if part.MimeType != "" {
 		line += " " + part.MimeType
@@ -200,7 +202,7 @@ func contentPartFileLine(part ContentPart) string {
 // assistantReasoningBytes counts only the reasoning text inside the native
 // content (Anthropic thinking, Responses reasoning summaries, chat
 // reasoning), not the blocks that repeat the entry's text and tool calls.
-func assistantReasoningBytes(native *AssistantNative) int64 {
+func assistantReasoningBytes(native *models.AssistantNative) int64 {
 	if native == nil {
 		return 0
 	}
@@ -237,7 +239,7 @@ const compactionSummaryPreamble = "The conversation and work before this point w
 
 // CompactionSummaryText is the user-role text that replaces summarized
 // history. Atlas and the daemon render this same text.
-func CompactionSummaryText(c *CompactionEntry) string {
+func CompactionSummaryText(c *models.CompactionEntry) string {
 	if c == nil {
 		return ""
 	}
@@ -267,7 +269,7 @@ const defaultPrefixTokens int64 = 16384
 // and that no model_change follows. With an anchor the estimate is its
 // PromptTokens (which already include system and tools) plus its own and every
 // later entry's Tokens; without one it is defaultPrefixTokens + path.Tokens.
-func estimatePathTokens(path *AgentSessionPath, model string) PathEstimate {
+func estimatePathTokens(path *models.AgentSessionPath, model string) PathEstimate {
 	if path == nil {
 		return PathEstimate{Tokens: defaultPrefixTokens}
 	}
@@ -278,13 +280,13 @@ func estimatePathTokens(path *AgentSessionPath, model string) PathEstimate {
 		if entry == nil {
 			continue
 		}
-		if entry.Type == SessionEntryModelChange {
+		if entry.Type == models.SessionEntryModelChange {
 			break
 		}
 		if !pathEntryAfterCompaction(path, order, entry) {
 			break
 		}
-		if entry.Type == SessionEntryAssistant && entry.Assistant != nil &&
+		if entry.Type == models.SessionEntryAssistant && entry.Assistant != nil &&
 			entry.Assistant.Model == model && entry.Assistant.Limits != nil && entry.Assistant.Limits.PromptTokens > 0 {
 			return PathEstimate{
 				Tokens:        entry.Assistant.Limits.PromptTokens + entry.Tokens + after,
@@ -300,7 +302,7 @@ func estimatePathTokens(path *AgentSessionPath, model string) PathEstimate {
 // the path estimate is over it, and at least one model step has run since the
 // latest compaction (otherwise the kept tail alone is over the threshold and
 // the overflow path takes over instead of compacting every step).
-func compactionDue(path *AgentSessionPath, model string, window ModelWindow) bool {
+func compactionDue(path *models.AgentSessionPath, model string, window ModelWindow) bool {
 	threshold := compactionThreshold(window)
 	if threshold <= 0 || path == nil {
 		return false
@@ -314,7 +316,7 @@ func compactionDue(path *AgentSessionPath, model string, window ModelWindow) boo
 	order := pathSessionOrder(path)
 	for i := len(path.Entries) - 1; i >= 0; i-- {
 		entry := path.Entries[i]
-		if entry != nil && entry.Type == SessionEntryAssistant && pathEntryAfterCompaction(path, order, entry) {
+		if entry != nil && entry.Type == models.SessionEntryAssistant && pathEntryAfterCompaction(path, order, entry) {
 			return true
 		}
 	}
@@ -322,7 +324,7 @@ func compactionDue(path *AgentSessionPath, model string, window ModelWindow) boo
 }
 
 // pathSessionOrder maps each session of the path's chain to its render index.
-func pathSessionOrder(path *AgentSessionPath) map[string]int {
+func pathSessionOrder(path *models.AgentSessionPath) map[string]int {
 	order := make(map[string]int, len(path.Chain))
 	for i, session := range path.Chain {
 		if session != nil {
@@ -335,7 +337,7 @@ func pathSessionOrder(path *AgentSessionPath) map[string]int {
 // pathEntryAfterCompaction reports whether entry renders after the path's
 // latest compaction: a higher sequence in the same session, or a later session
 // of the chain. Kept entries before the compaction row are not after it.
-func pathEntryAfterCompaction(path *AgentSessionPath, order map[string]int, entry *SessionEntry) bool {
+func pathEntryAfterCompaction(path *models.AgentSessionPath, order map[string]int, entry *models.SessionEntry) bool {
 	compaction := path.Compaction
 	if compaction == nil {
 		return true

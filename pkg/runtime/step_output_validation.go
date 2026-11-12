@@ -3,16 +3,17 @@ package runtime
 import (
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 // validateStepOutput checks a producer's output against its kind.
-func validateStepOutput(kind StepProducerKind, out agentrun.StepOutput) error {
+func validateStepOutput(kind models.StepProducerKind, out agentrun.StepOutput) error {
 	if err := out.Usage.Validate(); err != nil {
 		return agentrun.InvalidStepOutputf("%v", err)
 	}
 	switch kind {
-	case StepProducerModel:
+	case models.StepProducerModel:
 		if out.Assistant == nil {
 			return agentrun.InvalidStepOutputf("model producer returned no assistant entry")
 		}
@@ -22,7 +23,7 @@ func validateStepOutput(kind StepProducerKind, out agentrun.StepOutput) error {
 		if err := checkProducedAssistant(out.Assistant); err != nil {
 			return agentrun.InvalidStepOutputf("%v", err)
 		}
-	case StepProducerDeterministic:
+	case models.StepProducerDeterministic:
 		if out.Assistant != nil {
 			return agentrun.InvalidStepOutputf("deterministic producer returned an assistant entry")
 		}
@@ -82,7 +83,7 @@ func validateLoopToolCalls(calls []agentrun.LoopToolCall) error {
 		if strings.TrimSpace(call.Name) == "" {
 			return agentrun.InvalidStepOutputf("tool call %q has no name", call.ID)
 		}
-		if err := validateToolArguments("tool call "+call.ID+" arguments", call.Arguments); err != nil {
+		if err := models.ValidateToolArguments("tool call "+call.ID+" arguments", call.Arguments); err != nil {
 			return agentrun.InvalidStepOutputf("%v", err)
 		}
 		if call.Directive != nil && call.Directive.BindingRevision < 0 {

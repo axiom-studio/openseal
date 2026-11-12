@@ -5,28 +5,30 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-func planUser(id string, tokens int64) *SessionEntry {
-	return &SessionEntry{ID: id, SessionID: "ses", Type: SessionEntryUser, Tokens: tokens,
-		User: &UserEntry{Origin: UserEntryChannelMessage, Content: []ContentPart{{Type: ContentPartText, Text: "hi"}}}}
+func planUser(id string, tokens int64) *models.SessionEntry {
+	return &models.SessionEntry{ID: id, SessionID: "ses", Type: models.SessionEntryUser, Tokens: tokens,
+		User: &models.UserEntry{Origin: models.UserEntryChannelMessage, Content: []models.ContentPart{{Type: models.ContentPartText, Text: "hi"}}}}
 }
 
-func planAssistant(id, step string, tokens int64) *SessionEntry {
-	return &SessionEntry{ID: id, SessionID: "ses", StepID: step, Type: SessionEntryAssistant, Tokens: tokens,
-		Assistant: &AssistantEntry{Model: "m", Text: "working"}}
+func planAssistant(id, step string, tokens int64) *models.SessionEntry {
+	return &models.SessionEntry{ID: id, SessionID: "ses", StepID: step, Type: models.SessionEntryAssistant, Tokens: tokens,
+		Assistant: &models.AssistantEntry{Model: "m", Text: "working"}}
 }
 
-func planTool(id, step string, tokens int64, state ToolEntryState) *SessionEntry {
-	return &SessionEntry{ID: id, SessionID: "ses", StepID: step, Type: SessionEntryTool, State: state, Tokens: tokens,
-		ToolCallID: "call-" + id, Tool: &ToolEntry{Name: "read"}}
+func planTool(id, step string, tokens int64, state models.ToolEntryState) *models.SessionEntry {
+	return &models.SessionEntry{ID: id, SessionID: "ses", StepID: step, Type: models.SessionEntryTool, State: state, Tokens: tokens,
+		ToolCallID: "call-" + id, Tool: &models.ToolEntry{Name: "read"}}
 }
 
-func planNote(id string, tokens int64) *SessionEntry {
-	return &SessionEntry{ID: id, SessionID: "ses", Type: SessionEntryNote, Tokens: tokens, Note: &NoteEntry{Text: "note"}}
+func planNote(id string, tokens int64) *models.SessionEntry {
+	return &models.SessionEntry{ID: id, SessionID: "ses", Type: models.SessionEntryNote, Tokens: tokens, Note: &models.NoteEntry{Text: "note"}}
 }
 
-func planIDs(entries []*SessionEntry) string {
+func planIDs(entries []*models.SessionEntry) string {
 	ids := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		ids = append(ids, entry.ID)
@@ -34,14 +36,14 @@ func planIDs(entries []*SessionEntry) string {
 	return strings.Join(ids, ",")
 }
 
-func planTestEntries() []*SessionEntry {
-	return []*SessionEntry{
+func planTestEntries() []*models.SessionEntry {
+	return []*models.SessionEntry{
 		planUser("u0", 5000),
 		planAssistant("a1", "s1", 3000),
-		planTool("t2", "s1", 3000, ToolEntryCompleted),
+		planTool("t2", "s1", 3000, models.ToolEntryCompleted),
 		planUser("u3", 2000),
 		planAssistant("a4", "s2", 2000),
-		planTool("t5", "s2", 2000, ToolEntryCompleted),
+		planTool("t5", "s2", 2000, models.ToolEntryCompleted),
 		planAssistant("a6", "s3", 1000),
 	}
 }
@@ -77,10 +79,10 @@ func TestPlanCompactionNeverStartsAtToolEntry(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if first := plan.Kept[0]; !validCompactionCut(first) {
+		if first := plan.Kept[0]; !models.IsValidCompactionCut(first) {
 			t.Fatalf("keep %d: first kept %s is a %s entry", keep, first.ID, first.Type)
 		}
-		if plan.Summarized[len(plan.Summarized)-1].Type == SessionEntryAssistant {
+		if plan.Summarized[len(plan.Summarized)-1].Type == models.SessionEntryAssistant {
 			t.Fatalf("keep %d: summarized span ends at an assistant entry without its results", keep)
 		}
 	}
@@ -97,7 +99,7 @@ func TestPlanCompactionFallsBackToLatestStep(t *testing.T) {
 	}
 
 	// The latest step is an assistant with its results: the whole step is kept.
-	entries = append(planTestEntries(), planTool("t7", "s3", 500, ToolEntryCompleted))
+	entries = append(planTestEntries(), planTool("t7", "s3", 500, models.ToolEntryCompleted))
 	plan, err = planCompaction(entries, 1_000_000)
 	if err != nil {
 		t.Fatal(err)
@@ -108,10 +110,10 @@ func TestPlanCompactionFallsBackToLatestStep(t *testing.T) {
 }
 
 func TestPlanCompactionImpossibleForSingleStep(t *testing.T) {
-	single := []*SessionEntry{
+	single := []*models.SessionEntry{
 		planAssistant("a0", "s1", 9000),
-		planTool("t1", "s1", 9000, ToolEntryCompleted),
-		planTool("t2", "s1", 9000, ToolEntryCompleted),
+		planTool("t1", "s1", 9000, models.ToolEntryCompleted),
+		planTool("t2", "s1", 9000, models.ToolEntryCompleted),
 	}
 	if _, err := planCompaction(single, 1000); !errors.Is(err, errCompactionImpossible) {
 		t.Fatalf("err = %v, want errCompactionImpossible", err)
@@ -121,10 +123,10 @@ func TestPlanCompactionImpossibleForSingleStep(t *testing.T) {
 	}
 
 	// Under 4000 tokens before the cut: skipped, the length-rejection path handles it.
-	small := []*SessionEntry{
+	small := []*models.SessionEntry{
 		planUser("u0", 3000),
 		planAssistant("a1", "s1", 20000),
-		planTool("t2", "s1", 20000, ToolEntryCompleted),
+		planTool("t2", "s1", 20000, models.ToolEntryCompleted),
 	}
 	if _, err := planCompaction(small, 1000); !errors.Is(err, errCompactionImpossible) {
 		t.Fatalf("small span: err = %v, want errCompactionImpossible", err)
@@ -138,11 +140,11 @@ func TestPlanCompactionChildMayKeepParentEntry(t *testing.T) {
 	parentAssistant.SessionID = "parent"
 	childGoal := planUser("c-u2", 100)
 	childGoal.SessionID = "child"
-	childGoal.User.Origin = UserEntryGoal
+	childGoal.User.Origin = models.UserEntryGoal
 	childAssistant := planAssistant("c-a3", "cs1", 100)
 	childAssistant.SessionID = "child"
 
-	plan, err := planCompaction([]*SessionEntry{parentUser, parentAssistant, childGoal, childAssistant}, 6000)
+	plan, err := planCompaction([]*models.SessionEntry{parentUser, parentAssistant, childGoal, childAssistant}, 6000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,13 +156,13 @@ func TestPlanCompactionChildMayKeepParentEntry(t *testing.T) {
 func TestPlanCompactionRespectsOpenToolEntries(t *testing.T) {
 	// Another Run of the same session is waiting for an approval on t2: its
 	// assistant a1 is the latest allowed first kept entry.
-	entries := []*SessionEntry{
+	entries := []*models.SessionEntry{
 		planUser("u0", 5000),
 		planAssistant("a1", "other-step", 3000),
-		planTool("t2", "other-step", 3000, ToolEntryAwaitingApproval),
+		planTool("t2", "other-step", 3000, models.ToolEntryAwaitingApproval),
 		planUser("u3", 2000),
 		planAssistant("a4", "s2", 2000),
-		planTool("t5", "s2", 2000, ToolEntryCompleted),
+		planTool("t5", "s2", 2000, models.ToolEntryCompleted),
 	}
 	plan, err := planCompaction(entries, 1000)
 	if err != nil {
@@ -170,11 +172,11 @@ func TestPlanCompactionRespectsOpenToolEntries(t *testing.T) {
 		t.Fatalf("first kept = %s, want a1 (assistant of the open tool entry)", plan.FirstKeptEntryID)
 	}
 	for _, entry := range plan.Summarized {
-		if entry.Type == SessionEntryTool && entry.State.Open() {
+		if entry.Type == models.SessionEntryTool && entry.State.Open() {
 			t.Fatalf("summarized open tool entry %s", entry.ID)
 		}
 	}
-	if !validCompactionCutAt(entries, len(plan.Summarized)) {
+	if !models.IsValidCompactionCutAt(entries, len(plan.Summarized)) {
 		t.Fatal("store would reject the planned cut")
 	}
 
@@ -185,10 +187,10 @@ func TestPlanCompactionRespectsOpenToolEntries(t *testing.T) {
 	}
 
 	// An open tool entry whose assistant was compacted earlier bounds the cut at itself.
-	orphan := []*SessionEntry{
+	orphan := []*models.SessionEntry{
 		planUser("u0", 5000),
 		planNote("n1", 100),
-		planTool("t2", "gone", 100, ToolEntryRunning),
+		planTool("t2", "gone", 100, models.ToolEntryRunning),
 		planUser("u3", 100),
 		planAssistant("a4", "s2", 100),
 	}
@@ -203,13 +205,13 @@ func TestPlanCompactionRespectsOpenToolEntries(t *testing.T) {
 
 func TestCompactionKeepFor(t *testing.T) {
 	window := ModelWindow{ContextTokens: 200000}
-	if got := compactionKeepFor(CompactionTriggerThreshold, window); got != 15000 {
+	if got := compactionKeepFor(models.CompactionTriggerThreshold, window); got != 15000 {
 		t.Fatalf("threshold keep = %d, want 15000", got)
 	}
-	if got := compactionKeepFor(CompactionTriggerOverflow, window); got != 7500 {
+	if got := compactionKeepFor(models.CompactionTriggerOverflow, window); got != 7500 {
 		t.Fatalf("overflow keep = %d, want 7500", got)
 	}
-	if got := compactionKeepFor(CompactionTriggerOverflow, ModelWindow{}); got != 2048 {
+	if got := compactionKeepFor(models.CompactionTriggerOverflow, ModelWindow{}); got != 2048 {
 		t.Fatalf("overflow keep with unknown window = %d, want 2048", got)
 	}
 }
@@ -236,15 +238,15 @@ func TestCompactionChunkBudget(t *testing.T) {
 }
 
 // chunkTestSpan is n steps of user 1000 + assistant 2000 + two tools 1000 each.
-func chunkTestSpan(n int) []*SessionEntry {
-	var entries []*SessionEntry
+func chunkTestSpan(n int) []*models.SessionEntry {
+	var entries []*models.SessionEntry
 	for i := 0; i < n; i++ {
 		step := fmt.Sprintf("s%d", i)
 		entries = append(entries,
 			planUser(fmt.Sprintf("u%d", i), 1000),
 			planAssistant(fmt.Sprintf("a%d", i), step, 2000),
-			planTool(fmt.Sprintf("t%da", i), step, 1000, ToolEntryCompleted),
-			planTool(fmt.Sprintf("t%db", i), step, 1000, ToolEntryError),
+			planTool(fmt.Sprintf("t%da", i), step, 1000, models.ToolEntryCompleted),
+			planTool(fmt.Sprintf("t%db", i), step, 1000, models.ToolEntryError),
 		)
 	}
 	return entries
@@ -260,12 +262,12 @@ func TestCompactionChunksEndAtValidCuts(t *testing.T) {
 	if len(chunks) < 2 {
 		t.Fatalf("got %d chunks, want several", len(chunks))
 	}
-	var joined []*SessionEntry
+	var joined []*models.SessionEntry
 	for k, chunk := range chunks {
-		if !validCompactionCut(chunk[0]) {
+		if !models.IsValidCompactionCut(chunk[0]) {
 			t.Fatalf("chunk %d starts at %s (%s)", k, chunk[0].ID, chunk[0].Type)
 		}
-		if last := chunk[len(chunk)-1]; last.Type == SessionEntryAssistant {
+		if last := chunk[len(chunk)-1]; last.Type == models.SessionEntryAssistant {
 			t.Fatalf("chunk %d ends in assistant %s without its results", k, last.ID)
 		}
 		reserve := compactionFoldReserveTokens
@@ -288,7 +290,7 @@ func TestCompactionChunksEndAtValidCuts(t *testing.T) {
 	}
 
 	// One step over the budget cannot be split.
-	big := []*SessionEntry{planUser("u0", 100), planAssistant("a1", "s1", 30000), planTool("t2", "s1", 30000, ToolEntryCompleted)}
+	big := []*models.SessionEntry{planUser("u0", 100), planAssistant("a1", "s1", 30000), planTool("t2", "s1", 30000, models.ToolEntryCompleted)}
 	if _, err := compactionChunks(big, 0, budget); !errors.Is(err, errCompactionImpossible) {
 		t.Fatalf("oversized step: err = %v, want errCompactionImpossible", err)
 	}
@@ -308,10 +310,10 @@ func TestSplitCompactionChunkHalvesAtValidCut(t *testing.T) {
 	if !ok {
 		t.Fatal("split failed")
 	}
-	if planIDs(first) != planIDs(chunk[:8]) || !validCompactionCut(second[0]) {
+	if planIDs(first) != planIDs(chunk[:8]) || !models.IsValidCompactionCut(second[0]) {
 		t.Fatalf("split = %s | %s", planIDs(first), planIDs(second))
 	}
-	single := []*SessionEntry{planAssistant("a0", "s0", 100), planTool("t1", "s0", 100, ToolEntryCompleted)}
+	single := []*models.SessionEntry{planAssistant("a0", "s0", 100), planTool("t1", "s0", 100, models.ToolEntryCompleted)}
 	if _, _, ok := splitCompactionChunk(single); ok {
 		t.Fatal("split one indivisible step")
 	}
@@ -323,12 +325,12 @@ func TestCompactionActionCallIDsAreUnionOfPreviousAndSpan(t *testing.T) {
 	span[3].ActionCallID = "ac_1" // already in the previous compaction
 	span[6].ActionCallID = "ac_4"
 	span[1].ActionCallID = "ac_ignored" // not a tool entry
-	previous := &CompactionEntry{ActionCallIDs: []string{"ac_1", "ac_2"}}
+	previous := &models.CompactionEntry{ActionCallIDs: []string{"ac_1", "ac_2"}}
 	if got := strings.Join(compactionActionCallIDs(previous, span), ","); got != "ac_1,ac_2,ac_3,ac_4" {
 		t.Fatalf("ids = %s", got)
 	}
 
-	many := &CompactionEntry{}
+	many := &models.CompactionEntry{}
 	for i := 0; i < compactionActionCallsKept; i++ {
 		many.ActionCallIDs = append(many.ActionCallIDs, fmt.Sprintf("ac_old_%d", i))
 	}

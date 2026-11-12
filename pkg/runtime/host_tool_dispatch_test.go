@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -19,31 +20,33 @@ import (
 // fakeHostToolHost answers ExecuteHostTool with scripted replies, one per call.
 type fakeHostToolHost struct {
 	mu       sync.Mutex
-	requests []HostToolRequest
-	replies  []func(context.Context, HostToolRequest) (HostToolResult, error)
+	requests []models.HostToolRequest
+	replies  []func(context.Context, models.HostToolRequest) (models.HostToolResult, error)
 }
 
-func (h *fakeHostToolHost) ExecuteHostTool(ctx context.Context, request HostToolRequest) (HostToolResult, error) {
+func (h *fakeHostToolHost) ExecuteHostTool(ctx context.Context, request models.HostToolRequest) (models.HostToolResult, error) {
 	h.mu.Lock()
 	h.requests = append(h.requests, request)
 	index := len(h.requests) - 1
 	h.mu.Unlock()
 	if index >= len(h.replies) {
-		return HostToolResult{}, errors.New("unexpected host tool call")
+		return models.HostToolResult{}, errors.New("unexpected host tool call")
 	}
 	return h.replies[index](ctx, request)
 }
 
-func hostReplyJSON(value interface{}, isError bool) func(context.Context, HostToolRequest) (HostToolResult, error) {
-	return func(_ context.Context, request HostToolRequest) (HostToolResult, error) {
+func hostReplyJSON(value interface{}, isError bool) func(context.Context, models.HostToolRequest) (models.HostToolResult, error) {
+	return func(_ context.Context, request models.HostToolRequest) (models.HostToolResult, error) {
 		encoded, _ := json.Marshal(value)
-		return HostToolResult{APIVersion: HostToolAPIVersion, InvocationID: request.InvocationID,
-			Content: []ContentPart{{Type: ContentPartJSON, Value: encoded}}, IsError: isError}, nil
+		return models.HostToolResult{APIVersion: models.HostToolAPIVersion, InvocationID: request.InvocationID,
+			Content: []models.ContentPart{{Type: models.ContentPartJSON, Value: encoded}}, IsError: isError}, nil
 	}
 }
 
-func hostReplyError(err error) func(context.Context, HostToolRequest) (HostToolResult, error) {
-	return func(context.Context, HostToolRequest) (HostToolResult, error) { return HostToolResult{}, err }
+func hostReplyError(err error) func(context.Context, models.HostToolRequest) (models.HostToolResult, error) {
+	return func(context.Context, models.HostToolRequest) (models.HostToolResult, error) {
+		return models.HostToolResult{}, err
+	}
 }
 
 type hostToolDispatchFixture struct {
@@ -53,7 +56,7 @@ type hostToolDispatchFixture struct {
 	slept      []time.Duration
 }
 
-func newHostToolDispatchFixture(replies ...func(context.Context, HostToolRequest) (HostToolResult, error)) *hostToolDispatchFixture {
+func newHostToolDispatchFixture(replies ...func(context.Context, models.HostToolRequest) (models.HostToolResult, error)) *hostToolDispatchFixture {
 	f := &hostToolDispatchFixture{host: &fakeHostToolHost{replies: replies}, actions: action.NewActionCoordinator(nil, nil, nil, nil, nil)}
 	f.dispatcher = NewHostToolDispatcher(f.host, f.actions, nil)
 	f.dispatcher.sleep = func(ctx context.Context, wait time.Duration) error {
@@ -74,12 +77,12 @@ func hostToolSpec(t *testing.T, operation string) HostToolSpec {
 
 func hostToolCallFixture(t *testing.T, operation string, arguments map[string]interface{}) HostToolCall {
 	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "42"}
+	scope := models.Scope{Kind: "tenant", ID: "42"}
 	expires := time.Now().Add(time.Hour)
 	return HostToolCall{
-		Run: &AgentRun{ID: "run_1", Scope: scope, Status: AgentRunStatusRunning, AssignedAgentID: "agent_1",
+		Run: &models.AgentRun{ID: "run_1", Scope: scope, Status: models.AgentRunStatusRunning, AssignedAgentID: "agent_1",
 			LeaseOwner: "worker_1", LeaseExpiresAt: &expires},
-		Step: &AgentTurn{ID: "step_1", Scope: scope, RunID: "run_1", Status: AgentTurnStatusRunning,
+		Step: &models.AgentTurn{ID: "step_1", Scope: scope, RunID: "run_1", Status: models.AgentTurnStatusRunning,
 			LeaseOwner: "worker_1", LeaseExpiresAt: &expires},
 		Binding: &agentrun.TurnRunnerBinding{DefinitionID: "def_1", DefinitionVersion: "3", ModelActions: []capability.ModelAction{
 			{Name: "zeta.send", Description: "Send", Risk: capability.RiskLevel("high"), InputSchema: map[string]interface{}{"type": "object", "required": []interface{}{"to"}}},
@@ -91,9 +94,9 @@ func hostToolCallFixture(t *testing.T, operation string, arguments map[string]in
 	}
 }
 
-func hostToolErrorText(t *testing.T, result *ToolResult) string {
+func hostToolErrorText(t *testing.T, result *models.ToolResult) string {
 	t.Helper()
-	if result == nil || len(result.Content) != 1 || result.Content[0].Type != ContentPartJSON {
+	if result == nil || len(result.Content) != 1 || result.Content[0].Type != models.ContentPartJSON {
 		t.Fatalf("result = %#v, want one json part", result)
 	}
 	var value struct{ Error string }
@@ -116,15 +119,15 @@ func TestHostToolReadCompleted(t *testing.T) {
 	f := newHostToolDispatchFixture(hostReplyJSON(map[string]interface{}{"content": "hello"}, false))
 	call := hostToolCallFixture(t, workspace.OperationReadFile, map[string]interface{}{"path": "a.txt"})
 	outcome := runHostTool(t, f, call)
-	if outcome.State != ToolEntryCompleted || outcome.Result.Status != ToolResultSucceeded || outcome.Result.IsError {
+	if outcome.State != models.ToolEntryCompleted || outcome.Result.Status != models.ToolResultSucceeded || outcome.Result.IsError {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 	if got := string(outcome.Result.Content[0].Value); got != `{"content":"hello"}` {
 		t.Fatalf("content = %s", got)
 	}
 	request := f.host.requests[0]
-	want := HostToolRequest{
-		APIVersion: HostToolAPIVersion, InvocationID: "ent_1", Scope: call.Run.Scope, RunID: "run_1", StepID: "step_1",
+	want := models.HostToolRequest{
+		APIVersion: models.HostToolAPIVersion, InvocationID: "ent_1", Scope: call.Run.Scope, RunID: "run_1", StepID: "step_1",
 		SessionID: "ses_1", AgentID: "agent_1", DefinitionID: "def_1", DefinitionVersion: "3", ToolEntryID: "ent_1",
 		ToolCallID: "toolu_1", Operation: workspace.OperationReadFile, Arguments: map[string]interface{}{"path": "a.txt"},
 		Workspace: workspace.Authority{ConversationID: "conv_1"},
@@ -144,7 +147,7 @@ func TestHostToolReadCompleted(t *testing.T) {
 func TestHostToolIsErrorResultIsErrorEntry(t *testing.T) {
 	f := newHostToolDispatchFixture(hostReplyJSON(map[string]interface{}{"error": "no such file"}, true))
 	outcome := runHostTool(t, f, hostToolCallFixture(t, workspace.OperationEditFile, map[string]interface{}{"path": "a.txt"}))
-	if outcome.State != ToolEntryError || outcome.Result.Status != ToolResultFailed || !outcome.Result.IsError {
+	if outcome.State != models.ToolEntryError || outcome.Result.Status != models.ToolResultFailed || !outcome.Result.IsError {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 	if hostToolErrorText(t, outcome.Result) != "no such file" {
@@ -176,7 +179,7 @@ func TestHostToolRunCommandAttachesPinAndRecordsCommand(t *testing.T) {
 	if !reflect.DeepEqual(outcome.Arguments, sent) {
 		t.Fatalf("outcome arguments = %#v, sent %#v", outcome.Arguments, sent)
 	}
-	if outcome.State != ToolEntryCompleted || outcome.PinnedRun == nil {
+	if outcome.State != models.ToolEntryCompleted || outcome.PinnedRun == nil {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 	record := *outcome.PinnedRun
@@ -224,7 +227,7 @@ func TestHostToolRunCommandSetsCommandRefAndSortedVMTools(t *testing.T) {
 	if request.CommandRef != "command:ent_1" || outcome.OriginRef != "command:ent_1" {
 		t.Fatalf("commandRef = %q, originRef = %q", request.CommandRef, outcome.OriginRef)
 	}
-	want := []HostVMTool{
+	want := []models.HostVMTool{
 		{Name: "alpha.lookup", Description: "Look up", Risk: capability.RiskLevel("low"), InputSchema: map[string]interface{}{"type": "object"}},
 		{Name: "zeta.send", Description: "Send", Risk: capability.RiskLevel("high"), InputSchema: map[string]interface{}{"type": "object", "required": []interface{}{"to"}}},
 	}
@@ -239,7 +242,7 @@ func TestHostToolRunCommandSetsCommandRefAndSortedVMTools(t *testing.T) {
 // configured, after the authority checks.
 func (f *hostToolDispatchFixture) proposeNested(call HostToolCall, runID, capability string) error {
 	_, err := f.actions.ProposeNested(context.Background(), action.NestedActionRequest{
-		Scope: call.Step.Scope, Origin: ActionOriginVM, RunID: runID, TurnID: call.Step.ID,
+		Scope: call.Step.Scope, Origin: models.ActionOriginVM, RunID: runID, TurnID: call.Step.ID,
 		Capability: capability, IdempotencyKey: "probe",
 	})
 	return err
@@ -249,7 +252,7 @@ func TestHostToolRunCommandOpensNestedAuthorityForStepAndClosesIt(t *testing.T) 
 	f := newHostToolDispatchFixture()
 	call := hostToolCallFixture(t, workspace.OperationRunCommand, map[string]interface{}{"command": "seal call alpha.lookup"})
 	var offered, notOffered, otherRun error
-	f.host.replies = append(f.host.replies, func(ctx context.Context, request HostToolRequest) (HostToolResult, error) {
+	f.host.replies = append(f.host.replies, func(ctx context.Context, request models.HostToolRequest) (models.HostToolResult, error) {
 		offered = f.proposeNested(call, "run_1", "alpha.lookup")
 		notOffered = f.proposeNested(call, "run_1", "nobody.else")
 		otherRun = f.proposeNested(call, "run_2", "alpha.lookup")
@@ -258,11 +261,11 @@ func TestHostToolRunCommandOpensNestedAuthorityForStepAndClosesIt(t *testing.T) 
 	runHostTool(t, f, call)
 	// During the call the step's authority is open for run_1 with the call's
 	// binding: it offers alpha.lookup and nothing else.
-	if offered == nil || errors.Is(offered, ErrNestedTurnNotActive) || errors.Is(offered, action.ErrNestedActionNotAuthorized) ||
-		!errors.Is(notOffered, action.ErrNestedActionNotAuthorized) || !errors.Is(otherRun, ErrNestedTurnNotActive) {
+	if offered == nil || errors.Is(offered, models.ErrNestedTurnNotActive) || errors.Is(offered, action.ErrNestedActionNotAuthorized) ||
+		!errors.Is(notOffered, action.ErrNestedActionNotAuthorized) || !errors.Is(otherRun, models.ErrNestedTurnNotActive) {
 		t.Fatalf("nested authority during the call: offered=%v notOffered=%v otherRun=%v", offered, notOffered, otherRun)
 	}
-	if after := f.proposeNested(call, "run_1", "alpha.lookup"); !errors.Is(after, ErrNestedTurnNotActive) {
+	if after := f.proposeNested(call, "run_1", "alpha.lookup"); !errors.Is(after, models.ErrNestedTurnNotActive) {
 		t.Fatalf("nested authority still open: %v", after)
 	}
 }
@@ -271,8 +274,8 @@ func TestHostToolRunCommandWithoutActionsOpensNoBridge(t *testing.T) {
 	f := newHostToolDispatchFixture()
 	call := hostToolCallFixture(t, workspace.OperationRunCommand, map[string]interface{}{"command": "ls"})
 	call.Binding.ModelActions = nil
-	f.host.replies = append(f.host.replies, func(ctx context.Context, request HostToolRequest) (HostToolResult, error) {
-		if err := f.proposeNested(call, "run_1", "alpha.lookup"); !errors.Is(err, ErrNestedTurnNotActive) {
+	f.host.replies = append(f.host.replies, func(ctx context.Context, request models.HostToolRequest) (models.HostToolResult, error) {
+		if err := f.proposeNested(call, "run_1", "alpha.lookup"); !errors.Is(err, models.ErrNestedTurnNotActive) {
 			t.Errorf("nested authority opened without VM tools: %v", err)
 		}
 		return hostReplyJSON(map[string]interface{}{"exitStatus": 0}, false)(ctx, request)
@@ -286,8 +289,8 @@ func TestHostToolRunCommandWithoutActionsOpensNoBridge(t *testing.T) {
 func TestHostToolNonCommandNeverOpensNestedAuthority(t *testing.T) {
 	f := newHostToolDispatchFixture()
 	call := hostToolCallFixture(t, workspace.OperationWriteFile, map[string]interface{}{"path": "a.txt", "content": "x"})
-	f.host.replies = append(f.host.replies, func(ctx context.Context, request HostToolRequest) (HostToolResult, error) {
-		if err := f.proposeNested(call, "run_1", "alpha.lookup"); !errors.Is(err, ErrNestedTurnNotActive) {
+	f.host.replies = append(f.host.replies, func(ctx context.Context, request models.HostToolRequest) (models.HostToolResult, error) {
+		if err := f.proposeNested(call, "run_1", "alpha.lookup"); !errors.Is(err, models.ErrNestedTurnNotActive) {
 			t.Errorf("nested authority opened for a non-command tool: %v", err)
 		}
 		return hostReplyJSON(map[string]interface{}{"path": "a.txt"}, false)(ctx, request)
@@ -300,7 +303,7 @@ func TestHostToolNonCommandNeverOpensNestedAuthority(t *testing.T) {
 }
 
 func TestHostToolUnavailableRetriesTwiceThenError(t *testing.T) {
-	unavailable := &HostToolFailure{Code: HostToolFailureUnavailable, Message: "draining", NotStarted: true}
+	unavailable := &models.HostToolFailure{Code: models.HostToolFailureUnavailable, Message: "draining", NotStarted: true}
 	f := newHostToolDispatchFixture(hostReplyError(unavailable), hostReplyError(unavailable), hostReplyError(unavailable))
 	outcome := runHostTool(t, f, hostToolCallFixture(t, workspace.OperationWriteFile, map[string]interface{}{"path": "a.txt"}))
 	if len(f.host.requests) != 3 || !reflect.DeepEqual(f.slept, []time.Duration{time.Second, 3 * time.Second}) {
@@ -311,24 +314,24 @@ func TestHostToolUnavailableRetriesTwiceThenError(t *testing.T) {
 			t.Fatalf("retry changed the invocation: %q", request.InvocationID)
 		}
 	}
-	if outcome.State != ToolEntryError || hostToolErrorText(t, outcome.Result) != hostToolUnavailableMessage {
+	if outcome.State != models.ToolEntryError || hostToolErrorText(t, outcome.Result) != hostToolUnavailableMessage {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 }
 
 func TestHostToolUnavailableThenSucceeds(t *testing.T) {
-	unavailable := &HostToolFailure{Code: HostToolFailureUnavailable, NotStarted: true}
+	unavailable := &models.HostToolFailure{Code: models.HostToolFailureUnavailable, NotStarted: true}
 	f := newHostToolDispatchFixture(hostReplyError(unavailable), hostReplyJSON(map[string]interface{}{"entries": []interface{}{}}, false))
 	outcome := runHostTool(t, f, hostToolCallFixture(t, workspace.OperationListDirectory, map[string]interface{}{}))
-	if outcome.State != ToolEntryCompleted || len(f.slept) != 1 {
+	if outcome.State != models.ToolEntryCompleted || len(f.slept) != 1 {
 		t.Fatalf("outcome = %#v, waits = %v", outcome, f.slept)
 	}
 }
 
 func TestHostToolNotStartedFailureShowsItsMessage(t *testing.T) {
-	f := newHostToolDispatchFixture(hostReplyError(&HostToolFailure{Code: HostToolFailureAccessDenied, Message: "This chat's files are not yours.", NotStarted: true}))
+	f := newHostToolDispatchFixture(hostReplyError(&models.HostToolFailure{Code: models.HostToolFailureAccessDenied, Message: "This chat's files are not yours.", NotStarted: true}))
 	outcome := runHostTool(t, f, hostToolCallFixture(t, workspace.OperationDeleteFile, map[string]interface{}{"path": "a.txt"}))
-	if outcome.State != ToolEntryError || hostToolErrorText(t, outcome.Result) != "This chat's files are not yours." || len(f.slept) != 0 {
+	if outcome.State != models.ToolEntryError || hostToolErrorText(t, outcome.Result) != "This chat's files are not yours." || len(f.slept) != 0 {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 }
@@ -336,7 +339,7 @@ func TestHostToolNotStartedFailureShowsItsMessage(t *testing.T) {
 func TestHostToolWriteTransportFailureIsInterrupted(t *testing.T) {
 	f := newHostToolDispatchFixture(hostReplyError(errors.New("connection reset")))
 	outcome := runHostTool(t, f, hostToolCallFixture(t, workspace.OperationWriteFile, map[string]interface{}{"path": "a.txt"}))
-	if outcome.State != ToolEntryInterrupted || outcome.Result.Status != ToolResultInterrupted || !outcome.Result.IsError ||
+	if outcome.State != models.ToolEntryInterrupted || outcome.Result.Status != models.ToolResultInterrupted || !outcome.Result.IsError ||
 		hostToolErrorText(t, outcome.Result) != HostToolInterruptedMessage {
 		t.Fatalf("outcome = %#v", outcome)
 	}
@@ -344,40 +347,40 @@ func TestHostToolWriteTransportFailureIsInterrupted(t *testing.T) {
 
 func TestHostToolPinnedCommandTransportFailureRecordsUnknownRun(t *testing.T) {
 	pin := routineTestPin()
-	f := newHostToolDispatchFixture(hostReplyError(&HostToolFailure{Code: HostToolFailureFailed, Message: "stream ended"}))
+	f := newHostToolDispatchFixture(hostReplyError(&models.HostToolFailure{Code: models.HostToolFailureFailed, Message: "stream ended"}))
 	call := hostToolCallFixture(t, workspace.OperationRunCommand, map[string]interface{}{"command": pin.Command})
 	call.CommandPins = []workspace.CommandPin{pin}
 	outcome := runHostTool(t, f, call)
-	if outcome.State != ToolEntryInterrupted || outcome.PinnedRun == nil || outcome.PinnedRun.Refused == "" {
+	if outcome.State != models.ToolEntryInterrupted || outcome.PinnedRun == nil || outcome.PinnedRun.Refused == "" {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 }
 
 func TestHostToolReadTransportFailureIsError(t *testing.T) {
-	f := newHostToolDispatchFixture(hostReplyError(&HostToolFailure{Code: HostToolFailureFailed, Message: "stream ended"}))
+	f := newHostToolDispatchFixture(hostReplyError(&models.HostToolFailure{Code: models.HostToolFailureFailed, Message: "stream ended"}))
 	outcome := runHostTool(t, f, hostToolCallFixture(t, workspace.OperationSearchFiles, map[string]interface{}{"query": "x"}))
-	if outcome.State != ToolEntryError || outcome.Result.Status != ToolResultFailed || hostToolErrorText(t, outcome.Result) != hostToolCouldNotRunMessage {
+	if outcome.State != models.ToolEntryError || outcome.Result.Status != models.ToolResultFailed || hostToolErrorText(t, outcome.Result) != hostToolCouldNotRunMessage {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 }
 
 func TestHostToolUnsupportedHostIsError(t *testing.T) {
-	f := newHostToolDispatchFixture(hostReplyError(ErrHostToolUnsupported))
+	f := newHostToolDispatchFixture(hostReplyError(models.ErrHostToolUnsupported))
 	outcome := runHostTool(t, f, hostToolCallFixture(t, workspace.OperationWriteFile, map[string]interface{}{"path": "a.txt"}))
-	if outcome.State != ToolEntryError || hostToolErrorText(t, outcome.Result) != hostToolUnsupportedMessage {
+	if outcome.State != models.ToolEntryError || hostToolErrorText(t, outcome.Result) != hostToolUnsupportedMessage {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 }
 
-func oversizedHostReply(_ context.Context, request HostToolRequest) (HostToolResult, error) {
-	return HostToolResult{APIVersion: HostToolAPIVersion, InvocationID: request.InvocationID,
-		Content: []ContentPart{{Type: ContentPartText, Text: strings.Repeat("x", MaxToolResultContentBytes+1)}}}, nil
+func oversizedHostReply(_ context.Context, request models.HostToolRequest) (models.HostToolResult, error) {
+	return models.HostToolResult{APIVersion: models.HostToolAPIVersion, InvocationID: request.InvocationID,
+		Content: []models.ContentPart{{Type: models.ContentPartText, Text: strings.Repeat("x", models.MaxToolResultContentBytes+1)}}}, nil
 }
 
 func TestHostToolOversizedContentRead(t *testing.T) {
 	f := newHostToolDispatchFixture(oversizedHostReply)
 	outcome := runHostTool(t, f, hostToolCallFixture(t, workspace.OperationReadFile, map[string]interface{}{"path": "a.txt"}))
-	if outcome.State != ToolEntryError || hostToolErrorText(t, outcome.Result) != hostToolUnusableResultMessage {
+	if outcome.State != models.ToolEntryError || hostToolErrorText(t, outcome.Result) != hostToolUnusableResultMessage {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 }
@@ -385,33 +388,33 @@ func TestHostToolOversizedContentRead(t *testing.T) {
 func TestHostToolOversizedContentWrite(t *testing.T) {
 	f := newHostToolDispatchFixture(oversizedHostReply)
 	outcome := runHostTool(t, f, hostToolCallFixture(t, workspace.OperationRunCommand, map[string]interface{}{"command": "ls"}))
-	if outcome.State != ToolEntryInterrupted || hostToolErrorText(t, outcome.Result) != HostToolInterruptedMessage {
+	if outcome.State != models.ToolEntryInterrupted || hostToolErrorText(t, outcome.Result) != HostToolInterruptedMessage {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 }
 
 func TestHostToolMismatchedInvocationIsUnusable(t *testing.T) {
-	f := newHostToolDispatchFixture(func(context.Context, HostToolRequest) (HostToolResult, error) {
-		return HostToolResult{APIVersion: HostToolAPIVersion, InvocationID: "other", Content: []ContentPart{{Type: ContentPartText, Text: "x"}}}, nil
+	f := newHostToolDispatchFixture(func(context.Context, models.HostToolRequest) (models.HostToolResult, error) {
+		return models.HostToolResult{APIVersion: models.HostToolAPIVersion, InvocationID: "other", Content: []models.ContentPart{{Type: models.ContentPartText, Text: "x"}}}, nil
 	})
 	outcome := runHostTool(t, f, hostToolCallFixture(t, workspace.OperationListChats, map[string]interface{}{}))
-	if outcome.State != ToolEntryError || hostToolErrorText(t, outcome.Result) != hostToolUnusableResultMessage {
+	if outcome.State != models.ToolEntryError || hostToolErrorText(t, outcome.Result) != hostToolUnusableResultMessage {
 		t.Fatalf("outcome = %#v", outcome)
 	}
 }
 
 func TestHostToolContextCanceledLeavesEntryRunning(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	f := newHostToolDispatchFixture(func(ctx context.Context, request HostToolRequest) (HostToolResult, error) {
+	f := newHostToolDispatchFixture(func(ctx context.Context, request models.HostToolRequest) (models.HostToolResult, error) {
 		cancel()
-		return HostToolResult{}, ctx.Err()
+		return models.HostToolResult{}, ctx.Err()
 	})
 	if outcome, ok := f.dispatcher.Run(ctx, hostToolCallFixture(t, workspace.OperationWriteFile, map[string]interface{}{"path": "a.txt"})); ok {
 		t.Fatalf("ok = true, outcome = %#v", outcome)
 	}
 	// A cancel during the unavailable back-off is the same.
 	ctx, cancel = context.WithCancel(context.Background())
-	f = newHostToolDispatchFixture(hostReplyError(&HostToolFailure{Code: HostToolFailureUnavailable, NotStarted: true}))
+	f = newHostToolDispatchFixture(hostReplyError(&models.HostToolFailure{Code: models.HostToolFailureUnavailable, NotStarted: true}))
 	f.dispatcher.sleep = func(context.Context, time.Duration) error { cancel(); return context.Canceled }
 	if _, ok := f.dispatcher.Run(ctx, hostToolCallFixture(t, workspace.OperationReadFile, map[string]interface{}{"path": "a.txt"})); ok {
 		t.Fatal("ok = true after a cancel during back-off")
@@ -421,14 +424,14 @@ func TestHostToolContextCanceledLeavesEntryRunning(t *testing.T) {
 func TestHostToolResumeReadRerunsWriteInterrupted(t *testing.T) {
 	for _, operation := range []string{workspace.OperationListDirectory, workspace.OperationReadFile, workspace.OperationSearchFiles, workspace.OperationListChats} {
 		state, result := HostToolResumeState(hostToolSpec(t, operation))
-		if state != ToolEntryPending || result != nil {
+		if state != models.ToolEntryPending || result != nil {
 			t.Fatalf("%s resumes as %s %#v", operation, state, result)
 		}
 	}
 	for _, operation := range []string{workspace.OperationWriteFile, workspace.OperationEditFile, workspace.OperationDeleteFile,
 		workspace.OperationMoveFile, workspace.OperationCopyFromChat, workspace.OperationRunCommand} {
 		state, result := HostToolResumeState(hostToolSpec(t, operation))
-		if state != ToolEntryInterrupted || result.Status != ToolResultInterrupted || !result.IsError || hostToolErrorText(t, result) != HostToolInterruptedMessage {
+		if state != models.ToolEntryInterrupted || result.Status != models.ToolResultInterrupted || !result.IsError || hostToolErrorText(t, result) != HostToolInterruptedMessage {
 			t.Fatalf("%s resumes as %s %#v", operation, state, result)
 		}
 	}
@@ -437,15 +440,15 @@ func TestHostToolResumeReadRerunsWriteInterrupted(t *testing.T) {
 func TestHostToolNeverSpendsActionsBudget(t *testing.T) {
 	f := newHostToolDispatchFixture(hostReplyJSON(map[string]interface{}{"path": "a.txt"}, false), hostReplyJSON(map[string]interface{}{"exitStatus": 0}, false))
 	call := hostToolCallFixture(t, workspace.OperationWriteFile, map[string]interface{}{"path": "a.txt", "content": "x"})
-	call.Run.Budget = &BudgetPolicy{MaxActions: 1}
-	call.Run.BudgetUsage = BudgetUsage{Actions: 1}
+	call.Run.Budget = &models.BudgetPolicy{MaxActions: 1}
+	call.Run.BudgetUsage = models.BudgetUsage{Actions: 1}
 	before, _ := json.Marshal(call.Run)
-	if outcome := runHostTool(t, f, call); outcome.State != ToolEntryCompleted {
+	if outcome := runHostTool(t, f, call); outcome.State != models.ToolEntryCompleted {
 		t.Fatalf("write with an exhausted actions budget: %#v", outcome)
 	}
 	command := hostToolCallFixture(t, workspace.OperationRunCommand, map[string]interface{}{"command": "ls"})
 	command.Run = call.Run
-	if outcome := runHostTool(t, f, command); outcome.State != ToolEntryCompleted {
+	if outcome := runHostTool(t, f, command); outcome.State != models.ToolEntryCompleted {
 		t.Fatalf("command with an exhausted actions budget: %#v", outcome)
 	}
 	if after, _ := json.Marshal(call.Run); string(after) != string(before) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/fileinput"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -16,12 +17,12 @@ import (
 
 // ToolInvoker is the product-neutral boundary for a registered typed tool.
 type ToolInvoker interface {
-	InvokeTool(context.Context, ToolInvocation) (map[string]interface{}, error)
+	InvokeTool(context.Context, models.ToolInvocation) (map[string]interface{}, error)
 }
 
-type ToolInvokerFunc func(context.Context, ToolInvocation) (map[string]interface{}, error)
+type ToolInvokerFunc func(context.Context, models.ToolInvocation) (map[string]interface{}, error)
 
-func (f ToolInvokerFunc) InvokeTool(ctx context.Context, invocation ToolInvocation) (map[string]interface{}, error) {
+func (f ToolInvokerFunc) InvokeTool(ctx context.Context, invocation models.ToolInvocation) (map[string]interface{}, error) {
 	return f(ctx, invocation)
 }
 
@@ -80,19 +81,19 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input agentru
 	}
 	executionDeploymentID := input.Bound.Binding.DeploymentID
 	if input.Run != nil {
-		if input.Run.Scope != (Scope{Kind: input.Bound.Binding.Scope.Kind, ID: input.Bound.Binding.Scope.ID}) {
+		if input.Run.Scope != (models.Scope{Kind: input.Bound.Binding.Scope.Kind, ID: input.Bound.Binding.Scope.ID}) {
 			return nil, errors.New("action Run scope does not match the Skill binding")
 		}
 		if strings.TrimSpace(input.Run.AssignedAgentID) == "" {
 			return nil, errors.New("action Run has no assigned execution Agent")
 		}
 		// A Run executes its acting Agent's bindings, plus its owning Team's.
-		if owner := input.Bound.Binding.DeploymentID; owner != input.Run.AssignedAgentID && !(input.Run.Owner.Type == OwnerTypeTeam && owner == input.Run.Owner.ID) {
+		if owner := input.Bound.Binding.DeploymentID; owner != input.Run.AssignedAgentID && !(input.Run.Owner.Type == models.OwnerTypeTeam && owner == input.Run.Owner.ID) {
 			return nil, errors.New("Run cannot execute a Skill binding owned outside its acting Agent or owning Team")
 		}
 		executionDeploymentID = input.Run.AssignedAgentID
 	}
-	invocation := ToolInvocation{
+	invocation := models.ToolInvocation{
 		Name: transportEndpoint, Scope: input.Bound.Binding.Scope, DeploymentID: input.Bound.Binding.DeploymentID,
 		ExecutionDeploymentID: executionDeploymentID,
 		SkillID:               input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
@@ -104,7 +105,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input agentru
 	if input.Call != nil {
 		invocation.ActionCallID = input.Call.ID
 		invocation.RunID = input.Call.RunID
-		invocation.PreparedRuntime = clonePreparedRuntime(input.Call.PreparedRuntime)
+		invocation.PreparedRuntime = models.ClonePreparedRuntime(input.Call.PreparedRuntime)
 	}
 	return d.invoker.InvokeTool(ctx, invocation)
 }

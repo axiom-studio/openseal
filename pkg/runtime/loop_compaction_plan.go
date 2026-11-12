@@ -3,13 +3,15 @@ package runtime
 import (
 	"errors"
 	"fmt"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // compactionPlan is where a compaction cuts the rendered path: Summarized is
 // replaced by the summary, Kept stays verbatim after it.
 type compactionPlan struct {
-	Summarized       []*SessionEntry // Entries[:cut] (render order)
-	Kept             []*SessionEntry // Entries[cut:]
+	Summarized       []*models.SessionEntry // Entries[:cut] (render order)
+	Kept             []*models.SessionEntry // Entries[cut:]
 	FirstKeptEntryID string
 }
 
@@ -37,7 +39,7 @@ const (
 // least 2048) for an overflow compaction.
 func compactionKeepFor(trigger string, window ModelWindow) int64 {
 	keep := compactionKeepTokens(window)
-	if trigger == CompactionTriggerOverflow {
+	if trigger == models.CompactionTriggerOverflow {
 		keep /= 2
 		if keep < compactionOverflowMinimumKeep {
 			keep = compactionOverflowMinimumKeep
@@ -61,9 +63,9 @@ func compactionKeepFor(trigger string, window ModelWindow) int64 {
 // summarized away. A cut that leaves fewer than
 // compactionMinimumSummarizedTokens to summarize is errCompactionImpossible
 // too.
-func planCompaction(entries []*SessionEntry, keep int64) (compactionPlan, error) {
+func planCompaction(entries []*models.SessionEntry, keep int64) (compactionPlan, error) {
 	valid := func(cut int) bool {
-		return cut >= 1 && cut < len(entries) && validCompactionCutAt(entries, cut)
+		return cut >= 1 && cut < len(entries) && models.IsValidCompactionCutAt(entries, cut)
 	}
 	cut := 0
 	var acc int64
@@ -104,7 +106,7 @@ walk:
 
 // compactionEntryTokens is entry.Tokens, or the kernel estimate when the entry
 // was never stamped.
-func compactionEntryTokens(entry *SessionEntry) int64 {
+func compactionEntryTokens(entry *models.SessionEntry) int64 {
 	if entry == nil {
 		return 0
 	}
@@ -114,7 +116,7 @@ func compactionEntryTokens(entry *SessionEntry) int64 {
 	return estimateEntryTokens(entry)
 }
 
-func compactionSpanTokens(entries []*SessionEntry) int64 {
+func compactionSpanTokens(entries []*models.SessionEntry) int64 {
 	var total int64
 	for _, entry := range entries {
 		total += compactionEntryTokens(entry)
@@ -162,7 +164,7 @@ var compactionFoldReserveTokens = (int64(len(compactionSummaryPreamble))+estimat
 // an assistant tool call without its results. One chunk means no folding is
 // needed. More than compactionMaxFolds chunks, or one indivisible step over
 // the budget, is errCompactionImpossible.
-func compactionChunks(summarized []*SessionEntry, previousTokens, budget int64) ([][]*SessionEntry, error) {
+func compactionChunks(summarized []*models.SessionEntry, previousTokens, budget int64) ([][]*models.SessionEntry, error) {
 	if len(summarized) == 0 {
 		return nil, errCompactionImpossible
 	}
@@ -173,7 +175,7 @@ func compactionChunks(summarized []*SessionEntry, previousTokens, budget int64) 
 	if previousTokens > foldReserve {
 		foldReserve = previousTokens
 	}
-	var chunks [][]*SessionEntry
+	var chunks [][]*models.SessionEntry
 	start, used, reserve := 0, previousTokens, previousTokens
 	for _, segment := range compactionSegments(summarized) {
 		tokens := compactionSpanTokens(summarized[segment[0]:segment[1]])
@@ -197,11 +199,11 @@ func compactionChunks(summarized []*SessionEntry, previousTokens, budget int64) 
 // compactionSegments splits entries into [start, end) runs that each begin at
 // a valid cut (index 0 always begins one): a user or note entry, or an
 // assistant entry with the tool entries that follow it.
-func compactionSegments(entries []*SessionEntry) [][2]int {
+func compactionSegments(entries []*models.SessionEntry) [][2]int {
 	var segments [][2]int
 	start := 0
 	for i := 1; i < len(entries); i++ {
-		if validCompactionCut(entries[i]) {
+		if models.IsValidCompactionCut(entries[i]) {
 			segments = append(segments, [2]int{start, i})
 			start = i
 		}
@@ -215,13 +217,13 @@ func compactionSegments(entries []*SessionEntry) [][2]int {
 // splitCompactionChunk halves a chunk the host rejected as too long, at the
 // valid cut closest to half its tokens. ok is false when the chunk is one
 // indivisible step.
-func splitCompactionChunk(chunk []*SessionEntry) (first, second []*SessionEntry, ok bool) {
+func splitCompactionChunk(chunk []*models.SessionEntry) (first, second []*models.SessionEntry, ok bool) {
 	total := compactionSpanTokens(chunk)
 	best, bestDistance := 0, int64(-1)
 	var acc int64
 	for i := 1; i < len(chunk); i++ {
 		acc += compactionEntryTokens(chunk[i-1])
-		if !validCompactionCut(chunk[i]) {
+		if !models.IsValidCompactionCut(chunk[i]) {
 			continue
 		}
 		distance := 2*acc - total
@@ -242,7 +244,7 @@ func splitCompactionChunk(chunk []*SessionEntry) (first, second []*SessionEntry,
 // kernel and never parsed from the summary: the previous compaction's ids,
 // then the ActionCallID of every tool entry in the summarized span in step
 // order, deduped, keeping the last compactionActionCallsKept.
-func compactionActionCallIDs(previous *CompactionEntry, summarized []*SessionEntry) []string {
+func compactionActionCallIDs(previous *models.CompactionEntry, summarized []*models.SessionEntry) []string {
 	seen := make(map[string]bool)
 	var ids []string
 	add := func(id string) {
@@ -258,7 +260,7 @@ func compactionActionCallIDs(previous *CompactionEntry, summarized []*SessionEnt
 		}
 	}
 	for _, entry := range summarized {
-		if entry != nil && entry.Type == SessionEntryTool {
+		if entry != nil && entry.Type == models.SessionEntryTool {
 			add(entry.ActionCallID)
 		}
 	}

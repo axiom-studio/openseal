@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -69,8 +70,8 @@ func TestLoadCapabilitiesLoadsAndNamesTools(t *testing.T) {
 	}
 
 	// The next step derives the same set from the completed entry.
-	next := NewCapabilitySet(capabilityCatalogFixture(), PathLoadedCapabilityIDs(&AgentSessionPath{Entries: []*SessionEntry{
-		capabilityLoadEntry("e1", "run-1", ToolEntryCompleted, loaded...),
+	next := NewCapabilitySet(capabilityCatalogFixture(), PathLoadedCapabilityIDs(&models.AgentSessionPath{Entries: []*models.SessionEntry{
+		capabilityLoadEntry("e1", "run-1", models.ToolEntryCompleted, loaded...),
 	}}), oneAtATime)
 	if !reflect.DeepEqual(next.IDs(), s.IDs()) {
 		t.Fatalf("next step ids %v != %v", next.IDs(), s.IDs())
@@ -186,7 +187,7 @@ func TestLoadCapabilitiesCapsContentAndReportsNotLoaded(t *testing.T) {
 	s := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
 
 	content, isError, loaded := ExecuteLoadCapabilities(s, loadArgs("prompt:skill-research-0@1", "prompt:skill-research-1@1", "action:notion.op0"), capabilityToolName)
-	if isError || len(content) > MaxToolResultContentBytes {
+	if isError || len(content) > models.MaxToolResultContentBytes {
 		t.Fatalf("capped load: isError=%v len=%d", isError, len(content))
 	}
 	if !reflect.DeepEqual(loaded, []string{"prompt:skill-research-0@1"}) {
@@ -207,7 +208,7 @@ func TestLoadCapabilitiesCapsContentAndReportsNotLoaded(t *testing.T) {
 
 	// A single prompt too large on its own is loaded with its instructions cut.
 	content, isError, loaded = ExecuteLoadCapabilities(s, loadArgs("prompt:skill-research-2@1"), capabilityToolName)
-	if isError || len(content) > MaxToolResultContentBytes || !reflect.DeepEqual(loaded, []string{"prompt:skill-research-2@1"}) {
+	if isError || len(content) > models.MaxToolResultContentBytes || !reflect.DeepEqual(loaded, []string{"prompt:skill-research-2@1"}) {
 		t.Fatalf("truncated load: isError=%v len=%d loaded=%v", isError, len(content), loaded)
 	}
 	item := decodeCapabilityContent(t, content)["loaded"].([]interface{})[0].(map[string]interface{})
@@ -224,7 +225,7 @@ func TestLoadCapabilitiesSchemaByteStable(t *testing.T) {
 	if string(encoded) != wantSchema {
 		t.Fatalf("load schema = %s", encoded)
 	}
-	if spec.Name != LoadCapabilitiesTool || spec.Group != ModelStepToolHarness || !strings.Contains(spec.Description, "next step") {
+	if spec.Name != LoadCapabilitiesTool || spec.Group != models.ModelStepToolHarness || !strings.Contains(spec.Description, "next step") {
 		t.Fatalf("load spec = %+v", spec)
 	}
 	if strings.Contains(spec.Description, "turn") {
@@ -238,7 +239,7 @@ func TestLoadCapabilitiesSchemaByteStable(t *testing.T) {
 	search := SearchCapabilitiesSpec()
 	encoded, _ = json.Marshal(search.InputSchema)
 	const wantSearch = `{"additionalProperties":false,"properties":{"limit":{"description":"Maximum results; default 8.","maximum":20,"minimum":1,"type":"integer"},"query":{"description":"A few keywords: the service, the object and the verb.","maxLength":200,"minLength":1,"type":"string"}},"required":["query"],"type":"object"}`
-	if string(encoded) != wantSearch || search.Name != SearchCapabilitiesTool || search.Group != ModelStepToolHarness {
+	if string(encoded) != wantSearch || search.Name != SearchCapabilitiesTool || search.Group != models.ModelStepToolHarness {
 		t.Fatalf("search spec = %s %+v", encoded, search)
 	}
 }
