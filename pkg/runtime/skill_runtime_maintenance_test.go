@@ -1,9 +1,7 @@
 package runtime
 
 import (
-	"context"
 	"errors"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -117,7 +115,7 @@ func TestSkillRuntimeMaintenanceRejectsImmutableIntentDrift(t *testing.T) {
 }
 
 func TestSkillRuntimeMaintenanceRollbackIntentSurvivesReopenAndTakeover(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	forActionLifecycleBackends(t, func(t *testing.T, kernel KernelStore, backend actionLifecycleBackend) {
 		store := kernel.(SkillRuntimeMaintenanceStore)
 		request := skillRuntimeMaintenanceEmptyRequest()
 		gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)
@@ -128,7 +126,7 @@ func TestSkillRuntimeMaintenanceRollbackIntentSurvivesReopenAndTakeover(t *testi
 		if err != nil || rollingBack == nil || !rollingBack.Active || rollingBack.DesiredVersion != request.FromVersion || rollingBack.Phase != "rolling_back" || rollingBack.Revision != gate.Revision+1 {
 			t.Fatalf("rollback intent was not durably selected: %#v, %v", rollingBack, err)
 		}
-		store = reopenSkillRuntimeMaintenanceStore(t, kernel)
+		store = reopenSkillRuntimeMaintenanceStore(t, backend)
 		assertSkillRuntimeMaintenanceRecord(t, store, rollingBack)
 		active, err := store.ListActiveSkillRuntimeMaintenances(t.Context(), request.Scope)
 		if err != nil || len(active) != 1 || !reflect.DeepEqual(active[0], rollingBack) {
@@ -243,35 +241,9 @@ func assertSkillRuntimeMaintenanceRecord(t *testing.T, store SkillRuntimeMainten
 	}
 }
 
-func reopenSkillRuntimeMaintenanceStore(t *testing.T, kernel KernelStore) SkillRuntimeMaintenanceStore {
+// reopenSkillRuntimeMaintenanceStore opens the store again on backend's data,
+// as a restart would.
+func reopenSkillRuntimeMaintenanceStore(t *testing.T, backend actionLifecycleBackend) SkillRuntimeMaintenanceStore {
 	t.Helper()
-	switch original := kernel.(type) {
-	case *SQLiteStore:
-		var sequence int
-		var name, path string
-		if err := original.db.QueryRowContext(t.Context(), "PRAGMA database_list").Scan(&sequence, &name, &path); err != nil {
-			t.Fatal(err)
-		}
-		if err := original.Close(); err != nil {
-			t.Fatal(err)
-		}
-		reopened, err := NewSQLiteStore(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = reopened.Close() })
-		return reopened
-	case *PostgresStore:
-		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-		defer cancel()
-		reopened, err := NewPostgresStore(ctx, os.Getenv("OPENSEAL_TEST_POSTGRES_DSN"), WithPostgresSchema(original.schema))
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = reopened.Close() })
-		return reopened
-	default:
-		t.Fatal("unsupported maintenance restart fixture backend")
-		return nil
-	}
+	return backend.reopen(t).(SkillRuntimeMaintenanceStore)
 }

@@ -168,7 +168,7 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 			t.Fatal(err)
 		}
 		seed := seedAgentBuilderDrafts(t, store)
-		if _, err := store.db.Exec(`DROP INDEX idx_conversations_builder_draft; ALTER TABLE conversations DROP COLUMN builder_draft_requester`); err != nil {
+		if _, err := openTestSQLiteDB(t, path).Exec(`DROP INDEX idx_conversations_builder_draft; ALTER TABLE conversations DROP COLUMN builder_draft_requester`); err != nil {
 			t.Fatal(err)
 		}
 		if err := store.Close(); err != nil {
@@ -195,7 +195,12 @@ func TestAgentBuilderDraftMigrationFillsExistingConversations(t *testing.T) {
 			_ = store.Close()
 		})
 		seed := seedAgentBuilderDrafts(t, store)
-		if err := store.RollbackPostgresMigrations(ctx, agentBuilderDraftMigrationVersion-1); err != nil {
+		// The migration ledger names the migration that added the column.
+		var draftMigration int64
+		if err := pgSchema.db.QueryRowContext(ctx, `SELECT version FROM `+pgSchema.table("schema_migrations")+` WHERE name = 'agent builder draft requester'`).Scan(&draftMigration); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.RollbackPostgresMigrations(ctx, draftMigration-1); err != nil {
 			t.Fatal(err)
 		}
 		var columns int

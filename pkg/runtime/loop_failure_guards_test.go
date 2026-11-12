@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
@@ -162,7 +163,7 @@ func (f *fakeActionCallLister) ListActionCalls(_ context.Context, filter ActionF
 		if call.Scope != filter.Scope || call.RunID != filter.RunID {
 			continue
 		}
-		if len(filter.Status) > 0 && !containsActionStatus(filter.Status, call.Status) {
+		if len(filter.Status) > 0 && !slices.Contains(filter.Status, call.Status) {
 			continue
 		}
 		matched = append(matched, call)

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -205,19 +206,48 @@ func TestActionWorkerLifecycleBoundsPersistenceConflicts(t *testing.T) {
 
 func forActionLifecycleStores(t *testing.T, test func(*testing.T, KernelStore)) {
 	t.Helper()
+	forActionLifecycleBackends(t, func(t *testing.T, store KernelStore, _ actionLifecycleBackend) { test(t, store) })
+}
+
+// actionLifecycleBackend is the database behind one lifecycle store as the
+// test owns it: its own connection and table names for rows no store method
+// writes, and reopen, which opens the store again on the same data as a
+// restart would.
+type actionLifecycleBackend struct {
+	postgres bool
+	db       *sql.DB
+	table    func(name string) string
+	reopen   func(*testing.T) KernelStore
+}
+
+// forActionLifecycleBackends runs test on SQLite, and on Postgres when
+// OPENSEAL_TEST_POSTGRES_DSN is set.
+func forActionLifecycleBackends(t *testing.T, test func(*testing.T, KernelStore, actionLifecycleBackend)) {
+	t.Helper()
 	for _, testCase := range []struct {
 		name string
-		open func(*testing.T) KernelStore
+		open func(*testing.T) (KernelStore, actionLifecycleBackend)
 	}{
-		{name: "sqlite", open: func(t *testing.T) KernelStore {
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "action-lifecycle.db"))
+		{name: "sqlite", open: func(t *testing.T) (KernelStore, actionLifecycleBackend) {
+			path := filepath.Join(t.TempDir(), "action-lifecycle.db")
+			store, err := NewSQLiteStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = store.Close() })
-			return store
+			return store, actionLifecycleBackend{db: openTestSQLiteDB(t, path), table: func(name string) string { return name }, reopen: func(t *testing.T) KernelStore {
+				if err := store.Close(); err != nil {
+					t.Fatal(err)
+				}
+				reopened, err := NewSQLiteStore(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = reopened.Close() })
+				return reopened
+			}}
 		}},
-		{name: "postgres", open: func(t *testing.T) KernelStore {
+		{name: "postgres", open: func(t *testing.T) (KernelStore, actionLifecycleBackend) {
 			pgSchema := newTestPostgresSchema(t, "openseal_action_lifecycle_")
 			dsn := pgSchema.dsn
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
@@ -232,10 +262,15 @@ func forActionLifecycleStores(t *testing.T, test func(*testing.T, KernelStore)) 
 				_, _ = pgSchema.db.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.quoted()+` CASCADE`)
 				_ = store.Close()
 			})
-			return store
+			return store, actionLifecycleBackend{postgres: true, db: pgSchema.db, table: pgSchema.table, reopen: func(t *testing.T) KernelStore {
+				return pgSchema.open(t)
+			}}
 		}},
 	} {
-		t.Run(testCase.name, func(t *testing.T) { test(t, testCase.open(t)) })
+		t.Run(testCase.name, func(t *testing.T) {
+			store, backend := testCase.open(t)
+			test(t, store, backend)
+		})
 	}
 }
 

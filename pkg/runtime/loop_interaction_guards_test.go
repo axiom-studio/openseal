@@ -340,7 +340,7 @@ func TestGovernedToolViewsReadsRunCallsInPathOrder(t *testing.T) {
 	// The store-backed loader returns the same views.
 	store := newTestKernelStore(t)
 	for _, call := range f.calls {
-		putStoredAction(t, store, call)
+		seedActionCall(t, store, call)
 	}
 	loaded, err := loadGovernedToolViews(context.Background(), store, f.run.Scope, f.path, f.run.ID)
 	if err != nil {

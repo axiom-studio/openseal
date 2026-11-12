@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,10 +26,11 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	db := openTestSQLiteDB(t, path)
 	request, _ := createSQLiteActionCredentialLeaseFixture(t, ctx, primary, "nonce-sqlite-concurrent-0001")
 	cutoff := time.Now().UTC().Add(-time.Minute)
 	for index := 0; index < 130; index++ {
-		if _, err := primary.db.ExecContext(ctx, `INSERT INTO action_credential_lease_redemptions
+		if _, err := db.ExecContext(ctx, `INSERT INTO action_credential_lease_redemptions
 			(issuer,audience,nonce_digest,scope_kind,scope_id,run_id,action_call_id,action_lease_id,deployment_id,binding_id,binding_revision,transport,credential_fields_digest,expires_at,consumed_at)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, "expired", "execution-host", fmt.Sprintf("%064x", index), "tenant", "expired", "run", "call", "lease", "agent", "binding", 1, "tool", fmt.Sprintf("%064x", index), cutoff, cutoff); err != nil {
 			t.Fatal(err)
@@ -62,14 +64,14 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 		t.Fatalf("redemptions succeeded=%d replayed=%d, want 1/1", succeeded, replayed)
 	}
 	var expired int
-	if err := primary.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_credential_lease_redemptions WHERE expires_at <= ?`, time.Now().UTC()).Scan(&expired); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_credential_lease_redemptions WHERE expires_at <= ?`, time.Now().UTC()).Scan(&expired); err != nil {
 		t.Fatal(err)
 	}
 	if expired != 2 {
 		t.Fatalf("bounded cleanup left %d expired rows, want 2", expired)
 	}
 	var nonceDigest, fieldsDigest string
-	if err := primary.db.QueryRowContext(ctx, `SELECT nonce_digest, credential_fields_digest FROM action_credential_lease_redemptions
+	if err := db.QueryRowContext(ctx, `SELECT nonce_digest, credential_fields_digest FROM action_credential_lease_redemptions
 		WHERE issuer=? AND audience=?`, request.Lease.Issuer, request.Lease.Audience).Scan(&nonceDigest, &fieldsDigest); err != nil {
 		t.Fatal(err)
 	}
@@ -96,11 +98,11 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing.T) {
 	for _, test := range []struct {
 		name  string
-		drift func(*testing.T, context.Context, *SQLiteStore, *skill.Binding, ActionCredentialLeaseRedemptionRequest)
+		drift func(*testing.T, context.Context, *SQLiteStore, *sql.DB, *skill.Binding, ActionCredentialLeaseRedemptionRequest)
 	}{
-		{"action lease owner", func(t *testing.T, ctx context.Context, store *SQLiteStore, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
+		{"action lease owner", func(t *testing.T, ctx context.Context, _ *SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
 			var payload string
-			if err := store.db.QueryRowContext(ctx, `SELECT payload FROM action_calls WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.ActionCallID).Scan(&payload); err != nil {
+			if err := db.QueryRowContext(ctx, `SELECT payload FROM action_calls WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.ActionCallID).Scan(&payload); err != nil {
 				t.Fatal(err)
 			}
 			call, err := decodeActionCall(payload)
@@ -109,13 +111,13 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 			}
 			call.LeaseOwner = "other-worker"
 			updated, _ := json.Marshal(call)
-			if _, err := store.db.ExecContext(ctx, `UPDATE action_calls SET lease_owner=?, payload=? WHERE scope_kind=? AND scope_id=? AND id=?`, call.LeaseOwner, string(updated), call.Scope.Kind, call.Scope.ID, call.ID); err != nil {
+			if _, err := db.ExecContext(ctx, `UPDATE action_calls SET lease_owner=?, payload=? WHERE scope_kind=? AND scope_id=? AND id=?`, call.LeaseOwner, string(updated), call.Scope.Kind, call.Scope.ID, call.ID); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{"assigned agent", func(t *testing.T, ctx context.Context, store *SQLiteStore, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
+		{"assigned agent", func(t *testing.T, ctx context.Context, _ *SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
 			var payload string
-			if err := store.db.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.RunID).Scan(&payload); err != nil {
+			if err := db.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.RunID).Scan(&payload); err != nil {
 				t.Fatal(err)
 			}
 			run, err := decodeAgentRun(payload)
@@ -124,11 +126,11 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 			}
 			run.AssignedAgentID = "other-agent"
 			updated, _ := json.Marshal(run)
-			if _, err := store.db.ExecContext(ctx, `UPDATE agent_runs SET assigned_agent_id=?, payload=? WHERE scope_kind=? AND scope_id=? AND id=?`, run.AssignedAgentID, string(updated), run.Scope.Kind, run.Scope.ID, run.ID); err != nil {
+			if _, err := db.ExecContext(ctx, `UPDATE agent_runs SET assigned_agent_id=?, payload=? WHERE scope_kind=? AND scope_id=? AND id=?`, run.AssignedAgentID, string(updated), run.Scope.Kind, run.Scope.ID, run.ID); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{"binding revision", func(t *testing.T, ctx context.Context, store *SQLiteStore, binding *skill.Binding, _ ActionCredentialLeaseRedemptionRequest) {
+		{"binding revision", func(t *testing.T, ctx context.Context, store *SQLiteStore, _ *sql.DB, binding *skill.Binding, _ ActionCredentialLeaseRedemptionRequest) {
 			catalog := skill.NewCatalogWithStore(store)
 			if _, err := catalog.DisableBinding(ctx, skill.DisableBindingRequest{
 				Scope: binding.Scope, DeploymentID: binding.DeploymentID, BindingID: binding.ID, ExpectedRevision: binding.Revision,
@@ -140,18 +142,20 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "authority.db"))
+			path := filepath.Join(t.TempDir(), "authority.db")
+			store, err := NewSQLiteStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer store.Close()
+			db := openTestSQLiteDB(t, path)
 			request, binding := createSQLiteActionCredentialLeaseFixture(t, ctx, store, "nonce-sqlite-drift-"+uuid.NewString())
-			test.drift(t, ctx, store, binding, request)
+			test.drift(t, ctx, store, db, binding, request)
 			if err := store.RedeemActionCredentialLease(ctx, request); !errors.Is(err, ErrActionCredentialLeaseMismatch) {
 				t.Fatalf("authority drift error = %v, want %v", err, ErrActionCredentialLeaseMismatch)
 			}
 			var consumed int
-			if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_credential_lease_redemptions WHERE issuer=? AND audience=?`, request.Lease.Issuer, request.Lease.Audience).Scan(&consumed); err != nil {
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_credential_lease_redemptions WHERE issuer=? AND audience=?`, request.Lease.Issuer, request.Lease.Audience).Scan(&consumed); err != nil {
 				t.Fatal(err)
 			}
 			if consumed != 0 {
@@ -171,11 +175,13 @@ func TestSQLiteActionCredentialLeaseClockResolutionAndExpiry(t *testing.T) {
 
 	t.Run("expired lease fails closed without consuming nonce", func(t *testing.T) {
 		ctx := context.Background()
-		store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "expired.db"))
+		path := filepath.Join(t.TempDir(), "expired.db")
+		store, err := NewSQLiteStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer store.Close()
+		db := openTestSQLiteDB(t, path)
 		request, _ := createSQLiteActionCredentialLeaseFixture(t, ctx, store, "nonce-sqlite-expired-0001")
 		request.Lease.IssuedAt = time.Now().UTC().Add(-2 * time.Minute)
 		request.Lease.ExpiresAt = time.Now().UTC().Add(-time.Minute)
@@ -184,7 +190,7 @@ func TestSQLiteActionCredentialLeaseClockResolutionAndExpiry(t *testing.T) {
 			t.Fatalf("expired lease error = %v, want %v", err, ErrActionCredentialLeaseExpired)
 		}
 		var consumed int
-		if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_credential_lease_redemptions`).Scan(&consumed); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_credential_lease_redemptions`).Scan(&consumed); err != nil {
 			t.Fatal(err)
 		}
 		if consumed != 0 {
@@ -193,6 +199,9 @@ func TestSQLiteActionCredentialLeaseClockResolutionAndExpiry(t *testing.T) {
 	})
 }
 
+// createSQLiteActionCredentialLeaseFixture binds a credentialed skill, has
+// runtime-worker claim a call of it through the store's commands, and issues
+// that call's lease.
 func createSQLiteActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store *SQLiteStore, nonce string) (ActionCredentialLeaseRedemptionRequest, *skill.Binding) {
 	t.Helper()
 	now := time.Now().UTC().Round(0)
@@ -226,23 +235,20 @@ func createSQLiteActionCredentialLeaseFixture(t *testing.T, ctx context.Context,
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	expires := now.Add(2 * time.Minute)
-	call := &ActionCall{
-		ID: uuid.NewString(), Scope: scope, RunID: run.ID, DeploymentID: deploymentID, BindingID: binding.ID, BindingRevision: binding.Revision,
-		SkillID: definition.ID, SkillVersion: definition.Version, Action: "read", Status: ActionCallStatusRunning,
+	// The call is a step's nested call, admitted under its claimed Run's
+	// lease, which runtime-worker then claims.
+	if run, err = store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "run-worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute}); err != nil || run == nil {
+		t.Fatalf("claim run = %#v, %v", run, err)
+	}
+	seedActionCall(t, store, &ActionCall{
+		ID: uuid.NewString(), Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: deploymentID, BindingID: binding.ID, BindingRevision: binding.Revision,
+		SkillID: definition.ID, SkillVersion: definition.Version, Action: "read", Status: ActionCallStatusReady, Origin: ActionOriginVM,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, CredentialRefs: binding.Credentials,
-		Attempt: 1, MaxAttempts: 3, AvailableAt: now, LeaseOwner: "runtime-worker", LeaseExpiresAt: &expires,
-		Revision: 2, CreatedAt: now, UpdatedAt: now,
-	}
-	payload, err := json.Marshal(call)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.db.ExecContext(ctx, `INSERT INTO action_calls
-		(id,scope_kind,scope_id,run_id,status,available_at,lease_owner,lease_expires_at,revision,created_at,payload)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, call.ID, scope.Kind, scope.ID, run.ID, call.Status, call.AvailableAt,
-		call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload)); err != nil {
-		t.Fatal(err)
+		MaxAttempts: 3, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	call, err := store.ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: "runtime-worker", Now: now, LeaseDuration: 2 * time.Minute})
+	if err != nil || call == nil {
+		t.Fatalf("claim call = %#v, %v", call, err)
 	}
 	fields := map[string][]string{"reddit": {"oauth.access_token"}}
 	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{

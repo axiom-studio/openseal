@@ -220,7 +220,8 @@ func TestRunSkillDependencySQLiteProjectionMigrationAndMetadataQueries(t *testin
 	if _, err := db.Exec(`CREATE TABLE agent_runs(scope_kind TEXT,scope_id TEXT,id TEXT,status TEXT,assigned_agent_id TEXT,payload TEXT); CREATE TABLE skill_runtime_maintenance(scope_kind TEXT,scope_id TEXT,skill_id TEXT,active INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
-	run := &AgentRun{Scope: Scope{Kind: "tenant", ID: "legacy"}, ID: "accepted", AssignedAgentID: "agent", Status: AgentRunStatusSleeping, Context: runSkillDependencyRequest(Scope{}).Context}
+	run := &AgentRun{Scope: Scope{Kind: "tenant", ID: "legacy"}, ID: "accepted", AssignedAgentID: "agent", Status: AgentRunStatusSleeping,
+		Context: map[string]interface{}{capabilityInvocationContextKey: map[string]interface{}{"skillId": "reader", "skillVersion": "1.0.0", "action": "read", "inputs": map[string]interface{}{"scope": map[string]interface{}{"kind": "tenant", "id": "untrusted"}}}}}
 	payload, _ := json.Marshal(run)
 	for _, status := range []string{"sleeping", "completed"} {
 		if _, err := db.Exec(`INSERT INTO agent_runs VALUES('tenant','legacy',?,?,?,?)`, status, status, "agent", string(payload)); err != nil {

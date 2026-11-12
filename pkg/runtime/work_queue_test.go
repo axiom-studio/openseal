@@ -133,6 +133,31 @@ func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
 	}
 }
 
+// scheduleActionRetry claims the ready call as an earlier worker would and
+// persists that attempt's outcome: ready again at retryAt.
+func scheduleActionRetry(t *testing.T, store KernelStore, call *ActionCall, retryAt time.Time) {
+	t.Helper()
+	now := time.Now().UTC()
+	claimed, err := store.ClaimNextAction(t.Context(), ActionClaim{Scope: call.Scope, WorkerID: "earlier-worker", Now: now, LeaseDuration: time.Minute})
+	if err != nil || claimed == nil || claimed.ID != call.ID {
+		t.Fatalf("earlier claim = %#v, %v", claimed, err)
+	}
+	run, err := store.GetAgentRun(t.Context(), call.Scope, call.RunID)
+	if err != nil || run == nil {
+		t.Fatalf("run = %#v, %v", run, err)
+	}
+	retry := cloneActionCall(claimed)
+	retry.Status, retry.AvailableAt, retry.LeaseOwner, retry.LeaseExpiresAt = ActionCallStatusReady, retryAt, "", nil
+	retry.Revision++
+	retry.UpdatedAt = now
+	if _, err := store.PersistActionExecution(t.Context(), ActionExecutionRecord{
+		Call: retry, ExpectedCallRevision: claimed.Revision, ExpectedRunRevision: run.Revision, WorkerID: "earlier-worker", Now: now,
+		Event: &ActivityEvent{ID: "retry-" + call.ID, Scope: call.Scope, RunID: call.RunID, EventType: "action.retry_scheduled", Summary: "Retry scheduled", CreatedAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.T) {
 	for _, scenario := range []string{"retry", "expired_lease"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -143,12 +168,8 @@ func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.
 			// runtime caller the fixture passes UTC times.
 			due := time.Now().UTC().Add(150 * time.Millisecond)
 			if scenario == "retry" {
-				call, err := store.GetActionCall(t.Context(), scope, proposal.Call.ID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				call.AvailableAt = due
-				putStoredAction(t, store.SQLiteStore, call)
+				// An earlier attempt failed and scheduled its retry.
+				scheduleActionRetry(t, store.SQLiteStore, proposal.Call, due)
 			} else {
 				// A crashed worker holds the lease until it expires.
 				claimed, err := store.SQLiteStore.ClaimNextAction(t.Context(), ActionClaim{Scope: scope, WorkerID: "crashed", Now: time.Now().UTC(), LeaseDuration: time.Until(due)})

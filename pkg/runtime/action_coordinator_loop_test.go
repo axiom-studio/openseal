@@ -421,7 +421,7 @@ func TestLoopProposeValidatorsReadRunActionHistory(t *testing.T) {
 	}))
 	first := f.propose(f.request("call-1"))
 	succeedLoopCall(t, store, first.Call, loopProposeWorker, f.now.Add(2*time.Second))
-	putStoredAction(t, store, &ActionCall{
+	seedActionCall(t, store, &ActionCall{
 		ID: "vm-call", Scope: f.scope, RunID: f.run.ID, TurnID: "step-1", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
 		Origin: ActionOriginVM, Status: ActionCallStatusSucceeded, MaxAttempts: 1, AvailableAt: f.now, Revision: 1, CreatedAt: f.now, UpdatedAt: f.now,
 	})
@@ -441,7 +441,7 @@ func TestRunActionHistoryListsTerminalNonVMCallsNewestFirst(t *testing.T) {
 			at := base.Add(completed)
 			call.CompletedAt = &at
 		}
-		putStoredAction(t, store, call)
+		seedActionCall(t, store, call)
 	}
 	add("old", "run", ActionOriginLoop, ActionCallStatusSucceeded, time.Minute)
 	add("new", "run", ActionOriginLoop, ActionCallStatusFailed, 3*time.Minute)
@@ -483,7 +483,7 @@ func TestRunActionHistoryPagesPastStorePageLimits(t *testing.T) {
 		created := base.Add(time.Duration(i) * time.Second)
 		completed := created.Add(time.Millisecond)
 		id := fmt.Sprintf("call-%04d", i)
-		putStoredAction(t, store, &ActionCall{
+		seedActionCall(t, store, &ActionCall{
 			ID: id, Scope: scope, RunID: "run", TurnID: "step-1", Origin: ActionOriginLoop,
 			Status: ActionCallStatusSucceeded, CreatedAt: created, UpdatedAt: completed, CompletedAt: &completed,
 		})

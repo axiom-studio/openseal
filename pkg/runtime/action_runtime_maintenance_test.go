@@ -105,7 +105,7 @@ func TestActionRuntimeMaintenanceCoversLogicalSkillAndPreservesTenantIsolation(t
 }
 
 func TestActionRuntimeMaintenanceOwnerExpiryDoesNotReopenSubmissionOrClaim(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	forActionLifecycleBackends(t, func(t *testing.T, kernel KernelStore, backend actionLifecycleBackend) {
 		fixture := newActionRuntimeMaintenanceFixture(t, kernel)
 		maintenance := kernel.(SkillRuntimeMaintenanceStore)
 		request := actionRuntimeMaintenanceRequest(t, fixture)
@@ -122,7 +122,7 @@ func TestActionRuntimeMaintenanceOwnerExpiryDoesNotReopenSubmissionOrClaim(t *te
 		}
 		assertActionRuntimeMaintenanceError(t, err, before.Scope, fixture.binding.SkillID)
 		assertActionRuntimeMaintenanceNoSubmission(t, kernel, fixture.proposal.Call, before)
-		seedActionRuntimeMaintenanceLegacyCall(t, kernel, fixture)
+		seedActionRuntimeMaintenanceLegacyCall(t, backend, fixture)
 		claimed, err := kernel.ClaimNextAction(t.Context(), ActionClaim{Scope: before.Scope, WorkerID: "agent-worker", Now: fixture.now.Add(2 * time.Second), LeaseDuration: LoopActionLease, OwnActionID: fixture.proposal.Call.ID})
 		if err != nil || claimed != nil {
 			t.Fatalf("expired owner reopened execution: %#v, %v", claimed, err)
@@ -135,13 +135,13 @@ func TestActionRuntimeMaintenanceOwnerExpiryDoesNotReopenSubmissionOrClaim(t *te
 }
 
 func TestActionRuntimeMaintenanceStableGateSkipsLegacyReadyCallBeforeAuthority(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
+	forActionLifecycleBackends(t, func(t *testing.T, kernel KernelStore, backend actionLifecycleBackend) {
 		fixture := newActionRuntimeMaintenanceFixture(t, kernel)
 		gate, err := kernel.(SkillRuntimeMaintenanceStore).AcquireSkillRuntimeMaintenance(t.Context(), actionRuntimeMaintenanceRequest(t, fixture))
 		if err != nil || gate == nil || !gate.Active {
 			t.Fatalf("acquire = %#v, %v", gate, err)
 		}
-		seedActionRuntimeMaintenanceLegacyCall(t, kernel, fixture)
+		seedActionRuntimeMaintenanceLegacyCall(t, backend, fixture)
 		beforeCall, err := kernel.GetActionCall(t.Context(), fixture.proposal.Call.Scope, fixture.proposal.Call.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -482,9 +482,9 @@ func actionRuntimeMaintenanceWorker(kernel KernelStore, fixture *actionBindingFe
 }
 
 // Seed a ready loop call of the still-running Run as if it had been committed
-// before the gate, through trusted backend fixtures. Supported proposal APIs
+// before the gate, on the test's own connection. Supported proposal APIs
 // cannot create this state because the active gate fences insertion.
-func seedActionRuntimeMaintenanceLegacyCall(t *testing.T, kernel KernelStore, fixture *actionBindingFenceFixture) {
+func seedActionRuntimeMaintenanceLegacyCall(t *testing.T, backend actionLifecycleBackend, fixture *actionBindingFenceFixture) {
 	t.Helper()
 	call := fixture.proposal.Call
 	payload, err := json.Marshal(call)
@@ -495,43 +495,31 @@ func seedActionRuntimeMaintenanceLegacyCall(t *testing.T, kernel KernelStore, fi
 		externalOperationClaimDigest(call), call.ApprovalID, call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload),
 		call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion}
 	columns := `(id,scope_kind,scope_id,run_id,turn_id,status,idempotency_key,external_operation_digest,approval_id,available_at,lease_owner,lease_expires_at,revision,created_at,payload,deployment_id,binding_id,binding_revision,skill_id,skill_version)`
-	switch store := kernel.(type) {
-	case *SQLiteStore:
-		tx, beginErr := store.db.BeginTx(t.Context(), nil)
-		if beginErr != nil {
-			t.Fatal(beginErr)
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")
+	gate := "UPDATE skill_runtime_maintenance SET active=%s WHERE scope_kind=? AND scope_id=? AND skill_id=?"
+	inactive, active := "0", "1"
+	if backend.postgres {
+		numbered := make([]string, len(args))
+		for i := range numbered {
+			numbered[i] = fmt.Sprintf("$%d", i+1)
 		}
-		defer tx.Rollback()
-		if _, err = tx.ExecContext(t.Context(), "UPDATE skill_runtime_maintenance SET active=0 WHERE scope_kind=? AND scope_id=? AND skill_id=?", call.Scope.Kind, call.Scope.ID, call.SkillID); err == nil {
-			_, err = tx.ExecContext(t.Context(), "INSERT INTO action_calls "+columns+" VALUES ("+strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")+")", args...)
-		}
-		if err == nil {
-			_, err = tx.ExecContext(t.Context(), "UPDATE skill_runtime_maintenance SET active=1 WHERE scope_kind=? AND scope_id=? AND skill_id=?", call.Scope.Kind, call.Scope.ID, call.SkillID)
-		}
-		if err == nil {
-			err = tx.Commit()
-		}
-	case *PostgresStore:
-		placeholders := make([]string, len(args))
-		for i := range placeholders {
-			placeholders[i] = fmt.Sprintf("$%d", i+1)
-		}
-		tx, beginErr := store.db.BeginTx(t.Context(), nil)
-		if beginErr != nil {
-			t.Fatal(beginErr)
-		}
-		defer tx.Rollback()
-		if _, err = tx.ExecContext(t.Context(), "UPDATE "+store.table("skill_runtime_maintenance")+" SET active=FALSE WHERE scope_kind=$1 AND scope_id=$2 AND skill_id=$3", call.Scope.Kind, call.Scope.ID, call.SkillID); err == nil {
-			_, err = tx.ExecContext(t.Context(), "INSERT INTO "+store.table("action_calls")+" "+columns+" VALUES ("+strings.Join(placeholders, ",")+")", args...)
-		}
-		if err == nil {
-			_, err = tx.ExecContext(t.Context(), "UPDATE "+store.table("skill_runtime_maintenance")+" SET active=TRUE WHERE scope_kind=$1 AND scope_id=$2 AND skill_id=$3", call.Scope.Kind, call.Scope.ID, call.SkillID)
-		}
-		if err == nil {
-			err = tx.Commit()
-		}
-	default:
-		t.Fatal("unsupported legacy action fixture backend")
+		placeholders = strings.Join(numbered, ",")
+		gate = "UPDATE " + backend.table("skill_runtime_maintenance") + " SET active=%s WHERE scope_kind=$1 AND scope_id=$2 AND skill_id=$3"
+		inactive, active = "FALSE", "TRUE"
+	}
+	tx, err := backend.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(t.Context(), fmt.Sprintf(gate, inactive), call.Scope.Kind, call.Scope.ID, call.SkillID); err == nil {
+		_, err = tx.ExecContext(t.Context(), "INSERT INTO "+backend.table("action_calls")+" "+columns+" VALUES ("+placeholders+")", args...)
+	}
+	if err == nil {
+		_, err = tx.ExecContext(t.Context(), fmt.Sprintf(gate, active), call.Scope.Kind, call.Scope.ID, call.SkillID)
+	}
+	if err == nil {
+		err = tx.Commit()
 	}
 	if err != nil {
 		t.Fatal(err)

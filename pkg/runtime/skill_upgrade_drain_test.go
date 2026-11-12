@@ -274,17 +274,8 @@ func TestSkillUpgradeDrainMigrationProjectsLegacyMetadata(t *testing.T) {
 func TestSkillUpgradeDrainProjectsRollingVersionWritesAcrossStores(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := fixture.store.(KernelStore)
-		var db *sql.DB
-		actions := "action_calls"
-		postgres := false
-		switch value := store.(type) {
-		case *SQLiteStore:
-			db = value.db
-		case *PostgresStore:
-			db = value.db
-			postgres = true
-			actions = value.table(actions)
-		}
+		db, actions := fixture.db, fixture.table("action_calls")
+		_, postgres := store.(*PostgresStore)
 		scope := Scope{Kind: "tenant", ID: "rolling"}
 		run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Rolling-version write", Source: RunSourceManual})
 		if err != nil {
@@ -327,17 +318,8 @@ func TestSkillUpgradeDrainFencesLegacyWritersAgainstExistingAuthority(t *testing
 		t.Run(invalid, func(t *testing.T) {
 			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 				store := fixture.store.(KernelStore)
-				var db *sql.DB
-				actions := "action_calls"
-				postgres := false
-				switch value := store.(type) {
-				case *SQLiteStore:
-					db = value.db
-				case *PostgresStore:
-					db = value.db
-					postgres = true
-					actions = value.table(actions)
-				}
+				db, actions := fixture.db, fixture.table("action_calls")
+				_, postgres := store.(*PostgresStore)
 				scope := Scope{Kind: "tenant", ID: "legacy-fence"}
 				run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Fence old writer", Source: RunSourceManual})
 				if err != nil {
@@ -494,7 +476,7 @@ func TestSkillRuntimeUsageStatusesAcrossStores(t *testing.T) {
 			run.Status = runStatus
 			for _, status := range statuses {
 				call.Status = status
-				seedSkillUsageMetadata(t, store, run, call)
+				seedSkillUsageMetadata(t, fixture, run, call)
 				unfinished := status == ActionCallStatusReady || status == ActionCallStatusWaitingApproval || status == ActionCallStatusRunning || status == ActionCallStatusCompensating
 				want := unfinished || (status == ActionCallStatusSucceeded && !isTerminalAgentRunStatus(runStatus))
 				busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter)
@@ -505,17 +487,17 @@ func TestSkillRuntimeUsageStatusesAcrossStores(t *testing.T) {
 		}
 		call.BindingID, call.BindingRevision = "", 0
 		call.Status, run.Status = ActionCallStatusReady, AgentRunStatusRunning
-		seedSkillUsageMetadata(t, store, run, call)
+		seedSkillUsageMetadata(t, fixture, run, call)
 		if busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
 			t.Fatalf("unbound legacy call escaped exact binding drain: %v %v", busy, err)
 		}
 		call.Status = ActionCallStatusSucceeded
-		seedSkillUsageMetadata(t, store, run, call)
+		seedSkillUsageMetadata(t, fixture, run, call)
 		if busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
 			t.Fatalf("live unbound legacy receipt escaped binding drain: %v %v", busy, err)
 		}
 		run.Status = AgentRunStatusCompleted
-		seedSkillUsageMetadata(t, store, run, call)
+		seedSkillUsageMetadata(t, fixture, run, call)
 		if busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || busy {
 			t.Fatalf("completed unbound legacy receipt retained binding drain: %v %v", busy, err)
 		}
@@ -525,21 +507,11 @@ func TestSkillRuntimeUsageStatusesAcrossStores(t *testing.T) {
 // Status-table coverage uses the store's metadata commit boundaries without
 // decoding deliberately absent action outputs. Lifecycle behavior itself is
 // exercised through Coordinator/Worker in the drain regression above.
-func seedSkillUsageMetadata(t *testing.T, store KernelStore, run *AgentRun, call *ActionCall) {
+func seedSkillUsageMetadata(t *testing.T, fixture runStoreContractFixture, run *AgentRun, call *ActionCall) {
 	t.Helper()
-	var db *sql.DB
-	postgres := false
-	actions, runs := "action_calls", "agent_runs"
-	switch value := store.(type) {
-	case *SQLiteStore:
-		db = value.db
-	case *PostgresStore:
-		db = value.db
-		postgres = true
-		actions, runs = value.table(actions), value.table(runs)
-	default:
-		t.Fatal("unsupported usage store")
-	}
+	db := fixture.db
+	_, postgres := fixture.store.(*PostgresStore)
+	actions, runs := fixture.table("action_calls"), fixture.table("agent_runs")
 	payload, _ := json.Marshal(run)
 	placeholder := func(n int) string {
 		if postgres {
