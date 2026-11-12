@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -17,7 +18,7 @@ import (
 func routineConnectionFixture(t *testing.T, h *routineEventHarness, provider string, selection ExternalConversationMessageSelection) (*skill.Catalog, *ExternalConversationEndpoint) {
 	t.Helper()
 	catalog := skill.NewCatalog()
-	definition := slackConversationSkillDefinition()
+	definition := skillbindingtest.SlackConversationSkillDefinition()
 	definition.ID, definition.Name = provider, provider
 	adapter := definition.ConversationAdapters["conversations"]
 	adapter.Provider, adapter.Name = provider, provider+" conversations"

@@ -366,7 +366,7 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	deploymentID := "slack-agent"
 	catalog := skill.NewCatalog()
-	for _, definition := range []*skill.Definition{skillbinding.SkillManagementSkill(), slackConversationSkillDefinition()} {
+	for _, definition := range []*skill.Definition{skillbinding.SkillManagementSkill(), skillbindingtest.SlackConversationSkillDefinition()} {
 		if err := catalog.Register(ctx, definition); err != nil {
 			t.Fatal(err)
 		}
@@ -428,36 +428,6 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 	if err != nil || binding == nil || len(binding.EnabledConversationAdapters) != 1 ||
 		binding.EnabledConversationAdapters[0] != "conversations" || len(binding.AllowedActions) != 0 || binding.Credentials["SLACK_CONNECTION"].ID != "connection://tenant-a/slack" {
 		t.Fatalf("adapter-only binding = %#v, %v", binding, err)
-	}
-}
-
-func slackConversationSkillDefinition() *skill.Definition {
-	return &skill.Definition{
-		ID: "slack", Version: "1.0.0", Name: "Slack",
-		Actions: map[string]skill.Action{},
-		ConversationAdapters: map[string]skill.ConversationAdapter{"conversations": {
-			ProtocolVersion: skill.ConversationAdapterProtocolV1,
-			Name:            "Slack conversations", Description: "Receive and deliver Slack conversations.", Provider: "slack",
-			EndpointModes:     []skill.ConversationEndpointMode{skill.ConversationEndpointChannel},
-			InboundEventTypes: []string{skill.ConversationEventApprovalDecided, skill.ConversationEventMessageReceived},
-			Features:          []skill.ConversationAdapterFeature{skill.ConversationFeatureMentions, skill.ConversationFeatureThreads},
-			Credentials: []skill.CredentialRequirement{{
-				Name: "SLACK_CONNECTION", Kind: "slack-oauth",
-				OAuth2: &skill.OAuth2Requirement{
-					Provider: "slack", Subject: skill.OAuth2SubjectInstallation,
-					Scopes: []string{"channels:history", "chat:write"},
-				},
-			}},
-			Delivery: skill.ConversationDeliveryCapabilities{
-				Operations: []skill.ConversationDeliveryOperation{skill.ConversationDeliveryMessageSend},
-				Ordering:   skill.ConversationDeliveryOrderThread, Idempotency: skill.IdempotencyRequired,
-				SupportsAcknowledgementLookup: true, SupportsRetryAfter: true,
-			},
-			Transport: skill.ConversationAdapterTransport{
-				Kind: "plugin", IngressEndpoint: "slack.conversation.ingress", DeliveryEndpoint: "slack.conversation.deliver",
-				DeliveryCredentials: []string{"SLACK_CONNECTION"},
-			},
-		}},
 	}
 }
 

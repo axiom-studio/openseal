@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -460,7 +461,7 @@ func TestRegisteredConversationGatewayReturnsVerificationResponseBeforeEndpoints
 	ctx := context.Background()
 	store := newTestKernelStore(t)
 	catalog := skill.NewCatalog()
-	definition := slackConversationSkillDefinition()
+	definition := skillbindingtest.SlackConversationSkillDefinition()
 	if err := catalog.Register(ctx, definition); err != nil {
 		t.Fatal(err)
 	}

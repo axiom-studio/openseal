@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -328,7 +329,7 @@ func externalConversationEndpointFixtureOwnedBy(
 ) (*skill.Catalog, *ExternalConversationEndpoint) {
 	t.Helper()
 	catalog := skill.NewCatalog()
-	definition := slackConversationSkillDefinition()
+	definition := skillbindingtest.SlackConversationSkillDefinition()
 	definition.ID, definition.Name = provider, provider
 	adapter := definition.ConversationAdapters["conversations"]
 	adapter.Delivery.Operations = append([]skill.ConversationDeliveryOperation(nil), operations...)

@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -52,7 +53,7 @@ func fileConversationFixture(t *testing.T) (*sqlite.Store, *skill.Catalog, *mode
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := slackConversationSkillDefinition()
+	definition := skillbindingtest.SlackConversationSkillDefinition()
 	definition.ID = "slack"
 	definition.Name = "slack"
 	adapter := definition.ConversationAdapters["conversations"]

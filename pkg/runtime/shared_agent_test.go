@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -74,7 +75,7 @@ func newSharedAgentFixture(t *testing.T) *sharedAgentFixture {
 			Transport: skill.TransportReference{Kind: "kernel", Endpoint: "kernel://mcp"},
 			Actions:   map[string]skill.Action{"call": plainAction("call", skill.RiskLevelRead)},
 		},
-		slackConversationSkillDefinition(),
+		skillbindingtest.SlackConversationSkillDefinition(),
 	} {
 		if err := f.catalog.Register(ctx, definition); err != nil {
 			t.Fatal(err)

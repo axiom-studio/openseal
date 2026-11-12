@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -79,7 +80,7 @@ func TestExternalConversationEndpointFollowsItsSingularSkillBinding(t *testing.T
 	if err != nil || stored.Configuration["locale"] != "en-US" {
 		t.Fatalf("stored endpoint was not isolated: %#v, %v", stored, err)
 	}
-	nextDefinition := *slackConversationSkillDefinition()
+	nextDefinition := *skillbindingtest.SlackConversationSkillDefinition()
 	nextDefinition.Version = "1.0.1"
 	if err := catalog.Register(ctx, &nextDefinition); err != nil {
 		t.Fatal(err)
@@ -598,7 +599,7 @@ func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*sqlite
 	t.Helper()
 	store := newTestKernelStore(t)
 	catalog := skill.NewCatalog()
-	definition := slackConversationSkillDefinition()
+	definition := skillbindingtest.SlackConversationSkillDefinition()
 	if err := catalog.Register(ctx, definition); err != nil {
 		t.Fatal(err)
 	}

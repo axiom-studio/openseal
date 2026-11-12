@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -19,7 +20,7 @@ func TestSQLiteExternalConversationTransportRecoversAcrossRestart(t *testing.T) 
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: "one"}
-	definition := slackConversationSkillDefinition()
+	definition := skillbindingtest.SlackConversationSkillDefinition()
 	catalog := skill.NewCatalogWithStore(store)
 	if err := catalog.Register(ctx, definition); err != nil {
 		t.Fatal(err)

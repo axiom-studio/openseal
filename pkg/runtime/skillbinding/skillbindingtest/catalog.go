@@ -106,3 +106,36 @@ func MustDefinition(t *testing.T, catalog *skill.Catalog, id string) *skill.Defi
 	}
 	return definition
 }
+
+// SlackConversationSkillDefinition is a Slack skill with one conversation
+// adapter, "conversations", that receives messages and approval decisions
+// and sends messages with the SLACK_CONNECTION OAuth installation.
+func SlackConversationSkillDefinition() *skill.Definition {
+	return &skill.Definition{
+		ID: "slack", Version: "1.0.0", Name: "Slack",
+		Actions: map[string]skill.Action{},
+		ConversationAdapters: map[string]skill.ConversationAdapter{"conversations": {
+			ProtocolVersion: skill.ConversationAdapterProtocolV1,
+			Name:            "Slack conversations", Description: "Receive and deliver Slack conversations.", Provider: "slack",
+			EndpointModes:     []skill.ConversationEndpointMode{skill.ConversationEndpointChannel},
+			InboundEventTypes: []string{skill.ConversationEventApprovalDecided, skill.ConversationEventMessageReceived},
+			Features:          []skill.ConversationAdapterFeature{skill.ConversationFeatureMentions, skill.ConversationFeatureThreads},
+			Credentials: []skill.CredentialRequirement{{
+				Name: "SLACK_CONNECTION", Kind: "slack-oauth",
+				OAuth2: &skill.OAuth2Requirement{
+					Provider: "slack", Subject: skill.OAuth2SubjectInstallation,
+					Scopes: []string{"channels:history", "chat:write"},
+				},
+			}},
+			Delivery: skill.ConversationDeliveryCapabilities{
+				Operations: []skill.ConversationDeliveryOperation{skill.ConversationDeliveryMessageSend},
+				Ordering:   skill.ConversationDeliveryOrderThread, Idempotency: skill.IdempotencyRequired,
+				SupportsAcknowledgementLookup: true, SupportsRetryAfter: true,
+			},
+			Transport: skill.ConversationAdapterTransport{
+				Kind: "plugin", IngressEndpoint: "slack.conversation.ingress", DeliveryEndpoint: "slack.conversation.deliver",
+				DeliveryCredentials: []string{"SLACK_CONNECTION"},
+			},
+		}},
+	}
+}
