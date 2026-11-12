@@ -129,7 +129,7 @@ func NewAgentRunWorkerSupervisor(
 		logger = zap.NewNop().Sugar()
 	}
 	supervisor := &AgentRunWorkerSupervisor{store: store, resolver: resolver, config: config, logger: logger}
-	supervisor.pools = newScopePools("run:"+string(config.Kind), source, config.ReconcileInterval, WorkFamilyRunDue, logger, supervisor.newPool)
+	supervisor.pools = newScopePools("run:"+string(config.Kind), source, config.ReconcileInterval, poolRetireAfter, WorkFamilyRunDue, logger, supervisor.newPool)
 	return supervisor, nil
 }
 

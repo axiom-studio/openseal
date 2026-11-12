@@ -342,13 +342,12 @@ func TestQueueDrivenSupervisorAdmitsScopesWithoutListingAndRetiresIdlePools(t *t
 	catalog, scope := governedActionCatalog(t)
 	source := &checkedScopeSource{}
 	source.active.Store(true)
-	supervisor, err := NewActionWorkerSupervisor(store, catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+	supervisor, err := newActionWorkerSupervisor(store, catalog, nil, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"ok": true}, nil
-	}), source, nil, DynamicActionWorkerConfig{Concurrency: 1, PollInterval: 5 * time.Millisecond, ReconcileInterval: 10 * time.Millisecond})
+	}), source, nil, DynamicActionWorkerConfig{Concurrency: 1, PollInterval: 5 * time.Millisecond, ReconcileInterval: 10 * time.Millisecond}, 60*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
-	supervisor.pools.retire = 60 * time.Millisecond
 	supervisor.SetWorkSignals(newQueueHarness(t).status)
 	supervisor.Start(t.Context())
 	defer supervisor.Stop()

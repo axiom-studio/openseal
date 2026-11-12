@@ -68,7 +68,7 @@ func NewActionWorkerSupervisor(
 	logger *zap.SugaredLogger,
 	config DynamicActionWorkerConfig,
 ) (*ActionWorkerSupervisor, error) {
-	return newActionWorkerSupervisor(store, catalog, credentials, nil, dispatcher, source, logger, config)
+	return newActionWorkerSupervisor(store, catalog, credentials, nil, dispatcher, source, logger, config, poolRetireAfter)
 }
 
 func NewActionCredentialLeaseWorkerSupervisor(
@@ -83,7 +83,7 @@ func NewActionCredentialLeaseWorkerSupervisor(
 	if issuer == nil {
 		return nil, errors.New("action credential lease issuer is required")
 	}
-	return newActionWorkerSupervisor(store, catalog, nil, issuer, dispatcher, source, logger, config)
+	return newActionWorkerSupervisor(store, catalog, nil, issuer, dispatcher, source, logger, config, poolRetireAfter)
 }
 
 func newActionWorkerSupervisor(
@@ -95,6 +95,7 @@ func newActionWorkerSupervisor(
 	source WorkerScopeSource,
 	logger *zap.SugaredLogger,
 	config DynamicActionWorkerConfig,
+	retire time.Duration,
 ) (*ActionWorkerSupervisor, error) {
 	if store == nil || catalog == nil || dispatcher == nil || source == nil {
 		return nil, errors.New("action store, catalog, dispatcher, and scope source are required")
@@ -109,7 +110,7 @@ func newActionWorkerSupervisor(
 		store: store, catalog: catalog, credentials: credentials, leaseIssuer: issuer, dispatcher: dispatcher,
 		config: config, logger: logger,
 	}
-	supervisor.pools = newScopePools("action", source, config.ReconcileInterval, WorkFamilyAction, logger, supervisor.newPool)
+	supervisor.pools = newScopePools("action", source, config.ReconcileInterval, retire, WorkFamilyAction, logger, supervisor.newPool)
 	return supervisor, nil
 }
 

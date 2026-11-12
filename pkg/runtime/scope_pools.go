@@ -49,9 +49,11 @@ type scopePools[P scopePool] struct {
 	wg       sync.WaitGroup
 }
 
-func newScopePools[P scopePool](name string, source WorkerScopeSource, interval time.Duration, dueFamily WorkFamily, logger *zap.SugaredLogger, create func(Scope) (P, error)) *scopePools[P] {
+// retire is how long a queue-driven pool stays idle before it stops;
+// supervisors pass poolRetireAfter.
+func newScopePools[P scopePool](name string, source WorkerScopeSource, interval, retire time.Duration, dueFamily WorkFamily, logger *zap.SugaredLogger, create func(Scope) (P, error)) *scopePools[P] {
 	return &scopePools[P]{
-		name: name, source: source, gate: newWorkScopeGate(source, interval), interval: interval, retire: poolRetireAfter, dueFamily: dueFamily,
+		name: name, source: source, gate: newWorkScopeGate(source, interval), interval: interval, retire: retire, dueFamily: dueFamily,
 		logger: logger, create: create, pools: make(map[Scope]P), pending: make(map[Scope]struct{}), requests: make(chan struct{}, 1),
 	}
 }
