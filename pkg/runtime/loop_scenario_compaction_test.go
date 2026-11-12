@@ -181,7 +181,8 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 		for _, entry := range log[first:entryIndex(log, compaction.ID)] {
 			kept += entry.Tokens
 		}
-		if keep := compactionKeepTokens(ModelWindow{ContextTokens: 64_000}); kept < keep {
+		// A 64k window keeps min(15k, a quarter of its 48k threshold).
+		if keep := int64(12_000); kept < keep {
 			t.Fatalf("kept tail = %d tokens, want at least %d", kept, keep)
 		}
 		requireCompactionKeepsToolPairs(t, log, compaction)
@@ -254,7 +255,7 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 		if n := len(f.steps(run.ID)); n != 4 {
 			t.Fatalf("step rows = %d, want 4", n)
 		}
-		events := f.events(run.ID, compactionEventType)
+		events := f.events(run.ID, "session.compacted")
 		if len(events) != 1 || events[0].Payload["entryId"] != compaction.ID || events[0].Payload["trigger"] != CompactionTriggerThreshold {
 			t.Fatalf("compaction events = %#v", events)
 		}
@@ -432,12 +433,13 @@ func TestLoopSecondLengthRejectionFailsVisibly(t *testing.T) {
 		done := f.driveToRest(run.ID, 3)
 		f.mustStatus(done, AgentRunStatusFailed)
 
+		const overflowMessage = "The conversation is too long for the model's context, even after compacting it."
 		failure := done.FailureExplanation
 		if failure == nil || failure.Code != TurnHostContextExceeded || failure.Kind != RunFailureKindContextOverflow ||
-			failure.Message != runFailureMessageContextExceeded {
+			failure.Message != overflowMessage {
 			t.Fatalf("failure explanation = %#v", failure)
 		}
-		if !strings.Contains(done.Error, runFailureMessageContextExceeded) {
+		if !strings.Contains(done.Error, overflowMessage) {
 			t.Fatalf("run error = %q, want the context overflow message", done.Error)
 		}
 		if n := len(compactionEntries(f, run.ID)); n != 1 {

@@ -13,6 +13,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// taskMinimumTurns is the fewest Turns a task's Run may be given (the
+// control child minimum); a source with less left cannot start one.
+const taskMinimumTurns int64 = 8
+
 // taskBudgetChat starts a chat with a first exchange, then posts the task
 // request and bounds its Run with budget before that Run's first claim. The
 // first exchange is there because the loop plans a bounded step's budget from
@@ -86,7 +90,7 @@ func TestLoopTaskAuthorityRequiresChildBudget(t *testing.T) {
 			c := newTaskFixture(t, store)
 			// One Turn goes to the step that starts the task; the remaining 8
 			// meet the child minimum exactly.
-			conversation, source := taskBudgetChat(c, BudgetPolicy{MaxTurns: controlMinimumChildTurns + 1})
+			conversation, source := taskBudgetChat(c, BudgetPolicy{MaxTurns: taskMinimumTurns + 1})
 			_, ended := c.drive(source.ID)
 			if ended.Status != AgentRunStatusCompleted {
 				t.Fatalf("source = %s (%#v), log %v", ended.Status, ended.FailureExplanation, c.entryTypes(source.ID))
@@ -100,12 +104,12 @@ func TestLoopTaskAuthorityRequiresChildBudget(t *testing.T) {
 				t.Fatalf("tasks = %#v", tasks)
 			}
 			work := c.mustRun(tasks[0].WorkRun.ID)
-			if work.Budget == nil || work.Budget.MaxTurns != controlMinimumChildTurns || work.Budget.MaxInputTokens != 0 || work.Budget.MaxCostMicros != 0 {
-				t.Fatalf("task budget = %#v, want the remaining %d Turns and nothing else bounded", work.Budget, controlMinimumChildTurns)
+			if work.Budget == nil || work.Budget.MaxTurns != taskMinimumTurns || work.Budget.MaxInputTokens != 0 || work.Budget.MaxCostMicros != 0 {
+				t.Fatalf("task budget = %#v, want the remaining %d Turns and nothing else bounded", work.Budget, taskMinimumTurns)
 			}
 			allocation, ok := c.mustRun(source.ID).BudgetAllocations[work.ID]
-			if !ok || allocation.MaxTurns != controlMinimumChildTurns {
-				t.Fatalf("source allocations = %#v, want the task's %d Turns", c.mustRun(source.ID).BudgetAllocations, controlMinimumChildTurns)
+			if !ok || allocation.MaxTurns != taskMinimumTurns {
+				t.Fatalf("source allocations = %#v, want the task's %d Turns", c.mustRun(source.ID).BudgetAllocations, taskMinimumTurns)
 			}
 			messages := c.messages(conversation.ID)
 			if len(messages) != 4 || messages[3].Content != ack {
@@ -117,7 +121,7 @@ func TestLoopTaskAuthorityRequiresChildBudget(t *testing.T) {
 	t.Run("below_child_minimum_is_a_tool_error", func(t *testing.T) {
 		eachStore(t, "task_budget_short", func(t *testing.T, store KernelStore) {
 			c := newTaskFixture(t, store)
-			conversation, source := taskBudgetChat(c, BudgetPolicy{MaxTurns: controlMinimumChildTurns})
+			conversation, source := taskBudgetChat(c, BudgetPolicy{MaxTurns: taskMinimumTurns})
 			_, ended := c.drive(source.ID)
 			if ended.Status != AgentRunStatusCompleted {
 				t.Fatalf("source = %s (%#v), log %v", ended.Status, ended.FailureExplanation, c.entryTypes(source.ID))
