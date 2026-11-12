@@ -26,10 +26,11 @@ func NewApprovalNotificationWorker(
 	store ApprovalNotificationStore,
 	transport *ExternalConversationTransportService,
 	callbackResolver CallbackAdapterResolver,
+	opts ...models.ServiceOption,
 ) *ApprovalNotificationWorker {
 	return &ApprovalNotificationWorker{
-		store: store, conversations: NewConversationService(store), transport: transport,
-		callbacks: NewCallbackRegistry(store, callbackResolver), now: time.Now,
+		store: store, conversations: NewConversationService(store, opts...), transport: transport,
+		callbacks: NewCallbackRegistry(store, callbackResolver, opts...), now: models.ClockFrom(opts),
 	}
 }
 

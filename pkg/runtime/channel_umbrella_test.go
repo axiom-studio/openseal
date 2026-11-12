@@ -34,7 +34,7 @@ func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
 		t.Cleanup(func() { _ = sqlite.Close() })
 		return sqlite
 	}()} {
-		service := NewExternalConversationGatewayService(store)
+		service := NewExternalConversationGatewayService(store, nil)
 		team := gateway
 		team.Owner, team.DeploymentID = ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, "crew"
 		for id, value := range map[string]ExternalConversationIngressGateway{"agent-gateway": gateway, "team-gateway": team} {
@@ -58,7 +58,7 @@ func TestSQLiteChannelUmbrellaBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: "tenant-1"}
-	if _, err := NewExternalConversationGatewayService(store).Create(context.Background(), CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
+	if _, err := NewExternalConversationGatewayService(store, nil).Create(context.Background(), CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
 		Gateway: storetest.IngressGateway(scope), Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
 		t.Fatal(err)
 	}

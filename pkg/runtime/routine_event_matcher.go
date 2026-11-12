@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/google/uuid"
 )
@@ -61,11 +62,11 @@ var _ RoutineEventOfferer = (*RoutineEventMatcher)(nil)
 // same store value, so the host must pass the store its
 // RunbookActivationService writes to (not a wrapper of it). A store that
 // cannot be a map key could never be followed, so it panics here.
-func NewRoutineEventMatcher(store routineEventMatcherStore) *RoutineEventMatcher {
+func NewRoutineEventMatcher(store routineEventMatcherStore, opts ...models.ServiceOption) *RoutineEventMatcher {
 	if _, ok := routineActivationObserverKey(store); !ok {
 		panic("routine event matcher needs a comparable store (a pointer) so activation writes refresh its index")
 	}
-	matcher := &RoutineEventMatcher{store: store, nudge: make(chan struct{}, 1), now: time.Now}
+	matcher := &RoutineEventMatcher{store: store, nudge: make(chan struct{}, 1), now: models.ClockFrom(opts)}
 	matcher.index.current.Store(&routineEventIndex{scopes: map[Scope]routineEventScopeKeys{}})
 	matcher.unregister = registerRoutineActivationObserver(store, matcher.activationWritten)
 	return matcher

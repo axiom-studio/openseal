@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -56,8 +57,8 @@ type ExternalConversationTransportService struct {
 	now      func() time.Time
 }
 
-func NewExternalConversationTransportService(store ExternalConversationStore, resolver ExternalConversationAdapterResolver) *ExternalConversationTransportService {
-	return &ExternalConversationTransportService{store: store, resolver: resolver, now: time.Now}
+func NewExternalConversationTransportService(store ExternalConversationStore, resolver ExternalConversationAdapterResolver, opts ...models.ServiceOption) *ExternalConversationTransportService {
+	return &ExternalConversationTransportService{store: store, resolver: resolver, now: models.ClockFrom(opts)}
 }
 
 // SetRoutineEventOfferer lets verified Slack and Telegram messages start event

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -67,17 +68,17 @@ type AgentRequestInboxReconciler struct {
 	now                func() time.Time
 }
 
-func NewAgentRequestInboxReconciler(store AgentRequestInboxStore) (*AgentRequestInboxReconciler, error) {
+func NewAgentRequestInboxReconciler(store AgentRequestInboxStore, opts ...models.ServiceOption) (*AgentRequestInboxReconciler, error) {
 	if store == nil {
 		return nil, errors.New("AgentRequest inbox store is required")
 	}
 	reconciler := &AgentRequestInboxReconciler{
-		collaboration: NewCollaborationService(store),
-		commands:      NewRunCommandService(store),
-		now:           time.Now,
+		collaboration: NewCollaborationService(store, opts...),
+		commands:      NewRunCommandService(store, opts...),
+		now:           models.ClockFrom(opts),
 	}
 	if conversationStore, ok := store.(agentRequestInboxConversationStore); ok {
-		reconciler.projector, _ = NewAgentRequestConversationProjector(conversationStore)
+		reconciler.projector, _ = NewAgentRequestConversationProjector(conversationStore, opts...)
 	}
 	return reconciler, nil
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -59,8 +60,8 @@ type ExternalConversationEndpointService struct {
 	newID    func() string
 }
 
-func NewExternalConversationEndpointService(store ExternalConversationEndpointStore, resolver ExternalConversationAdapterResolver) *ExternalConversationEndpointService {
-	return &ExternalConversationEndpointService{store: store, resolver: resolver, now: time.Now, newID: uuid.NewString}
+func NewExternalConversationEndpointService(store ExternalConversationEndpointStore, resolver ExternalConversationAdapterResolver, opts ...models.ServiceOption) *ExternalConversationEndpointService {
+	return &ExternalConversationEndpointService{store: store, resolver: resolver, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
 func (s *ExternalConversationEndpointService) Create(ctx context.Context, req CreateExternalConversationEndpointRequest) (*ExternalConversationEndpoint, error) {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -152,6 +153,7 @@ func NewExternalConversationDeliveryWorker(
 	resolver ExternalConversationAdapterResolver,
 	host ExternalConversationAdapterHost,
 	config ExternalConversationDeliveryWorkerConfig,
+	opts ...models.ServiceOption,
 ) (*ExternalConversationDeliveryWorker, error) {
 	if store == nil || resolver == nil || host == nil {
 		return nil, errors.New("external conversation store, adapter resolver, and host are required")
@@ -161,7 +163,7 @@ func NewExternalConversationDeliveryWorker(
 		return nil, err
 	}
 	return &ExternalConversationDeliveryWorker{
-		store: store, resolver: resolver, host: host, config: normalized, now: time.Now,
+		store: store, resolver: resolver, host: host, config: normalized, now: models.ClockFrom(opts),
 	}, nil
 }
 

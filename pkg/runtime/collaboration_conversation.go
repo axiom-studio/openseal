@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const agentRequestProjectionCacheLimit = 10000
@@ -24,13 +26,13 @@ type AgentRequestConversationProjector struct {
 func NewAgentRequestConversationProjector(store interface {
 	CollaborationKernelStore
 	ConversationStore
-}) (*AgentRequestConversationProjector, error) {
+}, opts ...models.ServiceOption) (*AgentRequestConversationProjector, error) {
 	if store == nil {
 		return nil, errors.New("collaboration conversation store is required")
 	}
 	return &AgentRequestConversationProjector{
-		collaboration: NewCollaborationService(store),
-		conversations: NewConversationService(store),
+		collaboration: NewCollaborationService(store, opts...),
+		conversations: NewConversationService(store, opts...),
 		completed:     make(map[string]struct{}),
 	}, nil
 }

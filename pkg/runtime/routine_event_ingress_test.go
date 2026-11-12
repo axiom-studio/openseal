@@ -111,7 +111,7 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	// reply; the routine hears them anyway (E14).
 	catalog, endpoint := routineConnectionFixture(t, h, "slack", ExternalConversationSelectMentions)
 	activation := conversationRoutine(h, endpoint, RoutineEventSlackMessage, "channel")
-	gateways := NewExternalConversationGatewayService(h.store)
+	gateways := NewExternalConversationGatewayService(h.store, nil)
 	registration := createActiveExternalConversationGateway(t, h.ctx, gateways, CreateExternalConversationGatewayRequest{
 		ID: "acme-slack", Name: "Acme Slack", Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "pinned tenant gateway",
 		Gateway: ExternalConversationIngressGateway{
@@ -216,7 +216,7 @@ func TestTelegramMessageOffersRoutineEvent(t *testing.T) {
 		Attributes:  map[string]interface{}{"chatTitle": "Support desk", "participantUsername": "ana_r"},
 	}
 	// An unpinned gateway: authority comes from each mapped endpoint.
-	gateways := NewExternalConversationGatewayService(h.store)
+	gateways := NewExternalConversationGatewayService(h.store, nil)
 	registration := createActiveExternalConversationGateway(t, h.ctx, gateways, CreateExternalConversationGatewayRequest{
 		ID: "telegram-bot", Name: "Telegram bot", Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "unpinned gateway",
 		Gateway: ExternalConversationIngressGateway{

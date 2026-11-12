@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const (
@@ -103,11 +105,11 @@ type ConversationChangeService struct {
 	now           func() time.Time
 }
 
-func NewConversationChangeService(conversationStore ConversationStore, portfolio PortfolioStore) (*ConversationChangeService, error) {
+func NewConversationChangeService(conversationStore ConversationStore, portfolio PortfolioStore, opts ...models.ServiceOption) (*ConversationChangeService, error) {
 	if conversationStore == nil || portfolio == nil {
 		return nil, errors.New("conversation and portfolio stores are required")
 	}
-	service := &ConversationChangeService{conversations: NewConversationService(conversationStore), portfolio: portfolio, now: time.Now}
+	service := &ConversationChangeService{conversations: NewConversationService(conversationStore, opts...), portfolio: portfolio, now: models.ClockFrom(opts)}
 	service.activity, _ = portfolio.(RunActivityStore)
 	service.approvals, _ = portfolio.(conversationApprovalStore)
 	if store, ok := portfolio.(SkillSetupRequestStore); ok {

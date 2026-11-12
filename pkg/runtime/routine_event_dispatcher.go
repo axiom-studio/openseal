@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
@@ -102,8 +103,8 @@ type RoutineEventDispatcher struct {
 }
 
 // NewRoutineEventDispatcher builds a dispatcher on the matcher's store.
-func NewRoutineEventDispatcher(store KernelStore, matcher *RoutineEventMatcher) *RoutineEventDispatcher {
-	dispatcher := &RoutineEventDispatcher{store: store, matcher: matcher, now: time.Now, minPassGap: routineEventMinPassGap, workCursors: map[Scope]string{}}
+func NewRoutineEventDispatcher(store KernelStore, matcher *RoutineEventMatcher, opts ...models.ServiceOption) *RoutineEventDispatcher {
+	dispatcher := &RoutineEventDispatcher{store: store, matcher: matcher, now: models.ClockFrom(opts), minPassGap: routineEventMinPassGap, workCursors: map[Scope]string{}}
 	if reportingStore, ok := store.(ConversationStore); ok {
 		dispatcher.reportingStore = reportingStore
 	}

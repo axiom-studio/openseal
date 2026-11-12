@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -38,13 +39,10 @@ type ExternalConversationGatewayService struct {
 
 func NewExternalConversationGatewayService(
 	store ExternalConversationGatewayStore,
-	resolver ...ExternalConversationAdapterResolver,
+	resolver ExternalConversationAdapterResolver,
+	opts ...models.ServiceOption,
 ) *ExternalConversationGatewayService {
-	service := &ExternalConversationGatewayService{store: store, now: time.Now, newID: uuid.NewString}
-	if len(resolver) > 0 {
-		service.resolver = resolver[0]
-	}
-	return service
+	return &ExternalConversationGatewayService{store: store, resolver: resolver, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
 func (s *ExternalConversationGatewayService) Create(

@@ -14,6 +14,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/google/uuid"
 )
@@ -178,8 +179,8 @@ type CollaborationService struct {
 	newID             func() string
 }
 
-func NewCollaborationService(store CollaborationKernelStore) *CollaborationService {
-	service := &CollaborationService{store: store, runs: store, artifacts: store, dependencies: NewDependencyCoordinator(store), now: time.Now, newID: uuid.NewString}
+func NewCollaborationService(store CollaborationKernelStore, opts ...models.ServiceOption) *CollaborationService {
+	service := &CollaborationService{store: store, runs: store, artifacts: store, dependencies: NewDependencyCoordinator(store, opts...), now: models.ClockFrom(opts), newID: uuid.NewString}
 	service.teams = teamRosterReader(store)
 	return service
 }

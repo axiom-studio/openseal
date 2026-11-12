@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ExternalConversationReplyWorker projects applied inbox work after its
@@ -40,14 +41,15 @@ func externalConversationReplyRetryDelay(attempt int) time.Duration {
 func NewExternalConversationReplyWorker(
 	store ExternalConversationReplyStore,
 	resolver ExternalConversationAdapterResolver,
+	opts ...models.ServiceOption,
 ) (*ExternalConversationReplyWorker, error) {
 	if store == nil || resolver == nil {
 		return nil, errors.New("external conversation reply store and adapter resolver are required")
 	}
 	return &ExternalConversationReplyWorker{
-		store: store, conversations: NewConversationService(store),
-		transport: NewExternalConversationTransportService(store, resolver),
-		now:       time.Now,
+		store: store, conversations: NewConversationService(store, opts...),
+		transport: NewExternalConversationTransportService(store, resolver, opts...),
+		now:       models.ClockFrom(opts),
 	}, nil
 }
 

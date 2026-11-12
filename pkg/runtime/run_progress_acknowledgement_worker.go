@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -76,6 +77,7 @@ func NewRunProgressAcknowledgementWorker(
 	resolver ExternalConversationAdapterResolver,
 	renderer RunProgressAcknowledgementRenderer,
 	config RunProgressAcknowledgementWorkerConfig,
+	opts ...models.ServiceOption,
 ) (*RunProgressAcknowledgementWorker, error) {
 	if store == nil || resolver == nil || renderer == nil {
 		return nil, errors.New("Run progress acknowledgement store, adapter resolver, and renderer are required")
@@ -85,8 +87,8 @@ func NewRunProgressAcknowledgementWorker(
 		return nil, err
 	}
 	return &RunProgressAcknowledgementWorker{
-		store: store, resolver: resolver, renderer: renderer, conversations: NewConversationService(store),
-		transport: NewExternalConversationTransportService(store, resolver), config: normalized, now: time.Now,
+		store: store, resolver: resolver, renderer: renderer, conversations: NewConversationService(store, opts...),
+		transport: NewExternalConversationTransportService(store, resolver, opts...), config: normalized, now: models.ClockFrom(opts),
 	}, nil
 }
 

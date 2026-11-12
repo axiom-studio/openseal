@@ -50,7 +50,7 @@ type RunbookStepProducer struct {
 	now        func() time.Time
 }
 
-func NewRunbookStepProducer(definition *runbook.Definition, entrypoint string, calls ActionCallReader) (*RunbookStepProducer, error) {
+func NewRunbookStepProducer(definition *runbook.Definition, entrypoint string, calls ActionCallReader, opts ...models.ServiceOption) (*RunbookStepProducer, error) {
 	if diagnostics := runbook.Validate(definition); len(diagnostics) > 0 {
 		return nil, fmt.Errorf("invalid runbook %s: %s", diagnostics[0].Path, diagnostics[0].Message)
 	}
@@ -64,7 +64,7 @@ func NewRunbookStepProducer(definition *runbook.Definition, entrypoint string, c
 	if _, ok := definition.Entrypoints[entrypoint]; !ok {
 		return nil, fmt.Errorf("runbook entrypoint %q is not defined", entrypoint)
 	}
-	return &RunbookStepProducer{definition: definition, entrypoint: entrypoint, calls: calls, now: time.Now}, nil
+	return &RunbookStepProducer{definition: definition, entrypoint: entrypoint, calls: calls, now: models.ClockFrom(opts)}, nil
 }
 
 func (p *RunbookStepProducer) Kind() StepProducerKind { return StepProducerDeterministic }

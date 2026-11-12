@@ -169,7 +169,7 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 		Adapter: endpoint.Adapter, Provider: endpoint.Provider,
 	}
 	service := NewExternalConversationTransportService(store, catalog)
-	gateways := NewExternalConversationGatewayService(store)
+	gateways := NewExternalConversationGatewayService(store, nil)
 	registration := createActiveExternalConversationGateway(t, ctx, gateways, CreateExternalConversationGatewayRequest{
 		ID: "shared-slack", Name: "Shared Slack events", Gateway: gateway,
 		Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create verified route acceptance",
@@ -316,7 +316,7 @@ func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
 			InstallationID: "T-shared", ApplicationID: "A-shared", Address: "C-shared", Event: event,
 		}},
 	}}
-	registration := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store),
+	registration := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, nil),
 		CreateExternalConversationGatewayRequest{
 			ID: "tenant-slack", Name: "Tenant Slack",
 			Gateway: ExternalConversationIngressGateway{

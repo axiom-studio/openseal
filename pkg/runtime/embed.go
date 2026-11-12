@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -65,11 +66,11 @@ type EmbedSessionService struct {
 	randomToken   func() (string, error)
 }
 
-func NewEmbedSessionService(store EmbedStore, conversations ConversationStore) (*EmbedSessionService, error) {
+func NewEmbedSessionService(store EmbedStore, conversations ConversationStore, opts ...models.ServiceOption) (*EmbedSessionService, error) {
 	if store == nil || conversations == nil {
 		return nil, errors.New("embed and conversation stores are required")
 	}
-	return &EmbedSessionService{store: store, conversations: NewConversationService(conversations), now: time.Now, newID: uuid.NewString, randomToken: randomEmbedToken}, nil
+	return &EmbedSessionService{store: store, conversations: NewConversationService(conversations, opts...), now: models.ClockFrom(opts), newID: uuid.NewString, randomToken: randomEmbedToken}, nil
 }
 
 func (s *EmbedSessionService) CreateInstallation(ctx context.Context, req CreateEmbedInstallationRequest) (*EmbedInstallation, error) {

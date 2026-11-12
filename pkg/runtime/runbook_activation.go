@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -357,8 +358,8 @@ type RunbookActivationService struct {
 func NewRunbookActivationService(store interface {
 	RunbookActivationStore
 	PortfolioStore
-}) *RunbookActivationService {
-	return &RunbookActivationService{store: store, now: time.Now}
+}, opts ...models.ServiceOption) *RunbookActivationService {
+	return &RunbookActivationService{store: store, now: models.ClockFrom(opts)}
 }
 
 // WithRoutineEventSources sets the host's Google catalog for the source

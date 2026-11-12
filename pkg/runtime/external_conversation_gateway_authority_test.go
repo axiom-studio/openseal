@@ -116,7 +116,7 @@ func TestLegacyUnpinnedGatewayDoesNotAcceptUnboundEvent(t *testing.T) {
 func TestSQLiteGatewayAuthorityBackfillSurvivesRestartAndRejectsAmbiguity(t *testing.T) {
 	ctx := context.Background()
 	memory, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-	legacy := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(memory), CreateExternalConversationGatewayRequest{
+	legacy := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(memory, nil), CreateExternalConversationGatewayRequest{
 		ID: "legacy-gateway", Name: "Legacy gateway",
 		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
 		Actor:   ActivityActor{Type: "test", ID: "operator"}, Reason: "Create pre-migration provider routing",

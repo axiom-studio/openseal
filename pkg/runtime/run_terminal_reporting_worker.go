@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -43,12 +44,12 @@ type RunTerminalReportingWorker struct {
 func NewRunTerminalReportingWorker(store interface {
 	RunTerminalReportingStore
 	ConversationStore
-}, options RunTerminalReportingWorkerOptions) (*RunTerminalReportingWorker, error) {
+}, options RunTerminalReportingWorkerOptions, opts ...models.ServiceOption) (*RunTerminalReportingWorker, error) {
 	if store == nil || !validOpaqueIdentifier(options.WorkerID, 180) || options.LeaseDuration < 3*time.Second || options.LeaseDuration > 5*time.Minute || options.BatchSize < 1 || options.BatchSize > 100 || options.Concurrency < 1 || options.Concurrency > 32 || options.Concurrency > options.BatchSize {
 		return nil, ErrInvalidRunTerminalReport
 	}
 	return &RunTerminalReportingWorker{
-		store: store, options: options, now: time.Now,
+		store: store, options: options, now: models.ClockFrom(opts),
 		project: func(ctx context.Context, run *AgentRun) error { return projectTerminalRunReporting(ctx, store, run) },
 	}, nil
 }

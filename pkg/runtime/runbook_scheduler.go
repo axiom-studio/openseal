@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
@@ -45,8 +46,8 @@ func NewRunbookScheduler(store interface {
 	RunCommandStore
 	PortfolioStore
 	RunbookActivationStore
-}) *RunbookScheduler {
-	scheduler := &RunbookScheduler{store: store, now: time.Now}
+}, opts ...models.ServiceOption) *RunbookScheduler {
+	scheduler := &RunbookScheduler{store: store, now: models.ClockFrom(opts)}
 	if reportingStore, ok := store.(ConversationStore); ok {
 		scheduler.reportingStore = reportingStore
 	}

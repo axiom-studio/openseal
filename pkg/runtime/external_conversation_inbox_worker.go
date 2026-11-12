@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const externalConversationActorID = "openseal.external-conversation"
@@ -113,6 +114,7 @@ func NewExternalConversationInboxWorker(
 	store ExternalConversationStore,
 	dispatcher ExternalConversationDispatcher,
 	config ExternalConversationInboxWorkerConfig,
+	opts ...models.ServiceOption,
 ) (*ExternalConversationInboxWorker, error) {
 	if store == nil || dispatcher == nil {
 		return nil, errors.New("external conversation store and dispatcher are required")
@@ -122,7 +124,7 @@ func NewExternalConversationInboxWorker(
 		return nil, err
 	}
 	return &ExternalConversationInboxWorker{
-		store: store, conversations: NewConversationService(store), dispatcher: dispatcher, config: normalized, now: time.Now,
+		store: store, conversations: NewConversationService(store, opts...), dispatcher: dispatcher, config: normalized, now: models.ClockFrom(opts),
 	}, nil
 }
 

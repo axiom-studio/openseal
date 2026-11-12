@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -63,8 +64,8 @@ type ConversationTaskService struct {
 	now               func() time.Time
 }
 
-func NewConversationTaskService(store ConversationTaskKernelStore) *ConversationTaskService {
-	return &ConversationTaskService{store: store, now: time.Now}
+func NewConversationTaskService(store ConversationTaskKernelStore, opts ...models.ServiceOption) *ConversationTaskService {
+	return &ConversationTaskService{store: store, now: models.ClockFrom(opts)}
 }
 
 func (s *ConversationTaskService) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {

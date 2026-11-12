@@ -22,7 +22,7 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: "tenant-1"}
-	service := NewExternalConversationGatewayService(store)
+	service := NewExternalConversationGatewayService(store, nil)
 	if _, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
 		ID: "unsafe-active", Name: "Unsafe active", Gateway: storetest.IngressGateway(scope),
 		Status: ExternalConversationGatewayActive,
@@ -55,7 +55,7 @@ func TestExternalConversationGatewayServicePersistsAndUsesCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	service = NewExternalConversationGatewayService(reopened)
+	service = NewExternalConversationGatewayService(reopened, nil)
 	persisted, err := service.GetByIngressRoute(ctx, created.IngressRoute)
 	if err != nil || persisted.ID != created.ID || persisted.Status != ExternalConversationGatewayActive {
 		t.Fatalf("persisted gateway = %#v, err = %v", persisted, err)

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -116,8 +117,8 @@ type ConversationService struct {
 	reactions MessageReactionProjector
 }
 
-func NewConversationService(store ConversationStore) *ConversationService {
-	return &ConversationService{store: store, now: time.Now, newID: uuid.NewString}
+func NewConversationService(store ConversationStore, opts ...models.ServiceOption) *ConversationService {
+	return &ConversationService{store: store, now: models.ClockFrom(opts), newID: uuid.NewString}
 }
 
 func (s *ConversationService) CreateConversation(ctx context.Context, req CreateConversationRequest) (*Conversation, bool, error) {

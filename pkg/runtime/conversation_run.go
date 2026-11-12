@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
@@ -78,6 +79,7 @@ func NewConversationRunScheduler(
 	conversationStore ConversationStore,
 	runStore RunCommandStore,
 	config ConversationRunSchedulerConfig,
+	opts ...models.ServiceOption,
 ) (*ConversationRunScheduler, error) {
 	if conversationStore == nil || runStore == nil {
 		return nil, errors.New("conversation and run command stores are required")
@@ -87,11 +89,11 @@ func NewConversationRunScheduler(
 		return nil, err
 	}
 	return &ConversationRunScheduler{
-		conversations:     NewConversationService(conversationStore),
-		runs:              NewRunCommandService(runStore),
+		conversations:     NewConversationService(conversationStore, opts...),
+		runs:              NewRunCommandService(runStore, opts...),
 		conversationStore: conversationStore,
 		runStore:          runStore,
-		approvals:         NewApprovalCoordinator(runStore, runStore, nil),
+		approvals:         NewApprovalCoordinator(runStore, runStore, nil, opts...),
 		config:            normalized,
 	}, nil
 }
@@ -585,6 +587,7 @@ func NewConversationRunTurnRunner(
 	conversationStore ConversationStore,
 	coordinator *ConversationCoordinator,
 	config ConversationRunTurnRunnerConfig,
+	opts ...models.ServiceOption,
 ) (*ConversationRunTurnRunner, error) {
 	if conversationStore == nil || coordinator == nil {
 		return nil, ErrConversationCoordinationUnavailable
@@ -594,11 +597,11 @@ func NewConversationRunTurnRunner(
 		return nil, err
 	}
 	runner := &ConversationRunTurnRunner{
-		conversations: NewConversationService(conversationStore), conversationStore: conversationStore, coordinator: coordinator,
-		config: normalized, agentTurns: normalized.AgentTurns, now: time.Now,
+		conversations: NewConversationService(conversationStore, opts...), conversationStore: conversationStore, coordinator: coordinator,
+		config: normalized, agentTurns: normalized.AgentTurns, now: models.ClockFrom(opts),
 	}
 	if runs, ok := conversationStore.(RunCommandStore); ok {
-		runner.runs = NewRunCommandService(runs)
+		runner.runs = NewRunCommandService(runs, opts...)
 		runner.runStore = runs
 	}
 	if portfolio, ok := conversationStore.(PortfolioStore); ok {
