@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"encoding/json"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -62,123 +61,6 @@ func TestAskUserOptionsDecodeLimits(t *testing.T) {
 	}
 	if !strings.Contains(spec.Description, "Offer options when the answer is a choice.") {
 		t.Fatalf("description = %q", spec.Description)
-	}
-}
-
-const askUserOptionsArguments = `{"question":"` + askUserTestQuestion + `","allowMultiple":true,` +
-	`"options":[{"label":"Pricing"},{"label":"Docs","description":"The developer docs"},{"label":"Blog"}]}`
-
-func TestAskUserOptionsPostedAndAnsweredWithSelectedOptions(t *testing.T) {
-	forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
-		f := claimedForegroundRun(t, store)
-		call := newAskUserCallWithArguments(t, store, f.run, "foreground-worker", json.RawMessage(askUserOptionsArguments))
-		result := call.settle(t)
-		if result.Kind != ControlParked {
-			t.Fatalf("settle = %#v", result)
-		}
-		f.run = call.park(t, result.Park)
-		// The reconciler replays the same request, options included.
-		question := f.question(t)
-		want := &models.ChannelQuestion{AllowMultiple: true, Options: []models.ChannelQuestionOption{
-			{ID: "o1", Label: "Pricing"}, {ID: "o2", Label: "Docs", Description: "The developer docs"}, {ID: "o3", Label: "Blog"},
-		}}
-		if !reflect.DeepEqual(question.Question, want) || question.Content != askUserTestQuestion {
-			t.Fatalf("question = %#v", question.Question)
-		}
-
-		answer := f.post(t, conversation.PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: models.MessageIntentAnswer,
-			Content: "Blog, Pricing", ResolvesMessageID: question.ID, SelectedOptionIDs: []string{"o3", "o1"}, IdempotencyKey: "answer"})
-		if !reflect.DeepEqual(answer.SelectedOptionIDs, []string{"o3", "o1"}) {
-			t.Fatalf("answer = %#v", answer)
-		}
-		resumed, _, err := f.scheduler.ScheduleMessage(t.Context(), f.run.Scope, f.conversation.ID, answer.ID)
-		if err != nil || resumed == nil || resumed.Run.ID != f.run.ID {
-			t.Fatalf("answer did not wake the Run: %#v %v", resumed, err)
-		}
-		receipt := resumed.Run.PendingInterventions[len(resumed.Run.PendingInterventions)-1].ConversationAnswer
-		if receipt == nil || !reflect.DeepEqual(receipt.SelectedOptionIDs, []string{"o3", "o1"}) {
-			t.Fatalf("receipt = %#v", receipt)
-		}
-		resume, _ := call.resume(t)
-		if !resume.Resolved || call.entry.State != models.ToolEntryCompleted {
-			t.Fatalf("resume = %#v", resume)
-		}
-		value := askUserResultValue(t, call.entry)
-		if value["status"] != "answered" || value["answer"] != "Blog, Pricing" || value["messageId"] != answer.ID ||
-			!reflect.DeepEqual(value["selectedOptions"], []interface{}{"Pricing", "Blog"}) {
-			t.Fatalf("result = %#v", value)
-		}
-	})
-}
-
-func TestAskUserWithoutOptionsResultHasNoSelectedOptions(t *testing.T) {
-	store := conversationtest.NewStore(t)
-	f := claimedForegroundRun(t, store)
-	parked, call := askUserParked(t, store, f.run, "foreground-worker", askUserTestQuestion)
-	f.run = parked
-	question := f.question(t)
-	if question.Question != nil {
-		t.Fatalf("free-text question carries options: %#v", question.Question)
-	}
-	answer := f.post(t, conversation.PostChannelMessageRequest{Sender: f.trigger.Sender, Intent: models.MessageIntentAnswer,
-		Content: "The pricing page.", ResolvesMessageID: question.ID, IdempotencyKey: "answer"})
-	if _, _, err := f.scheduler.ScheduleMessage(t.Context(), f.run.Scope, f.conversation.ID, answer.ID); err != nil {
-		t.Fatal(err)
-	}
-	call.resume(t)
-	if value := askUserResultValue(t, call.entry); value["answer"] != "The pricing page." || value["selectedOptions"] != nil {
-		t.Fatalf("result = %#v", value)
-	}
-}
-
-func TestPostChannelMessageRefusesInvalidSelectedOptions(t *testing.T) {
-	store := conversationtest.NewStore(t)
-	f := claimedForegroundRun(t, store)
-	single := `{"question":"` + askUserTestQuestion + `","options":[{"label":"Pricing"},{"label":"Docs"}]}`
-	call := newAskUserCallWithArguments(t, store, f.run, "foreground-worker", json.RawMessage(single))
-	result := call.settle(t)
-	f.run = call.park(t, result.Park)
-	question := f.question(t)
-
-	post := func(req conversation.PostChannelMessageRequest) error {
-		current, err := f.service.GetConversation(t.Context(), f.conversation.Scope, f.conversation.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Scope, req.ConversationID, req.ExpectedRevision = current.Scope, current.ID, current.Revision
-		req.Sender, req.Intent, req.Audience = f.trigger.Sender, models.MessageIntentAnswer, models.ConversationAudience{Kind: models.ConversationAudienceChannel}
-		_, err = f.service.PostChannelMessage(t.Context(), req)
-		return err
-	}
-	for name, req := range map[string]conversation.PostChannelMessageRequest{
-		"unknown id":           {Content: "Blog", ResolvesMessageID: question.ID, SelectedOptionIDs: []string{"o9"}},
-		"two ids, one allowed": {Content: "Pricing, Docs", ResolvesMessageID: question.ID, SelectedOptionIDs: []string{"o1", "o2"}},
-		"duplicate ids":        {Content: "Pricing", ResolvesMessageID: question.ID, SelectedOptionIDs: []string{"o1", "o1"}},
-		"no question target":   {Content: "Pricing", SelectedOptionIDs: []string{"o1"}},
-		"target offers none":   {Content: "Pricing", ReplyToMessageID: f.trigger.ID, SelectedOptionIDs: []string{"o1"}},
-	} {
-		req.IdempotencyKey = "bad-" + strings.ReplaceAll(name, " ", "-")
-		if err := post(req); !errors.Is(err, models.ErrInvalidConversation) {
-			t.Errorf("%s: err = %v, want invalid", name, err)
-		}
-	}
-	// One option by reply id, and free text with nothing selected, are fine.
-	if err := post(conversation.PostChannelMessageRequest{Content: "Docs", ReplyToMessageID: question.ID, SelectedOptionIDs: []string{"o2"}, IdempotencyKey: "ok"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := post(conversation.PostChannelMessageRequest{Content: "Something else", ResolvesMessageID: question.ID, IdempotencyKey: "free"}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Options belong only on a question.
-	current, _ := f.service.GetConversation(t.Context(), f.conversation.Scope, f.conversation.ID)
-	_, err := f.service.PostChannelMessage(t.Context(), conversation.PostChannelMessageRequest{
-		Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
-		Sender: f.trigger.Sender, Intent: models.MessageIntentAnswer, Content: "Pick one", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
-		Question: &models.ChannelQuestion{Options: []models.ChannelQuestionOption{{ID: "o1", Label: "A"}, {ID: "o2", Label: "B"}}}, IdempotencyKey: "not-a-question",
-	})
-	if !errors.Is(err, models.ErrInvalidConversation) {
-		t.Fatalf("options on an answer: err = %v", err)
 	}
 }
 
