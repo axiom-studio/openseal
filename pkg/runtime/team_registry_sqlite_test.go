@@ -7,6 +7,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -35,7 +36,7 @@ func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	teams := kernelteam.NewRegistryWithStore(store, agents)
-	if _, err := teams.RegisterDefinition(ctx, sqliteTeamDefinition("1")); err != nil {
+	if _, err := teams.RegisterDefinition(ctx, storetest.TeamDefinition("1")); err != nil {
 		t.Fatal(err)
 	}
 	deployment, _, err := teams.CreateDeployment(ctx, &kernelteam.Deployment{
@@ -45,7 +46,7 @@ func TestSQLiteTeamDefinitionsRosterAndActivationsSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate := sqliteTeamDefinition("2")
+	candidate := storetest.TeamDefinition("2")
 	candidate.Purpose = "Produce reviewed evidence-backed findings"
 	amendment, err := teams.ProposeAmendment(ctx, kernelteam.ProposeAmendmentRequest{
 		Scope: scope, DeploymentID: deployment.ID, Candidate: candidate, ProposerType: "user", ProposerID: "operator", Rationale: "Require reviewed findings",

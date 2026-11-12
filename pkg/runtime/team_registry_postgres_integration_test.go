@@ -12,6 +12,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -49,7 +50,7 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	}
 	primaryTeams := kernelteam.NewRegistryWithStore(primary, primaryAgents)
 	for _, version := range []string{"1", "2"} {
-		if _, err := primaryTeams.RegisterDefinition(ctx, sqliteTeamDefinition(version)); err != nil {
+		if _, err := primaryTeams.RegisterDefinition(ctx, storetest.TeamDefinition(version)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -93,7 +94,7 @@ func TestPostgresTeamRegistryIsConcurrentRestartSafeAndScoped(t *testing.T) {
 	if activated.Load() != 1 {
 		t.Fatalf("successful concurrent activations = %d, want 1", activated.Load())
 	}
-	candidate := sqliteTeamDefinition("3")
+	candidate := storetest.TeamDefinition("3")
 	candidate.Purpose = "Produce independently reviewed evidence-backed findings"
 	amendment, err := primaryTeams.ProposeAmendment(ctx, kernelteam.ProposeAmendmentRequest{
 		Scope: scope, DeploymentID: deploymentInput.ID, Candidate: candidate, ProposerType: "user", ProposerID: "operator", Rationale: "Independent review",

@@ -1,4 +1,4 @@
-package runtime
+package storetest
 
 import (
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -6,7 +6,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-func sqliteTeamDefinition(version string) *kernelteam.Definition {
+// TeamDefinition is the research team definition the team store tests
+// register, at version.
+func TeamDefinition(version string) *kernelteam.Definition {
 	return &kernelteam.Definition{
 		ID: "research-team", Version: version, DisplayName: "Research Team", Purpose: "Produce evidence-backed findings",
 		Delegation: kernelteam.DelegationPolicy{MaximumDepth: 2, MaximumConcurrent: 4, RequireAcceptance: true},

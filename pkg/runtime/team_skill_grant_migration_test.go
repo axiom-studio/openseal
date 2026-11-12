@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -20,7 +21,7 @@ func TestSQLiteMigrationStripsTeamSkillGrantsAndRecomputesDigest(t *testing.T) {
 	}
 	db := openTestSQLiteDB(t, path)
 	teams := kernelteam.NewRegistryWithStore(store, kernelagent.NewRegistryWithStore(store))
-	registered, err := teams.RegisterDefinition(ctx, sqliteTeamDefinition("1"))
+	registered, err := teams.RegisterDefinition(ctx, storetest.TeamDefinition("1"))
 	if err != nil {
 		t.Fatal(err)
 	}
