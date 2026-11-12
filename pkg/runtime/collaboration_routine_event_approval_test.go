@@ -51,7 +51,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	if result.Approval == nil {
 		t.Fatalf("event occurrence write ran without review: %#v", result.Call)
 	}
-	f.parkOnApproval(result.Approval.ID)
+	f.ParkOnApproval(result.Approval.ID)
 	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalManual).Conversation
 	plain := proposeForApprovalMode(t, store, coordinator, conversation, "note")
 

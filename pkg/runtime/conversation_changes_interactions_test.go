@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -93,16 +94,16 @@ func (f *interactionChangeFixture) list(t *testing.T, cursor string) *Conversati
 // loopApprovalProposal records an approval-gated loop call of the fixture's
 // Run, as a run loop step proposes it while it holds the Run lease. It
 // returns the loop holding the Run and the Run as proposed from.
-func (f *interactionChangeFixture) loopApprovalProposal(t *testing.T, callID, idempotencyKey, eventID string) (*loopProposalFixture, *AgentRun) {
+func (f *interactionChangeFixture) loopApprovalProposal(t *testing.T, callID, idempotencyKey, eventID string) (*actiontest.LoopProposalFixture, *AgentRun) {
 	t.Helper()
-	loop := newLoopProposalFixture(t, f.store, f.run, "worker", time.Now().UTC())
-	proposal := sqliteApprovalProposal(loop.run, callID, idempotencyKey, eventID)
-	record := loopProposalRecord(proposal.Call, loop.run, loop.worker, loop.now, proposal.Event)
+	loop := actiontest.NewLoopProposalFixture(t, f.store, f.run, "worker", time.Now().UTC())
+	proposal := sqliteApprovalProposal(loop.Run, callID, idempotencyKey, eventID)
+	record := actiontest.LoopProposalRecord(proposal.Call, loop.Run, loop.Worker, loop.Now, proposal.Event)
 	record.Approval = proposal.Approval
 	if _, err := f.store.(ActionStore).CreateActionProposal(f.ctx, record); err != nil {
 		t.Fatal(err)
 	}
-	return loop, loop.run
+	return loop, loop.Run
 }
 
 func TestConversationChangesProjectApprovalsWithConversationContext(t *testing.T) {
@@ -114,7 +115,7 @@ func TestConversationChangesProjectApprovalsWithConversationContext(t *testing.T
 				t.Fatalf("initial approvals = %#v", initial)
 			}
 			loop, run := f.loopApprovalProposal(t, "deploy-call", "deploy-key", "deploy-event")
-			loop.parkOnApproval("approval-deploy-call")
+			loop.ParkOnApproval("approval-deploy-call")
 			actions := f.store.(ActionStore)
 			// Creating an approval advances the cursor, so a subscriber emits it.
 			requested := f.list(t, initial.Cursor)

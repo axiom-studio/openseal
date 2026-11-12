@@ -57,9 +57,9 @@ func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			f := newLoopProposalFixture(t, store, claimed, "conversation-worker", time.Now().UTC())
+			f := actiontest.NewLoopProposalFixture(t, store, claimed, "conversation-worker", time.Now().UTC())
 			coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
-			proposal, err := coordinator.Propose(ctx, f.request(action.ProposeActionRequest{
+			proposal, err := coordinator.Propose(ctx, f.Request(action.ProposeActionRequest{
 				DeploymentID: owner.ID,
 				SkillID:      ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion, Action: action.ObjectiveActionCreate,
 				Arguments:      map[string]interface{}{"title": "Publish release notes", "goal": "Create and review release notes", "priority": 2},
@@ -165,9 +165,9 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	validator, _ := action.NewObjectiveActionValidator(store)
-	f := newLoopProposalFixture(t, store, claimed, "worker", time.Now().UTC())
+	f := actiontest.NewLoopProposalFixture(t, store, claimed, "worker", time.Now().UTC())
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator})
-	proposal, err := coordinator.Propose(ctx, f.request(action.ProposeActionRequest{DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion, Action: action.ObjectiveActionPause, Arguments: map[string]interface{}{"objectiveId": objective.ID}, IdempotencyKey: "pause-on-request", Summary: "Pause objective: Watch production"}, "pause-on-request"))
+	proposal, err := coordinator.Propose(ctx, f.Request(action.ProposeActionRequest{DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: action.ObjectiveManagementSkillVersion, Action: action.ObjectiveActionPause, Arguments: map[string]interface{}{"objectiveId": objective.ID}, IdempotencyKey: "pause-on-request", Summary: "Pause objective: Watch production"}, "pause-on-request"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,22 +197,22 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 // end, approves it as an operator, re-leases the queued Run to f's worker as
 // the loop's next claim does, and executes the ready call inline as the
 // loop's governed executor does.
-func approveAndExecuteLoopAction(t *testing.T, store KernelStore, f *loopProposalFixture, proposal *ActionProposalResult, worker *action.ActionWorker, decisionID string) *ActionExecutionResult {
+func approveAndExecuteLoopAction(t *testing.T, store KernelStore, f *actiontest.LoopProposalFixture, proposal *ActionProposalResult, worker *action.ActionWorker, decisionID string) *ActionExecutionResult {
 	t.Helper()
-	f.assertUntouched()
-	f.parkOnApproval(proposal.Approval.ID)
+	f.AssertUntouched()
+	f.ParkOnApproval(proposal.Approval.ID)
 	resolved, err := action.NewApprovalCoordinator(store, store, action.EligibleApprovalAuthorizer{}).Resolve(context.Background(), action.ResolveApprovalRequest{
-		Scope: f.run.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
+		Scope: f.Run.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 		DecisionID: decisionID, Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Reviewed",
 	})
 	if err != nil || resolved.Call.Status != ActionCallStatusReady {
 		t.Fatalf("resolve = %#v, %v", resolved, err)
 	}
-	if queued := f.current(); queued.Status != AgentRunStatusQueued {
+	if queued := f.Current(); queued.Status != AgentRunStatusQueued {
 		t.Fatalf("approval did not queue the parked Run: %#v", queued)
 	}
-	resumed := newLoopProposalFixture(t, store, f.run, f.worker, time.Now().UTC())
-	return resumed.execute(worker, proposal.Call.ID)
+	resumed := actiontest.NewLoopProposalFixture(t, store, f.Run, f.Worker, time.Now().UTC())
+	return resumed.Execute(worker, proposal.Call.ID)
 }
 
 type objectiveActionStoreCase struct {

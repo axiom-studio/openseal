@@ -345,14 +345,14 @@ func newActionBindingFenceFixture(t *testing.T, kernel KernelStore) *actionBindi
 		BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion,
 		Action: "deploy", Status: ActionCallStatusReady, Risk: skill.RiskLevelProduction, SideEffect: skill.SideEffectExternal,
 		Arguments: map[string]interface{}{"environment": "production"}, CredentialRefs: binding.Credentials,
-		IdempotencyKey: "loop:" + loopProposalStep + ":deploy-production", MaxAttempts: 3, AvailableAt: now.Add(time.Second), Revision: 1,
+		IdempotencyKey: "loop:" + actiontest.LoopProposalStep + ":deploy-production", MaxAttempts: 3, AvailableAt: now.Add(time.Second), Revision: 1,
 		CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),
 	}
 	call.ExternalOperationDigest, err = computeExternalOperationDigest(scope, run.Owner, run.ObjectiveID, &ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"}, call.IdempotencyKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal := loopProposalRecord(call, run, "agent-worker", now.Add(time.Second), actiontest.CallEvent(call, uuid.NewString(), "action.proposed", now.Add(time.Second)))
+	proposal := actiontest.LoopProposalRecord(call, run, "agent-worker", now.Add(time.Second), actiontest.CallEvent(call, uuid.NewString(), "action.proposed", now.Add(time.Second)))
 	proposal.RequireBindingFence = true
 	return &actionBindingFenceFixture{store: store, catalog: catalog, binding: binding, now: now, proposal: proposal}
 }

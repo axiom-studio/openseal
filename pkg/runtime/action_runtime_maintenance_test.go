@@ -378,7 +378,7 @@ func newActionRuntimeMaintenanceTenantFixture(t *testing.T, original *actionBind
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposal := loopProposalRecord(call, run, "agent-worker", original.now.Add(time.Second), actiontest.CallEvent(call, uuid.NewString(), "action.proposed", original.now.Add(time.Second)))
+	proposal := actiontest.LoopProposalRecord(call, run, "agent-worker", original.now.Add(time.Second), actiontest.CallEvent(call, uuid.NewString(), "action.proposed", original.now.Add(time.Second)))
 	proposal.RequireBindingFence = true
 	return &actionBindingFenceFixture{store: original.store, catalog: catalog, binding: binding, now: original.now, proposal: proposal}
 }

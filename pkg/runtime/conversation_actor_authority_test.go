@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -235,19 +236,19 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 	root := f.schedule(t, trigger)
 	// The run loop claims member A's Run; one of its steps proposes the
 	// reviewed action and the step-end park waits on its approval.
-	loop := newLoopProposalFixture(t, f.store, root, "worker", time.Now().UTC())
+	loop := actiontest.NewLoopProposalFixture(t, f.store, root, "worker", time.Now().UTC())
 	coordinator := action.NewActionCoordinator(f.store, f.store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
 	}), nil)
-	proposal, err := coordinator.Propose(t.Context(), loop.request(action.ProposeActionRequest{
+	proposal, err := coordinator.Propose(t.Context(), loop.Request(action.ProposeActionRequest{
 		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0",
 		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed report"}, Summary: "Send reviewed report",
 	}, "reviewed-action"))
 	if err != nil || proposal == nil || proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval {
 		t.Fatalf("pending approval = %#v, %v", proposal, err)
 	}
-	loop.parkOnApproval(proposal.Approval.ID)
-	parked := loop.run
+	loop.ParkOnApproval(proposal.Approval.ID)
+	parked := loop.Run
 	messageB := f.post(t, PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, IdempotencyKey: "request-b"})
 	runB := f.schedule(t, messageB)
 	if runB.ID == root.ID || runB.Context[conversationRunContextTriggerID] != messageB.ID {

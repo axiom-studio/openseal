@@ -15,7 +15,7 @@ import (
 func TestFindAppsRunsThroughTheActionWorker(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope, _ := skillbindingtest.ConnectAppFixture(t)
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, skillbinding.SkillActionFindApps, map[string]interface{}{"query": "neon", "limit": 3})
-	executed := f.execute(action.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
+	executed := f.Execute(action.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 	apps, _ := executed.Call.Output["apps"].([]interface{})
 	if executed.Call.Status != ActionCallStatusSucceeded || len(apps) != 1 || apps[0].(map[string]interface{})["slug"] != "neondatabase/mcp-server-neon" {
 		t.Fatalf("find_apps: %#v", executed.Call)
@@ -29,7 +29,7 @@ func TestFindAppsRunsThroughTheActionWorker(t *testing.T) {
 func TestRequestConnectionParksTheRunOnOneConnectCard(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope, connected := skillbindingtest.ConnectAppFixture(t)
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestConnection, map[string]interface{}{"app": "linear", "reason": "Connect Linear so I can list your issues"})
-	executed := f.execute(action.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
+	executed := f.Execute(action.NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["setupRequest"] == nil {
 		t.Fatalf("request_connection: %#v", executed.Call)
 	}

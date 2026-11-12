@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -57,14 +58,14 @@ func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loop := newLoopProposalFixture(t, store, child.Run, "worker", time.Now().UTC())
+	loop := actiontest.NewLoopProposalFixture(t, store, child.Run, "worker", time.Now().UTC())
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		return action.ActionPolicyDecision{
 			Disposition: action.ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour,
 			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}},
 		}, nil
 	}), nil)
-	proposal, err := coordinator.Propose(ctx, loop.request(action.ProposeActionRequest{
+	proposal, err := coordinator.Propose(ctx, loop.Request(action.ProposeActionRequest{
 		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0",
 		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "child-action",
 		Summary: "Send reviewed reply",
@@ -75,7 +76,7 @@ func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 	if proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval {
 		t.Fatalf("proposal = %#v", proposal)
 	}
-	loop.parkOnApproval(proposal.Approval.ID)
+	loop.ParkOnApproval(proposal.Approval.ID)
 
 	if _, err := runs.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 		Scope: scope, RunID: root.Run.ID, ExpectedRevision: root.Run.Revision,
@@ -110,14 +111,14 @@ func assertCanceledApproval(t *testing.T, store cancellationStore) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loop := newLoopProposalFixture(t, store, created.Run, "worker", now)
+	loop := actiontest.NewLoopProposalFixture(t, store, created.Run, "worker", now)
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		return action.ActionPolicyDecision{
 			Disposition: action.ActionDispositionRequireApproval, Reason: "human review is required", ApprovalTTL: time.Hour,
 			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}},
 		}, nil
 	}), nil, models.WithClock(func() time.Time { return now }))
-	proposal, err := coordinator.Propose(ctx, loop.request(action.ProposeActionRequest{
+	proposal, err := coordinator.Propose(ctx, loop.Request(action.ProposeActionRequest{
 		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0", Action: "reply",
 		Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "reply-1", Summary: "Send reviewed reply",
 	}, "reply"))
@@ -128,8 +129,8 @@ func assertCanceledApproval(t *testing.T, store cancellationStore) {
 		t.Fatalf("proposal = %#v", proposal)
 	}
 	// The loop parks the Run on the approval at step end.
-	loop.parkOnApproval(proposal.Approval.ID)
-	parked := loop.current()
+	loop.ParkOnApproval(proposal.Approval.ID)
+	parked := loop.Current()
 
 	result, err := runs.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 		Scope: scope, RunID: parked.ID, ExpectedRevision: parked.Revision, Kind: agentrun.AgentRunCommandCancel,
