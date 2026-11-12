@@ -331,7 +331,7 @@ type TurnReaction struct {
 const MaximumTurnReactions = 3
 
 // ConversationReactInstruction is the description of the react control tool
-// (control_interaction.go).
+// (control/control_interaction.go).
 const ConversationReactInstruction = "Add an emoji reaction as yourself. A reaction is not a reply and never asks anyone to act. When a message needs no real answer (thanks, ok, got it, a joke, good news), react instead of replying, such as 👍 ❤️ 😂 🎉, and finish with an empty answer."
 
 func cloneTurnReactions(in []TurnReaction) []TurnReaction {

@@ -328,7 +328,7 @@ func checkPlacement(tree Tree, name string) error {
 	return nil
 }
 
-// ResolveChatFile is runtime.ChatFileResolver: the file at path in a chat's
+// ResolveChatFile is routine.ChatFileResolver: the file at path in a chat's
 // latest snapshot (version 0) or in the snapshot at version.
 func (s *Store) ResolveChatFile(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID, path string, version int64) (*routine.ChatFile, error) {
 	name, err := Clean(path)

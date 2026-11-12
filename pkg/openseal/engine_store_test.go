@@ -60,7 +60,7 @@ func TestWithStoreRejectsNil(t *testing.T) {
 	}
 }
 
-// kernelOnlyStore hides every interface beyond runtime.KernelStore, as a
+// kernelOnlyStore hides every interface beyond models.KernelStore, as a
 // runtime-only embedding's store would.
 type kernelOnlyStore struct{ models.KernelStore }
 

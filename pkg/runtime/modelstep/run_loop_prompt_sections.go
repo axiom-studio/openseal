@@ -1,8 +1,9 @@
 package modelstep
 
 // Kernel system sections of a loop model step (SPEC §6). The preparer
-// (run_loop_prepare.go) includes each section, in loopKernelSectionOrder,
-// when its condition holds, then the binding's own sections. The texts are
+// (runloop/run_loop_prepare.go) includes each section, in
+// LoopKernelSectionOrder, when its condition holds, then the binding's own
+// sections. The texts are
 // stable for a session so the provider prompt prefix stays cacheable; facts
 // that change per Run or per step are note entries, never section text.
 
@@ -16,7 +17,7 @@ const (
 	// The binding can take images.
 	LoopSectionMedia = "media"
 	// A pinned routine command; the text is the routine-script rules from
-	// run_loop_routine_script.go.
+	// runloop/run_loop_routine_script.go.
 	LoopSectionRoutineScript = "routine_script"
 )
 

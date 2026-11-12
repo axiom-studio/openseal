@@ -29,14 +29,14 @@ import (
 // Nothing the catalog decides is in System or in a harness or core tool: the
 // listing, the Agents and operations the control tools accept and the
 // catalog-dependent guidance are in the capabilities note
-// (capability_note.go), and loaded tools are frozen on their load entries
-// (capability_surface.go). So System and the harness and core tools stay
-// byte-identical across the steps and Runs of a session while the claim's
-// authority is unchanged.
+// (modelstep/capability_note.go), and loaded tools are frozen on their load
+// entries (modelstep/capability_surface.go). So System and the harness and
+// core tools stay byte-identical across the steps and Runs of a session while
+// the claim's authority is unchanged.
 
 // loopSectionCapabilities carries the static loading instructions of a
 // deferred capability set. It follows the kernel sections of
-// loopKernelSectionOrder and precedes the binding's sections.
+// modelstep.LoopKernelSectionOrder and precedes the binding's sections.
 const loopSectionCapabilities = "capabilities"
 
 const loopSectionCapabilitiesTitle = "Capabilities"

@@ -3,9 +3,10 @@ package runtime
 // Copies of the run worker tests' fixtures for runtime's tests that drive
 // the worker pool, loop binding and conversation tasks through the exported
 // API: the resolver catalog and loop binding config of
-// catalog_turn_resolver_test.go, the timer step producer of
-// agent_run_worker_loop_test.go and the continuation Run fixture of
-// conversation_task_continuation_lifecycle_test.go. Change them together.
+// runworker/catalog_turn_resolver_test.go, the timer step producer of
+// runworker/agent_run_worker_loop_test.go and the continuation Run fixture of
+// runworker/conversation_task_continuation_lifecycle_test.go. Change them
+// together.
 
 import (
 	"context"

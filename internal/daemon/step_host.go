@@ -34,7 +34,7 @@ func NewProviderStepHost(cfg OpenAIProviderConfig) (*ProviderStepHost, error) {
 	return &ProviderStepHost{client: client}, nil
 }
 
-// Step host failure codes (all *runtime.TurnHostFailure).
+// Step host failure codes (all *modelstep.TurnHostFailure).
 const (
 	stepHostInvalidRequest     = "invalid_model_step_request"
 	stepHostUnsupportedBinding = "unsupported_model_binding"

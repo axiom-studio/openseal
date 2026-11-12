@@ -2280,7 +2280,7 @@ type Option func(*Engine) error
 // last one wins). Without one, New opens an in-memory SQLite store whose
 // state ends with the Engine. Every store-backed service is wired once, after
 // all options ran, from that one store:
-//   - Runs, turns, activity and other runtime.KernelStore services always
+//   - Runs, turns, activity and other models.KernelStore services always
 //     use it.
 //   - Dependencies, conversations, embeds, spaces, collaboration, artifacts,
 //     Run audits and Skill reference upgrades exist only when it implements

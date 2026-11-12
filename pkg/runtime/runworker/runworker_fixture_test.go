@@ -1,10 +1,10 @@
 package runworker
 
 // Copies of runtime's base test fixtures for the run worker tests, so they
-// can move with the run worker code: the stored Run reader and SQLite file
-// opener of kernel_store_test.go, the method fixture of
-// accepted_run_execution_test.go, the action call records of
-// action_call_records_test.go, the store matrices of
+// can move with the run worker code. The originals are in pkg/runtime: the
+// stored Run reader and SQLite file opener of kernel_store_test.go, the
+// method fixture of accepted_run_execution_test.go, the action call records
+// of action_call_records_test.go, the store matrices of
 // conversation_task_sql_test.go, run_store_contract_test.go and
 // dependency_retirement_test.go, and the maintenance requests of
 // skill_runtime_maintenance_test.go. Change them together.

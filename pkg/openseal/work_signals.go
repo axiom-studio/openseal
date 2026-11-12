@@ -15,7 +15,7 @@ type WorkSignalHealth = workqueue.WorkSignalHealth
 // WorkItem asks for one pass over a family's durable work in a scope.
 type WorkItem = models.WorkItem
 
-// WorkQueue is the shared schedule of scope passes. See runtime.WorkQueue.
+// WorkQueue is the shared schedule of scope passes. See workqueue.WorkQueue.
 type WorkQueue = workqueue.WorkQueue
 
 // WorkSignal is one delivery or lifecycle event from a WorkQueue.

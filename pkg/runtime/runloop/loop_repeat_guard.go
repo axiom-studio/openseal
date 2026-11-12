@@ -21,7 +21,7 @@ import (
 
 // ToolGuardOutcome.Kind values set by the repeat guard. repeat_refused,
 // duplicate_suppressed and repeat_limit reuse the refused action_calls codes
-// (action_loop_refusal.go); the two below create no action_calls row.
+// (action/action_loop_refusal.go); the two below create no action_calls row.
 const (
 	ToolGuardSameStepDuplicate = "same_step_duplicate"
 	ToolGuardRunStopping       = "run_stopping"

@@ -14,7 +14,7 @@ import (
 
 // Renderer from a kernel ModelStepRequest to an OpenAI-compatible Chat
 // Completions request. Pure functions, no I/O. The step host maps a returned
-// *runtime.TurnHostFailure straight to the step's failure.
+// *modelstep.TurnHostFailure straight to the step's failure.
 
 // Renderer failure codes (all non-retryable).
 const (

@@ -12,7 +12,7 @@ const (
 
 // Umbrella is the Agent or Team deployment whose connections a run uses: the
 // Team in a Team chat, task or hand-off, and the Agent itself in a 1:1 chat.
-// It mirrors runtime.ObjectiveOwner, which this package cannot import.
+// It mirrors models.ObjectiveOwner, which this package cannot import.
 type Umbrella struct {
 	Kind UmbrellaKind `json:"kind"`
 	ID   string       `json:"id"`

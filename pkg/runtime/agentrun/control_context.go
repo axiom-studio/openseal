@@ -14,9 +14,9 @@ const (
 	FinalModeReview   FinalAnswerMode = "review"   // Run.Context[AgentRequestCompletionReviewContextKey]
 )
 
-// ControlAuthority is resolved once per claim (ResolveControlAuthority,
-// control_authority.go) and is constant for the claim, so the advertised tool
-// list is stable. It carries the conversation flags of section 05 §7.
+// ControlAuthority is resolved once per claim
+// (control.ResolveControlAuthority) and is constant for the claim, so the
+// advertised tool list is stable. It carries the conversation flags of section 05 §7.
 type ControlAuthority struct {
 	AgentID           string
 	FinalMode         FinalAnswerMode // "" = default

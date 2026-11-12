@@ -26,7 +26,7 @@ type AgentTurnRecord struct {
 	// step that ended in tool calls.
 	OutputSummary string `json:"outputSummary,omitempty"`
 	ToolCallCount int    `json:"toolCallCount"`
-	// StopReason is a runtime.ModelStopReason value, or "" for
+	// StopReason is a models.ModelStopReason value, or "" for
 	// deterministic steps.
 	StopReason string `json:"stopReason,omitempty"`
 	// Final is true when the step's output had no tool calls or included a

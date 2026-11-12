@@ -12,7 +12,8 @@ import (
 )
 
 // Kinds of RunFailureExplanation written by the kernel (SPEC §2.2). The guard
-// kinds repeat_limit and context_overflow are in loop_guard_failures.go.
+// kinds repeat_limit and context_overflow are in
+// modelstep/loop_guard_failures.go.
 const (
 	RunFailureKindExecution          = "execution"
 	RunFailureKindWorkspace          = "workspace"

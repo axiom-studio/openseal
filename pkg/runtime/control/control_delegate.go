@@ -74,8 +74,8 @@ type delegateHandler struct{}
 type delegateReplyHandler struct{}
 
 // Spec carries no Agent list: the eligible Agents are in the capabilities
-// note (capability_note.go), so a new Agent never changes the tool, and the
-// handler resolves agentId against the claim's targets.
+// note (modelstep/capability_note.go), so a new Agent never changes the
+// tool, and the handler resolves agentId against the claim's targets.
 func (delegateHandler) Spec(a agentrun.ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Ask another Agent to do a piece of work and wait for its answer. " +

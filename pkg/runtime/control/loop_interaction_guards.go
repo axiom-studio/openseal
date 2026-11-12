@@ -194,8 +194,8 @@ func browserAwaitsUserReply(views []GovernedToolView) bool {
 // SPEC §2.4 FinalPark content (Deliver plus the LoopPark status, wake and
 // summary); the final-answer producer (CTL-14) sets
 // FinalAnswer.Park = &FinalPark{Deliver: p.Deliver, Park: LoopPark{Status: p.Status, Wake: p.Wake, Summary: p.Summary}}.
-// FinalPark and LoopPark are declared by loop-1 (run_loop_hooks.go), which
-// lands in the same wave, so this file does not declare them.
+// FinalPark and LoopPark are declared in agentrun (run_loop_hooks.go and
+// step_producer.go).
 type finalAnswerParkPlan struct {
 	Deliver bool // post the answer first (OTP question), then park
 	Status  models.AgentRunStatus
