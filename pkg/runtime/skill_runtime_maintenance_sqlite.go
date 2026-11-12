@@ -100,7 +100,7 @@ func validateMaintenanceBindingSnapshot(ctx context.Context, q maintenanceSQLQue
 			}
 			delete(expected, key)
 		} else {
-			if err := AddSkillRuntimeMaintenanceBindingDigest(h, SkillRuntimeMaintenanceBindingRevision{deployment, id, revision}); err != nil {
+			if err := AddSkillRuntimeMaintenanceBindingDigest(h, SkillRuntimeMaintenanceBindingRevision{DeploymentID: deployment, BindingID: id, Revision: revision}); err != nil {
 				return err
 			}
 		}

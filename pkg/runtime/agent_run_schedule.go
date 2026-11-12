@@ -24,10 +24,10 @@ type AgentRunClaim struct {
 	// ConversationTaskForegroundReserve leaves this many agent slots unavailable
 	// to canonical conversation task work. Zero preserves ordinary admission.
 	ConversationTaskForegroundReserve int
-	conversationTaskRuns              map[string]bool
-	// ActiveConversationTaskRuns and InvalidConversationTaskRuns are computed
-	// by conversation task admission while a claim is evaluated; callers
-	// leave them empty. They are never encoded.
+	// The three task-run maps below are computed by conversation task
+	// admission while a claim is evaluated; callers leave them empty. They
+	// are never encoded.
+	conversationTaskRuns        map[string]bool `json:"-"`
 	ActiveConversationTaskRuns  map[string]bool `json:"-"`
 	InvalidConversationTaskRuns map[string]bool `json:"-"`
 }

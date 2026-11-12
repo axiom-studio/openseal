@@ -225,10 +225,10 @@ var OpenToolEntryStates = []ToolEntryState{
 }
 
 func (s ToolEntryState) Valid() bool {
-	for _, known := range ToolEntryStates {
-		if s == known {
-			return true
-		}
+	switch s {
+	case ToolEntryPending, ToolEntryAwaitingApproval, ToolEntryAwaitingChild, ToolEntryAwaitingEvent,
+		ToolEntryRunning, ToolEntryCompleted, ToolEntryError, ToolEntryInterrupted:
+		return true
 	}
 	return false
 }
