@@ -526,6 +526,10 @@ func runbookActionTraceMetadata(call *ActionCall) map[string]string {
 // fork branch, so it never carries media or unbounded payloads.
 const runbookActionResultLimit = 64 << 10
 
+// runbookResultCompactLevel bounds the depth, entries and text of a
+// compacted action result.
+type runbookResultCompactLevel struct{ depth, entries, text int }
+
 // runbookActionResult is the value an action node writes to its result path:
 // the ActionCall output without its model media (screenshots and other
 // base64 payloads), compacted to runbookActionResultLimit when it is larger.
@@ -550,7 +554,7 @@ func runbookActionResult(output map[string]interface{}) map[string]interface{} {
 		}
 	}
 	original := len(encoded)
-	for _, level := range []struct{ depth, entries, text int }{
+	for _, level := range []runbookResultCompactLevel{
 		{8, 64, 2048}, {6, 16, 512}, {4, 4, 128},
 	} {
 		value := map[string]interface{}{

@@ -30,9 +30,13 @@ const toolOutputInlineBytes = 16 << 10
 
 const toolOutputPreviewBytes = 8 << 10
 
-// toolOutputCompactLevels is the depth / entries / text ladder used to shorten
-// json output that has nowhere to be kept.
-var toolOutputCompactLevels = []struct{ depth, entries, text int }{
+// toolOutputCompactLevel bounds the depth, entries and text of a compacted
+// json value.
+type toolOutputCompactLevel struct{ depth, entries, text int }
+
+// toolOutputCompactLevels is the ladder used to shorten json output that has
+// nowhere to be kept.
+var toolOutputCompactLevels = []toolOutputCompactLevel{
 	{8, 64, 2048}, {7, 32, 1024}, {6, 16, 512}, {5, 8, 256}, {4, 4, 128},
 }
 
