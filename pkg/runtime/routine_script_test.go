@@ -213,11 +213,15 @@ func loopRunCommandEntry(t *testing.T, routine *loopRoutineScript, sequence int6
 			return hostReplyJSON(result, false)(context.Background(), request)
 		}
 	}
-	f := newHostToolDispatchFixture(answer)
+	dispatcher := NewHostToolDispatcher(&fakeHostToolHost{replies: []func(context.Context, HostToolRequest) (HostToolResult, error){answer}},
+		NewActionCoordinator(nil, nil, nil, nil, nil), nil)
 	call := hostToolCallFixture(t, workspace.OperationRunCommand, arguments)
 	call.ToolEntryID = fmt.Sprintf("ent_%d", sequence)
 	call.CommandPins = routine.CommandPins()
-	outcome := runHostTool(t, f, call)
+	outcome, ok := dispatcher.Run(context.Background(), call)
+	if !ok {
+		t.Fatal("Run returned ok=false")
+	}
 	patch, err := outcome.KernelPatch()
 	if err != nil {
 		t.Fatal(err)
@@ -411,6 +415,7 @@ func TestLoopRoutineScriptCompletionCheckReadsToolEntries(t *testing.T) {
 // A failed script puts the Run in explain mode with a routine_script
 // FailureExplanation; the first recorded failure stays the reported one.
 func TestLoopRoutineScriptFinalFailureExplainsAndFails(t *testing.T) {
+	const failureTextLimit = 1024 // the bound of a Run failure message
 	routine := loopRoutineScriptFixture(t)
 	output := strings.Repeat("line of output\n", 400) + "KeyError: 'signup_date'"
 	entries := []*SessionEntry{loopRunCommandEntry(t, routine, 3, map[string]interface{}{"command": "python3 scripts/weekly.py"}, map[string]interface{}{"exitStatus": float64(1), "stderr": output})}
@@ -424,7 +429,7 @@ func TestLoopRoutineScriptFinalFailureExplainsAndFails(t *testing.T) {
 		t.Fatalf("failure = %#v", failure)
 	}
 	if !strings.HasPrefix(failure.Message, "The routine's script exited with status 1: python3 scripts/weekly.py") ||
-		!strings.HasSuffix(failure.Message, "…") || len(failure.Message) > maximumTurnFailureTextBytes+len("…") {
+		!strings.HasSuffix(failure.Message, "…") || len(failure.Message) > failureTextLimit+len("…") {
 		t.Fatalf("message = %q", failure.Message)
 	}
 	run.FailureExplanation = failure
