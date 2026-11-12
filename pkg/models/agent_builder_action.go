@@ -331,3 +331,19 @@ func ValidateAgentDisplayName(name string) error {
 	}
 	return nil
 }
+
+// AgentBuilderTeamOperation is the create_team operation of an openseal.teams
+// card, the only Team card under the agent-builder rule (D11).
+const AgentBuilderTeamOperation = "create_team"
+
+// IsAgentBuilderApproval reports whether approval reviews an agent-builder
+// action: any agent_profile card, or a team card for create_team. Team role and
+// profile amendments keep their own approval paths.
+func IsAgentBuilderApproval(approval *ApprovalCheckpoint) bool {
+	if approval == nil {
+		return false
+	}
+	resourceType, _ := approval.ProposedAction["resourceType"].(string)
+	operation, _ := approval.ProposedAction["operation"].(string)
+	return resourceType == AgentProfileResourceType || resourceType == "team" && operation == AgentBuilderTeamOperation
+}

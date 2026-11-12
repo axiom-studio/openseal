@@ -36,22 +36,6 @@ type AgentBuilderApprovalAuthorizer interface {
 // that did not come from a person through the host approval route (D11).
 var ErrAgentBuilderApprovalForbidden = errors.New("this approval can only be given by a person in the app")
 
-// agentBuilderTeamOperation is the create_team operation of an openseal.teams
-// card, the only Team card under the agent-builder rule (D11).
-const agentBuilderTeamOperation = "create_team"
-
-// isAgentBuilderApproval reports whether approval reviews an agent-builder
-// action: any agent_profile card, or a team card for create_team. Team role and
-// profile amendments keep their own approval paths.
-func isAgentBuilderApproval(approval *models.ApprovalCheckpoint) bool {
-	if approval == nil {
-		return false
-	}
-	resourceType, _ := approval.ProposedAction["resourceType"].(string)
-	operation, _ := approval.ProposedAction["operation"].(string)
-	return resourceType == models.AgentProfileResourceType || resourceType == "team" && operation == agentBuilderTeamOperation
-}
-
 // isTargetedSkillBindingApproval reports whether approval reviews an
 // openseal.skills upsert_binding or disable_binding aimed at another Agent
 // (the validator's preview names its targetAgent).
@@ -70,7 +54,7 @@ func isTargetedSkillBindingApproval(approval *models.ApprovalCheckpoint) bool {
 // targeted skills card. No approval mode, timeout rule, external reply or
 // callback approves one.
 func approvedOnlyByPerson(approval *models.ApprovalCheckpoint) bool {
-	return isAgentBuilderApproval(approval) || isTargetedSkillBindingApproval(approval)
+	return models.IsAgentBuilderApproval(approval) || isTargetedSkillBindingApproval(approval)
 }
 
 // authorizeAgentBuilderApproval applies D11 to an approve of an agent-builder
@@ -85,7 +69,7 @@ func (c *ApprovalCoordinator) authorizeAgentBuilderApproval(ctx context.Context,
 	if err := host.AuthorizeApproval(ctx, principal, models.CloneApprovalCheckpoint(approval)); err != nil {
 		return fmt.Errorf("authorize approval: %w", err)
 	}
-	if !isAgentBuilderApproval(approval) {
+	if !models.IsAgentBuilderApproval(approval) {
 		return nil
 	}
 	if err := host.AuthorizeAgentBuilderApproval(ctx, principal, models.CloneApprovalCheckpoint(approval)); err != nil {

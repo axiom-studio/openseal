@@ -45,10 +45,6 @@ func ApprovedOnlyByPerson(approval *models.ApprovalCheckpoint) bool {
 	return approvedOnlyByPerson(approval)
 }
 
-func IsAgentBuilderApproval(approval *models.ApprovalCheckpoint) bool {
-	return isAgentBuilderApproval(approval)
-}
-
 // NewActionWorkerSupervisorRetiringAfter builds a supervisor whose idle
 // scope pools retire after retire instead of workqueue.PoolRetireAfter.
 func NewActionWorkerSupervisorRetiringAfter(

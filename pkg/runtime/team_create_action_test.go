@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -189,7 +191,7 @@ func TestTeamCreatePreview(t *testing.T) {
 		"rationale": "The person wants a launch team."
 	}`, f.salesID))
 	// The preview is what the D11 approval rule and the drafts rail key on.
-	if !isAgentBuilderApproval(&ApprovalCheckpoint{ProposedAction: preview}) {
+	if !models.IsAgentBuilderApproval(&ApprovalCheckpoint{ProposedAction: preview}) {
 		t.Fatal("create_team preview is not recognised as an agent-builder card")
 	}
 }

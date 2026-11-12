@@ -13,7 +13,7 @@ func agentBuilderCreatesResource(approval *models.ApprovalCheckpoint) bool {
 	resourceType, _ := approval.ProposedAction["resourceType"].(string)
 	operation, _ := approval.ProposedAction["operation"].(string)
 	return resourceType == models.AgentProfileResourceType && operation == models.AgentActionCreateAgent ||
-		resourceType == "team" && operation == agentBuilderTeamOperation
+		resourceType == "team" && operation == models.AgentBuilderTeamOperation
 }
 
 // createdAgentBuilderConversation is the conversation whose approved card

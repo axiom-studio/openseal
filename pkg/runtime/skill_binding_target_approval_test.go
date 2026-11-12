@@ -83,7 +83,7 @@ func TestTargetedSkillBindingChangeIsReviewedInEveryMode(t *testing.T) {
 			if approval.TimeoutDecision != models.ApprovalTimeoutExpire || len(approval.Destinations) != 0 {
 				t.Fatalf("%s %s card timeout %q destinations %#v", mode, action, approval.TimeoutDecision, approval.Destinations)
 			}
-			if !runtime.IsTargetedSkillBindingApproval(approval) || !runtime.ApprovedOnlyByPerson(approval) || runtime.IsAgentBuilderApproval(approval) {
+			if !runtime.IsTargetedSkillBindingApproval(approval) || !runtime.ApprovedOnlyByPerson(approval) || models.IsAgentBuilderApproval(approval) {
 				t.Fatalf("%s %s card is not a targeted skills card: %#v", mode, action, approval.ProposedAction)
 			}
 			if binding, _ := f.Catalog.GetBinding(f.Ctx, f.SkillScope, "researcher", "reddit"); binding == nil || binding.Revision != 1 || binding.Disabled {

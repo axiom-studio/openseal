@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+
 	"github.com/axiom-studio/openseal/pkg/validation"
 )
 
@@ -195,7 +197,7 @@ func agentBuilderDraft(ctx context.Context, reader AgentBuilderDraftReader, filt
 	}
 	var newestCard, pendingCard *ApprovalCheckpoint
 	for _, approval := range approvals {
-		if !isAgentBuilderApproval(approval) {
+		if !models.IsAgentBuilderApproval(approval) {
 			continue
 		}
 		if newestCard == nil {
