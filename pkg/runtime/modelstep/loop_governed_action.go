@@ -1,4 +1,4 @@
-package conversation
+package modelstep
 
 import (
 	"crypto/sha256"

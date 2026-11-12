@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // The conversation seams of the RunLoop (run-loop section 05 §7, §13 on
@@ -534,7 +535,7 @@ func (l *conversationLoop) checkToolCall(ctx context.Context, in agentrun.StepTo
 	if entry == nil || entry.Tool == nil || len(entry.Tool.Directive) > 0 {
 		return "", nil
 	}
-	action, err := runtimeconversation.SelectGovernedAction(in.Binding, entry.Tool.Name, nil)
+	action, err := modelstep.SelectGovernedAction(in.Binding, entry.Tool.Name, nil)
 	if err != nil || action == nil || action.SkillID != models.RunManagementSkillID {
 		// An unresolvable call is refused by the executor itself.
 		return "", nil

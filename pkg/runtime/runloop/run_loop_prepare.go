@@ -172,7 +172,7 @@ func (p *CatalogModelStepPreparer) tools(binding *agentrun.TurnRunnerBinding, se
 	if set.Offered() {
 		harness = append(harness, modelstep.SearchCapabilitiesSpec(), modelstep.LoadCapabilitiesSpec())
 	}
-	names := conversation.LoopGovernedToolNames(binding.ModelActions)
+	names := modelstep.LoopGovernedToolNames(binding.ModelActions)
 	visibleActions, _, visibleHost, _ := set.Visible()
 	visibleHostOps := map[string]bool{}
 	for _, spec := range visibleHost {
@@ -314,7 +314,7 @@ func (p *CatalogModelStepPreparer) stream(ctx context.Context, binding *agentrun
 // the provider tool name of a newly visible action or host tool, "" for
 // instructions and runbooks (run through run_operation).
 func loopCapabilityToolName(actions []capability.ModelAction) func(id string) string {
-	names := conversation.LoopGovernedToolNames(actions)
+	names := modelstep.LoopGovernedToolNames(actions)
 	return func(id string) string {
 		switch {
 		case strings.HasPrefix(id, models.CapabilityActionPrefix):

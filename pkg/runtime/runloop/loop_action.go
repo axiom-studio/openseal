@@ -14,7 +14,6 @@ import (
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"go.uber.org/zap"
 )
@@ -273,7 +272,7 @@ func refusedOutcome(state models.ToolEntryState, result *models.ToolResult) (Gov
 }
 
 func (x *GovernedToolExecutor) propose(ctx context.Context, call GovernedToolCall) (GovernedToolOutcome, error) {
-	action, err := conversation.SelectGovernedAction(call.Binding, call.Name, call.Directive)
+	action, err := modelstep.SelectGovernedAction(call.Binding, call.Name, call.Directive)
 	if err != nil {
 		return GovernedToolOutcome{}, err
 	}

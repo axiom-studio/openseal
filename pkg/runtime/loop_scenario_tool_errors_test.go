@@ -15,7 +15,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -282,7 +281,7 @@ func TestLoopToolNamesAreUniqueAcrossBindings(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.Offered = offered
-		toolNames := conversation.LoopGovernedToolNames(offered)
+		toolNames := modelstep.LoopGovernedToolNames(offered)
 		bySlug := map[string]string{}
 		for _, action := range offered {
 			if action.BindingTool != nil {
