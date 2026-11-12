@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
@@ -23,7 +24,11 @@ import (
 func putStoredRun(t testing.TB, store *SQLiteStore, run *models.AgentRun) {
 	t.Helper()
 	ctx := context.Background()
-	payload := mustJSON(t, run)
+	encoded, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := string(encoded)
 	result, err := store.db.ExecContext(ctx, `UPDATE agent_runs SET objective_id = ?, parent_run_id = ?, root_run_id = ?,
 		assigned_agent_id = ?, status = ?, priority = ?, revision = ?, deadline = ?, available_at = ?, queue_entered_at = ?,
 		lease_owner = ?, lease_expires_at = ?, last_claimed_at = ?, attempt = ?, created_at = ?, payload = ?
@@ -120,16 +125,6 @@ func putStoredAgentRequest(t testing.TB, store *SQLiteStore, request *models.Age
 	}
 }
 
-// The store-connection forms of the raw_sql_test.go helpers below are only
-// for runtime tests not yet on a connection of their own. Delete each when
-// its last caller has moved to the raw_sql_test.go form.
-
-// rewriteStoredPayload is rewriteRowPayload on the store's own connection.
-func rewriteStoredPayload[T any](t testing.TB, store *SQLiteStore, table string, scope models.Scope, id string, edit func(*T)) {
-	t.Helper()
-	rewriteRowPayload(t, store.db, table, scope, id, edit)
-}
-
 // execStoreSQL runs a statement against the store's database. It keeps its
 // own body (execSQL's twin) so the put* fixtures depend on nothing else.
 func execStoreSQL(t testing.TB, store *SQLiteStore, query string, args ...any) {
@@ -139,20 +134,7 @@ func execStoreSQL(t testing.TB, store *SQLiteStore, query string, args ...any) {
 	}
 }
 
-// countStoreRows is countRows on the store's own connection.
-func countStoreRows(t testing.TB, store *SQLiteStore, table string) int {
-	t.Helper()
-	return countRows(t, store.db, table)
-}
-
 func deleteStoredRow(t testing.TB, store *SQLiteStore, table string, scope models.Scope, id string) {
 	t.Helper()
 	execStoreSQL(t, store, `DELETE FROM `+table+` WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id)
-}
-
-// listStoredRoutineEvents is listRoutineEventRows on the store's own
-// connection.
-func listStoredRoutineEvents(t testing.TB, store *SQLiteStore, scope models.Scope) []storedRoutineEvent {
-	t.Helper()
-	return listRoutineEventRows(t, store.db, scope)
 }
