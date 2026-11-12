@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
 func (s *SQLiteStore) CreateObjectiveWithEvent(ctx context.Context, objective *models.Objective, event *models.ActivityEvent) (*models.ActivityEvent, error) {
@@ -360,7 +361,7 @@ func (s *SQLiteStore) ListActivity(ctx context.Context, filter models.ActivityFi
 	if err != nil {
 		return nil, err
 	}
-	return scanSQLiteActivity(rows, limit)
+	return sqlstore.ScanActivityEvents(rows, limit)
 }
 
 func appendSQLiteActivityStrings(query string, args []interface{}, column string, values []string) (string, []interface{}) {
@@ -372,21 +373,4 @@ func appendSQLiteActivityStrings(query string, args []interface{}, column string
 		args = append(args, value)
 	}
 	return query, args
-}
-
-func scanSQLiteActivity(rows *sql.Rows, capacity int) ([]*models.ActivityEvent, error) {
-	defer rows.Close()
-	result := make([]*models.ActivityEvent, 0, capacity)
-	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return nil, err
-		}
-		var event models.ActivityEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			return nil, err
-		}
-		result = append(result, &event)
-	}
-	return result, rows.Err()
 }

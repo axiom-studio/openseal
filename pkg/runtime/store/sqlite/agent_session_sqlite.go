@@ -303,25 +303,6 @@ func insertSQLiteSessionEvents(ctx context.Context, conn *sql.Conn, events []*mo
 	return out, nil
 }
 
-// withSQLiteSessionWrite runs fn on one connection in BEGIN IMMEDIATE and
-// commits when fn succeeds.
-func (s *SQLiteStore) withSQLiteSessionWrite(ctx context.Context, fn func(*sql.Conn) error) error {
-	conn, err := beginImmediateSQLite(ctx, s.db)
-	if err != nil {
-		return err
-	}
-	committed := false
-	defer rollbackSQLiteConn(conn, &committed)
-	if err := fn(conn); err != nil {
-		return err
-	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return err
-	}
-	committed = true
-	return nil
-}
-
 // ---------------------------------------------------------------------------
 // Open / create
 
@@ -338,7 +319,7 @@ func (s *SQLiteStore) OpenConversationAgentSession(ctx context.Context, req mode
 	id := models.ConversationAgentSessionID(req.Scope, lane)
 
 	var result *models.OpenAgentSessionResult
-	err := s.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
+	err := s.withImmediateTx(ctx, func(conn *sql.Conn) error {
 		run, err := sqliteSessionRunLease(ctx, conn, req.Scope, req.RunID, req.Lease)
 		if err != nil {
 			return err
@@ -403,7 +384,7 @@ func (s *SQLiteStore) CreateRunAgentSession(ctx context.Context, req models.Crea
 		return nil, err
 	}
 	var result *models.OpenAgentSessionResult
-	err := s.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
+	err := s.withImmediateTx(ctx, func(conn *sql.Conn) error {
 		run, err := sqliteSessionRunLease(ctx, conn, req.Scope, req.OwnerRunID, req.Lease)
 		if err != nil {
 			return err
@@ -793,7 +774,7 @@ func (s *SQLiteStore) AppendAgentSessionEntries(ctx context.Context, req models.
 		return nil, err
 	}
 	var result *models.AppendAgentSessionEntriesResult
-	err := s.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
+	err := s.withImmediateTx(ctx, func(conn *sql.Conn) error {
 		var run *models.AgentRun
 		var err error
 		if req.Lease != nil {
@@ -1070,7 +1051,7 @@ func (s *SQLiteStore) TransitionToolEntry(ctx context.Context, req models.ToolEn
 		return nil, err
 	}
 	var result *models.ToolEntryTransitionResult
-	err := s.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
+	err := s.withImmediateTx(ctx, func(conn *sql.Conn) error {
 		if req.Lease.WorkerID == "" {
 			run, err := getSQLiteAgentRun(ctx, conn, req.Scope, req.RunID)
 			if err != nil {

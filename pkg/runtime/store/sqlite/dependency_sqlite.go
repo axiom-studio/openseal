@@ -381,7 +381,7 @@ func updateSQLiteDependency(ctx context.Context, conn *sql.Conn, edge *models.Ru
 		WHERE scope_kind = ? AND scope_id = ? AND group_id = ? AND id = ? AND revision = ?`, edge.TargetRunID,
 		edge.RequestID, edge.State, edge.Revision, edge.UpdatedAt, string(payload), edge.Scope.Kind, edge.Scope.ID,
 		edge.GroupID, edge.ID, expectedRevision)
-	return expectDependencyRow(result, err)
+	return sqlstore.ExpectRevisionRow(result, err)
 }
 
 func updateSQLiteDependencyGroup(ctx context.Context, conn *sql.Conn, group *models.RunDependencyGroup, expectedRevision int64) error {
@@ -392,19 +392,5 @@ func updateSQLiteDependencyGroup(ctx context.Context, conn *sql.Conn, group *mod
 	result, err := conn.ExecContext(ctx, `UPDATE run_dependency_groups SET status = ?, revision = ?, updated_at = ?, payload = ?
 		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`, group.Status, group.Revision, group.UpdatedAt,
 		string(payload), group.Scope.Kind, group.Scope.ID, group.ID, expectedRevision)
-	return expectDependencyRow(result, err)
-}
-
-func expectDependencyRow(result sql.Result, err error) error {
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected != 1 {
-		return models.ErrRevisionConflict
-	}
-	return nil
+	return sqlstore.ExpectRevisionRow(result, err)
 }

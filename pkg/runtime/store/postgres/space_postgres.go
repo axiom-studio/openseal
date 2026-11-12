@@ -86,16 +86,6 @@ func (s *PostgresStore) rollbackSpaces(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func scanPostgresSpace(row sqlstore.RowScanner) (*models.Space, error) {
-	var space models.Space
-	if err := row.Scan(&space.ID, &space.Scope.Kind, &space.Scope.ID, &space.Name, &space.Look, &space.Position,
-		&space.IsDefault, &space.Access, &space.OwnerID, &space.CreatedAt, &space.UpdatedAt); err != nil {
-		return nil, err
-	}
-	space.CreatedAt, space.UpdatedAt = space.CreatedAt.UTC(), space.UpdatedAt.UTC()
-	return &space, nil
-}
-
 func (s *PostgresStore) spacesLock(ctx context.Context, tx *sql.Tx, scope models.Scope) error {
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:spaces:"+scope.Key())
 	return err
@@ -104,7 +94,7 @@ func (s *PostgresStore) spacesLock(ctx context.Context, tx *sql.Tx, scope models
 // postgresDefaultSpace returns the owner's default space, or
 // ErrNoDefaultSpace.
 func (s *PostgresStore) postgresDefaultSpace(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, ownerID string) (*models.Space, error) {
-	space, err := scanPostgresSpace(queryer.QueryRowContext(ctx, `SELECT `+sqlstore.SpaceColumns+` FROM `+s.table("spaces")+`
+	space, err := sqlstore.ScanSpace(queryer.QueryRowContext(ctx, `SELECT `+sqlstore.SpaceColumns+` FROM `+s.table("spaces")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND owner_id = $3 AND is_default`, scope.Kind, scope.ID, ownerID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, models.ErrNoDefaultSpace
@@ -113,7 +103,7 @@ func (s *PostgresStore) postgresDefaultSpace(ctx context.Context, queryer sqlsto
 }
 
 func (s *PostgresStore) getPostgresSpace(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, spaceID string) (*models.Space, error) {
-	space, err := scanPostgresSpace(queryer.QueryRowContext(ctx, `SELECT `+sqlstore.SpaceColumns+` FROM `+s.table("spaces")+`
+	space, err := sqlstore.ScanSpace(queryer.QueryRowContext(ctx, `SELECT `+sqlstore.SpaceColumns+` FROM `+s.table("spaces")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, spaceID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, models.ErrSpaceNotFound
@@ -130,7 +120,7 @@ func (s *PostgresStore) listPostgresSpaces(ctx context.Context, queryer sqlstore
 	defer rows.Close()
 	result := make([]*models.Space, 0)
 	for rows.Next() {
-		space, err := scanPostgresSpace(rows)
+		space, err := sqlstore.ScanSpace(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -280,15 +270,6 @@ func (s *PostgresStore) DeleteSpace(ctx context.Context, scope models.Scope, spa
 	return tx.Commit()
 }
 
-func scanPostgresSpaceMember(row sqlstore.RowScanner) (*models.SpaceMember, error) {
-	var member models.SpaceMember
-	if err := row.Scan(&member.SpaceID, &member.Type, &member.ID, &member.Position, &member.AddedAt); err != nil {
-		return nil, err
-	}
-	member.AddedAt = member.AddedAt.UTC()
-	return &member, nil
-}
-
 func (s *PostgresStore) ListSpaceMembers(ctx context.Context, scope models.Scope, spaceID string) ([]*models.SpaceMember, error) {
 	if _, err := s.getPostgresSpace(ctx, s.db, scope, spaceID); err != nil {
 		return nil, err
@@ -302,7 +283,7 @@ func (s *PostgresStore) ListSpaceMembers(ctx context.Context, scope models.Scope
 	defer rows.Close()
 	result := make([]*models.SpaceMember, 0)
 	for rows.Next() {
-		member, err := scanPostgresSpaceMember(rows)
+		member, err := sqlstore.ScanSpaceMember(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -342,7 +323,7 @@ func (s *PostgresStore) PutSpaceMember(ctx context.Context, scope models.Scope, 
 
 func (s *PostgresStore) putPostgresSpaceMemberTx(ctx context.Context, tx *sql.Tx, scope models.Scope, member *models.SpaceMember) (*models.SpaceMember, bool, error) {
 	members := s.table("space_members")
-	existing, err := scanPostgresSpaceMember(tx.QueryRowContext(ctx, `SELECT `+sqlstore.SpaceMemberColumns+` FROM `+members+`
+	existing, err := sqlstore.ScanSpaceMember(tx.QueryRowContext(ctx, `SELECT `+sqlstore.SpaceMemberColumns+` FROM `+members+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND space_id = $3 AND member_type = $4 AND member_id = $5`,
 		scope.Kind, scope.ID, member.SpaceID, member.Type, member.ID))
 	if err == nil {
@@ -461,7 +442,7 @@ func (s *PostgresStore) EnsureMemberHasSpace(ctx context.Context, scope models.S
 }
 
 func (s *PostgresStore) SetSpaceAccess(ctx context.Context, scope models.Scope, spaceID string, access models.SpaceAccess, now time.Time) (*models.Space, error) {
-	space, err := scanPostgresSpace(s.db.QueryRowContext(ctx, `UPDATE `+s.table("spaces")+` SET access = $1, updated_at = $2
+	space, err := sqlstore.ScanSpace(s.db.QueryRowContext(ctx, `UPDATE `+s.table("spaces")+` SET access = $1, updated_at = $2
 		WHERE scope_kind = $3 AND scope_id = $4 AND id = $5 RETURNING `+sqlstore.SpaceColumns, access, now, scope.Kind, scope.ID, spaceID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, models.ErrSpaceNotFound
@@ -645,7 +626,7 @@ func (s *PostgresStore) ListScopeSpaceMembers(ctx context.Context, scope models.
 	defer rows.Close()
 	result := make([]*models.SpaceMember, 0)
 	for rows.Next() {
-		member, err := scanPostgresSpaceMember(rows)
+		member, err := sqlstore.ScanSpaceMember(rows)
 		if err != nil {
 			return nil, err
 		}

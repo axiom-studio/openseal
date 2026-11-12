@@ -68,7 +68,7 @@ func putTestSQLiteSessionRun(t *testing.T, store *SQLiteStore, runID, sessionID 
 		ID: runID, Scope: sqliteSessionScope, Status: status, Revision: 1, SessionID: sessionID,
 		LeaseOwner: "w1", LeaseExpiresAt: &expires, CreatedAt: sqliteSessionNow, UpdatedAt: sqliteSessionNow,
 	}
-	err := store.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
+	err := store.withImmediateTx(ctx, func(conn *sql.Conn) error {
 		current, err := getSQLiteAgentRun(ctx, conn, sqliteSessionScope, runID)
 		if err != nil {
 			return insertSQLiteAgentRunConn(ctx, conn, run)
@@ -103,7 +103,7 @@ func TestSQLiteInTxHelpersSkipFence(t *testing.T) {
 	putTestSQLiteSessionRun(t, store, "r1", "child-session", models.AgentRunStatusRunning)
 	note := &models.SessionEntry{ID: "n1", Type: models.SessionEntryNote, SourceKey: models.TaskPromotedSourceKey("r1"), Note: &models.NoteEntry{Kind: models.NoteTaskPromoted, Text: "moved", Data: json.RawMessage(`{}`)}}
 	var appendErr, transitionErr error
-	err = store.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
+	err = store.withImmediateTx(ctx, func(conn *sql.Conn) error {
 		_, appendErr = store.appendAgentSessionEntriesTx(ctx, conn, models.AppendAgentSessionEntriesRequest{
 			Scope: sqliteSessionScope, SessionID: sessionID, RunID: "r1", Entries: []*models.SessionEntry{note},
 		})

@@ -16,3 +16,22 @@ func ScanSpacePerson(row RowScanner) (*models.SpacePerson, error) {
 	person.AddedAt = person.AddedAt.UTC()
 	return &person, nil
 }
+
+func ScanSpace(row RowScanner) (*models.Space, error) {
+	var space models.Space
+	if err := row.Scan(&space.ID, &space.Scope.Kind, &space.Scope.ID, &space.Name, &space.Look, &space.Position,
+		&space.IsDefault, &space.Access, &space.OwnerID, &space.CreatedAt, &space.UpdatedAt); err != nil {
+		return nil, err
+	}
+	space.CreatedAt, space.UpdatedAt = space.CreatedAt.UTC(), space.UpdatedAt.UTC()
+	return &space, nil
+}
+
+func ScanSpaceMember(row RowScanner) (*models.SpaceMember, error) {
+	var member models.SpaceMember
+	if err := row.Scan(&member.SpaceID, &member.Type, &member.ID, &member.Position, &member.AddedAt); err != nil {
+		return nil, err
+	}
+	member.AddedAt = member.AddedAt.UTC()
+	return &member, nil
+}

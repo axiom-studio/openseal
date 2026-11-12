@@ -677,7 +677,7 @@ func (s *PostgresStore) PutConversationCursor(ctx context.Context, record models
 			record.Cursor.Revision, record.Cursor.UpdatedAt, string(payload), record.Cursor.Scope.Kind, record.Cursor.Scope.ID,
 			record.Cursor.ConversationID, record.Cursor.Participant.Type, record.Cursor.Participant.ID, record.ExpectedRevision)
 		if err == nil {
-			err = expectPostgresDependencyRow(result, nil)
+			err = sqlstore.ExpectRevisionRow(result, nil)
 		}
 	}
 	if err != nil {
@@ -743,7 +743,7 @@ func (s *PostgresStore) PutConversationPresence(ctx context.Context, record mode
 		if err != nil {
 			return nil, err
 		}
-		if err := expectPostgresDependencyRow(result, nil); err != nil {
+		if err := sqlstore.ExpectRevisionRow(result, nil); err != nil {
 			return nil, err
 		}
 	} else {
@@ -875,7 +875,7 @@ func (s *PostgresStore) updatePostgresConversationTx(ctx context.Context, tx *sq
 		updated_at=$4, payload=jsonb_set($5::jsonb, '{spaceId}', to_jsonb(space_id), true) WHERE scope_kind=$6 AND scope_id=$7 AND id=$8 AND revision=$9`, conversation.Status,
 		conversation.LastSequence, conversation.Revision, conversation.UpdatedAt, string(payload), conversation.Scope.Kind,
 		conversation.Scope.ID, conversation.ID, expectedRevision)
-	return expectPostgresDependencyRow(result, err)
+	return sqlstore.ExpectRevisionRow(result, err)
 }
 
 func (s *PostgresStore) insertPostgresChannelMessageTx(ctx context.Context, tx *sql.Tx, message *models.ChannelMessage) error {

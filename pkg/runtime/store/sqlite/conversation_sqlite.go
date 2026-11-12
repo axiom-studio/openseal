@@ -685,7 +685,7 @@ func (s *SQLiteStore) PutConversationCursor(ctx context.Context, record models.C
 			record.Cursor.DeliveredSequence, record.Cursor.ReadSequence, record.Cursor.Revision, record.Cursor.UpdatedAt, string(payload),
 			record.Cursor.Scope.Kind, record.Cursor.Scope.ID, record.Cursor.ConversationID, record.Cursor.Participant.Type, record.Cursor.Participant.ID, record.ExpectedRevision)
 		if err == nil {
-			err = expectDependencyRow(result, nil)
+			err = sqlstore.ExpectRevisionRow(result, nil)
 		}
 	}
 	if err != nil {
@@ -748,7 +748,7 @@ func (s *SQLiteStore) PutConversationPresence(ctx context.Context, record models
 		if err != nil {
 			return nil, err
 		}
-		if err := expectDependencyRow(result, nil); err != nil {
+		if err := sqlstore.ExpectRevisionRow(result, nil); err != nil {
 			return nil, err
 		}
 	} else {
@@ -862,7 +862,7 @@ func updateSQLiteConversation(ctx context.Context, conn *sql.Conn, conversation 
 		payload = json_set(?, '$.spaceId', space_id)
 		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`, conversation.Status, conversation.LastSequence,
 		conversation.Revision, conversation.UpdatedAt, string(payload), conversation.Scope.Kind, conversation.Scope.ID, conversation.ID, expectedRevision)
-	return expectDependencyRow(result, err)
+	return sqlstore.ExpectRevisionRow(result, err)
 }
 
 func insertSQLiteChannelMessage(ctx context.Context, conn *sql.Conn, message *models.ChannelMessage) error {

@@ -394,7 +394,7 @@ func (s *PostgresStore) updatePostgresDependencyTx(ctx context.Context, tx *sql.
 		state = $3, revision = $4, updated_at = $5, payload = $6::jsonb WHERE scope_kind = $7 AND scope_id = $8
 		AND group_id = $9 AND id = $10 AND revision = $11`, edge.TargetRunID, edge.RequestID, edge.State, edge.Revision,
 		edge.UpdatedAt, string(payload), edge.Scope.Kind, edge.Scope.ID, edge.GroupID, edge.ID, expectedRevision)
-	return expectPostgresDependencyRow(result, err)
+	return sqlstore.ExpectRevisionRow(result, err)
 }
 
 func (s *PostgresStore) updatePostgresDependencyGroupTx(ctx context.Context, tx *sql.Tx, group *models.RunDependencyGroup, expectedRevision int64) error {
@@ -405,19 +405,5 @@ func (s *PostgresStore) updatePostgresDependencyGroupTx(ctx context.Context, tx 
 	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("run_dependency_groups")+` SET status = $1, revision = $2,
 		updated_at = $3, payload = $4::jsonb WHERE scope_kind = $5 AND scope_id = $6 AND id = $7 AND revision = $8`,
 		group.Status, group.Revision, group.UpdatedAt, string(payload), group.Scope.Kind, group.Scope.ID, group.ID, expectedRevision)
-	return expectPostgresDependencyRow(result, err)
-}
-
-func expectPostgresDependencyRow(result sql.Result, err error) error {
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected != 1 {
-		return models.ErrRevisionConflict
-	}
-	return nil
+	return sqlstore.ExpectRevisionRow(result, err)
 }

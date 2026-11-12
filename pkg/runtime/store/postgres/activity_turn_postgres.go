@@ -377,7 +377,7 @@ func (s *PostgresStore) ListActivity(ctx context.Context, filter models.Activity
 	if err != nil {
 		return nil, err
 	}
-	return scanPostgresActivity(rows, limit)
+	return sqlstore.ScanActivityEvents(rows, limit)
 }
 
 func appendPostgresActivityStrings(query string, args []interface{}, placeholder int, column string, values []string) (string, []interface{}, int) {
@@ -387,23 +387,6 @@ func appendPostgresActivityStrings(query string, args []interface{}, placeholder
 	query += fmt.Sprintf(" AND %s = ANY($%d)", column, placeholder)
 	args = append(args, pq.Array(values))
 	return query, args, placeholder + 1
-}
-
-func scanPostgresActivity(rows *sql.Rows, capacity int) ([]*models.ActivityEvent, error) {
-	defer rows.Close()
-	result := make([]*models.ActivityEvent, 0, capacity)
-	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return nil, err
-		}
-		var event models.ActivityEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			return nil, err
-		}
-		result = append(result, &event)
-	}
-	return result, rows.Err()
 }
 
 func (s *PostgresStore) CreateAgentTurn(ctx context.Context, turn *models.AgentTurn) (*models.AgentTurn, error) {

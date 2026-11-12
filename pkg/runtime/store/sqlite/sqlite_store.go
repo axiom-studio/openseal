@@ -240,3 +240,22 @@ func (s *SQLiteStore) Close() error {
 	}
 	return s.db.Close()
 }
+
+// withImmediateTx runs fn on one connection in BEGIN IMMEDIATE and commits
+// when fn succeeds.
+func (s *SQLiteStore) withImmediateTx(ctx context.Context, fn func(*sql.Conn) error) error {
+	conn, err := beginImmediateSQLite(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer rollbackSQLiteConn(conn, &committed)
+	if err := fn(conn); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}

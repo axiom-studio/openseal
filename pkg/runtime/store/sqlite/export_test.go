@@ -12,7 +12,7 @@ import (
 // storetest.RunAgentSessionContract forks sessions through.
 func CreateRunSessionInOwnTx(ctx context.Context, s *SQLiteStore, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
 	var result *models.OpenAgentSessionResult
-	err := s.withSQLiteSessionWrite(ctx, func(conn *sql.Conn) error {
+	err := s.withImmediateTx(ctx, func(conn *sql.Conn) error {
 		var err error
 		result, err = s.createRunAgentSessionTx(ctx, conn, req)
 		return err
