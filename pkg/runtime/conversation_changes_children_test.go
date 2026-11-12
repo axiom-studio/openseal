@@ -16,7 +16,11 @@ type batchedConversationRunsStore struct {
 
 func (s *batchedConversationRunsStore) ListAgentRuns(_ context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
 	if filter.Kind == RunKindConversation {
-		return pageAgentRuns(s.roots, filter.Offset, filter.Limit), nil
+		roots := s.roots[min(max(filter.Offset, 0), len(s.roots)):]
+		if filter.Limit > 0 && filter.Limit < len(roots) {
+			roots = roots[:filter.Limit]
+		}
+		return roots, nil
 	}
 	s.batches = append(s.batches, append([]string(nil), filter.RootRunIDs...))
 	return nil, nil

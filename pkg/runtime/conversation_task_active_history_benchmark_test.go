@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -19,13 +20,18 @@ import (
 // a history scan. After measurement they are completed to measure the empty
 // active page in the same conversation with the same retained history.
 func BenchmarkConversationTaskSQLiteActiveHistory(b *testing.B) {
-	conversationTaskBenchmarkActiveHistory(b, func(b *testing.B) conversationTaskSQLTestStore {
-		store, err := NewSQLiteStore(filepath.Join(b.TempDir(), "tasks.db"))
+	conversationTaskBenchmarkActiveHistory(b, func(b *testing.B) (conversationTaskSQLTestStore, conversationTaskBenchmarkExplainPlans) {
+		path := filepath.Join(b.TempDir(), "tasks.db")
+		store, err := NewSQLiteStore(path)
 		if err != nil {
 			b.Fatal(err)
 		}
 		b.Cleanup(func() { _ = store.Close() })
-		return store
+		db := openTestSQLiteDB(b, path)
+		return store, func(b *testing.B, filter ConversationTaskFilter, _ int) {
+			conversationTaskBenchmarkExplain(b, db, filter)
+			conversationActiveRunsBenchmarkExplain(b, db, filter)
+		}
 	})
 }
 
@@ -34,31 +40,43 @@ func BenchmarkConversationTaskPostgresActiveHistory(b *testing.B) {
 	if dsn == "" {
 		b.Skip("set OPENSEAL_TASK_BENCH_POSTGRES_DSN to an isolated benchmark database")
 	}
-	conversationTaskBenchmarkActiveHistory(b, func(b *testing.B) conversationTaskSQLTestStore {
-		schema := fmt.Sprintf("conversation_task_benchmark_%x", time.Now().UnixNano())
-		store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(schema))
+	conversationTaskBenchmarkActiveHistory(b, func(b *testing.B) (conversationTaskSQLTestStore, conversationTaskBenchmarkExplainPlans) {
+		db, err := sql.Open("postgres", dsn)
+		if err != nil {
+			b.Fatal(err)
+		}
+		schema := testPostgresSchema{dsn: dsn, name: fmt.Sprintf("conversation_task_benchmark_%x", time.Now().UnixNano()), db: db}
+		store, err := NewPostgresStore(context.Background(), dsn, WithPostgresSchema(schema.name))
 		if err != nil {
 			b.Fatal(err)
 		}
 		b.Cleanup(func() {
-			if _, err := store.db.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS "+store.quotedSchema()+" CASCADE"); err != nil {
+			if _, err := db.ExecContext(context.Background(), "DROP SCHEMA IF EXISTS "+schema.quoted()+" CASCADE"); err != nil {
 				b.Error(err)
 			}
 			_ = store.Close()
+			_ = db.Close()
 		})
 		var config string
-		if err := store.db.QueryRowContext(context.Background(), "SELECT current_setting('server_version') || ' fsync=' || current_setting('fsync') || ' synchronous_commit=' || current_setting('synchronous_commit')").Scan(&config); err != nil {
+		if err := db.QueryRowContext(context.Background(), "SELECT current_setting('server_version') || ' fsync=' || current_setting('fsync') || ' synchronous_commit=' || current_setting('synchronous_commit')").Scan(&config); err != nil {
 			b.Fatal(err)
 		}
 		b.Logf("isolated PostgreSQL: %s", config)
-		return store
+		return store, func(b *testing.B, filter ConversationTaskFilter, history int) {
+			conversationTaskPostgresBenchmarkExplain(b, schema, filter, history)
+		}
 	})
 }
 
-func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) conversationTaskSQLTestStore) {
+// conversationTaskBenchmarkExplainPlans checks the backend's plans for the
+// task page of filter over history completed tasks, on the benchmark's own
+// connection to the store's database.
+type conversationTaskBenchmarkExplainPlans func(b *testing.B, filter ConversationTaskFilter, history int)
+
+func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) (conversationTaskSQLTestStore, conversationTaskBenchmarkExplainPlans)) {
 	for _, history := range []int{100, 10000} {
 		b.Run(fmt.Sprintf("completed_%d", history), func(b *testing.B) {
-			store := open(b)
+			store, explain := open(b)
 			base := time.Now().UTC().Add(-2 * time.Hour)
 			kernel, ok := store.(ConversationTaskKernelStore)
 			if !ok {
@@ -106,13 +124,7 @@ func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) 
 			}
 			// Print the actual scoped indexed SQL plan once per fixture. This
 			// is untimed and complements timings with an asymptotic invariant.
-			switch typed := store.(type) {
-			case *SQLiteStore:
-				conversationTaskBenchmarkExplain(b, typed, filter)
-				conversationActiveRunsBenchmarkExplain(b, typed, filter)
-			case *PostgresStore:
-				conversationTaskPostgresBenchmarkExplain(b, typed, filter, history)
-			}
+			explain(b, filter, history)
 			b.Run("five_old_active", func(b *testing.B) {
 				b.ReportAllocs()
 				for index := 0; index < b.N; index++ {
@@ -187,9 +199,9 @@ func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) 
 	}
 }
 
-func conversationTaskBenchmarkExplain(t testing.TB, store *SQLiteStore, filter ConversationTaskFilter) {
+func conversationTaskBenchmarkExplain(t testing.TB, db *sql.DB, filter ConversationTaskFilter) {
 	t.Helper()
-	rows, err := store.db.QueryContext(context.Background(), `EXPLAIN QUERY PLAN SELECT t.payload, r.payload FROM conversation_tasks t
+	rows, err := db.QueryContext(context.Background(), `EXPLAIN QUERY PLAN SELECT t.payload, r.payload FROM conversation_tasks t
         JOIN agent_runs r ON r.scope_kind=t.scope_kind AND r.scope_id=t.scope_id AND r.id=t.work_run_id
         WHERE t.scope_kind=? AND t.scope_id=? AND t.conversation_id=? AND t.owner_type=? AND t.owner_id=?
         AND t.actor_type=? AND t.actor_id=? AND t.thread_root_id=? AND t.is_active=1
@@ -277,9 +289,9 @@ func conversationTaskBenchmarkRecord(t testing.TB, store conversationTaskSQLTest
 	return record
 }
 
-func conversationActiveRunsBenchmarkExplain(t testing.TB, store *SQLiteStore, filter ConversationTaskFilter) {
+func conversationActiveRunsBenchmarkExplain(t testing.TB, db *sql.DB, filter ConversationTaskFilter) {
 	t.Helper()
-	rows, err := store.db.QueryContext(context.Background(), `EXPLAIN QUERY PLAN SELECT child.payload FROM conversation_active_runs linked
+	rows, err := db.QueryContext(context.Background(), `EXPLAIN QUERY PLAN SELECT child.payload FROM conversation_active_runs linked
 		JOIN agent_runs child INDEXED BY sqlite_autoindex_agent_runs_1 ON child.scope_kind=linked.scope_kind AND child.scope_id=linked.scope_id AND child.id=linked.id
 		JOIN agent_runs root ON root.scope_kind=linked.scope_kind AND root.scope_id=linked.scope_id AND root.id=linked.root_run_id
 		WHERE linked.scope_kind=? AND linked.scope_id=? AND linked.owner_type=? AND linked.owner_id=? AND linked.conversation_id=?
@@ -316,12 +328,12 @@ func conversationActiveRunsBenchmarkExplain(t testing.TB, store *SQLiteStore, fi
 	}
 }
 
-func conversationTaskPostgresBenchmarkExplain(t testing.TB, store *PostgresStore, filter ConversationTaskFilter, history int) {
+func conversationTaskPostgresBenchmarkExplain(t testing.TB, schema testPostgresSchema, filter ConversationTaskFilter, history int) {
 	t.Helper()
 	// This is an isolated fixture: refreshing its planner statistics performs no
 	// work against platform/application tables and is excluded from timings.
 	for _, table := range []string{"conversation_tasks", "agent_runs", "conversation_active_runs"} {
-		if _, err := store.db.ExecContext(context.Background(), "ANALYZE "+store.table(table)); err != nil {
+		if _, err := schema.db.ExecContext(context.Background(), "ANALYZE "+schema.table(table)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -330,20 +342,20 @@ func conversationTaskPostgresBenchmarkExplain(t testing.TB, store *PostgresStore
 		sql  string
 		args []interface{}
 	}{
-		{"task", `SELECT t.payload,r.payload FROM ` + store.table("conversation_tasks") + ` t
-		JOIN ` + store.table("agent_runs") + ` r ON r.scope_kind=t.scope_kind AND r.scope_id=t.scope_id AND r.id=t.work_run_id
+		{"task", `SELECT t.payload,r.payload FROM ` + schema.table("conversation_tasks") + ` t
+		JOIN ` + schema.table("agent_runs") + ` r ON r.scope_kind=t.scope_kind AND r.scope_id=t.scope_id AND r.id=t.work_run_id
 		WHERE t.scope_kind=$1 AND t.scope_id=$2 AND t.conversation_id=$3 AND t.owner_type=$4 AND t.owner_id=$5
 		AND t.actor_type=$6 AND t.actor_id=$7 AND t.thread_root_id=$8 AND t.is_active
 		ORDER BY t.created_at DESC,t.id DESC LIMIT $9`, []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.ConversationID, filter.Owner.Type, filter.Owner.ID, filter.AuthenticatedActor.Type, filter.AuthenticatedActor.ID, filter.ThreadRootID, filter.Limit}},
 		{"active_child", `WITH linked AS MATERIALIZED (
-		SELECT * FROM ` + store.table("conversation_active_runs") + `
+		SELECT * FROM ` + schema.table("conversation_active_runs") + `
 		WHERE scope_kind=$1 AND scope_id=$2 AND owner_type=$3 AND owner_id=$4 AND conversation_id=$5
 		ORDER BY created_at DESC,id DESC LIMIT $6
 		)
 		SELECT child.payload FROM linked
-		CROSS JOIN LATERAL (SELECT payload,id,root_run_id,status FROM ` + store.table("agent_runs") + `
+		CROSS JOIN LATERAL (SELECT payload,id,root_run_id,status FROM ` + schema.table("agent_runs") + `
 		WHERE scope_kind=linked.scope_kind AND scope_id=linked.scope_id AND id=linked.id OFFSET 0) child
-		CROSS JOIN LATERAL (SELECT payload,id FROM ` + store.table("agent_runs") + `
+		CROSS JOIN LATERAL (SELECT payload,id FROM ` + schema.table("agent_runs") + `
 		WHERE scope_kind=linked.scope_kind AND scope_id=linked.scope_id AND id=linked.root_run_id OFFSET 0) root
 		WHERE child.root_run_id=root.id AND child.id<>root.id AND root.payload->>'kind'='conversation'
 		AND root.payload->'owner'->>'type'=linked.owner_type AND root.payload->'owner'->>'id'=linked.owner_id
@@ -354,7 +366,7 @@ func conversationTaskPostgresBenchmarkExplain(t testing.TB, store *PostgresStore
 	}
 	for _, query := range queries {
 		var raw []byte
-		if err := store.db.QueryRowContext(context.Background(), "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) "+query.sql, query.args...).Scan(&raw); err != nil {
+		if err := schema.db.QueryRowContext(context.Background(), "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) "+query.sql, query.args...).Scan(&raw); err != nil {
 			t.Fatal(err)
 		}
 		t.Logf("Postgres %s plan: %s", query.name, raw)

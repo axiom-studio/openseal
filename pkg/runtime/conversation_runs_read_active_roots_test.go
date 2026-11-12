@@ -8,7 +8,7 @@ import (
 )
 
 func TestConversationActiveRunsTracksCanonicalRootChanges(t *testing.T) {
-	store := newTestKernelStore(t)
+	store, db := newTestSQLiteStore(t)
 	scope := Scope{Kind: "tenant", ID: "active-root"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
 	at := time.Now()
@@ -49,7 +49,7 @@ func TestConversationActiveRunsTracksCanonicalRootChanges(t *testing.T) {
 	child.Revision++
 	updateConversationTaskSQLRun(t, store, child, child.Revision-1)
 	check("moved", 0)
-	if countStoreRows(t, store, "conversation_active_runs") != 0 {
+	if countRows(t, db, "conversation_active_runs") != 0 {
 		t.Fatal("terminal children retained active root lookup entries")
 	}
 }

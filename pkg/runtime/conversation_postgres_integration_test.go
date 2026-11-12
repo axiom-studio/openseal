@@ -21,7 +21,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
 		t.Fatalf("schema version = %d, err = %v", version, err)
 	}
 

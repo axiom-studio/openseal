@@ -399,15 +399,15 @@ func TestTerminalRunReportingContractFailedTerminalCommitRollsBackIntent(t *test
 		}
 		// Fail the audit write AFTER the canonical terminal write and its
 		// enqueue trigger. A rollback must remove both the completion and intent.
-		switch database := store.(type) {
+		switch store.(type) {
 		case *SQLiteStore:
-			_, err = database.db.ExecContext(t.Context(), `CREATE TRIGGER reporting_contract_activity_failure BEFORE INSERT ON run_activity BEGIN SELECT RAISE(ABORT,'injected activity failure'); END`)
+			_, err = fixture.db.ExecContext(t.Context(), `CREATE TRIGGER reporting_contract_activity_failure BEFORE INSERT ON run_activity BEGIN SELECT RAISE(ABORT,'injected activity failure'); END`)
 			t.Cleanup(func() {
-				_, _ = database.db.ExecContext(context.Background(), `DROP TRIGGER IF EXISTS reporting_contract_activity_failure`)
+				_, _ = fixture.db.ExecContext(context.Background(), `DROP TRIGGER IF EXISTS reporting_contract_activity_failure`)
 			})
 		case *PostgresStore:
-			_, err = database.db.ExecContext(t.Context(), `CREATE FUNCTION `+database.table("reporting_contract_activity_failure")+`() RETURNS trigger LANGUAGE plpgsql AS $report_test$ BEGIN RAISE EXCEPTION 'injected activity failure'; END; $report_test$;
-				CREATE TRIGGER reporting_contract_activity_failure BEFORE INSERT ON `+database.table("run_activity")+` FOR EACH ROW EXECUTE FUNCTION `+database.table("reporting_contract_activity_failure")+`()`)
+			_, err = fixture.db.ExecContext(t.Context(), `CREATE FUNCTION `+fixture.table("reporting_contract_activity_failure")+`() RETURNS trigger LANGUAGE plpgsql AS $report_test$ BEGIN RAISE EXCEPTION 'injected activity failure'; END; $report_test$;
+				CREATE TRIGGER reporting_contract_activity_failure BEFORE INSERT ON `+fixture.table("run_activity")+` FOR EACH ROW EXECUTE FUNCTION `+fixture.table("reporting_contract_activity_failure")+`()`)
 		default:
 			// Memory commits cannot fail after validation; reject the terminal
 			// revision at the same command boundary instead.

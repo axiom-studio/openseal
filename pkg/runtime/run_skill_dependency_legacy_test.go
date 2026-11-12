@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -65,18 +64,9 @@ func TestLegacyRunSkillDependencyRequiresProvableImmutableMethod(t *testing.T) {
 
 func TestLegacyRunSkillDependencyBackfillPagesWithoutRewritingHistoryAcrossStores(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-		var db *sql.DB
-		var runs, deployments, definitions, dependencies string
-		postgres := false
-		switch store := fixture.store.(type) {
-		case *SQLiteStore:
-			db, runs, deployments, definitions, dependencies = store.db, "agent_runs", "agent_deployments", "agent_definitions", "run_skill_dependencies"
-		case *PostgresStore:
-			db, runs, deployments, definitions, dependencies = store.db, store.table("agent_runs"), store.table("agent_deployments"), store.table("agent_definitions"), store.table("run_skill_dependencies")
-			postgres = true
-		default:
-			t.Skip("one-time migration applies to durable stores")
-		}
+		db := fixture.db
+		runs, deployments, definitions, dependencies := fixture.table("agent_runs"), fixture.table("agent_deployments"), fixture.table("agent_definitions"), fixture.table("run_skill_dependencies")
+		_, postgres := fixture.store.(*PostgresStore)
 		store := fixture.store.(KernelStore)
 		scope := Scope{Kind: "tenant", ID: "legacy-backfill"}
 		deployment, definition := acceptedMethodFixture(scope)

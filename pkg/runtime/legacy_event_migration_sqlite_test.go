@@ -35,9 +35,10 @@ func TestSQLiteStoreDropsEventSources(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		check := openTestSQLiteDB(t, path)
 		for _, table := range sqlstore.LegacyEventSourceTables {
 			var count int
-			if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil || count != 0 {
+			if err := check.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("SQLite table %s still exists: %d, %v", table, count, err)
 			}
 		}
@@ -66,9 +67,10 @@ func TestSQLiteStoreDropsEventWaits(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		check := openTestSQLiteDB(t, path)
 		for _, table := range sqlstore.LegacyEventWaitTables {
 			var count int
-			if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil || count != 0 {
+			if err := check.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("SQLite table %s still exists: %d, %v", table, count, err)
 			}
 		}
