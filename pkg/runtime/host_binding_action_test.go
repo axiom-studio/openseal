@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -27,7 +28,7 @@ func (durableCatalog) UsesDurableBindings() bool { return true }
 // A connected app's tool is proposed, fenced and executed for the run it was
 // supplied to, with no stored binding row; another user's run cannot reach it.
 func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	claimed := actiontest.ClaimedOwnedRun(t, store, scope, time.Now().UTC(), "worker", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"})
 	// Another run in the workspace, e.g. another user's chat.

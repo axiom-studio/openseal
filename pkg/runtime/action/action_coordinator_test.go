@@ -12,13 +12,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 	ctx := context.Background()
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	catalog, scope := actiontest.GovernedCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := actiontest.ClaimedRun(t, store, scope, now, "worker")
@@ -101,7 +102,7 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 
 func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) {
 	ctx := context.Background()
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	catalog, scope := actiontest.GovernedCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := actiontest.ClaimedRun(t, store, scope, now, "worker")
@@ -143,7 +144,7 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 
 func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(t *testing.T) {
 	ctx := context.Background()
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	catalog, scope := actiontest.GovernedCatalog(t)
 	policyEvaluations := 0
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
@@ -180,7 +181,7 @@ func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(
 
 func TestActionCoordinatorEnforcesExternalOperationPolicy(t *testing.T) {
 	ctx := context.Background()
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	catalog, scope := externalOperationPolicyCatalog(t)
 	run := actiontest.ClaimedRun(t, store, scope, time.Now().UTC(), "worker")
 	coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {

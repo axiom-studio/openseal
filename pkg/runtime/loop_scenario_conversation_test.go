@@ -24,6 +24,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 )
 
@@ -245,7 +246,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("flashcards_and_recipe", func(t *testing.T) {
-		f := looptest.NewFixture(t, newTestKernelStore(t))
+		f := looptest.NewFixture(t, kerneltest.NewStore(t))
 		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{})
 		first := true
 		f.Model.Add(&looptest.ModelRule{Name: "card", Reply: func(v looptest.StepView) models.ModelStepResult {
@@ -283,7 +284,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("poll", func(t *testing.T) {
-		f := looptest.NewFixture(t, newTestKernelStore(t))
+		f := looptest.NewFixture(t, kerneltest.NewStore(t))
 		people := []models.ConversationParticipant{convActor("ana"), convActor("ben"), convActor("cy")}
 		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{
 			HumanParticipants: func(_ context.Context, _ *models.Conversation) ([]models.ConversationParticipant, error) {
@@ -333,7 +334,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("places", func(t *testing.T) {
-		f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(convAnswer("ok: ")))
+		f := looptest.NewFixture(t, kerneltest.NewStore(t), looptest.WithRules(convAnswer("ok: ")))
 		found := map[string][]runtimeconversation.ConversationPlace{}
 		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{Places: func(_ context.Context, run *models.AgentRun) []runtimeconversation.ConversationPlace {
 			conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
@@ -371,7 +372,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 	})
 
 	t.Run("image_style", func(t *testing.T) {
-		f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(convAnswer("ok: ")))
+		f := looptest.NewFixture(t, kerneltest.NewStore(t), looptest.WithRules(convAnswer("ok: ")))
 		// The host reads the style saved by the sender of the Run's trigger.
 		styles := map[string]string{"Draw a fox": " cartoon "}
 		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{ImageStyle: func(_ context.Context, run *models.AgentRun) string {
@@ -581,7 +582,7 @@ func TestCatchUpAppendsNewVisibleMessagesWithAttribution(t *testing.T) {
 		// A message in a local thread runs in the thread's lane and session:
 		// the canonical trigger is the thread message, the session holds only
 		// the thread, and the answer goes back into the thread.
-		f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(convAnswer("ok: ")))
+		f := looptest.NewFixture(t, kerneltest.NewStore(t), looptest.WithRules(convAnswer("ok: ")))
 		conversation := convChat(f, models.ObjectiveOwner{}, nil)
 		root := convPost(f, conversation.ID, "Call one started", func(r *runtimeconversation.PostChannelMessageRequest) {
 			r.Sender = models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "calls"}
@@ -686,7 +687,7 @@ func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
 		// reply root there is not a thread. The reply's Run works in the
 		// chat's own lane, and its seed holds the whole chat, not only the
 		// quoted message's "thread".
-		f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(convAnswer("ok: ")))
+		f := looptest.NewFixture(t, kerneltest.NewStore(t), looptest.WithRules(convAnswer("ok: ")))
 		conversation := convChat(f, models.ObjectiveOwner{}, &models.ConversationReference{Kind: models.ConversationReferenceExternalSource, ID: "telegram-endpoint"})
 		source := func(id, thread string) *models.ExternalMessageSource {
 			return &models.ExternalMessageSource{Provider: "telegram", ChannelType: "private", ChannelID: "chat-7", ThreadID: thread, MessageID: id, ParticipantID: "kev"}
@@ -790,7 +791,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 	})
 
 	t.Run("participation_opt_in", func(t *testing.T) {
-		f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(convAnswer("ok: ")))
+		f := looptest.NewFixture(t, kerneltest.NewStore(t), looptest.WithRules(convAnswer("ok: ")))
 		convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
 		conversation := convChat(f, models.ObjectiveOwner{}, nil)
 
@@ -865,7 +866,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 // response mode from its trigger: the run_context names a spoken reply, the
 // spoken system section is offered, and the answer is posted spoken.
 func TestSpokenTriggerKeepsItsResponseMode(t *testing.T) {
-	f := looptest.NewFixture(t, newTestKernelStore(t), looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
+	f := looptest.NewFixture(t, kerneltest.NewStore(t), looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
 		args := map[string]any{"answer": "Leave at seven."}
 		// The spoken final tool requires silent.
 		for _, tool := range v.Request().Tools {

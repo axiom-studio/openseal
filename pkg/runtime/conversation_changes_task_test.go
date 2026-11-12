@@ -11,6 +11,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -150,7 +151,7 @@ func TestConversationChangesProjectIndependentTaskBeforeAndWithTerminalReport(t 
 }
 
 func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	conversations := runtimeconversation.NewConversationService(store)
 	scope := models.Scope{Kind: "tenant", ID: "task-thread-privacy"}
 	seedTestSpace(t, store, scope)
@@ -205,7 +206,7 @@ func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
 }
 
 func TestConversationTaskTerminalWindowCountsVisibleRuns(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	source, turn, conversation, message := conversationruntest.SettledTaskSource(t, store)
 	admitted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, source, turn))
 	if err != nil {

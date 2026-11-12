@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -55,7 +56,7 @@ func TestDependencyFanOutAtomicallyCreatesTargetRuns(t *testing.T) {
 }
 
 func TestDependencyFanOutRejectsUnsealedTargetWithoutMutation(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	record := atomicTargetRunFixture(t, store)
 	record.Dependencies[0].TargetRunID = "missing-child"
 	if _, err := store.CreateRunDependencyGroup(t.Context(), record); err == nil {

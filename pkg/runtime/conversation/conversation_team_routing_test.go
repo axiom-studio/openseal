@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -19,7 +20,7 @@ func teamRoutingAgent(id string) models.ConversationParticipant {
 }
 
 func TestTeamRoutingAddressingOrder(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := NewConversationService(store)
 	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "routing"})
 	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
@@ -167,7 +168,7 @@ func TestFindHandoffMentions(t *testing.T) {
 // and what each does on the Team.
 func TestConversationTeamRosterReadsLeadAndPurposeFromMembers(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
 	if err := store.CreateTeamDefinition(ctx, &kernelteam.Definition{
 		ID: "launch", Version: "1", DisplayName: "Launch", Purpose: "Ship", Routing: kernelteam.RoutingPolicy{Notes: "Maya owns pricing"},

@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -56,7 +57,7 @@ func TestRunbookActionOwnerChecksTheCurrentRoster(t *testing.T) {
 // A Team member creates a routine in its Team chat as in its own chat: the
 // Team owns it and the member runs it, only while the member is on the roster.
 func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
-	ctx, store, scope := t.Context(), conversationtest.NewStore(t), models.Scope{Kind: "tenant", ID: "task-test"}
+	ctx, store, scope := t.Context(), kerneltest.NewStore(t), models.Scope{Kind: "tenant", ID: "task-test"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}
 	service := conversation.NewConversationService(store)
 	conversationtest.SeedSpace(t, store, scope)

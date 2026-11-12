@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 type countedConversationBackdropStore struct {
@@ -28,7 +29,7 @@ func (s *countedConversationBackdropStore) ListChannelMessages(ctx context.Conte
 func TestConversationThreadBackdropDoesNotSeekPastHiddenPage(t *testing.T) {
 	for _, replyTo := range []bool{false, true} {
 		t.Run(fmt.Sprintf("replyTo=%t", replyTo), func(t *testing.T) {
-			store := conversationtest.NewStore(t)
+			store := kerneltest.NewStore(t)
 			service := runtimeconversation.NewConversationService(store)
 			conversation := conversationtest.ThreadStartConversation(t, store)
 			older := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{
@@ -152,7 +153,7 @@ func TestConversationThreadBackdropIsBoundedAuthorizedAndStable(t *testing.T) {
 }
 
 func TestOrdinaryConversationHasNoThreadBackdropReads(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	conversation := conversationtest.ThreadStartConversation(t, store)
 	root := conversationtest.ThreadStartPost(t, service, conversation, runtimeconversation.PostChannelMessageRequest{IdempotencyKey: "ordinary-root"})

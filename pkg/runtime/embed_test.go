@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -25,7 +26,7 @@ func testEmbedPermissions() models.EmbedPermissionPolicy {
 }
 
 func TestEmbedSessionCreatesDistinctCanonicalAgentConversations(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service, err := runtimeconversation.NewEmbedSessionService(store, store)
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +64,7 @@ func TestEmbedSessionCreatesDistinctCanonicalAgentConversations(t *testing.T) {
 }
 
 func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service, _ := runtimeconversation.NewEmbedSessionService(store, store)
 	installation, err := service.CreateInstallation(t.Context(), runtimeconversation.CreateEmbedInstallationRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "1"}, DeploymentID: "support-agent", Name: "Signed support", AllowedOrigins: []string{"https://app.example.com"},

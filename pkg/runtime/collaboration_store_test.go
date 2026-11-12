@@ -7,12 +7,13 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	t.Parallel()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	portfolio := portfolio.NewPortfolioService(store)
@@ -70,7 +71,7 @@ func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 
 func TestAgentRequestNegotiationAndSafety(t *testing.T) {
 	t.Parallel()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	portfolio := portfolio.NewPortfolioService(store)

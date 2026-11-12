@@ -13,7 +13,7 @@ import (
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/google/uuid"
@@ -289,7 +289,7 @@ func delegateResult(t *testing.T, entry *models.SessionEntry) map[string]interfa
 }
 
 func TestDelegateParksWaitingForAgentDecision(t *testing.T) {
-	f := newDelegateFixture(t, conversationtest.NewStore(t), nil)
+	f := newDelegateFixture(t, kerneltest.NewStore(t), nil)
 	result, request := f.delegate()
 	if request.Recipient != (models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "specialist"}) || request.Status != models.AgentRequestStatusPending ||
 		request.AcceptancePolicy != models.AgentRequestAcceptanceRecipientReview || request.Goal != "Analyze the release" ||
@@ -319,7 +319,7 @@ func TestDelegateParksWaitingForAgentDecision(t *testing.T) {
 }
 
 func TestDelegateCompletedResultCarriesAnswerAndArtifacts(t *testing.T) {
-	f := newDelegateFixture(t, conversationtest.NewStore(t), nil)
+	f := newDelegateFixture(t, kerneltest.NewStore(t), nil)
 	_, request := f.delegate()
 	f.finishChild(request.ID, models.AgentRunStatusCompleted, map[string]interface{}{
 		"report": "Ship it: no blockers found.", "summary": "Release analysed",
@@ -343,7 +343,7 @@ func TestDelegateCompletedResultCarriesAnswerAndArtifacts(t *testing.T) {
 }
 
 func TestDelegateClarificationThenReplyParksAgain(t *testing.T) {
-	f := newDelegateFixture(t, conversationtest.NewStore(t), nil)
+	f := newDelegateFixture(t, kerneltest.NewStore(t), nil)
 	_, request := f.delegate()
 	f.respond(request.ID, collaboration.AgentRequestDecisionRequestClarification, "Which region?")
 	resumed := f.resume()
@@ -381,7 +381,7 @@ func TestDelegateClarificationThenReplyParksAgain(t *testing.T) {
 }
 
 func TestDelegateReplyCrashBeforeAnswerAnswersOnResume(t *testing.T) {
-	f := newDelegateFixture(t, conversationtest.NewStore(t), nil)
+	f := newDelegateFixture(t, kerneltest.NewStore(t), nil)
 	_, request := f.delegate()
 	f.respond(request.ID, collaboration.AgentRequestDecisionRequestClarification, "Which region?")
 	f.resume()
@@ -405,7 +405,7 @@ func TestDelegateReplyCrashBeforeAnswerAnswersOnResume(t *testing.T) {
 }
 
 func TestDelegateRejectedIsErrorResult(t *testing.T) {
-	f := newDelegateFixture(t, conversationtest.NewStore(t), nil)
+	f := newDelegateFixture(t, kerneltest.NewStore(t), nil)
 	_, request := f.delegate()
 	f.respond(request.ID, collaboration.AgentRequestDecisionReject, "Out of scope for me.")
 	resumed := f.resume()
@@ -418,7 +418,7 @@ func TestDelegateRejectedIsErrorResult(t *testing.T) {
 }
 
 func TestDelegateFailedLeavesNoFinalFailureCheckpoint(t *testing.T) {
-	f := newDelegateFixture(t, conversationtest.NewStore(t), nil)
+	f := newDelegateFixture(t, kerneltest.NewStore(t), nil)
 	_, request := f.delegate()
 	f.finishChild(request.ID, models.AgentRunStatusFailed, nil, "provider exhausted retries")
 	source := f.reload()
@@ -440,7 +440,7 @@ func TestDelegateFailedLeavesNoFinalFailureCheckpoint(t *testing.T) {
 }
 
 func TestDelegateFromRunbookOriginIsPreauthorized(t *testing.T) {
-	f := newDelegateFixture(t, conversationtest.NewStore(t), func(req *models.CreateAgentRunRequest) {
+	f := newDelegateFixture(t, kerneltest.NewStore(t), func(req *models.CreateAgentRunRequest) {
 		req.Context = map[string]interface{}{
 			"runbookDefinitionId": "hourly-scan", "runbookDefinitionVersion": "2.0.2", "runbookActivationId": "activation-one",
 		}
@@ -454,7 +454,7 @@ func TestDelegateFromRunbookOriginIsPreauthorized(t *testing.T) {
 }
 
 func TestReplyToForeignRequestIsRefused(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	other := newDelegateFixture(t, store, nil)
 	_, foreign := other.delegate()
 	other.respond(foreign.ID, collaboration.AgentRequestDecisionRequestClarification, "Which region?")
@@ -478,7 +478,7 @@ func TestReplyToForeignRequestIsRefused(t *testing.T) {
 }
 
 func TestDelegateReplyToUnaskedRequestIsRefused(t *testing.T) {
-	f := newDelegateFixture(t, conversationtest.NewStore(t), nil)
+	f := newDelegateFixture(t, kerneltest.NewStore(t), nil)
 	_, request := f.delegate()
 	f.respond(request.ID, collaboration.AgentRequestDecisionReject, "No.")
 	f.resume()
@@ -491,7 +491,7 @@ func TestDelegateReplyToUnaskedRequestIsRefused(t *testing.T) {
 }
 
 func TestDelegateUnknownAgentIsRefused(t *testing.T) {
-	f := newDelegateFixture(t, conversationtest.NewStore(t), nil)
+	f := newDelegateFixture(t, kerneltest.NewStore(t), nil)
 	f.call(models.ControlToolDelegate, map[string]interface{}{"agentId": "stranger", "goal": "Do it"})
 	f.mustSettle()
 	if value := delegateResult(t, f.entry); f.entry.State != models.ToolEntryError || value["error"] != controlDelegationRejectedCode {
@@ -503,7 +503,7 @@ func TestDelegateUnknownAgentIsRefused(t *testing.T) {
 }
 
 func TestDelegateNewMessageRefusesWithoutRequest(t *testing.T) {
-	f := newDelegateFixture(t, conversationtest.NewStore(t), nil)
+	f := newDelegateFixture(t, kerneltest.NewStore(t), nil)
 	f.call(models.ControlToolDelegate, map[string]interface{}{"agentId": "specialist", "goal": "Analyze the release"})
 	// A message arrives after the loop read the Run.
 	current := f.reload()
@@ -533,7 +533,7 @@ func TestDelegateNewMessageRefusesWithoutRequest(t *testing.T) {
 
 func TestDelegateBoundedSourceFundsMinimumChild(t *testing.T) {
 	const childMinimumTurns = 8 // the Turns every child is funded with at least
-	f := newDelegateFixture(t, conversationtest.NewStore(t), func(req *models.CreateAgentRunRequest) {
+	f := newDelegateFixture(t, kerneltest.NewStore(t), func(req *models.CreateAgentRunRequest) {
 		req.Budget = &models.BudgetPolicy{MaxTurns: 64}
 	})
 	_, request := f.delegate()
@@ -543,7 +543,7 @@ func TestDelegateBoundedSourceFundsMinimumChild(t *testing.T) {
 }
 
 func TestDelegateInsufficientBudgetIsToolError(t *testing.T) {
-	f := newDelegateFixture(t, conversationtest.NewStore(t), func(req *models.CreateAgentRunRequest) {
+	f := newDelegateFixture(t, kerneltest.NewStore(t), func(req *models.CreateAgentRunRequest) {
 		req.Budget = &models.BudgetPolicy{MaxTurns: 4}
 	})
 	f.call(models.ControlToolDelegate, map[string]interface{}{"agentId": "specialist", "goal": "Analyze the release"})
@@ -584,7 +584,7 @@ func TestDelegateCrashBeforeRequestResettlesOnce(t *testing.T) {
 		name string
 		open func(t *testing.T) delegateTestStore
 	}{
-		{"Memory", func(*testing.T) delegateTestStore { return conversationtest.NewStore(t) }},
+		{"Memory", func(*testing.T) delegateTestStore { return kerneltest.NewStore(t) }},
 		{"SQLite", func(t *testing.T) delegateTestStore { return openControlSessionStore(t) }},
 	}
 	for _, backend := range backends {

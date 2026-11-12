@@ -13,6 +13,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -39,7 +40,7 @@ func channelMessageBatchHistory(t testing.TB, store models.KernelStore, count in
 }
 
 func TestConversationMessageBatchReducesIdleHistoricalPollReads(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation, runs := channelMessageBatchHistory(t, store, 100)
 	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "viewer"}, Roles: []string{"reader"}}
 	counted := conversationtest.NewCountedBatchStore(store)
@@ -175,7 +176,7 @@ func TestConversationMessageBatchSQLiteQueriesExactIDsOnceAndClones(t *testing.T
 }
 
 func TestConversationMessageBatchChunksAndDeduplicatesExactIDs(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation, runs := channelMessageBatchHistory(t, store, 401)
 	runs = append(runs, runs[0])
 	counted := conversationtest.NewCountedBatchStore(store)

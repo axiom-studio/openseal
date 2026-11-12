@@ -7,7 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -51,7 +51,7 @@ func (s *idleConversationBenchmarkStore) reportReads(b *testing.B) {
 
 func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (*idleConversationBenchmarkStore, *ConversationRunScheduler, models.Scope, []*models.Conversation) {
 	b.Helper()
-	store := &idleConversationBenchmarkStore{Store: conversationtest.NewStore(b)}
+	store := &idleConversationBenchmarkStore{Store: kerneltest.NewStore(b)}
 	service := runtimeconversation.NewConversationService(store)
 	scope := models.Scope{Kind: "tenant", ID: "idle-scheduler-benchmark"}
 	ctx := b.Context()

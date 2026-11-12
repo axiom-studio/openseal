@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -63,7 +63,7 @@ func (s *passCountingStore) ListRoutineEventWorkScopes(ctx context.Context) ([]m
 }
 
 func TestRoutineEventDispatcherCoalescesNudges(t *testing.T) {
-	store := &passCountingStore{Store: conversationtest.NewStore(t)}
+	store := &passCountingStore{Store: kerneltest.NewStore(t)}
 	matcher := NewRoutineEventMatcher(store)
 	t.Cleanup(matcher.Close)
 	dispatcher := NewRoutineEventDispatcher(store, matcher)

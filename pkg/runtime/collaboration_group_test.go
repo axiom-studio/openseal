@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -106,7 +107,7 @@ func TestGroupedAgentRequestsJoinBeforeWakingAcrossPortableStores(t *testing.T) 
 
 func TestGroupedAgentRequestsRecordLosingCompletionWithoutSecondWake(t *testing.T) {
 	t.Parallel()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "any-fan-in"}
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
@@ -168,7 +169,7 @@ func TestGroupedAgentRequestsRecordLosingCompletionWithoutSecondWake(t *testing.
 
 func TestGroupedAgentRequestRejectionFailsRequiredFanIn(t *testing.T) {
 	t.Parallel()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "reject-fan-in"}
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{

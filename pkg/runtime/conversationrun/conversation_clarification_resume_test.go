@@ -7,8 +7,8 @@ import (
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/control/controltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
@@ -61,7 +61,7 @@ func TestConversationClarificationReplayWithInactiveParent(t *testing.T) {
 }
 
 func TestConversationClarificationTargetsOnlyTheRepliedTask(t *testing.T) {
-	f := newClarificationFixture(t, conversationtest.NewStore(t), "targets")
+	f := newClarificationFixture(t, kerneltest.NewStore(t), "targets")
 	q := f.question(t)
 	other, err := portfolio.NewPortfolioService(f.store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: f.root.Scope, Kind: models.RunKindAgentWork, Owner: f.root.Owner, AssignedAgentID: "writer", ParentRunID: f.root.ID, Goal: "Draft the outline", Source: models.RunSourceRequest})
 	if err != nil {

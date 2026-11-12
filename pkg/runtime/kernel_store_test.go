@@ -10,22 +10,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-// newTestKernelStore returns an empty in-memory kernel store that is closed
-// when the test ends. kerneltest.NewStore, skillbindingtest.NewStore,
-// actiontest.NewStore, conversationtest.NewStore and the openers in the
-// store/sqlite, callback, skillbinding, action and conversation tests are
-// its copies for other packages (importing runtimetest here would be a
-// cycle); change them together.
-func newTestKernelStore(t testing.TB) *sqlite.Store {
-	t.Helper()
-	store, err := sqlite.NewInMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	return store
-}
-
 // openTestSQLiteDB opens the test's own connection to the SQLite file at
 // path, closed when the test ends.
 func openTestSQLiteDB(t testing.TB, path string) *sql.DB {
@@ -50,7 +34,7 @@ func getStoredRun(t testing.TB, store *sqlite.Store, scope models.Scope, id stri
 
 // newTestSQLiteStore opens a SQLite store on a fresh file and the test's own
 // connection to that file, both closed when the test ends. Use it instead of
-// newTestKernelStore when the test reads or writes rows no store method
+// kerneltest.NewStore when the test reads or writes rows no store method
 // offers.
 func newTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
 	t.Helper()

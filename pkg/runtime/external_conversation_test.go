@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -598,7 +599,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 
 func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*sqlite.Store, *skill.Catalog, models.Scope, models.ExternalConversationAdapterReference) {
 	t.Helper()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	catalog := skill.NewCatalog()
 	definition := skillbindingtest.SlackConversationSkillDefinition()
 	if err := catalog.Register(ctx, definition); err != nil {

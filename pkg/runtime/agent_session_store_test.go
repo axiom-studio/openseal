@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
@@ -162,11 +163,11 @@ func TestOpenConversationSessionChecksRunBinding(t *testing.T) {
 		t.Fatalf("a failed open stored a session")
 	}
 
-	session := openTestConversationSession(t, newTestKernelStore(t), "r2")
+	session := openTestConversationSession(t, kerneltest.NewStore(t), "r2")
 	if session.Kind != models.AgentSessionKindConversation || session.NextSequence != 1 || session.RootSessionID != session.ID || session.Revision != 1 {
 		t.Fatalf("new session = %+v", session)
 	}
-	store = newTestKernelStore(t)
+	store = kerneltest.NewStore(t)
 	first := openTestConversationSession(t, store, "r2")
 	again, err := store.OpenConversationAgentSession(context.Background(), models.OpenConversationAgentSessionRequest{
 		Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: "r2", Lease: testSessionLease(),
@@ -177,7 +178,7 @@ func TestOpenConversationSessionChecksRunBinding(t *testing.T) {
 }
 
 func TestAppendFencedBySessionBindingAndLease(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	result, err := testAppend(store, session.ID, "r1", storetest.UserSessionEntry("u1", "hi"), storetest.UserSessionEntry("u2", "there"))
 	if err != nil {
@@ -212,7 +213,7 @@ func TestAppendFencedBySessionBindingAndLease(t *testing.T) {
 }
 
 func TestAppendWatermarkCAS(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	zero := int64(0)
 	ten := int64(10)
@@ -249,7 +250,7 @@ func TestAppendWatermarkCAS(t *testing.T) {
 }
 
 func TestAppendConsumesInterventionsWithEntries(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	putTestSessionRun(t, store, "r1", session.ID, models.AgentRunStatusRunning, 2)
 	before := testStoredSessionRun(t, store, "r1")
@@ -295,7 +296,7 @@ func TestAppendConsumesInterventionsWithEntries(t *testing.T) {
 }
 
 func TestLeaselessNoteNeedsTerminalRun(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	note := &models.SessionEntry{ID: "n1", Type: models.SessionEntryNote, SourceKey: models.FailureNoteSourceKey("r1", "t1"), Note: &models.NoteEntry{Kind: models.NoteRunFailed, Text: "the run failed"}}
 	req := models.AppendAgentSessionEntriesRequest{Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Entries: []*models.SessionEntry{note}}
@@ -314,7 +315,7 @@ func TestLeaselessNoteNeedsTerminalRun(t *testing.T) {
 }
 
 func TestAppendReplayAndEvents(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	batch := []*models.SessionEntry{storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", models.ToolEntryPending)}
 	event := &models.ActivityEvent{Scope: testSessionScope, RunID: "r1", EventType: "turn.narration", Summary: "Checking"}
@@ -345,7 +346,7 @@ func TestAppendReplayAndEvents(t *testing.T) {
 }
 
 func TestCreateRunSessionBindsRunAndForks(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	parent := openTestConversationSession(t, store, "r1")
 	if _, err := testAppend(store, parent.ID, "r1", storetest.UserSessionEntry("p1", "a"), storetest.UserSessionEntry("p2", "b"), storetest.UserSessionEntry("p3", "c")); err != nil {
 		t.Fatal(err)
@@ -411,7 +412,7 @@ func TestCreateRunSessionBindsRunAndForks(t *testing.T) {
 }
 
 func TestForkDepthLimit(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	parent := openTestConversationSession(t, store, "r0")
 	sourceRunID := "r0"
 	for depth := 1; depth <= models.MaxAgentSessionDepth+1; depth++ {
@@ -433,7 +434,7 @@ func TestForkDepthLimit(t *testing.T) {
 }
 
 func TestTransitionToolEntry(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	if _, err := testAppend(store, session.ID, "r1", storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", models.ToolEntryPending)); err != nil {
 		t.Fatal(err)
@@ -498,7 +499,7 @@ func TestTransitionToolEntry(t *testing.T) {
 }
 
 func TestCompactionCannotDropAssistantWithOpenToolEntry(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	session := openTestConversationSession(t, store, "r1")
 	if _, err := testAppend(store, session.ID, "r1", storetest.UserSessionEntry("u1", "a")); err != nil {
 		t.Fatal(err)

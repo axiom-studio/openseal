@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop/runlooptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -26,7 +27,7 @@ type conversationFollowUpFixture struct {
 
 func newConversationFollowUpFixture(t *testing.T) *conversationFollowUpFixture {
 	t.Helper()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	service := conversation.NewConversationService(store)
 	conversationtest.SeedSpace(t, store, models.Scope{Kind: "tenant", ID: "follow-ups"})
 	conversation, _, err := service.CreateConversation(t.Context(), conversation.CreateConversationRequest{

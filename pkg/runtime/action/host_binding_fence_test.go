@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -15,7 +16,7 @@ import (
 // The durable fence admits a host binding only without a stored row of the
 // same identity, and only while the call matches it exactly.
 func TestActionProposalFenceChecksHostBindings(t *testing.T) {
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	claimed := actiontest.ClaimedOwnedRun(t, store, scope, time.Now().UTC(), "worker", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"})
 	catalog := skillbindingtest.HostConnectorCatalog(t, scope, map[string]bool{claimed.ID: true})

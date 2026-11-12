@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
@@ -75,7 +76,7 @@ func TestDelegatedAgentRunWorksWithoutAnyConnection(t *testing.T) {
 }
 
 func TestOnlyTheActingPersonSteersARun(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "steering"}
 	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", ActingUser: "7",
@@ -132,7 +133,7 @@ func TestOnlyTheActingPersonSteersARun(t *testing.T) {
 }
 
 func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := t.Context()
 	run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 	conversationID := run.Context[models.ConversationRunConversationIDContextKey].(string)
@@ -236,7 +237,7 @@ func TestRoutineRunsActForTheirCreatorOnlyWithATask(t *testing.T) {
 	// A started routine with a task acts for its creator. (A task routine is
 	// always scheduled; its scheduled occurrences are checked in
 	// TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores.)
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	run, _, bound, args := routinetest.ScheduledTask(t, store)
 	activation := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*models.RunbookActivation)
 	started, err := routine.StartRunbookActivation(t.Context(), store, run.Scope, activation.ID, routine.StartRunbookActivationRequest{IdempotencyKey: "start-now", Actor: models.ActivityActor{Type: "user", ID: "user"}})

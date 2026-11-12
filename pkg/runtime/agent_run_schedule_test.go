@@ -8,12 +8,13 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestCreateAgentRunInitializesDurableQueueMetadata(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
 	service := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	available := now.Add(time.Hour)

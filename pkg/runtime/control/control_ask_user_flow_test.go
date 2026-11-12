@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/control/controltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 func TestAskUserPostsQuestionAndParks(t *testing.T) {
@@ -56,7 +56,7 @@ func TestAskUserPostsQuestionAndParks(t *testing.T) {
 }
 
 func TestAskUserResumeWithoutAnswerRepostsAndReparks(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	f := controltest.ClaimedForegroundRun(t, store)
 	call := controltest.NewAskUserCall(t, store, f.Run, "foreground-worker", controltest.AskUserQuestion)
 	// Crash after the entry transition, before the post and the park: the
@@ -117,7 +117,7 @@ func TestAskUserQuestionReconcilerRepostsFromEntry(t *testing.T) {
 }
 
 func TestAskUserAnswerFromOtherActorIgnored(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	f := controltest.ClaimedForegroundRun(t, store)
 	parked, call := controltest.AskUserParked(t, store, f.Run, "foreground-worker", controltest.AskUserQuestion)
 	f.Run = parked
@@ -185,7 +185,7 @@ func TestAskUserOptionsPostedAndAnsweredWithSelectedOptions(t *testing.T) {
 }
 
 func TestAskUserWithoutOptionsResultHasNoSelectedOptions(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	f := controltest.ClaimedForegroundRun(t, store)
 	parked, call := controltest.AskUserParked(t, store, f.Run, "foreground-worker", controltest.AskUserQuestion)
 	f.Run = parked
@@ -205,7 +205,7 @@ func TestAskUserWithoutOptionsResultHasNoSelectedOptions(t *testing.T) {
 }
 
 func TestPostChannelMessageRefusesInvalidSelectedOptions(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	f := controltest.ClaimedForegroundRun(t, store)
 	single := `{"question":"` + controltest.AskUserQuestion + `","options":[{"label":"Pricing"},{"label":"Docs"}]}`
 	call := controltest.NewAskUserCallWithArguments(t, store, f.Run, "foreground-worker", json.RawMessage(single))

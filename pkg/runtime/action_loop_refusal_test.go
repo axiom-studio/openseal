@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 func refusedLoopCallRequest(f *actiontest.LoopStore, prior *models.ActionCall, code string) action.RefusedLoopCallRequest {
@@ -68,7 +69,7 @@ func TestNewRefusedLoopCallRow(t *testing.T) {
 }
 
 func TestNewRefusedLoopCallDuplicateSuppressedSummary(t *testing.T) {
-	f := actiontest.NewLoopStore(t, newTestKernelStore(t))
+	f := actiontest.NewLoopStore(t, kerneltest.NewStore(t))
 	prior := f.Propose(f.LoopCall("prior"))
 	coordinator := action.NewActionCoordinator(f.Store, f.Store, nil, nil, nil)
 	_, event, err := coordinator.NewRefusedLoopCall(refusedLoopCallRequest(f, prior, action.RefusedLoopCallDuplicateSuppressed))
@@ -88,7 +89,7 @@ func TestNewRefusedLoopCallDuplicateSuppressedSummary(t *testing.T) {
 }
 
 func TestRefusedLoopCallRequiresLiveLease(t *testing.T) {
-	f := actiontest.NewLoopStore(t, newTestKernelStore(t))
+	f := actiontest.NewLoopStore(t, kerneltest.NewStore(t))
 	prior := f.Propose(f.LoopCall("prior"))
 	coordinator := action.NewActionCoordinator(f.Store, f.Store, nil, nil, nil)
 	req := refusedLoopCallRequest(f, prior, action.RefusedLoopCallRepeat)

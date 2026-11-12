@@ -11,6 +11,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -36,7 +37,7 @@ func (s *countedCatalogTaskContextStore) ListConversationTasks(ctx context.Conte
 }
 
 func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
-	store := &countedCatalogTaskContextStore{Store: newTestKernelStore(t)}
+	store := &countedCatalogTaskContextStore{Store: kerneltest.NewStore(t)}
 	for name, input := range map[string]map[string]interface{}{
 		"non-chat":           {},
 		"partial context":    {models.ConversationRunConversationIDContextKey: "chat"},
@@ -53,7 +54,7 @@ func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
 }
 
 func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *testing.T) {
-	kernel := newTestKernelStore(t)
+	kernel := kerneltest.NewStore(t)
 	source, _, _, _ := conversationruntest.SettledTaskSource(t, kernel)
 	child, err := portfolio.NewPortfolioService(kernel).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: source.Scope, Owner: source.Owner, Kind: models.RunKindAgentWork, ParentRunID: source.ID, AssignedAgentID: source.AssignedAgentID,
@@ -71,7 +72,7 @@ func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *test
 
 func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *models.Conversation, []*models.ConversationTaskResult) {
 	t.Helper()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	base := time.Now().UTC().Add(-time.Hour)
 	scope := models.Scope{Kind: "tenant", ID: "task-sql"}
 	conversation := &models.Conversation{ID: "conversation", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "task-agent"},

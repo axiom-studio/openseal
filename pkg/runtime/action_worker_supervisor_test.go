@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
@@ -44,7 +45,7 @@ func (s *mutableActionWorkerScopeSource) set(scopes []models.Scope, err error) {
 }
 
 func TestActionWorkerSupervisorReconcilesIsolatedScopes(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	source := &mutableActionWorkerScopeSource{scopes: []models.Scope{
 		{Kind: "tenant", ID: "2"}, {Kind: "tenant", ID: "1"}, {Kind: "tenant", ID: "1"},
 	}, listed: make(chan struct{}, 1)}
@@ -94,7 +95,7 @@ func waitActionWorkerScopeCount(supervisor *action.ActionWorkerSupervisor, want 
 
 func TestActionWorkerSupervisorStartStopIsIdempotent(t *testing.T) {
 	supervisor, err := action.NewActionWorkerSupervisor(
-		newTestKernelStore(t), skill.NewCatalog(), nil,
+		kerneltest.NewStore(t), skill.NewCatalog(), nil,
 		action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
 		workqueue.WorkerScopeSourceFunc(func(context.Context) ([]models.Scope, error) { return []models.Scope{{Kind: "tenant", ID: "1"}}, nil }),
 		zap.NewNop().Sugar(), action.DynamicActionWorkerConfig{ReconcileInterval: 5 * time.Millisecond},

@@ -16,22 +16,10 @@ import (
 
 // The helpers in this file are for the in-package conversation tests,
 // which cannot import conversationtest (it imports conversation). They
-// copy runtime's and conversationtest's store openers, space seed and
+// copy runtime's and conversationtest's SQLite openers, space seed and
 // thread start post, and the final-answer action calls and run context
 // section reader of runtime's conversation run tests. Change the copies
 // together.
-
-// newTestKernelStore returns an empty in-memory kernel store that is
-// closed when the test ends.
-func newTestKernelStore(t testing.TB) *sqlite.Store {
-	t.Helper()
-	store, err := sqlite.NewInMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	return store
-}
 
 // openTestSQLiteDB opens the test's own connection to the SQLite file at
 // path, closed when the test ends.
@@ -47,7 +35,7 @@ func openTestSQLiteDB(t testing.TB, path string) *sql.DB {
 
 // newTestSQLiteStore opens a SQLite store on a fresh file and the test's own
 // connection to that file, both closed when the test ends. Use it instead of
-// newTestKernelStore when the test reads or writes rows no store method
+// kerneltest.NewStore when the test reads or writes rows no store method
 // offers.
 func newTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
 	t.Helper()

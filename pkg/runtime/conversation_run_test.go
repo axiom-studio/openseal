@@ -15,13 +15,14 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop/runlooptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "scheduler"}
 	service := runtimeconversation.NewConversationService(store)
@@ -153,7 +154,7 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 }
 
 func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "canceled-conversation"}
 	service := runtimeconversation.NewConversationService(store)
@@ -212,7 +213,7 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 }
 
 func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "legacy-round"}
 	service := runtimeconversation.NewConversationService(store)

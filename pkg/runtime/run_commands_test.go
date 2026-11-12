@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -221,7 +222,7 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 
 func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := agentrun.NewRunCommandService(store)
 	scope := models.Scope{Kind: "tenant", ID: "human"}
 	created, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
@@ -275,7 +276,7 @@ func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 
 func TestResolveHumanInterventionCarriesActionCallID(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := agentrun.NewRunCommandService(store)
 	activity := runtimeactivity.NewRunActivityService(store, store)
 	scope := models.Scope{Kind: "tenant", ID: "human"}
@@ -332,7 +333,7 @@ func TestResolveHumanInterventionCarriesActionCallID(t *testing.T) {
 
 func TestRunPausePreservesWaitingCondition(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := agentrun.NewRunCommandService(store)
 	scope := models.Scope{Kind: "local", ID: "wait"}
 	created, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
@@ -407,7 +408,7 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 }
 
 func TestRunCreationRejectsCredentialStateButAllowsTokenBudgets(t *testing.T) {
-	service := agentrun.NewRunCommandService(newTestKernelStore(t))
+	service := agentrun.NewRunCommandService(kerneltest.NewStore(t))
 	base := models.CreateAgentRunRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "safe"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 		Goal: "Operate safely", Source: models.RunSourceManual,

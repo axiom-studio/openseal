@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -31,7 +32,7 @@ func createDependencySource(t *testing.T, store *sqlite.Store, scope models.Scop
 func TestDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	createDependencySource(t, store, scope, "source-all")
 	coordinatorClock := func() time.Time { return time.Date(2026, 7, 10, 12, 1, 0, 0, time.UTC) }
 	coordinator := portfolio.NewDependencyCoordinator(store, models.WithClock(func() time.Time { return coordinatorClock() }))
@@ -101,7 +102,7 @@ func TestDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 func TestDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "concurrent"}
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	createDependencySource(t, store, scope, "source-any")
 	coordinator := portfolio.NewDependencyCoordinator(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC) }))
 	_, err := coordinator.CreateRunDependencyGroup(ctx, models.CreateRunDependencyGroupRequest{
@@ -169,7 +170,7 @@ func TestDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testing.T) {
 func TestDependencyCoordinatorOptionalCompletionContinuesAfterWake(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "optional"}
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	createDependencySource(t, store, scope, "source-optional")
 	coordinator := portfolio.NewDependencyCoordinator(store)
 	optional := false

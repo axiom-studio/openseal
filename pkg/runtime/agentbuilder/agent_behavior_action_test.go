@@ -19,6 +19,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -145,7 +146,7 @@ func TestGovernedAgentChannelActionComposesIngressAndApprovalDelivery(t *testing
 
 func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	agents := agentBehaviorActionRegistry(t, ctx, scope, nil)
 	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
@@ -255,7 +256,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 // A Team member's Run amends that member exactly as its own chat would.
 func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	agents := agentBehaviorActionRegistry(t, ctx, scope, nil)
 	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
@@ -338,7 +339,7 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 
 func TestGovernedAgentBehaviorActionUsesCheckpointApprovalAuthority(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	agents := agentBehaviorActionRegistry(t, ctx, scope, &workforce.AmendmentPolicy{
 		AgentMayPropose: true, AllowedFields: []string{"systemPrompt"}, RequiresApproval: true,
@@ -580,7 +581,7 @@ func TestOlderAgentManagementBindingsAlwaysRequireReviewInSkipMode(t *testing.T)
 	for _, version := range []string{"1.2.0", "1.2.1", "1.2.2", "1.3.0", "1.3.1"} {
 		t.Run(version, func(t *testing.T) {
 			ctx := t.Context()
-			store := conversationtest.NewStore(t)
+			store := kerneltest.NewStore(t)
 			conversation := conversationtest.ApprovalModeConversation(t, store)
 			conversationtest.SetApprovalMode(t, runtimeconversation.NewConversationApprovalModeService(store), conversation, models.ConversationApprovalSkip)
 			// Published versions predate review: always, so their stored
@@ -649,7 +650,7 @@ var legacyAgentManagementArguments = map[string]map[string]interface{}{
 // The roster can change while a proposal waits for approval, so dispatch
 // rechecks it; an Agent's own Run is its roster of one.
 func TestAgentBehaviorRunOnRosterChecksTheCurrentTeamRoster(t *testing.T) {
-	ctx, store, scope := context.Background(), conversationtest.NewStore(t), models.Scope{Kind: "tenant", ID: "tenant-a"}
+	ctx, store, scope := context.Background(), kerneltest.NewStore(t), models.Scope{Kind: "tenant", ID: "tenant-a"}
 	team := &kernelteam.Deployment{ID: "research-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: "member", AgentDeploymentID: "researcher"}}}
 	teams := rosterPortfolio{Store: store, team: team}

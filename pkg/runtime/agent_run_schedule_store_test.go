@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func TestAgentRunClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "test"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
@@ -83,7 +84,7 @@ func TestAgentRunClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
 }
 
 func TestAgentRunAttemptBudgetSurvivesLeaseRecovery(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "local", ID: "attempt-budget"}
 	now := time.Now().UTC()
@@ -107,7 +108,7 @@ func TestAgentRunAttemptBudgetSurvivesLeaseRecovery(t *testing.T) {
 }
 
 func TestAgentRunClaimHonorsCapacityAndScope(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	otherScope := models.Scope{Kind: "tenant", ID: "two"}
@@ -155,7 +156,7 @@ func TestAgentRunClaimHonorsCapacityAndScope(t *testing.T) {
 }
 
 func TestAgentRunClaimHonorsConcurrencyKeyCapacity(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "conversation-capacity"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
@@ -205,7 +206,7 @@ func TestAgentRunClaimHonorsConcurrencyKeyCapacity(t *testing.T) {
 }
 
 func TestAgentRunClaimIsolatesRunKinds(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "kinds"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)

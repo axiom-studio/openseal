@@ -9,10 +9,11 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "conversation-runbook-start"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-42"}

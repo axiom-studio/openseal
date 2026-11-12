@@ -17,7 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimecollaboration "github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
@@ -135,7 +135,7 @@ func TestLoopPoolYieldsAfterItsStepSlice(t *testing.T) {
 // instead of going back to the queue: the model is never called past the
 // attempt limit, and the paused Run is not claimed again.
 func TestLoopPoolNeverChargesPastAttemptLimit(t *testing.T) {
-	f := looptest.NewFixture(t, conversationtest.NewStore(t), looptest.WithRules(lookupSteps(4)...))
+	f := looptest.NewFixture(t, kerneltest.NewStore(t), looptest.WithRules(lookupSteps(4)...))
 	pool := poolFixturePool(t, f, 1)
 	run, err := f.Portfolio.CreateAgentRun(f.Ctx, models.CreateAgentRunRequest{
 		Scope: f.Scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: looptest.FixtureAgent}, AssignedAgentID: looptest.FixtureAgent,
@@ -250,7 +250,7 @@ func (p *plannedPoolProducer) Produce(_ context.Context, in agentrun.StepInput) 
 // The pool reserves the producer's planned usage for the step and settles
 // exactly the step's usage when the Run completes.
 func TestLoopPoolPreservesProducerBudgetPlanning(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "7"}
 	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher",
@@ -306,7 +306,7 @@ func (p *slowPoolProducer) Produce(ctx context.Context, _ agentrun.StepInput) (a
 // heartbeat renews the Run lease and the loop renews the step lease, so the
 // step completes once on the original worker.
 func TestLoopPoolRenewsLeaseDuringLongStep(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	scope := models.Scope{Kind: "local", ID: "test"}
@@ -352,7 +352,7 @@ func (handoffPoolProducer) Produce(context.Context, agentrun.StepInput) (agentru
 // when the recipient's Run finishes: the pool resolves the terminal child
 // into the AgentRequest and the source's output.
 func TestLoopPoolCompletesArtifactFreeHandoffFromTerminalChild(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "7"}
 	portfolio := portfolio.NewPortfolioService(store)
 	source, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{

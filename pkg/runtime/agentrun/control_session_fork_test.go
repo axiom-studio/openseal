@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
 
 func TestControlForkRefIsBeforeForkingAssistant(t *testing.T) {
-	store := newForkTestStore(t)
+	store := kerneltest.NewStore(t)
 	parent := openForkTestSession(t, store, "r1")
 	if _, err := appendForkTestEntries(store, parent.ID, "r1", storetest.UserSessionEntry("p1", "a"), storetest.UserSessionEntry("p2", "b")); err != nil {
 		t.Fatal(err)
@@ -221,18 +222,6 @@ var (
 
 func forkTestLease() *models.AgentRunLeaseGuard {
 	return &models.AgentRunLeaseGuard{WorkerID: "w1", Now: forkTestNow}
-}
-
-// newForkTestStore returns an empty in-memory kernel store that is closed
-// when the test ends.
-func newForkTestStore(t testing.TB) *sqlite.Store {
-	t.Helper()
-	store, err := sqlite.NewInMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	return store
 }
 
 // openForkTestSession creates the running Run runID bound to the c1 lane of

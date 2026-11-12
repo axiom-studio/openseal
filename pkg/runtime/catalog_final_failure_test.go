@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
@@ -34,7 +35,7 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 				Goal: "Explain the stopped attempt", Context: map[string]interface{}{},
 				FailureExplanation: &models.RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "action_failed", Message: "The image service rejected the request."},
 			}
-			config := bindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{})
+			config := bindingTestConfig(t, kerneltest.NewStore(t), &modelsteptest.RecordingStepHost{})
 			config.SkillHosts = runworker.SkillHostCapabilityResolverFunc(func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error) {
 				t.Fatal("failure explanation attempted runtime preparation")
 				return nil, nil

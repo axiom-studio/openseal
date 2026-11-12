@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -177,7 +177,7 @@ func NewFixture(t *testing.T, withHost bool) *Fixture {
 		}
 	}
 
-	spaces := portfolio.NewSpaceService(conversationtest.NewStore(t))
+	spaces := portfolio.NewSpaceService(kerneltest.NewStore(t))
 	salesID, homeID := SeedSpaces(t, spaces, scope)
 	fixture := &Fixture{
 		Scope: scope, Agents: agents, Teams: teams, Catalog: catalog, Spaces: spaces, SalesID: salesID, HomeID: homeID,

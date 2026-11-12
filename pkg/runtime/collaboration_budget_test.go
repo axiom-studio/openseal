@@ -7,11 +7,12 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "delegation-budget"}
 	portfolio := portfolio.NewPortfolioService(store)
@@ -62,7 +63,7 @@ func TestBudgetedDelegationRequiresNarrowExplicitAllocation(t *testing.T) {
 }
 
 func TestGroupedDelegationCannotOverAllocateParentBudget(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "group-budget"}
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{

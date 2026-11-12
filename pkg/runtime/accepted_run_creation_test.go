@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -194,7 +195,7 @@ func TestAcceptedRunCreationSchedulerRetainsPinAcrossOccurrenceDeliveryRetry(t *
 }
 
 func TestAcceptedRunCreationReplayRejectsChangedWorkBeforePreparation(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}})
 	request := models.CreateAgentRunRequest{Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID, Entrypoint: "review", Goal: "Original work", Source: models.RunSourceManual, IdempotencyKey: "request-conflict", Context: map[string]interface{}{"runbookDefinitionId": "review", "runbookDefinitionVersion": "1"}}
 	commands := agentrun.NewRunCommandService(store)
@@ -215,7 +216,7 @@ func TestAcceptedRunCreationReplayRejectsChangedWorkBeforePreparation(t *testing
 }
 
 func TestAcceptedRunCreationDiscardsUntrustedPinBeforeCanonicalReplay(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}})
 	request := models.CreateAgentRunRequest{
 		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: "rowan", Entrypoint: "review", Goal: "Original work", Source: models.RunSourceManual, IdempotencyKey: "untrusted-pin",
@@ -238,7 +239,7 @@ func TestAcceptedRunCreationDiscardsUntrustedPinBeforeCanonicalReplay(t *testing
 }
 
 func TestAcceptedRunCreationActionDispatcherPreparesNewWorkAndReplays(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}})
 	seedTestSpace(t, store, activation.Scope)
 	conversation, _, err := conversation.NewConversationService(store).CreateConversation(t.Context(), conversation.CreateConversationRequest{

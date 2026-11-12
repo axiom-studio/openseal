@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -227,7 +228,7 @@ func TestConversationChangesProjectSkillSetupRequests(t *testing.T) {
 const settledInteractionLimit = 50
 
 func TestConversationChangesBoundSettledInteractions(t *testing.T) {
-	f := newInteractionChangeFixture(t, newTestKernelStore(t))
+	f := newInteractionChangeFixture(t, kerneltest.NewStore(t))
 	setups := f.store.(models.SkillSetupRequestStore)
 	start := time.Now().UTC()
 	for index := 0; index < settledInteractionLimit+5; index++ {
@@ -264,7 +265,7 @@ func (p teamRosterPortfolio) GetTeamDeployment(_ context.Context, scope capabili
 // Requests in a Team chat are saved to the Team, whichever member asked;
 // one saved to a member's own umbrella never shows in the Team chat.
 func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
-	ctx, store, scope := context.Background(), newTestKernelStore(t), models.Scope{Kind: "tenant", ID: "team-requests"}
+	ctx, store, scope := context.Background(), kerneltest.NewStore(t), models.Scope{Kind: "tenant", ID: "team-requests"}
 	conversations := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{

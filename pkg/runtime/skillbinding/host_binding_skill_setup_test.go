@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -17,7 +18,7 @@ import (
 // this run, and the refusal names the connected tools to use instead.
 func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
 	ctx := context.Background()
-	store := skillbindingtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, "agent")
 	run := skillbindingtest.ClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")

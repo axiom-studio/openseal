@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -86,7 +87,7 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 
 func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	ctx := context.Background()
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
 	coordinatorClock := func() time.Time { return now.Add(2 * time.Second) }
@@ -167,7 +168,7 @@ func TestApprovalCoordinatorAppliesReviewedTimeoutApprovalAcrossStores(t *testin
 }
 
 func TestApprovalCoordinatorExpiresApprovalAfterRunLeavesWaitingState(t *testing.T) {
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
 	paused, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
@@ -232,7 +233,7 @@ func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 }
 
 func TestApprovalCoordinatorResumesRunWithReviewerGuidance(t *testing.T) {
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
 	coordinator := action.NewApprovalCoordinator(store, store, action.EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return now.Add(time.Second) }))

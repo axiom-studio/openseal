@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -40,7 +41,7 @@ func endpointFixtureWithOperations(
 	operations []skill.ConversationDeliveryOperation,
 ) (*sqlite.Store, *skill.Catalog, *models.ExternalConversationEndpoint) {
 	t.Helper()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	catalog, endpoint := endpointFixtureOn(t, ctx, store, provider, operations)
 	return store, catalog, endpoint
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	runtimecontrol "github.com/axiom-studio/openseal/pkg/runtime/control"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -167,7 +167,7 @@ func TestRunbookValueRendersTypedTemplateSegments(t *testing.T) {
 }
 
 func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	control := &runtimecontrol.ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration.NewCollaborationService(store)}
 	producer := newRoutineTestProducer(t, routineConcurrentDefinition(), "manual", store)
 	cc := agentrun.ControlContext{

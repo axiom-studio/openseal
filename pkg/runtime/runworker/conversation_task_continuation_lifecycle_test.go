@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -86,7 +87,7 @@ func TestAgentRunWorkerKeepsForegroundDuringSlowResolution(t *testing.T) {
 func testAgentRunWorkerKeepsForegroundPastDeadline(t *testing.T, resolving bool) {
 	t.Helper()
 	synctest.Test(t, func(t *testing.T) {
-		store := conversationtest.NewStore(t)
+		store := kerneltest.NewStore(t)
 		run, conversation, trigger := continuationLifecycleFixture(t, store, "slow-foreground")
 		claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: run.Scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 		if err != nil || claimed == nil {
@@ -224,7 +225,7 @@ func TestAgentRunWorkerKeepsForegroundDuringSlowTurn(t *testing.T) {
 
 func TestAgentRunWorkerKeepsQueuedForegroundPastDeadlineWithSaturatedLimiter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		store := conversationtest.NewStore(t)
+		store := kerneltest.NewStore(t)
 		run, conversation, trigger := continuationLifecycleFixture(t, store, "limited-foreground")
 		var modelCalls atomic.Int32
 		pool := workerTaskPool(t, store, run.Scope, &workerTaskProducer{reply: func(context.Context, int, agentrun.StepInput) (agentrun.StepOutput, error) {

@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -101,7 +102,7 @@ func TestOwnedItemActivityNamesTheActingMember(t *testing.T) {
 // A Team member's background task reaches account setup exactly as its 1:1
 // task does, and loses it once the member leaves the roster.
 func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
-	ctx, memory, scope := t.Context(), newTestKernelStore(t), models.Scope{Kind: "tenant", ID: "task-sql"}
+	ctx, memory, scope := t.Context(), kerneltest.NewStore(t), models.Scope{Kind: "tenant", ID: "task-sql"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}
 	team := chatRosterTeam(scope, "task-agent")
 	store := teamRosterPortfolio{Store: memory, team: team}

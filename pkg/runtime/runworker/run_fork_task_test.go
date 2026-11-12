@@ -9,9 +9,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -19,7 +19,7 @@ import (
 
 func claimedForkTaskFixture(t *testing.T) (*sqlite.Store, *models.AgentRun, *models.ConversationTaskResult) {
 	t.Helper()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	foreground, turn, _, _ := settledWorkerTaskFixture(t, store)
 	accepted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, foreground, turn))
 	if err != nil {
@@ -174,7 +174,7 @@ func TestRunForkTaskRejectsBranchProvenanceReplacement(t *testing.T) {
 }
 
 func TestRunForkTaskRejectsContextOnlySelfRoot(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: models.Scope{Kind: "tenant", ID: "forged-task-fork"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 		AssignedAgentID: "agent", Goal: "Forged task source", Context: map[string]interface{}{models.ConversationTaskContextKey: "forged-task"},

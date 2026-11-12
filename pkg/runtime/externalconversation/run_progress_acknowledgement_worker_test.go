@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -30,7 +30,7 @@ type runProgressWorkerFixture struct {
 
 func newRunProgressWorkerFixture(t *testing.T, provider string, operations []capability.ConversationDeliveryOperation) runProgressWorkerFixture {
 	t.Helper()
-	return newRunProgressWorkerFixtureOn(t, conversationtest.NewStore(t), provider, operations)
+	return newRunProgressWorkerFixtureOn(t, kerneltest.NewStore(t), provider, operations)
 }
 
 // newRunProgressWorkerFixtureOn builds the fixture in store, so a test can

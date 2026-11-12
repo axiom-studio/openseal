@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -25,7 +26,7 @@ func (s *countingAgentRunClaimStore) ClaimNextAgentRunWithDecision(ctx context.C
 }
 
 func TestAgentRunWorkerPoolCoalescesIdleClaimPolling(t *testing.T) {
-	store := &countingAgentRunClaimStore{Store: newTestKernelStore(t)}
+	store := &countingAgentRunClaimStore{Store: kerneltest.NewStore(t)}
 	pool, err := runworker.NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return nil, errors.New("unexpected resolver call")
 	}), nil, runworker.AgentRunWorkerConfig{

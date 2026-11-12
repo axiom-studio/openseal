@@ -11,7 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -120,7 +120,7 @@ func NewDispatchFixture(t *testing.T) *DispatchFixture {
 	t.Helper()
 	ctx := context.Background()
 	base := NewFixture(t, false)
-	store := &DispatchStore{Store: conversationtest.NewStore(t), Approvals: map[string]*models.ApprovalCheckpoint{}}
+	store := &DispatchStore{Store: kerneltest.NewStore(t), Approvals: map[string]*models.ApprovalCheckpoint{}}
 	base.Spaces = portfolio.NewSpaceService(store)
 	base.SalesID, base.HomeID = SeedSpaces(t, base.Spaces, base.Scope)
 	recorder := &RecordingHost{}

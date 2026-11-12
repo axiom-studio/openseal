@@ -10,7 +10,8 @@ import (
 // scenario tests have the same openers in its kernel_store_test.go.
 
 // newTestKernelStore returns an empty in-memory kernel store that is closed
-// when the test ends.
+// when the test ends. It is kerneltest.NewStore, which imports this package
+// and so cannot be used by its in-package tests.
 func newTestKernelStore(t testing.TB) *Store {
 	t.Helper()
 	store, err := NewInMemory()

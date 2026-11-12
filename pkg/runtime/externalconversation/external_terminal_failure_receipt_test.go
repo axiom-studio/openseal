@@ -10,9 +10,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/google/uuid"
 )
 
@@ -55,7 +55,7 @@ func TestExternalTerminalFailureUsesCapturedRevisionAfterMetadataUpdate(t *testi
 }
 
 func TestExternalTerminalFailurePrefersSavedNormalAnswerOverOlderFailure(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	now := runStoreEpoch
 	run, conversation, trigger := conversationruntest.TerminalFailureConversation(t, store, now, false)
 	run = conversationruntest.FailTerminalConversation(t, store, run, now, "provider_rate_limited")

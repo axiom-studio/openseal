@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -102,7 +103,7 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 
 func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
@@ -182,7 +183,7 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 
 func TestRunReportingProjectsTerminalMilestoneOnce(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "reporting"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-one"}
 	run := &models.AgentRun{
@@ -218,7 +219,7 @@ func TestRunReportingProjectsTerminalMilestoneOnce(t *testing.T) {
 
 func TestRunbookSchedulerKeepsSiblingRunbooksIndependent(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	objective, _ := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{

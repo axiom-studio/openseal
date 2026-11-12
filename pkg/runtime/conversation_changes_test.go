@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -154,7 +155,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 }
 
 func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	conversations := runtimeconversation.NewConversationService(store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "private-stream"}

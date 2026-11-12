@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -90,7 +91,7 @@ func (f *clarificationFixture) answer(t *testing.T, target string) *models.Chann
 func TestConversationClarificationRoundTrip(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store clarificationStore = conversationtest.NewStore(t)
+			var store clarificationStore = kerneltest.NewStore(t)
 			if backend == "sqlite" {
 				db, err := sqlite.New(filepath.Join(t.TempDir(), "state.db"))
 				if err != nil {
@@ -157,7 +158,7 @@ func (s *failingAnswerProjectionStore) CommitChannelMessage(ctx context.Context,
 	return s.ConversationStore.CommitChannelMessage(ctx, record)
 }
 func TestConversationClarificationRecoversAfterWakeBeforeAcknowledgment(t *testing.T) {
-	f := newClarificationFixture(t, conversationtest.NewStore(t), "crash")
+	f := newClarificationFixture(t, kerneltest.NewStore(t), "crash")
 	q := f.question(t)
 	answer := f.answer(t, q.ID)
 	failing := &failingAnswerProjectionStore{ConversationStore: f.store, fail: true}
@@ -172,7 +173,7 @@ func TestConversationClarificationRecoversAfterWakeBeforeAcknowledgment(t *testi
 	}
 }
 func TestConversationWorkOriginKeepsOwnerBoundary(t *testing.T) {
-	f := newClarificationFixture(t, conversationtest.NewStore(t), "context")
+	f := newClarificationFixture(t, kerneltest.NewStore(t), "context")
 	other := models.CloneAgentRun(f.child)
 	other.Owner.ID = "another-agent"
 	_, conversation, _, err := runtimeconversation.ConversationWorkOrigin(t.Context(), f.store, f.store, other)

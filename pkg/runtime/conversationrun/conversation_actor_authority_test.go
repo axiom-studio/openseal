@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -29,7 +30,7 @@ type conversationActorFixture struct {
 
 func newConversationActorFixture(t *testing.T, scope models.Scope, agentID string) *conversationActorFixture {
 	t.Helper()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	conversationtest.SeedSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{

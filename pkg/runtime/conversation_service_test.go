@@ -8,11 +8,12 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 	t.Parallel()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "one"})
 	service := runtimeconversation.NewConversationService(store)
 	origin := &models.ConversationReference{Kind: models.ConversationReferenceObjective, ID: "objective-reddit-research"}
@@ -34,7 +35,7 @@ func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 
 func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 	t.Parallel()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "one"}
@@ -67,7 +68,7 @@ func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 }
 
 func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "visibility"}
@@ -132,7 +133,7 @@ func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
 
 func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *testing.T) {
 	t.Parallel()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	service := runtimeconversation.NewConversationService(store, models.WithClock(func() time.Time { return now }))
 	ctx := context.Background()

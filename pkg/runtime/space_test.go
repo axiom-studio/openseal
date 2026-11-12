@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -28,7 +29,7 @@ func TestSQLiteSpaceStore(t *testing.T) {
 
 func TestSpaceValidation(t *testing.T) {
 	t.Parallel()
-	service := portfolio.NewSpaceService(newTestKernelStore(t))
+	service := portfolio.NewSpaceService(kerneltest.NewStore(t))
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	ctx := context.Background()
 	for _, request := range []portfolio.CreateSpaceRequest{

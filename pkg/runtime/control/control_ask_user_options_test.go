@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 func TestAskUserOptionsDecodeLimits(t *testing.T) {
@@ -68,7 +69,7 @@ func TestAgentBuilderConversationOriginValidates(t *testing.T) {
 	if err := (models.ConversationReference{Kind: models.ConversationReferenceAgentBuilder, ID: "k"}).Validate(); err != nil {
 		t.Fatal(err)
 	}
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversationtest.SeedSpace(t, store, models.Scope{Kind: "organization", ID: "builder"})
 	service := conversation.NewConversationService(store)
 	origin := &models.ConversationReference{Kind: models.ConversationReferenceAgentBuilder, ID: "k"}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
@@ -194,7 +195,7 @@ func TestConversationTaskContinuationStoreConcurrentReplay(t *testing.T) {
 }
 
 func TestConversationTaskContinuationStoreRejectsWeakenedDeadline(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	source, _, _ := conversationContinuationFixture(t, store, models.AgentRunStatusQueued, false)
 	_, err := store.PromoteConversationTask(t.Context(), models.ConversationTaskPromotionRequest{Scope: source.Scope, RunID: source.ID, Now: time.Now(), MinimumAge: time.Second})
 	if !errors.Is(err, models.ErrInvalidConversationTask) {

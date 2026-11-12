@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/appproject"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -68,7 +69,7 @@ func appMessageText(t *testing.T, got conversationMessageAttachments) string {
 }
 
 func TestConversationAppAttachmentIsTheReferencedVersion(t *testing.T) {
-	store, content := newTestKernelStore(t), &conversationAppContent{byRef: map[string]string{}}
+	store, content := kerneltest.NewStore(t), &conversationAppContent{byRef: map[string]string{}}
 	scope := conversationTestArtifact().Scope
 	for version, label := range []string{"first", "second", "third"} {
 		storeConversationApp(t, store, content, scope, int64(version+1), []appproject.File{appEntry(label), {Path: "src/styles.css", Content: "h1 { color: teal; }"}})
@@ -91,7 +92,7 @@ func TestConversationAppAttachmentIsTheReferencedVersion(t *testing.T) {
 }
 
 func TestConversationAppAttachmentRespectsItsBudget(t *testing.T) {
-	store, content := newTestKernelStore(t), &conversationAppContent{byRef: map[string]string{}}
+	store, content := kerneltest.NewStore(t), &conversationAppContent{byRef: map[string]string{}}
 	scope := conversationTestArtifact().Scope
 	files := []appproject.File{appEntry("big"), {Path: "src/small.ts", Content: "export const small = 1;\n"}}
 	for _, name := range []string{"a", "b", "c"} {
@@ -115,7 +116,7 @@ func TestConversationAppAttachmentRespectsItsBudget(t *testing.T) {
 }
 
 func TestConversationAppAttachmentRejectsOtherScopes(t *testing.T) {
-	store, content := newTestKernelStore(t), &conversationAppContent{byRef: map[string]string{}}
+	store, content := kerneltest.NewStore(t), &conversationAppContent{byRef: map[string]string{}}
 	home := conversationTestArtifact().Scope
 	other := models.Scope{Kind: home.Kind, ID: "other"}
 	storeConversationApp(t, store, content, home, 1, []appproject.File{appEntry("home")})

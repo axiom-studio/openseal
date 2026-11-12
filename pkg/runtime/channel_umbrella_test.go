@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	_ "github.com/mattn/go-sqlite3"
@@ -28,7 +29,7 @@ func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
 			t.Fatalf("%s: gateway accepted", name)
 		}
 	}
-	for _, store := range []models.ExternalConversationGatewayStore{newTestKernelStore(t), func() models.ExternalConversationGatewayStore {
+	for _, store := range []models.ExternalConversationGatewayStore{kerneltest.NewStore(t), func() models.ExternalConversationGatewayStore {
 		sqlite, err := sqlite.New(filepath.Join(t.TempDir(), "gateways.db"))
 		if err != nil {
 			t.Fatal(err)

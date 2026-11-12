@@ -13,6 +13,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -108,7 +109,7 @@ func TestAlwaysReviewActionKeepsApprovalInEveryMode(t *testing.T) {
 
 func TestNewConversationsDefaultToAutoApprovalMode(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	if conversation.ApprovalMode != models.ConversationApprovalAuto {
 		t.Fatalf("new conversation approval mode = %q", conversation.ApprovalMode)
@@ -131,7 +132,7 @@ func TestNewConversationsDefaultToAutoApprovalMode(t *testing.T) {
 
 func TestSetApprovalModeIsRevisionCheckedAndRecordsActivity(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	service := runtimeconversation.NewConversationApprovalModeService(store)
 	if _, err := service.SetApprovalMode(ctx, runtimeconversation.SetConversationApprovalModeRequest{
@@ -174,7 +175,7 @@ func TestSetApprovalModeIsRevisionCheckedAndRecordsActivity(t *testing.T) {
 
 func TestLooseningApprovalModeApprovesAllowedPendingApprovals(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	service := runtimeconversation.NewConversationApprovalModeService(store)
 	conversation = conversationtest.SetApprovalMode(t, service, conversation, models.ConversationApprovalManual).Conversation
@@ -230,7 +231,7 @@ func TestLooseningApprovalModeApprovesAllowedPendingApprovals(t *testing.T) {
 
 func TestTighteningApprovalModeLeavesPendingApprovals(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	service := runtimeconversation.NewConversationApprovalModeService(store)
 	coordinator := runtimeaction.NewActionCoordinator(store, store, conversationtest.ApprovalModeCatalog(t), runtimeaction.NewDefaultActionPolicy(), nil)
@@ -255,7 +256,7 @@ func TestTighteningApprovalModeLeavesPendingApprovals(t *testing.T) {
 
 func TestRunConversationIDFallsBackToRootRun(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	root := &models.AgentRun{ID: "root", Scope: scope, RootRunID: "root", Context: map[string]interface{}{"conversationId": "chat"}}
 	child := &models.AgentRun{ID: "child", Scope: scope, RootRunID: "root", ParentRunID: "root", Context: map[string]interface{}{}}
@@ -284,7 +285,7 @@ func TestRunConversationIDFallsBackToRootRun(t *testing.T) {
 }
 
 func TestActionCoordinatorPassesConversationApprovalModeToPolicy(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	var seen runtimeaction.ActionPolicyInput
 	coordinator := runtimeaction.NewActionCoordinator(store, store, conversationtest.ApprovalModeCatalog(t), runtimeaction.ActionPolicyEvaluatorFunc(func(_ context.Context, input runtimeaction.ActionPolicyInput) (runtimeaction.ActionPolicyDecision, error) {
@@ -412,7 +413,7 @@ func mustSQLiteApprovalModeStore(t *testing.T) *sqlite.Store {
 
 func TestApprovalWithoutReviewContextIsNamedByActionIntent(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	coordinator := runtimeaction.NewActionCoordinator(store, store, conversationtest.ApprovalModeCatalog(t), runtimeaction.NewDefaultActionPolicy(), nil)
 	scope := conversation.Scope
@@ -454,7 +455,7 @@ func setFixtureApprovalMode(t *testing.T, store *sqlite.Store, conversation *mod
 
 func TestAlwaysReviewActionApprovalShowsInputsAndSurvivesSkip(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	service := runtimeconversation.NewConversationApprovalModeService(store)
 	conversation = conversationtest.SetApprovalMode(t, service, conversation, models.ConversationApprovalSkip).Conversation
@@ -499,7 +500,7 @@ func TestAlwaysReviewActionApprovalShowsInputsAndSurvivesSkip(t *testing.T) {
 // ordinary write exactly like a manifest review: always action.
 func TestPolicyReviewFloorParksInSkipAndSurvivesSweep(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	service := runtimeconversation.NewConversationApprovalModeService(store)
 	conversation = conversationtest.SetApprovalMode(t, service, conversation, models.ConversationApprovalSkip).Conversation
@@ -541,7 +542,7 @@ func TestPolicyReviewFloorParksInSkipAndSurvivesSweep(t *testing.T) {
 }
 
 func TestPolicyWithoutReviewFloorKeepsDisposition(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	service := runtimeconversation.NewConversationApprovalModeService(store)
 	conversation = conversationtest.SetApprovalMode(t, service, conversation, models.ConversationApprovalSkip).Conversation

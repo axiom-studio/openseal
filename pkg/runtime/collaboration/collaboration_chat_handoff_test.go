@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -29,7 +29,7 @@ func TestOneToOneChatCannotHandWorkToAnotherAgent(t *testing.T) {
 // A Team chat hand-off is checked against the roster again when it is
 // accepted: the child answers in the chat, so a removed member cannot take it.
 func TestTeamChatHandOffAcceptanceRechecksTheRoster(t *testing.T) {
-	ctx, store, scope := t.Context(), conversationtest.NewStore(t), models.Scope{Kind: "tenant", ID: "handoff-roster"}
+	ctx, store, scope := t.Context(), kerneltest.NewStore(t), models.Scope{Kind: "tenant", ID: "handoff-roster"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "gtm"}
 	team := activeCollaborationTeam(scope, owner.ID,
 		kernelteam.RosterAssignment{ID: "marlow", AgentDeploymentID: "marlow"}, kernelteam.RosterAssignment{ID: "harp", AgentDeploymentID: "harp"})

@@ -3,14 +3,16 @@ package runtime
 import (
 	"context"
 	"errors"
-	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func TestPortfolioSupportsMultipleObjectivesAndRunLineage(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := portfolio.NewPortfolioService(store)
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "marketing"}
@@ -55,7 +57,7 @@ func TestPortfolioSupportsMultipleObjectivesAndRunLineage(t *testing.T) {
 
 func TestPortfolioFailsClosedAcrossScopesAndOnStaleRevision(t *testing.T) {
 	ctx := context.Background()
-	service := portfolio.NewPortfolioService(newTestKernelStore(t))
+	service := portfolio.NewPortfolioService(kerneltest.NewStore(t))
 	scopeA := models.Scope{Kind: "tenant", ID: "a"}
 	scopeB := models.Scope{Kind: "tenant", ID: "b"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}

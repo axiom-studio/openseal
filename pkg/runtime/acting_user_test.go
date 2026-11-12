@@ -7,11 +7,12 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 func TestAgentRunReplayActingUser(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := agentrun.NewRunCommandService(store)
 	scope := models.Scope{Kind: "tenant", ID: "1"}
 	request := func(key, actingUser string) models.CreateAgentRunRequest {

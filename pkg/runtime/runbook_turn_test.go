@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
@@ -373,7 +374,7 @@ type runbookLoopFixture struct {
 
 func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runbookLoopFixture {
 	t.Helper()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	f := &runbookLoopFixture{t: t, ctx: context.Background(), store: store, scope: models.Scope{Kind: "tenant", ID: "runbook-loop"}}
 	collaboration := collaboration.NewCollaborationService(store)
 	f.control = &control.ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration}

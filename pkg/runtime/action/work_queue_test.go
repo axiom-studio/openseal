@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -97,7 +98,7 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 }
 
 func TestQueueDrivenActionPoolIssuesNoReadsWhileIdle(t *testing.T) {
-	store := &deadlineActionStore{Store: actiontest.NewStore(t)}
+	store := &deadlineActionStore{Store: kerneltest.NewStore(t)}
 	catalog, scope := actiontest.GovernedCatalog(t)
 	pool := actiontest.NewPool(t, store, catalog, scope, 5*time.Millisecond, 4, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 		return nil, errors.New("unexpected idle dispatch")
@@ -115,7 +116,7 @@ func TestQueueDrivenActionPoolIssuesNoReadsWhileIdle(t *testing.T) {
 }
 
 func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
-	store := &deadlineActionStore{Store: actiontest.NewStore(t)}
+	store := &deadlineActionStore{Store: kerneltest.NewStore(t)}
 	catalog, scope := actiontest.GovernedCatalog(t)
 	dispatched := make(chan struct{}, 1)
 	pool := actiontest.NewPool(t, store, catalog, scope, time.Hour, 2, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
@@ -171,7 +172,7 @@ func scheduleActionRetry(t *testing.T, store models.KernelStore, call *models.Ac
 func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.T) {
 	for _, scenario := range []string{"retry", "expired_lease"} {
 		t.Run(scenario, func(t *testing.T) {
-			store := &deadlineActionStore{Store: actiontest.NewStore(t)}
+			store := &deadlineActionStore{Store: kerneltest.NewStore(t)}
 			catalog, scope := actiontest.GovernedCatalog(t)
 			proposal := actiontest.CreatePoolWork(t, store.Store, catalog, scope)
 			// The SQLite store compares timestamps as text, so like every
@@ -218,7 +219,7 @@ func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.
 }
 
 func TestQueueDrivenActionPoolPollsWhileQueueIsUnhealthy(t *testing.T) {
-	store := &deadlineActionStore{Store: actiontest.NewStore(t)}
+	store := &deadlineActionStore{Store: kerneltest.NewStore(t)}
 	catalog, scope := actiontest.GovernedCatalog(t)
 	status := newQueueHarness(t).status
 	pool := actiontest.NewPool(t, store, catalog, scope, 10*time.Millisecond, 1, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
@@ -275,7 +276,7 @@ func (s *deadlineAgentRunStore) reads() int64 {
 }
 
 func TestQueueDrivenAgentRunPoolIssuesNoReadsWhileIdleAndWakesOnDeadline(t *testing.T) {
-	store := &deadlineAgentRunStore{Store: actiontest.NewStore(t)}
+	store := &deadlineAgentRunStore{Store: kerneltest.NewStore(t)}
 	scope := models.Scope{Kind: "tenant", ID: "idle-runs"}
 	pool, err := runworker.NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return nil, errors.New("unexpected idle turn")
@@ -346,7 +347,7 @@ func (s *checkedScopeSource) WorkerScopeActive(context.Context, models.Scope) (b
 }
 
 func TestQueueDrivenSupervisorAdmitsScopesWithoutListingAndRetiresIdlePools(t *testing.T) {
-	store := &deadlineActionStore{Store: actiontest.NewStore(t)}
+	store := &deadlineActionStore{Store: kerneltest.NewStore(t)}
 	catalog, scope := actiontest.GovernedCatalog(t)
 	source := &checkedScopeSource{}
 	source.active.Store(true)
@@ -455,7 +456,7 @@ func (s *signalConversationStore) ListConversations(ctx context.Context, filter 
 }
 
 func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) {
-	store := &signalConversationStore{Store: actiontest.NewStore(t)}
+	store := &signalConversationStore{Store: kerneltest.NewStore(t)}
 	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)

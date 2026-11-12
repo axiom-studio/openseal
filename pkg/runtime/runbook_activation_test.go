@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -19,7 +20,7 @@ import (
 
 func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
@@ -77,7 +78,7 @@ func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
 
 func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	registry := kernelagent.NewRegistryWithStore(kernelagent.NewMemoryStore())
@@ -186,7 +187,7 @@ func TestResolvedVerificationBlocksManualAndScheduledActivation(t *testing.T) {
 
 func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	portfolio := runtimeportfolio.NewPortfolioService(store)
@@ -223,7 +224,7 @@ func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 
 func TestActiveRunbookActivationMaterializesReportingChannel(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
@@ -273,7 +274,7 @@ func TestActiveRunbookActivationMaterializesReportingChannel(t *testing.T) {
 
 func TestPausedRunbookActivationDefersReportingChannelUntilResumed(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	seedTestSpace(t, store, scope)
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}
@@ -371,7 +372,7 @@ func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) 
 
 func TestRunbookActivationCannotCrossObjectiveOwner(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}, Title: "Outcome", Goal: "Do useful work", Status: models.ObjectiveStatusActive,
@@ -391,7 +392,7 @@ func TestRunbookActivationCannotCrossObjectiveOwner(t *testing.T) {
 
 func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
@@ -437,7 +438,7 @@ func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testin
 
 func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
@@ -508,7 +509,7 @@ func eventTaskFixture(t *testing.T, store *sqlite.Store) (models.Scope, routine.
 }
 
 func TestRunbookActivationCreateEventTaskNoCursor(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope, request := eventTaskFixture(t, store)
 	activation, err := routine.NewRunbookActivationService(store).Create(t.Context(), request)
 	if err != nil {
@@ -541,7 +542,7 @@ func TestRunbookActivationCreateEventTaskNoCursor(t *testing.T) {
 }
 
 func TestRunbookActivationPausedReason(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope, request := eventTaskFixture(t, store)
 	service := routine.NewRunbookActivationService(store)
 	activation, err := service.Create(t.Context(), request)
@@ -572,7 +573,7 @@ func TestRunbookActivationPausedReason(t *testing.T) {
 }
 
 func TestRunbookActivationPausedReasonOnPausedRoutine(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope, request := eventTaskFixture(t, store)
 	service := routine.NewRunbookActivationService(store)
 	activation, err := service.Create(t.Context(), request)

@@ -13,12 +13,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/google/uuid"
 )
 
 func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	ctx := t.Context()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	scope := models.Scope{Kind: "tenant", ID: "run-failed-" + uuid.NewString()[:8]}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}

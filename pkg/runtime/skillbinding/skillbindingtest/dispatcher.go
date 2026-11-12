@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/mcp"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -39,7 +40,7 @@ func ClaimedSkillActionRun(t *testing.T, ctx context.Context, store *sqlite.Stor
 func CredentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Catalog, *skillbinding.SkillBindingActionDispatcher, models.Scope) {
 	t.Helper()
 	ctx := context.Background()
-	store := NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
 	catalog := SkillActionCatalog(t, ctx, scope, "agent")
 	if err := catalog.Bind(ctx, &skill.Binding{ID: "interaction-actions", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent",

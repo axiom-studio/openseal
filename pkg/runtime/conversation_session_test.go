@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -33,7 +34,7 @@ func TestConversationSessionIDIsStablePerLane(t *testing.T) {
 	// lane's in-memory session, and only under the lane's own id.
 	threadRun := &models.AgentRun{ID: "thread-run", Scope: scope, AssignedAgentID: "agent-a", SessionID: ids["thread"],
 		Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: "chat", "threadRootMessageId": "root"}}
-	if session, err := models.ConversationRunSession(context.Background(), newTestKernelStore(t), threadRun); err != nil || session == nil ||
+	if session, err := models.ConversationRunSession(context.Background(), kerneltest.NewStore(t), threadRun); err != nil || session == nil ||
 		session.ID != ids["thread"] || session.LaneKey != "chat:thread:root:agent:agent-a" || session.Validate() != nil {
 		t.Fatalf("lane session = %+v, %v", session, err)
 	}
@@ -69,7 +70,7 @@ func TestTeamRoutingRunHasNoSession(t *testing.T) {
 	}
 	run := &models.AgentRun{ID: "routing", Scope: scope, Kind: models.RunKindConversation, Owner: team.Owner,
 		ConcurrencyKey: request.ConcurrencyKey, Context: request.Context}
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	session, err := models.ConversationRunSession(context.Background(), store, run)
 	if err != nil || session != nil {
 		t.Fatalf("routing run session = %+v, %v", session, err)
@@ -86,7 +87,7 @@ func TestTeamRoutingRunHasNoSession(t *testing.T) {
 
 func TestConversationRunSessionResolvesLaneAndChildSessions(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	lane := models.ConversationRunLane("c1", "", "agent-a")
 	run := putTestSessionRun(t, store, "r1", models.ConversationSessionID(testSessionScope, lane), models.AgentRunStatusRunning, 0)
 	run.AssignedAgentID = "agent-a"
@@ -146,7 +147,7 @@ func TestChildSessionRequiresForkEntryAndParent(t *testing.T) {
 	}
 
 	// A valid request forks the parent at the given entry through the store.
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	parent := openTestConversationSession(t, store, "r1")
 	if _, err := testAppend(store, parent.ID, "r1", storetest.UserSessionEntry("p1", "a"), storetest.UserSessionEntry("p2", "b"), storetest.UserSessionEntry("p3", "c")); err != nil {
 		t.Fatal(err)

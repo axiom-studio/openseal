@@ -7,7 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -77,7 +77,7 @@ func mixedSteeringPrefix() []models.AgentRunIntervention {
 }
 
 func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	run, session := steeringRun(t, store, 1, mixedSteeringPrefix()...)
 	preparer := &steeringPreparer{}
 	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{preparer}, loopSessionNow)
@@ -124,7 +124,7 @@ func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
 }
 
 func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	run, session := steeringRun(t, store, 0, mixedSteeringPrefix()[3])
 	catchUp := &steeringPreparer{fn: func(in agentrun.StepInput, plan agentrun.SteeringPlan) *agentrun.StepContextAppend {
 		expected := in.Session.ChannelWatermark
@@ -151,7 +151,7 @@ func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
 }
 
 func TestSteeringCursorCommitsWithEntries(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	run, session := steeringRun(t, store, 0, models.AgentRunIntervention{ID: "steer", Instruction: "stop after the draft"})
 	stale := int64(99)
 	moving := &steeringPreparer{fn: func(agentrun.StepInput, agentrun.SteeringPlan) *agentrun.StepContextAppend {
@@ -194,7 +194,7 @@ func TestSteeringCursorCommitsWithEntries(t *testing.T) {
 }
 
 func TestSteeringReplayAfterCrashAppendsOnce(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	run, session := steeringRun(t, store, 0,
 		models.AgentRunIntervention{ID: "a", Instruction: "first"},
 		models.AgentRunIntervention{ID: "b", Instruction: "second"})

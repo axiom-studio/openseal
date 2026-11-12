@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -151,7 +152,7 @@ func testConversationReactions(t *testing.T, store models.ConversationStore) {
 		t.Fatalf("external reaction projected back out: %d, %v", len(projector.events), err)
 	}
 
-	changes, err := NewConversationChangeService(store, newTestKernelStore(t))
+	changes, err := NewConversationChangeService(store, kerneltest.NewStore(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -225,7 +226,7 @@ func workerTaskProposal() workerTaskProposalText {
 // without calling the model again: the task is admitted once, the source Run
 // completes with the acknowledgment, and the tool entry completes.
 func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	source, step, conversation, _ := settledWorkerTaskFixture(t, store)
 	expireRunLease(t, store, source)
 

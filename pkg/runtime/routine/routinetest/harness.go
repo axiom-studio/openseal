@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -22,7 +23,7 @@ import (
 
 func NewEventHarness(t *testing.T) *EventHarness {
 	t.Helper()
-	return NewEventHarnessOn(t, conversationtest.NewStore(t))
+	return NewEventHarnessOn(t, kerneltest.NewStore(t))
 }
 
 // NewEventRowsHarness is NewEventHarness on a store file, with

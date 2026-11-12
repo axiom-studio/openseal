@@ -14,7 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -134,7 +134,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	}, "user", "operator", "audit"); err != nil {
 		t.Fatal(err)
 	}
-	store := &runbookAuditRecords{Store: conversationtest.NewStore(t)}
+	store := &runbookAuditRecords{Store: kerneltest.NewStore(t)}
 	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Research", Goal: "Find evidence", Status: models.ObjectiveStatusActive,
 	})
@@ -266,7 +266,7 @@ func TestRunExecutionAuditProjectsConversationalRunAsOneGraph(t *testing.T) {
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "conversation-audit"}
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	store := &runbookAuditRecords{Store: conversationtest.NewStore(t)}
+	store := &runbookAuditRecords{Store: kerneltest.NewStore(t)}
 	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"},
 		AssignedAgentID: "assistant", Goal: "Respond to an Agent channel message", Source: models.RunSourceRequest,

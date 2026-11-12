@@ -3,15 +3,17 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"github.com/axiom-studio/openseal/pkg/models"
-	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
-	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"sync"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func TestActivitySequencesConcurrentAppends(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	portfolio := portfolio.NewPortfolioService(store)
 	activity := runtimeactivity.NewRunActivityService(store, store)
 	ctx := context.Background()
@@ -52,7 +54,7 @@ func TestActivitySequencesConcurrentAppends(t *testing.T) {
 }
 
 func TestRunTransitionPersistsWakeAndTerminalState(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	portfolio := portfolio.NewPortfolioService(store)
 	activity := runtimeactivity.NewRunActivityService(store, store)
 	ctx := context.Background()

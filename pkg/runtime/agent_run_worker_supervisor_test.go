@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"go.uber.org/zap"
@@ -35,7 +36,7 @@ func (s *mutableWorkerScopeSource) set(scopes []models.Scope, err error) {
 }
 
 func TestAgentRunWorkerSupervisorExecutesOnlyConfiguredKindAcrossScopes(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope1 := models.Scope{Kind: "tenant", ID: "1"}
 	scope2 := models.Scope{Kind: "tenant", ID: "2"}

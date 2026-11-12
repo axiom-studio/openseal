@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration/collaborationtest"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -27,7 +28,7 @@ func (s *countingConversationStore) GetConversation(ctx context.Context, scope m
 func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t *testing.T) {
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "deleted-conversation-projection"}
-	store := &countingConversationStore{Store: newTestKernelStore(t)}
+	store := &countingConversationStore{Store: kerneltest.NewStore(t)}
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "requester"}, AssignedAgentID: "requester",
 		Goal: "Coordinate work", Source: models.RunSourceManual,
@@ -61,7 +62,7 @@ func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t
 func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "conversation-projection"}
 	store := &collaborationtest.TeamStore{
-		Store: newTestKernelStore(t),
+		Store: kerneltest.NewStore(t),
 		Deployment: &kernelteam.Deployment{
 			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
@@ -190,7 +191,7 @@ func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "escalation-projection"}
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "coordinator"},

@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
@@ -128,7 +129,7 @@ type compactionFixture struct {
 
 func newCompactionFixture(t *testing.T) *compactionFixture {
 	t.Helper()
-	store := newModelStepTestStore(t)
+	store := kerneltest.NewStore(t)
 	f := &storetest.SessionFixture{
 		T: t, Ctx: context.Background(), Store: store,
 		Scope: models.Scope{Kind: "tenant", ID: "compact-" + uuid.NewString()[:8]},
@@ -724,16 +725,4 @@ func TestCompactionModelPrefersStepThenBindingThenNewest(t *testing.T) {
 	if got := compactionModel(agentrun.StepInput{Step: &models.AgentTurn{}, Binding: &agentrun.TurnRunnerBinding{Model: "auto"}, Path: stale}); got != "auto" {
 		t.Fatalf("model after a change = %q, want the binding's", got)
 	}
-}
-
-// newModelStepTestStore opens an in-memory SQLite store closed when the test
-// ends.
-func newModelStepTestStore(t testing.TB) *sqlite.Store {
-	t.Helper()
-	store, err := sqlite.NewInMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	return store
 }

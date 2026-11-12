@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -97,7 +98,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 }
 
 func TestConversationArchiveImportRejectsUnknownReplyAndDuplicateRecords(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "archive"})
 	service := conversation.NewConversationService(store)
 	base := conversation.ImportConversationArchiveRequest{

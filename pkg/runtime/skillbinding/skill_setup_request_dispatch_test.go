@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -16,7 +17,7 @@ import (
 
 func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing.T) {
 	ctx := context.Background()
-	store := skillbindingtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)
@@ -66,7 +67,7 @@ func TestSkillSetupIsExplicitScopedAndIdempotentWithoutGrantingAccess(t *testing
 
 func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 	ctx := context.Background()
-	store := skillbindingtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)
@@ -116,7 +117,7 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 
 func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing.T) {
 	ctx := context.Background()
-	store := skillbindingtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, "agent")
 	discoveries := 0
@@ -156,7 +157,7 @@ func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing
 
 func TestSkillSetupResolvesAnOmittedSourceFromTheCatalog(t *testing.T) {
 	ctx := context.Background()
-	store := skillbindingtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
 	deploymentID := "agent"
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)

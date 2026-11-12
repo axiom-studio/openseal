@@ -8,7 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 // runStartActions serves ListActionCalls from a fixed set; every other
@@ -87,7 +87,7 @@ func TestRunStartNoteIdempotent(t *testing.T) {
 	step := &models.AgentTurn{ID: "step-9", Scope: g.run.Scope, RunID: g.run.ID, Sequence: 9}
 	prepare := func(run *models.AgentRun, path *models.AgentSessionPath) []*models.SessionEntry {
 		t.Helper()
-		out, err := NewRunStartPreparer(conversationtest.NewStore(t), actions).BeforeStep(context.Background(),
+		out, err := NewRunStartPreparer(kerneltest.NewStore(t), actions).BeforeStep(context.Background(),
 			agentrun.StepInput{Run: run, Step: step, Session: session, Path: path}, agentrun.SteeringPlan{})
 		if err != nil {
 			t.Fatalf("before step: %v", err)

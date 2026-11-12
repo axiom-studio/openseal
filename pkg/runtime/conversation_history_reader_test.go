@@ -11,12 +11,13 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestConversationHistoryReadsVisibleOriginals(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, store, scope)

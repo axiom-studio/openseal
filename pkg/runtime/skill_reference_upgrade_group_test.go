@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -107,7 +108,7 @@ func runGroupUpgradeScenario(t *testing.T, store groupUpgradeStore) {
 
 func TestSkillReferenceGroupUpgradeRejectsStaleSiblings(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	registerGroupUpgradeVersions(t, catalog)
 	scope := skill.ScopeReference{Kind: "tenant", ID: "1"}

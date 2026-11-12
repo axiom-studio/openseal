@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -50,7 +51,7 @@ func executePersonAction(t *testing.T, worker *action.ActionWorker, scope models
 }
 
 func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Now().UTC()
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, "")
@@ -84,7 +85,7 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 // The same external operation of a parked call is admitted again in another
 // run: its digest was released when it parked.
 func TestParkedCallReleasesExternalOperation(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Now().UTC()
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
@@ -105,7 +106,7 @@ func TestParkedCallReleasesExternalOperation(t *testing.T) {
 }
 
 func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Now().UTC()
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
@@ -131,7 +132,7 @@ func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
 }
 
 func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Now().UTC()
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
@@ -154,7 +155,7 @@ func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
 }
 
 func TestPersonActionApprovalOnlyByActingUser(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Now().UTC()
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)

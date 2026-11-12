@@ -6,6 +6,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -25,7 +26,7 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			store := skillbindingtest.NewStore(t)
+			store := kerneltest.NewStore(t)
 			scope := models.Scope{Kind: "tenant", ID: "a"}
 			catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, "agent")
 			provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {

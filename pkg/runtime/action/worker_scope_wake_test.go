@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -32,7 +33,7 @@ func TestWorkerPoolScopeWakeDoesNotWakeAnotherTenant(t *testing.T) {
 // test cannot import (actiontest imports action).
 func newScopeWakeTestPool(t *testing.T, scope models.Scope) *ActionWorkerPool {
 	t.Helper()
-	pool, err := NewActionWorkerPool(newActionTestStore(t), skill.NewCatalog(), CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+	pool, err := NewActionWorkerPool(kerneltest.NewStore(t), skill.NewCatalog(), CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "test-secret"}, nil
 	}), ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }), nil,
 		ActionWorkerConfig{Scope: scope, Concurrency: 1, PollInterval: time.Hour, LeaseDuration: time.Second})

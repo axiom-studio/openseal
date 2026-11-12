@@ -11,8 +11,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -140,7 +140,7 @@ func TestPendingSetupProjectionIsTenantScoped(t *testing.T) {
 		models.SkillSetupRequestStore
 		ListPendingSkillSetupRequests(context.Context, models.Scope, int, int) ([]*models.SkillSetupRequest, error)
 	}
-	for _, store := range []pendingStore{conversationtest.NewStore(t), sqlite} {
+	for _, store := range []pendingStore{kerneltest.NewStore(t), sqlite} {
 		request := skillbindingtest.SkillSetupRequest()
 		if err := store.SaveSkillSetupRequest(t.Context(), request, 0); err != nil {
 			t.Fatal(err)

@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
@@ -24,7 +25,7 @@ import (
 
 func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	deploymentID := "research-agent"
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)
@@ -140,7 +141,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 
 func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	deploymentID := "research-agent"
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, deploymentID)
@@ -240,7 +241,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, "agent-a")
-	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, newTestKernelStore(t))
+	validator, _ := skillbinding.NewSkillBindingActionValidator(catalog, kerneltest.NewStore(t))
 	management := skillbinding.SkillManagementSkill()
 	bound, err := catalog.Resolve(ctx, skillScope, "agent-a", management.ID, management.Version, skillbinding.SkillActionUpsertBinding)
 	if err != nil {
@@ -255,7 +256,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	if _, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{Run: foreignRun, Bound: bound, Arguments: base}); err == nil {
 		t.Fatal("management binding from agent-a escalated into agent-b")
 	}
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	durableForeign, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: foreignRun.Owner, AssignedAgentID: foreignRun.AssignedAgentID, Goal: "Manage Skills", Source: models.RunSourceChat,
 	})
@@ -384,7 +385,7 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID},
 		AssignedAgentID: deploymentID, Goal: "Enable Slack conversations", Source: models.RunSourceChat,

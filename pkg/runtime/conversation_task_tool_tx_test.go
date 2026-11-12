@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -345,7 +346,7 @@ func TestStartTaskCompletesSourceAtomically(t *testing.T) {
 }
 
 func TestConversationTaskToolRecordValidation(t *testing.T) {
-	fixture := conversationTaskToolRecord(t, newTestKernelStore(t), "validate")
+	fixture := conversationTaskToolRecord(t, kerneltest.NewStore(t), "validate")
 	mutate := map[string]func(*models.ConversationTaskCreateRecord){
 		"transition without entry id": func(r *models.ConversationTaskCreateRecord) {
 			task := *r.Task

@@ -15,6 +15,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -107,7 +108,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 }
 
 func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	catalog := artifactcatalog.NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }))
 	artifact := validCatalogArtifact("game-log", 1)
 	var created atomic.Int32
@@ -138,7 +139,7 @@ func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
 }
 
 func TestArtifactCatalogRejectsSecretsSignedURLsAndInvalidEvidence(t *testing.T) {
-	catalog := artifactcatalog.NewArtifactCatalog(newTestKernelStore(t))
+	catalog := artifactcatalog.NewArtifactCatalog(kerneltest.NewStore(t))
 	tests := []struct {
 		name   string
 		mutate func(*models.Artifact)

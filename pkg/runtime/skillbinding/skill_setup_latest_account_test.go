@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -34,7 +35,7 @@ type latestSetupTestFixture struct {
 
 func newLatestSetupTestFixture(t *testing.T, source string) *latestSetupTestFixture {
 	t.Helper()
-	f := &latestSetupTestFixture{ctx: context.Background(), scope: models.Scope{Kind: "tenant", ID: "a"}, store: skillbindingtest.NewStore(t), source: source}
+	f := &latestSetupTestFixture{ctx: context.Background(), scope: models.Scope{Kind: "tenant", ID: "a"}, store: kerneltest.NewStore(t), source: source}
 	f.catalog = skillbindingtest.SkillActionCatalog(t, f.ctx, f.scope, "agent")
 	f.locations = []latestSetupTestLocation{{scope: skill.ScopeReference{Kind: "tenant", ID: "a"}, deploymentID: "agent"}}
 	if source != "" {

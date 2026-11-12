@@ -8,6 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -23,7 +24,7 @@ func (s *countingFinalReplyStore) ListChannelMessages(ctx context.Context, filte
 
 func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 	ctx := t.Context()
-	store := &countingFinalReplyStore{Store: conversationtest.NewStore(t)}
+	store := &countingFinalReplyStore{Store: kerneltest.NewStore(t)}
 	service := runtimeconversation.NewConversationService(store)
 	scope := models.Scope{Kind: "tenant", ID: "17"}
 	conversationtest.SeedSpace(t, store, scope)

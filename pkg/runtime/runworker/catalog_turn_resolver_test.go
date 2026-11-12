@@ -18,7 +18,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
@@ -237,7 +237,7 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 	}
 	for index, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			store := conversationtest.NewStore(t)
+			store := kerneltest.NewStore(t)
 			run := tc.run
 			run.ID, run.Scope, run.Kind = fmt.Sprintf("run-%d", index), scope, models.RunKindAgentWork
 			run.Owner, run.AssignedAgentID = models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, "agent"
@@ -354,7 +354,7 @@ func TestDecisionRunOffersOnlyDecisionToolViaBinding(t *testing.T) {
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
 			catalog.activationDeployments = nil
-			store := conversationtest.NewStore(t)
+			store := kerneltest.NewStore(t)
 			run := claimedBindingRun(t, store, &models.AgentRun{
 				ID: "decision", Scope: scope, Kind: models.RunKindAgentWork, Source: models.RunSourceRequestDecision,
 				Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "reviewer"}, AssignedAgentID: "reviewer",
@@ -399,7 +399,7 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 		}}},
 	}
 	base := &models.AgentRun{ID: "run", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher", Context: map[string]interface{}{}}
-	config := loopBindingTestConfig(t, conversationtest.NewStore(t), nil)
+	config := loopBindingTestConfig(t, kerneltest.NewStore(t), nil)
 
 	invocation := models.CloneAgentRun(base)
 	invocation.Context = map[string]interface{}{}
@@ -443,7 +443,7 @@ func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 		definition: &kernelagent.AgentDefinition{ID: "coding-agent", Version: "1", Purpose: "Work in repositories", SystemPrompt: "Work carefully."},
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "coding-agent"},
 	}
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	run := claimedBindingRun(t, store, &models.AgentRun{
 		ID: "run", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "coding-agent"},
 		AssignedAgentID: "coding-agent", Goal: "Inspect the repository",
@@ -477,7 +477,7 @@ func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 		}
 	}
 
-	chatStore := conversationtest.NewStore(t)
+	chatStore := kerneltest.NewStore(t)
 	chat := claimedBindingRun(t, chatStore, &models.AgentRun{
 		ID: "chat-run", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "coding-agent"},
 		AssignedAgentID: "coding-agent", Goal: "Inspect the repository", Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: "chat-1"},
@@ -513,7 +513,7 @@ func TestCatalogTurnResolverUsesDeploymentSpecificSkillHost(t *testing.T) {
 	var resolvedScope skill.ScopeReference
 	var resolvedDeployment string
 	run := &models.AgentRun{ID: "run", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "sre"}, AssignedAgentID: "sre", Context: map[string]interface{}{"capabilityInvocation": map[string]interface{}{}}}
-	config := loopBindingTestConfig(t, conversationtest.NewStore(t), nil)
+	config := loopBindingTestConfig(t, kerneltest.NewStore(t), nil)
 	config.SkillHosts = SkillHostCapabilityResolverFunc(func(_ context.Context, gotScope skill.ScopeReference, deploymentID string) (*skill.HostCapabilityState, error) {
 		resolvedScope, resolvedDeployment = gotScope, deploymentID
 		return &wanted, nil
@@ -538,7 +538,7 @@ func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "analyst"},
 	}
 	run := &models.AgentRun{ID: "run", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "analyst"}, AssignedAgentID: "analyst", Goal: "Analyze", Context: map[string]interface{}{}}
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, conversationtest.NewStore(t), &modelsteptest.RecordingStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, kerneltest.NewStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +585,7 @@ func TestCatalogTurnResolverHidesOriginatingRunbookFromDelegatedAgent(t *testing
 			"runbookDefinitionId": "daily-browser-task", "runbookDefinitionVersion": "1.2.3",
 		}},
 	}
-	config := loopBindingTestConfig(t, conversationtest.NewStore(t), &modelsteptest.RecordingStepHost{})
+	config := loopBindingTestConfig(t, kerneltest.NewStore(t), &modelsteptest.RecordingStepHost{})
 	binding, err := ResolveLoopBinding(t.Context(), catalog, run, config)
 	if err != nil {
 		t.Fatal(err)
@@ -641,7 +641,7 @@ func TestCatalogTurnResolverPrefersDefinitionOperationWithoutCallableActivation(
 		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "community-agent"}, AssignedAgentID: "community-agent",
 		Goal: "Run it now", Context: map[string]interface{}{},
 	}
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, conversationtest.NewStore(t), &modelsteptest.RecordingStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, kerneltest.NewStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +701,7 @@ func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.
 		Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: current.ID,
 		Goal: "Delegate a release review", Context: map[string]interface{}{},
 	}
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, conversationtest.NewStore(t), &modelsteptest.RecordingStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, kerneltest.NewStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -732,7 +732,7 @@ func TestCatalogTurnResolverDoesNotProjectTenantDirectoryIntoStandaloneAgent(t *
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID},
 	}
 	run := &models.AgentRun{ID: "run", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: current.ID}, AssignedAgentID: current.ID, Goal: "Answer concisely", Context: map[string]interface{}{}}
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, conversationtest.NewStore(t), &modelsteptest.RecordingStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, kerneltest.NewStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -766,7 +766,7 @@ func TestCatalogTurnResolverSeparatesAcceptedRequestExecutionFromIntake(t *testi
 		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
 		Goal: "Perform the accepted request", Context: map[string]interface{}{"collaboration": map[string]interface{}{"requestId": "request"}},
 	}
-	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, conversationtest.NewStore(t), &modelsteptest.RecordingStepHost{}))
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, kerneltest.NewStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -808,7 +808,7 @@ func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRun
 			}}},
 		},
 	}
-	config := loopBindingTestConfig(t, conversationtest.NewStore(t), &modelsteptest.RecordingStepHost{})
+	config := loopBindingTestConfig(t, kerneltest.NewStore(t), &modelsteptest.RecordingStepHost{})
 	teamRun := &models.AgentRun{ID: "run", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "review-team"}, AssignedAgentID: "reviewer-agent", Goal: "Enable the reviewer", Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{}}
 	binding, err := ResolveLoopBinding(t.Context(), catalog, teamRun, config)
 	if err != nil {
@@ -934,7 +934,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 		definition: &kernelagent.AgentDefinition{ID: "finn-definition", Version: "7", Purpose: "Build Agents", SystemPrompt: "You are Finn, the builder."},
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skillScope, DeploymentID: "finn"},
 	}
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	parent := &models.AgentRun{
 		ID: "parent", Scope: scope, Kind: models.RunKindConversation, RootRunID: "parent", Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"},
 		AssignedAgentID: "finn", Goal: "Build an Agent", Status: models.AgentRunStatusRunning, Revision: 1, CreatedAt: time.Now().UTC(),

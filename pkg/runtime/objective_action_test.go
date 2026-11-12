@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -102,7 +103,7 @@ func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testin
 }
 
 func TestObjectiveActionsRejectInjectedOwnerForeignTargetAndStaleRevisionBeforeApproval(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "marketing"}
@@ -148,7 +149,7 @@ func TestObjectiveActionsRejectInjectedOwnerForeignTargetAndStaleRevisionBeforeA
 }
 
 func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "sre"}

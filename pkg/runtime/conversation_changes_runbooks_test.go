@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	runtimeroutine "github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -133,7 +134,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 
 func TestLinkRunbooks(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	service := conversation.NewConversationService(store)
 	scope := models.Scope{Kind: "tenant", ID: "links"}
 	seedTestSpace(t, store, scope)

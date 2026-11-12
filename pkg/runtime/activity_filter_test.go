@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -17,7 +18,7 @@ import (
 // AfterSequence.
 func TestListActivityAppliesEveryFilterInBothDirections(t *testing.T) {
 	stores := map[string]func(*testing.T) models.KernelStore{
-		"sqlite":   func(t *testing.T) models.KernelStore { return newTestKernelStore(t) },
+		"sqlite":   func(t *testing.T) models.KernelStore { return kerneltest.NewStore(t) },
 		"postgres": func(t *testing.T) models.KernelStore { return activityFilterPostgresStore(t) },
 	}
 	for name, open := range stores {

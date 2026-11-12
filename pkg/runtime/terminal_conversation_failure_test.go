@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/google/uuid"
 )
 
@@ -115,7 +116,7 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 }
 
 func TestTerminalConversationFailureRejectsForgedOriginAndPreservesSavedAnswer(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	run, conversation, trigger := conversationruntest.TerminalFailureConversation(t, store, runStoreContractEpoch, false)
 	run = conversationruntest.FailTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	for _, mutate := range []func(*models.AgentRun){
@@ -188,7 +189,7 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 }
 
 func TestTerminalConversationFailureResponseFlagCannotAuthorizeControlSource(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	run, conversation, _ := conversationruntest.TerminalFailureConversation(t, store, runStoreContractEpoch, false)
 	run = conversationruntest.FailTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	current, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)
@@ -243,7 +244,7 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 }
 
 func TestFailedConversationReplySkipsServiceWakeWithoutRetry(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	run, conversation, _ := conversationruntest.TerminalFailureConversation(t, store, runStoreContractEpoch, false)
 	run = conversationruntest.FailTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
 	current, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)

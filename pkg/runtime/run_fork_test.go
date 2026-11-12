@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -72,7 +73,7 @@ func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
 }
 
 func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "7"}
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "parent", Source: models.RunSourceManual,
@@ -121,7 +122,7 @@ func TestRunForkCoordinatorRequiresExplicitChildBudgets(t *testing.T) {
 }
 
 func TestRunForkCoordinatorCarriesCallableRunbookEntrypoint(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "7"}
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
@@ -160,7 +161,7 @@ func TestRunForkCoordinatorCarriesCallableRunbookEntrypoint(t *testing.T) {
 }
 
 func TestRunForkCoordinatorDoesNotTransferPrivateContext(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "7"}
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "lead", Goal: "Coordinate research", Source: models.RunSourceManual,

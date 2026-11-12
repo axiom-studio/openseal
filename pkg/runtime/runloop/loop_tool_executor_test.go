@@ -14,7 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -94,7 +94,7 @@ func fakeLoopControls(real ...control.Tool) (control.Registry, map[models.Contro
 func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real ...control.Tool) *toolExecFixture {
 	t.Helper()
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "tools-" + uuid.NewString()[:8]}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))

@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -14,7 +15,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
-			var store models.ConversationStore = newTestKernelStore(t)
+			var store models.ConversationStore = kerneltest.NewStore(t)
 			var disk *sqlite.Store
 			path := filepath.Join(t.TempDir(), "initiator.db")
 			if backend == "sqlite" {
@@ -102,7 +103,7 @@ func TestChannelMessagesRejectUntrustedInitiator(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
-			store := newTestKernelStore(t)
+			store := kerneltest.NewStore(t)
 			service := runtimeconversation.NewConversationService(store)
 			scope := models.Scope{Kind: "tenant", ID: "initiator"}
 			seedTestSpace(t, store, scope)

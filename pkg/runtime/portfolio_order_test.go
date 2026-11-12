@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -52,7 +53,7 @@ func TestAgentRunCreatedDescendingOrderPrecedesPagination(t *testing.T) {
 func TestAgentRunSearchPrecedesPaginationAndIsLiteral(t *testing.T) {
 	for _, kind := range []string{"sqlite"} {
 		t.Run(kind, func(t *testing.T) {
-			var store models.PortfolioStore = newTestKernelStore(t)
+			var store models.PortfolioStore = kerneltest.NewStore(t)
 			if kind == "sqlite" {
 				db, err := sqlite.New(filepath.Join(t.TempDir(), "search.db"))
 				if err != nil {

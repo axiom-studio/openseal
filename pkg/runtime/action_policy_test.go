@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -39,7 +40,7 @@ func TestDefaultActionPolicyProfileImageExceptionIsNarrow(t *testing.T) {
 
 func TestProfileImageProposalProceedsWithoutApproval(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	catalog, scope := actiontest.GovernedCatalog(t)
 	definition := builtin.SkillDefinition()
 	if err := catalog.Register(ctx, definition); err != nil {

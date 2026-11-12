@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/mcp"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -36,7 +37,7 @@ type TargetFixture struct {
 // TargetFixture on a fresh store.
 func NewTargetFixture(t *testing.T) *TargetFixture {
 	t.Helper()
-	f := &TargetFixture{Ctx: context.Background(), Store: NewStore(t), Scope: models.Scope{Kind: "tenant", ID: "tenant-a"}}
+	f := &TargetFixture{Ctx: context.Background(), Store: kerneltest.NewStore(t), Scope: models.Scope{Kind: "tenant", ID: "tenant-a"}}
 	f.SkillScope = skill.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}
 	reference := capability.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}
 	f.Agents = kernelagent.NewRegistry()

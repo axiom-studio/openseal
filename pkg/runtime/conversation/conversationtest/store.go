@@ -14,20 +14,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-// NewStore returns an empty in-memory kernel store that is closed when the
-// test ends. It is a copy of runtime's newTestKernelStore (runtime's own
-// tests cannot import this package's importers without a cycle); change
-// both.
-func NewStore(t testing.TB) *sqlite.Store {
-	t.Helper()
-	store, err := sqlite.NewInMemory()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.Close() })
-	return store
-}
-
 // OpenSQLiteDB opens the test's own connection to the SQLite file at path,
 // closed when the test ends.
 func OpenSQLiteDB(t testing.TB, path string) *sql.DB {

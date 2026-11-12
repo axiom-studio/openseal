@@ -12,7 +12,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -70,7 +70,7 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 	t.Parallel()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "developer",
 		Goal: "Coordinate the release", Source: models.RunSourceManual,
@@ -160,7 +160,7 @@ func TestTeamCompletionReviewQuorumEscalatesAndResolvesDisagreement(t *testing.T
 	t.Parallel()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "review-quorum"}
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "lead",
 		Goal: "Coordinate reviewed delivery", Source: models.RunSourceManual,
@@ -236,7 +236,7 @@ func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	newService := func(policy kernelteam.DelegationPolicy) (*sqlite.Store, *portfolio.PortfolioService, *CollaborationService) {
-		store := conversationtest.NewStore(t)
+		store := kerneltest.NewStore(t)
 		portfolio := portfolio.NewPortfolioService(store)
 		service := NewCollaborationService(store)
 		service.teams = collaborationTeamStoreStub{
@@ -384,7 +384,7 @@ func TestTeamWorkOfferFiltersMemberSkillsAndRecordsCapacity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "team-authority"}
-	kernel := conversationtest.NewStore(t)
+	kernel := kerneltest.NewStore(t)
 	store := &collaborationAgentCatalogStore{
 		Store: kernel,
 		deployments: map[string]*kernelagent.AgentDeployment{

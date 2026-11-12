@@ -14,7 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun/agentruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
 )
@@ -141,7 +141,7 @@ func (s *dependencyRepairReadCountingStore) ListAgentRuns(ctx context.Context, f
 }
 
 func TestAgentRunWorkerIdleDependencyMetadataDoesNotHydrateRunsOrHistory(t *testing.T) {
-	store := &dependencyRepairReadCountingStore{Store: conversationtest.NewStore(t)}
+	store := &dependencyRepairReadCountingStore{Store: kerneltest.NewStore(t)}
 	fixture := agentruntest.NewDependencyFixtureWithPolicy(t, store.Store, models.Scope{Kind: "tenant", ID: uuid.NewString()}, models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureWait})
 	pool := newDependencyRepairTestPool(t, store, fixture.Scope)
 	for range 5 {

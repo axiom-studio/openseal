@@ -11,7 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -35,7 +35,7 @@ var teamChannelMembers = []string{"agent-a", "agent-b"}
 func newTeamChannelFixture(t *testing.T, operations ...capability.ConversationDeliveryOperation) *teamChannelFixture {
 	t.Helper()
 	ctx := t.Context()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "support-team"}
 	catalog, endpoint := endpointFixtureOwnedBy(t, ctx, store, "slack", operations, owner)
 	conversations := runtimeconversation.NewConversationService(store)

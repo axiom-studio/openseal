@@ -13,6 +13,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 
@@ -326,7 +327,7 @@ func TestRunOperationTwiceInOneRunCreatesTwoChildren(t *testing.T) {
 }
 
 func TestRunOperationPostsStartedMessagePerChild(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	var trigger *models.ChannelMessage
 	var conversation *models.Conversation

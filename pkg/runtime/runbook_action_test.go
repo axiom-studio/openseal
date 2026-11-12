@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -52,7 +53,7 @@ func TestRunbookScheduleReplacementContractRequiresTimingChange(t *testing.T) {
 
 func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
@@ -143,7 +144,7 @@ func TestObjectiveConversationResolvesObjectiveMutationAndRunbookStart(t *testin
 
 func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
@@ -197,7 +198,7 @@ func TestObjectiveConversationResolvesAutomaticallyExhaustedRunbookStart(t *test
 
 func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
@@ -297,7 +298,7 @@ func TestObjectiveConversationReplacesRetiredRunbookScheduleWithFreshActivation(
 
 func TestRunbookScheduleReplacementRejectsActiveOrForeignActivation(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	rowan := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	other := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other"}
@@ -327,7 +328,7 @@ func TestRunbookScheduleReplacementRejectsActiveOrForeignActivation(t *testing.T
 
 func TestRunbookStartRejectsActivationOwnedByAnotherAgent(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "3"}
 	rowan := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	other := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other"}

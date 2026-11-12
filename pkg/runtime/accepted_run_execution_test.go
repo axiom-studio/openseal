@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
@@ -103,7 +104,7 @@ func TestAcceptedRunExecutionResolverKeepsOriginalDefinitionAndChecksLiveGrants(
 	action := capability.ModelAction{Name: "reader.read", SkillID: "reader", Version: "1.0.0", Action: "read", BindingID: "account", BindingRevision: 1}
 	catalog := &bindingCatalog{deployment: deployment, definitions: map[string]*kernelagent.AgentDefinition{"reader-agent@1": original, "reader-agent@2": &latest}, activation: &skill.ActivationSnapshot{SnapshotID: "live", Scope: skill.ScopeReference(scope), DeploymentID: "agent", Skills: []skill.ActivatedSkill{{SkillID: "reader", SkillVersion: "1.0.0", Actions: []capability.ModelAction{action}}}}}
 	run := &models.AgentRun{ID: "accepted", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Entrypoint: "manual", Context: map[string]interface{}{models.AcceptedRunExecutionContextKey: pin}}
-	binding, err := runworker.ResolveLoopBinding(t.Context(), catalog, run, bindingTestConfig(t, newTestKernelStore(t), nil))
+	binding, err := runworker.ResolveLoopBinding(t.Context(), catalog, run, bindingTestConfig(t, kerneltest.NewStore(t), nil))
 	if err != nil || binding.DefinitionVersion != "1" || len(binding.ModelActions) != 1 {
 		t.Fatalf("accepted method followed current deployment behavior: %#v %v", binding, err)
 	}
@@ -119,7 +120,7 @@ func TestAcceptedRunExecutionResolverKeepsOriginalDefinitionAndChecksLiveGrants(
 	}
 	// Revocation changes the live projection independently of the method pin.
 	catalog.activation = &skill.ActivationSnapshot{SnapshotID: "revoked", Scope: skill.ScopeReference(scope), DeploymentID: "agent"}
-	binding, err = runworker.ResolveLoopBinding(t.Context(), catalog, run, bindingTestConfig(t, newTestKernelStore(t), nil))
+	binding, err = runworker.ResolveLoopBinding(t.Context(), catalog, run, bindingTestConfig(t, kerneltest.NewStore(t), nil))
 	if err != nil || len(binding.ModelActions) != 0 || binding.DefinitionVersion != "1" {
 		t.Fatalf("accepted method snapshot restored revoked authority: %#v %v", binding, err)
 	}
@@ -129,7 +130,7 @@ func TestAcceptedRunExecutionResolverKeepsOriginalDefinitionAndChecksLiveGrants(
 	} {
 		legacy := models.CloneAgentRun(run)
 		legacy.Context = contextValues
-		if _, err := runworker.ResolveLoopBinding(t.Context(), catalog, legacy, bindingTestConfig(t, newTestKernelStore(t), nil)); !errors.Is(err, models.ErrAcceptedRunExecution) {
+		if _, err := runworker.ResolveLoopBinding(t.Context(), catalog, legacy, bindingTestConfig(t, kerneltest.NewStore(t), nil)); !errors.Is(err, models.ErrAcceptedRunExecution) {
 			t.Fatalf("unknown/stale legacy continuation guessed current method: %v", err)
 		}
 	}

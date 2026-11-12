@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -56,7 +57,7 @@ func (s *countingActionPoolStore) GetAgentRun(ctx context.Context, scope models.
 }
 
 func TestActionWorkerPoolCoalescesIdleClaimsBeforeHydration(t *testing.T) {
-	store := &countingActionPoolStore{Store: newTestKernelStore(t)}
+	store := &countingActionPoolStore{Store: kerneltest.NewStore(t)}
 	pool, err := action.NewActionWorkerPool(store, skill.NewCatalog(), nil,
 		action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return nil, errors.New("unexpected idle dispatch")
@@ -76,7 +77,7 @@ func TestActionWorkerPoolCoalescesIdleClaimsBeforeHydration(t *testing.T) {
 }
 
 func TestActionWorkerPoolWakeSurvivesEmptyClaimRace(t *testing.T) {
-	store := &countingActionPoolStore{Store: newTestKernelStore(t), entered: make(chan struct{}), release: make(chan struct{})}
+	store := &countingActionPoolStore{Store: kerneltest.NewStore(t), entered: make(chan struct{}), release: make(chan struct{})}
 	catalog, scope := actiontest.GovernedCatalog(t)
 	dispatched := make(chan struct{}, 1)
 	pool := actiontest.NewPool(t, store, catalog, scope, time.Hour, 1, action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
@@ -103,7 +104,7 @@ func TestActionWorkerPoolWakeSurvivesEmptyClaimRace(t *testing.T) {
 func TestActionWorkerPoolRecoversMissedWakeAndRestart(t *testing.T) {
 	for _, scenario := range []string{"missed_wake", "restart", "wake_after_idle"} {
 		t.Run(scenario, func(t *testing.T) {
-			store := &countingActionPoolStore{Store: newTestKernelStore(t)}
+			store := &countingActionPoolStore{Store: kerneltest.NewStore(t)}
 			catalog, scope := actiontest.GovernedCatalog(t)
 			dispatched := make(chan struct{}, 1)
 			interval := 25 * time.Millisecond
@@ -147,7 +148,7 @@ func TestActionWorkerPoolRecoversMissedWakeAndRestart(t *testing.T) {
 }
 
 func TestActionWorkerPoolHandsOffClaimBeforeProviderAndDrainsBacklog(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	catalog, scope := actiontest.GovernedCatalog(t)
 	const calls = 8
 	for i := 0; i < calls; i++ {
@@ -199,7 +200,7 @@ func TestWorkerPollSignalPreservesNotificationBeforeWait(t *testing.T) {
 }
 
 func TestActionWorkerPoolBacksOffAfterClaimedRunHydrationFailure(t *testing.T) {
-	store := &countingActionPoolStore{Store: newTestKernelStore(t), failRead: true}
+	store := &countingActionPoolStore{Store: kerneltest.NewStore(t), failRead: true}
 	catalog, scope := actiontest.GovernedCatalog(t)
 	for range 20 {
 		actiontest.CreatePoolWork(t, store.Store, catalog, scope)
@@ -223,7 +224,7 @@ func TestActionWorkerPoolBacksOffAfterClaimedRunHydrationFailure(t *testing.T) {
 }
 
 func TestActionWorkerPoolSerializesStopBeforeConcurrentRestart(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	catalog, scope := actiontest.GovernedCatalog(t)
 	actiontest.CreatePoolWork(t, store, catalog, scope)
 	entered, stopping, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
@@ -298,7 +299,7 @@ func TestWorkerPollSignalBroadcastsAndCancelsAllWaiters(t *testing.T) {
 }
 
 func TestAgentRunWorkerObservesTimerDeadlineWithoutWaitingForFallback(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "timer-deadline"}
 	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "sleep then resume", Source: models.RunSourceManual,

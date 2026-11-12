@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 func conversationTestPNG(t *testing.T) string {
@@ -32,7 +33,7 @@ func TestConversationImageBecomesReferencePart(t *testing.T) {
 	content := conversationTestPNG(t)
 	artifact := conversationTestArtifact()
 	artifact.Name, artifact.MediaType, artifact.SizeBytes, artifact.Digest = "chart.png", "image/png", int64(len(content)), conversationTestDigest(content)
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	if err := store.CreateArtifactVersion(t.Context(), artifact, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +138,7 @@ func TestConversationAttachmentContent(t *testing.T) {
 
 func TestConversationAttachmentScopeAndProjection(t *testing.T) {
 	ctx := t.Context()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	artifact := conversationTestArtifact()
 	content := "company,total\nAcme,42"
 	artifact.MediaType, artifact.SizeBytes, artifact.Digest = "text/csv", int64(len(content)), conversationTestDigest(content)

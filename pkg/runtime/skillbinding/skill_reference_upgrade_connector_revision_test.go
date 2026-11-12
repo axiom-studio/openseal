@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -54,7 +55,7 @@ func TestSkillReferenceUpgradeAdapterMatchesOnlySameBindingAndPastRevision(t *te
 
 func TestSkillReferenceUpgradeMovesOlderConversationAndCallbackPinsAtomically(t *testing.T) {
 	ctx := context.Background()
-	store := newUpgradeTestStore(t)
+	store := kerneltest.NewStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	for _, version := range []string{"1.0.0", "1.1.0"} {
 		conversationAdapter, err := capability.NormalizeConversationAdapter(skill.ConversationAdapter{

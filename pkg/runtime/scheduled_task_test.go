@@ -19,6 +19,7 @@ import (
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
@@ -75,7 +76,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 	for _, kind := range []string{"sqlite"} {
 		for _, limit := range []string{"bounded", "omitted", "null"} {
 			t.Run(kind+"/"+limit, func(t *testing.T) {
-				var store models.KernelStore = newTestKernelStore(t)
+				var store models.KernelStore = kerneltest.NewStore(t)
 				if kind == "sqlite" {
 					s, err := sqlite.New(filepath.Join(t.TempDir(), "tasks.db"))
 					if err != nil {
@@ -180,7 +181,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 	}
 }
 func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	run, _, bound, args := routinetest.ScheduledTask(t, store)
 	v, _ := routine.NewRunbookActionValidator(store)
 	for _, change := range []string{"scope", "owner", "background", "conversation", "binding", "cron", "timezone", "foreign-input"} {
@@ -274,7 +275,7 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 	}
 }
 func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 	a := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*models.RunbookActivation)
 	statusBound, err := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, action.RunbookActionSetStatus)
@@ -333,7 +334,7 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) {
 	for _, limit := range []string{"bounded", "omitted", "null"} {
 		t.Run(limit, func(t *testing.T) {
-			store := newTestKernelStore(t)
+			store := kerneltest.NewStore(t)
 			run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 			if limit != "bounded" {
 				args = withScheduleArgument(args, "maximumOccurrences", nil, limit == "omitted")
@@ -375,7 +376,7 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 // who asked for it as its only approver, whatever role the host policy named,
 // so a member accepts their own routine in any space they belong to.
 func TestRoutineBriefIsDecidedByTheRequester(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 	now := time.Now().Add(time.Second)
 	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
@@ -397,7 +398,7 @@ func TestRoutineBriefIsDecidedByTheRequester(t *testing.T) {
 }
 
 func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	source, _, bound, args := routinetest.ScheduledTask(t, store)
 	a := dispatchTaskForTest(t, store, source, bound, args, "create")["activation"].(*models.RunbookActivation)
 	scheduler := routine.NewRunbookScheduler(store, models.WithClock(func() time.Time { return a.NextRunAt.Add(time.Second) }))
@@ -427,7 +428,7 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 }
 
 func TestScheduledTaskSurvivesAgentDefinitionSynchronization(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	run, _, bound, args := routinetest.ScheduledTask(t, store)
 	first := dispatchTaskForTest(t, store, run, bound, args, "task-one")["activation"].(*models.RunbookActivation)
 	second := dispatchTaskForTest(t, store, run, bound, args, "task-two")["activation"].(*models.RunbookActivation)

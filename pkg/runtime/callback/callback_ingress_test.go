@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -29,7 +30,7 @@ func (h *callbackHostStub) NormalizeCallback(_ context.Context, request Callback
 
 func TestCallbackIngressFollowsCurrentBindingWithoutRegistrationRewrite(t *testing.T) {
 	ctx := context.Background()
-	store := newCallbackTestStore(t)
+	store := kerneltest.NewStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 
@@ -69,7 +70,7 @@ func TestCallbackIngressFollowsCurrentBindingWithoutRegistrationRewrite(t *testi
 
 func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) {
 	ctx := context.Background()
-	store := newCallbackTestStore(t)
+	store := kerneltest.NewStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
@@ -114,7 +115,7 @@ func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) 
 
 func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.T) {
 	ctx := context.Background()
-	store := newCallbackTestStore(t)
+	store := kerneltest.NewStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
@@ -172,7 +173,7 @@ func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.
 
 func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
 	ctx := context.Background()
-	store := newCallbackTestStore(t)
+	store := kerneltest.NewStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0

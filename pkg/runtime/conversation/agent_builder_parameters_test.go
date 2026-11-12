@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 type agentBuilderParametersFixture struct {
@@ -18,7 +19,7 @@ type agentBuilderParametersFixture struct {
 
 func newAgentBuilderParametersFixture(t *testing.T) agentBuilderParametersFixture {
 	t.Helper()
-	store, scope := newTestKernelStore(t), models.Scope{Kind: "organization", ID: "builder"}
+	store, scope := kerneltest.NewStore(t), models.Scope{Kind: "organization", ID: "builder"}
 	seedTestSpace(t, store, scope)
 	return agentBuilderParametersFixture{
 		service: NewConversationService(store),

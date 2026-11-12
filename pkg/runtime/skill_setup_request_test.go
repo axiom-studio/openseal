@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
@@ -91,7 +92,7 @@ func TestSkillSetupSurvivesSQLiteReopen(t *testing.T) {
 
 func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "a"}
 	catalog := skillbindingtest.SkillActionCatalog(t, ctx, scope, "agent")
 	if err := catalog.Bind(ctx, &skill.Binding{ID: "setup-actions", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent", SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, AllowedActions: []string{agentrun.SkillActionRequestSetup, skillbinding.SkillActionListSetupRequests}, MaximumRisk: skill.RiskLevelRead}); err != nil {

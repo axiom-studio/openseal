@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -60,7 +61,7 @@ func TestConversationChangeBatchesHistoricalRootLookups(t *testing.T) {
 func TestConversationChangeProjectionIncludesScopedDelegatedWork(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store models.KernelStore = newTestKernelStore(t)
+			var store models.KernelStore = kerneltest.NewStore(t)
 			if backend == "sqlite" {
 				db, err := sqlite.New(filepath.Join(t.TempDir(), "children.db"))
 				if err != nil {

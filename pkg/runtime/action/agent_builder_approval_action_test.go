@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -33,7 +34,7 @@ func TestAgentBuilderApprovalActionsMatchCreateAndUpdateAndTeam(t *testing.T) {
 	}
 
 	// A create_team card gets the same policy as an agent card.
-	coordinator := NewActionCoordinator(newActionTestStore(t), newActionTestStore(t), skill.NewCatalog(), NewDefaultActionPolicy(), nil)
+	coordinator := NewActionCoordinator(kerneltest.NewStore(t), kerneltest.NewStore(t), skill.NewCatalog(), NewDefaultActionPolicy(), nil)
 	coordinator.newID = func() string { return "approval-team" }
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	team := bound(models.TeamManagementSkillID, "create_team")

@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 // Catch-up (run-loop section 05 §4, CONV-03), on the SQLite store
@@ -249,7 +250,7 @@ func TestCatchUpCapsToOneAppendWithOmittedNote(t *testing.T) {
 }
 
 func TestCatchUpCapsByAppendBytes(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	conversation := conversationtest.ThreadStartConversation(t, store)
 	f := &conversationtest.CatchUpFixture{T: t, Store: store, Service: service, Conversation: conversation, AgentID: conversation.Owner.ID,

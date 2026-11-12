@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -260,7 +261,7 @@ func TestStartTaskCompletesForegroundWithAcknowledgmentAtomically(t *testing.T) 
 }
 
 func TestStartTaskProvenanceSourceTurnIsStepAndLastApplied(t *testing.T) {
-	f := newStartTaskFixture(t, conversationtest.NewStore(t))
+	f := newStartTaskFixture(t, kerneltest.NewStore(t))
 	f.settle("call-task")
 	tasks := f.tasks()
 	if len(tasks) != 1 {
@@ -289,7 +290,7 @@ func TestStartTaskProvenanceSourceTurnIsStepAndLastApplied(t *testing.T) {
 	}
 
 	// A request that does not match the step's entry is refused.
-	g := newStartTaskFixture(t, conversationtest.NewStore(t))
+	g := newStartTaskFixture(t, kerneltest.NewStore(t))
 	for name, mutate := range map[string]func(*conversationrun.StartConversationTaskRequest){
 		"tampered goal":     func(r *conversationrun.StartConversationTaskRequest) { r.Goal = "Something else entirely." },
 		"tampered ack":      func(r *conversationrun.StartConversationTaskRequest) { r.Acknowledgment = "Done already." },
@@ -347,14 +348,14 @@ func TestStartTaskRefusedWhenSteeringUnconsumed(t *testing.T) {
 		f.assertNotStarted("call-task")
 	}
 	t.Run("seen by the settle", func(t *testing.T) {
-		f := newStartTaskFixture(t, conversationtest.NewStore(t))
+		f := newStartTaskFixture(t, kerneltest.NewStore(t))
 		f.run = steer(t, f)
 		check(t, f, f.settle("call-task"))
 	})
 	t.Run("arrived under the settle", func(t *testing.T) {
 		// The settle's Run copy predates the message; the admission reads
 		// the stored Run and refuses.
-		f := newStartTaskFixture(t, conversationtest.NewStore(t))
+		f := newStartTaskFixture(t, kerneltest.NewStore(t))
 		stale := f.run
 		steered := steer(t, f)
 		cc := f.context("call-task")
@@ -437,7 +438,7 @@ func TestStartTaskNotAloneIsRefused(t *testing.T) {
 		t.Fatalf("refusals = %#v", refusals)
 	}
 	// Settled anyway (a resumed entry), the handler applies the same rule.
-	f := newStartTaskFixture(t, conversationtest.NewStore(t), calls...)
+	f := newStartTaskFixture(t, kerneltest.NewStore(t), calls...)
 	result := f.settle("call-task")
 	entry := f.storedEntry(f.entries["call-task"].ID)
 	value := controlResultValue(t, entry)
@@ -484,7 +485,7 @@ func TestTaskWorkRunSessionForksBeforeStartDecision(t *testing.T) {
 }
 
 func TestOldTaskWithoutToolEntryStillValidates(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	record := storetest.ConversationTaskRecord(t, store, "old")
 	task := record.Task
 	if task.SourceToolEntryID != "" || task.Validate() != nil {

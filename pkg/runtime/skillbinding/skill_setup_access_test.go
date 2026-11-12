@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -15,7 +16,7 @@ import (
 func TestSetupListReportsSavedBindingAccessWithoutCredentials(t *testing.T) {
 	for _, disabled := range []bool{false, true} {
 		ctx := context.Background()
-		store := skillbindingtest.NewStore(t)
+		store := kerneltest.NewStore(t)
 		r := skillbindingtest.SkillSetupRequest()
 		catalog := skillbindingtest.SkillActionCatalog(t, ctx, r.Scope, r.DeploymentID)
 		b := &skill.Binding{ID: "saved", Revision: 1, Scope: skill.ScopeReference{Kind: r.Scope.Kind, ID: r.Scope.ID}, DeploymentID: r.DeploymentID, SkillID: r.SkillID, SkillVersion: r.SkillVersion, AllowedActions: []string{"read"}, EnablePrompt: true, MaximumRisk: skill.RiskLevelRead, Credentials: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "credential://private-account"}}}

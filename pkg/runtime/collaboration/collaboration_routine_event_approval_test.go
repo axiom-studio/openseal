@@ -9,13 +9,14 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 // An event routine occurrence, and a Run under one, is manual whatever the
 // conversation's mode, and loosening the mode never approves its checkpoints.
 func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	service := runtimeconversation.NewConversationApprovalModeService(store)
 	coordinator := action.NewActionCoordinator(store, store, conversationtest.ApprovalModeCatalog(t), action.NewDefaultActionPolicy(), nil)
@@ -81,7 +82,7 @@ func (r *countingRunReader) GetAgentRun(ctx context.Context, scope models.Scope,
 // supplied, so resolving a delegated child's mode needs no root read.
 func TestRoutineEventBatchInheritedWithoutRootRead(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	conversation := conversationtest.ApprovalModeConversation(t, store)
 	scope := conversation.Scope
 	chat := &models.AgentRun{ID: "chat", Kind: models.RunKindConversation, Scope: scope, RootRunID: "chat", Context: map[string]interface{}{

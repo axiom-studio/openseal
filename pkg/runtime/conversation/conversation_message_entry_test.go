@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/appproject"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -81,7 +82,7 @@ type attachmentFixture struct {
 }
 
 func newAttachmentFixture(t *testing.T) *attachmentFixture {
-	return &attachmentFixture{t: t, store: newTestKernelStore(t), content: &conversationAppContent{byRef: map[string]string{}}, scope: conversationTestArtifact().Scope}
+	return &attachmentFixture{t: t, store: kerneltest.NewStore(t), content: &conversationAppContent{byRef: map[string]string{}}, scope: conversationTestArtifact().Scope}
 }
 
 func (f *attachmentFixture) put(id, name, mediaType, data string) models.ConversationReference {

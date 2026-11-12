@@ -13,6 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -49,7 +50,7 @@ func TestArtifactCatalogRecordsTheChatAndSpaceAnArtifactWasMadeIn(t *testing.T) 
 		"chat-sales":  {ID: "chat-sales", SpaceID: "space-sales"},
 		"chat-design": {ID: "chat-design", SpaceID: "space-design"},
 	}}
-	catalog := artifactcatalog.NewArtifactCatalog(newTestKernelStore(t)).WithPlacement(artifactcatalog.ArtifactPlacement{Runs: runs, Conversations: conversations})
+	catalog := artifactcatalog.NewArtifactCatalog(kerneltest.NewStore(t)).WithPlacement(artifactcatalog.ArtifactPlacement{Runs: runs, Conversations: conversations})
 	register := func(id string, mutate func(*models.Artifact)) models.ArtifactProvenance {
 		t.Helper()
 		artifact := validCatalogArtifact(id, 1)
@@ -115,7 +116,7 @@ func TestArtifactCatalogRecordsTheChatAndSpaceAnArtifactWasMadeIn(t *testing.T) 
 
 func TestArtifactPlacementFailsOnConversationLookupErrors(t *testing.T) {
 	lookupErr := errors.New("conversation store unavailable")
-	catalog := artifactcatalog.NewArtifactCatalog(newTestKernelStore(t)).WithPlacement(artifactcatalog.ArtifactPlacement{
+	catalog := artifactcatalog.NewArtifactCatalog(kerneltest.NewStore(t)).WithPlacement(artifactcatalog.ArtifactPlacement{
 		Runs:          placementRuns{"run-chat": {ID: "run-chat", Context: map[string]interface{}{"conversationId": "chat-sales"}}},
 		Conversations: placementConversations{err: lookupErr},
 	})
@@ -135,7 +136,7 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 	defer sqlite.Close()
 	stamp := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
 	clock := models.WithClock(func() time.Time { return stamp })
-	catalogs := []*artifactcatalog.ArtifactCatalog{artifactcatalog.NewArtifactCatalog(newTestKernelStore(t), clock), artifactcatalog.NewArtifactCatalog(sqlite, clock)}
+	catalogs := []*artifactcatalog.ArtifactCatalog{artifactcatalog.NewArtifactCatalog(kerneltest.NewStore(t), clock), artifactcatalog.NewArtifactCatalog(sqlite, clock)}
 	for _, catalog := range catalogs {
 		for i := 0; i < 90; i++ {
 			artifact := validCatalogArtifact(fmt.Sprintf("asset-%03d", i), 1)
@@ -202,7 +203,7 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 }
 
 func TestArtifactRejectsInvalidPlacementIdentifiers(t *testing.T) {
-	catalog := artifactcatalog.NewArtifactCatalog(newTestKernelStore(t))
+	catalog := artifactcatalog.NewArtifactCatalog(kerneltest.NewStore(t))
 	for name, mutate := range map[string]func(*models.Artifact){
 		"conversation": func(a *models.Artifact) { a.Provenance.ConversationID = "chats/sales" },
 		"space":        func(a *models.Artifact) { a.Provenance.SpaceID = strings.Repeat("s", 129) },

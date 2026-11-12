@@ -10,6 +10,7 @@ import (
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -17,7 +18,7 @@ import (
 func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store models.RunCommandStore = newTestKernelStore(t)
+			var store models.RunCommandStore = kerneltest.NewStore(t)
 			if backend == "sqlite" {
 				db, err := sqlite.New(filepath.Join(t.TempDir(), "retry.db"))
 				if err != nil {
@@ -95,7 +96,7 @@ func failedReplyFixtureWithFailure(t *testing.T, store models.RunCommandStore, f
 func TestRetryConversationRunRejectsAnAlreadyExplainedProposalFailure(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store models.RunCommandStore = newTestKernelStore(t)
+			var store models.RunCommandStore = kerneltest.NewStore(t)
 			if backend == "sqlite" {
 				db, err := sqlite.New(filepath.Join(t.TempDir(), "explained-retry.db"))
 				if err != nil {
@@ -129,7 +130,7 @@ func TestRetryConversationRunRejectsAnAlreadyExplainedProposalFailure(t *testing
 func TestRetryClearsFailureExplanation(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			var store models.RunCommandStore = newTestKernelStore(t)
+			var store models.RunCommandStore = kerneltest.NewStore(t)
 			if backend == "sqlite" {
 				db, err := sqlite.New(filepath.Join(t.TempDir(), "retry-failure.db"))
 				if err != nil {
@@ -179,7 +180,7 @@ func (s *retryGuardStore) ListAgentTurns(context.Context, models.AgentTurnFilter
 func TestRetryConversationRunRejectsUnrecoveredWork(t *testing.T) {
 	for _, kind := range []string{"actions", "children", "pending"} {
 		t.Run(kind, func(t *testing.T) {
-			store := &retryGuardStore{Store: newTestKernelStore(t)}
+			store := &retryGuardStore{Store: kerneltest.NewStore(t)}
 			service, failed := failedReplyFixture(t, store)
 			switch kind {
 			case "actions":

@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 func TestActiveConversationRunsIncludeNonterminalDescendantAfterCoordinationRootEnds(t *testing.T) {
 	ctx := context.Background()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Now().UTC()
 	scope := models.Scope{Kind: "tenant", ID: "1"}
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}
@@ -44,7 +44,7 @@ func TestActiveConversationRunsIncludeNonterminalDescendantAfterCoordinationRoot
 }
 
 func TestActiveConversationRunsIncludeOnlyExactIndependentTaskThreadAndActor(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	source, turn, conversation, trigger := conversationruntest.SettledTaskSource(t, store)
 	if _, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, source, turn)); err != nil {
 		t.Fatal(err)

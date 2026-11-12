@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 func TestAgentRequestInboxBoundsConversationProjectionCadence(t *testing.T) {
-	reconciler, err := NewAgentRequestInboxReconciler(conversationtest.NewStore(t))
+	reconciler, err := NewAgentRequestInboxReconciler(kerneltest.NewStore(t))
 	if err != nil {
 		t.Fatal(err)
 	}

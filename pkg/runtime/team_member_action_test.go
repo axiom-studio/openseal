@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -22,7 +23,7 @@ import (
 
 func TestGovernedTeamMemberActionUpdatesTheRosterAndReplays(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	teams, agentDeploymentID := teamMemberActionRegistry(t, ctx, scope)
 	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "accessibility-team"}

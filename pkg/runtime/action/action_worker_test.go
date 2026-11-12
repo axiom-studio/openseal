@@ -11,12 +11,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *testing.T) {
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	baseCatalog, proposal := createRunnableAction(t, store, now)
 	catalog := &toolTransportActionCatalog{ActionExecutionCatalog: baseCatalog, endpoint: "release_deploy"}
@@ -71,7 +72,7 @@ func (c *toolTransportActionCatalog) Resolve(ctx context.Context, scope skill.Sc
 }
 
 func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	catalog, proposal := createRunnableAction(t, store, now)
 	attempts := 0

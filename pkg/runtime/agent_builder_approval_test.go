@@ -10,6 +10,7 @@ import (
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -21,7 +22,7 @@ func agentBuilderApprovalCoordinator(t *testing.T, policy runtimeaction.ActionPo
 	t.Helper()
 	ctx := context.Background()
 	fixture := agentbuildertest.NewFixture(t, true)
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: fixture.Scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"},
 		AssignedAgentID: "finn", Goal: "Build an inbox helper", Source: models.RunSourceChat,

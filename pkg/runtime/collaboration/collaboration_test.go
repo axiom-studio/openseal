@@ -13,7 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -343,7 +343,7 @@ func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
 
 func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 	t.Parallel()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	portfolio := portfolio.NewPortfolioService(store)
@@ -416,7 +416,7 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 		})
 	}
 
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	portfolio := portfolio.NewPortfolioService(store)
 	activity := runtimeactivity.NewRunActivityService(store, store)
 	service := NewCollaborationService(store)
@@ -489,7 +489,7 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 
 func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *testing.T) {
 	t.Parallel()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	portfolio := portfolio.NewPortfolioService(store)
@@ -525,7 +525,7 @@ func TestCollaborationRejectsCredentialTransferAndUnauthorizedRequesters(t *test
 
 func TestCollaborationCompletionRejectsInvalidAuthorityArtifactsAndEvidence(t *testing.T) {
 	t.Parallel()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := context.Background()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	portfolio := portfolio.NewPortfolioService(store)
@@ -667,7 +667,7 @@ func TestSQLiteCollaborationSurvivesRestart(t *testing.T) {
 }
 
 func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "acme"}
 	portfolio := portfolio.NewPortfolioService(store)
@@ -729,7 +729,7 @@ func TestTerminalFailedHandoffChildResolvesRequestAndSource(t *testing.T) {
 }
 
 func TestTerminalChildCompletesArtifactBearingRequestFromRegisteredOutput(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "artifact-delegation"}
 	portfolio := portfolio.NewPortfolioService(store)

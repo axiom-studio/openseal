@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 )
 
 type retentionContentStore struct{ available map[string]bool }
@@ -23,7 +24,7 @@ func (s *retentionContentStore) Delete(_ context.Context, _ models.Scope, ref st
 
 func TestArtifactRetentionSweepDeletesDueBytesAndPreservesLegalHold(t *testing.T) {
 	ctx := t.Context()
-	store := newTestKernelStore(t)
+	store := kerneltest.NewStore(t)
 	catalog := artifactcatalog.NewArtifactCatalog(store)
 	now := time.Date(2026, 7, 13, 1, 0, 0, 0, time.UTC)
 	for _, fixture := range []struct {

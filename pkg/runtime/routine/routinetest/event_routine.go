@@ -11,8 +11,8 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -24,7 +24,7 @@ import (
 func NewEventRoutine(t *testing.T, hooksAvailable bool) *EventRoutine {
 	t.Helper()
 	ctx := t.Context()
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	run, catalog, bound, args := ScheduledTask(t, store)
 	now := time.Now().UTC()
 	owner := run.Owner

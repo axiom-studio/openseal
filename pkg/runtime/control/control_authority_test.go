@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -188,7 +189,7 @@ func TestForkChildCannotFork(t *testing.T) {
 }
 
 func TestVoiceCallDisablesTaskStart(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	run := claimedForegroundChatRun(t, store)
 
 	typed := resolveControlAuthorityForTest(t, chatAuthorityInput(store, run))
@@ -211,7 +212,7 @@ func TestVoiceCallDisablesTaskStart(t *testing.T) {
 }
 
 func TestChatReplyCannotWait(t *testing.T) {
-	store := conversationtest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	run := claimedForegroundChatRun(t, store)
 	chat := resolveControlAuthorityForTest(t, chatAuthorityInput(store, run))
 	if chat.CanWait {

@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -196,7 +197,7 @@ func TestLoopProposeApprovalCreatesPendingApprovalWithoutRunChange(t *testing.T)
 }
 
 func TestLoopProposeApprovalWithoutSummaryIsRejected(t *testing.T) {
-	f := newLoopProposeFixture(t, actiontest.NewStore(t), nil)
+	f := newLoopProposeFixture(t, kerneltest.NewStore(t), nil)
 	f.requireApproval()
 	req := f.request("call-1")
 	req.Summary = "   "
@@ -260,7 +261,7 @@ func (v failingProposalValidator) ValidateActionProposal(_ context.Context, inpu
 
 func TestLoopProposeValidationErrorsAreRejections(t *testing.T) {
 	validatorErr := errors.New("the environment is not admitted for this Run")
-	f := newLoopProposeFixture(t, actiontest.NewStore(t), nil, failingProposalValidator{err: validatorErr})
+	f := newLoopProposeFixture(t, kerneltest.NewStore(t), nil, failingProposalValidator{err: validatorErr})
 
 	missing := f.request("missing")
 	missing.Action = "rollback"
@@ -375,7 +376,7 @@ func TestLoopProposeReplayWithSameKeyReturnsSameCall(t *testing.T) {
 }
 
 func TestLoopProposeRequiresLiveLeaseOfRunningRun(t *testing.T) {
-	f := newLoopProposeFixture(t, actiontest.NewStore(t), nil)
+	f := newLoopProposeFixture(t, kerneltest.NewStore(t), nil)
 	foreign := f.request("foreign")
 	foreign.WorkerID = "other-worker"
 	if _, err := f.coordinator.Propose(f.ctx, foreign); !errors.Is(err, models.ErrLeaseLost) {
@@ -405,7 +406,7 @@ func TestLoopProposeRequiresLiveLeaseOfRunningRun(t *testing.T) {
 }
 
 func TestLoopProposeValidatorsReadRunActionHistory(t *testing.T) {
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	var seen []*models.ActionCall
 	f := newLoopProposeFixture(t, store, nil, actiontest.ProposalValidatorFunc(func(ctx context.Context, input agentrun.ActionProposalValidationInput) (map[string]interface{}, error) {
 		calls, err := input.History.Calls(ctx)
@@ -425,7 +426,7 @@ func TestLoopProposeValidatorsReadRunActionHistory(t *testing.T) {
 }
 
 func TestRunActionHistoryListsTerminalNonVMCallsNewestFirst(t *testing.T) {
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	base := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	add := func(id, runID string, origin models.ActionOrigin, status models.ActionCallStatus, completed time.Duration) {
@@ -468,7 +469,7 @@ func TestRunActionHistoryListsTerminalNonVMCallsNewestFirst(t *testing.T) {
 // Stores cap one page at 500 and default to 100, oldest first; the history
 // pages until a short page so a long Run's newest calls are kept.
 func TestRunActionHistoryPagesPastStorePageLimits(t *testing.T) {
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	scope := models.Scope{Kind: "tenant", ID: "one"}
 	base := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	const total = 1020
@@ -492,7 +493,7 @@ func TestRunActionHistoryPagesPastStorePageLimits(t *testing.T) {
 
 func TestNestedProposeHasNoCheckpointGuards(t *testing.T) {
 	ctx := context.Background()
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	f := newNestedActionFixture(t, store)
 	current, err := store.GetAgentRun(ctx, f.scope, f.run.ID)
 	if err != nil {
@@ -516,7 +517,7 @@ func TestNestedProposeHasNoCheckpointGuards(t *testing.T) {
 }
 
 func TestLoopProposePersonCredentialApproverIsActingUser(t *testing.T) {
-	store := actiontest.NewStore(t)
+	store := kerneltest.NewStore(t)
 	now := time.Now().UTC()
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
