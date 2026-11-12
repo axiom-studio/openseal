@@ -69,8 +69,8 @@ func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
 		if reply, ok := externalConversationRunReply(ctx, nil, nil, failed); !ok || reply != "I couldn't read that file, so I stopped." {
 			t.Fatalf("explained reply = %q %v", reply, ok)
 		}
-		if reason, err := NewRunCommandService(store).conversationRetryBlocker(ctx, stored); err != nil || !strings.Contains(reason, "already has a reply") {
-			t.Fatalf("explained attempt was retryable: %q %v", reason, err)
+		if retry, err := NewRunCommandService(store).ConversationRetryEligibility(ctx, stored.Scope, stored.ID); err != nil || retry.Available || !strings.Contains(retry.Reason, "already has a reply") {
+			t.Fatalf("explained attempt was retryable: %+v %v", retry, err)
 		}
 	})
 }
@@ -105,8 +105,8 @@ func TestNonExplainableFailureFailsWithKernelReply(t *testing.T) {
 		if !ok || reply != TerminalFailureReply("provider_unavailable") || strings.Contains(reply, "SECRET") {
 			t.Fatalf("kernel reply = %q %v", reply, ok)
 		}
-		if reason, err := NewRunCommandService(store).conversationRetryBlocker(ctx, failed); err != nil || reason != "" {
-			t.Fatalf("unexplained failure must be retryable: %q %v", reason, err)
+		if retry, err := NewRunCommandService(store).ConversationRetryEligibility(ctx, failed.Scope, failed.ID); err != nil || !retry.Available || retry.Reason != "" {
+			t.Fatalf("unexplained failure must be retryable: %+v %v", retry, err)
 		}
 	})
 }
