@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -14,19 +15,19 @@ import (
 // parent when it waits on that trial. It wraps the host's terminal finalizer,
 // which runs for every Run as before.
 type AgentTrialFinalizer struct {
-	store RunCommandStore
+	store models.RunCommandStore
 	next  agentrun.RunTerminalFinalizer
 	// wake nudges the scope's workers after a parent is queued (optional).
-	wake func(Scope)
+	wake func(models.Scope)
 	now  func() time.Time
 }
 
 // NewAgentTrialFinalizer wraps next (may be nil). wake may be nil.
-func NewAgentTrialFinalizer(store RunCommandStore, next agentrun.RunTerminalFinalizer, wake func(Scope), opts ...models.ServiceOption) *AgentTrialFinalizer {
+func NewAgentTrialFinalizer(store models.RunCommandStore, next agentrun.RunTerminalFinalizer, wake func(models.Scope), opts ...models.ServiceOption) *AgentTrialFinalizer {
 	return &AgentTrialFinalizer{store: store, next: next, wake: wake, now: models.ClockFrom(opts)}
 }
 
-func (f *AgentTrialFinalizer) FinalizeRun(ctx context.Context, run *AgentRun) error {
+func (f *AgentTrialFinalizer) FinalizeRun(ctx context.Context, run *models.AgentRun) error {
 	trialErr := f.settleAgentTrial(ctx, run)
 	var nextErr error
 	if f != nil && f.next != nil {
@@ -42,8 +43,8 @@ func (f *AgentTrialFinalizer) FinalizeRun(ctx context.Context, run *AgentRun) er
 // so its park CAS fails and re-plans. A canceled child is delivered only to
 // a parent waiting on it: a parent that canceled it at the deadline already
 // reported timed_out.
-func (f *AgentTrialFinalizer) settleAgentTrial(ctx context.Context, child *AgentRun) error {
-	if f == nil || f.store == nil || child == nil || !isTerminalAgentRunStatus(child.Status) {
+func (f *AgentTrialFinalizer) settleAgentTrial(ctx context.Context, child *models.AgentRun) error {
+	if f == nil || f.store == nil || child == nil || !models.IsTerminalAgentRunStatus(child.Status) {
 		return nil
 	}
 	trial, ok, err := agentTrialContextForRun(child)
@@ -59,31 +60,31 @@ func (f *AgentTrialFinalizer) settleAgentTrial(ctx context.Context, child *Agent
 		if err != nil {
 			return err
 		}
-		if parent == nil || isTerminalAgentRunStatus(parent.Status) || interactionReceiptDelivered(parent, interventionID) {
+		if parent == nil || models.IsTerminalAgentRunStatus(parent.Status) || interactionReceiptDelivered(parent, interventionID) {
 			return nil
 		}
-		waiting := parent.Status == AgentRunStatusWaitingForEvent && parent.WakeCondition != nil &&
+		waiting := parent.Status == models.AgentRunStatusWaitingForEvent && parent.WakeCondition != nil &&
 			parent.WakeCondition.Type == agentrun.AgentTrialWakeType && parent.WakeCondition.Reference == child.ID
-		if child.Status == AgentRunStatusCanceled && !waiting {
+		if child.Status == models.AgentRunStatusCanceled && !waiting {
 			return nil
 		}
 		now := f.now().UTC()
 		receipt := agentTrialReceiptFromRun(child, now)
-		status, wake := AgentRunStatusQueued, (*WakeCondition)(nil)
+		status, wake := models.AgentRunStatusQueued, (*models.WakeCondition)(nil)
 		if !waiting {
 			status, wake = parent.Status, parent.WakeCondition
 		}
-		actor := ActivityActor{Type: "service", ID: "agent-trial-finalizer"}
-		_, _, err = NewRunActivityService(f.store, f.store, models.WithClock(f.now)).TransitionRun(ctx, parent.Scope, parent.ID, RunTransitionRequest{
+		actor := models.ActivityActor{Type: "service", ID: "agent-trial-finalizer"}
+		_, _, err = activity.NewRunActivityService(f.store, f.store, models.WithClock(f.now)).TransitionRun(ctx, parent.Scope, parent.ID, activity.RunTransitionRequest{
 			ExpectedRevision: parent.Revision, Status: status, WakeCondition: wake,
 			Summary: "Received the trial reply; continuing", EventType: "run.agent_trial_settled",
 			Actor: actor, CorrelationID: child.ID, CausationID: trial.ActionCallID,
 			Payload: map[string]interface{}{"trialRunId": child.ID, "status": receipt.Status},
-			Intervention: &AgentRunIntervention{
+			Intervention: &models.AgentRunIntervention{
 				ID: interventionID, Actor: actor, CreatedAt: now, ActionCallID: trial.ActionCallID, AgentTrial: &receipt,
 			},
 		})
-		if errors.Is(err, ErrRevisionConflict) {
+		if errors.Is(err, models.ErrRevisionConflict) {
 			continue
 		}
 		if err != nil {
@@ -94,10 +95,10 @@ func (f *AgentTrialFinalizer) settleAgentTrial(ctx context.Context, child *Agent
 		}
 		return nil
 	}
-	return ErrRevisionConflict
+	return models.ErrRevisionConflict
 }
 
-func interactionReceiptDelivered(run *AgentRun, interventionID string) bool {
+func interactionReceiptDelivered(run *models.AgentRun, interventionID string) bool {
 	for _, intervention := range run.PendingInterventions {
 		if intervention.ID == interventionID {
 			return true

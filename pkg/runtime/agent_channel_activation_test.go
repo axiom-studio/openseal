@@ -12,10 +12,12 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -28,9 +30,9 @@ type channelActionFixture struct {
 	endpoints   *externalconversation.ExternalConversationEndpointService
 	resolver    *switchableConversationAdapterResolver
 	catalog     *skill.Catalog
-	scope       Scope
-	endpoint    *ExternalConversationEndpoint
-	run         *AgentRun
+	scope       models.Scope
+	endpoint    *models.ExternalConversationEndpoint
+	run         *models.AgentRun
 	coordinator *action.ActionCoordinator
 	dispatcher  *AgentBehaviorActionDispatcher
 }
@@ -49,12 +51,12 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 	resolver := &switchableConversationAdapterResolver{ExternalConversationAdapterResolver: catalog}
 	endpoints := externalconversation.NewExternalConversationEndpointService(store, resolver)
 	endpoint, err := endpoints.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
-		ID: "slack-channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Slack channel", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Address: "C012345",
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
-		Policy:  ExternalConversationPolicy{MessageSelection: ExternalConversationSelectMentions, ReplyMode: ExternalConversationReplyThread, IgnoreBots: true},
-		Status:  ExternalConversationEndpointActive,
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy:  models.ExternalConversationPolicy{MessageSelection: models.ExternalConversationSelectMentions, ReplyMode: models.ExternalConversationReplyThread, IgnoreBots: true},
+		Status:  models.ExternalConversationEndpointActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -74,23 +76,23 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 	}, "user", "operator", "initial"); err != nil {
 		t.Fatal(err)
 	}
-	if err := catalog.Register(ctx, AgentManagementSkill()); err != nil {
+	if err := catalog.Register(ctx, models.AgentManagementSkill()); err != nil {
 		t.Fatal(err)
 	}
 	if err := catalog.Bind(ctx, &skill.Binding{
 		ID: "agents", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "slack-agent",
-		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion,
-		AllowedActions: []string{AgentActionListChannels, AgentActionConfigureChannel}, MaximumRisk: skill.RiskLevelWrite,
+		SkillID: models.AgentManagementSkillID, SkillVersion: models.AgentManagementSkillVersion,
+		AllowedActions: []string{models.AgentActionListChannels, models.AgentActionConfigureChannel}, MaximumRisk: skill.RiskLevelWrite,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"}, AssignedAgentID: "slack-agent", Goal: "Configure Slack", Source: RunSourceChat,
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"}, AssignedAgentID: "slack-agent", Goal: "Configure Slack", Source: models.RunSourceChat,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil {
+	if _, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil {
 		t.Fatal(err)
 	}
 	validator, err := NewAgentBehaviorActionValidator(agents, endpoints)
@@ -98,7 +100,7 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 		t.Fatal(err)
 	}
 	policy := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review routing", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour}, nil
+		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review routing", EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour}, nil
 	})
 	dispatcher, err := NewAgentBehaviorActionDispatcher(store, agents, nil, endpoints)
 	if err != nil {
@@ -108,7 +110,7 @@ func newChannelActionFixture(t *testing.T) *channelActionFixture {
 		coordinator: action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}), dispatcher: dispatcher}
 }
 
-func (f *channelActionFixture) propose(t *testing.T, extra map[string]interface{}) (*ActionProposalResult, error) {
+func (f *channelActionFixture) propose(t *testing.T, extra map[string]interface{}) (*models.ActionProposalResult, error) {
 	t.Helper()
 	arguments := map[string]interface{}{"endpointId": f.endpoint.ID, "messageSelection": "all_messages", "rationale": "Handle messages in the current channel"}
 	for key, value := range extra {
@@ -116,16 +118,16 @@ func (f *channelActionFixture) propose(t *testing.T, extra map[string]interface{
 	}
 	return f.coordinator.Propose(context.Background(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
 		Scope: f.scope, RunID: f.run.ID, WorkerID: "conversation-worker", DeploymentID: "slack-agent",
-		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionConfigureChannel,
+		SkillID: models.AgentManagementSkillID, SkillVersion: models.AgentManagementSkillVersion, Action: models.AgentActionConfigureChannel,
 		Arguments: arguments, IdempotencyKey: "configure-channel", Summary: "Configure channel",
 	}, "configure-channel"))
 }
 
-func (f *channelActionFixture) approve(t *testing.T, proposal *ActionProposalResult) *ActionCall {
+func (f *channelActionFixture) approve(t *testing.T, proposal *models.ActionProposalResult) *models.ActionCall {
 	t.Helper()
 	resolved, err := action.NewApprovalCoordinator(f.store, f.store, action.EligibleApprovalAuthorizer{}).Resolve(context.Background(), action.ResolveApprovalRequest{
 		Scope: f.scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-		DecisionID: "approve-channel", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "operator"}, Reason: "Reviewed",
+		DecisionID: "approve-channel", Decision: models.ApprovalDecisionApprove, Principal: models.ApprovalPrincipal{Type: "user", ID: "operator"}, Reason: "Reviewed",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +166,7 @@ func TestAgentChannelRejectsRetiredEndpointsBeforeApproval(t *testing.T) {
 	for _, status := range []string{"active", "paused", ""} {
 		t.Run(status, func(t *testing.T) {
 			f := newChannelActionFixture(t)
-			retired := ExternalConversationEndpointRetired
+			retired := models.ExternalConversationEndpointRetired
 			endpoint, err := f.endpoints.Update(context.Background(), f.scope, f.endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: f.endpoint.Revision, Status: &retired})
 			if err != nil {
 				t.Fatal(err)
@@ -173,10 +175,10 @@ func TestAgentChannelRejectsRetiredEndpointsBeforeApproval(t *testing.T) {
 			if status != "" {
 				extra["status"] = status
 			}
-			if _, err := f.propose(t, extra); !errors.Is(err, ErrInvalidExternalConversation) || !strings.Contains(err.Error(), "retired") {
+			if _, err := f.propose(t, extra); !errors.Is(err, models.ErrInvalidExternalConversation) || !strings.Contains(err.Error(), "retired") {
 				t.Fatalf("retired channel proposal: %v", err)
 			}
-			approvals, err := f.store.ListApprovals(context.Background(), ApprovalFilter{Scope: f.scope, RunID: f.run.ID})
+			approvals, err := f.store.ListApprovals(context.Background(), models.ApprovalFilter{Scope: f.scope, RunID: f.run.ID})
 			if err != nil || len(approvals) != 0 {
 				t.Fatalf("invalid proposal created approval: %#v, %v", approvals, err)
 			}
@@ -209,14 +211,14 @@ func TestAgentChannelRechecksEndpointAndAdapterAfterApproval(t *testing.T) {
 			ctx := context.Background()
 			switch change {
 			case "retirement":
-				retired := ExternalConversationEndpointRetired
+				retired := models.ExternalConversationEndpointRetired
 				if _, err := f.endpoints.Update(ctx, f.scope, f.endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: f.endpoint.Revision, Status: &retired}); err != nil {
 					t.Fatal(err)
 				}
 			case "adapter-unavailable":
 				f.resolver.unavailable = true
 			case "foreign-owner":
-				foreign := cloneExternalConversationEndpoint(f.endpoint)
+				foreign := models.CloneExternalConversationEndpoint(f.endpoint)
 				foreign.Owner.ID = "other-agent"
 				foreign.DeploymentID = "other-agent"
 				payload, err := json.Marshal(foreign)
@@ -285,19 +287,19 @@ func TestAgentChannelActivationAndReplayPreserveLaterEndpointChanges(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoint := output["endpoint"].(*ExternalConversationEndpoint)
-	if endpoint.Revision != f.endpoint.Revision+1 || endpoint.Policy.MessageSelection != ExternalConversationSelectAllMessages {
+	endpoint := output["endpoint"].(*models.ExternalConversationEndpoint)
+	if endpoint.Revision != f.endpoint.Revision+1 || endpoint.Policy.MessageSelection != models.ExternalConversationSelectAllMessages {
 		t.Fatalf("endpoint was not committed: %#v", endpoint)
 	}
 	if replay, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); err != nil || replay["replayed"] != true {
 		t.Fatalf("replay: %#v, %v", replay, err)
 	}
-	paused := ExternalConversationEndpointPaused
+	paused := models.ExternalConversationEndpointPaused
 	later, err := f.endpoints.Update(ctx, f.scope, endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision, Status: &paused})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); !errors.Is(err, ErrExternalConversationConflict) {
+	if _, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); !errors.Is(err, models.ErrExternalConversationConflict) {
 		t.Fatalf("replay overwrote newer endpoint: %v", err)
 	}
 	unchanged, _ := f.endpoints.Get(ctx, f.scope, endpoint.ID)
@@ -309,11 +311,11 @@ func TestAgentChannelActivationAndReplayPreserveLaterEndpointChanges(t *testing.
 func TestAgentChannelRejectsUnavailableAdapterBeforeApproval(t *testing.T) {
 	f := newChannelActionFixture(t)
 	f.resolver.unavailable = true
-	if _, err := f.propose(t, nil); !errors.Is(err, ErrInvalidExternalConversation) {
+	if _, err := f.propose(t, nil); !errors.Is(err, models.ErrInvalidExternalConversation) {
 		t.Fatalf("unavailable adapter proposal: %v", err)
 	}
 	f.assertUnactivated(t)
-	approvals, err := f.store.ListApprovals(context.Background(), ApprovalFilter{Scope: f.scope, RunID: f.run.ID})
+	approvals, err := f.store.ListApprovals(context.Background(), models.ApprovalFilter{Scope: f.scope, RunID: f.run.ID})
 	if err != nil || len(approvals) != 0 {
 		t.Fatalf("unavailable adapter created approval: %#v, %v", approvals, err)
 	}
@@ -321,14 +323,14 @@ func TestAgentChannelRejectsUnavailableAdapterBeforeApproval(t *testing.T) {
 
 func TestAgentChannelRejectsForeignTenantEndpointBeforeApproval(t *testing.T) {
 	f := newChannelActionFixture(t)
-	foreign := cloneExternalConversationEndpoint(f.endpoint)
+	foreign := models.CloneExternalConversationEndpoint(f.endpoint)
 	foreign.ID = "foreign-channel"
 	foreign.Scope.ID = "another-tenant"
 	foreign.IngressRoute = "another-route"
 	if err := f.store.CreateExternalConversationEndpoint(context.Background(), foreign); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.propose(t, map[string]interface{}{"endpointId": foreign.ID}); !errors.Is(err, ErrExternalConversationEndpointNotFound) {
+	if _, err := f.propose(t, map[string]interface{}{"endpointId": foreign.ID}); !errors.Is(err, models.ErrExternalConversationEndpointNotFound) {
 		t.Fatalf("foreign endpoint proposal: %v", err)
 	}
 	f.assertUnactivated(t)
@@ -347,7 +349,7 @@ func TestAgentChannelActivationEndpointCASRollsBackWholeTransaction(t *testing.T
 	if _, err := f.db.ExecContext(ctx, `CREATE TRIGGER change_endpoint_before_activation BEFORE INSERT ON agent_definitions BEGIN UPDATE external_conversation_endpoints SET revision=revision+1; END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); !errors.Is(err, ErrExternalConversationConflict) {
+	if _, err := f.dispatcher.configureChannel(ctx, agentrun.ActionDispatchInput{Call: call, Arguments: call.Arguments}, f.run); !errors.Is(err, models.ErrExternalConversationConflict) {
 		t.Fatalf("stale transaction commit: %v", err)
 	}
 	f.assertUnactivated(t)
@@ -360,7 +362,7 @@ func TestAgentChannelActivationEndpointCASRollsBackWholeTransaction(t *testing.T
 func TestAgentChannelCanActivatePausedEndpoint(t *testing.T) {
 	f := newChannelActionFixture(t)
 	ctx := context.Background()
-	paused := ExternalConversationEndpointPaused
+	paused := models.ExternalConversationEndpointPaused
 	if _, err := f.endpoints.Update(ctx, f.scope, f.endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: f.endpoint.Revision, Status: &paused}); err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +375,7 @@ func TestAgentChannelCanActivatePausedEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output["endpoint"].(*ExternalConversationEndpoint).Status != ExternalConversationEndpointActive {
+	if output["endpoint"].(*models.ExternalConversationEndpoint).Status != models.ExternalConversationEndpointActive {
 		t.Fatalf("paused endpoint was not activated: %#v", output)
 	}
 }

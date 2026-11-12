@@ -8,24 +8,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 type agentBuilderDraftFake struct {
-	conversations []*Conversation
-	messages      map[string][]*ChannelMessage // ascending
-	runs          map[string][]*AgentRun       // newest first
-	approvals     map[string][]*ApprovalCheckpoint
+	conversations []*models.Conversation
+	messages      map[string][]*models.ChannelMessage // ascending
+	runs          map[string][]*models.AgentRun       // newest first
+	approvals     map[string][]*models.ApprovalCheckpoint
 	created       map[string]bool // produced its Agent or Team
-	filters       []ConversationFilter
+	filters       []models.ConversationFilter
 	statusReads   []string // conversations whose approvals were read
 }
 
 // ListConversations selects as a store does: the person's unfinished builder
 // conversations in the asked statuses.
-func (f *agentBuilderDraftFake) ListConversations(_ context.Context, filter ConversationFilter) ([]*Conversation, error) {
+func (f *agentBuilderDraftFake) ListConversations(_ context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
 	f.filters = append(f.filters, filter)
-	selected := []*Conversation{}
+	selected := []*models.Conversation{}
 	for _, conversation := range f.conversations {
 		if f.messages[conversation.ID][0].Sender.ID == filter.AgentBuilderDraftOf && !f.created[conversation.ID] &&
 			slices.Contains(filter.Statuses, conversation.Status) {
@@ -33,7 +34,7 @@ func (f *agentBuilderDraftFake) ListConversations(_ context.Context, filter Conv
 		}
 	}
 	if filter.Offset >= len(selected) {
-		return []*Conversation{}, nil
+		return []*models.Conversation{}, nil
 	}
 	selected = selected[filter.Offset:]
 	if filter.Limit > 0 && len(selected) > filter.Limit {
@@ -42,8 +43,8 @@ func (f *agentBuilderDraftFake) ListConversations(_ context.Context, filter Conv
 	return selected, nil
 }
 
-func (f *agentBuilderDraftFake) ListChannelMessages(_ context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
-	values := append([]*ChannelMessage(nil), f.messages[filter.ConversationID]...)
+func (f *agentBuilderDraftFake) ListChannelMessages(_ context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
+	values := append([]*models.ChannelMessage(nil), f.messages[filter.ConversationID]...)
 	if filter.Descending {
 		for i, j := 0, len(values)-1; i < j; i, j = i+1, j-1 {
 			values[i], values[j] = values[j], values[i]
@@ -55,14 +56,14 @@ func (f *agentBuilderDraftFake) ListChannelMessages(_ context.Context, filter Ch
 	return values, nil
 }
 
-func (f *agentBuilderDraftFake) ListAgentRuns(_ context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
-	if filter.AssignedAgentID != conversationrun.AgentBuilderDeploymentID || filter.Order != AgentRunOrderCreatedDesc {
+func (f *agentBuilderDraftFake) ListAgentRuns(_ context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
+	if filter.AssignedAgentID != conversationrun.AgentBuilderDeploymentID || filter.Order != models.AgentRunOrderCreatedDesc {
 		return nil, errors.New("unexpected run filter")
 	}
 	return f.runs[filter.ConversationID], nil
 }
 
-func (f *agentBuilderDraftFake) ListApprovals(_ context.Context, filter ApprovalFilter) ([]*ApprovalCheckpoint, error) {
+func (f *agentBuilderDraftFake) ListApprovals(_ context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
 	if !filter.NewestFirst {
 		return nil, errors.New("unexpected approval order")
 	}
@@ -71,31 +72,31 @@ func (f *agentBuilderDraftFake) ListApprovals(_ context.Context, filter Approval
 }
 
 var (
-	agentBuilderDraftScope     = Scope{Kind: "tenant", ID: "one"}
-	agentBuilderDraftRequester = ConversationParticipant{Type: ConversationParticipantUser, ID: "ana"}
-	agentBuilderDraftPrincipal = ApprovalPrincipal{Type: "user", ID: "ana"}
+	agentBuilderDraftScope     = models.Scope{Kind: "tenant", ID: "one"}
+	agentBuilderDraftRequester = models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "ana"}
+	agentBuilderDraftPrincipal = models.ApprovalPrincipal{Type: "user", ID: "ana"}
 )
 
-func (f *agentBuilderDraftFake) add(id string, updated time.Time, sender ConversationParticipant) {
+func (f *agentBuilderDraftFake) add(id string, updated time.Time, sender models.ConversationParticipant) {
 	if f.messages == nil {
-		f.messages, f.runs, f.approvals, f.created = map[string][]*ChannelMessage{}, map[string][]*AgentRun{}, map[string][]*ApprovalCheckpoint{}, map[string]bool{}
+		f.messages, f.runs, f.approvals, f.created = map[string][]*models.ChannelMessage{}, map[string][]*models.AgentRun{}, map[string][]*models.ApprovalCheckpoint{}, map[string]bool{}
 	}
-	f.conversations = append(f.conversations, &Conversation{
-		ID: id, Scope: agentBuilderDraftScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: conversationrun.AgentBuilderDeploymentID},
-		Title: "New agent", Status: ConversationStatusActive, UpdatedAt: updated, SpaceID: "space-" + id,
-		Origin: &ConversationReference{Kind: ConversationReferenceAgentBuilder, ID: id},
+	f.conversations = append(f.conversations, &models.Conversation{
+		ID: id, Scope: agentBuilderDraftScope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: conversationrun.AgentBuilderDeploymentID},
+		Title: "New agent", Status: models.ConversationStatusActive, UpdatedAt: updated, SpaceID: "space-" + id,
+		Origin: &models.ConversationReference{Kind: models.ConversationReferenceAgentBuilder, ID: id},
 	})
-	f.messages[id] = []*ChannelMessage{{
+	f.messages[id] = []*models.ChannelMessage{{
 		ID: id + "-m1", ConversationID: id, Sequence: 1, Sender: sender, Content: "Build a press agent",
-		BuilderParameters: &AgentBuilderParameters{Kind: AgentBuilderKindAgent, Name: "Press " + id},
+		BuilderParameters: &models.AgentBuilderParameters{Kind: models.AgentBuilderKindAgent, Name: "Press " + id},
 	}}
 }
 
-func agentBuilderCard(id, operation string, status ApprovalStatus, approvers ...ApprovalPrincipal) *ApprovalCheckpoint {
-	return &ApprovalCheckpoint{
+func agentBuilderCard(id, operation string, status models.ApprovalStatus, approvers ...models.ApprovalPrincipal) *models.ApprovalCheckpoint {
+	return &models.ApprovalCheckpoint{
 		ID: id, ActionCallID: id + "-call", Status: status, EligibleApprovers: approvers,
 		ProposedAction: map[string]interface{}{
-			"resourceType": agentProfileResourceType, "operation": operation,
+			"resourceType": models.AgentProfileResourceType, "operation": operation,
 			"agent": map[string]interface{}{"displayName": "Card " + id},
 		},
 	}
@@ -104,57 +105,57 @@ func agentBuilderCard(id, operation string, status ApprovalStatus, approvers ...
 func TestAgentBuilderDraftsStatusesAndFiltering(t *testing.T) {
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	fake := &agentBuilderDraftFake{}
-	agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: conversationrun.AgentBuilderDeploymentID}
+	agent := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: conversationrun.AgentBuilderDeploymentID}
 	at := func(i int) time.Time { return now.Add(-time.Duration(i) * time.Minute) }
 
 	fake.add("drafting", at(0), agentBuilderDraftRequester)
-	fake.runs["drafting"] = []*AgentRun{
-		{ID: "child", ParentRunID: "run-drafting", Status: AgentRunStatusFailed},
-		{ID: "run-drafting", Status: AgentRunStatusRunning},
+	fake.runs["drafting"] = []*models.AgentRun{
+		{ID: "child", ParentRunID: "run-drafting", Status: models.AgentRunStatusFailed},
+		{ID: "run-drafting", Status: models.AgentRunStatusRunning},
 	}
-	fake.approvals["drafting"] = []*ApprovalCheckpoint{agentBuilderCard("drafting-card", AgentActionCreateAgent, ApprovalStatusPending, agentBuilderDraftPrincipal)}
+	fake.approvals["drafting"] = []*models.ApprovalCheckpoint{agentBuilderCard("drafting-card", models.AgentActionCreateAgent, models.ApprovalStatusPending, agentBuilderDraftPrincipal)}
 
 	fake.add("ready", at(1), agentBuilderDraftRequester)
-	fake.runs["ready"] = []*AgentRun{{ID: "run-ready", Status: AgentRunStatusWaitingForApproval}}
-	fake.approvals["ready"] = []*ApprovalCheckpoint{
-		{ID: "unrelated", Status: ApprovalStatusPending, ProposedAction: map[string]interface{}{"resourceType": "skill_binding"}},
-		agentBuilderCard("ready-card", AgentActionCreateAgent, ApprovalStatusPending, agentBuilderDraftPrincipal),
+	fake.runs["ready"] = []*models.AgentRun{{ID: "run-ready", Status: models.AgentRunStatusWaitingForApproval}}
+	fake.approvals["ready"] = []*models.ApprovalCheckpoint{
+		{ID: "unrelated", Status: models.ApprovalStatusPending, ProposedAction: map[string]interface{}{"resourceType": "skill_binding"}},
+		agentBuilderCard("ready-card", models.AgentActionCreateAgent, models.ApprovalStatusPending, agentBuilderDraftPrincipal),
 	}
 
 	fake.add("needs-approval", at(2), agentBuilderDraftRequester)
-	fake.runs["needs-approval"] = []*AgentRun{{ID: "run-na", Status: AgentRunStatusWaitingForApproval}}
-	fake.approvals["needs-approval"] = []*ApprovalCheckpoint{agentBuilderCard("na-card", AgentActionUpdateAgent, ApprovalStatusPending, ApprovalPrincipal{Type: "user", ID: "boss"})}
+	fake.runs["needs-approval"] = []*models.AgentRun{{ID: "run-na", Status: models.AgentRunStatusWaitingForApproval}}
+	fake.approvals["needs-approval"] = []*models.ApprovalCheckpoint{agentBuilderCard("na-card", models.AgentActionUpdateAgent, models.ApprovalStatusPending, models.ApprovalPrincipal{Type: "user", ID: "boss"})}
 
 	fake.add("needs-input", at(3), agentBuilderDraftRequester)
-	fake.runs["needs-input"] = []*AgentRun{{ID: "run-ni", Status: AgentRunStatusWaitingForEvent}}
+	fake.runs["needs-input"] = []*models.AgentRun{{ID: "run-ni", Status: models.AgentRunStatusWaitingForEvent}}
 	fake.messages["needs-input"] = append(fake.messages["needs-input"],
-		&ChannelMessage{ID: "q1", Sequence: 2, Sender: agent, Intent: MessageIntentQuestion, Content: "Which tone?"},
-		&ChannelMessage{ID: "status", Sequence: 3, Sender: agent, Intent: MessageIntentUpdate, Content: "Waiting"})
+		&models.ChannelMessage{ID: "q1", Sequence: 2, Sender: agent, Intent: models.MessageIntentQuestion, Content: "Which tone?"},
+		&models.ChannelMessage{ID: "status", Sequence: 3, Sender: agent, Intent: models.MessageIntentUpdate, Content: "Waiting"})
 
 	fake.add("answered", at(4), agentBuilderDraftRequester)
 	fake.messages["answered"] = append(fake.messages["answered"],
-		&ChannelMessage{ID: "q2", Sequence: 2, Sender: agent, Intent: MessageIntentQuestion, Content: "Which tone?"},
-		&ChannelMessage{ID: "a2", Sequence: 3, Sender: agentBuilderDraftRequester, Intent: MessageIntentAnswer, Content: "Warm",
-			BuilderParameters: &AgentBuilderParameters{Kind: AgentBuilderKindAgent, Name: "Renamed"}})
+		&models.ChannelMessage{ID: "q2", Sequence: 2, Sender: agent, Intent: models.MessageIntentQuestion, Content: "Which tone?"},
+		&models.ChannelMessage{ID: "a2", Sequence: 3, Sender: agentBuilderDraftRequester, Intent: models.MessageIntentAnswer, Content: "Warm",
+			BuilderParameters: &models.AgentBuilderParameters{Kind: models.AgentBuilderKindAgent, Name: "Renamed"}})
 
 	fake.add("stopped", at(5), agentBuilderDraftRequester)
-	fake.runs["stopped"] = []*AgentRun{{ID: "run-stopped", Status: AgentRunStatusCanceled}}
+	fake.runs["stopped"] = []*models.AgentRun{{ID: "run-stopped", Status: models.AgentRunStatusCanceled}}
 
 	fake.add("failed", at(6), agentBuilderDraftRequester)
-	fake.runs["failed"] = []*AgentRun{{ID: "run-failed", Status: AgentRunStatusFailed}}
-	fake.approvals["failed"] = []*ApprovalCheckpoint{agentBuilderCard("failed-card", AgentActionCreateAgent, ApprovalStatusApproved, agentBuilderDraftPrincipal)}
+	fake.runs["failed"] = []*models.AgentRun{{ID: "run-failed", Status: models.AgentRunStatusFailed}}
+	fake.approvals["failed"] = []*models.ApprovalCheckpoint{agentBuilderCard("failed-card", models.AgentActionCreateAgent, models.ApprovalStatusApproved, agentBuilderDraftPrincipal)}
 
 	fake.add("created", at(7), agentBuilderDraftRequester)
-	fake.runs["created"] = []*AgentRun{{ID: "run-created", Status: AgentRunStatusCompleted}}
-	fake.approvals["created"] = []*ApprovalCheckpoint{
-		agentBuilderCard("later-update", AgentActionUpdateAgent, ApprovalStatusPending, agentBuilderDraftPrincipal),
-		agentBuilderCard("created-card", AgentActionCreateAgent, ApprovalStatusApproved, agentBuilderDraftPrincipal),
+	fake.runs["created"] = []*models.AgentRun{{ID: "run-created", Status: models.AgentRunStatusCompleted}}
+	fake.approvals["created"] = []*models.ApprovalCheckpoint{
+		agentBuilderCard("later-update", models.AgentActionUpdateAgent, models.ApprovalStatusPending, agentBuilderDraftPrincipal),
+		agentBuilderCard("created-card", models.AgentActionCreateAgent, models.ApprovalStatusApproved, agentBuilderDraftPrincipal),
 	}
 	fake.created["created"] = true
 
-	fake.add("someone-else", at(8), ConversationParticipant{Type: ConversationParticipantUser, ID: "bo"})
+	fake.add("someone-else", at(8), models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "bo"})
 	fake.add("archived", at(9), agentBuilderDraftRequester)
-	fake.conversations[len(fake.conversations)-1].Status = ConversationStatusArchived
+	fake.conversations[len(fake.conversations)-1].Status = models.ConversationStatusArchived
 
 	drafts, err := ListAgentBuilderDrafts(t.Context(), fake, AgentBuilderDraftFilter{
 		Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester, Principal: agentBuilderDraftPrincipal,
@@ -193,8 +194,8 @@ func TestAgentBuilderDraftsStatusesAndFiltering(t *testing.T) {
 		}
 	}
 	filter := fake.filters[0]
-	if filter.OriginKind != ConversationReferenceAgentBuilder || filter.Owner == nil || filter.Owner.ID != conversationrun.AgentBuilderDeploymentID ||
-		len(filter.Statuses) != 1 || filter.Statuses[0] != ConversationStatusActive ||
+	if filter.OriginKind != models.ConversationReferenceAgentBuilder || filter.Owner == nil || filter.Owner.ID != conversationrun.AgentBuilderDeploymentID ||
+		len(filter.Statuses) != 1 || filter.Statuses[0] != models.ConversationStatusActive ||
 		filter.AgentBuilderDraftOf != "ana" || filter.Limit != defaultAgentBuilderDraftLimit || filter.Offset != 0 {
 		t.Fatalf("conversation filter = %#v", filter)
 	}
@@ -218,9 +219,9 @@ func TestAgentBuilderDraftsStatusesAndFiltering(t *testing.T) {
 	for _, bad := range []AgentBuilderDraftFilter{
 		{Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester, Limit: 101},
 		{Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester, Offset: -1},
-		{Scope: agentBuilderDraftScope, Requester: ConversationParticipant{Type: ConversationParticipantAgent, ID: "x"}},
+		{Scope: agentBuilderDraftScope, Requester: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "x"}},
 	} {
-		if _, err := ListAgentBuilderDrafts(t.Context(), fake, bad); !errors.Is(err, ErrInvalidConversation) {
+		if _, err := ListAgentBuilderDrafts(t.Context(), fake, bad); !errors.Is(err, models.ErrInvalidConversation) {
 			t.Fatalf("filter %#v accepted: %v", bad, err)
 		}
 	}
@@ -231,9 +232,9 @@ func TestAgentBuilderDraftsStatusesAndFiltering(t *testing.T) {
 func TestAgentBuilderDraftsTitleFromFirstMessagePastTheNewestPage(t *testing.T) {
 	fake := &agentBuilderDraftFake{}
 	fake.add("long", time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC), agentBuilderDraftRequester)
-	agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: conversationrun.AgentBuilderDeploymentID}
+	agent := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: conversationrun.AgentBuilderDeploymentID}
 	for sequence := int64(2); sequence <= agentBuilderDraftMessageScan+1; sequence++ {
-		fake.messages["long"] = append(fake.messages["long"], &ChannelMessage{ID: "update", Sequence: sequence, Sender: agent, Intent: MessageIntentUpdate})
+		fake.messages["long"] = append(fake.messages["long"], &models.ChannelMessage{ID: "update", Sequence: sequence, Sender: agent, Intent: models.MessageIntentUpdate})
 	}
 	drafts, err := ListAgentBuilderDrafts(t.Context(), fake, AgentBuilderDraftFilter{Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester})
 	if err != nil || len(drafts) != 1 || drafts[0].Title != "Press long" {

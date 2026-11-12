@@ -13,8 +13,10 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -81,7 +83,7 @@ type teamCreateArguments struct {
 // isTeamCreateAction reports openseal.teams create_team. Only the current
 // version has it.
 func isTeamCreateAction(bound *skill.BoundAction) bool {
-	return bound != nil && bound.Definition != nil && bound.Definition.ID == TeamManagementSkillID &&
+	return bound != nil && bound.Definition != nil && bound.Definition.ID == models.TeamManagementSkillID &&
 		bound.Definition.Version == action.TeamManagementSkillVersion && bound.Action.Name == action.TeamActionCreateTeam
 }
 
@@ -97,9 +99,9 @@ type TeamCreateActionValidator struct {
 func NewTeamCreateActionValidator(
 	agents *kernelagent.Registry,
 	teams *kernelteam.Registry,
-	spaces *SpaceService,
-	conversations ConversationStore,
-	runs PortfolioStore,
+	spaces *portfolio.SpaceService,
+	conversations models.ConversationStore,
+	runs models.PortfolioStore,
 ) (*TeamCreateActionValidator, error) {
 	if agents == nil || teams == nil || spaces == nil {
 		return nil, errors.New("team create validator requires the Agent and Team registries and spaces")
@@ -189,7 +191,7 @@ func resolveTeamCreate(
 	ctx context.Context,
 	agents *kernelagent.Registry,
 	teams *kernelteam.Registry,
-	scope Scope,
+	scope models.Scope,
 	builderID string,
 	arguments map[string]interface{},
 ) (*resolvedTeamCreate, error) {
@@ -219,7 +221,7 @@ func resolveTeamCreate(
 			return nil, fmt.Errorf("agent %q is listed more than once", memberID)
 		}
 		seen[memberID] = true
-		deployment, err := agents.GetDeployment(ctx, agentBuilderScope(scope), memberID)
+		deployment, err := agents.GetDeployment(ctx, models.ScopeReference(scope), memberID)
 		if err != nil {
 			return nil, skillbinding.AgentBuilderTargetError(memberID, err)
 		}
@@ -273,7 +275,7 @@ func validateTeamCreateText(args teamCreateArguments) error {
 	return nil
 }
 
-func resolveTeamSpace(ctx context.Context, spaces *SpaceService, scope Scope, spaceID string) (*Space, error) {
+func resolveTeamSpace(ctx context.Context, spaces *portfolio.SpaceService, scope models.Scope, spaceID string) (*models.Space, error) {
 	if spaceID == "" {
 		return nil, errors.New("create_team requires a space")
 	}
@@ -282,7 +284,7 @@ func resolveTeamSpace(ctx context.Context, spaces *SpaceService, scope Scope, sp
 
 // teamBuilderDefinitionID is "team-<slug>-<8 hex>", derived from the call so a
 // replay registers nothing new.
-func teamBuilderDefinitionID(scope Scope, displayName, callID string) string {
+func teamBuilderDefinitionID(scope models.Scope, displayName, callID string) string {
 	digest := sha256.Sum256([]byte(scope.Kind + ":" + scope.ID + ":" + callID))
 	return "team-" + kernelteam.MemberSlug(displayName) + "-" + hex.EncodeToString(digest[:])[:8]
 }
@@ -332,14 +334,14 @@ func teamMembersMaximumRisk(members []resolvedTeamMember) capability.RiskLevel {
 
 // createTeam runs an approved create_team. Ids come from the call, so a
 // retry or a crash-resumed execution converges on the same Team.
-func (d *AgentBuilderActionDispatcher) createTeam(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBuilderActionDispatcher) createTeam(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	approval, err := approvedAgentBuilderCheckpoint(ctx, d.store, call)
 	if err != nil {
 		return nil, err
 	}
 	scope := call.Scope
-	reference := agentBuilderScope(scope)
+	reference := models.ScopeReference(scope)
 	approver := approval.DecisionBy.ID
 	args, err := decodeTeamCreateArguments(input.Arguments)
 	if err != nil {
@@ -428,7 +430,7 @@ func (d *AgentBuilderActionDispatcher) registerTeamBuilderDefinition(ctx context
 
 // teamSpace resolves the reviewed space at execution. A space deleted while
 // the card waited fails the call.
-func (d *AgentBuilderActionDispatcher) teamSpace(ctx context.Context, scope Scope, spaceID string) (*Space, error) {
+func (d *AgentBuilderActionDispatcher) teamSpace(ctx context.Context, scope models.Scope, spaceID string) (*models.Space, error) {
 	if spaceID == "" {
 		return nil, errors.New("create_team requires a space")
 	}
@@ -447,9 +449,9 @@ func (d *AgentBuilderActionDispatcher) teamSpace(ctx context.Context, scope Scop
 // placeTeamInSpace adds the Team to the reviewed space. The create placed it
 // there; a replay whose create committed without the membership gets it
 // here.
-func (d *AgentBuilderActionDispatcher) placeTeamInSpace(ctx context.Context, scope Scope, space *Space, teamID string) error {
-	_, _, err := d.provision.PutSpaceMember(ctx, PutSpaceMemberRequest{
-		Scope: scope, SpaceID: space.ID, Type: SpaceMemberTeam, MemberID: teamID,
+func (d *AgentBuilderActionDispatcher) placeTeamInSpace(ctx context.Context, scope models.Scope, space *models.Space, teamID string) error {
+	_, _, err := d.provision.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{
+		Scope: scope, SpaceID: space.ID, Type: models.SpaceMemberTeam, MemberID: teamID,
 	})
 	return err
 }

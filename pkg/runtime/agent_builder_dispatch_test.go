@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -24,10 +25,10 @@ import (
 // agentBuilderDispatchStore serves the approvals the test decides.
 type agentBuilderDispatchStore struct {
 	*sqlite.Store
-	approvals map[string]*ApprovalCheckpoint
+	approvals map[string]*models.ApprovalCheckpoint
 }
 
-func (s *agentBuilderDispatchStore) GetApproval(ctx context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error) {
+func (s *agentBuilderDispatchStore) GetApproval(ctx context.Context, scope models.Scope, approvalID string) (*models.ApprovalCheckpoint, error) {
 	if approval, ok := s.approvals[approvalID]; ok {
 		return approval, nil
 	}
@@ -37,14 +38,14 @@ func (s *agentBuilderDispatchStore) GetApproval(ctx context.Context, scope Scope
 // agentBuilderTestProvisioner does what the Engine does for the builder.
 type agentBuilderTestProvisioner struct {
 	agents        *kernelagent.Registry
-	spaces        *SpaceService
+	spaces        *portfolio.SpaceService
 	conversations *conversation.ConversationService
 	created       int
 	putErr        error
 }
 
 func (p *agentBuilderTestProvisioner) CreateAgentDeploymentInSpace(ctx context.Context, spaceID string, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
-	scope := Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
+	scope := models.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
 	if _, err := p.spaces.GetSpace(ctx, scope, spaceID); err != nil {
 		return nil, nil, err
 	}
@@ -53,7 +54,7 @@ func (p *agentBuilderTestProvisioner) CreateAgentDeploymentInSpace(ctx context.C
 		return nil, nil, err
 	}
 	p.created++
-	if _, _, err := p.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: SpaceMemberAgent, MemberID: created.ID}); err != nil {
+	if _, _, err := p.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: models.SpaceMemberAgent, MemberID: created.ID}); err != nil {
 		return created, activation, err
 	}
 	if _, err := p.EnsureAgentControlConversation(ctx, created); err != nil {
@@ -62,10 +63,10 @@ func (p *agentBuilderTestProvisioner) CreateAgentDeploymentInSpace(ctx context.C
 	return created, activation, nil
 }
 
-func (p *agentBuilderTestProvisioner) EnsureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment) (*Conversation, error) {
+func (p *agentBuilderTestProvisioner) EnsureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment) (*models.Conversation, error) {
 	conversation, _, err := p.conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
-		Scope: Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID},
-		Title: "Agent control", Origin: &ConversationReference{Kind: ConversationReferenceAgentControl, ID: "agent-" + deployment.ID},
+		Scope: models.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deployment.ID},
+		Title: "Agent control", Origin: &models.ConversationReference{Kind: models.ConversationReferenceAgentControl, ID: "agent-" + deployment.ID},
 		IdempotencyKey: "agent-control:" + deployment.ID,
 	})
 	return conversation, err
@@ -75,15 +76,15 @@ func (p *agentBuilderTestProvisioner) CreateTeamDeploymentInSpace(context.Contex
 	return nil, nil, errors.New("not used")
 }
 
-func (p *agentBuilderTestProvisioner) ListSpaces(ctx context.Context, scope Scope) ([]*Space, error) {
+func (p *agentBuilderTestProvisioner) ListSpaces(ctx context.Context, scope models.Scope) ([]*models.Space, error) {
 	return p.spaces.ListSpaces(ctx, scope)
 }
 
-func (p *agentBuilderTestProvisioner) ListSpaceMembers(ctx context.Context, scope Scope, spaceID string) ([]*SpaceMember, error) {
+func (p *agentBuilderTestProvisioner) ListSpaceMembers(ctx context.Context, scope models.Scope, spaceID string) ([]*models.SpaceMember, error) {
 	return p.spaces.ListSpaceMembers(ctx, scope, spaceID)
 }
 
-func (p *agentBuilderTestProvisioner) PutSpaceMember(ctx context.Context, request PutSpaceMemberRequest) (*SpaceMember, bool, error) {
+func (p *agentBuilderTestProvisioner) PutSpaceMember(ctx context.Context, request portfolio.PutSpaceMemberRequest) (*models.SpaceMember, bool, error) {
 	if p.putErr != nil {
 		return nil, false, p.putErr
 	}
@@ -119,8 +120,8 @@ func newAgentBuilderDispatchFixture(t *testing.T) *agentBuilderDispatchFixture {
 	t.Helper()
 	ctx := context.Background()
 	base := newAgentBuilderFixture(t, false)
-	store := &agentBuilderDispatchStore{Store: newTestKernelStore(t), approvals: map[string]*ApprovalCheckpoint{}}
-	base.spaces = NewSpaceService(store)
+	store := &agentBuilderDispatchStore{Store: newTestKernelStore(t), approvals: map[string]*models.ApprovalCheckpoint{}}
+	base.spaces = portfolio.NewSpaceService(store)
 	base.salesID, base.homeID = seedAgentBuilderSpaces(t, base.spaces, base.scope)
 	recorder := &agentBuilderRecordingHost{}
 	var err error
@@ -128,9 +129,9 @@ func newAgentBuilderDispatchFixture(t *testing.T) *agentBuilderDispatchFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: base.scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
-		AssignedAgentID: "finn", ActingUser: agentBuilderApprover.ID, Goal: "Build an Agent", Source: RunSourceChat,
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: base.scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"},
+		AssignedAgentID: "finn", ActingUser: agentBuilderApprover.ID, Goal: "Build an Agent", Source: models.RunSourceChat,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +145,7 @@ func newAgentBuilderDispatchFixture(t *testing.T) *agentBuilderDispatchFixture {
 	return &agentBuilderDispatchFixture{agentBuilderFixture: base, store: store, provision: provision, recorder: recorder, dispatcher: dispatcher}
 }
 
-var agentBuilderApprover = ApprovalPrincipal{Type: "user", ID: "person-1"}
+var agentBuilderApprover = models.ApprovalPrincipal{Type: "user", ID: "person-1"}
 
 // resolve fills the kernel-resolved arguments as the coordinator does at
 // proposal time and checks the proposal passes validation.
@@ -166,18 +167,18 @@ func (f *agentBuilderDispatchFixture) resolve(t *testing.T, action string, argum
 }
 
 // execute dispatches callID as approved by approver.
-func (f *agentBuilderDispatchFixture) execute(t *testing.T, action, callID string, arguments map[string]interface{}, approver ApprovalPrincipal) (map[string]interface{}, error) {
+func (f *agentBuilderDispatchFixture) execute(t *testing.T, action, callID string, arguments map[string]interface{}, approver models.ApprovalPrincipal) (map[string]interface{}, error) {
 	t.Helper()
-	call := &ActionCall{
-		ID: callID, Scope: f.scope, RunID: f.run.ID, DeploymentID: "finn", SkillID: AgentManagementSkillID,
-		SkillVersion: AgentManagementSkillVersion, Action: action, Arguments: arguments,
+	call := &models.ActionCall{
+		ID: callID, Scope: f.scope, RunID: f.run.ID, DeploymentID: "finn", SkillID: models.AgentManagementSkillID,
+		SkillVersion: models.AgentManagementSkillVersion, Action: action, Arguments: arguments,
 	}
-	if action != AgentActionListAgents {
+	if action != models.AgentActionListAgents {
 		call.ApprovalID = "approval-" + callID
 		decider := approver
-		f.store.approvals[call.ApprovalID] = &ApprovalCheckpoint{
+		f.store.approvals[call.ApprovalID] = &models.ApprovalCheckpoint{
 			ID: call.ApprovalID, Scope: f.scope, RunID: f.run.ID, ActionCallID: callID,
-			Status: ApprovalStatusApproved, DecisionBy: &decider,
+			Status: models.ApprovalStatusApproved, DecisionBy: &decider,
 		}
 	}
 	return f.dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
@@ -196,7 +197,7 @@ func (f *agentBuilderDispatchFixture) spaceMember(t *testing.T, spaceID, deploym
 		t.Fatal(err)
 	}
 	for _, member := range members {
-		if member.Type == SpaceMemberAgent && member.ID == deploymentID {
+		if member.Type == models.SpaceMemberAgent && member.ID == deploymentID {
 			return true
 		}
 	}
@@ -212,8 +213,8 @@ func agentBuilderDispatchCreateArguments(spaceID string) map[string]interface{} 
 func TestAgentBuilderCreateAgentExecutes(t *testing.T) {
 	ctx := context.Background()
 	f := newAgentBuilderDispatchFixture(t)
-	arguments := f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
-	output, err := f.execute(t, AgentActionCreateAgent, "call-create", arguments, agentBuilderApprover)
+	arguments := f.resolve(t, models.AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
+	output, err := f.execute(t, models.AgentActionCreateAgent, "call-create", arguments, agentBuilderApprover)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +226,7 @@ func TestAgentBuilderCreateAgentExecutes(t *testing.T) {
 	if again := agentBuilderResourceID("agent-deployment", f.scope, "call-create"); again != deploymentID {
 		t.Fatalf("deployment id is not deterministic: %q != %q", again, deploymentID)
 	}
-	if output["resourceType"] != agentProfileResourceType || output["operation"] != AgentActionCreateAgent ||
+	if output["resourceType"] != models.AgentProfileResourceType || output["operation"] != models.AgentActionCreateAgent ||
 		output["deploymentId"] != deploymentID || output["displayName"] != "Inbox   Triage" || output["replayed"] != false {
 		t.Fatalf("output head = %#v", output)
 	}
@@ -288,7 +289,7 @@ func TestAgentBuilderCreateAgentExecutes(t *testing.T) {
 	}
 
 	// The same call again (a crash-resumed execution) converges.
-	replay, err := f.execute(t, AgentActionCreateAgent, "call-create", arguments, agentBuilderApprover)
+	replay, err := f.execute(t, models.AgentActionCreateAgent, "call-create", arguments, agentBuilderApprover)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +319,7 @@ func TestAgentBuilderCreateAgentInDefaultSpace(t *testing.T) {
 	delete(arguments, "skills")
 	delete(arguments, "connections")
 	delete(arguments, "model")
-	output, err := f.execute(t, AgentActionCreateAgent, "call-personal", f.resolve(t, AgentActionCreateAgent, arguments), agentBuilderApprover)
+	output, err := f.execute(t, models.AgentActionCreateAgent, "call-personal", f.resolve(t, models.AgentActionCreateAgent, arguments), agentBuilderApprover)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,9 +338,9 @@ func TestAgentBuilderCreateAgentInDefaultSpace(t *testing.T) {
 func TestAgentBuilderCreateAgentRefusesNonUserApprover(t *testing.T) {
 	ctx := context.Background()
 	f := newAgentBuilderDispatchFixture(t)
-	arguments := f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
-	for _, approver := range []ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "agent", ID: "finn"}} {
-		if _, err := f.execute(t, AgentActionCreateAgent, "call-"+approver.Type, arguments, approver); err == nil ||
+	arguments := f.resolve(t, models.AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
+	for _, approver := range []models.ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "agent", ID: "finn"}} {
+		if _, err := f.execute(t, models.AgentActionCreateAgent, "call-"+approver.Type, arguments, approver); err == nil ||
 			!strings.Contains(err.Error(), "only by a person") {
 			t.Fatalf("%s approver error = %v", approver.Type, err)
 		}
@@ -356,7 +357,7 @@ func TestAgentBuilderCreateAgentRefusesNonUserApprover(t *testing.T) {
 func TestAgentBuilderCreateAgentFailsWhenNameTakenWhileWaiting(t *testing.T) {
 	ctx := context.Background()
 	f := newAgentBuilderDispatchFixture(t)
-	arguments := f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
+	arguments := f.resolve(t, models.AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
 	definition, err := f.agents.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
 		ID: "rival-definition", Version: "1.0.0", DisplayName: "inbox triage", Purpose: "Rival", SystemPrompt: "Rival.",
 		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
@@ -370,7 +371,7 @@ func TestAgentBuilderCreateAgentFailsWhenNameTakenWhileWaiting(t *testing.T) {
 	}, "user", "operator", "fixture"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.execute(t, AgentActionCreateAgent, "call-taken", arguments, agentBuilderApprover); err == nil ||
+	if _, err := f.execute(t, models.AgentActionCreateAgent, "call-taken", arguments, agentBuilderApprover); err == nil ||
 		!strings.Contains(err.Error(), "already used") || !strings.Contains(err.Error(), "another name") {
 		t.Fatalf("taken name error = %v", err)
 	}
@@ -382,9 +383,9 @@ func TestAgentBuilderCreateAgentFailsWhenNameTakenWhileWaiting(t *testing.T) {
 func TestAgentBuilderCreateAgentRetriesAfterModelFailure(t *testing.T) {
 	ctx := context.Background()
 	f := newAgentBuilderDispatchFixture(t)
-	arguments := f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
+	arguments := f.resolve(t, models.AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
 	f.recorder.prepareErr = errors.New("gateway unavailable")
-	if _, err := f.execute(t, AgentActionCreateAgent, "call-retry", arguments, agentBuilderApprover); err == nil ||
+	if _, err := f.execute(t, models.AgentActionCreateAgent, "call-retry", arguments, agentBuilderApprover); err == nil ||
 		!strings.Contains(err.Error(), "gateway unavailable") {
 		t.Fatalf("first attempt error = %v", err)
 	}
@@ -396,9 +397,9 @@ func TestAgentBuilderCreateAgentRetriesAfterModelFailure(t *testing.T) {
 	if _, err := f.agents.GetDeployment(ctx, f.reference(), failedID); f.provision.created != 0 || !errors.Is(err, kernelagent.ErrDeploymentNotFound) {
 		t.Fatalf("deployment after a failed model: created %d, %v", f.provision.created, err)
 	}
-	f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
+	f.resolve(t, models.AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
 	f.recorder.prepareErr = nil
-	output, err := f.execute(t, AgentActionCreateAgent, "call-retry", arguments, agentBuilderApprover)
+	output, err := f.execute(t, models.AgentActionCreateAgent, "call-retry", arguments, agentBuilderApprover)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,11 +425,11 @@ func TestAgentBuilderCreateAgentRetriesAfterModelFailure(t *testing.T) {
 func TestAgentBuilderUpdateAgentProfileActivatesCandidate(t *testing.T) {
 	ctx := context.Background()
 	f := newAgentBuilderDispatchFixture(t)
-	arguments := f.resolve(t, AgentActionUpdateAgent, map[string]interface{}{
+	arguments := f.resolve(t, models.AgentActionUpdateAgent, map[string]interface{}{
 		"agentId": "researcher", "displayName": "Scout", "systemPrompt": "Research competitors every week.",
 		"rationale": "The person wants a weekly scout.",
 	})
-	output, err := f.execute(t, AgentActionUpdateAgent, "call-update", arguments, agentBuilderApprover)
+	output, err := f.execute(t, models.AgentActionUpdateAgent, "call-update", arguments, agentBuilderApprover)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +445,7 @@ func TestAgentBuilderUpdateAgentProfileActivatesCandidate(t *testing.T) {
 	if err != nil || definition.DisplayName != "Scout" || definition.SystemPrompt != "Research competitors every week." || definition.Purpose != "Researcher work" {
 		t.Fatalf("definition = %#v, %v", definition, err)
 	}
-	if output["resourceType"] != agentProfileResourceType || output["operation"] != AgentActionUpdateAgent ||
+	if output["resourceType"] != models.AgentProfileResourceType || output["operation"] != models.AgentActionUpdateAgent ||
 		output["deploymentId"] != "researcher" || output["displayName"] != "Scout" || output["replayed"] != false ||
 		output["amendment"] == nil || output["activation"] == nil {
 		t.Fatalf("output = %#v", output)
@@ -465,7 +466,7 @@ func TestAgentBuilderUpdateAgentProfileActivatesCandidate(t *testing.T) {
 		t.Fatalf("created = %#v", f.recorder.created)
 	}
 
-	replay, err := f.execute(t, AgentActionUpdateAgent, "call-update", arguments, agentBuilderApprover)
+	replay, err := f.execute(t, models.AgentActionUpdateAgent, "call-update", arguments, agentBuilderApprover)
 	if err != nil || replay["replayed"] != true || replay["displayName"] != "Scout" || replay["amendment"] == nil {
 		t.Fatalf("replay = %#v, %v", replay, err)
 	}
@@ -478,10 +479,10 @@ func TestAgentBuilderUpdateAgentProfileActivatesCandidate(t *testing.T) {
 func TestAgentBuilderUpdateAgentModelOnly(t *testing.T) {
 	ctx := context.Background()
 	f := newAgentBuilderDispatchFixture(t)
-	arguments := f.resolve(t, AgentActionUpdateAgent, map[string]interface{}{
+	arguments := f.resolve(t, models.AgentActionUpdateAgent, map[string]interface{}{
 		"agentId": "researcher", "model": "gpt-6-luna", "rationale": "Faster model.",
 	})
-	output, err := f.execute(t, AgentActionUpdateAgent, "call-model", arguments, agentBuilderApprover)
+	output, err := f.execute(t, models.AgentActionUpdateAgent, "call-model", arguments, agentBuilderApprover)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,10 +506,10 @@ func TestAgentBuilderUpdateAgentSkills(t *testing.T) {
 	f := newAgentBuilderDispatchFixture(t)
 	skillScope := skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}
 	bindingID := "builder:researcher:acme.notes"
-	remove := f.resolve(t, AgentActionUpdateAgent, map[string]interface{}{
+	remove := f.resolve(t, models.AgentActionUpdateAgent, map[string]interface{}{
 		"agentId": "researcher", "removeSkillBindingIds": []interface{}{bindingID}, "rationale": "Notes are not needed.",
 	})
-	output, err := f.execute(t, AgentActionUpdateAgent, "call-remove", remove, agentBuilderApprover)
+	output, err := f.execute(t, models.AgentActionUpdateAgent, "call-remove", remove, agentBuilderApprover)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +520,7 @@ func TestAgentBuilderUpdateAgentSkills(t *testing.T) {
 	if removed, _ := output["removedBindings"].([]interface{}); len(removed) != 1 {
 		t.Fatalf("removedBindings = %#v", output["removedBindings"])
 	}
-	replay, err := f.execute(t, AgentActionUpdateAgent, "call-remove", remove, agentBuilderApprover)
+	replay, err := f.execute(t, models.AgentActionUpdateAgent, "call-remove", remove, agentBuilderApprover)
 	if err != nil || replay["replayed"] != true {
 		t.Fatalf("replay = %#v, %v", replay, err)
 	}
@@ -527,14 +528,14 @@ func TestAgentBuilderUpdateAgentSkills(t *testing.T) {
 		t.Fatalf("replay changed the binding: %#v", again)
 	}
 
-	add := f.resolve(t, AgentActionUpdateAgent, map[string]interface{}{
+	add := f.resolve(t, models.AgentActionUpdateAgent, map[string]interface{}{
 		"agentId": "researcher", "rationale": "Notes again.",
 		"addSkills": []interface{}{map[string]interface{}{
 			"skillId": "acme.notes", "skillVersion": "1.0.0", "allowedActions": []interface{}{"write_note"},
 			"enablePrompt": false, "maximumRisk": "write",
 		}},
 	})
-	output, err = f.execute(t, AgentActionUpdateAgent, "call-add", add, agentBuilderApprover)
+	output, err = f.execute(t, models.AgentActionUpdateAgent, "call-add", add, agentBuilderApprover)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +546,7 @@ func TestAgentBuilderUpdateAgentSkills(t *testing.T) {
 	if bindings, _ := output["bindings"].([]interface{}); len(bindings) != 1 {
 		t.Fatalf("bindings = %#v", output["bindings"])
 	}
-	if _, err := f.execute(t, AgentActionUpdateAgent, "call-add", add, agentBuilderApprover); err != nil {
+	if _, err := f.execute(t, models.AgentActionUpdateAgent, "call-add", add, agentBuilderApprover); err != nil {
 		t.Fatal(err)
 	}
 	if again, _ := f.catalog.GetBinding(ctx, skillScope, "researcher", bindingID); again.Revision != enabled.Revision {
@@ -574,7 +575,7 @@ func TestAgentBuilderUpdateAgentRefusals(t *testing.T) {
 		"stale":   {map[string]interface{}{"agentId": "researcher", "expectedDeploymentRevision": revision("researcher") + 5, "purpose": "Other", "rationale": "x"}, "changed while the card waited"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := f.execute(t, AgentActionUpdateAgent, "call-"+name, test.arguments, agentBuilderApprover); err == nil || !strings.Contains(err.Error(), test.want) {
+			if _, err := f.execute(t, models.AgentActionUpdateAgent, "call-"+name, test.arguments, agentBuilderApprover); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error = %v, want %q", err, test.want)
 			}
 		})
@@ -582,9 +583,9 @@ func TestAgentBuilderUpdateAgentRefusals(t *testing.T) {
 	if binding, err := f.catalog.GetBinding(ctx, skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}, "researcher", "bundled:agents"); err != nil || binding.Disabled {
 		t.Fatalf("bundled binding = %#v, %v", binding, err)
 	}
-	if _, err := f.execute(t, AgentActionUpdateAgent, "call-role", map[string]interface{}{
+	if _, err := f.execute(t, models.AgentActionUpdateAgent, "call-role", map[string]interface{}{
 		"agentId": "researcher", "expectedDeploymentRevision": revision("researcher"), "purpose": "Other", "rationale": "x",
-	}, ApprovalPrincipal{Type: "role", ID: "operator"}); err == nil || !strings.Contains(err.Error(), "only by a person") {
+	}, models.ApprovalPrincipal{Type: "role", ID: "operator"}); err == nil || !strings.Contains(err.Error(), "only by a person") {
 		t.Fatalf("role approver error = %v", err)
 	}
 }
@@ -592,13 +593,13 @@ func TestAgentBuilderUpdateAgentRefusals(t *testing.T) {
 func TestAgentBuilderListAgents(t *testing.T) {
 	ctx := context.Background()
 	f := newAgentBuilderDispatchFixture(t)
-	if _, err := f.spaces.EnsureMemberHasSpace(ctx, f.scope, agentBuilderApprover.ID, SpaceMemberAgent, "researcher"); err != nil {
+	if _, err := f.spaces.EnsureMemberHasSpace(ctx, f.scope, agentBuilderApprover.ID, models.SpaceMemberAgent, "researcher"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := f.spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: f.scope, SpaceID: f.salesID, Type: SpaceMemberAgent, MemberID: "researcher"}); err != nil {
+	if _, _, err := f.spaces.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: f.scope, SpaceID: f.salesID, Type: models.SpaceMemberAgent, MemberID: "researcher"}); err != nil {
 		t.Fatal(err)
 	}
-	output, err := f.execute(t, AgentActionListAgents, "call-list", map[string]interface{}{}, agentBuilderApprover)
+	output, err := f.execute(t, models.AgentActionListAgents, "call-list", map[string]interface{}{}, agentBuilderApprover)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +621,7 @@ func TestAgentBuilderListAgents(t *testing.T) {
 		listed["researcher"]["rolloutStatus"] != "active" || len(listed["researcher"]["spaceIds"].([]interface{})) != 2 {
 		t.Fatalf("researcher = %#v", listed["researcher"])
 	}
-	filtered, err := f.execute(t, AgentActionListAgents, "call-query", map[string]interface{}{"query": "PLATFORM"}, agentBuilderApprover)
+	filtered, err := f.execute(t, models.AgentActionListAgents, "call-query", map[string]interface{}{"query": "PLATFORM"}, agentBuilderApprover)
 	if err != nil || len(filtered["agents"].([]interface{})) != 1 {
 		t.Fatalf("filtered = %#v, %v", filtered, err)
 	}
@@ -635,8 +636,8 @@ func TestAgentBuilderDispatcherPassesOtherActionsOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	other := *f.bound(t, AgentActionTryAgent)
-	other.Action.Name = AgentActionAmendBehavior
+	other := *f.bound(t, models.AgentActionTryAgent)
+	other.Action.Name = models.AgentActionAmendBehavior
 	result, err := dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{Bound: &other})
 	if err != nil || result["fallback"] != true {
 		t.Fatalf("amend_behavior = %#v, %v", result, err)
@@ -651,22 +652,22 @@ func TestAgentBuilderDispatcherPassesOtherActionsOn(t *testing.T) {
 // against the Agent's concurrency: a new chat Run is still admitted
 // (spec-openseal risk 10).
 func TestAgentBuilderParkedRunDoesNotBlockNewChatRuns(t *testing.T) {
-	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := actiontest.NewLoopStore(t, store)
 		_, approval := f.ProposeLoopApproval("create-agent", actiontest.LoopApprovalOptions{AlwaysReview: true})
 		f.ParkOn(approval.ID)
-		if f.Run.Status != AgentRunStatusWaitingForApproval {
+		if f.Run.Status != models.AgentRunStatusWaitingForApproval {
 			t.Fatalf("parked Run = %s", f.Run.Status)
 		}
-		portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return f.Now }))
-		next, err := portfolio.CreateAgentRun(f.Ctx, CreateAgentRunRequest{
-			Scope: f.Scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
-			AssignedAgentID: "agent", Goal: "Build another Agent", Source: RunSourceChat,
+		portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return f.Now }))
+		next, err := portfolio.CreateAgentRun(f.Ctx, models.CreateAgentRunRequest{
+			Scope: f.Scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
+			AssignedAgentID: "agent", Goal: "Build another Agent", Source: models.RunSourceChat,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		claimed, err := store.ClaimNextAgentRun(f.Ctx, AgentRunClaim{
+		claimed, err := store.ClaimNextAgentRun(f.Ctx, models.AgentRunClaim{
 			Scope: f.Scope, WorkerID: "chat-worker", Now: f.Now.Add(time.Second), LeaseDuration: time.Minute,
 			AgingInterval: time.Minute, AssignedAgentID: "agent", MaxActiveForAgent: 1,
 		})
@@ -681,9 +682,9 @@ func TestAgentBuilderParkedRunDoesNotBlockNewChatRuns(t *testing.T) {
 func TestAgentBuilderCreateAgentRetiresAgentOnLateFailure(t *testing.T) {
 	ctx := context.Background()
 	f := newAgentBuilderDispatchFixture(t)
-	arguments := f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
+	arguments := f.resolve(t, models.AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
 	f.provision.putErr = errors.New("space store unavailable")
-	if _, err := f.execute(t, AgentActionCreateAgent, "call-late", arguments, agentBuilderApprover); err == nil ||
+	if _, err := f.execute(t, models.AgentActionCreateAgent, "call-late", arguments, agentBuilderApprover); err == nil ||
 		!strings.Contains(err.Error(), "space store unavailable") || !strings.Contains(err.Error(), "propose create_agent again") {
 		t.Fatalf("late failure error = %v", err)
 	}
@@ -697,12 +698,12 @@ func TestAgentBuilderCreateAgentRetiresAgentOnLateFailure(t *testing.T) {
 	}
 	f.provision.putErr = nil
 	// The name is free again, and the failed call does not revive its Agent.
-	f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
-	if _, err := f.execute(t, AgentActionCreateAgent, "call-late", arguments, agentBuilderApprover); err == nil ||
+	f.resolve(t, models.AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
+	if _, err := f.execute(t, models.AgentActionCreateAgent, "call-late", arguments, agentBuilderApprover); err == nil ||
 		!strings.Contains(err.Error(), "propose create_agent again") {
 		t.Fatalf("replay of the failed call = %v", err)
 	}
-	output, err := f.execute(t, AgentActionCreateAgent, "call-again", arguments, agentBuilderApprover)
+	output, err := f.execute(t, models.AgentActionCreateAgent, "call-again", arguments, agentBuilderApprover)
 	if err != nil || output["displayName"] != "Inbox   Triage" {
 		t.Fatalf("second create = %#v, %v", output, err)
 	}
@@ -713,8 +714,8 @@ func TestAgentBuilderCreateAgentRetiresAgentOnLateFailure(t *testing.T) {
 func TestAgentBuilderCreatedAgentKeepsGrantRiskInTeams(t *testing.T) {
 	ctx := context.Background()
 	f := newAgentBuilderDispatchFixture(t)
-	arguments := f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
-	output, err := f.execute(t, AgentActionCreateAgent, "call-team-member", arguments, agentBuilderApprover)
+	arguments := f.resolve(t, models.AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
+	output, err := f.execute(t, models.AgentActionCreateAgent, "call-team-member", arguments, agentBuilderApprover)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -740,7 +741,7 @@ func TestAgentBuilderCreatedAgentKeepsGrantRiskInTeams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	memberRun := &AgentRun{Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-x"}, AssignedAgentID: deployment.ID}
+	memberRun := &models.AgentRun{Scope: f.scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-x"}, AssignedAgentID: deployment.ID}
 	teamBinding := &skill.Binding{Scope: f.reference(), DeploymentID: "team-x", SkillID: "acme.notes", SkillVersion: "1.0.0"}
 	allowsRisk := func(risk capability.RiskLevel) bool {
 		_, err := validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
@@ -764,14 +765,14 @@ func TestAgentBuilderCreatedAgentKeepsGrantRiskInTeams(t *testing.T) {
 func TestAgentBuilderUpdateAgentRaisesAuthorityForAddedSkills(t *testing.T) {
 	ctx := context.Background()
 	f := newAgentBuilderDispatchFixture(t)
-	arguments := f.resolve(t, AgentActionUpdateAgent, map[string]interface{}{
+	arguments := f.resolve(t, models.AgentActionUpdateAgent, map[string]interface{}{
 		"agentId": "researcher", "purpose": "Research and take notes.", "rationale": "Notes need writing.",
 		"addSkills": []interface{}{map[string]interface{}{
 			"skillId": "acme.notes", "skillVersion": "1.0.0", "allowedActions": []interface{}{"write_note"},
 			"enablePrompt": false, "maximumRisk": "write",
 		}},
 	})
-	output, err := f.execute(t, AgentActionUpdateAgent, "call-raise", arguments, agentBuilderApprover)
+	output, err := f.execute(t, models.AgentActionUpdateAgent, "call-raise", arguments, agentBuilderApprover)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,7 +791,7 @@ func TestAgentBuilderUpdateAgentRaisesAuthorityForAddedSkills(t *testing.T) {
 	if output["activation"] == nil || output["replayed"] != false {
 		t.Fatalf("output = %#v", output)
 	}
-	replay, err := f.execute(t, AgentActionUpdateAgent, "call-raise", arguments, agentBuilderApprover)
+	replay, err := f.execute(t, models.AgentActionUpdateAgent, "call-raise", arguments, agentBuilderApprover)
 	if err != nil || replay["replayed"] != true {
 		t.Fatalf("replay = %#v, %v", replay, err)
 	}
@@ -826,7 +827,7 @@ func (c builderTeamAuthorityCatalog) GetTeamDefinition(context.Context, string, 
 
 // newTestAgentBuilderDispatcher builds a dispatcher over its own installer.
 func newTestAgentBuilderDispatcher(
-	store KernelStore, agents *kernelagent.Registry, teams *kernelteam.Registry, catalog *skill.Catalog,
+	store models.KernelStore, agents *kernelagent.Registry, teams *kernelteam.Registry, catalog *skill.Catalog,
 	provision AgentProvisioner, host AgentBuilderHost, fallback agentrun.ActionDispatcher,
 ) (*AgentBuilderActionDispatcher, error) {
 	installer, err := NewAgentInstaller(store, agents, teams, catalog, provision, host)

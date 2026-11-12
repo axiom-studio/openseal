@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 // try_agent runs a drafted profile as a bounded child Run of the builder:
@@ -44,7 +46,7 @@ func agentTrialRunID(parentRunID, callID string) string {
 
 // tryAgent starts the trial child Run and returns at once; the parent parks
 // on the agent_trial card.
-func (d *AgentBuilderActionDispatcher) tryAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBuilderActionDispatcher) tryAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	args, err := resolveAgentTry(ctx, d.host, call.Scope, input.Arguments)
 	if err != nil {
@@ -61,7 +63,7 @@ func (d *AgentBuilderActionDispatcher) tryAgent(ctx context.Context, input agent
 
 // ensureAgentTrialRun creates the trial child of parent for callID, or
 // returns the one an earlier attempt created.
-func ensureAgentTrialRun(ctx context.Context, store PortfolioStore, parent *AgentRun, callID string, args agentTryArguments, now time.Time) (*AgentRun, error) {
+func ensureAgentTrialRun(ctx context.Context, store models.PortfolioStore, parent *models.AgentRun, callID string, args models.AgentTryArguments, now time.Time) (*models.AgentRun, error) {
 	childID := agentTrialRunID(parent.ID, callID)
 	existing, err := getAgentTrialChild(ctx, store, parent.Scope, childID)
 	if err != nil {
@@ -76,12 +78,12 @@ func ensureAgentTrialRun(ctx context.Context, store PortfolioStore, parent *Agen
 	if err != nil {
 		return nil, err
 	}
-	child, err := buildAgentRun(ctx, store, CreateAgentRunRequest{
-		Kind: RunKindAgentWork, Scope: parent.Scope, ParentRunID: parent.ID,
+	child, err := portfolio.BuildAgentRun(ctx, store, models.CreateAgentRunRequest{
+		Kind: models.RunKindAgentWork, Scope: parent.Scope, ParentRunID: parent.ID,
 		Owner: parent.Owner, AssignedAgentID: parent.AssignedAgentID, ActingUser: parent.ActingUser,
-		Goal: args.Message, Source: RunSourceHandoff, Priority: parent.Priority,
+		Goal: args.Message, Source: models.RunSourceHandoff, Priority: parent.Priority,
 		Context: map[string]interface{}{AgentTrialContextKey: trial, AgentTrialModelContextKey: args.Model},
-		Budget:  &BudgetPolicy{MaxTurns: agentTrialMaxTurns},
+		Budget:  &models.BudgetPolicy{MaxTurns: agentTrialMaxTurns},
 	}, childID, now)
 	if err != nil {
 		return nil, err
@@ -96,15 +98,15 @@ func ensureAgentTrialRun(ctx context.Context, store PortfolioStore, parent *Agen
 	return child, nil
 }
 
-func getAgentTrialChild(ctx context.Context, store PortfolioStore, scope Scope, childID string) (*AgentRun, error) {
+func getAgentTrialChild(ctx context.Context, store models.PortfolioStore, scope models.Scope, childID string) (*models.AgentRun, error) {
 	child, err := store.GetAgentRun(ctx, scope, childID)
-	if errors.Is(err, ErrRunNotFound) {
+	if errors.Is(err, models.ErrRunNotFound) {
 		return nil, nil
 	}
 	return child, err
 }
 
-func checkedAgentTrialChild(child *AgentRun, parentRunID, callID string) (*AgentRun, error) {
+func checkedAgentTrialChild(child *models.AgentRun, parentRunID, callID string) (*models.AgentRun, error) {
 	trial, ok, err := agentTrialContextForRun(child)
 	if err != nil {
 		return nil, err
@@ -129,7 +131,7 @@ func agentTrialContextMap(trial AgentTrialContext) (map[string]interface{}, erro
 
 // agentTrialContextForRun decodes a trial child's AgentTrialContext; ok is
 // false for every other Run.
-func agentTrialContextForRun(run *AgentRun) (*AgentTrialContext, bool, error) {
+func agentTrialContextForRun(run *models.AgentRun) (*AgentTrialContext, bool, error) {
 	if run == nil || run.Context == nil {
 		return nil, false, nil
 	}
@@ -154,43 +156,43 @@ func agentTrialContextForRun(run *AgentRun) (*AgentTrialContext, bool, error) {
 
 // agentTrialSessionSeed seeds a trial child's run session with the test
 // message as it is, the way a person would send it.
-func agentTrialSessionSeed(run *AgentRun) (*SessionEntry, error) {
+func agentTrialSessionSeed(run *models.AgentRun) (*models.SessionEntry, error) {
 	message := strings.TrimSpace(run.Goal)
 	if message == "" {
-		return nil, fmt.Errorf("%w: agent trial needs a message", ErrInvalidAgentRun)
+		return nil, fmt.Errorf("%w: agent trial needs a message", models.ErrInvalidAgentRun)
 	}
-	key := GoalSourceKey(run.ID)
-	return &SessionEntry{
-		ID: SessionEntryID(RunAgentSessionID(run.Scope, run.ID), key), RunID: run.ID,
-		Type: SessionEntryUser, SourceKey: key,
-		User: &UserEntry{
-			Origin:  UserEntryGoal,
-			Author:  SessionAuthor{Type: "service", ID: "agent-trial"},
-			Content: []ContentPart{{Type: ContentPartText, Text: cutUTF8(message, maximumChildBriefBytes)}},
+	key := models.GoalSourceKey(run.ID)
+	return &models.SessionEntry{
+		ID: models.SessionEntryID(models.RunAgentSessionID(run.Scope, run.ID), key), RunID: run.ID,
+		Type: models.SessionEntryUser, SourceKey: key,
+		User: &models.UserEntry{
+			Origin:  models.UserEntryGoal,
+			Author:  models.SessionAuthor{Type: "service", ID: "agent-trial"},
+			Content: []models.ContentPart{{Type: models.ContentPartText, Text: models.TruncateUTF8(message, models.MaximumChildBriefBytes)}},
 		},
 	}, nil
 }
 
 // isAgentTrialCall reports a succeeded try_agent call.
-func isAgentTrialCall(call *ActionCall) bool {
-	return call != nil && call.Status == ActionCallStatusSucceeded && call.DuplicateOfActionCallID == "" &&
-		call.SkillID == AgentManagementSkillID && call.Action == AgentActionTryAgent
+func isAgentTrialCall(call *models.ActionCall) bool {
+	return call != nil && call.Status == models.ActionCallStatusSucceeded && call.DuplicateOfActionCallID == "" &&
+		call.SkillID == models.AgentManagementSkillID && call.Action == models.AgentActionTryAgent
 }
 
-func agentTrialCallRunID(call *ActionCall) string {
+func agentTrialCallRunID(call *models.ActionCall) string {
 	id, _ := call.Output["trialRunId"].(string)
 	return strings.TrimSpace(id)
 }
 
-func agentTrialDeadline(child *AgentRun) time.Time {
+func agentTrialDeadline(child *models.AgentRun) time.Time {
 	return child.CreatedAt.UTC().Add(agentTrialTimeout)
 }
 
-func agentTrialTimedOut(childID string) AgentTrialReceipt {
-	return AgentTrialReceipt{RunID: childID, Status: AgentTrialStatusTimedOut, FailureMessage: "The draft did not answer within 5 minutes."}
+func agentTrialTimedOut(childID string) models.AgentTrialReceipt {
+	return models.AgentTrialReceipt{RunID: childID, Status: AgentTrialStatusTimedOut, FailureMessage: "The draft did not answer within 5 minutes."}
 }
 
-func agentTrialReceiptFor(callID, childID string, interventions []AgentRunIntervention) *AgentTrialReceipt {
+func agentTrialReceiptFor(callID, childID string, interventions []models.AgentRunIntervention) *models.AgentTrialReceipt {
 	for i := len(interventions) - 1; i >= 0; i-- {
 		intervention := interventions[i]
 		if intervention.ActionCallID == callID && intervention.AgentTrial != nil && intervention.AgentTrial.RunID == childID {
@@ -204,13 +206,13 @@ func agentTrialReceiptFor(callID, childID string, interventions []AgentRunInterv
 // agentTrialReceiptFromRun is the receipt of a terminal trial child. A
 // canceled child that ran to its deadline timed out; one canceled sooner was
 // stopped.
-func agentTrialReceiptFromRun(child *AgentRun, now time.Time) AgentTrialReceipt {
-	receipt := AgentTrialReceipt{RunID: child.ID}
+func agentTrialReceiptFromRun(child *models.AgentRun, now time.Time) models.AgentTrialReceipt {
+	receipt := models.AgentTrialReceipt{RunID: child.ID}
 	switch child.Status {
-	case AgentRunStatusCompleted:
+	case models.AgentRunStatusCompleted:
 		receipt.Status = AgentTrialStatusCompleted
 		receipt.Answer = forkChildAnswer(child)
-	case AgentRunStatusCanceled:
+	case models.AgentRunStatusCanceled:
 		ended := now
 		if child.CompletedAt != nil {
 			ended = *child.CompletedAt
@@ -238,7 +240,7 @@ func agentTrialReceiptFromRun(child *AgentRun, now time.Time) AgentTrialReceipt 
 }
 
 // agentTrialToolOutput is the model-facing try_agent result.
-func agentTrialToolOutput(receipt AgentTrialReceipt) map[string]interface{} {
+func agentTrialToolOutput(receipt models.AgentTrialReceipt) map[string]interface{} {
 	output := map[string]interface{}{
 		"status": receipt.Status, "reply": truncateAgentTrialText(receipt.Answer, receipt.RunID), "trialRunId": receipt.RunID,
 	}
@@ -253,13 +255,13 @@ func truncateAgentTrialText(text, runID string) string {
 		return text
 	}
 	suffix := "…[truncated; full reply is in run " + runID + "]"
-	return cutUTF8(text, agentTrialReplyBytes-len(suffix)) + suffix
+	return models.TruncateUTF8(text, agentTrialReplyBytes-len(suffix)) + suffix
 }
 
 const finalOutputReportKey = "report"
 
 // forkChildAnswer is a child's final answer: its report, else its summary.
-func forkChildAnswer(child *AgentRun) string {
+func forkChildAnswer(child *models.AgentRun) string {
 	for _, key := range []string{finalOutputReportKey, conversationrun.FinalOutputSummaryKey} {
 		if text, ok := child.Output[key].(string); ok && strings.TrimSpace(text) != "" {
 			return strings.TrimSpace(text)

@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -820,7 +821,7 @@ func TestSharedAgentUpdateReplacesYourSkillEdit(t *testing.T) {
 	}
 
 	// The adopter changed the calendar's actions instead.
-	if _, err := f.installer.grantAgentSkill(ctx, f.scope, installed.AgentID, AgentSkillGrant{
+	if _, err := f.installer.grantAgentSkill(ctx, f.scope, installed.AgentID, models.AgentSkillGrant{
 		SkillID: "acme.calendar", SkillVersion: "1.0.0", AllowedActions: []string{"list_events", "create_event"}, MaximumRisk: skill.RiskLevelWrite,
 	}, map[string]skill.CredentialReference{"google": {Kind: "oauth", ID: skill.PersonCredentialReferenceID}}, actor, "edit"); err != nil {
 		t.Fatal(err)

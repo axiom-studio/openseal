@@ -11,8 +11,10 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -31,9 +33,9 @@ type AgentBuilderActionValidator struct {
 	agents        *kernelagent.Registry
 	teams         *kernelteam.Registry
 	catalog       *skill.Catalog
-	spaces        *SpaceService
-	conversations ConversationStore
-	runs          PortfolioStore
+	spaces        *portfolio.SpaceService
+	conversations models.ConversationStore
+	runs          models.PortfolioStore
 	host          AgentBuilderHost
 }
 
@@ -45,9 +47,9 @@ func NewAgentBuilderActionValidator(
 	agents *kernelagent.Registry,
 	teams *kernelteam.Registry,
 	catalog *skill.Catalog,
-	spaces *SpaceService,
-	conversations ConversationStore,
-	runs PortfolioStore,
+	spaces *portfolio.SpaceService,
+	conversations models.ConversationStore,
+	runs models.PortfolioStore,
 	host AgentBuilderHost,
 ) (*AgentBuilderActionValidator, error) {
 	if agents == nil || teams == nil || catalog == nil || spaces == nil {
@@ -67,7 +69,7 @@ func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context
 		return nil, false, nil
 	}
 	switch input.Bound.Action.Name {
-	case AgentActionCreateAgent, AgentActionUpdateAgent:
+	case models.AgentActionCreateAgent, models.AgentActionUpdateAgent:
 	default:
 		return nil, false, nil
 	}
@@ -79,7 +81,7 @@ func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context
 		arguments = map[string]interface{}{}
 	}
 	switch input.Bound.Action.Name {
-	case AgentActionCreateAgent:
+	case models.AgentActionCreateAgent:
 		if spaceID, _ := arguments["spaceId"].(string); strings.TrimSpace(spaceID) == "" {
 			resolved, err := v.runSpaceID(ctx, input.Run)
 			if err != nil {
@@ -87,14 +89,14 @@ func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context
 			}
 			arguments["spaceId"] = resolved
 		}
-	case AgentActionUpdateAgent:
+	case models.AgentActionUpdateAgent:
 		if _, supplied := arguments["expectedDeploymentRevision"]; !supplied {
 			agentID, _ := arguments["agentId"].(string)
 			if strings.TrimSpace(agentID) != "" {
 				if err := v.authorizeAgentChange(ctx, input.Run, agentID); err != nil {
 					return nil, true, err
 				}
-				deployment, err := v.agents.GetDeployment(ctx, agentBuilderScope(input.Run.Scope), strings.TrimSpace(agentID))
+				deployment, err := v.agents.GetDeployment(ctx, models.ScopeReference(input.Run.Scope), strings.TrimSpace(agentID))
 				if err != nil {
 					return nil, true, skillbinding.AgentBuilderTargetError(agentID, err)
 				}
@@ -120,13 +122,13 @@ func (v *AgentBuilderActionValidator) ValidateActionProposal(ctx context.Context
 	}
 	scope := input.Run.Scope
 	switch input.Bound.Action.Name {
-	case AgentActionCreateAgent:
+	case models.AgentActionCreateAgent:
 		resolved, err := resolveAgentCreate(ctx, v.agents, v.teams, v.catalog, v.spaces, v.host, scope, input.Arguments)
 		if err != nil {
 			return nil, err
 		}
 		return agentCreatePreview(input.Bound, resolved)
-	case AgentActionUpdateAgent:
+	case models.AgentActionUpdateAgent:
 		// The card shows the target's current profile, so the person must
 		// be allowed to change it before anything of it is read.
 		if agentID, _ := input.Arguments["agentId"].(string); strings.TrimSpace(agentID) != builderID {
@@ -139,7 +141,7 @@ func (v *AgentBuilderActionValidator) ValidateActionProposal(ctx context.Context
 			return nil, err
 		}
 		return agentUpdatePreview(input.Bound, resolved)
-	case AgentActionTryAgent:
+	case models.AgentActionTryAgent:
 		_, err := resolveAgentTry(ctx, v.host, scope, input.Arguments)
 		return nil, err
 	}
@@ -149,7 +151,7 @@ func (v *AgentBuilderActionValidator) ValidateActionProposal(ctx context.Context
 // authorizeAgentChange asks the host whether the Run's person may change
 // agentID. A refusal reads like a missing Agent, so the card never shows an
 // Agent the person can't manage. A nil host (the OSS daemon) has one person.
-func (v *AgentBuilderActionValidator) authorizeAgentChange(ctx context.Context, run *AgentRun, agentID string) error {
+func (v *AgentBuilderActionValidator) authorizeAgentChange(ctx context.Context, run *models.AgentRun, agentID string) error {
 	agentID = strings.TrimSpace(agentID)
 	if v.host == nil || agentID == "" {
 		return nil
@@ -167,7 +169,7 @@ func (v *AgentBuilderActionValidator) authorizeAgentChange(ctx context.Context, 
 // runSpaceID is the space an Agent or Team made by the run goes to when the
 // call names none: the space of the run's chat, else the default space of
 // the person the run acts for.
-func (v *AgentBuilderActionValidator) runSpaceID(ctx context.Context, run *AgentRun) (string, error) {
+func (v *AgentBuilderActionValidator) runSpaceID(ctx context.Context, run *models.AgentRun) (string, error) {
 	if v.runs != nil && v.conversations != nil {
 		_, conversation, _, err := conversation.ConversationWorkOrigin(ctx, v.runs, v.conversations, run)
 		if err != nil {
@@ -189,7 +191,7 @@ func (v *AgentBuilderActionValidator) runSpaceID(ctx context.Context, run *Agent
 
 // resolvedAgentSkillGrant is a grant checked against its exact definition.
 type resolvedAgentSkillGrant struct {
-	grant      AgentSkillGrant
+	grant      models.AgentSkillGrant
 	definition *skill.Definition
 	// credentials are an account skill's credential references (person
 	// refs); nil for a skill that needs no account.
@@ -197,13 +199,13 @@ type resolvedAgentSkillGrant struct {
 }
 
 type resolvedAgentConnection struct {
-	request    AgentConnectionRequest
+	request    models.AgentConnectionRequest
 	definition *skill.Definition
 }
 
 type resolvedAgentCreate struct {
-	args        agentCreateArguments
-	space       *Space
+	args        models.AgentCreateArguments
+	space       *models.Space
 	skills      []resolvedAgentSkillGrant
 	connections []resolvedAgentConnection
 }
@@ -214,7 +216,7 @@ type resolvedAgentRemovedBinding struct {
 }
 
 type resolvedAgentUpdate struct {
-	args       agentUpdateArguments
+	args       models.AgentUpdateArguments
 	deployment *kernelagent.AgentDeployment
 	definition *kernelagent.AgentDefinition
 	// candidate is definition with the profile changes applied; its version
@@ -236,12 +238,12 @@ func resolveAgentCreate(
 	agents *kernelagent.Registry,
 	teams *kernelteam.Registry,
 	catalog *skill.Catalog,
-	spaces *SpaceService,
+	spaces *portfolio.SpaceService,
 	host AgentBuilderHost,
-	scope Scope,
+	scope models.Scope,
 	arguments map[string]interface{},
 ) (*resolvedAgentCreate, error) {
-	var args agentCreateArguments
+	var args models.AgentCreateArguments
 	if err := decodeAgentBuilderArguments(arguments, &args); err != nil {
 		return nil, err
 	}
@@ -251,7 +253,7 @@ func resolveAgentCreate(
 	if args.Rationale == "" {
 		return nil, errors.New("create_agent requires a rationale")
 	}
-	if err := validateAgentProfileText(args.AgentProfileArguments); err != nil {
+	if err := models.ValidateAgentProfileText(args.AgentProfileArguments); err != nil {
 		return nil, err
 	}
 	if err := ensureAgentNameAvailable(ctx, agents, teams, scope, args.DisplayName, ""); err != nil {
@@ -281,11 +283,11 @@ func resolveAgentUpdate(
 	teams *kernelteam.Registry,
 	catalog *skill.Catalog,
 	host AgentBuilderHost,
-	scope Scope,
+	scope models.Scope,
 	builderID string,
 	arguments map[string]interface{},
 ) (*resolvedAgentUpdate, error) {
-	var args agentUpdateArguments
+	var args models.AgentUpdateArguments
 	if err := decodeAgentBuilderArguments(arguments, &args); err != nil {
 		return nil, err
 	}
@@ -297,7 +299,7 @@ func resolveAgentUpdate(
 	if args.AgentID == builderID {
 		return nil, errors.New("update_agent cannot change the Agent you are; use amend_behavior for your own behavior")
 	}
-	deployment, err := agents.GetDeployment(ctx, agentBuilderScope(scope), args.AgentID)
+	deployment, err := agents.GetDeployment(ctx, models.ScopeReference(scope), args.AgentID)
 	if err != nil {
 		return nil, skillbinding.AgentBuilderTargetError(args.AgentID, err)
 	}
@@ -333,7 +335,7 @@ func resolveAgentUpdate(
 	}
 	// Only changed fields are checked, so an Agent made under older limits
 	// can still be changed in chat.
-	if err := validateAgentProfileFields(profile, fields); err != nil {
+	if err := models.ValidateAgentProfileFields(profile, fields); err != nil {
 		return nil, err
 	}
 	if err := candidate.Validate(); err != nil {
@@ -371,18 +373,18 @@ func resolveAgentUpdate(
 	}, nil
 }
 
-func resolveAgentTry(ctx context.Context, host AgentBuilderHost, scope Scope, arguments map[string]interface{}) (agentTryArguments, error) {
-	var args agentTryArguments
+func resolveAgentTry(ctx context.Context, host AgentBuilderHost, scope models.Scope, arguments map[string]interface{}) (models.AgentTryArguments, error) {
+	var args models.AgentTryArguments
 	if err := decodeAgentBuilderArguments(arguments, &args); err != nil {
 		return args, err
 	}
 	args.AgentProfileArguments = args.AgentProfileArguments.Normalized()
 	args.Message = strings.TrimSpace(args.Message)
-	if err := validateAgentProfileText(args.AgentProfileArguments); err != nil {
+	if err := models.ValidateAgentProfileText(args.AgentProfileArguments); err != nil {
 		return args, err
 	}
-	if args.Message == "" || utf8.RuneCountInString(args.Message) > maxAgentTrialMessageRunes {
-		return args, fmt.Errorf("try_agent message must contain 1 to %d characters", maxAgentTrialMessageRunes)
+	if args.Message == "" || utf8.RuneCountInString(args.Message) > models.MaxAgentTrialMessageRunes {
+		return args, fmt.Errorf("try_agent message must contain 1 to %d characters", models.MaxAgentTrialMessageRunes)
 	}
 	if err := validation.ValidateNoSensitiveInput(args.Message); err != nil {
 		return args, err
@@ -426,14 +428,14 @@ func ensureAgentNameAvailable(
 	ctx context.Context,
 	agents *kernelagent.Registry,
 	teams *kernelteam.Registry,
-	scope Scope,
+	scope models.Scope,
 	name, exceptDeploymentID string,
 ) error {
 	taken, err := takenAgentNames(ctx, agents, teams, scope, exceptDeploymentID)
 	if err != nil {
 		return err
 	}
-	if taken[normalizedAgentName(name)] {
+	if taken[models.NormalizedAgentName(name)] {
 		return agentNameTakenError{name: strings.TrimSpace(name)}
 	}
 	return nil
@@ -445,11 +447,11 @@ func takenAgentNames(
 	ctx context.Context,
 	agents *kernelagent.Registry,
 	teams *kernelteam.Registry,
-	scope Scope,
+	scope models.Scope,
 	exceptDeploymentID string,
 ) (map[string]bool, error) {
 	taken := map[string]bool{}
-	reference := agentBuilderScope(scope)
+	reference := models.ScopeReference(scope)
 	deployments, err := agents.ListDeployments(ctx, kernelagent.AgentDeploymentFilter{
 		Scope: reference, ExcludeStatuses: []kernelagent.RolloutStatus{kernelagent.RolloutRetired},
 	})
@@ -461,14 +463,14 @@ func takenAgentNames(
 			continue
 		}
 		if deployment.DisplayName != "" {
-			taken[normalizedAgentName(deployment.DisplayName)] = true
+			taken[models.NormalizedAgentName(deployment.DisplayName)] = true
 		}
 		definition, err := agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 		if err != nil {
 			return nil, err
 		}
 		if definition != nil {
-			taken[normalizedAgentName(definition.DisplayName)] = true
+			taken[models.NormalizedAgentName(definition.DisplayName)] = true
 		}
 	}
 	if teams == nil {
@@ -487,13 +489,13 @@ func takenAgentNames(
 			return nil, err
 		}
 		if definition != nil {
-			taken[normalizedAgentName(definition.DisplayName)] = true
+			taken[models.NormalizedAgentName(definition.DisplayName)] = true
 		}
 	}
 	return taken, nil
 }
 
-func resolveAgentBuilderSpace(ctx context.Context, spaces *SpaceService, scope Scope, spaceID string) (*Space, error) {
+func resolveAgentBuilderSpace(ctx context.Context, spaces *portfolio.SpaceService, scope models.Scope, spaceID string) (*models.Space, error) {
 	if spaceID == "" {
 		return nil, errors.New("create_agent requires a space")
 	}
@@ -501,7 +503,7 @@ func resolveAgentBuilderSpace(ctx context.Context, spaces *SpaceService, scope S
 		return nil, errors.New("spaces are not configured")
 	}
 	space, err := spaces.GetSpace(ctx, scope, spaceID)
-	if errors.Is(err, ErrSpaceNotFound) || err == nil && space == nil {
+	if errors.Is(err, models.ErrSpaceNotFound) || err == nil && space == nil {
 		return nil, fmt.Errorf("space %q does not exist", spaceID)
 	}
 	if err != nil {
@@ -530,9 +532,9 @@ func catalogGrantRisk(definition *skill.Definition, allowedActions []string) ski
 	return ceiling
 }
 
-func resolveAgentSkillGrants(ctx context.Context, catalog *skill.Catalog, grants []AgentSkillGrant) ([]resolvedAgentSkillGrant, error) {
-	if len(grants) > maxAgentBuilderSkillGrants {
-		return nil, fmt.Errorf("an agent can be given at most %d Skills at once", maxAgentBuilderSkillGrants)
+func resolveAgentSkillGrants(ctx context.Context, catalog *skill.Catalog, grants []models.AgentSkillGrant) ([]resolvedAgentSkillGrant, error) {
+	if len(grants) > models.MaxAgentBuilderSkillGrants {
+		return nil, fmt.Errorf("an agent can be given at most %d Skills at once", models.MaxAgentBuilderSkillGrants)
 	}
 	result := make([]resolvedAgentSkillGrant, 0, len(grants))
 	seen := map[string]bool{}
@@ -547,7 +549,7 @@ func resolveAgentSkillGrants(ctx context.Context, catalog *skill.Catalog, grants
 			return nil, fmt.Errorf("Skill %s is listed more than once", grant.SkillID)
 		}
 		seen[grant.SkillID] = true
-		if routineUngrantableSkill(grant.SkillID) {
+		if models.RoutineUngrantableSkill(grant.SkillID) {
 			return nil, fmt.Errorf("Skill %s is a built-in management Skill the workspace binds itself; leave it out", grant.SkillID)
 		}
 		if catalog == nil {
@@ -575,9 +577,9 @@ func resolveAgentSkillGrants(ctx context.Context, catalog *skill.Catalog, grants
 	return result, nil
 }
 
-func resolveAgentConnections(ctx context.Context, catalog *skill.Catalog, requests []AgentConnectionRequest) ([]resolvedAgentConnection, error) {
-	if len(requests) > maxAgentBuilderConnections {
-		return nil, fmt.Errorf("an agent can list at most %d connections", maxAgentBuilderConnections)
+func resolveAgentConnections(ctx context.Context, catalog *skill.Catalog, requests []models.AgentConnectionRequest) ([]resolvedAgentConnection, error) {
+	if len(requests) > models.MaxAgentBuilderConnections {
+		return nil, fmt.Errorf("an agent can list at most %d connections", models.MaxAgentBuilderConnections)
 	}
 	result := make([]resolvedAgentConnection, 0, len(requests))
 	seen := map[string]bool{}
@@ -608,7 +610,7 @@ func resolveAgentConnections(ctx context.Context, catalog *skill.Catalog, reques
 	return result, nil
 }
 
-func resolveAgentRemovedBindings(ctx context.Context, catalog *skill.Catalog, scope Scope, deploymentID string, bindingIDs []string) ([]resolvedAgentRemovedBinding, error) {
+func resolveAgentRemovedBindings(ctx context.Context, catalog *skill.Catalog, scope models.Scope, deploymentID string, bindingIDs []string) ([]resolvedAgentRemovedBinding, error) {
 	result := make([]resolvedAgentRemovedBinding, 0, len(bindingIDs))
 	seen := map[string]bool{}
 	for _, bindingID := range bindingIDs {
@@ -639,7 +641,7 @@ func resolveAgentRemovedBindings(ctx context.Context, catalog *skill.Catalog, sc
 	return result, nil
 }
 
-func validateAgentBuilderModel(ctx context.Context, host AgentBuilderHost, scope Scope, model string) error {
+func validateAgentBuilderModel(ctx context.Context, host AgentBuilderHost, scope models.Scope, model string) error {
 	if model == "" {
 		return nil
 	}
@@ -662,8 +664,8 @@ func decodeAgentBuilderArguments(arguments map[string]interface{}, target interf
 	return nil
 }
 
-func agentProfileFromDefinition(definition *kernelagent.AgentDefinition) agentProfileArguments {
-	return agentProfileArguments{
+func agentProfileFromDefinition(definition *kernelagent.AgentDefinition) models.AgentProfileArguments {
+	return models.AgentProfileArguments{
 		DisplayName: definition.DisplayName, Purpose: definition.Purpose, SystemPrompt: definition.SystemPrompt,
 		Personality: definition.Personality, OperatingPrinciples: append([]string(nil), definition.OperatingPrinciples...),
 	}
@@ -675,11 +677,11 @@ func agentBuilderPreviewHead(bound *skill.BoundAction) map[string]interface{} {
 	return map[string]interface{}{
 		"skillId": bound.Definition.ID, "skillVersion": bound.Definition.Version, "action": bound.Action.Name,
 		"risk": bound.Action.Risk, "sideEffect": bound.Action.SideEffect,
-		"resourceType": agentProfileResourceType, "operation": bound.Action.Name,
+		"resourceType": models.AgentProfileResourceType, "operation": bound.Action.Name,
 	}
 }
 
-func agentProfilePreview(profile agentProfileArguments, deploymentID string) map[string]interface{} {
+func agentProfilePreview(profile models.AgentProfileArguments, deploymentID string) map[string]interface{} {
 	principles := profile.OperatingPrinciples
 	if principles == nil {
 		principles = []string{}

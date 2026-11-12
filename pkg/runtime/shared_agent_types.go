@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -180,7 +181,7 @@ type SharedAgentSource struct {
 // SharedAgentInstallRequest installs a copy in the adopter's scope.
 // IdempotencyKey derives the copy's ids, so a replay returns the same Agent.
 type SharedAgentInstallRequest struct {
-	Scope               Scope              `json:"scope"`
+	Scope               models.Scope       `json:"scope"`
 	ActingUserID        string             `json:"actingUserId"`
 	IdempotencyKey      string             `json:"idempotencyKey"`
 	Source              SharedAgentSource  `json:"source"`
@@ -236,7 +237,7 @@ type SharedAgentInstallPlan struct {
 type SharedAgentInstalled struct {
 	AgentID        string                            `json:"agentId"`
 	DisplayName    string                            `json:"displayName"`
-	Space          *Space                            `json:"space"`
+	Space          *models.Space                     `json:"space"`
 	ConversationID string                            `json:"conversationId"`
 	Activation     *kernelagent.DefinitionActivation `json:"activation,omitempty"`
 	Bindings       []*skill.Binding                  `json:"bindings"`
@@ -247,7 +248,7 @@ type SharedAgentInstalled struct {
 // SharedAgentUpdateRequest moves a copy from one published version to
 // another: fields where From and To differ take To's value.
 type SharedAgentUpdateRequest struct {
-	Scope                      Scope             `json:"scope"`
+	Scope                      models.Scope      `json:"scope"`
 	DeploymentID               string            `json:"deploymentId"`
 	ActingUserID               string            `json:"actingUserId"`
 	IdempotencyKey             string            `json:"idempotencyKey,omitempty"`

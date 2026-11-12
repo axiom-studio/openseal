@@ -10,8 +10,10 @@ import (
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -26,13 +28,13 @@ type AgentProvisioner interface {
 	CreateAgentDeploymentInSpace(ctx context.Context, spaceID string, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error)
 	// EnsureAgentControlConversation returns the Agent's control
 	// conversation, creating it when it is missing. It is idempotent.
-	EnsureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment) (*Conversation, error)
+	EnsureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment) (*models.Conversation, error)
 	// CreateTeamDeploymentInSpace creates the Team as a member of the
 	// space; its Agents must already be in it.
 	CreateTeamDeploymentInSpace(ctx context.Context, spaceID string, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error)
-	ListSpaces(ctx context.Context, scope Scope) ([]*Space, error)
-	ListSpaceMembers(ctx context.Context, scope Scope, spaceID string) ([]*SpaceMember, error)
-	PutSpaceMember(ctx context.Context, request PutSpaceMemberRequest) (*SpaceMember, bool, error)
+	ListSpaces(ctx context.Context, scope models.Scope) ([]*models.Space, error)
+	ListSpaceMembers(ctx context.Context, scope models.Scope, spaceID string) ([]*models.SpaceMember, error)
+	PutSpaceMember(ctx context.Context, request portfolio.PutSpaceMemberRequest) (*models.SpaceMember, bool, error)
 }
 
 const (
@@ -74,7 +76,7 @@ func (d *AgentBuilderActionDispatcher) DispatchAction(ctx context.Context, input
 	run, err := d.store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil || run == nil {
 		if err == nil {
-			err = ErrRunNotFound
+			err = models.ErrRunNotFound
 		}
 		return nil, err
 	}
@@ -83,13 +85,13 @@ func (d *AgentBuilderActionDispatcher) DispatchAction(ctx context.Context, input
 		return nil, errors.New("agent builder action is not bound to the current Run's Agent deployment")
 	}
 	switch input.Bound.Action.Name {
-	case AgentActionListAgents:
+	case models.AgentActionListAgents:
 		return d.listAgents(ctx, input.Call.Scope, builderID, input.Arguments)
-	case AgentActionCreateAgent:
+	case models.AgentActionCreateAgent:
 		return d.createAgent(ctx, input, run)
-	case AgentActionUpdateAgent:
+	case models.AgentActionUpdateAgent:
 		return d.updateAgent(ctx, input, run)
-	case AgentActionTryAgent:
+	case models.AgentActionTryAgent:
 		return d.tryAgent(ctx, input, run)
 	case action.TeamActionCreateTeam:
 		return d.createTeam(ctx, input, run)
@@ -105,7 +107,7 @@ func isAgentBuilderDispatchedAction(bound *skill.BoundAction) bool {
 		return false
 	}
 	switch bound.Action.Name {
-	case AgentActionListAgents, AgentActionCreateAgent, AgentActionUpdateAgent, AgentActionTryAgent:
+	case models.AgentActionListAgents, models.AgentActionCreateAgent, models.AgentActionUpdateAgent, models.AgentActionTryAgent:
 		return true
 	}
 	return false
@@ -113,7 +115,7 @@ func isAgentBuilderDispatchedAction(bound *skill.BoundAction) bool {
 
 // approvedAgentBuilderCheckpoint returns the call's approval. Only a person
 // may approve an agent builder card.
-func approvedAgentBuilderCheckpoint(ctx context.Context, store ActionStore, call *ActionCall) (*ApprovalCheckpoint, error) {
+func approvedAgentBuilderCheckpoint(ctx context.Context, store models.ActionStore, call *models.ActionCall) (*models.ApprovalCheckpoint, error) {
 	if strings.TrimSpace(call.ApprovalID) == "" {
 		return nil, errors.New("agent builder changes run only after a person approves the card")
 	}
@@ -121,7 +123,7 @@ func approvedAgentBuilderCheckpoint(ctx context.Context, store ActionStore, call
 	if err != nil {
 		return nil, err
 	}
-	if approval.Status != ApprovalStatusApproved || approval.DecisionBy == nil {
+	if approval.Status != models.ApprovalStatusApproved || approval.DecisionBy == nil {
 		return nil, errors.New("agent builder changes run only after a person approves the card")
 	}
 	if approval.DecisionBy.Type != "user" || strings.TrimSpace(approval.DecisionBy.ID) == "" {
@@ -132,7 +134,7 @@ func approvedAgentBuilderCheckpoint(ctx context.Context, store ActionStore, call
 
 // agentBuilderResourceID derives a definition or deployment id from the
 // call, in the 21-character form of the existing ids.
-func agentBuilderResourceID(kind string, scope Scope, callID string) string {
+func agentBuilderResourceID(kind string, scope models.Scope, callID string) string {
 	digest := sha256.Sum256([]byte(kind + ":" + scope.Kind + ":" + scope.ID + ":" + callID))
 	return "a" + base64.RawURLEncoding.EncodeToString(digest[:])[:20]
 }
@@ -141,14 +143,14 @@ func agentBuilderBindingID(deploymentID, skillID string) string {
 	return "builder:" + deploymentID + ":" + skillID
 }
 
-func (d *AgentBuilderActionDispatcher) listAgents(ctx context.Context, scope Scope, builderID string, arguments map[string]interface{}) (map[string]interface{}, error) {
-	var args agentListArguments
+func (d *AgentBuilderActionDispatcher) listAgents(ctx context.Context, scope models.Scope, builderID string, arguments map[string]interface{}) (map[string]interface{}, error) {
+	var args models.AgentListArguments
 	if err := decodeAgentBuilderArguments(arguments, &args); err != nil {
 		return nil, err
 	}
-	query := normalizedAgentName(args.Query)
+	query := models.NormalizedAgentName(args.Query)
 	deployments, err := d.agents.ListDeployments(ctx, kernelagent.AgentDeploymentFilter{
-		Scope: agentBuilderScope(scope), ExcludeStatuses: []kernelagent.RolloutStatus{kernelagent.RolloutRetired},
+		Scope: models.ScopeReference(scope), ExcludeStatuses: []kernelagent.RolloutStatus{kernelagent.RolloutRetired},
 	})
 	if err != nil {
 		return nil, err
@@ -167,8 +169,8 @@ func (d *AgentBuilderActionDispatcher) listAgents(ctx context.Context, scope Sco
 			return nil, err
 		}
 		name := agentDeploymentDisplayName(deployment, definition)
-		if query != "" && !strings.Contains(normalizedAgentName(name), query) &&
-			!strings.Contains(normalizedAgentName(definition.Purpose), query) {
+		if query != "" && !strings.Contains(models.NormalizedAgentName(name), query) &&
+			!strings.Contains(models.NormalizedAgentName(definition.Purpose), query) {
 			continue
 		}
 		spaceIDs := memberships[deployment.ID]
@@ -185,7 +187,7 @@ func (d *AgentBuilderActionDispatcher) listAgents(ctx context.Context, scope Sco
 }
 
 // agentSpaceIDs maps each Agent deployment to the spaces it is in.
-func (d *AgentBuilderActionDispatcher) agentSpaceIDs(ctx context.Context, scope Scope) (map[string][]string, error) {
+func (d *AgentBuilderActionDispatcher) agentSpaceIDs(ctx context.Context, scope models.Scope) (map[string][]string, error) {
 	spaces, err := d.provision.ListSpaces(ctx, scope)
 	if err != nil {
 		return nil, err
@@ -200,7 +202,7 @@ func (d *AgentBuilderActionDispatcher) agentSpaceIDs(ctx context.Context, scope 
 			return nil, err
 		}
 		for _, member := range members {
-			if member != nil && member.Type == SpaceMemberAgent {
+			if member != nil && member.Type == models.SpaceMemberAgent {
 				result[member.ID] = append(result[member.ID], space.ID)
 			}
 		}
@@ -218,20 +220,20 @@ func agentDeploymentDisplayName(deployment *kernelagent.AgentDeployment, definit
 	return definition.DisplayName
 }
 
-func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	approval, err := approvedAgentBuilderCheckpoint(ctx, d.store, call)
 	if err != nil {
 		return nil, err
 	}
 	scope := call.Scope
-	var args agentCreateArguments
+	var args models.AgentCreateArguments
 	if err := decodeAgentBuilderArguments(input.Arguments, &args); err != nil {
 		return nil, err
 	}
 	args.AgentProfileArguments = args.AgentProfileArguments.Normalized()
 	args.SpaceID = strings.TrimSpace(args.SpaceID)
-	if err := validateAgentProfileText(args.AgentProfileArguments); err != nil {
+	if err := models.ValidateAgentProfileText(args.AgentProfileArguments); err != nil {
 		return nil, err
 	}
 	grants, err := resolveAgentSkillGrants(ctx, d.catalog, args.Skills)
@@ -276,7 +278,7 @@ func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input ag
 		message += fmt.Sprintf(" For each connection, call openseal.skills.request_connection with targetAgentId=%s.", deploymentID)
 	}
 	return agentBuilderJSONMap(map[string]interface{}{
-		"resourceType": agentProfileResourceType, "operation": AgentActionCreateAgent,
+		"resourceType": models.AgentProfileResourceType, "operation": models.AgentActionCreateAgent,
 		// The reviewed profile is already in the conversation; the full
 		// definition and deployment would repeat it and put the definition id
 		// first, which the model mistakes for the Agent's id.
@@ -288,17 +290,17 @@ func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input ag
 	})
 }
 
-func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
 	call := input.Call
 	approval, err := approvedAgentBuilderCheckpoint(ctx, d.store, call)
 	if err != nil {
 		return nil, err
 	}
 	scope := call.Scope
-	reference := agentBuilderScope(scope)
+	reference := models.ScopeReference(scope)
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	builderID := strings.TrimSpace(run.AssignedAgentID)
-	var args agentUpdateArguments
+	var args models.AgentUpdateArguments
 	if err := decodeAgentBuilderArguments(input.Arguments, &args); err != nil {
 		return nil, err
 	}
@@ -430,7 +432,7 @@ func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input ag
 		})
 	}
 	result := map[string]interface{}{
-		"resourceType": agentProfileResourceType, "operation": AgentActionUpdateAgent,
+		"resourceType": models.AgentProfileResourceType, "operation": models.AgentActionUpdateAgent,
 		"agentId": deployment.ID, "deploymentId": deployment.ID, "displayName": name, "replayed": replayed,
 		"bindings": bindings, "removedBindings": removedBindings,
 		"message": fmt.Sprintf("Updated %s; its agent id is %s.", name, deployment.ID),

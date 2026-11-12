@@ -11,6 +11,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -22,10 +23,10 @@ func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
 	_, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	endpoints := externalconversation.NewExternalConversationEndpointService(store, catalog)
 	endpoint, err := endpoints.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
-		ID: "channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"}, DeploymentID: "slack-agent",
+		ID: "channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"}, DeploymentID: "slack-agent",
 		Name: "Slack", Adapter: adapter, Mode: capability.ConversationEndpointChannel, Address: "C012345",
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
-		Policy:  ExternalConversationPolicy{MessageSelection: ExternalConversationSelectMentions, ReplyMode: ExternalConversationReplyThread, IgnoreBots: true}, Status: ExternalConversationEndpointActive,
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy:  models.ExternalConversationPolicy{MessageSelection: models.ExternalConversationSelectMentions, ReplyMode: models.ExternalConversationReplyThread, IgnoreBots: true}, Status: models.ExternalConversationEndpointActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +59,7 @@ func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	policy := endpoint.Policy
-	policy.MessageSelection = ExternalConversationSelectAllMessages
+	policy.MessageSelection = models.ExternalConversationSelectAllMessages
 	prepared, err := endpoints.PrepareUpdate(ctx, scope, endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision, Policy: &policy})
 	if err != nil {
 		t.Fatal(err)
@@ -88,12 +89,12 @@ func TestPostgresAgentChannelActivationIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A concurrent retirement must win even after a prepared, reviewed update.
-	retired := ExternalConversationEndpointRetired
+	retired := models.ExternalConversationEndpointRetired
 	retiredEndpoint, err := endpoints.Update(ctx, scope, endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision, Status: &retired})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := activate(); !errors.Is(err, ErrExternalConversationConflict) {
+	if err := activate(); !errors.Is(err, models.ErrExternalConversationConflict) {
 		t.Fatalf("retirement race: %v", err)
 	}
 	unchanged, _ = agents.GetDeployment(ctx, agentScope, deployment.ID)

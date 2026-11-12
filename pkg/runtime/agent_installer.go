@@ -9,6 +9,8 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -21,7 +23,7 @@ import (
 // placement, bindings, control conversation, retire-on-failure and
 // AfterAgentCreated cannot drift apart. An Engine builds one and shares it.
 type AgentInstaller struct {
-	store     KernelStore
+	store     models.KernelStore
 	agents    *kernelagent.Registry
 	teams     *kernelteam.Registry
 	catalog   *skill.Catalog
@@ -32,7 +34,7 @@ type AgentInstaller struct {
 // NewAgentInstaller builds the installer. host may be nil: model choices are
 // then refused at proposal time and nothing runs after creation.
 func NewAgentInstaller(
-	store KernelStore,
+	store models.KernelStore,
 	agents *kernelagent.Registry,
 	teams *kernelteam.Registry,
 	catalog *skill.Catalog,
@@ -49,10 +51,10 @@ func NewAgentInstaller(
 // (risk recomputed from the catalog, account skills with their credential
 // references) and MaximumRisk is the ceiling they need.
 type agentBuildInput struct {
-	Scope        Scope
+	Scope        models.Scope
 	DefinitionID string
 	DeploymentID string
-	Profile      agentProfileArguments // normalized and validated; Model "" = host default
+	Profile      models.AgentProfileArguments // normalized and validated; Model "" = host default
 	SpaceID      string
 	Grants       []resolvedAgentSkillGrant
 	MaximumRisk  capability.RiskLevel
@@ -69,9 +71,9 @@ type agentBuildResult struct {
 	deployment   *kernelagent.AgentDeployment
 	activation   *kernelagent.DefinitionActivation
 	replayed     bool
-	space        *Space
+	space        *models.Space
 	bindings     []interface{}
-	conversation *Conversation
+	conversation *models.Conversation
 }
 
 // agentBuildRetryable marks a build error a fresh attempt (new ids) can get
@@ -86,7 +88,7 @@ func (e agentBuildRetryable) Unwrap() error { return e.err }
 // exists retires it, so the reviewed name is free again.
 func (i *AgentInstaller) build(ctx context.Context, input agentBuildInput) (*agentBuildResult, error) {
 	scope := input.Scope
-	reference := agentBuilderScope(scope)
+	reference := models.ScopeReference(scope)
 	approver := strings.TrimSpace(input.Approver)
 	if approver == "" {
 		return nil, errors.New("an Agent is created only after a person approves it")
@@ -142,7 +144,7 @@ func sameDefinitionProvenance(left, right workforce.DefinitionProvenance) bool {
 
 // finishCreatedAgent places the committed Agent in the reviewed space, binds
 // the grants and returns its control conversation.
-func (i *AgentInstaller) finishCreatedAgent(ctx context.Context, scope Scope, space *Space, deployment *kernelagent.AgentDeployment, grants []resolvedAgentSkillGrant, actor skill.BindingActor, reason string) ([]interface{}, *Conversation, error) {
+func (i *AgentInstaller) finishCreatedAgent(ctx context.Context, scope models.Scope, space *models.Space, deployment *kernelagent.AgentDeployment, grants []resolvedAgentSkillGrant, actor skill.BindingActor, reason string) ([]interface{}, *models.Conversation, error) {
 	if err := i.placeAgentInSpace(ctx, scope, space, deployment.ID); err != nil {
 		return nil, nil, err
 	}
@@ -178,7 +180,7 @@ func (i *AgentInstaller) retireFailedAgent(ctx context.Context, reference capabi
 
 // createSpace resolves the reviewed space at execution. A space deleted
 // while the review waited fails the build.
-func (i *AgentInstaller) createSpace(ctx context.Context, scope Scope, spaceID string) (*Space, error) {
+func (i *AgentInstaller) createSpace(ctx context.Context, scope models.Scope, spaceID string) (*models.Space, error) {
 	if spaceID == "" {
 		return nil, errors.New("an Agent needs a space")
 	}
@@ -198,7 +200,7 @@ func (i *AgentInstaller) createSpace(ctx context.Context, scope Scope, spaceID s
 // 1.0.0 of definitionID, with maximumRisk the ceiling its reviewed grants
 // need. A definition with the same provenance Source and Reference (an
 // earlier attempt of the same build) counts as success.
-func (i *AgentInstaller) registerAgentBuilderDefinition(ctx context.Context, definitionID string, profile agentProfileArguments, maximumRisk capability.RiskLevel, provenance workforce.DefinitionProvenance) (*kernelagent.AgentDefinition, error) {
+func (i *AgentInstaller) registerAgentBuilderDefinition(ctx context.Context, definitionID string, profile models.AgentProfileArguments, maximumRisk capability.RiskLevel, provenance workforce.DefinitionProvenance) (*kernelagent.AgentDefinition, error) {
 	existing, err := i.agents.GetDefinition(ctx, definitionID, agentBuilderDefinitionVersion)
 	if err == nil && existing != nil {
 		if !sameDefinitionProvenance(existing.Provenance, provenance) {
@@ -281,9 +283,9 @@ func (i *AgentInstaller) firstAgentActivation(ctx context.Context, reference cap
 // placeAgentInSpace adds the Agent to the reviewed space. The create placed
 // it there; a replay whose create committed without the membership gets it
 // here.
-func (i *AgentInstaller) placeAgentInSpace(ctx context.Context, scope Scope, space *Space, deploymentID string) error {
-	_, _, err := i.provision.PutSpaceMember(ctx, PutSpaceMemberRequest{
-		Scope: scope, SpaceID: space.ID, Type: SpaceMemberAgent, MemberID: deploymentID,
+func (i *AgentInstaller) placeAgentInSpace(ctx context.Context, scope models.Scope, space *models.Space, deploymentID string) error {
+	_, _, err := i.provision.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{
+		Scope: scope, SpaceID: space.ID, Type: models.SpaceMemberAgent, MemberID: deploymentID,
 	})
 	return err
 }
@@ -292,7 +294,7 @@ func (i *AgentInstaller) placeAgentInSpace(ctx context.Context, scope Scope, spa
 // that already matches the grant (an earlier attempt) is returned as is.
 // credentials, when not nil, are the binding's credential references (an
 // account skill's person refs); nil keeps the current binding's.
-func (i *AgentInstaller) grantAgentSkill(ctx context.Context, scope Scope, deploymentID string, grant AgentSkillGrant, credentials map[string]skill.CredentialReference, actor skill.BindingActor, reason string) (*skill.Binding, error) {
+func (i *AgentInstaller) grantAgentSkill(ctx context.Context, scope models.Scope, deploymentID string, grant models.AgentSkillGrant, credentials map[string]skill.CredentialReference, actor skill.BindingActor, reason string) (*skill.Binding, error) {
 	reference := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	bindingID := agentBuilderBindingID(deploymentID, grant.SkillID)
 	args := skillbinding.SkillBindingUpsertArguments{

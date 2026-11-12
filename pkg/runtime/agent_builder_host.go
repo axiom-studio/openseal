@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -44,7 +45,7 @@ type AgentModelRequest struct {
 
 // AgentCreated reports an Agent a builder action created or changed.
 type AgentCreated struct {
-	Scope         Scope
+	Scope         models.Scope
 	DeploymentID  string
 	DisplayName   string
 	Purpose       string
@@ -64,9 +65,9 @@ type AgentBuilderCutoverHost interface {
 	// (current definition and bindings with the agent builder actions). It
 	// is idempotent and runs before a scope's drafts convert, whether or not
 	// the builder already exists.
-	EnsureBuilderAgent(ctx context.Context, scope Scope, requesterUserID string) error
+	EnsureBuilderAgent(ctx context.Context, scope models.Scope, requesterUserID string) error
 	// DraftModel is the model the draft was billed with; "" = default.
-	DraftModel(ctx context.Context, scope Scope, idempotencyKey string) (string, error)
+	DraftModel(ctx context.Context, scope models.Scope, idempotencyKey string) (string, error)
 	// AfterAgentBuilderCutover runs once, after the cutover table is dropped.
 	AfterAgentBuilderCutover(ctx context.Context) error
 }
@@ -82,7 +83,7 @@ const (
 // AgentTrialContext is the drafted profile a try_agent child Run speaks as.
 // Profile carries no model; the model is under AgentTrialModelContextKey.
 type AgentTrialContext struct {
-	Profile      agentProfileArguments `json:"profile"`
-	ParentRunID  string                `json:"parentRunId"`
-	ActionCallID string                `json:"actionCallId"`
+	Profile      models.AgentProfileArguments `json:"profile"`
+	ParentRunID  string                       `json:"parentRunId"`
+	ActionCallID string                       `json:"actionCallId"`
 }

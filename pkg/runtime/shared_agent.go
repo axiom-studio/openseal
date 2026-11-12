@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -53,13 +54,13 @@ const (
 
 // sharedAgentResolvedInstall is a planned install as the kernel resolved it.
 type sharedAgentResolvedInstall struct {
-	scope        Scope
+	scope        models.Scope
 	actor        string
 	key          string
 	definitionID string
 	deploymentID string
 	spaceID      string
-	profile      agentProfileArguments
+	profile      models.AgentProfileArguments
 	grants       []resolvedAgentSkillGrant
 	// account marks the grants (by skill id) that are account skills, with
 	// their credential requirements by slot.
@@ -85,12 +86,12 @@ type sharedSkill struct {
 // credentials) and per-slot provider names. Skills that keep the Agent from
 // being shared are listed as refusals. The platform assistant and copies of
 // shared agents can't be exported.
-func (i *AgentInstaller) ExportSharedAgent(ctx context.Context, scope Scope, deploymentID string) (*SharedAgentExport, error) {
+func (i *AgentInstaller) ExportSharedAgent(ctx context.Context, scope models.Scope, deploymentID string) (*SharedAgentExport, error) {
 	deploymentID = strings.TrimSpace(deploymentID)
 	if deploymentID == "" {
 		return nil, errors.New("an agent id is required")
 	}
-	reference := agentBuilderScope(scope)
+	reference := models.ScopeReference(scope)
 	deployment, err := i.agents.GetDeployment(ctx, reference, deploymentID)
 	if err != nil {
 		return nil, err
@@ -121,7 +122,7 @@ func (i *AgentInstaller) ExportSharedAgent(ctx context.Context, scope Scope, dep
 		},
 		DefinitionVersion: deployment.ActiveVersion,
 	}
-	routines, err := i.store.ListObjectives(ctx, ObjectiveFilter{Scope: scope, Owner: &ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID}})
+	routines, err := i.store.ListObjectives(ctx, models.ObjectiveFilter{Scope: scope, Owner: &models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deployment.ID}})
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +132,7 @@ func (i *AgentInstaller) ExportSharedAgent(ctx context.Context, scope Scope, dep
 		return nil, err
 	}
 	for _, binding := range bindings {
-		if binding == nil || binding.Disabled || strings.HasPrefix(binding.ID, "bundled:") || routineUngrantableSkill(binding.SkillID) {
+		if binding == nil || binding.Disabled || strings.HasPrefix(binding.ID, "bundled:") || models.RoutineUngrantableSkill(binding.SkillID) {
 			continue
 		}
 		shared, refusal, err := i.exportSharedSkill(ctx, binding)
@@ -233,7 +234,7 @@ func (i *AgentInstaller) PlanSharedAgentInstall(ctx context.Context, request Sha
 		}
 	}
 	profile := sharedAgentProfileArguments(request.Profile)
-	if err := validateAgentProfileText(profile); err != nil {
+	if err := models.ValidateAgentProfileText(profile); err != nil {
 		return nil, err
 	}
 	plan := &SharedAgentInstallPlan{Request: request, Skills: []SharedAgentPlannedSkill{}, Slots: []SharedAgentPlannedSlot{}, Bindings: []*skill.Binding{}}
@@ -341,12 +342,12 @@ func (i *AgentInstaller) InstallSharedAgent(ctx context.Context, plan *SharedAge
 // RetireSharedAgentInstall retires a copy whose install the host could not
 // finish (links, apps), so its name is free again. Only a copy can be
 // retired this way; a retired copy is done.
-func (i *AgentInstaller) RetireSharedAgentInstall(ctx context.Context, scope Scope, deploymentID, actor string) error {
+func (i *AgentInstaller) RetireSharedAgentInstall(ctx context.Context, scope models.Scope, deploymentID, actor string) error {
 	deploymentID, actor = strings.TrimSpace(deploymentID), strings.TrimSpace(actor)
 	if deploymentID == "" || actor == "" {
 		return errors.New("retiring a shared agent install needs the agent and the acting person")
 	}
-	reference := agentBuilderScope(scope)
+	reference := models.ScopeReference(scope)
 	current, err := i.agents.GetDeployment(ctx, reference, deploymentID)
 	if err != nil {
 		return err
@@ -409,7 +410,7 @@ func (i *AgentInstaller) ApplySharedAgentUpdate(ctx context.Context, request Sha
 		return nil, errors.New("a shared agent update needs its share and version")
 	}
 	scope := request.Scope
-	reference := agentBuilderScope(scope)
+	reference := models.ScopeReference(scope)
 	actor := skill.BindingActor{Type: "user", ID: request.ActingUserID}
 	callRef := sharedAgentUpdatePrefix + request.IdempotencyKey
 	current, err := i.agents.GetDeployment(ctx, reference, strings.TrimSpace(request.DeploymentID))
@@ -448,7 +449,7 @@ func (i *AgentInstaller) ApplySharedAgentUpdate(ctx context.Context, request Sha
 // replaySharedAgentUpdate finishes an update whose version is already
 // active: the bindings are granted and disabled again (both idempotent).
 func (i *AgentInstaller) replaySharedAgentUpdate(ctx context.Context, request SharedAgentUpdateRequest, deployment *kernelagent.AgentDeployment, actor skill.BindingActor) (*SharedAgentUpdated, error) {
-	reference := agentBuilderScope(request.Scope)
+	reference := models.ScopeReference(request.Scope)
 	activation, err := i.agentActivationTo(ctx, reference, deployment.ID, deployment.ActiveVersion)
 	if err != nil {
 		return nil, err
@@ -465,7 +466,7 @@ func (i *AgentInstaller) replaySharedAgentUpdate(ctx context.Context, request Sh
 
 func (i *AgentInstaller) finishSharedAgentUpdate(
 	ctx context.Context,
-	scope Scope,
+	scope models.Scope,
 	deployment *kernelagent.AgentDeployment,
 	activation *kernelagent.DefinitionActivation,
 	grants []resolvedAgentSkillGrant,
@@ -530,7 +531,7 @@ func (i *AgentInstaller) finishSharedAgentUpdate(
 
 func (i *AgentInstaller) planSharedAgentUpdate(ctx context.Context, request SharedAgentUpdateRequest) (*sharedAgentUpdatePlan, error) {
 	scope := request.Scope
-	reference := agentBuilderScope(scope)
+	reference := models.ScopeReference(scope)
 	deployment, err := i.agents.GetDeployment(ctx, reference, strings.TrimSpace(request.DeploymentID))
 	if err != nil {
 		return nil, err
@@ -546,7 +547,7 @@ func (i *AgentInstaller) planSharedAgentUpdate(ctx context.Context, request Shar
 		return nil, ErrSharedAgentNotCopy
 	}
 	from, to := sharedAgentProfileArguments(request.From.Profile), sharedAgentProfileArguments(request.To.Profile)
-	if err := validateAgentProfileText(to); err != nil {
+	if err := models.ValidateAgentProfileText(to); err != nil {
 		return nil, err
 	}
 	preview := &SharedAgentUpdatePreview{
@@ -667,7 +668,7 @@ type sharedAgentSkillDiff struct {
 // ceiling is recomputed over the copy's resulting enabled non-bundled
 // bindings, each at its catalog risk. A granted skill whose copy binding the
 // adopter turned off or changed away from From replaces their edit.
-func (i *AgentInstaller) resolveSharedAgentSkillDiff(ctx context.Context, scope Scope, deploymentID string, from, to SharedAgentSpec) (*sharedAgentSkillDiff, error) {
+func (i *AgentInstaller) resolveSharedAgentSkillDiff(ctx context.Context, scope models.Scope, deploymentID string, from, to SharedAgentSpec) (*sharedAgentSkillDiff, error) {
 	diff := &sharedAgentSkillDiff{
 		changes: []SharedAgentChange{}, newSlots: []SharedAgentPlannedSlot{}, unavailableSkills: []SharedAgentPlannedSkill{},
 		account: map[string]map[string]skill.CredentialRequirement{}, risks: map[string]capability.RiskLevel{},
@@ -816,7 +817,7 @@ func sharedAgentBindingMatches(binding *skill.Binding, value SharedAgentSkill) b
 	return strings.TrimSpace(binding.SkillVersion) == strings.TrimSpace(value.SkillVersion) &&
 		strings.TrimSpace(binding.SourceIdentity) == strings.TrimSpace(value.SourceIdentity) &&
 		binding.EnablePrompt == value.EnablePrompt &&
-		equalStrings(sortedStrings(normalizedActionStrings(binding.AllowedActions)), sortedStrings(normalizedActionStrings(value.AllowedActions)))
+		equalStrings(sortedStrings(models.TrimmedUniqueStrings(binding.AllowedActions)), sortedStrings(models.TrimmedUniqueStrings(value.AllowedActions)))
 }
 
 func sharedAgentSkillHasSlot(value SharedAgentSkill, slot string) bool {
@@ -832,8 +833,8 @@ func sharedAgentSkillHasSlot(value SharedAgentSkill, slot string) bool {
 // catalog. A skill that does not resolve exactly is unavailable, never
 // dropped. Only catalog failures are errors.
 func (i *AgentInstaller) resolveSharedSkills(ctx context.Context, grants, accountSkills []SharedAgentSkill) ([]sharedSkill, error) {
-	if len(grants)+len(accountSkills) > maxAgentBuilderSkillGrants {
-		return nil, fmt.Errorf("an agent can be given at most %d Skills at once", maxAgentBuilderSkillGrants)
+	if len(grants)+len(accountSkills) > models.MaxAgentBuilderSkillGrants {
+		return nil, fmt.Errorf("an agent can be given at most %d Skills at once", models.MaxAgentBuilderSkillGrants)
 	}
 	result := make([]sharedSkill, 0, len(grants)+len(accountSkills))
 	seen := map[string]bool{}
@@ -873,12 +874,12 @@ func (i *AgentInstaller) resolveSharedSkill(ctx context.Context, value SharedAge
 	value.SkillID = strings.TrimSpace(value.SkillID)
 	value.SkillVersion = strings.TrimSpace(value.SkillVersion)
 	value.SourceIdentity = strings.TrimSpace(value.SourceIdentity)
-	value.AllowedActions = normalizedActionStrings(value.AllowedActions)
+	value.AllowedActions = models.TrimmedUniqueStrings(value.AllowedActions)
 	resolved := sharedSkill{spec: value, account: account, name: strings.TrimSpace(value.Name)}
 	if resolved.name == "" {
 		resolved.name = value.SkillID
 	}
-	if routineUngrantableSkill(value.SkillID) || value.SkillID == sharedAgentMCPSkillID || value.SkillID == sharedAgentExternalConversationSkillID {
+	if models.RoutineUngrantableSkill(value.SkillID) || value.SkillID == sharedAgentMCPSkillID || value.SkillID == sharedAgentExternalConversationSkillID {
 		return resolved, nil
 	}
 	definition, err := sharedSkillDefinition(ctx, i.catalog, value.SkillID, value.SkillVersion, value.SourceIdentity)
@@ -889,7 +890,7 @@ func (i *AgentInstaller) resolveSharedSkill(ctx context.Context, value SharedAge
 	if definition.Name != "" {
 		resolved.name = definition.Name
 	}
-	grant := AgentSkillGrant{
+	grant := models.AgentSkillGrant{
 		SkillID: value.SkillID, SkillVersion: value.SkillVersion, SourceIdentity: value.SourceIdentity,
 		AllowedActions: value.AllowedActions, EnablePrompt: value.EnablePrompt,
 		MaximumRisk: catalogGrantRisk(definition, value.AllowedActions),
@@ -965,7 +966,7 @@ func sharedAgentPlanCredentials(resolved *sharedAgentResolvedInstall, bindings [
 // sharedAgentBindings reads back the copy's bindings for grants and lists
 // the account slots still on the person ref: the host links each to the
 // adopter's own sign-in or shows a connect card for it.
-func (i *AgentInstaller) sharedAgentBindings(ctx context.Context, scope Scope, deploymentID string, grants []resolvedAgentSkillGrant, account map[string]map[string]skill.CredentialRequirement) ([]*skill.Binding, []SharedAgentPlannedSlot, error) {
+func (i *AgentInstaller) sharedAgentBindings(ctx context.Context, scope models.Scope, deploymentID string, grants []resolvedAgentSkillGrant, account map[string]map[string]skill.CredentialRequirement) ([]*skill.Binding, []SharedAgentPlannedSlot, error) {
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	bindings := make([]*skill.Binding, 0, len(grants))
 	unconnected := []SharedAgentPlannedSlot{}
@@ -993,9 +994,9 @@ func (i *AgentInstaller) sharedAgentBindings(ctx context.Context, scope Scope, d
 
 // sharedAgentName is the copy's name. A requested name must be free; without
 // one the shared name is used, or "X 2", "X 3"… when it is taken.
-func (i *AgentInstaller) sharedAgentName(ctx context.Context, scope Scope, shared, requested, exceptDeploymentID string) (string, error) {
+func (i *AgentInstaller) sharedAgentName(ctx context.Context, scope models.Scope, shared, requested, exceptDeploymentID string) (string, error) {
 	if requested != "" {
-		if err := validateAgentDisplayName(requested); err != nil {
+		if err := models.ValidateAgentDisplayName(requested); err != nil {
 			return "", err
 		}
 		if err := ensureAgentNameAvailable(ctx, i.agents, i.teams, scope, requested, exceptDeploymentID); err != nil {
@@ -1007,18 +1008,18 @@ func (i *AgentInstaller) sharedAgentName(ctx context.Context, scope Scope, share
 	if err != nil {
 		return "", err
 	}
-	if !taken[normalizedAgentName(shared)] {
+	if !taken[models.NormalizedAgentName(shared)] {
 		return shared, nil
 	}
 	for suffix := 2; suffix <= maxSharedAgentNameSuffix; suffix++ {
 		tail := " " + strconv.Itoa(suffix)
 		base := shared
-		if overflow := utf8.RuneCountInString(base) + len(tail) - maxAgentDisplayNameRunes; overflow > 0 {
+		if overflow := utf8.RuneCountInString(base) + len(tail) - models.MaxAgentDisplayNameRunes; overflow > 0 {
 			runes := []rune(base)
 			base = strings.TrimSpace(string(runes[:len(runes)-overflow]))
 		}
 		candidate := base + tail
-		if !taken[normalizedAgentName(candidate)] {
+		if !taken[models.NormalizedAgentName(candidate)] {
 			return candidate, nil
 		}
 	}
@@ -1028,11 +1029,11 @@ func (i *AgentInstaller) sharedAgentName(ctx context.Context, scope Scope, share
 // sharedAgentNameMatches reports whether current is the shared name or a
 // collision variant of it ("X 2"), which is not an edit.
 func sharedAgentNameMatches(current, shared string) bool {
-	if normalizedAgentName(current) == normalizedAgentName(shared) {
+	if models.NormalizedAgentName(current) == models.NormalizedAgentName(shared) {
 		return true
 	}
-	prefix := normalizedAgentName(shared) + " "
-	rest, ok := strings.CutPrefix(normalizedAgentName(current), prefix)
+	prefix := models.NormalizedAgentName(shared) + " "
+	rest, ok := strings.CutPrefix(models.NormalizedAgentName(current), prefix)
 	if !ok {
 		return false
 	}
@@ -1040,8 +1041,8 @@ func sharedAgentNameMatches(current, shared string) bool {
 	return err == nil && number >= 2 && number <= maxSharedAgentNameSuffix
 }
 
-func sharedAgentProfileArguments(profile SharedAgentProfile) agentProfileArguments {
-	return agentProfileArguments{
+func sharedAgentProfileArguments(profile SharedAgentProfile) models.AgentProfileArguments {
+	return models.AgentProfileArguments{
 		DisplayName: profile.DisplayName, Purpose: profile.Purpose, SystemPrompt: profile.SystemPrompt,
 		Personality: profile.Personality, OperatingPrinciples: profile.OperatingPrinciples,
 	}.Normalized()
@@ -1059,7 +1060,7 @@ func sharedAgentPlannedSlot(shared sharedSkill, slot, bindingID string) SharedAg
 	return planned
 }
 
-func sharedSkillBindingArguments(bindingID string, grant AgentSkillGrant) skillbinding.SkillBindingUpsertArguments {
+func sharedSkillBindingArguments(bindingID string, grant models.AgentSkillGrant) skillbinding.SkillBindingUpsertArguments {
 	return skillbinding.SkillBindingUpsertArguments{
 		BindingID: bindingID, SkillID: grant.SkillID, SkillVersion: grant.SkillVersion, SourceIdentity: grant.SourceIdentity,
 		AllowedActions: grant.AllowedActions, EnablePrompt: grant.EnablePrompt, MaximumRisk: grant.MaximumRisk,

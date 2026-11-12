@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
@@ -52,12 +53,12 @@ type agentChannelActionArguments struct {
 type AgentBehaviorActionValidator struct {
 	agents    *kernelagent.Registry
 	endpoints *externalconversation.ExternalConversationEndpointService
-	teams     TeamRosterReader
+	teams     models.TeamRosterReader
 }
 
 // SetTeamRoster gives the validator the Team catalog that proves a Team
 // member is still on its chat's roster.
-func (v *AgentBehaviorActionValidator) SetTeamRoster(teams TeamRosterReader) {
+func (v *AgentBehaviorActionValidator) SetTeamRoster(teams models.TeamRosterReader) {
 	if v != nil {
 		v.teams = teams
 	}
@@ -105,7 +106,7 @@ func (v *AgentBehaviorActionValidator) ResolveActionProposalArguments(ctx contex
 		if endpointErr != nil {
 			return nil, true, endpointErr
 		}
-		if endpoint.DeploymentID != deploymentID || endpoint.Owner.Type != OwnerTypeAgent || endpoint.Owner.ID != deploymentID {
+		if endpoint.DeploymentID != deploymentID || endpoint.Owner.Type != models.OwnerTypeAgent || endpoint.Owner.ID != deploymentID {
 			return nil, true, errors.New("agent channel endpoint is not owned by the current Agent")
 		}
 		if _, supplied := arguments["expectedEndpointRevision"]; !supplied {
@@ -138,7 +139,7 @@ func (v *AgentBehaviorActionValidator) ValidateActionProposal(ctx context.Contex
 			return nil, channelErr
 		}
 		return map[string]interface{}{
-			"resourceType": agentBehaviorResourceType, "operation": AgentActionConfigureChannel,
+			"resourceType": models.AgentBehaviorResourceType, "operation": models.AgentActionConfigureChannel,
 			"deploymentId": deployment.ID, "definitionId": definition.ID, "baseVersion": definition.Version,
 			"endpointId": endpoint.ID, "expectedEndpointRevision": endpoint.Revision,
 			"current": agentChannelCurrentValues(definition, endpoint), "changes": changes,
@@ -150,7 +151,7 @@ func (v *AgentBehaviorActionValidator) ValidateActionProposal(ctx context.Contex
 		return nil, err
 	}
 	return map[string]interface{}{
-		"resourceType": agentBehaviorResourceType, "operation": AgentActionAmendBehavior,
+		"resourceType": models.AgentBehaviorResourceType, "operation": models.AgentActionAmendBehavior,
 		"deploymentId": deployment.ID, "definitionId": definition.ID, "baseVersion": definition.Version,
 		"expectedDeploymentRevision": deployment.Revision,
 		"current":                    agentBehaviorCurrentValues(definition, changes),
@@ -161,13 +162,13 @@ func (v *AgentBehaviorActionValidator) ValidateActionProposal(ctx context.Contex
 // AgentBehaviorActionDispatcher materializes an approved proposal through the
 // canonical immutable Agent amendment and activation lifecycle.
 type AgentBehaviorActionDispatcher struct {
-	store     KernelStore
+	store     models.KernelStore
 	agents    *kernelagent.Registry
 	endpoints *externalconversation.ExternalConversationEndpointService
 	fallback  agentrun.ActionDispatcher
 }
 
-func NewAgentBehaviorActionDispatcher(store KernelStore, agents *kernelagent.Registry, fallback agentrun.ActionDispatcher, endpoints ...*externalconversation.ExternalConversationEndpointService) (*AgentBehaviorActionDispatcher, error) {
+func NewAgentBehaviorActionDispatcher(store models.KernelStore, agents *kernelagent.Registry, fallback agentrun.ActionDispatcher, endpoints ...*externalconversation.ExternalConversationEndpointService) (*AgentBehaviorActionDispatcher, error) {
 	if store == nil || agents == nil {
 		return nil, errors.New("kernel store and agent registry are required")
 	}
@@ -179,7 +180,7 @@ func NewAgentBehaviorActionDispatcher(store KernelStore, agents *kernelagent.Reg
 }
 
 func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
-	if !isAgentManagementAction(input.Bound) {
+	if !models.IsAgentManagementAction(input.Bound) {
 		if d == nil || d.fallback == nil {
 			return nil, errors.New("action dispatcher does not support this action")
 		}
@@ -191,7 +192,7 @@ func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, inpu
 	run, err := d.store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil || run == nil {
 		if err == nil {
-			err = ErrRunNotFound
+			err = models.ErrRunNotFound
 		}
 		return nil, err
 	}
@@ -203,7 +204,7 @@ func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, inpu
 		return nil, errors.New("agent behavior action cannot target another Agent deployment")
 	}
 	// The roster can change while a proposal waits for approval.
-	if err := agentBehaviorRunOnRoster(ctx, teamRosterReader(d.store), run); err != nil {
+	if err := agentBehaviorRunOnRoster(ctx, models.TeamRosterReaderOf(d.store), run); err != nil {
 		return nil, err
 	}
 	if isAgentListChannelsAction(input.Bound) {
@@ -246,13 +247,13 @@ func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, inpu
 // call's candidate version. Without an approval, proposerID is the actor.
 func activateAgentAmendment(
 	ctx context.Context,
-	store ActionStore,
+	store models.ActionStore,
 	agents *kernelagent.Registry,
-	scope Scope,
+	scope models.Scope,
 	deployment *kernelagent.AgentDeployment,
 	definition, candidate *kernelagent.AgentDefinition,
 	changes map[string]interface{},
-	call *ActionCall,
+	call *models.ActionCall,
 	proposerID, rationale, reason string,
 ) (*kernelagent.DefinitionAmendment, *kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
 	scopeReference := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
@@ -319,7 +320,7 @@ func activateAgentAmendment(
 	return agents.ActivateAmendment(ctx, scopeReference, amendment.ID, amendment.Revision, actorType, actorID, reason)
 }
 
-func (d *AgentBehaviorActionDispatcher) listChannels(ctx context.Context, scope Scope, deploymentID string) (map[string]interface{}, error) {
+func (d *AgentBehaviorActionDispatcher) listChannels(ctx context.Context, scope models.Scope, deploymentID string) (map[string]interface{}, error) {
 	if d.endpoints == nil {
 		return nil, errors.New("agent channel management is not configured")
 	}
@@ -331,8 +332,8 @@ func (d *AgentBehaviorActionDispatcher) listChannels(ctx context.Context, scope 
 	if err != nil {
 		return nil, err
 	}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}
-	endpoints, err := d.endpoints.List(ctx, ExternalConversationEndpointFilter{Scope: scope, Owner: &owner, Limit: 500})
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}
+	endpoints, err := d.endpoints.List(ctx, models.ExternalConversationEndpointFilter{Scope: scope, Owner: &owner, Limit: 500})
 	if err != nil {
 		return nil, err
 	}
@@ -346,9 +347,9 @@ func (d *AgentBehaviorActionDispatcher) listChannels(ctx context.Context, scope 
 			"mode": endpoint.Mode, "address": endpoint.Address, "status": endpoint.Status,
 			"revision": endpoint.Revision, "ingressRoute": endpoint.IngressRoute,
 			"adapter": endpoint.Adapter, "handler": endpoint.Handler, "policy": endpoint.Policy,
-			"configurable": endpoint.Status != ExternalConversationEndpointRetired,
+			"configurable": endpoint.Status != models.ExternalConversationEndpointRetired,
 		}
-		if endpoint.Status == ExternalConversationEndpointRetired {
+		if endpoint.Status == models.ExternalConversationEndpointRetired {
 			channel["configurationBlocker"] = "This channel is retired and cannot be configured or reactivated. Use an active or paused channel."
 		}
 		if route := findAgentChannelRoute(definition, endpoint.ID); route != nil {
@@ -359,7 +360,7 @@ func (d *AgentBehaviorActionDispatcher) listChannels(ctx context.Context, scope 
 	return map[string]interface{}{"resourceType": "agent_channels", "channels": channels}, nil
 }
 
-func (d *AgentBehaviorActionDispatcher) configureChannel(ctx context.Context, input agentrun.ActionDispatchInput, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBehaviorActionDispatcher) configureChannel(ctx context.Context, input agentrun.ActionDispatchInput, run *models.AgentRun) (map[string]interface{}, error) {
 	args, deployment, definition, endpoint, candidate, changes, err := resolveAgentChannelAction(ctx, d.agents, d.endpoints, run, input.Arguments)
 	if errors.Is(err, kernelagent.ErrRevisionConflict) {
 		return d.replayedChannelResult(ctx, input.Call, run)
@@ -460,7 +461,7 @@ func agentDefinitionAmendmentField(change string) string {
 	return change
 }
 
-func (d *AgentBehaviorActionDispatcher) convergeChannelEndpoint(ctx context.Context, endpoint *ExternalConversationEndpoint, definition *kernelagent.AgentDefinition, args agentChannelActionArguments) (*ExternalConversationEndpoint, error) {
+func (d *AgentBehaviorActionDispatcher) convergeChannelEndpoint(ctx context.Context, endpoint *models.ExternalConversationEndpoint, definition *kernelagent.AgentDefinition, args agentChannelActionArguments) (*models.ExternalConversationEndpoint, error) {
 	request, err := agentChannelEndpointUpdate(endpoint, definition, args)
 	if err != nil {
 		return nil, err
@@ -471,20 +472,20 @@ func (d *AgentBehaviorActionDispatcher) convergeChannelEndpoint(ctx context.Cont
 	return d.endpoints.Update(ctx, endpoint.Scope, endpoint.ID, request)
 }
 
-func agentChannelEndpointUpdate(endpoint *ExternalConversationEndpoint, definition *kernelagent.AgentDefinition, args agentChannelActionArguments) (externalconversation.UpdateExternalConversationEndpointRequest, error) {
+func agentChannelEndpointUpdate(endpoint *models.ExternalConversationEndpoint, definition *kernelagent.AgentDefinition, args agentChannelActionArguments) (externalconversation.UpdateExternalConversationEndpointRequest, error) {
 	request := externalconversation.UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision}
 	route := findAgentChannelRoute(definition, endpoint.ID)
 	if route == nil {
 		return request, errors.New("Agent definition does not contain the channel route")
 	}
-	handler := ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: endpoint.DeploymentID}
-	policy := ExternalConversationPolicy{
-		MessageSelection: ExternalConversationMessageSelection(route.MessageSelection),
-		ReplyMode:        ExternalConversationReplyMode(route.ReplyMode), IgnoreBots: route.IgnoreBots,
+	handler := models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: endpoint.DeploymentID}
+	policy := models.ExternalConversationPolicy{
+		MessageSelection: models.ExternalConversationMessageSelection(route.MessageSelection),
+		ReplyMode:        models.ExternalConversationReplyMode(route.ReplyMode), IgnoreBots: route.IgnoreBots,
 	}
 	status := endpoint.Status
 	if args.Status != nil {
-		status = ExternalConversationEndpointStatus(strings.TrimSpace(*args.Status))
+		status = models.ExternalConversationEndpointStatus(strings.TrimSpace(*args.Status))
 	}
 	if endpoint.Handler != handler {
 		request.Handler = &handler
@@ -501,7 +502,7 @@ func agentChannelEndpointUpdate(endpoint *ExternalConversationEndpoint, definiti
 func resolveAgentBehaviorAction(
 	ctx context.Context,
 	agents *kernelagent.Registry,
-	run *AgentRun,
+	run *models.AgentRun,
 	arguments map[string]interface{},
 ) (agentBehaviorActionArguments, *kernelagent.AgentDeployment, *kernelagent.AgentDefinition, map[string]interface{}, error) {
 	var args agentBehaviorActionArguments
@@ -546,9 +547,9 @@ func resolveAgentChannelAction(
 	ctx context.Context,
 	agents *kernelagent.Registry,
 	endpoints *externalconversation.ExternalConversationEndpointService,
-	run *AgentRun,
+	run *models.AgentRun,
 	arguments map[string]interface{},
-) (agentChannelActionArguments, *kernelagent.AgentDeployment, *kernelagent.AgentDefinition, *ExternalConversationEndpoint, *kernelagent.AgentDefinition, map[string]interface{}, error) {
+) (agentChannelActionArguments, *kernelagent.AgentDeployment, *kernelagent.AgentDefinition, *models.ExternalConversationEndpoint, *kernelagent.AgentDefinition, map[string]interface{}, error) {
 	var args agentChannelActionArguments
 	arguments, err := withoutRemovedChannelTrigger(arguments)
 	if err != nil {
@@ -585,13 +586,13 @@ func resolveAgentChannelAction(
 		return args, nil, nil, nil, nil, nil, err
 	}
 	if endpoint.Revision != args.ExpectedEndpointRevision {
-		return args, nil, nil, nil, nil, nil, ErrExternalConversationConflict
+		return args, nil, nil, nil, nil, nil, models.ErrExternalConversationConflict
 	}
-	if endpoint.DeploymentID != deploymentID || endpoint.Owner.Type != OwnerTypeAgent || endpoint.Owner.ID != deploymentID {
+	if endpoint.DeploymentID != deploymentID || endpoint.Owner.Type != models.OwnerTypeAgent || endpoint.Owner.ID != deploymentID {
 		return args, nil, nil, nil, nil, nil, errors.New("agent channel endpoint is not owned by the current Agent")
 	}
-	if endpoint.Status == ExternalConversationEndpointRetired {
-		return args, nil, nil, nil, nil, nil, fmt.Errorf("%w: retired channels cannot be configured or reactivated; use an active or paused channel", ErrInvalidExternalConversation)
+	if endpoint.Status == models.ExternalConversationEndpointRetired {
+		return args, nil, nil, nil, nil, nil, fmt.Errorf("%w: retired channels cannot be configured or reactivated; use an active or paused channel", models.ErrInvalidExternalConversation)
 	}
 	candidate := cloneAgentDefinitionForAction(definition)
 	route := findAgentChannelRoute(candidate, endpoint.ID)
@@ -613,12 +614,12 @@ func resolveAgentChannelAction(
 		route.IgnoreBots = *args.IgnoreBots
 	}
 	if args.Purposes != nil {
-		route.Purposes = normalizedActionStrings(*args.Purposes)
+		route.Purposes = models.TrimmedUniqueStrings(*args.Purposes)
 	}
 	syncAgentApprovalDestination(candidate, endpoint.ID, hasExactAgentActionString(route.Purposes, "approvals"))
 	if args.Status != nil {
-		status := ExternalConversationEndpointStatus(strings.TrimSpace(*args.Status))
-		if status != ExternalConversationEndpointActive && status != ExternalConversationEndpointPaused {
+		status := models.ExternalConversationEndpointStatus(strings.TrimSpace(*args.Status))
+		if status != models.ExternalConversationEndpointActive && status != models.ExternalConversationEndpointPaused {
 			return args, nil, nil, nil, nil, nil, errors.New("agent channel status must be active or paused")
 		}
 	}
@@ -639,7 +640,7 @@ func resolveAgentChannelAction(
 	if !equalJSON(definition.Authority.ApprovalDestinations, candidate.Authority.ApprovalDestinations) {
 		changes["authority.approvalDestinations"] = append([]kernelagent.ApprovalDestination(nil), candidate.Authority.ApprovalDestinations...)
 	}
-	if args.Status != nil && endpoint.Status != ExternalConversationEndpointStatus(strings.TrimSpace(*args.Status)) {
+	if args.Status != nil && endpoint.Status != models.ExternalConversationEndpointStatus(strings.TrimSpace(*args.Status)) {
 		changes["channelStatus"] = strings.TrimSpace(*args.Status)
 	}
 	if len(changes) == 0 {
@@ -702,7 +703,7 @@ func syncAgentApprovalDestination(definition *kernelagent.AgentDefinition, endpo
 	definition.Authority.ApprovalDestinations = destinations
 }
 
-func agentChannelCurrentValues(definition *kernelagent.AgentDefinition, endpoint *ExternalConversationEndpoint) map[string]interface{} {
+func agentChannelCurrentValues(definition *kernelagent.AgentDefinition, endpoint *models.ExternalConversationEndpoint) map[string]interface{} {
 	current := map[string]interface{}{
 		"endpointId": endpoint.ID, "status": endpoint.Status, "handler": endpoint.Handler, "policy": endpoint.Policy,
 	}
@@ -730,7 +731,7 @@ func hasExactAgentActionString(values []string, expected string) bool {
 // agentBehaviorDeploymentID is the Agent whose behavior and channels the Run
 // may change: its acting Agent, in that Agent's own chat or as a Team member
 // in a Team chat, exactly as in that member's own chat.
-func agentBehaviorDeploymentID(run *AgentRun) (string, error) {
+func agentBehaviorDeploymentID(run *models.AgentRun) (string, error) {
 	if run == nil {
 		return "", errors.New("agent behavior actions require an Agent's own conversation Run or a Team member's Run")
 	}
@@ -739,11 +740,11 @@ func agentBehaviorDeploymentID(run *AgentRun) (string, error) {
 		return "", errors.New("agent behavior actions require the Run's acting Agent")
 	}
 	switch {
-	case run.Owner.Type == OwnerTypeAgent:
+	case run.Owner.Type == models.OwnerTypeAgent:
 		if run.Owner.ID != deploymentID {
 			return "", errors.New("agent behavior action cannot target a Run assigned to another Agent")
 		}
-	case run.Owner.Type == OwnerTypeTeam:
+	case run.Owner.Type == models.OwnerTypeTeam:
 		// agentBehaviorRunOnRoster proves the member is on the Team's roster.
 	default:
 		return "", errors.New("agent behavior actions require an Agent's own conversation Run or a Team member's Run")
@@ -753,14 +754,14 @@ func agentBehaviorDeploymentID(run *AgentRun) (string, error) {
 
 // agentBehaviorRunOnRoster requires a Team member Run's Agent to be on the
 // owning Team's current active roster. An Agent's own Run is its roster of one.
-func agentBehaviorRunOnRoster(ctx context.Context, teams TeamRosterReader, run *AgentRun) error {
-	if run == nil || run.Owner.Type != OwnerTypeTeam {
+func agentBehaviorRunOnRoster(ctx context.Context, teams models.TeamRosterReader, run *models.AgentRun) error {
+	if run == nil || run.Owner.Type != models.OwnerTypeTeam {
 		return nil
 	}
 	if teams == nil {
 		return errors.New("agent behavior action requires the current Team roster")
 	}
-	onRoster, err := AgentOnChatRoster(ctx, teams, run.Scope, run.Owner, strings.TrimSpace(run.AssignedAgentID))
+	onRoster, err := models.AgentOnChatRoster(ctx, teams, run.Scope, run.Owner, strings.TrimSpace(run.AssignedAgentID))
 	if err != nil {
 		return err
 	}
@@ -797,7 +798,7 @@ func applyAgentBehaviorArguments(candidate *kernelagent.AgentDefinition, args ag
 		candidate.Personality = strings.TrimSpace(*args.Personality)
 	}
 	if args.OperatingPrinciples != nil {
-		candidate.OperatingPrinciples = normalizedActionStrings(*args.OperatingPrinciples)
+		candidate.OperatingPrinciples = models.TrimmedUniqueStrings(*args.OperatingPrinciples)
 	}
 	if args.ApprovalTimeout != nil {
 		value := *args.ApprovalTimeout
@@ -895,7 +896,7 @@ func agentBehaviorActionCandidateVersion(baseVersion, actionID string) string {
 func findAgentBehaviorAmendment(
 	ctx context.Context,
 	agents *kernelagent.Registry,
-	scope Scope,
+	scope models.Scope,
 	deploymentID, version string,
 ) (*kernelagent.DefinitionAmendment, error) {
 	amendments, err := agents.ListAmendments(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID)
@@ -910,7 +911,7 @@ func findAgentBehaviorAmendment(
 	return nil, nil
 }
 
-func approvedAgentBehaviorCheckpoint(ctx context.Context, store ActionStore, call *ActionCall) (*ApprovalCheckpoint, error) {
+func approvedAgentBehaviorCheckpoint(ctx context.Context, store models.ActionStore, call *models.ActionCall) (*models.ApprovalCheckpoint, error) {
 	if strings.TrimSpace(call.ApprovalID) == "" {
 		return nil, errors.New("agent definition policy requires an approved action checkpoint")
 	}
@@ -918,13 +919,13 @@ func approvedAgentBehaviorCheckpoint(ctx context.Context, store ActionStore, cal
 	if err != nil {
 		return nil, err
 	}
-	if approval.Status != ApprovalStatusApproved || approval.DecisionBy == nil {
+	if approval.Status != models.ApprovalStatusApproved || approval.DecisionBy == nil {
 		return nil, errors.New("agent definition policy requires an approved action checkpoint with a decision principal")
 	}
 	return approval, nil
 }
 
-func (d *AgentBehaviorActionDispatcher) replayedResult(ctx context.Context, call *ActionCall, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBehaviorActionDispatcher) replayedResult(ctx context.Context, call *models.ActionCall, run *models.AgentRun) (map[string]interface{}, error) {
 	deploymentID, err := agentBehaviorDeploymentID(run)
 	if err != nil {
 		return nil, err
@@ -965,12 +966,12 @@ func agentBehaviorActionResult(
 	replayed bool,
 ) map[string]interface{} {
 	return map[string]interface{}{
-		"resourceType": agentBehaviorResourceType, "operation": AgentActionAmendBehavior, "replayed": replayed,
+		"resourceType": models.AgentBehaviorResourceType, "operation": models.AgentActionAmendBehavior, "replayed": replayed,
 		"amendment": amendment, "deployment": deployment, "activation": activation,
 	}
 }
 
-func (d *AgentBehaviorActionDispatcher) replayedChannelResult(ctx context.Context, call *ActionCall, run *AgentRun) (map[string]interface{}, error) {
+func (d *AgentBehaviorActionDispatcher) replayedChannelResult(ctx context.Context, call *models.ActionCall, run *models.AgentRun) (map[string]interface{}, error) {
 	deploymentID, err := agentBehaviorDeploymentID(run)
 	if err != nil {
 		return nil, err
@@ -1018,8 +1019,8 @@ func (d *AgentBehaviorActionDispatcher) replayedChannelResult(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	if endpoint.Revision != args.ExpectedEndpointRevision+1 || endpoint.Status == ExternalConversationEndpointRetired || endpoint.DeploymentID != deploymentID || endpoint.Owner.Type != OwnerTypeAgent || endpoint.Owner.ID != deploymentID {
-		return nil, ErrExternalConversationConflict
+	if endpoint.Revision != args.ExpectedEndpointRevision+1 || endpoint.Status == models.ExternalConversationEndpointRetired || endpoint.DeploymentID != deploymentID || endpoint.Owner.Type != models.OwnerTypeAgent || endpoint.Owner.ID != deploymentID {
+		return nil, models.ErrExternalConversationConflict
 	}
 	request, err := agentChannelEndpointUpdate(endpoint, definition, args)
 	if err != nil {
@@ -1028,7 +1029,7 @@ func (d *AgentBehaviorActionDispatcher) replayedChannelResult(ctx context.Contex
 	// A replay reports the committed result. It must never overwrite channel
 	// changes made after approval or try to repair a legacy partial activation.
 	if request.Handler != nil || request.Policy != nil || request.Status != nil {
-		return nil, ErrExternalConversationConflict
+		return nil, models.ErrExternalConversationConflict
 	}
 	return agentChannelActionResult(amendment, deployment, activation, endpoint, true), nil
 }
@@ -1037,11 +1038,11 @@ func agentChannelActionResult(
 	amendment *kernelagent.DefinitionAmendment,
 	deployment *kernelagent.AgentDeployment,
 	activation *kernelagent.DefinitionActivation,
-	endpoint *ExternalConversationEndpoint,
+	endpoint *models.ExternalConversationEndpoint,
 	replayed bool,
 ) map[string]interface{} {
 	return map[string]interface{}{
-		"resourceType": agentBehaviorResourceType, "operation": AgentActionConfigureChannel, "replayed": replayed,
+		"resourceType": models.AgentBehaviorResourceType, "operation": models.AgentActionConfigureChannel, "replayed": replayed,
 		"amendment": amendment, "deployment": deployment, "activation": activation, "endpoint": endpoint,
 	}
 }
@@ -1049,12 +1050,12 @@ func agentChannelActionResult(
 // isAgentBuilderAction matches the builder actions. They run only on the
 // current contract; an older binding gets them after its upgrade.
 func isAgentBuilderAction(bound *skill.BoundAction) bool {
-	if bound == nil || bound.Definition == nil || bound.Definition.ID != AgentManagementSkillID ||
-		bound.Definition.Version != AgentManagementSkillVersion {
+	if bound == nil || bound.Definition == nil || bound.Definition.ID != models.AgentManagementSkillID ||
+		bound.Definition.Version != models.AgentManagementSkillVersion {
 		return false
 	}
 	switch bound.Action.Name {
-	case AgentActionListAgents, AgentActionCreateAgent, AgentActionUpdateAgent, AgentActionTryAgent:
+	case models.AgentActionListAgents, models.AgentActionCreateAgent, models.AgentActionUpdateAgent, models.AgentActionTryAgent:
 		return true
 	}
 	return false
@@ -1065,16 +1066,16 @@ func isAgentMutationAction(bound *skill.BoundAction) bool {
 }
 
 func isAgentListChannelsAction(bound *skill.BoundAction) bool {
-	return isAgentManagementAction(bound) && bound.Action.Name == AgentActionListChannels
+	return models.IsAgentManagementAction(bound) && bound.Action.Name == models.AgentActionListChannels
 }
 
 func isAgentConfigureChannelAction(bound *skill.BoundAction) bool {
-	return isAgentManagementAction(bound) && bound.Action.Name == AgentActionConfigureChannel
+	return models.IsAgentManagementAction(bound) && bound.Action.Name == models.AgentActionConfigureChannel
 }
 
 func isAgentBehaviorAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil &&
-		bound.Definition.ID == AgentManagementSkillID &&
-		IsSupportedAgentManagementSkillVersion(bound.Definition.Version) &&
-		bound.Action.Name == AgentActionAmendBehavior
+		bound.Definition.ID == models.AgentManagementSkillID &&
+		models.IsSupportedAgentManagementSkillVersion(bound.Definition.Version) &&
+		bound.Action.Name == models.AgentActionAmendBehavior
 }

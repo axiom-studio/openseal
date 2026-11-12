@@ -11,7 +11,9 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -48,15 +50,15 @@ func (h *agentBuilderTestHost) PrepareAgentModel(context.Context, AgentModelRequ
 func (h *agentBuilderTestHost) AfterAgentCreated(context.Context, AgentCreated) {}
 
 type agentBuilderFixture struct {
-	scope   Scope
+	scope   models.Scope
 	agents  *kernelagent.Registry
 	teams   *kernelteam.Registry
 	catalog *skill.Catalog
-	spaces  *SpaceService
+	spaces  *portfolio.SpaceService
 	salesID string
 	// homeID is the default space of the person the fixture's run acts for.
 	homeID    string
-	run       *AgentRun
+	run       *models.AgentRun
 	host      *agentBuilderTestHost
 	validator *AgentBuilderActionValidator
 }
@@ -64,7 +66,7 @@ type agentBuilderFixture struct {
 func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 	t.Helper()
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "tenant-a"}
+	scope := models.Scope{Kind: "tenant", ID: "tenant-a"}
 	reference := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	agents := kernelagent.NewRegistry()
 	addAgent := func(id, name string, amendments workforce.AmendmentPolicy, status kernelagent.RolloutStatus) {
@@ -118,7 +120,7 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 
 	catalog := skill.NewCatalog()
 	for _, definition := range []*skill.Definition{
-		AgentManagementSkill(),
+		models.AgentManagementSkill(),
 		{
 			ID: "acme.notes", Version: "1.0.0", Name: "Notes", Description: "Keep notes",
 			Transport: skill.TransportReference{Kind: "kernel", Endpoint: "kernel://notes"},
@@ -151,8 +153,8 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 	for _, binding := range []*skill.Binding{
 		{
 			ID: "bundled:agents", Revision: 1, Scope: skillScope, DeploymentID: "finn",
-			SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion,
-			AllowedActions: []string{AgentActionListAgents, AgentActionCreateAgent, AgentActionUpdateAgent, AgentActionTryAgent},
+			SkillID: models.AgentManagementSkillID, SkillVersion: models.AgentManagementSkillVersion,
+			AllowedActions: []string{models.AgentActionListAgents, models.AgentActionCreateAgent, models.AgentActionUpdateAgent, models.AgentActionTryAgent},
 			MaximumRisk:    skill.RiskLevelWrite,
 		},
 		{
@@ -161,8 +163,8 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 		},
 		{
 			ID: "bundled:agents", Revision: 1, Scope: skillScope, DeploymentID: "researcher",
-			SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion,
-			AllowedActions: []string{AgentActionAmendBehavior}, MaximumRisk: skill.RiskLevelWrite,
+			SkillID: models.AgentManagementSkillID, SkillVersion: models.AgentManagementSkillVersion,
+			AllowedActions: []string{models.AgentActionAmendBehavior}, MaximumRisk: skill.RiskLevelWrite,
 		},
 	} {
 		if err := catalog.Bind(ctx, binding); err != nil {
@@ -170,13 +172,13 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 		}
 	}
 
-	spaces := NewSpaceService(newTestKernelStore(t))
+	spaces := portfolio.NewSpaceService(newTestKernelStore(t))
 	salesID, homeID := seedAgentBuilderSpaces(t, spaces, scope)
 	fixture := &agentBuilderFixture{
 		scope: scope, agents: agents, teams: teams, catalog: catalog, spaces: spaces, salesID: salesID, homeID: homeID,
-		run: &AgentRun{
-			ID: "builder-run", Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"},
-			AssignedAgentID: "finn", ActingUser: agentBuilderApprover.ID, Source: RunSourceChat,
+		run: &models.AgentRun{
+			ID: "builder-run", Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"},
+			AssignedAgentID: "finn", ActingUser: agentBuilderApprover.ID, Source: models.RunSourceChat,
 		},
 	}
 	var host AgentBuilderHost
@@ -193,14 +195,14 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 
 // seedAgentBuilderSpaces creates Sales, owned by an operator, and Home, the
 // default space of the person the builder run acts for.
-func seedAgentBuilderSpaces(t *testing.T, spaces *SpaceService, scope Scope) (salesID, homeID string) {
+func seedAgentBuilderSpaces(t *testing.T, spaces *portfolio.SpaceService, scope models.Scope) (salesID, homeID string) {
 	t.Helper()
 	ctx := context.Background()
-	sales, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Sales", Look: DefaultSpaceLook, OwnerID: "operator"})
+	sales, err := spaces.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: "Sales", Look: models.DefaultSpaceLook, OwnerID: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	home, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Home", Look: DefaultSpaceLook, OwnerID: agentBuilderApprover.ID})
+	home, err := spaces.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: "Home", Look: models.DefaultSpaceLook, OwnerID: agentBuilderApprover.ID})
 	if err != nil || !home.IsDefault {
 		t.Fatalf("home = %+v, err = %v", home, err)
 	}
@@ -210,7 +212,7 @@ func seedAgentBuilderSpaces(t *testing.T, spaces *SpaceService, scope Scope) (sa
 func (f *agentBuilderFixture) bound(t *testing.T, action string) *skill.BoundAction {
 	t.Helper()
 	bound, err := f.catalog.Resolve(context.Background(), skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}, "finn",
-		AgentManagementSkillID, AgentManagementSkillVersion, action)
+		models.AgentManagementSkillID, models.AgentManagementSkillVersion, action)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +271,7 @@ func TestAgentBuilderCreatePreviewGolden(t *testing.T) {
 	fixture := newAgentBuilderFixture(t, true)
 	arguments := agentBuilderCreateArguments()
 	arguments["spaceId"] = fixture.salesID
-	preview, err := fixture.propose(t, AgentActionCreateAgent, arguments)
+	preview, err := fixture.propose(t, models.AgentActionCreateAgent, arguments)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +301,7 @@ func TestAgentBuilderCreateResolvesSpaceToPersonal(t *testing.T) {
 	fixture := newAgentBuilderFixture(t, false)
 	arguments := agentBuilderCreateArguments()
 	delete(arguments, "model")
-	preview, err := fixture.propose(t, AgentActionCreateAgent, arguments)
+	preview, err := fixture.propose(t, models.AgentActionCreateAgent, arguments)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +330,7 @@ func TestAgentBuilderModelSchemaHidesKernelResolvedArguments(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{AgentActionListAgents, AgentActionCreateAgent, AgentActionUpdateAgent, AgentActionTryAgent} {
+	for _, name := range []string{models.AgentActionListAgents, models.AgentActionCreateAgent, models.AgentActionUpdateAgent, models.AgentActionTryAgent} {
 		if !seen[name] {
 			t.Fatalf("model actions %v miss %s", seen, name)
 		}
@@ -373,8 +375,8 @@ func TestAgentBuilderCreateRefusals(t *testing.T) {
 		"management Skill grant": {
 			mutate: func(_ *agentBuilderFixture, arguments map[string]interface{}) {
 				arguments["skills"] = []interface{}{map[string]interface{}{
-					"skillId": AgentManagementSkillID, "skillVersion": AgentManagementSkillVersion,
-					"allowedActions": []interface{}{AgentActionCreateAgent}, "enablePrompt": false, "maximumRisk": "write",
+					"skillId": models.AgentManagementSkillID, "skillVersion": models.AgentManagementSkillVersion,
+					"allowedActions": []interface{}{models.AgentActionCreateAgent}, "enablePrompt": false, "maximumRisk": "write",
 				}}
 			},
 			want: "built-in management Skill",
@@ -404,7 +406,7 @@ func TestAgentBuilderCreateRefusals(t *testing.T) {
 			if testCase.mutate != nil {
 				testCase.mutate(fixture, arguments)
 			}
-			preview, err := fixture.propose(t, AgentActionCreateAgent, arguments)
+			preview, err := fixture.propose(t, models.AgentActionCreateAgent, arguments)
 			if err == nil || !strings.Contains(err.Error(), testCase.want) {
 				t.Fatalf("preview=%#v err=%v, want %q", preview, err, testCase.want)
 			}
@@ -416,7 +418,7 @@ func TestAgentBuilderSensitiveFieldIsTyped(t *testing.T) {
 	fixture := newAgentBuilderFixture(t, true)
 	arguments := agentBuilderCreateArguments()
 	arguments["operatingPrinciples"] = []interface{}{"Use api key sk-live-0123456789abcdefghijklmnop"}
-	_, err := fixture.propose(t, AgentActionCreateAgent, arguments)
+	_, err := fixture.propose(t, models.AgentActionCreateAgent, arguments)
 	var sensitive *validation.SensitiveInputError
 	if !errors.As(err, &sensitive) && !errors.Is(err, validation.ErrSensitiveInput) {
 		t.Fatalf("sensitive principle error = %v", err)
@@ -428,7 +430,7 @@ func TestAgentBuilderValidatorRefusesForeignBinding(t *testing.T) {
 	run := *fixture.run
 	run.AssignedAgentID = "researcher"
 	_, err := fixture.validator.ValidateActionProposal(context.Background(), agentrun.ActionProposalValidationInput{
-		Run: &run, Bound: fixture.bound(t, AgentActionCreateAgent), Arguments: agentBuilderCreateArguments(),
+		Run: &run, Bound: fixture.bound(t, models.AgentActionCreateAgent), Arguments: agentBuilderCreateArguments(),
 	})
 	if err == nil || !strings.Contains(err.Error(), "not bound to the current Run's Agent") {
 		t.Fatalf("foreign binding error = %v", err)
@@ -437,7 +439,7 @@ func TestAgentBuilderValidatorRefusesForeignBinding(t *testing.T) {
 
 func TestAgentBuilderUpdatePreviewListsOnlyChanges(t *testing.T) {
 	fixture := newAgentBuilderFixture(t, true)
-	preview, err := fixture.propose(t, AgentActionUpdateAgent, map[string]interface{}{
+	preview, err := fixture.propose(t, models.AgentActionUpdateAgent, map[string]interface{}{
 		"agentId": "researcher", "personality": "Calm", "purpose": "Research competitors weekly.",
 		"model": "gpt-6-luna",
 		"addSkills": []interface{}{map[string]interface{}{
@@ -512,7 +514,7 @@ func TestAgentBuilderUpdateRefusals(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			fixture := newAgentBuilderFixture(t, true)
-			preview, err := fixture.propose(t, AgentActionUpdateAgent, testCase.arguments)
+			preview, err := fixture.propose(t, models.AgentActionUpdateAgent, testCase.arguments)
 			if err == nil || !strings.Contains(err.Error(), testCase.want) {
 				t.Fatalf("preview=%#v err=%v, want %q", preview, err, testCase.want)
 			}
@@ -522,7 +524,7 @@ func TestAgentBuilderUpdateRefusals(t *testing.T) {
 
 func TestAgentBuilderUpdateKeepsOwnNameAndResolvesRevision(t *testing.T) {
 	fixture := newAgentBuilderFixture(t, false)
-	bound := fixture.bound(t, AgentActionUpdateAgent)
+	bound := fixture.bound(t, models.AgentActionUpdateAgent)
 	resolved, handled, err := fixture.validator.ResolveActionProposalArguments(context.Background(), agentrun.ActionProposalValidationInput{
 		Run: fixture.run, Bound: bound, Arguments: map[string]interface{}{"agentId": "researcher", "displayName": "researcher", "rationale": "x"},
 	})
@@ -546,27 +548,27 @@ func TestAgentBuilderTryAgentValidation(t *testing.T) {
 	}
 	// try_agent skips the name check: drafting an Agent named like one that
 	// exists is still worth a test message.
-	if preview, err := fixture.propose(t, AgentActionTryAgent, base); err != nil || preview != nil {
+	if preview, err := fixture.propose(t, models.AgentActionTryAgent, base); err != nil || preview != nil {
 		t.Fatalf("try_agent preview=%#v err=%v", preview, err)
 	}
 	withModel := maps.Clone(base)
 	withModel["model"] = "gpt-6-luna"
-	if _, err := fixture.propose(t, AgentActionTryAgent, withModel); err == nil || err.Error() != "model selection is unavailable here" {
+	if _, err := fixture.propose(t, models.AgentActionTryAgent, withModel); err == nil || err.Error() != "model selection is unavailable here" {
 		t.Fatalf("try_agent model without host = %v", err)
 	}
 	secret := maps.Clone(base)
 	secret["message"] = "my password: hunter2-correct-horse"
-	if _, err := fixture.propose(t, AgentActionTryAgent, secret); err == nil {
+	if _, err := fixture.propose(t, models.AgentActionTryAgent, secret); err == nil {
 		t.Fatal("try_agent accepted a secret in the message")
 	}
 }
 
 func TestAgentBuilderActionsExistOnlyInCurrentContract(t *testing.T) {
-	definition := AgentManagementSkill()
+	definition := models.AgentManagementSkill()
 	if definition.Version != "1.6.0" {
 		t.Fatalf("version = %s", definition.Version)
 	}
-	for _, name := range []string{AgentActionListAgents, AgentActionCreateAgent, AgentActionUpdateAgent, AgentActionTryAgent} {
+	for _, name := range []string{models.AgentActionListAgents, models.AgentActionCreateAgent, models.AgentActionUpdateAgent, models.AgentActionTryAgent} {
 		action, ok := definition.Actions[name]
 		if !ok {
 			t.Fatalf("missing %s", name)
@@ -574,20 +576,20 @@ func TestAgentBuilderActionsExistOnlyInCurrentContract(t *testing.T) {
 		if !isAgentBuilderAction(&skill.BoundAction{Definition: definition, Action: action}) {
 			t.Fatalf("%s is not a builder action at %s", name, definition.Version)
 		}
-		older := AgentManagementSkill()
+		older := models.AgentManagementSkill()
 		older.Version = "1.5.0"
 		if isAgentBuilderAction(&skill.BoundAction{Definition: older, Action: action}) {
 			t.Fatalf("%s matched the 1.5.0 contract", name)
 		}
-		if isAgentManagementAction(&skill.BoundAction{Definition: definition, Action: action}) {
+		if models.IsAgentManagementAction(&skill.BoundAction{Definition: definition, Action: action}) {
 			t.Fatalf("%s reached the self-only behavior dispatcher", name)
 		}
-		wantReview := name == AgentActionCreateAgent || name == AgentActionUpdateAgent
+		wantReview := name == models.AgentActionCreateAgent || name == models.AgentActionUpdateAgent
 		if action.AlwaysReview() != wantReview {
 			t.Fatalf("%s review always = %v", name, action.AlwaysReview())
 		}
 	}
-	if !IsSupportedAgentManagementSkillVersion("1.4.0") {
+	if !models.IsSupportedAgentManagementSkillVersion("1.4.0") {
 		t.Fatal("1.4.0 bindings are no longer supported")
 	}
 }
@@ -600,19 +602,19 @@ func TestAgentBuilderUpdateRefusesAgentThePersonCannotChange(t *testing.T) {
 	fixture.run.ActingUser = "person-2"
 	fixture.host.forbidden = map[string]bool{"person-2/researcher": true}
 	arguments := map[string]interface{}{"agentId": "researcher", "displayName": "Foo", "rationale": "Rename it."}
-	preview, err := fixture.propose(t, AgentActionUpdateAgent, arguments)
+	preview, err := fixture.propose(t, models.AgentActionUpdateAgent, arguments)
 	if err == nil || preview != nil || !strings.Contains(err.Error(), "can't change it") || strings.Contains(err.Error(), "Researcher work") {
 		t.Fatalf("forbidden update = %#v, %v", preview, err)
 	}
 	arguments["expectedDeploymentRevision"] = 1
 	preview, err = fixture.validator.ValidateActionProposal(ctx, agentrun.ActionProposalValidationInput{
-		Run: fixture.run, Bound: fixture.bound(t, AgentActionUpdateAgent), Arguments: arguments,
+		Run: fixture.run, Bound: fixture.bound(t, models.AgentActionUpdateAgent), Arguments: arguments,
 	})
 	if err == nil || preview != nil || !strings.Contains(err.Error(), "can't change it") {
 		t.Fatalf("forbidden update with a revision = %#v, %v", preview, err)
 	}
 	fixture.host.forbidden = nil
-	if _, err := fixture.propose(t, AgentActionUpdateAgent, map[string]interface{}{"agentId": "researcher", "displayName": "Foo", "rationale": "Rename it."}); err != nil {
+	if _, err := fixture.propose(t, models.AgentActionUpdateAgent, map[string]interface{}{"agentId": "researcher", "displayName": "Foo", "rationale": "Rename it."}); err != nil {
 		t.Fatal(err)
 	}
 	for _, checked := range fixture.host.authorized {
@@ -658,7 +660,7 @@ func TestResolveAgentSkillGrantsRiskFromCatalog(t *testing.T) {
 		{"prompt only", nil, true, skill.RiskLevelProduction, skill.RiskLevelRead},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			grants, err := resolveAgentSkillGrants(ctx, catalog, []AgentSkillGrant{{
+			grants, err := resolveAgentSkillGrants(ctx, catalog, []models.AgentSkillGrant{{
 				SkillID: "acme.lookup", SkillVersion: "1.0.0", AllowedActions: test.actions, EnablePrompt: test.prompt, MaximumRisk: test.declared,
 			}})
 			if err != nil {
