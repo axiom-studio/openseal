@@ -1,8 +1,8 @@
-package runtime
+package activity
 
 import "github.com/axiom-studio/openseal/pkg/models"
 
-func externalMessageSource(endpoint *models.ExternalConversationEndpoint, event models.NormalizedExternalConversationEvent) *models.ExternalMessageSource {
+func NewExternalMessageSource(endpoint *models.ExternalConversationEndpoint, event models.NormalizedExternalConversationEvent) *models.ExternalMessageSource {
 	source := &models.ExternalMessageSource{Provider: endpoint.Provider, WorkspaceID: endpoint.InstallationID,
 		ChannelID: event.ExternalConversationID, ThreadID: event.ExternalThreadID, MessageID: event.ExternalMessageID,
 		ParticipantID: event.ExternalParticipantID, ParticipantDisplayName: models.ExternalSourceLabel(event.ParticipantDisplayName, 160), OccurredAt: event.OccurredAt}

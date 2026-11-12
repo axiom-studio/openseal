@@ -1,4 +1,4 @@
-package runtime
+package activity
 
 import (
 	"errors"
@@ -23,7 +23,7 @@ type ExternalOperationIdentity struct {
 }
 
 func (i ExternalOperationIdentity) Validate() error {
-	if _, err := canonicalExternalOperationResource(i.Resource); err != nil {
+	if _, err := CanonicalExternalOperationResource(i.Resource); err != nil {
 		return err
 	}
 	if !models.IsValidOpaqueIdentifier(i.Operation, 256) {
@@ -32,7 +32,7 @@ func (i ExternalOperationIdentity) Validate() error {
 	return nil
 }
 
-func canonicalExternalOperationResource(value string) (string, error) {
+func CanonicalExternalOperationResource(value string) (string, error) {
 	rawValue := value
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 2048 || strings.ContainsAny(value, "\r\n") {
@@ -89,14 +89,14 @@ func canonicalExternalOperationResource(value string) (string, error) {
 	return value, nil
 }
 
-func computeExternalOperationDigest(scope models.Scope, owner models.ObjectiveOwner, objectiveID string, identity *ExternalOperationIdentity, idempotencyKey string) (string, error) {
+func ComputeExternalOperationDigest(scope models.Scope, owner models.ObjectiveOwner, objectiveID string, identity *ExternalOperationIdentity, idempotencyKey string) (string, error) {
 	if identity == nil {
 		return "", nil
 	}
 	if err := identity.Validate(); err != nil {
 		return "", err
 	}
-	resource, _ := canonicalExternalOperationResource(identity.Resource)
+	resource, _ := CanonicalExternalOperationResource(identity.Resource)
 	operation := strings.ToLower(strings.TrimSpace(identity.Operation))
 	occurrence := strings.TrimSpace(idempotencyKey)
 	ownerKey := strings.TrimSpace(objectiveID)
