@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -20,15 +21,15 @@ import (
 // the given results and the others with their refusals, and collects notes.
 type repeatSim struct {
 	t      *testing.T
-	scope  Scope
+	scope  models.Scope
 	seq    int64
 	ledger *repeatLedger
-	byID   map[string]*SessionEntry
+	byID   map[string]*models.SessionEntry
 	order  []string
 }
 
 func newRepeatSim(t *testing.T) *repeatSim {
-	return &repeatSim{t: t, scope: Scope{Kind: "tenant", ID: "repeat"}, ledger: newRepeatLedger(), byID: map[string]*SessionEntry{}}
+	return &repeatSim{t: t, scope: models.Scope{Kind: "tenant", ID: "repeat"}, ledger: newRepeatLedger(), byID: map[string]*models.SessionEntry{}}
 }
 
 type simCall struct {
@@ -42,11 +43,11 @@ type simCall struct {
 type simOutcome struct {
 	verdict repeatVerdict
 	refusal *repeatRefusal
-	entry   *SessionEntry
+	entry   *models.SessionEntry
 	note    string
 }
 
-func (s *repeatSim) store(entry *SessionEntry) {
+func (s *repeatSim) store(entry *models.SessionEntry) {
 	if _, ok := s.byID[entry.ID]; !ok {
 		s.order = append(s.order, entry.ID)
 	}
@@ -54,8 +55,8 @@ func (s *repeatSim) store(entry *SessionEntry) {
 	s.ledger.observe(entry)
 }
 
-func (s *repeatSim) entries() []*SessionEntry {
-	out := make([]*SessionEntry, 0, len(s.order))
+func (s *repeatSim) entries() []*models.SessionEntry {
+	out := make([]*models.SessionEntry, 0, len(s.order))
 	for _, id := range s.order {
 		out = append(out, s.byID[id])
 	}
@@ -64,9 +65,9 @@ func (s *repeatSim) entries() []*SessionEntry {
 
 func (s *repeatSim) user(text string) {
 	s.seq++
-	s.store(&SessionEntry{
+	s.store(&models.SessionEntry{
 		ID: fmt.Sprintf("e_%d", s.seq), Scope: s.scope, SessionID: "session-1", RunID: "run-1", Sequence: s.seq,
-		Type: SessionEntryUser, User: &UserEntry{Origin: "steering", Content: []ContentPart{storetest.TextPart(text)}},
+		Type: models.SessionEntryUser, User: &models.UserEntry{Origin: "steering", Content: []models.ContentPart{storetest.TextPart(text)}},
 	})
 }
 
@@ -79,11 +80,11 @@ func (s *repeatSim) step(step int64, waitOffered bool, calls ...simCall) ([]simO
 			s.t.Fatalf("repeat key: %v", err)
 		}
 		s.seq++
-		entry := &SessionEntry{
+		entry := &models.SessionEntry{
 			ID: fmt.Sprintf("e_%d", s.seq), Scope: s.scope, SessionID: "session-1", RunID: "run-1", Sequence: s.seq,
-			StepID: fmt.Sprintf("step-%d", step), Step: step, Type: SessionEntryTool, State: ToolEntryPending,
+			StepID: fmt.Sprintf("step-%d", step), Step: step, Type: models.SessionEntryTool, State: models.ToolEntryPending,
 			ToolCallID: fmt.Sprintf("call_%d_%d", step, i), ActionCallID: fmt.Sprintf("ac_%d", s.seq), Revision: 1,
-			Tool: &ToolEntry{Name: call.subject.Identity, ArgumentsDigest: key, RepeatEffect: string(call.subject.Effect)},
+			Tool: &models.ToolEntry{Name: call.subject.Identity, ArgumentsDigest: key, RepeatEffect: string(call.subject.Effect)},
 		}
 		s.store(entry)
 		planned[i] = repeatStepCall{Entry: entry, Subject: call.subject, Key: key}
@@ -97,7 +98,7 @@ func (s *repeatSim) step(step int64, waitOffered bool, calls ...simCall) ([]simO
 		next.Tool, next.Revision = &tool, pending.Revision+1
 		outcome := simOutcome{verdict: verdicts[i]}
 		if refusal, ok := verdicts[i].refusal(); ok {
-			next.State = ToolEntryError
+			next.State = models.ToolEntryError
 			tool.Result, tool.Guard, tool.DuplicateOfEntryID = refusal.Result, refusal.Guard, refusal.DuplicateOfEntryID
 			outcome.refusal = refusal
 			s.store(&next)
@@ -107,14 +108,14 @@ func (s *repeatSim) step(step int64, waitOffered bool, calls ...simCall) ([]simO
 		}
 		switch {
 		case call.interrupted:
-			next.State = ToolEntryInterrupted
-			tool.Result = &ToolResult{Status: ToolResultInterrupted, IsError: true, Content: []ContentPart{storetest.TextPart("interrupted")}}
+			next.State = models.ToolEntryInterrupted
+			tool.Result = &models.ToolResult{Status: models.ToolResultInterrupted, IsError: true, Content: []models.ContentPart{storetest.TextPart("interrupted")}}
 		case call.failed:
-			next.State = ToolEntryError
-			tool.Result = &ToolResult{Status: ToolResultFailed, IsError: true, Content: []ContentPart{storetest.TextPart(call.result)}}
+			next.State = models.ToolEntryError
+			tool.Result = &models.ToolResult{Status: models.ToolResultFailed, IsError: true, Content: []models.ContentPart{storetest.TextPart(call.result)}}
 		default:
-			next.State = ToolEntryCompleted
-			tool.Result = &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{storetest.TextPart(call.result)}}
+			next.State = models.ToolEntryCompleted
+			tool.Result = &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{storetest.TextPart(call.result)}}
 		}
 		tool.Parked = call.parked
 		tool.ResultDigest = modelstep.ToolResultDigest(tool.Result)
@@ -171,7 +172,7 @@ func expectRefused(t *testing.T, label string, outcome simOutcome, kind repeatVe
 	if outcome.verdict.Kind != kind || outcome.verdict.Code != code || outcome.verdict.Count != count {
 		t.Fatalf("%s: verdict = %+v, want kind %d code %s count %d", label, outcome.verdict, kind, code, count)
 	}
-	if outcome.refusal == nil || !outcome.refusal.Result.IsError || outcome.entry.State != ToolEntryError {
+	if outcome.refusal == nil || !outcome.refusal.Result.IsError || outcome.entry.State != models.ToolEntryError {
 		t.Fatalf("%s: refusal = %+v entry state %s", label, outcome.refusal, outcome.entry.State)
 	}
 }
@@ -195,7 +196,7 @@ func TestRepeatReadNoteThenRefusalThenFailure(t *testing.T) {
 	if want := "Not run: this exact call was already made twice in this run with the same result (last at step 2). Use the earlier result, try a different step, or say what is blocking you."; third.refusal.Message != want {
 		t.Fatalf("3rd text = %q", third.refusal.Message)
 	}
-	if third.refusal.Result.Status != ToolResultRefused || third.refusal.ActionCallCode != action.RefusedLoopCallRepeat {
+	if third.refusal.Result.Status != models.ToolResultRefused || third.refusal.ActionCallCode != action.RefusedLoopCallRepeat {
 		t.Fatalf("3rd refusal = %+v", third.refusal)
 	}
 	if third.refusal.DuplicateOfEntryID != second.entry.ID || third.refusal.DuplicateOfActionCallID != second.entry.ActionCallID ||
@@ -271,7 +272,7 @@ func TestRepeatWriteDuplicateSuppressedWithPriorResult(t *testing.T) {
 	second := sim.one(3, send)
 	expectRefused(t, "2nd", second, repeatSuppressWrite, action.RefusedLoopCallDuplicateSuppressed, 2)
 	result := second.refusal.Result
-	if result.Status != ToolResultDuplicateSuppressed || len(result.Content) != 2 {
+	if result.Status != models.ToolResultDuplicateSuppressed || len(result.Content) != 2 {
 		t.Fatalf("suppressed result = %+v", result)
 	}
 	if want := "Not run: this exact call already succeeded at step 2, so it was not repeated. If it really has to happen again, tell the user; a new request can do it. Its result was:"; result.Content[0].Text != want {
@@ -470,7 +471,7 @@ func TestRepeatControlToolsNotCounted(t *testing.T) {
 		outcomes, _ := sim.step(7, false, call, call)
 		expectRun(t, name+" same step", outcomes[1])
 	}
-	card := governedCall(SkillManagementSkillID, agentrun.SkillActionRequestCredential, capability.SideEffectWrite, false, map[string]interface{}{"x": 1})
+	card := governedCall(models.SkillManagementSkillID, agentrun.SkillActionRequestCredential, capability.SideEffectWrite, false, map[string]interface{}{"x": 1})
 	if card.Effect != RepeatEffectControl {
 		t.Fatalf("card effect = %s", card.Effect)
 	}

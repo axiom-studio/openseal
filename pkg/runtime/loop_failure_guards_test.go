@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -16,19 +17,19 @@ import (
 // fakeSessionEntryLister serves SessionEntryFilter pages from a fixed entry
 // list in sequence order, honoring AfterSequence, Types and Limit.
 type fakeSessionEntryLister struct {
-	entries []*SessionEntry
+	entries []*models.SessionEntry
 	calls   int
 }
 
-func (f *fakeSessionEntryLister) ListAgentSessionEntries(_ context.Context, filter SessionEntryFilter) ([]*SessionEntry, error) {
+func (f *fakeSessionEntryLister) ListAgentSessionEntries(_ context.Context, filter models.SessionEntryFilter) ([]*models.SessionEntry, error) {
 	f.calls++
-	normalized, err := normalizeSessionEntryFilter(filter)
+	normalized, err := models.NormalizeSessionEntryFilter(filter)
 	if err != nil {
 		return nil, err
 	}
-	var page []*SessionEntry
+	var page []*models.SessionEntry
 	for _, entry := range f.entries {
-		if sessionEntryMatchesFilter(entry, normalized) {
+		if models.SessionEntryMatchesFilter(entry, normalized) {
 			page = append(page, entry)
 			if len(page) == normalized.Limit {
 				break
@@ -39,12 +40,12 @@ func (f *fakeSessionEntryLister) ListAgentSessionEntries(_ context.Context, filt
 }
 
 type errorStreakLog struct {
-	scope   Scope
-	entries []*SessionEntry
+	scope   models.Scope
+	entries []*models.SessionEntry
 	seq     int64
 }
 
-func (l *errorStreakLog) add(entry *SessionEntry) {
+func (l *errorStreakLog) add(entry *models.SessionEntry) {
 	l.seq++
 	entry.Scope, entry.SessionID, entry.RunID, entry.Sequence = l.scope, "session-1", "run-1", l.seq
 	entry.ID = fmt.Sprintf("e_%d", l.seq)
@@ -54,22 +55,22 @@ func (l *errorStreakLog) add(entry *SessionEntry) {
 // step appends one step's tool entries; true = an is_error result.
 func (l *errorStreakLog) step(step int64, results ...bool) {
 	for i, isError := range results {
-		state, status := ToolEntryCompleted, ToolResultSucceeded
+		state, status := models.ToolEntryCompleted, models.ToolResultSucceeded
 		if isError {
-			state, status = ToolEntryError, ToolResultFailed
+			state, status = models.ToolEntryError, models.ToolResultFailed
 		}
-		l.add(&SessionEntry{
-			Type: SessionEntryTool, Step: step, StepID: fmt.Sprintf("step-%d", step), State: state,
+		l.add(&models.SessionEntry{
+			Type: models.SessionEntryTool, Step: step, StepID: fmt.Sprintf("step-%d", step), State: state,
 			ToolCallID: fmt.Sprintf("call-%d-%d", step, i),
-			Tool: &ToolEntry{Name: "linear_get_issue", Result: &ToolResult{Status: status, IsError: isError,
-				Content: []ContentPart{storetest.TextPart("result")}}},
+			Tool: &models.ToolEntry{Name: "linear_get_issue", Result: &models.ToolResult{Status: status, IsError: isError,
+				Content: []models.ContentPart{storetest.TextPart("result")}}},
 		})
 	}
 }
 
 func TestErrorStreakFailsRun(t *testing.T) {
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "guards"}
+	scope := models.Scope{Kind: "tenant", ID: "guards"}
 	log := &errorStreakLog{scope: scope}
 	for step := int64(1); step < loopErrorStreakLimit; step++ {
 		log.step(step, true, true)
@@ -108,7 +109,7 @@ func TestErrorStreakFailsRun(t *testing.T) {
 		{"user guidance resets it", func(l *errorStreakLog) {
 			for s := int64(1); s <= 9; s++ {
 				if s == 4 {
-					l.add(&SessionEntry{Type: SessionEntryUser, User: &UserEntry{}})
+					l.add(&models.SessionEntry{Type: models.SessionEntryUser, User: &models.UserEntry{}})
 				}
 				l.step(s, true)
 			}
@@ -117,19 +118,19 @@ func TestErrorStreakFailsRun(t *testing.T) {
 			for s := int64(1); s <= 8; s++ {
 				l.step(s, true)
 				if s == 5 {
-					l.add(&SessionEntry{Type: SessionEntryTool, Step: s, StepID: "step-5", State: ToolEntryInterrupted, ToolCallID: "lost",
-						Tool: &ToolEntry{Name: "write", Result: &ToolResult{Status: ToolResultInterrupted, IsError: true}}})
+					l.add(&models.SessionEntry{Type: models.SessionEntryTool, Step: s, StepID: "step-5", State: models.ToolEntryInterrupted, ToolCallID: "lost",
+						Tool: &models.ToolEntry{Name: "write", Result: &models.ToolResult{Status: models.ToolResultInterrupted, IsError: true}}})
 				}
 			}
-			l.add(&SessionEntry{Type: SessionEntryTool, Step: 9, StepID: "step-9", State: ToolEntryInterrupted, ToolCallID: "lost-9",
-				Tool: &ToolEntry{Name: "write", Result: &ToolResult{Status: ToolResultInterrupted, IsError: true}}})
+			l.add(&models.SessionEntry{Type: models.SessionEntryTool, Step: 9, StepID: "step-9", State: models.ToolEntryInterrupted, ToolCallID: "lost-9",
+				Tool: &models.ToolEntry{Name: "write", Result: &models.ToolResult{Status: models.ToolResultInterrupted, IsError: true}}})
 		}, 8},
 		{"an open entry breaks it", func(l *errorStreakLog) {
 			for s := int64(1); s <= 8; s++ {
 				l.step(s, true)
 				if s == 1 {
-					l.add(&SessionEntry{Type: SessionEntryTool, Step: s, StepID: "step-1", State: ToolEntryAwaitingApproval, ToolCallID: "held",
-						Tool: &ToolEntry{Name: "send"}})
+					l.add(&models.SessionEntry{Type: models.SessionEntryTool, Step: s, StepID: "step-1", State: models.ToolEntryAwaitingApproval, ToolCallID: "held",
+						Tool: &models.ToolEntry{Name: "send"}})
 				}
 			}
 		}, 7},
@@ -155,13 +156,13 @@ func TestErrorStreakFailsRun(t *testing.T) {
 }
 
 type fakeActionCallLister struct {
-	calls []*ActionCall
+	calls []*models.ActionCall
 	pages int
 }
 
-func (f *fakeActionCallLister) ListActionCalls(_ context.Context, filter ActionFilter) ([]*ActionCall, error) {
+func (f *fakeActionCallLister) ListActionCalls(_ context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
 	f.pages++
-	var matched []*ActionCall
+	var matched []*models.ActionCall
 	for _, call := range f.calls {
 		if call.Scope != filter.Scope || call.RunID != filter.RunID {
 			continue
@@ -183,19 +184,19 @@ func (f *fakeActionCallLister) ListActionCalls(_ context.Context, filter ActionF
 
 func TestImageProviderRejectionRefusesFurtherGenerations(t *testing.T) {
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "guards"}
+	scope := models.Scope{Kind: "tenant", ID: "guards"}
 	target := imageGenerationTarget{SkillID: builtin.SkillID, Action: builtin.GenerateImage, BindingID: "binding-1", BindingRevision: 3}
-	imageCall := func(id, runID string, status ActionCallStatus, code string) *ActionCall {
-		return &ActionCall{ID: id, Scope: scope, RunID: runID, SkillID: builtin.SkillID, Action: builtin.GenerateImage,
+	imageCall := func(id, runID string, status models.ActionCallStatus, code string) *models.ActionCall {
+		return &models.ActionCall{ID: id, Scope: scope, RunID: runID, SkillID: builtin.SkillID, Action: builtin.GenerateImage,
 			BindingID: "binding-1", BindingRevision: 3, Status: status, ErrorCode: code, Error: "image provider rejected the request"}
 	}
 	actions := &fakeActionCallLister{}
 
 	// Nothing rejected yet: the call runs.
-	actions.calls = []*ActionCall{
-		imageCall("ac_ok", "run-1", ActionCallStatusSucceeded, ""),
-		imageCall("ac_other_failure", "run-1", ActionCallStatusFailed, "provider_unavailable"),
-		imageCall("ac_other_run", "run-2", ActionCallStatusFailed, ActionErrorCodeImageProviderRejected),
+	actions.calls = []*models.ActionCall{
+		imageCall("ac_ok", "run-1", models.ActionCallStatusSucceeded, ""),
+		imageCall("ac_other_failure", "run-1", models.ActionCallStatusFailed, "provider_unavailable"),
+		imageCall("ac_other_run", "run-2", models.ActionCallStatusFailed, ActionErrorCodeImageProviderRejected),
 	}
 	prior, err := priorImageProviderRejection(ctx, actions, scope, "run-1", target)
 	if err != nil || prior != nil {
@@ -203,14 +204,14 @@ func TestImageProviderRejectionRefusesFurtherGenerations(t *testing.T) {
 	}
 
 	// After a rejection on the binding, every later generation is refused.
-	rejected := imageCall("ac_rejected", "run-1", ActionCallStatusFailed, ActionErrorCodeImageProviderRejected)
+	rejected := imageCall("ac_rejected", "run-1", models.ActionCallStatusFailed, ActionErrorCodeImageProviderRejected)
 	actions.calls = append(actions.calls, rejected)
 	prior, err = priorImageProviderRejection(ctx, actions, scope, "run-1", target)
 	if err != nil || prior == nil || prior.ID != "ac_rejected" {
 		t.Fatalf("after rejection: prior=%+v err=%v", prior, err)
 	}
 	result, guard := imageProviderRejectionRefusal(prior)
-	if result.Status != ToolResultRefused || !result.IsError || len(result.Content) != 1 || result.Content[0].Type != ContentPartJSON {
+	if result.Status != models.ToolResultRefused || !result.IsError || len(result.Content) != 1 || result.Content[0].Type != models.ContentPartJSON {
 		t.Fatalf("result = %+v", result)
 	}
 	var value map[string]string
@@ -225,7 +226,7 @@ func TestImageProviderRejectionRefusesFurtherGenerations(t *testing.T) {
 	if guard == nil || guard.Kind != ToolGuardImageProviderRejected {
 		t.Fatalf("guard = %+v", guard)
 	}
-	if _, err := validateContentParts(result.Content, contentPartLimits{}); err != nil {
+	if _, err := models.ValidateContentParts(result.Content, models.ContentPartLimits{}); err != nil {
 		t.Fatalf("refusal content invalid: %v", err)
 	}
 
@@ -245,7 +246,7 @@ func TestImageProviderRejectionRefusesFurtherGenerations(t *testing.T) {
 	// A rejection past the first page is still found.
 	many := &fakeActionCallLister{}
 	for i := 0; i < control.ActionCallPageSize; i++ {
-		many.calls = append(many.calls, imageCall(fmt.Sprintf("ac_%d", i), "run-1", ActionCallStatusFailed, "provider_unavailable"))
+		many.calls = append(many.calls, imageCall(fmt.Sprintf("ac_%d", i), "run-1", models.ActionCallStatusFailed, "provider_unavailable"))
 	}
 	many.calls = append(many.calls, rejected)
 	prior, err = priorImageProviderRejection(ctx, many, scope, "run-1", target)

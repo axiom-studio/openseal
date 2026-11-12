@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -35,7 +36,7 @@ func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
 	}
 	// A finished trial never parks.
 	now = child.CreatedAt.Add(time.Minute)
-	child.Status = AgentRunStatusCompleted
+	child.Status = models.AgentRunStatusCompleted
 	agentbuildertest.PutTrialRun(t, f.Store.Store, child)
 	if wake, _, err := parker.governedCardWait(context.Background(), f.Run, call); err != nil || wake != nil {
 		t.Fatalf("wake after completion = %#v, %v", wake, err)
@@ -43,26 +44,26 @@ func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
 }
 
 func TestAgentTrialFinalizerDeliversReceiptAndQueuesParent(t *testing.T) {
-	f := agentbuildertest.NewTrialFinalizerFixture(t, AgentRunStatusWaitingForEvent)
-	child := f.EndChild(t, AgentRunStatusCompleted, map[string]interface{}{agentbuilder.FinalOutputReportKey: "I would apologise and refund."}, "")
-	var woken []Scope
+	f := agentbuildertest.NewTrialFinalizerFixture(t, models.AgentRunStatusWaitingForEvent)
+	child := f.EndChild(t, models.AgentRunStatusCompleted, map[string]interface{}{agentbuilder.FinalOutputReportKey: "I would apologise and refund."}, "")
+	var woken []models.Scope
 	nextCalls := 0
-	next := agentrun.RunTerminalFinalizerFunc(func(context.Context, *AgentRun) error { nextCalls++; return nil })
-	finalizer := agentbuilder.NewAgentTrialFinalizer(f.Store, next, func(scope Scope) { woken = append(woken, scope) })
+	next := agentrun.RunTerminalFinalizerFunc(func(context.Context, *models.AgentRun) error { nextCalls++; return nil })
+	finalizer := agentbuilder.NewAgentTrialFinalizer(f.Store, next, func(scope models.Scope) { woken = append(woken, scope) })
 	for range 2 {
 		if err := finalizer.FinalizeRun(context.Background(), child); err != nil {
 			t.Fatal(err)
 		}
 	}
 	parent := agentbuildertest.MustRun(t, f.Store, f.Scope, f.Parent.ID)
-	if parent.Status != AgentRunStatusQueued || parent.WakeCondition != nil {
+	if parent.Status != models.AgentRunStatusQueued || parent.WakeCondition != nil {
 		t.Fatalf("parent = %s %#v", parent.Status, parent.WakeCondition)
 	}
 	receipts := 0
 	for _, intervention := range parent.PendingInterventions {
 		if intervention.AgentTrial != nil {
 			receipts++
-			if intervention.ActionCallID != f.Call.ID || *intervention.AgentTrial != (AgentTrialReceipt{
+			if intervention.ActionCallID != f.Call.ID || *intervention.AgentTrial != (models.AgentTrialReceipt{
 				RunID: child.ID, Status: agentbuilder.AgentTrialStatusCompleted, Answer: "I would apologise and refund.",
 			}) {
 				t.Fatalf("intervention = %#v receipt=%#v", intervention, intervention.AgentTrial)
@@ -76,16 +77,16 @@ func TestAgentTrialFinalizerDeliversReceiptAndQueuesParent(t *testing.T) {
 	// The resume renders the receipt as the tool result.
 	outcome := settleAgentTrialCall(t, f, parent, parent.PendingInterventions, time.Now())
 	output := agentTrialResultOutput(t, outcome)
-	if outcome.State != ToolEntryCompleted || output["status"] != agentbuilder.AgentTrialStatusCompleted ||
+	if outcome.State != models.ToolEntryCompleted || output["status"] != agentbuilder.AgentTrialStatusCompleted ||
 		output["reply"] != "I would apologise and refund." || output["trialRunId"] != child.ID {
 		t.Fatalf("outcome = %#v output=%#v", outcome, output)
 	}
 }
 
 func TestAgentTrialResumeRendersFailure(t *testing.T) {
-	f := agentbuildertest.NewTrialFinalizerFixture(t, AgentRunStatusRunning)
-	child := f.EndChild(t, AgentRunStatusFailed, nil, "")
-	child.FailureExplanation = &RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "model", Message: "The model is unavailable."}
+	f := agentbuildertest.NewTrialFinalizerFixture(t, models.AgentRunStatusRunning)
+	child := f.EndChild(t, models.AgentRunStatusFailed, nil, "")
+	child.FailureExplanation = &models.RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "model", Message: "The model is unavailable."}
 	agentbuildertest.PutTrialRun(t, f.Store, child)
 	// No receipt (the finalizer missed it): the resume reads the child.
 	outcome := settleAgentTrialCall(t, f, f.Parent, nil, time.Now())
@@ -96,9 +97,9 @@ func TestAgentTrialResumeRendersFailure(t *testing.T) {
 }
 
 func TestAgentTrialResumeReadsMissedChild(t *testing.T) {
-	f := agentbuildertest.NewTrialFinalizerFixture(t, AgentRunStatusRunning)
+	f := agentbuildertest.NewTrialFinalizerFixture(t, models.AgentRunStatusRunning)
 	const replyLimit = 8 << 10 // the trial reply bound
-	f.EndChild(t, AgentRunStatusCompleted, map[string]interface{}{agentbuilder.FinalOutputReportKey: strings.Repeat("a", replyLimit+100)}, "")
+	f.EndChild(t, models.AgentRunStatusCompleted, map[string]interface{}{agentbuilder.FinalOutputReportKey: strings.Repeat("a", replyLimit+100)}, "")
 	outcome := settleAgentTrialCall(t, f, f.Parent, nil, time.Now())
 	output := agentTrialResultOutput(t, outcome)
 	reply, _ := output["reply"].(string)
@@ -108,7 +109,7 @@ func TestAgentTrialResumeReadsMissedChild(t *testing.T) {
 }
 
 func TestAgentTrialTimerWakeCancelsRunningChild(t *testing.T) {
-	f := agentbuildertest.NewTrialFinalizerFixture(t, AgentRunStatusWaitingForEvent)
+	f := agentbuildertest.NewTrialFinalizerFixture(t, models.AgentRunStatusWaitingForEvent)
 	ctx := context.Background()
 	deadline := agentbuilder.AgentTrialDeadline(f.Child)
 
@@ -119,7 +120,7 @@ func TestAgentTrialTimerWakeCancelsRunningChild(t *testing.T) {
 		t.Fatalf("early wake = %#v, %v", early, err)
 	}
 	due, err := wakes.WakeDueTimers(ctx, f.Scope, deadline.Add(time.Second))
-	if err != nil || len(due.Runs) != 1 || due.Runs[0].Run.ID != f.Parent.ID || due.Runs[0].Run.Status != AgentRunStatusQueued {
+	if err != nil || len(due.Runs) != 1 || due.Runs[0].Run.ID != f.Parent.ID || due.Runs[0].Run.Status != models.AgentRunStatusQueued {
 		t.Fatalf("due wake = %#v, %v", due, err)
 	}
 
@@ -127,17 +128,17 @@ func TestAgentTrialTimerWakeCancelsRunningChild(t *testing.T) {
 	parent := agentbuildertest.MustRun(t, f.Store, f.Scope, f.Parent.ID)
 	outcome := settleAgentTrialCall(t, f, parent, nil, deadline.Add(time.Second))
 	output := agentTrialResultOutput(t, outcome)
-	if outcome.State != ToolEntryCompleted || output["status"] != agentbuilder.AgentTrialStatusTimedOut || output["trialRunId"] != f.Child.ID {
+	if outcome.State != models.ToolEntryCompleted || output["status"] != agentbuilder.AgentTrialStatusTimedOut || output["trialRunId"] != f.Child.ID {
 		t.Fatalf("outcome = %#v output=%#v", outcome, output)
 	}
-	if child := agentbuildertest.MustRun(t, f.Store, f.Scope, f.Child.ID); child.Status != AgentRunStatusCanceled {
+	if child := agentbuildertest.MustRun(t, f.Store, f.Scope, f.Child.ID); child.Status != models.AgentRunStatusCanceled {
 		t.Fatalf("child = %s", child.Status)
 	}
 }
 
 // settleAgentTrialCall settles the fixture's try_agent call for parent at
 // now, as the loop's resume does.
-func settleAgentTrialCall(t *testing.T, f *agentbuildertest.TrialFinalizerFixture, parent *AgentRun, settled []AgentRunIntervention, now time.Time) GovernedToolOutcome {
+func settleAgentTrialCall(t *testing.T, f *agentbuildertest.TrialFinalizerFixture, parent *models.AgentRun, settled []models.AgentRunIntervention, now time.Time) GovernedToolOutcome {
 	t.Helper()
 	clock := func() time.Time { return now }
 	executor := &GovernedToolExecutor{governedParker: newGovernedParker(f.Store, nil, clock), store: f.Store, now: clock}

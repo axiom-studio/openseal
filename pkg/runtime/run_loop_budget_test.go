@@ -7,25 +7,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type budgetPlanningProducer struct {
-	plan  BudgetUsage
+	plan  models.BudgetUsage
 	err   error
 	calls int
 	seen  agentrun.StepInput
 }
 
-func (p *budgetPlanningProducer) Kind() StepProducerKind { return StepProducerModel }
+func (p *budgetPlanningProducer) Kind() models.StepProducerKind { return models.StepProducerModel }
 
 func (p *budgetPlanningProducer) Produce(context.Context, agentrun.StepInput) (agentrun.StepOutput, error) {
 	return agentrun.StepOutput{}, errors.New("not produced in budget tests")
 }
 
-func (p *budgetPlanningProducer) PlanStepBudget(_ context.Context, in agentrun.StepInput) (BudgetUsage, error) {
+func (p *budgetPlanningProducer) PlanStepBudget(_ context.Context, in agentrun.StepInput) (models.BudgetUsage, error) {
 	p.calls++
 	p.seen = in
 	return p.plan, p.err
@@ -33,7 +36,9 @@ func (p *budgetPlanningProducer) PlanStepBudget(_ context.Context, in agentrun.S
 
 type deterministicBudgetProducer struct{}
 
-func (deterministicBudgetProducer) Kind() StepProducerKind { return StepProducerDeterministic }
+func (deterministicBudgetProducer) Kind() models.StepProducerKind {
+	return models.StepProducerDeterministic
+}
 
 func (deterministicBudgetProducer) Produce(context.Context, agentrun.StepInput) (agentrun.StepOutput, error) {
 	return agentrun.StepOutput{}, nil
@@ -42,44 +47,44 @@ func (deterministicBudgetProducer) Produce(context.Context, agentrun.StepInput) 
 type stepBudgetFixture struct {
 	t        *testing.T
 	store    *sqlite.Store
-	activity *RunActivityService
-	turns    *AgentTurnService
-	run      *AgentRun
-	step     *AgentTurn
+	activity *runtimeactivity.RunActivityService
+	turns    *runtimeactivity.AgentTurnService
+	run      *models.AgentRun
+	step     *models.AgentTurn
 	now      time.Time
 }
 
-func newStepBudgetFixture(t *testing.T, budget *BudgetPolicy) *stepBudgetFixture {
+func newStepBudgetFixture(t *testing.T, budget *models.BudgetPolicy) *stepBudgetFixture {
 	t.Helper()
 	ctx := t.Context()
 	store := conversationtest.NewStore(t)
-	scope := Scope{Kind: "local", ID: "step-budget-" + strings.ReplaceAll(t.Name(), "/", "-")}
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "bounded work", Budget: budget,
+	scope := models.Scope{Kind: "local", ID: "step-budget-" + strings.ReplaceAll(t.Name(), "/", "-")}
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "bounded work", Budget: budget,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	activity := NewRunActivityService(store, store)
-	run, _, err = activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusRunning, Summary: "started",
-		Actor: ActivityActor{Type: "worker", ID: "worker"},
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	run, _, err = activity.TransitionRun(ctx, scope, run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusRunning, Summary: "started",
+		Actor: models.ActivityActor{Type: "worker", ID: "worker"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f := &stepBudgetFixture{
-		t: t, store: store, activity: activity, turns: NewAgentTurnService(store, store), run: run,
+		t: t, store: store, activity: activity, turns: runtimeactivity.NewAgentTurnService(store, store), run: run,
 		now: time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC),
 	}
 	f.step = f.begin()
 	return f
 }
 
-func (f *stepBudgetFixture) begin() *AgentTurn {
+func (f *stepBudgetFixture) begin() *models.AgentTurn {
 	f.t.Helper()
-	step, err := f.turns.BeginTurn(f.t.Context(), BeginAgentTurnRequest{
-		Scope: f.run.Scope, RunID: f.run.ID, Producer: StepProducerModel, WorkerID: "worker", LeaseDuration: time.Minute,
+	step, err := f.turns.BeginTurn(f.t.Context(), runtimeactivity.BeginAgentTurnRequest{
+		Scope: f.run.Scope, RunID: f.run.ID, Producer: models.StepProducerModel, WorkerID: "worker", LeaseDuration: time.Minute,
 	})
 	if err != nil {
 		f.t.Fatal(err)
@@ -87,7 +92,7 @@ func (f *stepBudgetFixture) begin() *AgentTurn {
 	return step
 }
 
-func (f *stepBudgetFixture) reserve(binding *agentrun.TurnRunnerBinding) (*AgentRun, *BudgetAdmission) {
+func (f *stepBudgetFixture) reserve(binding *agentrun.TurnRunnerBinding) (*models.AgentRun, *models.BudgetAdmission) {
 	f.t.Helper()
 	run, admission, err := reserveStepBudget(f.t.Context(), f.activity, f.now, f.run, f.step, binding,
 		agentrun.StepInput{Binding: binding, Mode: agentrun.StepModeNormal, WorkerID: "worker"}, "worker")
@@ -100,7 +105,7 @@ func (f *stepBudgetFixture) reserve(binding *agentrun.TurnRunnerBinding) (*Agent
 
 // apply finishes the step and applies it with transition, filling the budget
 // settlement the way applyStep does.
-func (f *stepBudgetFixture) apply(finish FinishAgentTurnRequest, transition RunTransitionRequest, produced bool) *AgentRun {
+func (f *stepBudgetFixture) apply(finish runtimeactivity.FinishAgentTurnRequest, transition runtimeactivity.RunTransitionRequest, produced bool) *models.AgentRun {
 	f.t.Helper()
 	ctx := f.t.Context()
 	finished, err := f.turns.FinishTurn(ctx, f.run.Scope, f.step.ID, finish)
@@ -121,7 +126,7 @@ func (f *stepBudgetFixture) apply(finish FinishAgentTurnRequest, transition RunT
 
 func (f *stepBudgetFixture) eventTypes() []string {
 	f.t.Helper()
-	events, err := f.store.ListActivity(f.t.Context(), ActivityFilter{Scope: f.run.Scope, RunID: f.run.ID})
+	events, err := f.store.ListActivity(f.t.Context(), models.ActivityFilter{Scope: f.run.Scope, RunID: f.run.ID})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -133,16 +138,16 @@ func (f *stepBudgetFixture) eventTypes() []string {
 }
 
 func TestRunLoopBudgetReservationPerStep(t *testing.T) {
-	f := newStepBudgetFixture(t, &BudgetPolicy{MaxTurns: 2, MaxInputTokens: 1000})
-	producer := &budgetPlanningProducer{plan: BudgetUsage{InputTokens: 100, Turns: 5}}
-	binding := &agentrun.TurnRunnerBinding{Producer: producer, BudgetReservation: BudgetUsage{InputTokens: 20}}
+	f := newStepBudgetFixture(t, &models.BudgetPolicy{MaxTurns: 2, MaxInputTokens: 1000})
+	producer := &budgetPlanningProducer{plan: models.BudgetUsage{InputTokens: 100, Turns: 5}}
+	binding := &agentrun.TurnRunnerBinding{Producer: producer, BudgetReservation: models.BudgetUsage{InputTokens: 20}}
 
 	run, admission := f.reserve(binding)
 	if admission != nil {
 		t.Fatalf("admission = %#v", admission)
 	}
 	reservation, ok := run.BudgetReservations[f.step.ID]
-	if !ok || reservation.Usage != (BudgetUsage{Turns: 1, InputTokens: 120}) || !reservation.CreatedAt.Equal(f.now) {
+	if !ok || reservation.Usage != (models.BudgetUsage{Turns: 1, InputTokens: 120}) || !reservation.CreatedAt.Equal(f.now) {
 		t.Fatalf("reservation = %#v (ok=%v)", reservation, ok)
 	}
 	if producer.calls != 1 || producer.seen.Run == nil || producer.seen.Run == f.run || producer.seen.Step.ID != f.step.ID {
@@ -156,18 +161,18 @@ func TestRunLoopBudgetReservationPerStep(t *testing.T) {
 	}
 
 	// A retrying step with a different plan is reconciled in place.
-	producer.plan = BudgetUsage{InputTokens: 200}
+	producer.plan = models.BudgetUsage{InputTokens: 200}
 	f.now = f.now.Add(time.Minute)
 	run, _ = f.reserve(binding)
 	reconciled := run.BudgetReservations[f.step.ID]
-	if reconciled.Usage != (BudgetUsage{Turns: 1, InputTokens: 220}) || !reconciled.CreatedAt.Equal(reservation.CreatedAt) {
+	if reconciled.Usage != (models.BudgetUsage{Turns: 1, InputTokens: 220}) || !reconciled.CreatedAt.Equal(reservation.CreatedAt) {
 		t.Fatalf("reconciled = %#v", reconciled)
 	}
 
-	run = f.apply(FinishAgentTurnRequest{
-		ExpectedRevision: f.step.Revision, Status: AgentTurnStatusCompleted, WorkerID: "worker",
-		Usage: TurnUsage{InputTokens: 150, OutputTokens: 9, NativeOperations: 1},
-	}, RunTransitionRequest{Status: AgentRunStatusRunning, Summary: "Applied step 1", Actor: ActivityActor{Type: "worker", ID: "worker"}}, true)
+	run = f.apply(runtimeactivity.FinishAgentTurnRequest{
+		ExpectedRevision: f.step.Revision, Status: models.AgentTurnStatusCompleted, WorkerID: "worker",
+		Usage: models.TurnUsage{InputTokens: 150, OutputTokens: 9, NativeOperations: 1},
+	}, runtimeactivity.RunTransitionRequest{Status: models.AgentRunStatusRunning, Summary: "Applied step 1", Actor: models.ActivityActor{Type: "worker", ID: "worker"}}, true)
 	if len(run.BudgetReservations) != 0 || run.BudgetUsage.Turns != 1 || run.BudgetUsage.InputTokens != 150 || run.BudgetUsage.Actions != 1 {
 		t.Fatalf("settled run budget = %#v reservations=%#v", run.BudgetUsage, run.BudgetReservations)
 	}
@@ -186,9 +191,9 @@ func TestRunLoopBudgetReservationPerStep(t *testing.T) {
 	}
 
 	// Applying the second step exhausts MaxTurns: the loop pauses.
-	finished, err := f.turns.FinishTurn(t.Context(), f.run.Scope, f.step.ID, FinishAgentTurnRequest{
-		ExpectedRevision: f.step.Revision, Status: AgentTurnStatusCompleted, WorkerID: "worker",
-		Usage: TurnUsage{InputTokens: 10},
+	finished, err := f.turns.FinishTurn(t.Context(), f.run.Scope, f.step.ID, runtimeactivity.FinishAgentTurnRequest{
+		ExpectedRevision: f.step.Revision, Status: models.AgentTurnStatusCompleted, WorkerID: "worker",
+		Usage: models.TurnUsage{InputTokens: 10},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -206,7 +211,7 @@ func TestRunLoopBudgetReservationPerStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if paused.Status != AgentRunStatusPaused || paused.BudgetState != BudgetStateExhausted || paused.BudgetUsage.Turns != 2 ||
+	if paused.Status != models.AgentRunStatusPaused || paused.BudgetState != models.BudgetStateExhausted || paused.BudgetUsage.Turns != 2 ||
 		event.EventType != "budget.exhausted" || len(paused.BudgetReservations) != 0 {
 		t.Fatalf("paused = %#v event=%#v", paused, event)
 	}
@@ -214,7 +219,7 @@ func TestRunLoopBudgetReservationPerStep(t *testing.T) {
 
 func TestRunLoopBudgetUnboundedRunReservesNothing(t *testing.T) {
 	f := newStepBudgetFixture(t, nil)
-	producer := &budgetPlanningProducer{plan: BudgetUsage{InputTokens: 1 << 40}}
+	producer := &budgetPlanningProducer{plan: models.BudgetUsage{InputTokens: 1 << 40}}
 	before := f.run.Revision
 	run, admission := f.reserve(&agentrun.TurnRunnerBinding{Producer: producer})
 	if admission != nil || run.Revision != before || len(run.BudgetReservations) != 0 || producer.calls != 0 {
@@ -226,9 +231,9 @@ func TestRunLoopBudgetUnboundedRunReservesNothing(t *testing.T) {
 }
 
 func TestRunLoopBudgetDeterministicProducerReservesFloor(t *testing.T) {
-	f := newStepBudgetFixture(t, &BudgetPolicy{MaxTurns: 3, MaxActions: 4})
-	run, admission := f.reserve(&agentrun.TurnRunnerBinding{Producer: deterministicBudgetProducer{}, BudgetReservation: BudgetUsage{Actions: 1}})
-	if admission != nil || run.BudgetReservations[f.step.ID].Usage != (BudgetUsage{Turns: 1, Actions: 1}) {
+	f := newStepBudgetFixture(t, &models.BudgetPolicy{MaxTurns: 3, MaxActions: 4})
+	run, admission := f.reserve(&agentrun.TurnRunnerBinding{Producer: deterministicBudgetProducer{}, BudgetReservation: models.BudgetUsage{Actions: 1}})
+	if admission != nil || run.BudgetReservations[f.step.ID].Usage != (models.BudgetUsage{Turns: 1, Actions: 1}) {
 		t.Fatalf("admission=%#v reservations=%#v", admission, run.BudgetReservations)
 	}
 	if stepReservationID(run, f.step) != f.step.ID {
@@ -237,11 +242,11 @@ func TestRunLoopBudgetDeterministicProducerReservesFloor(t *testing.T) {
 }
 
 func TestRunLoopBudgetAdmissionRefusesStep(t *testing.T) {
-	f := newStepBudgetFixture(t, &BudgetPolicy{MaxInputTokens: 10})
+	f := newStepBudgetFixture(t, &models.BudgetPolicy{MaxInputTokens: 10})
 	before := *f.run
-	run, admission := f.reserve(&agentrun.TurnRunnerBinding{Producer: deterministicBudgetProducer{}, BudgetReservation: BudgetUsage{InputTokens: 11}})
+	run, admission := f.reserve(&agentrun.TurnRunnerBinding{Producer: deterministicBudgetProducer{}, BudgetReservation: models.BudgetUsage{InputTokens: 11}})
 	if admission == nil || admission.TurnID != f.step.ID || !admission.EvaluatedAt.Equal(f.now) ||
-		admission.Dimension != "input_tokens" || admission.Reason != BudgetAdmissionReservation || admission.Remaining != 10 {
+		admission.Dimension != "input_tokens" || admission.Reason != models.BudgetAdmissionReservation || admission.Remaining != 10 {
 		t.Fatalf("admission = %#v", admission)
 	}
 	if err := admission.Validate(); err != nil {
@@ -253,10 +258,10 @@ func TestRunLoopBudgetAdmissionRefusesStep(t *testing.T) {
 
 	finish := stepBudgetAdmissionFinish(f.step, "worker", *admission)
 	run = f.apply(finish, stepBudgetPause(f.run, "worker", "", admission, ""), false)
-	if f.step.Status != AgentTurnStatusCanceled || f.step.FailureCode != StepFailureBudgetExhausted || f.step.BudgetAdmission == nil {
+	if f.step.Status != models.AgentTurnStatusCanceled || f.step.FailureCode != StepFailureBudgetExhausted || f.step.BudgetAdmission == nil {
 		t.Fatalf("step = %#v", f.step)
 	}
-	if run.Status != AgentRunStatusPaused || run.BudgetUsage != (BudgetUsage{}) || len(run.BudgetReservations) != 0 ||
+	if run.Status != models.AgentRunStatusPaused || run.BudgetUsage != (models.BudgetUsage{}) || len(run.BudgetReservations) != 0 ||
 		run.BudgetAdmission == nil || run.BudgetAdmission.TurnID != f.step.ID {
 		t.Fatalf("paused run = %#v", run)
 	}
@@ -267,17 +272,17 @@ func TestRunLoopBudgetAdmissionRefusesStep(t *testing.T) {
 }
 
 func TestRunLoopBudgetPlannerAdmission(t *testing.T) {
-	f := newStepBudgetFixture(t, &BudgetPolicy{MaxInputTokens: 100})
-	want := BudgetAdmission{Reason: BudgetAdmissionHostedInput, Dimension: "input_tokens", Required: 500, Remaining: 100}
-	producer := &budgetPlanningProducer{err: &BudgetAdmissionError{Admission: want}}
+	f := newStepBudgetFixture(t, &models.BudgetPolicy{MaxInputTokens: 100})
+	want := models.BudgetAdmission{Reason: models.BudgetAdmissionHostedInput, Dimension: "input_tokens", Required: 500, Remaining: 100}
+	producer := &budgetPlanningProducer{err: &models.BudgetAdmissionError{Admission: want}}
 	_, admission := f.reserve(&agentrun.TurnRunnerBinding{Producer: producer})
 	if admission == nil || admission.Dimension != "input_tokens" || admission.Required != 500 || admission.TurnID != f.step.ID {
 		t.Fatalf("admission = %#v", admission)
 	}
 
-	producer.err = ErrBudgetExhausted
+	producer.err = models.ErrBudgetExhausted
 	_, admission = f.reserve(&agentrun.TurnRunnerBinding{Producer: producer})
-	if admission == nil || admission.Dimension != "unknown" || admission.Reason != BudgetAdmissionHostedInput {
+	if admission == nil || admission.Dimension != "unknown" || admission.Reason != models.BudgetAdmissionHostedInput {
 		t.Fatalf("bare exhaustion admission = %#v", admission)
 	}
 
@@ -290,7 +295,7 @@ func TestRunLoopBudgetPlannerAdmission(t *testing.T) {
 func TestRunLoopDurationBudgetDeadline(t *testing.T) {
 	parent := t.Context()
 
-	unbounded, cancel, charge, ok := stepDurationDeadline(parent, &AgentRun{}, "step")
+	unbounded, cancel, charge, ok := stepDurationDeadline(parent, &models.AgentRun{}, "step")
 	defer cancel()
 	if !ok || charge != 0 {
 		t.Fatalf("unbounded: ok=%v charge=%d", ok, charge)
@@ -299,32 +304,32 @@ func TestRunLoopDurationBudgetDeadline(t *testing.T) {
 		t.Fatal("unbounded step has a deadline")
 	}
 
-	spent := &AgentRun{
-		Budget:      &BudgetPolicy{MaxDurationMS: 1000},
-		BudgetUsage: BudgetUsage{DurationMS: 600},
-		BudgetReservations: map[string]BudgetReservation{
-			"other": {ID: "other", Usage: BudgetUsage{DurationMS: 400}},
-			"step":  {ID: "step", Usage: BudgetUsage{DurationMS: 900}},
+	spent := &models.AgentRun{
+		Budget:      &models.BudgetPolicy{MaxDurationMS: 1000},
+		BudgetUsage: models.BudgetUsage{DurationMS: 600},
+		BudgetReservations: map[string]models.BudgetReservation{
+			"other": {ID: "other", Usage: models.BudgetUsage{DurationMS: 400}},
+			"step":  {ID: "step", Usage: models.BudgetUsage{DurationMS: 900}},
 		},
 	}
 	if _, cancel, _, ok := stepDurationDeadline(parent, spent, "step"); ok {
 		cancel()
 		t.Fatal("no duration left must refuse the step before it starts")
 	}
-	finish := stepDurationExpiredFinish(&AgentTurn{Revision: 3}, "worker", TurnUsage{}, 0, 0)
-	if finish.Status != AgentTurnStatusCanceled || finish.FailureCode != StepFailureDurationBudget ||
-		finish.Usage != (TurnUsage{}) || finish.OutputSummary != stepDurationExpiredSummary || finish.ExpectedRevision != 3 {
+	finish := stepDurationExpiredFinish(&models.AgentTurn{Revision: 3}, "worker", models.TurnUsage{}, 0, 0)
+	if finish.Status != models.AgentTurnStatusCanceled || finish.FailureCode != StepFailureDurationBudget ||
+		finish.Usage != (models.TurnUsage{}) || finish.OutputSummary != stepDurationExpiredSummary || finish.ExpectedRevision != 3 {
 		t.Fatalf("before-start finish = %#v", finish)
 	}
-	pause := stepBudgetPause(&AgentRun{Budget: spent.Budget, BudgetUsage: spent.BudgetUsage}, "worker", stepDurationExpiredSummary, nil, "duration_ms")
-	if pause.Status != AgentRunStatusPaused || pause.EventType != "budget.exhausted" ||
+	pause := stepBudgetPause(&models.AgentRun{Budget: spent.Budget, BudgetUsage: spent.BudgetUsage}, "worker", stepDurationExpiredSummary, nil, "duration_ms")
+	if pause.Status != models.AgentRunStatusPaused || pause.EventType != "budget.exhausted" ||
 		pause.Payload["dimension"] != "duration_ms" || pause.Payload["used"] != int64(600) || pause.Payload["limit"] != int64(1000) {
 		t.Fatalf("duration pause = %#v", pause)
 	}
 
-	left := &AgentRun{
-		Budget: &BudgetPolicy{MaxDurationMS: 30}, BudgetUsage: BudgetUsage{DurationMS: 10},
-		BudgetReservations: map[string]BudgetReservation{"other": {ID: "other", Usage: BudgetUsage{DurationMS: 15}}},
+	left := &models.AgentRun{
+		Budget: &models.BudgetPolicy{MaxDurationMS: 30}, BudgetUsage: models.BudgetUsage{DurationMS: 10},
+		BudgetReservations: map[string]models.BudgetReservation{"other": {ID: "other", Usage: models.BudgetUsage{DurationMS: 15}}},
 	}
 	stepCtx, cancel, charge, ok := stepDurationDeadline(parent, left, "step")
 	defer cancel()
@@ -335,12 +340,12 @@ func TestRunLoopDurationBudgetDeadline(t *testing.T) {
 	if !stepDurationExpired(parent, stepCtx) {
 		t.Fatal("deadline expiry not detected")
 	}
-	finish = stepDurationExpiredFinish(&AgentTurn{}, "worker", TurnUsage{InputTokens: 40, DurationMS: 2}, 3, charge)
+	finish = stepDurationExpiredFinish(&models.AgentTurn{}, "worker", models.TurnUsage{InputTokens: 40, DurationMS: 2}, 3, charge)
 	if finish.FailureCode != StepFailureDurationBudget || finish.Usage.DurationMS != 5 || finish.Usage.InputTokens != 40 ||
 		finish.OutputSummary != stepDurationExceededSummary {
 		t.Fatalf("mid-step finish = %#v", finish)
 	}
-	if finish := stepDurationExpiredFinish(&AgentTurn{}, "worker", TurnUsage{InputTokens: -1}, 9, 5); finish.Usage != (TurnUsage{DurationMS: 9}) {
+	if finish := stepDurationExpiredFinish(&models.AgentTurn{}, "worker", models.TurnUsage{InputTokens: -1}, 9, 5); finish.Usage != (models.TurnUsage{DurationMS: 9}) {
 		t.Fatalf("invalid producer usage must not be charged: %#v", finish.Usage)
 	}
 
@@ -356,8 +361,8 @@ func TestRunLoopDurationBudgetDeadline(t *testing.T) {
 }
 
 func TestBudgetUsageForStepChargesTurnOnlyWhenProduced(t *testing.T) {
-	usage := TurnUsage{InputTokens: 3, OutputTokens: 4, Cost: 0.0000015, DurationMS: 7, NativeOperations: 2}
-	want := BudgetUsage{Turns: 1, InputTokens: 3, OutputTokens: 4, CostMicros: 2, DurationMS: 7, Actions: 2}
+	usage := models.TurnUsage{InputTokens: 3, OutputTokens: 4, Cost: 0.0000015, DurationMS: 7, NativeOperations: 2}
+	want := models.BudgetUsage{Turns: 1, InputTokens: 3, OutputTokens: 4, CostMicros: 2, DurationMS: 7, Actions: 2}
 	if got := budgetUsageForStep(usage, true); got != want {
 		t.Fatalf("produced = %#v", got)
 	}
@@ -366,12 +371,12 @@ func TestBudgetUsageForStepChargesTurnOnlyWhenProduced(t *testing.T) {
 		t.Fatalf("not produced = %#v", got)
 	}
 
-	req := RunTransitionRequest{Status: AgentRunStatusRunning}
-	fillStepBudgetSettlement(&req, &AgentRun{}, &AgentTurn{ID: "s"}, false)
+	req := runtimeactivity.RunTransitionRequest{Status: models.AgentRunStatusRunning}
+	fillStepBudgetSettlement(&req, &models.AgentRun{}, &models.AgentTurn{ID: "s"}, false)
 	if req.ActivityUsageDelta != nil || req.BudgetUsageDelta != nil || req.SettleBudgetReservationID != "" || req.EventType != "" {
 		t.Fatalf("empty settlement = %#v", req)
 	}
-	fillStepBudgetSettlement(&req, &AgentRun{}, &AgentTurn{ID: "s", Usage: usage}, true)
+	fillStepBudgetSettlement(&req, &models.AgentRun{}, &models.AgentTurn{ID: "s", Usage: usage}, true)
 	if req.ActivityUsageDelta == nil || req.ActivityUsageDelta.Turns != 1 || req.BudgetUsageDelta != nil {
 		t.Fatalf("unbounded settlement = %#v", req)
 	}

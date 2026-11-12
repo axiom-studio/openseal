@@ -7,35 +7,36 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func governedResultCall(status ActionCallStatus) *ActionCall {
-	return &ActionCall{
+func governedResultCall(status models.ActionCallStatus) *models.ActionCall {
+	return &models.ActionCall{
 		ID: "call-1", RunID: "run-1", TurnID: "step-1", SkillID: "repo", SkillVersion: "1.0.0", Action: "push",
-		Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Status: status,
+		Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, Status: status,
 		Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal,
 	}
 }
 
-func governedResultApproval(status ApprovalStatus, reason string) *ApprovalCheckpoint {
-	return &ApprovalCheckpoint{ID: "approval-1", ActionCallID: "call-1", Status: status, DecisionReason: reason}
+func governedResultApproval(status models.ApprovalStatus, reason string) *models.ApprovalCheckpoint {
+	return &models.ApprovalCheckpoint{ID: "approval-1", ActionCallID: "call-1", Status: status, DecisionReason: reason}
 }
 
 // requireGovernedResult checks state, status and the exact json part, and
 // that the result is a valid terminal result for its state.
-func requireGovernedResult(t *testing.T, state ToolEntryState, result *ToolResult, wantState ToolEntryState, wantStatus ToolResultStatus, wantJSON string) {
+func requireGovernedResult(t *testing.T, state models.ToolEntryState, result *models.ToolResult, wantState models.ToolEntryState, wantStatus models.ToolResultStatus, wantJSON string) {
 	t.Helper()
 	if state != wantState || result == nil || result.Status != wantStatus {
 		t.Fatalf("render = %q %#v; want %q %q", state, result, wantState, wantStatus)
 	}
-	if len(result.Content) == 0 || result.Content[0].Type != ContentPartJSON || string(result.Content[0].Value) != wantJSON {
+	if len(result.Content) == 0 || result.Content[0].Type != models.ContentPartJSON || string(result.Content[0].Value) != wantJSON {
 		t.Fatalf("content = %#v\nwant json %s", result.Content, wantJSON)
 	}
-	entry := &SessionEntry{ID: "governed", Type: SessionEntryTool, State: state, StepID: "step-1", ToolCallID: "call-1",
-		Tool: &ToolEntry{Name: "governed", SideEffect: ToolSideEffectWrite, Result: result}}
+	entry := &models.SessionEntry{ID: "governed", Type: models.SessionEntryTool, State: state, StepID: "step-1", ToolCallID: "call-1",
+		Tool: &models.ToolEntry{Name: "governed", SideEffect: models.ToolSideEffectWrite, Result: result}}
 	if err := entry.Validate(); err != nil {
 		t.Fatalf("result invalid for %s: %v", state, err)
 	}
@@ -44,117 +45,117 @@ func requireGovernedResult(t *testing.T, state ToolEntryState, result *ToolResul
 func TestRenderGovernedResultTable(t *testing.T) {
 	type row struct {
 		name     string
-		call     func() *ActionCall
-		approval *ApprovalCheckpoint
+		call     func() *models.ActionCall
+		approval *models.ApprovalCheckpoint
 		settled  string
-		state    ToolEntryState
-		status   ToolResultStatus
+		state    models.ToolEntryState
+		status   models.ToolResultStatus
 		json     string
 	}
 	rows := []row{
-		{name: "succeeded", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusSucceeded)
+		{name: "succeeded", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusSucceeded)
 			c.Output = map[string]interface{}{"sha": "abc", "pushed": true}
 			return c
-		}, state: ToolEntryCompleted, status: ToolResultSucceeded,
+		}, state: models.ToolEntryCompleted, status: models.ToolResultSucceeded,
 			json: `{"evidenceRef":"action-call:call-1","output":{"pushed":true,"sha":"abc"}}`},
-		{name: "succeeded after card", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusSucceeded)
+		{name: "succeeded after card", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusSucceeded)
 			c.Output = map[string]interface{}{"requiresHuman": true}
 			return c
-		}, settled: "The person solved the challenge.", state: ToolEntryCompleted, status: ToolResultSucceeded,
+		}, settled: "The person solved the challenge.", state: models.ToolEntryCompleted, status: models.ToolResultSucceeded,
 			json: `{"evidenceRef":"action-call:call-1","outcome":"The person solved the challenge.","output":{"requiresHuman":true}}`},
-		{name: "succeeded receipt", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusSucceeded)
+		{name: "succeeded receipt", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusSucceeded)
 			c.DuplicateOfActionCallID = "call-0"
 			return c
-		}, state: ToolEntryError, status: ToolResultDuplicateSuppressed,
+		}, state: models.ToolEntryError, status: models.ToolResultDuplicateSuppressed,
 			json: `{"evidenceRef":"action-call:call-1","note":"This exact operation was already performed earlier, so it was not sent again.","priorEvidenceRef":"action-call:call-0","status":"duplicate_suppressed"}`},
-		{name: "recovered running write", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusFailed)
-			c.RecoveredRunning, c.ErrorCode, c.Error, c.FailurePhase = true, ActionErrorCodeInterrupted, "lost", ActionFailureAfterDispatch
+		{name: "recovered running write", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusFailed)
+			c.RecoveredRunning, c.ErrorCode, c.Error, c.FailurePhase = true, models.ActionErrorCodeInterrupted, "lost", models.ActionFailureAfterDispatch
 			return c
-		}, state: ToolEntryInterrupted, status: ToolResultInterrupted,
+		}, state: models.ToolEntryInterrupted, status: models.ToolResultInterrupted,
 			json: `{"error":"The previous operation may already have taken effect. It was not sent again. Check before retrying.","evidenceRef":"action-call:call-1","status":"interrupted"}`},
-		{name: "recovered running read is a plain failure", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusFailed)
+		{name: "recovered running read is a plain failure", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusFailed)
 			c.SideEffect, c.RecoveredRunning, c.Error = skill.SideEffectRead, true, "timeout"
 			return c
-		}, state: ToolEntryError, status: ToolResultFailed,
+		}, state: models.ToolEntryError, status: models.ToolResultFailed,
 			json: `{"error":"timeout","evidenceRef":"action-call:call-1","status":"failed"}`},
-		{name: "failed", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusFailed)
-			c.Error, c.ErrorCode, c.FailurePhase = "rate limited", "rate_limited", ActionFailureAfterDispatch
+		{name: "failed", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusFailed)
+			c.Error, c.ErrorCode, c.FailurePhase = "rate limited", "rate_limited", models.ActionFailureAfterDispatch
 			c.ErrorDetails = map[string]string{"retryAfter": "30"}
 			return c
-		}, state: ToolEntryError, status: ToolResultFailed,
+		}, state: models.ToolEntryError, status: models.ToolResultFailed,
 			json: `{"error":"rate limited","errorCode":"rate_limited","errorDetails":{"retryAfter":"30"},"evidenceRef":"action-call:call-1","failurePhase":"after_dispatch","status":"failed"}`},
-		{name: "failed connect-once parked settled", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusFailed)
-			c.SkillID, c.FailurePhase, c.Error = "mail", ActionFailureBeforeDispatch, "needs sign-in"
-			c.Output = map[string]interface{}{"setupRequest": map[string]interface{}{"kind": SkillSetupKindConnectAccount, "id": skillbinding.ConnectAccountRequestPrefix + "call-1"}}
+		{name: "failed connect-once parked settled", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusFailed)
+			c.SkillID, c.FailurePhase, c.Error = "mail", models.ActionFailureBeforeDispatch, "needs sign-in"
+			c.Output = map[string]interface{}{"setupRequest": map[string]interface{}{"kind": models.SkillSetupKindConnectAccount, "id": skillbinding.ConnectAccountRequestPrefix + "call-1"}}
 			return c
-		}, settled: "The person you act for connected Google. Retry the step that needed it.", state: ToolEntryError, status: ToolResultFailed,
+		}, settled: "The person you act for connected Google. Retry the step that needed it.", state: models.ToolEntryError, status: models.ToolResultFailed,
 			json: `{"error":"An account sign-in was needed.","evidenceRef":"action-call:call-1","outcome":"The person you act for connected Google. Retry the step that needed it.","status":"failed"}`},
-		{name: "denied by policy", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusDenied)
+		{name: "denied by policy", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusDenied)
 			c.Error = "policy forbids pushes"
 			return c
-		}, state: ToolEntryError, status: ToolResultDenied,
+		}, state: models.ToolEntryError, status: models.ToolResultDenied,
 			json: `{"evidenceRef":"action-call:call-1","reason":"policy forbids pushes","status":"denied"}`},
-		{name: "approval rejected", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusDenied)
+		{name: "approval rejected", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusDenied)
 			c.ApprovalID, c.Error = "approval-1", "rejected: not now"
 			return c
-		}, approval: governedResultApproval(ApprovalStatusRejected, "not now"), state: ToolEntryError, status: ToolResultDenied,
+		}, approval: governedResultApproval(models.ApprovalStatusRejected, "not now"), state: models.ToolEntryError, status: models.ToolResultDenied,
 			json: `{"evidenceRef":"action-call:call-1","reason":"not now","status":"rejected"}`},
-		{name: "approval changes requested", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusDenied)
+		{name: "approval changes requested", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusDenied)
 			c.ApprovalID, c.Error = "approval-1", "changes_requested: use the main branch"
 			return c
-		}, approval: governedResultApproval(ApprovalStatusChangesRequested, "use the main branch"), state: ToolEntryError, status: ToolResultChangesRequested,
+		}, approval: governedResultApproval(models.ApprovalStatusChangesRequested, "use the main branch"), state: models.ToolEntryError, status: models.ToolResultChangesRequested,
 			json: `{"evidenceRef":"action-call:call-1","guidance":"use the main branch","status":"changes_requested"}`},
-		{name: "approval superseded", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusDenied)
+		{name: "approval superseded", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusDenied)
 			c.ApprovalID = "approval-1"
 			return c
-		}, approval: governedResultApproval(ApprovalStatusSuperseded, action.ApprovalSupersededReason), state: ToolEntryError, status: ToolResultSuperseded,
+		}, approval: governedResultApproval(models.ApprovalStatusSuperseded, action.ApprovalSupersededReason), state: models.ToolEntryError, status: models.ToolResultSuperseded,
 			json: `{"evidenceRef":"action-call:call-1","reason":"` + action.ApprovalSupersededReason + `","status":"superseded"}`},
-		{name: "approval expired", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusDenied)
+		{name: "approval expired", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusDenied)
 			c.ApprovalID = "approval-1"
 			return c
-		}, approval: governedResultApproval(ApprovalStatusExpired, ""), state: ToolEntryError, status: ToolResultExpired,
+		}, approval: governedResultApproval(models.ApprovalStatusExpired, ""), state: models.ToolEntryError, status: models.ToolResultExpired,
 			json: `{"evidenceRef":"action-call:call-1","reason":"Nobody answered the approval request in time; the action was not carried out.","status":"expired"}`},
-		{name: "approval canceled", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusDenied)
+		{name: "approval canceled", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusDenied)
 			c.ApprovalID, c.Error = "approval-1", "the run was canceled"
 			return c
-		}, approval: governedResultApproval(ApprovalStatusCanceled, ""), state: ToolEntryError, status: ToolResultCanceled,
+		}, approval: governedResultApproval(models.ApprovalStatusCanceled, ""), state: models.ToolEntryError, status: models.ToolResultCanceled,
 			json: `{"evidenceRef":"action-call:call-1","reason":"the run was canceled","status":"canceled"}`},
-		{name: "canceled", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusCanceled)
+		{name: "canceled", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusCanceled)
 			c.Error = "The run that made this call ended before it ran."
 			return c
-		}, state: ToolEntryError, status: ToolResultCanceled,
+		}, state: models.ToolEntryError, status: models.ToolResultCanceled,
 			json: `{"evidenceRef":"action-call:call-1","reason":"The run that made this call ended before it ran.","status":"canceled"}`},
-		{name: "refused row", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusRefused)
+		{name: "refused row", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusRefused)
 			c.ErrorCode, c.Error = action.RefusedLoopCallRepeat, "already done"
 			return c
-		}, state: ToolEntryError, status: ToolResultRefused,
+		}, state: models.ToolEntryError, status: models.ToolResultRefused,
 			json: `{"code":"` + action.RefusedLoopCallRepeat + `","error":"already done","evidenceRef":"action-call:call-1","status":"refused"}`},
-		{name: "compensated", call: func() *ActionCall { return governedResultCall(ActionCallStatusCompensated) },
-			state: ToolEntryError, status: ToolResultFailed,
+		{name: "compensated", call: func() *models.ActionCall { return governedResultCall(models.ActionCallStatusCompensated) },
+			state: models.ToolEntryError, status: models.ToolResultFailed,
 			json: `{"error":"The action was reverted.","evidenceRef":"action-call:call-1","status":"failed"}`},
-		{name: "compensating", call: func() *ActionCall { return governedResultCall(ActionCallStatusCompensating) },
-			state: ToolEntryError, status: ToolResultFailed,
+		{name: "compensating", call: func() *models.ActionCall { return governedResultCall(models.ActionCallStatusCompensating) },
+			state: models.ToolEntryError, status: models.ToolResultFailed,
 			json: `{"error":"The action was reverted.","evidenceRef":"action-call:call-1","status":"failed"}`},
-		{name: "budget exhausted", call: func() *ActionCall {
-			c := governedResultCall(ActionCallStatusDenied)
+		{name: "budget exhausted", call: func() *models.ActionCall {
+			c := governedResultCall(models.ActionCallStatusDenied)
 			c.Error = action.ActionBudgetExhaustedReason
 			return c
-		}, state: ToolEntryError, status: ToolResultDenied,
+		}, state: models.ToolEntryError, status: models.ToolResultDenied,
 			json: `{"evidenceRef":"action-call:call-1","reason":"This run has used its action budget.","status":"denied"}`},
 	}
 	for _, r := range rows {
@@ -166,26 +167,26 @@ func TestRenderGovernedResultTable(t *testing.T) {
 
 	t.Run("proposal rejection", func(t *testing.T) {
 		state, result := renderGovernedRejection(&action.ActionProposalRejection{Code: action.ProposalRejectionToolArgumentsInvalid, Message: "path is required"})
-		requireGovernedResult(t, state, result, ToolEntryError, ToolResultRefused,
+		requireGovernedResult(t, state, result, models.ToolEntryError, models.ToolResultRefused,
 			`{"code":"`+action.ProposalRejectionToolArgumentsInvalid+`","error":"path is required","status":"refused"}`)
 	})
 	t.Run("maintenance at proposal", func(t *testing.T) {
 		state, result := renderGovernedMaintenanceRefusal()
-		requireGovernedResult(t, state, result, ToolEntryError, ToolResultRefused,
+		requireGovernedResult(t, state, result, models.ToolEntryError, models.ToolResultRefused,
 			`{"code":"skill_maintenance","error":"This tool is temporarily unavailable while it is being updated. Try again later or use another way.","status":"refused"}`)
 	})
 	t.Run("in-flight external operation", func(t *testing.T) {
 		state, result := renderGovernedInFlight("call-0")
-		requireGovernedResult(t, state, result, ToolEntryError, ToolResultDuplicateSuppressed,
+		requireGovernedResult(t, state, result, models.ToolEntryError, models.ToolResultDuplicateSuppressed,
 			`{"error":"The same operation is already in progress, so it was not sent again.","priorEvidenceRef":"action-call:call-0","status":"duplicate_suppressed"}`)
 	})
 	t.Run("budget exhausted without row", func(t *testing.T) {
 		state, result := renderGovernedBudgetExhausted(nil)
-		requireGovernedResult(t, state, result, ToolEntryError, ToolResultDenied,
+		requireGovernedResult(t, state, result, models.ToolEntryError, models.ToolResultDenied,
 			`{"reason":"This run has used its action budget.","status":"denied"}`)
 	})
 	t.Run("non-terminal calls do not render", func(t *testing.T) {
-		for _, status := range []ActionCallStatus{ActionCallStatusReady, ActionCallStatusWaitingApproval, ActionCallStatusRunning} {
+		for _, status := range []models.ActionCallStatus{models.ActionCallStatusReady, models.ActionCallStatusWaitingApproval, models.ActionCallStatusRunning} {
 			if state, result := renderGovernedResult(governedResultCall(status), nil, ""); state != "" || result != nil {
 				t.Fatalf("%s rendered %q %#v", status, state, result)
 			}
@@ -196,21 +197,21 @@ func TestRenderGovernedResultTable(t *testing.T) {
 func TestGovernedScreenshotBecomesImagePart(t *testing.T) {
 	pixels := []byte("\x89PNG\r\n\x1a\nscreenshot")
 	encoded := base64.StdEncoding.EncodeToString(pixels)
-	call := governedResultCall(ActionCallStatusSucceeded)
+	call := governedResultCall(models.ActionCallStatusSucceeded)
 	call.SideEffect = skill.SideEffectRead
 	call.Output = map[string]interface{}{
 		"url":        "https://example.com",
 		"modelMedia": map[string]interface{}{"mediaType": "image/png", "contentBase64": encoded, "detail": "high"},
 	}
 	state, result := renderGovernedResult(call, nil, "")
-	requireGovernedResult(t, state, result, ToolEntryCompleted, ToolResultSucceeded,
+	requireGovernedResult(t, state, result, models.ToolEntryCompleted, models.ToolResultSucceeded,
 		`{"evidenceRef":"action-call:call-1","output":{"url":"https://example.com"}}`)
 	if len(result.Content) != 2 {
 		t.Fatalf("content = %#v; want json + image", result.Content)
 	}
 	digest := sha256.Sum256(pixels)
 	image := result.Content[1]
-	if image.Type != ContentPartImage || image.MediaType != "image/png" || image.Detail != "high" || image.ActionCallID != "call-1" ||
+	if image.Type != models.ContentPartImage || image.MediaType != "image/png" || image.Detail != "high" || image.ActionCallID != "call-1" ||
 		image.SHA256 != hex.EncodeToString(digest[:]) || image.DataBase64 != "" {
 		t.Fatalf("image part = %#v", image)
 	}
@@ -230,10 +231,10 @@ func TestGovernedScreenshotBecomesImagePart(t *testing.T) {
 		"not an object":    "attached",
 	} {
 		t.Run(name, func(t *testing.T) {
-			bad := governedResultCall(ActionCallStatusSucceeded)
+			bad := governedResultCall(models.ActionCallStatusSucceeded)
 			bad.Output = map[string]interface{}{"url": "https://example.com", "modelMedia": media}
 			state, result := renderGovernedResult(bad, nil, "")
-			requireGovernedResult(t, state, result, ToolEntryCompleted, ToolResultSucceeded,
+			requireGovernedResult(t, state, result, models.ToolEntryCompleted, models.ToolResultSucceeded,
 				`{"evidenceRef":"action-call:call-1","output":{"url":"https://example.com"}}`)
 			if len(result.Content) != 1 {
 				t.Fatalf("invalid media produced parts %#v", result.Content)

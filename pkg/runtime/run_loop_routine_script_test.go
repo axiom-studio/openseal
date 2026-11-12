@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -16,9 +17,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
-func routineScriptRun() *AgentRun {
-	return &AgentRun{ID: "occurrence", Scope: Scope{Kind: "tenant", ID: "one"}, AssignedAgentID: "agent", Context: map[string]interface{}{
-		conversationRunContextConversationID: "chat",
+func routineScriptRun() *models.AgentRun {
+	return &models.AgentRun{ID: "occurrence", Scope: models.Scope{Kind: "tenant", ID: "one"}, AssignedAgentID: "agent", Context: map[string]interface{}{
+		models.ConversationRunConversationIDContextKey: "chat",
 		routine.RoutineScriptContextKey: map[string]interface{}{"path": "scripts/weekly.py", "digest": loopScriptDigest("a"), "filesVersion": float64(2),
 			"command": "python3 scripts/weekly.py", "timeoutSeconds": float64(120)},
 	}}
@@ -38,11 +39,11 @@ func loopRoutineScriptFixture(t *testing.T) *PreparedRoutineScript {
 // loopRunCommandEntry runs command through the host tool dispatcher with the
 // claim's pins, the host replying reply (nil: transport failure), and
 // returns the terminal tool entry the loop records from the outcome.
-func loopRunCommandEntry(t *testing.T, routine *PreparedRoutineScript, sequence int64, arguments map[string]interface{}, reply map[string]interface{}) *SessionEntry {
+func loopRunCommandEntry(t *testing.T, routine *PreparedRoutineScript, sequence int64, arguments map[string]interface{}, reply map[string]interface{}) *models.SessionEntry {
 	t.Helper()
 	answer := modelsteptest.HostReplyError(errors.New("connection reset"))
 	if reply != nil {
-		answer = func(_ context.Context, request HostToolRequest) (HostToolResult, error) {
+		answer = func(_ context.Context, request models.HostToolRequest) (models.HostToolResult, error) {
 			result := map[string]interface{}{}
 			for name, value := range reply {
 				result[name] = value
@@ -57,7 +58,7 @@ func loopRunCommandEntry(t *testing.T, routine *PreparedRoutineScript, sequence 
 			return modelsteptest.HostReplyJSON(result, false)(context.Background(), request)
 		}
 	}
-	dispatcher := modelstep.NewHostToolDispatcher(&modelsteptest.FakeHostToolHost{Replies: []func(context.Context, HostToolRequest) (HostToolResult, error){answer}},
+	dispatcher := modelstep.NewHostToolDispatcher(&modelsteptest.FakeHostToolHost{Replies: []func(context.Context, models.HostToolRequest) (models.HostToolResult, error){answer}},
 		runtimeaction.NewActionCoordinator(nil, nil, nil, nil, nil), nil)
 	call := modelsteptest.HostToolCallFixture(t, workspace.OperationRunCommand, arguments)
 	call.ToolEntryID = fmt.Sprintf("ent_%d", sequence)
@@ -71,14 +72,14 @@ func loopRunCommandEntry(t *testing.T, routine *PreparedRoutineScript, sequence 
 		t.Fatal(err)
 	}
 	encoded, _ := json.Marshal(arguments)
-	return &SessionEntry{ID: call.ToolEntryID, Sequence: sequence, RunID: "occurrence", StepID: "step", Type: SessionEntryTool, State: outcome.State,
+	return &models.SessionEntry{ID: call.ToolEntryID, Sequence: sequence, RunID: "occurrence", StepID: "step", Type: models.SessionEntryTool, State: outcome.State,
 		ToolCallID: fmt.Sprintf("call_%d", sequence),
-		Tool:       &ToolEntry{Name: routineScriptRunCommandTool, Arguments: encoded, Result: outcome.Result, PinnedRun: patch.PinnedRun, OriginRef: patch.OriginRef}}
+		Tool:       &models.ToolEntry{Name: routineScriptRunCommandTool, Arguments: encoded, Result: outcome.Result, PinnedRun: patch.PinnedRun, OriginRef: patch.OriginRef}}
 }
 
 func TestLoopRoutineScriptPreparesPinsAndSection(t *testing.T) {
 	tools := modelstep.HostToolSpecs(workspace.ChatAuthority("chat"))
-	if routine, err := PrepareRoutineScript(&AgentRun{ID: "chat-run", Context: map[string]interface{}{}}, tools); routine != nil || err != nil {
+	if routine, err := PrepareRoutineScript(&models.AgentRun{ID: "chat-run", Context: map[string]interface{}{}}, tools); routine != nil || err != nil {
 		t.Fatalf("plain Run = %#v, %v", routine, err)
 	}
 	if routine, err := PrepareRoutineScript(nil, tools); routine != nil || err != nil {
@@ -141,24 +142,24 @@ func TestLoopRoutineScriptCompletionCheckReadsToolEntries(t *testing.T) {
 	approved := map[string]interface{}{"command": "python3 scripts/weekly.py"}
 	clean := map[string]interface{}{"exitStatus": float64(0), "stdout": "412 signups\n"}
 	for name, testCase := range map[string]struct {
-		entries func(*testing.T) []*SessionEntry
+		entries func(*testing.T) []*models.SessionEntry
 		want    []string // "" alone: the Run may complete
 	}{
 		"clean run": {
-			entries: func(t *testing.T) []*SessionEntry {
-				return []*SessionEntry{loopRunCommandEntry(t, routine, 3, approved, clean)}
+			entries: func(t *testing.T) []*models.SessionEntry {
+				return []*models.SessionEntry{loopRunCommandEntry(t, routine, 3, approved, clean)}
 			},
 			want: []string{""},
 		},
 		"clean run with extra spaces": {
-			entries: func(t *testing.T) []*SessionEntry {
-				return []*SessionEntry{loopRunCommandEntry(t, routine, 3, map[string]interface{}{"command": "python3   scripts/weekly.py"}, clean)}
+			entries: func(t *testing.T) []*models.SessionEntry {
+				return []*models.SessionEntry{loopRunCommandEntry(t, routine, 3, map[string]interface{}{"command": "python3   scripts/weekly.py"}, clean)}
 			},
 			want: []string{""},
 		},
 		"clean run then an unrelated failing command": {
-			entries: func(t *testing.T) []*SessionEntry {
-				return []*SessionEntry{
+			entries: func(t *testing.T) []*models.SessionEntry {
+				return []*models.SessionEntry{
 					loopRunCommandEntry(t, routine, 5, map[string]interface{}{"command": "ls out"}, map[string]interface{}{"exitStatus": float64(2)}),
 					loopRunCommandEntry(t, routine, 3, approved, clean),
 				}
@@ -166,28 +167,28 @@ func TestLoopRoutineScriptCompletionCheckReadsToolEntries(t *testing.T) {
 			want: []string{""},
 		},
 		"never ran": {
-			entries: func(t *testing.T) []*SessionEntry {
-				return []*SessionEntry{loopRunCommandEntry(t, routine, 3, map[string]interface{}{"command": "ls"}, map[string]interface{}{"exitStatus": float64(0)})}
+			entries: func(t *testing.T) []*models.SessionEntry {
+				return []*models.SessionEntry{loopRunCommandEntry(t, routine, 3, map[string]interface{}{"command": "ls"}, map[string]interface{}{"exitStatus": float64(0)})}
 			},
 			want: []string{"The routine's script did not run: python3 scripts/weekly.py"},
 		},
 		"pending entry does not count": {
-			entries: func(t *testing.T) []*SessionEntry {
+			entries: func(t *testing.T) []*models.SessionEntry {
 				entry := loopRunCommandEntry(t, routine, 3, approved, clean)
-				entry.State, entry.Tool.Result = ToolEntryPending, nil
-				return []*SessionEntry{entry}
+				entry.State, entry.Tool.Result = models.ToolEntryPending, nil
+				return []*models.SessionEntry{entry}
 			},
 			want: []string{"The routine's script did not run"},
 		},
 		"failed": {
-			entries: func(t *testing.T) []*SessionEntry {
-				return []*SessionEntry{loopRunCommandEntry(t, routine, 3, approved, map[string]interface{}{"exitStatus": float64(1), "stderr": "Traceback (most recent call last):\nKeyError: 'signup_date'"})}
+			entries: func(t *testing.T) []*models.SessionEntry {
+				return []*models.SessionEntry{loopRunCommandEntry(t, routine, 3, approved, map[string]interface{}{"exitStatus": float64(1), "stderr": "Traceback (most recent call last):\nKeyError: 'signup_date'"})}
 			},
 			want: []string{"exited with status 1: python3 scripts/weekly.py", "Last output:\nTraceback (most recent call last):\nKeyError: 'signup_date'"},
 		},
 		"failed again after a clean-looking unconfirmed run": {
-			entries: func(t *testing.T) []*SessionEntry {
-				return []*SessionEntry{
+			entries: func(t *testing.T) []*models.SessionEntry {
+				return []*models.SessionEntry{
 					loopRunCommandEntry(t, routine, 3, approved, map[string]interface{}{"exitStatus": float64(0), workspace.ExpectedDigestArgument: false}),
 					loopRunCommandEntry(t, routine, 4, approved, map[string]interface{}{"exitStatus": float64(3)}),
 				}
@@ -195,48 +196,48 @@ func TestLoopRoutineScriptCompletionCheckReadsToolEntries(t *testing.T) {
 			want: []string{"exited with status 3"},
 		},
 		"timed out": {
-			entries: func(t *testing.T) []*SessionEntry {
-				return []*SessionEntry{loopRunCommandEntry(t, routine, 3, approved, map[string]interface{}{"exitStatus": float64(-1), "timedOut": true})}
+			entries: func(t *testing.T) []*models.SessionEntry {
+				return []*models.SessionEntry{loopRunCommandEntry(t, routine, 3, approved, map[string]interface{}{"exitStatus": float64(-1), "timedOut": true})}
 			},
 			want: []string{"timed out after 120 seconds: python3 scripts/weekly.py"},
 		},
 		"edited script refused": {
-			entries: func(t *testing.T) []*SessionEntry {
-				return []*SessionEntry{loopRunCommandEntry(t, routine, 3, approved, map[string]interface{}{workspace.RefusedResult: "the chat's files hold another version of scripts/weekly.py than the approved one; it was not run"})}
+			entries: func(t *testing.T) []*models.SessionEntry {
+				return []*models.SessionEntry{loopRunCommandEntry(t, routine, 3, approved, map[string]interface{}{workspace.RefusedResult: "the chat's files hold another version of scripts/weekly.py than the approved one; it was not run"})}
 			},
 			want: []string{"The routine's script scripts/weekly.py could not run: the chat's files hold another version"},
 		},
 		"other command": {
-			entries: func(t *testing.T) []*SessionEntry {
-				return []*SessionEntry{loopRunCommandEntry(t, routine, 3, map[string]interface{}{"command": "python3 scripts/weekly.py --skip-checks"}, clean)}
+			entries: func(t *testing.T) []*models.SessionEntry {
+				return []*models.SessionEntry{loopRunCommandEntry(t, routine, 3, map[string]interface{}{"command": "python3 scripts/weekly.py --skip-checks"}, clean)}
 			},
 			want: []string{"did not run as approved: python3 scripts/weekly.py"},
 		},
 		"interrupted": {
-			entries: func(t *testing.T) []*SessionEntry {
-				return []*SessionEntry{loopRunCommandEntry(t, routine, 3, approved, nil)}
+			entries: func(t *testing.T) []*models.SessionEntry {
+				return []*models.SessionEntry{loopRunCommandEntry(t, routine, 3, approved, nil)}
 			},
 			want: []string{"interrupted before it finished: python3 scripts/weekly.py"},
 		},
 		"interrupted on resume without a record": {
-			entries: func(t *testing.T) []*SessionEntry {
+			entries: func(t *testing.T) []*models.SessionEntry {
 				entry := loopRunCommandEntry(t, routine, 3, approved, nil)
 				entry.Tool.PinnedRun = nil
-				return []*SessionEntry{entry}
+				return []*models.SessionEntry{entry}
 			},
 			want: []string{"interrupted before it finished"},
 		},
 		"interrupted unrelated command": {
-			entries: func(t *testing.T) []*SessionEntry {
+			entries: func(t *testing.T) []*models.SessionEntry {
 				entry := loopRunCommandEntry(t, routine, 3, map[string]interface{}{"command": "ls"}, nil)
-				return []*SessionEntry{entry}
+				return []*models.SessionEntry{entry}
 			},
 			want: []string{"The routine's script did not run"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			entries := testCase.entries(t)
-			entries = append(entries, &SessionEntry{ID: "note", Sequence: 1, Type: SessionEntryNote, Note: &NoteEntry{Kind: NoteRunContext, Text: "x"}}, nil)
+			entries = append(entries, &models.SessionEntry{ID: "note", Sequence: 1, Type: models.SessionEntryNote, Note: &models.NoteEntry{Kind: models.NoteRunContext, Text: "x"}}, nil)
 			message := routine.CompletionFailure(entries)
 			if testCase.want[0] == "" {
 				if message != "" {
@@ -262,12 +263,12 @@ func TestLoopRoutineScriptFinalFailureExplainsAndFails(t *testing.T) {
 	const failureTextLimit = 1024 // the bound of a Run failure message
 	routine := loopRoutineScriptFixture(t)
 	output := strings.Repeat("line of output\n", 400) + "KeyError: 'signup_date'"
-	entries := []*SessionEntry{loopRunCommandEntry(t, routine, 3, map[string]interface{}{"command": "python3 scripts/weekly.py"}, map[string]interface{}{"exitStatus": float64(1), "stderr": output})}
+	entries := []*models.SessionEntry{loopRunCommandEntry(t, routine, 3, map[string]interface{}{"command": "python3 scripts/weekly.py"}, map[string]interface{}{"exitStatus": float64(1), "stderr": output})}
 	if message := routine.CompletionFailure(entries); len(message) > 4000 || !strings.HasSuffix(message, "KeyError: 'signup_date'") {
 		t.Fatalf("message (%d bytes) = %q", len(message), message)
 	}
 	run := routineScriptRun()
-	run.Status = AgentRunStatusRunning
+	run.Status = models.AgentRunStatusRunning
 	failure := routine.FinalFailure(run, entries)
 	if failure == nil || failure.Kind != "routine_script" || failure.Code != RunFailureCodeRoutineScript || failure.Explained {
 		t.Fatalf("failure = %#v", failure)
@@ -281,11 +282,11 @@ func TestLoopRoutineScriptFinalFailureExplainsAndFails(t *testing.T) {
 		t.Fatal("the Run is not in explain mode")
 	}
 	note := conversation.FailureExplanationNote("ses", run.ID, "step_2", failure)
-	if note == nil || note.Note.Kind != NoteFailureExplanation || !strings.Contains(note.Note.Text, "This attempt has stopped: The routine's script exited with status 1") {
+	if note == nil || note.Note.Kind != models.NoteFailureExplanation || !strings.Contains(note.Note.Text, "This attempt has stopped: The routine's script exited with status 1") {
 		t.Fatalf("note = %#v", note)
 	}
 
-	earlier := &RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "execution_failed", Message: "The model provider failed."}
+	earlier := &models.RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "execution_failed", Message: "The model provider failed."}
 	run.FailureExplanation = earlier
 	if kept := routine.FinalFailure(run, entries); kept == nil || *kept != *earlier {
 		t.Fatalf("kept = %#v", kept)

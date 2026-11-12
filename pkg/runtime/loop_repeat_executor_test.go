@@ -24,7 +24,7 @@ import (
 // plays the LoopToolExecutor around a loopRepeatGuard.
 type repeatExecFixture struct {
 	*actiontest.LoopStore
-	sessions    AgentSessionStore
+	sessions    models.AgentSessionStore
 	coordinator *action.ActionCoordinator
 	step        int64
 }
@@ -33,8 +33,8 @@ func newRepeatExecFixture(t *testing.T) *repeatExecFixture {
 	t.Helper()
 	store := conversationtest.NewStore(t)
 	f := actiontest.NewLoopStore(t, store)
-	lease := AgentRunLeaseGuard{WorkerID: actiontest.LoopStoreWorker, Now: f.Now}
-	if _, err := store.CreateRunAgentSession(f.Ctx, CreateRunAgentSessionRequest{
+	lease := models.AgentRunLeaseGuard{WorkerID: actiontest.LoopStoreWorker, Now: f.Now}
+	if _, err := store.CreateRunAgentSession(f.Ctx, models.CreateRunAgentSessionRequest{
 		Scope: f.Scope, OwnerRunID: f.Run.ID, AgentID: f.Run.AssignedAgentID, Lease: lease, Now: f.Now,
 	}); err != nil {
 		t.Fatal(err)
@@ -80,8 +80,8 @@ func mustArgs(raw string) map[string]interface{} {
 	return out
 }
 
-func (f *repeatExecFixture) lease() AgentRunLeaseGuard {
-	return AgentRunLeaseGuard{WorkerID: actiontest.LoopStoreWorker, Now: f.Now}
+func (f *repeatExecFixture) lease() models.AgentRunLeaseGuard {
+	return models.AgentRunLeaseGuard{WorkerID: actiontest.LoopStoreWorker, Now: f.Now}
 }
 
 // appendStep appends one step's assistant entry and its tool entries pending,
@@ -90,19 +90,19 @@ func (f *repeatExecFixture) appendStep(calls ...execCall) []loopRepeatCall {
 	f.T.Helper()
 	f.step++
 	stepID := fmt.Sprintf("step-%d", f.step)
-	assistant := &SessionEntry{
-		ID: SessionEntryID(f.Run.SessionID, AssistantEntryKey(stepID)), StepID: stepID, Step: f.step, Type: SessionEntryAssistant,
-		Assistant: &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls},
+	assistant := &models.SessionEntry{
+		ID: models.SessionEntryID(f.Run.SessionID, models.AssistantEntryKey(stepID)), StepID: stepID, Step: f.step, Type: models.SessionEntryAssistant,
+		Assistant: &models.AssistantEntry{Provider: models.ModelStepProviderAnthropic, Model: "claude-x", StopReason: models.ModelStopToolCalls},
 	}
-	entries := []*SessionEntry{assistant}
+	entries := []*models.SessionEntry{assistant}
 	out := make([]loopRepeatCall, len(calls))
 	for i, call := range calls {
 		callID := fmt.Sprintf("toolu_%d_%d", f.step, i)
-		assistant.Assistant.ToolCalls = append(assistant.Assistant.ToolCalls, ModelToolCall{ID: callID, Name: call.name, Arguments: json.RawMessage(call.args)})
-		entry := &SessionEntry{
-			ID: SessionEntryID(f.Run.SessionID, ToolEntryKey(stepID, callID)), StepID: stepID, Step: f.step,
-			Type: SessionEntryTool, State: ToolEntryPending, ToolCallID: callID,
-			Tool: &ToolEntry{Name: call.name, Arguments: json.RawMessage(call.args), SideEffect: ToolSideEffectRead},
+		assistant.Assistant.ToolCalls = append(assistant.Assistant.ToolCalls, models.ModelToolCall{ID: callID, Name: call.name, Arguments: json.RawMessage(call.args)})
+		entry := &models.SessionEntry{
+			ID: models.SessionEntryID(f.Run.SessionID, models.ToolEntryKey(stepID, callID)), StepID: stepID, Step: f.step,
+			Type: models.SessionEntryTool, State: models.ToolEntryPending, ToolCallID: callID,
+			Tool: &models.ToolEntry{Name: call.name, Arguments: json.RawMessage(call.args), SideEffect: models.ToolSideEffectRead},
 		}
 		if err := stampRepeatFields(entry.Tool, call.subject); err != nil {
 			f.T.Fatal(err)
@@ -117,7 +117,7 @@ func (f *repeatExecFixture) appendStep(calls ...execCall) []loopRepeatCall {
 		}
 	}
 	lease := f.lease()
-	result, err := f.sessions.AppendAgentSessionEntries(f.Ctx, AppendAgentSessionEntriesRequest{
+	result, err := f.sessions.AppendAgentSessionEntries(f.Ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: f.Scope, SessionID: f.Run.SessionID, RunID: f.Run.ID, Lease: &lease, Entries: entries, Now: f.Now,
 	})
 	if err != nil {
@@ -143,7 +143,7 @@ func (f *repeatExecFixture) guard(calls []loopRepeatCall, wait bool) *loopRepeat
 
 // transition moves entry from its state to `to` through the executor path
 // (withRepeatKernelFields), observes it and returns it.
-func (f *repeatExecFixture) transition(guard *loopRepeatGuard, entry *SessionEntry, to ToolEntryState, req ToolEntryTransitionRequest) *SessionEntry {
+func (f *repeatExecFixture) transition(guard *loopRepeatGuard, entry *models.SessionEntry, to models.ToolEntryState, req models.ToolEntryTransitionRequest) *models.SessionEntry {
 	f.T.Helper()
 	req.Scope, req.EntryID, req.RunID, req.Lease, req.Now = f.Scope, entry.ID, f.Run.ID, f.lease(), f.Now
 	req.From, req.ExpectedRevision, req.To = entry.State, entry.Revision, to
@@ -157,17 +157,17 @@ func (f *repeatExecFixture) transition(guard *loopRepeatGuard, entry *SessionEnt
 	return result.Entry
 }
 
-func textResult(text string, failed bool) *ToolResult {
-	status := ToolResultSucceeded
+func textResult(text string, failed bool) *models.ToolResult {
+	status := models.ToolResultSucceeded
 	if failed {
-		status = ToolResultFailed
+		status = models.ToolResultFailed
 	}
-	return &ToolResult{Status: status, IsError: failed, Content: []ContentPart{storetest.TextPart(text)}}
+	return &models.ToolResult{Status: status, IsError: failed, Content: []models.ContentPart{storetest.TextPart(text)}}
 }
 
 // runStep plays a whole step: plan, refuse, execute what may run with
 // results[i] (by call), and finish.
-func (f *repeatExecFixture) runStep(results []string, calls ...execCall) ([]*SessionEntry, *agentrun.LoopFailure) {
+func (f *repeatExecFixture) runStep(results []string, calls ...execCall) ([]*models.SessionEntry, *agentrun.LoopFailure) {
 	f.T.Helper()
 	planned := f.appendStep(calls...)
 	guard := f.guard(planned, false)
@@ -178,7 +178,7 @@ func (f *repeatExecFixture) runStep(results []string, calls ...execCall) ([]*Ses
 		if !guard.Dispatch(call.Entry.ID) {
 			continue
 		}
-		f.transition(guard, call.Entry, ToolEntryCompleted, ToolEntryTransitionRequest{Result: textResult(results[i], false)})
+		f.transition(guard, call.Entry, models.ToolEntryCompleted, models.ToolEntryTransitionRequest{Result: textResult(results[i], false)})
 	}
 	failure, err := guard.Finish(f.Ctx)
 	if err != nil {
@@ -187,9 +187,9 @@ func (f *repeatExecFixture) runStep(results []string, calls ...execCall) ([]*Ses
 	return f.stepEntries(planned), failure
 }
 
-func (f *repeatExecFixture) stepEntries(calls []loopRepeatCall) []*SessionEntry {
+func (f *repeatExecFixture) stepEntries(calls []loopRepeatCall) []*models.SessionEntry {
 	f.T.Helper()
-	out := make([]*SessionEntry, len(calls))
+	out := make([]*models.SessionEntry, len(calls))
 	for i, call := range calls {
 		entry, err := f.sessions.GetSessionEntry(f.Ctx, f.Scope, call.Entry.ID)
 		if err != nil {
@@ -200,10 +200,10 @@ func (f *repeatExecFixture) stepEntries(calls []loopRepeatCall) []*SessionEntry 
 	return out
 }
 
-func (f *repeatExecFixture) notes() []*SessionEntry {
+func (f *repeatExecFixture) notes() []*models.SessionEntry {
 	f.T.Helper()
-	notes, err := f.sessions.ListAgentSessionEntries(f.Ctx, SessionEntryFilter{
-		Scope: f.Scope, SessionID: f.Run.SessionID, NoteKinds: []NoteKind{NoteRepeat},
+	notes, err := f.sessions.ListAgentSessionEntries(f.Ctx, models.SessionEntryFilter{
+		Scope: f.Scope, SessionID: f.Run.SessionID, NoteKinds: []models.NoteKind{models.NoteRepeat},
 	})
 	if err != nil {
 		f.T.Fatal(err)
@@ -211,10 +211,10 @@ func (f *repeatExecFixture) notes() []*SessionEntry {
 	return notes
 }
 
-func requireGuardRefusal(t *testing.T, entry *SessionEntry, kind string, count int, status ToolResultStatus, text string) {
+func requireGuardRefusal(t *testing.T, entry *models.SessionEntry, kind string, count int, status models.ToolResultStatus, text string) {
 	t.Helper()
 	tool := entry.Tool
-	if entry.State != ToolEntryError || tool.Guard == nil || tool.Guard.Kind != kind || tool.Guard.Count != count ||
+	if entry.State != models.ToolEntryError || tool.Guard == nil || tool.Guard.Kind != kind || tool.Guard.Count != count ||
 		tool.Result == nil || !tool.Result.IsError || tool.Result.Status != status || tool.ResultDigest != "" {
 		t.Fatalf("entry %s = state %s, tool %#v", entry.ToolCallID, entry.State, tool)
 	}
@@ -225,7 +225,7 @@ func requireGuardRefusal(t *testing.T, entry *SessionEntry, kind string, count i
 
 func TestStampRepeatFields(t *testing.T) {
 	subject := readCall("read_file", `{"path":"a"}`).subject
-	tool := &ToolEntry{}
+	tool := &models.ToolEntry{}
 	if err := stampRepeatFields(tool, subject); err != nil {
 		t.Fatal(err)
 	}
@@ -234,32 +234,32 @@ func TestStampRepeatFields(t *testing.T) {
 		t.Fatalf("stamped %#v", tool)
 	}
 	subject.Effect = "sometimes"
-	if err := stampRepeatFields(&ToolEntry{}, subject); err == nil {
+	if err := stampRepeatFields(&models.ToolEntry{}, subject); err == nil {
 		t.Fatal("an invalid effect was stamped")
 	}
 }
 
 func TestWithRepeatKernelFields(t *testing.T) {
 	result := textResult("ok", false)
-	req := withRepeatKernelFields(ToolEntryTransitionRequest{From: ToolEntryRunning, To: ToolEntryCompleted, Result: result})
+	req := withRepeatKernelFields(models.ToolEntryTransitionRequest{From: models.ToolEntryRunning, To: models.ToolEntryCompleted, Result: result})
 	if req.Kernel == nil || req.Kernel.ResultDigest != modelstep.ToolResultDigest(result) || req.Kernel.Parked != nil {
 		t.Fatalf("executed terminal patch = %#v", req.Kernel)
 	}
-	original := &ToolEntryKernelPatch{OriginRef: "command:x"}
-	req = withRepeatKernelFields(ToolEntryTransitionRequest{From: ToolEntryAwaitingChild, To: ToolEntryCompleted, Result: result, Kernel: original})
+	original := &models.ToolEntryKernelPatch{OriginRef: "command:x"}
+	req = withRepeatKernelFields(models.ToolEntryTransitionRequest{From: models.ToolEntryAwaitingChild, To: models.ToolEntryCompleted, Result: result, Kernel: original})
 	if req.Kernel.Parked == nil || !*req.Kernel.Parked || req.Kernel.OriginRef != "command:x" || original.Parked != nil {
 		t.Fatalf("parked patch = %#v (original %#v)", req.Kernel, original)
 	}
-	req = withRepeatKernelFields(ToolEntryTransitionRequest{From: ToolEntryAwaitingApproval, To: ToolEntryRunning})
+	req = withRepeatKernelFields(models.ToolEntryTransitionRequest{From: models.ToolEntryAwaitingApproval, To: models.ToolEntryRunning})
 	if req.Kernel == nil || req.Kernel.Parked == nil || req.Kernel.ResultDigest != "" {
 		t.Fatalf("resume patch = %#v", req.Kernel)
 	}
-	req = withRepeatKernelFields(ToolEntryTransitionRequest{From: ToolEntryPending, To: ToolEntryError, Result: result,
-		Kernel: &ToolEntryKernelPatch{Guard: &ToolGuardOutcome{Kind: action.RefusedLoopCallRepeat}}})
+	req = withRepeatKernelFields(models.ToolEntryTransitionRequest{From: models.ToolEntryPending, To: models.ToolEntryError, Result: result,
+		Kernel: &models.ToolEntryKernelPatch{Guard: &models.ToolGuardOutcome{Kind: action.RefusedLoopCallRepeat}}})
 	if req.Kernel.ResultDigest != "" {
 		t.Fatal("a refusal got a result digest")
 	}
-	if req := withRepeatKernelFields(ToolEntryTransitionRequest{From: ToolEntryPending, To: ToolEntryRunning}); req.Kernel != nil {
+	if req := withRepeatKernelFields(models.ToolEntryTransitionRequest{From: models.ToolEntryPending, To: models.ToolEntryRunning}); req.Kernel != nil {
 		t.Fatalf("start patch = %#v", req.Kernel)
 	}
 }
@@ -268,12 +268,12 @@ func TestRepeatGuardReadNoteRefusalThenFailure(t *testing.T) {
 	f := newRepeatExecFixture(t)
 	read := readCall("read_file", `{"path":"a.txt"}`)
 	first, failure := f.runStep([]string{"same"}, read)
-	if failure != nil || first[0].State != ToolEntryCompleted || first[0].Tool.ResultDigest == "" || len(f.notes()) != 0 {
+	if failure != nil || first[0].State != models.ToolEntryCompleted || first[0].Tool.ResultDigest == "" || len(f.notes()) != 0 {
 		t.Fatalf("1st = %#v, %#v, notes %d", first[0], failure, len(f.notes()))
 	}
 	second, failure := f.runStep([]string{"same"}, read)
 	notes := f.notes()
-	if failure != nil || second[0].State != ToolEntryCompleted || len(notes) != 1 {
+	if failure != nil || second[0].State != models.ToolEntryCompleted || len(notes) != 1 {
 		t.Fatalf("2nd: failure %#v, notes %d", failure, len(notes))
 	}
 	note := notes[0]
@@ -285,17 +285,17 @@ func TestRepeatGuardReadNoteRefusalThenFailure(t *testing.T) {
 	if failure != nil {
 		t.Fatalf("3rd failure = %#v", failure)
 	}
-	requireGuardRefusal(t, third[0], action.RefusedLoopCallRepeat, 3, ToolResultRefused, repeatRefusedText(3, 2))
+	requireGuardRefusal(t, third[0], action.RefusedLoopCallRepeat, 3, models.ToolResultRefused, repeatRefusedText(3, 2))
 	if third[0].Tool.DuplicateOfEntryID != second[0].ID || third[0].ActionCallID != "" {
 		t.Fatalf("3rd duplicateOf = %q, action call %q", third[0].Tool.DuplicateOfEntryID, third[0].ActionCallID)
 	}
 	fourth, _ := f.runStep(nil, read)
-	requireGuardRefusal(t, fourth[0], action.RefusedLoopCallRepeat, 4, ToolResultRefused, repeatRefusedText(4, 2))
+	requireGuardRefusal(t, fourth[0], action.RefusedLoopCallRepeat, 4, models.ToolResultRefused, repeatRefusedText(4, 2))
 
 	other := readCall("read_file", `{"path":"b.txt"}`)
 	fifth, failure := f.runStep(nil, read, other)
-	requireGuardRefusal(t, fifth[0], action.RefusedLoopCallRepeatLimit, 5, ToolResultRefused, repeatLimitText(5))
-	requireGuardRefusal(t, fifth[1], ToolGuardRunStopping, 0, ToolResultRefused, repeatRunStoppingText)
+	requireGuardRefusal(t, fifth[0], action.RefusedLoopCallRepeatLimit, 5, models.ToolResultRefused, repeatLimitText(5))
+	requireGuardRefusal(t, fifth[1], ToolGuardRunStopping, 0, models.ToolResultRefused, repeatRunStoppingText)
 	if failure == nil || failure.Kind != modelstep.RunFailureKindRepeatLimit || failure.Code != action.RunFailureCodeRepeatLimit || !failure.Explainable ||
 		failure.Message != repeatLimitRunError {
 		t.Fatalf("5th failure = %#v", failure)
@@ -309,10 +309,10 @@ func TestRepeatGuardSameStepDuplicateIsRefused(t *testing.T) {
 	f := newRepeatExecFixture(t)
 	read := readCall("read_file", `{"path":"a.txt"}`)
 	entries, failure := f.runStep([]string{"one", "two"}, read, read)
-	if failure != nil || entries[0].State != ToolEntryCompleted {
+	if failure != nil || entries[0].State != models.ToolEntryCompleted {
 		t.Fatalf("first = %#v, %#v", entries[0], failure)
 	}
-	requireGuardRefusal(t, entries[1], ToolGuardSameStepDuplicate, 0, ToolResultRefused, repeatSameStepText(entries[0].ToolCallID))
+	requireGuardRefusal(t, entries[1], ToolGuardSameStepDuplicate, 0, models.ToolResultRefused, repeatSameStepText(entries[0].ToolCallID))
 	if entries[1].Tool.DuplicateOfEntryID != entries[0].ID {
 		t.Fatalf("duplicateOf = %q", entries[1].Tool.DuplicateOfEntryID)
 	}
@@ -326,7 +326,7 @@ func TestRepeatGuardSuppressesSucceededWrite(t *testing.T) {
 	if failure != nil {
 		t.Fatalf("failure = %#v", failure)
 	}
-	requireGuardRefusal(t, second[0], action.RefusedLoopCallDuplicateSuppressed, 2, ToolResultDuplicateSuppressed, repeatSuppressedText(1))
+	requireGuardRefusal(t, second[0], action.RefusedLoopCallDuplicateSuppressed, 2, models.ToolResultDuplicateSuppressed, repeatSuppressedText(1))
 	content := second[0].Tool.Result.Content
 	if len(content) != 2 || content[1].Text != "sent #1" || second[0].Tool.DuplicateOfEntryID != first[0].ID {
 		t.Fatalf("suppressed result = %#v", second[0].Tool)
@@ -345,7 +345,7 @@ func TestRepeatGuardGovernedRefusalRecordsRefusedRow(t *testing.T) {
 		}
 		call := f.Propose(f.LoopCall(fmt.Sprintf("call-%d", i+1)))
 		priorCallID = call.ID
-		f.transition(guard, planned[0].Entry, ToolEntryCompleted, ToolEntryTransitionRequest{ActionCallID: call.ID, Result: textResult("same", false)})
+		f.transition(guard, planned[0].Entry, models.ToolEntryCompleted, models.ToolEntryTransitionRequest{ActionCallID: call.ID, Result: textResult("same", false)})
 		if failure, err := guard.Finish(f.Ctx); err != nil || failure != nil {
 			t.Fatalf("finish = %#v, %v", failure, err)
 		}
@@ -360,12 +360,12 @@ func TestRepeatGuardGovernedRefusalRecordsRefusedRow(t *testing.T) {
 		t.Fatalf("refusals = %d, %v", len(refused), err)
 	}
 	entry := refused[0]
-	requireGuardRefusal(t, entry, action.RefusedLoopCallRepeat, 3, ToolResultRefused, "")
+	requireGuardRefusal(t, entry, action.RefusedLoopCallRepeat, 3, models.ToolResultRefused, "")
 	row, err := f.Store.GetActionCall(f.Ctx, f.Scope, entry.ActionCallID)
 	if err != nil {
 		t.Fatalf("refused row %q: %v", entry.ActionCallID, err)
 	}
-	if row.Status != ActionCallStatusRefused || row.TurnID != entry.StepID || row.DuplicateOfActionCallID != priorCallID ||
+	if row.Status != models.ActionCallStatusRefused || row.TurnID != entry.StepID || row.DuplicateOfActionCallID != priorCallID ||
 		row.ErrorCode != action.RefusedLoopCallRepeat || row.Error != entry.Tool.Result.Content[0].Text || row.ErrorDetails["count"] != "3" ||
 		row.ErrorDetails["step"] != "2" || row.BindingID != "binding-1" {
 		t.Fatalf("refused row = %#v", row)
@@ -381,7 +381,7 @@ func TestRepeatGuardGovernedRefusalNeedsCoordinator(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		planned := f.appendStep(read)
 		call := f.Propose(f.LoopCall(fmt.Sprintf("call-%d", i+1)))
-		f.transition(nil, planned[0].Entry, ToolEntryCompleted, ToolEntryTransitionRequest{ActionCallID: call.ID, Result: textResult("same", false)})
+		f.transition(nil, planned[0].Entry, models.ToolEntryCompleted, models.ToolEntryTransitionRequest{ActionCallID: call.ID, Result: textResult("same", false)})
 	}
 	planned := f.appendStep(read)
 	guard, err := startLoopRepeatGuard(f.Ctx, loopRepeatGuardConfig{Sessions: f.sessions, Run: f.Run, WorkerID: actiontest.LoopStoreWorker}, planned)
@@ -391,7 +391,7 @@ func TestRepeatGuardGovernedRefusalNeedsCoordinator(t *testing.T) {
 	if _, err := guard.ApplyRefusals(f.Ctx); err == nil {
 		t.Fatal("a governed refusal was written without its refused row")
 	}
-	if entry := f.stepEntries(planned)[0]; entry.State != ToolEntryPending {
+	if entry := f.stepEntries(planned)[0]; entry.State != models.ToolEntryPending {
 		t.Fatalf("entry = %s", entry.State)
 	}
 }
@@ -403,7 +403,7 @@ func TestRepeatGuardResumeKeepsStepDecisions(t *testing.T) {
 		planned := f.appendStep(read, read)
 		// The first pass ran the first call, then crashed before refusing
 		// the second.
-		f.transition(nil, planned[0].Entry, ToolEntryCompleted, ToolEntryTransitionRequest{Result: textResult("one", false)})
+		f.transition(nil, planned[0].Entry, models.ToolEntryCompleted, models.ToolEntryTransitionRequest{Result: textResult("one", false)})
 		resumed := f.stepEntries(planned)
 		guard := f.guard([]loopRepeatCall{{Entry: resumed[0]}, {Entry: resumed[1]}}, false)
 		if _, ok := guard.Verdict(resumed[0].ID); ok || guard.Dispatch(resumed[0].ID) {
@@ -412,7 +412,7 @@ func TestRepeatGuardResumeKeepsStepDecisions(t *testing.T) {
 		if _, err := guard.ApplyRefusals(f.Ctx); err != nil {
 			t.Fatal(err)
 		}
-		requireGuardRefusal(t, f.stepEntries(planned)[1], ToolGuardSameStepDuplicate, 0, ToolResultRefused, "")
+		requireGuardRefusal(t, f.stepEntries(planned)[1], ToolGuardSameStepDuplicate, 0, models.ToolResultRefused, "")
 	})
 	t.Run("repeat limit before a crash stops the rest", func(t *testing.T) {
 		f := newRepeatExecFixture(t)
@@ -428,8 +428,8 @@ func TestRepeatGuardResumeKeepsStepDecisions(t *testing.T) {
 		}
 		// Refuse only the failing call, then crash.
 		refusal, _ := first.verdicts[0].refusal()
-		f.transition(nil, planned[0].Entry, ToolEntryError, ToolEntryTransitionRequest{
-			Result: refusal.Result, Kernel: &ToolEntryKernelPatch{Guard: refusal.Guard, DuplicateOfEntryID: refusal.DuplicateOfEntryID},
+		f.transition(nil, planned[0].Entry, models.ToolEntryError, models.ToolEntryTransitionRequest{
+			Result: refusal.Result, Kernel: &models.ToolEntryKernelPatch{Guard: refusal.Guard, DuplicateOfEntryID: refusal.DuplicateOfEntryID},
 		})
 		resumed := f.stepEntries(planned)
 		guard := f.guard([]loopRepeatCall{{Entry: resumed[0]}, {Entry: resumed[1]}}, false)
@@ -439,7 +439,7 @@ func TestRepeatGuardResumeKeepsStepDecisions(t *testing.T) {
 		if _, err := guard.ApplyRefusals(f.Ctx); err != nil {
 			t.Fatal(err)
 		}
-		requireGuardRefusal(t, f.stepEntries(planned)[1], ToolGuardRunStopping, 0, ToolResultRefused, repeatRunStoppingText)
+		requireGuardRefusal(t, f.stepEntries(planned)[1], ToolGuardRunStopping, 0, models.ToolResultRefused, repeatRunStoppingText)
 		failure, err := guard.Finish(f.Ctx)
 		if err != nil || failure == nil || failure.Code != action.RunFailureCodeRepeatLimit {
 			t.Fatalf("finish = %#v, %v", failure, err)
@@ -457,19 +457,19 @@ func TestRepeatGuardFinishWaitsForOpenEntries(t *testing.T) {
 	if _, err := guard.ApplyRefusals(f.Ctx); err != nil {
 		t.Fatal(err)
 	}
-	f.transition(guard, planned[0].Entry, ToolEntryCompleted, ToolEntryTransitionRequest{Result: textResult("same", false)})
-	waiting := f.transition(guard, planned[1].Entry, ToolEntryAwaitingApproval, ToolEntryTransitionRequest{Wait: &ToolEntryWait{ApprovalID: "approval-1"}})
+	f.transition(guard, planned[0].Entry, models.ToolEntryCompleted, models.ToolEntryTransitionRequest{Result: textResult("same", false)})
+	waiting := f.transition(guard, planned[1].Entry, models.ToolEntryAwaitingApproval, models.ToolEntryTransitionRequest{Wait: &models.ToolEntryWait{ApprovalID: "approval-1"}})
 	if failure, err := guard.Finish(f.Ctx); err != nil || failure != nil || len(f.notes()) != 0 {
 		t.Fatalf("parked finish = %#v, %v, notes %d", failure, err, len(f.notes()))
 	}
 	// The resume settles the held call; a guard opened for it finishes the step.
 	resumed := f.stepEntries(planned)
 	again := f.guard([]loopRepeatCall{{Entry: resumed[0]}, {Entry: resumed[1]}}, false)
-	running := f.transition(again, waiting, ToolEntryRunning, ToolEntryTransitionRequest{})
+	running := f.transition(again, waiting, models.ToolEntryRunning, models.ToolEntryTransitionRequest{})
 	if !running.Tool.Parked {
 		t.Fatal("leaving awaiting_approval did not mark the entry parked")
 	}
-	f.transition(again, running, ToolEntryCompleted, ToolEntryTransitionRequest{Result: textResult("deployed", false)})
+	f.transition(again, running, models.ToolEntryCompleted, models.ToolEntryTransitionRequest{Result: textResult("deployed", false)})
 	for i := 0; i < 2; i++ {
 		if failure, err := again.Finish(f.Ctx); err != nil || failure != nil {
 			t.Fatalf("finish %d = %#v, %v", i, failure, err)
@@ -486,7 +486,7 @@ func TestRepeatGuardErrorStreakFailsRun(t *testing.T) {
 	for i := 1; i <= loopErrorStreakLimit; i++ {
 		planned := f.appendStep(readCall("read_file", fmt.Sprintf(`{"path":"missing-%d"}`, i)))
 		guard := f.guard(planned, false)
-		f.transition(guard, planned[0].Entry, ToolEntryError, ToolEntryTransitionRequest{Result: textResult("not found", true)})
+		f.transition(guard, planned[0].Entry, models.ToolEntryError, models.ToolEntryTransitionRequest{Result: textResult("not found", true)})
 		failure, err := guard.Finish(f.Ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -503,7 +503,7 @@ func TestRepeatGuardErrorStreakFailsRun(t *testing.T) {
 func TestRepeatGuardRejectsUnstampedEntries(t *testing.T) {
 	f := newRepeatExecFixture(t)
 	planned := f.appendStep(readCall("read_file", `{"path":"a"}`))
-	unstamped := cloneSessionEntry(planned[0].Entry)
+	unstamped := models.CloneSessionEntry(planned[0].Entry)
 	unstamped.Tool.ArgumentsDigest = ""
 	if _, err := startLoopRepeatGuard(f.Ctx, loopRepeatGuardConfig{Sessions: f.sessions, Run: f.Run, WorkerID: actiontest.LoopStoreWorker},
 		[]loopRepeatCall{{Entry: unstamped}}); err == nil || !strings.Contains(err.Error(), "repeat key") {
@@ -527,10 +527,10 @@ func TestRepeatGuardLostLeaseWritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := guard.ApplyRefusals(f.Ctx); !errors.Is(err, ErrLeaseLost) {
+	if _, err := guard.ApplyRefusals(f.Ctx); !errors.Is(err, models.ErrLeaseLost) {
 		t.Fatalf("refusal under a foreign lease = %v", err)
 	}
-	if entry := f.stepEntries(planned)[0]; entry.State != ToolEntryPending {
+	if entry := f.stepEntries(planned)[0]; entry.State != models.ToolEntryPending {
 		t.Fatalf("entry = %s", entry.State)
 	}
 }
@@ -548,11 +548,11 @@ func TestRepeatGuardObserveIsConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, call := range planned {
 		wg.Add(1)
-		go func(entry *SessionEntry) {
+		go func(entry *models.SessionEntry) {
 			defer wg.Done()
-			req := withRepeatKernelFields(ToolEntryTransitionRequest{
+			req := withRepeatKernelFields(models.ToolEntryTransitionRequest{
 				Scope: f.Scope, EntryID: entry.ID, RunID: f.Run.ID, Lease: f.lease(), Now: f.Now,
-				From: ToolEntryPending, To: ToolEntryCompleted, Result: textResult("ok", false),
+				From: models.ToolEntryPending, To: models.ToolEntryCompleted, Result: textResult("ok", false),
 			})
 			result, err := f.sessions.TransitionToolEntry(context.Background(), req)
 			if err != nil {

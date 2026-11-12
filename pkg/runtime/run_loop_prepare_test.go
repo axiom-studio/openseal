@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
@@ -40,7 +41,7 @@ type prepareFixture struct {
 	t        *testing.T
 	preparer *CatalogModelStepPreparer
 	binding  *agentrun.TurnRunnerBinding
-	run      *AgentRun
+	run      *models.AgentRun
 	render   *modelsteptest.RenderFixture
 }
 
@@ -48,7 +49,7 @@ func newPrepareFixture(t *testing.T, authority agentrun.ControlAuthority) *prepa
 	registry, _ := fakeLoopControls()
 	preparer := NewCatalogModelStepPreparer(CatalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are Finn.", "Purpose: help the team."},
-		SkillPrompts: []HostedSkillPrompt{
+		SkillPrompts: []models.HostedSkillPrompt{
 			{SkillID: modelstep.PinnedCapabilitySkillID, Version: "1", Reference: "openseal.builtin@1", Name: "Built-in", Instructions: "Use the built-in tools."},
 			{SkillID: "skill-notion", Version: "1", Reference: "skill-notion@1", Name: "Notion", Instructions: "Notion rules."},
 		},
@@ -62,21 +63,21 @@ func newPrepareFixture(t *testing.T, authority agentrun.ControlAuthority) *prepa
 			ModelActions: prepareTestActions(), Authority: authority,
 			Prompt: agentrun.PromptContribution{
 				AgentInstructions: []string{"Reply in the chat's language."},
-				Sections:          []ModelStepSystemSection{{ID: "channel_rules", Title: "Channel", Text: "Keep replies short."}},
+				Sections:          []models.ModelStepSystemSection{{ID: "channel_rules", Title: "Channel", Text: "Keep replies short."}},
 			},
 		},
-		run:    &AgentRun{ID: "run-1", Scope: loopSessionScope, AssignedAgentID: "agent-1"},
+		run:    &models.AgentRun{ID: "run-1", Scope: loopSessionScope, AssignedAgentID: "agent-1"},
 		render: modelsteptest.NewRenderFixture(t, "chat"),
 	}
 	f.render.User("run-1", "find the launch notes")
 	return f
 }
 
-func (f *prepareFixture) prepare(step string) ModelStepRequest {
+func (f *prepareFixture) prepare(step string) models.ModelStepRequest {
 	f.t.Helper()
 	path := f.render.Path()
 	req, err := f.preparer.PrepareModelStep(context.Background(), agentrun.StepInput{
-		Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path,
+		Run: f.run, Step: &models.AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path,
 		Binding: f.binding, Mode: agentrun.StepModeNormal,
 	})
 	if err != nil {
@@ -88,7 +89,7 @@ func (f *prepareFixture) prepare(step string) ModelStepRequest {
 	return req
 }
 
-func toolNames(tools []ModelStepTool) []string {
+func toolNames(tools []models.ModelStepTool) []string {
 	names := make([]string, len(tools))
 	for i, tool := range tools {
 		names[i] = tool.Name
@@ -99,7 +100,7 @@ func toolNames(tools []ModelStepTool) []string {
 func fullPrepareAuthority() agentrun.ControlAuthority {
 	return agentrun.ControlAuthority{
 		AgentID: "agent-1", CanReportProgress: true, CanWait: true, CanAskUser: true, CanReact: true,
-		TaskStart:   &HostedConversationTaskContext{ConversationID: "conv-1", CanStart: true},
+		TaskStart:   &models.HostedConversationTaskContext{ConversationID: "conv-1", CanStart: true},
 		ForkAllowed: true,
 	}
 }
@@ -120,9 +121,9 @@ func TestPrepareToolOrderStableAcrossSteps(t *testing.T) {
 		t.Fatalf("tools = %v\nwant    %v", got, want)
 	}
 	for _, tool := range first.Tools {
-		group := ModelStepToolHarness
+		group := models.ModelStepToolHarness
 		if strings.HasPrefix(tool.Name, loopGovernedToolPrefix) {
-			group = ModelStepToolCore
+			group = models.ModelStepToolCore
 		}
 		if tool.Group != group {
 			t.Errorf("tool %s group = %s, want %s", tool.Name, tool.Group, group)
@@ -135,7 +136,7 @@ func TestPrepareToolOrderStableAcrossSteps(t *testing.T) {
 	// A later step over a longer path (a read call and its result) sends the
 	// same system and tools byte for byte.
 	f.render.Assistant("run-1", "step-1", "c1")
-	f.render.Tool("run-1", "step-1", "c1", ToolEntryCompleted)
+	f.render.Tool("run-1", "step-1", "c1", models.ToolEntryCompleted)
 	second := f.prepare("step-2")
 	a, _ := json.Marshal([]interface{}{first.System, first.Tools})
 	b, _ := json.Marshal([]interface{}{second.System, second.Tools})
@@ -165,7 +166,7 @@ func TestPrepareLoadAppendsTools(t *testing.T) {
 		t.Fatalf("appended tools = %v, want load order", toolNames(added))
 	}
 	for _, tool := range added {
-		if tool.Group != ModelStepToolLoaded || tool.Surface != load.ID {
+		if tool.Group != models.ModelStepToolLoaded || tool.Surface != load.ID {
 			t.Errorf("tool %s group = %s surface = %q, want loaded at %s", tool.Name, tool.Group, tool.Surface, load.ID)
 		}
 	}
@@ -194,23 +195,23 @@ func TestPrepareLoadAppendsTools(t *testing.T) {
 
 // addLoad appends a load_capabilities call and its completed entry that
 // made ids visible, frozen as the executor freezes them.
-func (f *prepareFixture) addLoad(step, call string, ids ...string) *SessionEntry {
+func (f *prepareFixture) addLoad(step, call string, ids ...string) *models.SessionEntry {
 	f.t.Helper()
 	arguments, _ := json.Marshal(map[string]interface{}{"ids": ids})
-	f.render.Add(&SessionEntry{RunID: f.run.ID, StepID: step, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
-		Provider: ModelStepProviderAnthropic, Model: "claude-test", StopReason: ModelStopToolCalls,
-		ToolCalls: []ModelToolCall{{ID: call, Name: modelstep.LoadCapabilitiesTool, Arguments: arguments}},
+	f.render.Add(&models.SessionEntry{RunID: f.run.ID, StepID: step, Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
+		Provider: models.ModelStepProviderAnthropic, Model: "claude-test", StopReason: models.ModelStopToolCalls,
+		ToolCalls: []models.ModelToolCall{{ID: call, Name: modelstep.LoadCapabilitiesTool, Arguments: arguments}},
 	}})
 	set := f.preparer.CapabilitySet(agentrun.StepInput{Run: f.run, Binding: f.binding, Path: f.render.Path()})
 	patch := loadKernelPatch(set, f.binding.ModelActions, ids)
-	return f.render.Add(&SessionEntry{RunID: f.run.ID, StepID: step, Type: SessionEntryTool, State: ToolEntryCompleted, ToolCallID: call, Tool: &ToolEntry{
-		Name: modelstep.LoadCapabilitiesTool, Arguments: arguments, SideEffect: ToolSideEffectNone,
+	return f.render.Add(&models.SessionEntry{RunID: f.run.ID, StepID: step, Type: models.SessionEntryTool, State: models.ToolEntryCompleted, ToolCallID: call, Tool: &models.ToolEntry{
+		Name: modelstep.LoadCapabilitiesTool, Arguments: arguments, SideEffect: models.ToolSideEffectNone,
 		SurfacedTools: patch.SurfacedTools, LoadedInstructions: patch.LoadedInstructions,
-		Result: &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: `{"status":"loaded"}`}}},
+		Result: &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartText, Text: `{"status":"loaded"}`}}},
 	}})
 }
 
-func sectionIDs(sections []ModelStepSystemSection) []string {
+func sectionIDs(sections []models.ModelStepSystemSection) []string {
 	ids := make([]string, len(sections))
 	for i, section := range sections {
 		ids[i] = section.ID
@@ -277,13 +278,13 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 	// Explaining a failure sends no tools.
 	path := f.render.Path()
 	explain, err := f.preparer.PrepareModelStep(context.Background(), agentrun.StepInput{
-		Run: f.run, Step: &AgentTurn{ID: "step-2", RunID: f.run.ID}, Session: path.Session, Path: path,
+		Run: f.run, Step: &models.AgentTurn{ID: "step-2", RunID: f.run.ID}, Session: path.Session, Path: path,
 		Binding: f.binding, Mode: agentrun.StepModeExplainFailure,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if explain.Purpose != ModelStepPurposeExplanation || len(explain.Tools) != 0 || explain.Validate() != nil {
+	if explain.Purpose != models.ModelStepPurposeExplanation || len(explain.Tools) != 0 || explain.Validate() != nil {
 		t.Errorf("explanation request purpose=%s tools=%d validate=%v", explain.Purpose, len(explain.Tools), explain.Validate())
 	}
 }
@@ -322,7 +323,7 @@ func TestLoopGovernedToolNamesValidAndUnique(t *testing.T) {
 	seen := map[string]bool{}
 	for _, action := range actions {
 		name := names[action.Name]
-		if !validModelStepToolName(name) || seen[name] {
+		if !models.ValidModelStepToolName(name) || seen[name] {
 			t.Fatalf("tool name %q for %q is invalid or repeated", name, action.Name)
 		}
 		seen[name] = true

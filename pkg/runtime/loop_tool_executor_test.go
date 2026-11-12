@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	"github.com/google/uuid"
@@ -47,11 +48,11 @@ func (h *loopFakeControlHandler) Run(ctx context.Context, x *control.ControlExec
 		return control.ControlResult{}, err
 	}
 	now := x.Now()
-	moved, err := x.Sessions.TransitionToolEntry(ctx, ToolEntryTransitionRequest{
+	moved, err := x.Sessions.TransitionToolEntry(ctx, models.ToolEntryTransitionRequest{
 		Scope: cc.Run.Scope, EntryID: cc.Entry.ID, RunID: cc.Run.ID, Lease: cc.LeaseGuard(now),
-		From: cc.Entry.State, ExpectedRevision: cc.Entry.Revision, To: ToolEntryCompleted,
-		Result: result, Kernel: &ToolEntryKernelPatch{Control: meta}, Now: now,
-		Tokens: modelstep.EstimateEntryTokens(control.WithToolResult(cc.Entry, ToolEntryCompleted, result)),
+		From: cc.Entry.State, ExpectedRevision: cc.Entry.Revision, To: models.ToolEntryCompleted,
+		Result: result, Kernel: &models.ToolEntryKernelPatch{Control: meta}, Now: now,
+		Tokens: modelstep.EstimateEntryTokens(control.WithToolResult(cc.Entry, models.ToolEntryCompleted, result)),
 	})
 	if err != nil {
 		return control.ControlResult{}, err
@@ -66,20 +67,20 @@ type toolExecFixture struct {
 	t        *testing.T
 	ctx      context.Context
 	store    *sqlite.Store
-	scope    Scope
+	scope    models.Scope
 	now      time.Time
-	run      *AgentRun
+	run      *models.AgentRun
 	host     *scriptedHost
 	control  *control.ControlExecutor
-	handlers map[ControlToolName]*loopFakeControlHandler
+	handlers map[models.ControlToolName]*loopFakeControlHandler
 	binding  *agentrun.TurnRunnerBinding
 }
 
 // fakeLoopControls fakes every control tool of the run loop, except the
 // tools in real, which keep the handler given there.
-func fakeLoopControls(real ...control.Tool) (control.Registry, map[ControlToolName]*loopFakeControlHandler) {
+func fakeLoopControls(real ...control.Tool) (control.Registry, map[models.ControlToolName]*loopFakeControlHandler) {
 	registry := control.NewRegistry(real...)
-	fakes := map[ControlToolName]*loopFakeControlHandler{}
+	fakes := map[models.ControlToolName]*loopFakeControlHandler{}
 	for name := range loopControlRegistry() {
 		if _, ok := registry[name]; !ok {
 			fakes[name] = &loopFakeControlHandler{}
@@ -94,22 +95,22 @@ func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real 
 	t.Helper()
 	ctx := context.Background()
 	store := conversationtest.NewStore(t)
-	scope := Scope{Kind: "tenant", ID: "tools-" + uuid.NewString()[:8]}
+	scope := models.Scope{Kind: "tenant", ID: "tools-" + uuid.NewString()[:8]}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	created, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}, AssignedAgentID: "agent-1",
-		Goal: "work", Source: RunSourceObjective,
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	created, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}, AssignedAgentID: "agent-1",
+		Goal: "work", Source: models.RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: toolExecWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	run, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: toolExecWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
 	if err != nil || run == nil || run.ID != created.ID {
 		t.Fatalf("claim = %#v, %v", run, err)
 	}
-	if _, err := store.CreateRunAgentSession(ctx, CreateRunAgentSessionRequest{
-		Scope: scope, OwnerRunID: run.ID, AgentID: "agent-1", Lease: AgentRunLeaseGuard{WorkerID: toolExecWorker, Now: now}, Now: now,
+	if _, err := store.CreateRunAgentSession(ctx, models.CreateRunAgentSessionRequest{
+		Scope: scope, OwnerRunID: run.ID, AgentID: "agent-1", Lease: models.AgentRunLeaseGuard{WorkerID: toolExecWorker, Now: now}, Now: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ func newToolExecFixture(t *testing.T, authority agentrun.ControlAuthority, real 
 	return f
 }
 
-func (f *toolExecFixture) currentRun() *AgentRun {
+func (f *toolExecFixture) currentRun() *models.AgentRun {
 	f.t.Helper()
 	run, err := f.store.GetAgentRun(f.ctx, f.scope, f.run.ID)
 	if err != nil {
@@ -142,37 +143,37 @@ func (f *toolExecFixture) currentRun() *AgentRun {
 
 // toolStep is one appended model step.
 type toolStep struct {
-	turn      *AgentTurn
-	assistant *SessionEntry
-	entries   []*SessionEntry
+	turn      *models.AgentTurn
+	assistant *models.SessionEntry
+	entries   []*models.SessionEntry
 }
 
 // appendToolStep creates the step row (status as given) and appends its
 // assistant entry with the planned tool entries in one append.
 func appendToolStep(t *testing.T, ctx context.Context, store interface {
-	AgentSessionStore
-	AgentTurnStore
-}, run *AgentRun, binding *agentrun.TurnRunnerBinding, worker, stepID string, status AgentTurnStatus, now time.Time, calls ...ModelToolCall) toolStep {
+	models.AgentSessionStore
+	models.AgentTurnStore
+}, run *models.AgentRun, binding *agentrun.TurnRunnerBinding, worker, stepID string, status models.AgentTurnStatus, now time.Time, calls ...models.ModelToolCall) toolStep {
 	t.Helper()
-	turn, err := store.CreateAgentTurn(ctx, &AgentTurn{
-		ID: stepID, Scope: run.Scope, RunID: run.ID, Status: status, Producer: StepProducerModel, Revision: 1,
+	turn, err := store.CreateAgentTurn(ctx, &models.AgentTurn{
+		ID: stepID, Scope: run.Scope, RunID: run.ID, Status: status, Producer: models.StepProducerModel, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
 		t.Fatalf("create step %s: %v", stepID, err)
 	}
-	assistant := &SessionEntry{
-		ID: SessionEntryID(run.SessionID, AssistantEntryKey(stepID)), Scope: run.Scope, SessionID: run.SessionID,
-		RunID: run.ID, StepID: stepID, Step: turn.Sequence, Type: SessionEntryAssistant,
-		Assistant: &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: "claude-x", Text: "Working.", StopReason: ModelStopToolCalls, ToolCalls: calls},
+	assistant := &models.SessionEntry{
+		ID: models.SessionEntryID(run.SessionID, models.AssistantEntryKey(stepID)), Scope: run.Scope, SessionID: run.SessionID,
+		RunID: run.ID, StepID: stepID, Step: turn.Sequence, Type: models.SessionEntryAssistant,
+		Assistant: &models.AssistantEntry{Provider: models.ModelStepProviderAnthropic, Model: "claude-x", Text: "Working.", StopReason: models.ModelStopToolCalls, ToolCalls: calls},
 	}
 	entries, err := PlanToolEntries(binding, assistant)
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
-	appended, err := store.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
+	appended, err := store.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: run.Scope, SessionID: run.SessionID, RunID: run.ID,
-		Lease: &AgentRunLeaseGuard{WorkerID: worker, Now: now}, Entries: append([]*SessionEntry{assistant}, entries...), Now: now,
+		Lease: &models.AgentRunLeaseGuard{WorkerID: worker, Now: now}, Entries: append([]*models.SessionEntry{assistant}, entries...), Now: now,
 	})
 	if err != nil {
 		t.Fatalf("append step %s: %v", stepID, err)
@@ -180,7 +181,7 @@ func appendToolStep(t *testing.T, ctx context.Context, store interface {
 	return toolStep{turn: turn, assistant: appended.Entries[0], entries: appended.Entries[1:]}
 }
 
-func (f *toolExecFixture) step(stepID string, status AgentTurnStatus, calls ...ModelToolCall) toolStep {
+func (f *toolExecFixture) step(stepID string, status models.AgentTurnStatus, calls ...models.ModelToolCall) toolStep {
 	f.t.Helper()
 	return appendToolStep(f.t, f.ctx, f.store, f.run, f.binding, toolExecWorker, stepID, status, f.now, calls...)
 }
@@ -192,7 +193,7 @@ func (f *toolExecFixture) input(step toolStep) agentrun.StepToolsInput {
 	}
 }
 
-func (f *toolExecFixture) entry(entry *SessionEntry) *SessionEntry {
+func (f *toolExecFixture) entry(entry *models.SessionEntry) *models.SessionEntry {
 	f.t.Helper()
 	stored, err := f.store.GetSessionEntry(f.ctx, f.scope, entry.ID)
 	if err != nil {
@@ -201,13 +202,13 @@ func (f *toolExecFixture) entry(entry *SessionEntry) *SessionEntry {
 	return stored
 }
 
-func toolCall(id, name, args string) ModelToolCall {
-	return ModelToolCall{ID: id, Name: name, Arguments: json.RawMessage(args)}
+func toolCall(id, name, args string) models.ModelToolCall {
+	return models.ModelToolCall{ID: id, Name: name, Arguments: json.RawMessage(args)}
 }
 
-func resultValue(t *testing.T, entry *SessionEntry) map[string]interface{} {
+func resultValue(t *testing.T, entry *models.SessionEntry) map[string]interface{} {
 	t.Helper()
-	if entry.Tool.Result == nil || len(entry.Tool.Result.Content) == 0 || entry.Tool.Result.Content[0].Type != ContentPartJSON {
+	if entry.Tool.Result == nil || len(entry.Tool.Result.Content) == 0 || entry.Tool.Result.Content[0].Type != models.ContentPartJSON {
 		t.Fatalf("entry %s result = %#v", entry.ToolCallID, entry.Tool.Result)
 	}
 	var value map[string]interface{}
@@ -231,7 +232,7 @@ type scriptedHost struct {
 
 func newScriptedHost() *scriptedHost { return &scriptedHost{files: map[string]string{}} }
 
-func (h *scriptedHost) ExecuteHostTool(ctx context.Context, request HostToolRequest) (HostToolResult, error) {
+func (h *scriptedHost) ExecuteHostTool(ctx context.Context, request models.HostToolRequest) (models.HostToolResult, error) {
 	h.mu.Lock()
 	h.active++
 	if h.active > h.maxActive {
@@ -263,8 +264,8 @@ func (h *scriptedHost) ExecuteHostTool(ctx context.Context, request HostToolRequ
 		value = map[string]interface{}{"path": path, "content": content, "exists": ok}
 	}
 	encoded, _ := json.Marshal(value)
-	return HostToolResult{APIVersion: HostToolAPIVersion, InvocationID: request.InvocationID,
-		Content: []ContentPart{{Type: ContentPartJSON, Value: encoded}}}, nil
+	return models.HostToolResult{APIVersion: models.HostToolAPIVersion, InvocationID: request.InvocationID,
+		Content: []models.ContentPart{{Type: models.ContentPartJSON, Value: encoded}}}, nil
 }
 
 func (h *scriptedHost) activeNow() int {
@@ -281,11 +282,11 @@ func (h *scriptedHost) orderNow() []string {
 
 func TestReadAfterWriteSeesWrite(t *testing.T) {
 	f := newToolExecFixture(t, agentrun.ControlAuthority{})
-	step := f.step("step-1", AgentTurnStatusRunning,
+	step := f.step("step-1", models.AgentTurnStatusRunning,
 		toolCall("call-w", "workspace_write_file", `{"path":"notes.md","content":"fresh"}`),
 		toolCall("call-r", "workspace_read_file", `{"path":"notes.md"}`),
 	)
-	if step.entries[0].Tool.SideEffect != ToolSideEffectWrite || step.entries[1].Tool.SideEffect != ToolSideEffectRead ||
+	if step.entries[0].Tool.SideEffect != models.ToolSideEffectWrite || step.entries[1].Tool.SideEffect != models.ToolSideEffectRead ||
 		step.entries[0].Tool.RepeatEffect != string(RepeatEffectStateful) || step.entries[1].Tool.ArgumentsDigest == "" {
 		t.Fatalf("planned = %#v / %#v", step.entries[0].Tool, step.entries[1].Tool)
 	}
@@ -321,10 +322,10 @@ func TestReadAfterWriteSeesWrite(t *testing.T) {
 		t.Fatalf("host order = %v", f.host.order)
 	}
 	read := f.entry(step.entries[1])
-	if read.State != ToolEntryCompleted || resultValue(t, read)["content"] != "fresh" || read.Tool.ResultDigest == "" {
+	if read.State != models.ToolEntryCompleted || resultValue(t, read)["content"] != "fresh" || read.Tool.ResultDigest == "" {
 		t.Fatalf("read = %s %#v", read.State, read.Tool.Result)
 	}
-	if write := f.entry(step.entries[0]); write.State != ToolEntryCompleted {
+	if write := f.entry(step.entries[0]); write.State != models.ToolEntryCompleted {
 		t.Fatalf("write = %s", write.State)
 	}
 }
@@ -332,11 +333,11 @@ func TestReadAfterWriteSeesWrite(t *testing.T) {
 func TestReadsRunConcurrentlyBound4(t *testing.T) {
 	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	f.host.gate = make(chan struct{})
-	var calls []ModelToolCall
+	var calls []models.ModelToolCall
 	for i := 0; i < 6; i++ {
 		calls = append(calls, toolCall(fmt.Sprintf("call-%d", i), "workspace_read_file", fmt.Sprintf(`{"path":"f%d.md"}`, i)))
 	}
-	step := f.step("step-1", AgentTurnStatusRunning, calls...)
+	step := f.step("step-1", models.AgentTurnStatusRunning, calls...)
 	done := make(chan struct{})
 	var out agentrun.StepToolsOutcome
 	var err error
@@ -365,7 +366,7 @@ func TestReadsRunConcurrentlyBound4(t *testing.T) {
 		t.Fatalf("host calls = %d, max concurrency = %d", out.HostToolCalls, f.host.maxActive)
 	}
 	for _, entry := range step.entries {
-		if stored := f.entry(entry); stored.State != ToolEntryCompleted {
+		if stored := f.entry(entry); stored.State != models.ToolEntryCompleted {
 			t.Fatalf("%s = %s", entry.ToolCallID, stored.State)
 		}
 	}
@@ -373,7 +374,7 @@ func TestReadsRunConcurrentlyBound4(t *testing.T) {
 
 func TestSecondSettleCallRefused(t *testing.T) {
 	f := newToolExecFixture(t, agentrun.ControlAuthority{CanWait: true, CanAskUser: true})
-	step := f.step("step-1", AgentTurnStatusRunning,
+	step := f.step("step-1", models.AgentTurnStatusRunning,
 		toolCall("call-wait", "wait", `{"goal":"a"}`),
 		toolCall("call-ask", "ask_user", `{"goal":"b"}`),
 	)
@@ -385,15 +386,15 @@ func TestSecondSettleCallRefused(t *testing.T) {
 		t.Fatalf("outcome = %#v", out)
 	}
 	ask := f.entry(step.entries[1])
-	if ask.State != ToolEntryError || resultValue(t, ask)["error"] != "control_one_settle_call" {
+	if ask.State != models.ToolEntryError || resultValue(t, ask)["error"] != "control_one_settle_call" {
 		t.Fatalf("second settle call = %s %v", ask.State, ask.Tool.Result)
 	}
-	if wait := f.entry(step.entries[0]); wait.State != ToolEntryPending || f.handlers[ControlToolWait].calls != 0 {
+	if wait := f.entry(step.entries[0]); wait.State != models.ToolEntryPending || f.handlers[models.ControlToolWait].calls != 0 {
 		t.Fatalf("first settle call ran in the inline phase: %s", wait.State)
 	}
 	// Phase 10: the step is finished and applied, then the one call settles.
 	finished := *step.turn
-	finished.Status = AgentTurnStatusCompleted
+	finished.Status = models.AgentTurnStatusCompleted
 	in := f.input(step)
 	in.Step = &finished
 	in.Run.LastAppliedTurn = finished.Sequence
@@ -401,17 +402,17 @@ func TestSecondSettleCallRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settled.Failure != nil || settled.Park != nil || f.handlers[ControlToolWait].calls != 1 || f.handlers[ControlToolAskUser].calls != 0 {
-		t.Fatalf("settle = %#v, wait calls %d, ask calls %d", settled, f.handlers[ControlToolWait].calls, f.handlers[ControlToolAskUser].calls)
+	if settled.Failure != nil || settled.Park != nil || f.handlers[models.ControlToolWait].calls != 1 || f.handlers[models.ControlToolAskUser].calls != 0 {
+		t.Fatalf("settle = %#v, wait calls %d, ask calls %d", settled, f.handlers[models.ControlToolWait].calls, f.handlers[models.ControlToolAskUser].calls)
 	}
-	if wait := f.entry(step.entries[0]); wait.State != ToolEntryCompleted {
+	if wait := f.entry(step.entries[0]); wait.State != models.ToolEntryCompleted {
 		t.Fatalf("settled call = %s", wait.State)
 	}
 }
 
 func TestUnofferedToolIsError(t *testing.T) {
 	f := newToolExecFixture(t, agentrun.ControlAuthority{})
-	step := f.step("step-1", AgentTurnStatusRunning,
+	step := f.step("step-1", models.AgentTurnStatusRunning,
 		toolCall("call-unknown", "made_up_tool", `{}`),
 		toolCall("call-fork", "control_fork", `{"goal":"x"}`),
 		toolCall("call-load", "load_capabilities", `{"ids":["action:x"]}`),
@@ -426,7 +427,7 @@ func TestUnofferedToolIsError(t *testing.T) {
 	}
 	for _, entry := range step.entries[:2] {
 		stored := f.entry(entry)
-		if stored.State != ToolEntryError || !stored.Tool.Result.IsError || resultValue(t, stored)["error"] != loopToolNotAvailableCode {
+		if stored.State != models.ToolEntryError || !stored.Tool.Result.IsError || resultValue(t, stored)["error"] != loopToolNotAvailableCode {
 			t.Fatalf("%s = %s %v", entry.ToolCallID, stored.State, stored.Tool.Result)
 		}
 	}
@@ -435,10 +436,10 @@ func TestUnofferedToolIsError(t *testing.T) {
 	if stored := f.entry(step.entries[2]); !stored.Tool.Result.IsError || resultValue(t, stored)["status"] != "not_available" {
 		t.Fatalf("load of an unknown ID = %s %v", stored.State, stored.Tool.Result)
 	}
-	if f.handlers[ControlToolFork].calls != 0 {
+	if f.handlers[models.ControlToolFork].calls != 0 {
 		t.Fatal("an unoffered control tool ran")
 	}
-	if read := f.entry(step.entries[3]); read.State != ToolEntryCompleted {
+	if read := f.entry(step.entries[3]); read.State != models.ToolEntryCompleted {
 		t.Fatalf("offered read = %s", read.State)
 	}
 }
@@ -447,9 +448,9 @@ func TestPlanToolEntriesRefusesUnusableArguments(t *testing.T) {
 	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	call := toolCall("call-bad", "workspace_read_file", `{}`)
 	call.ArgumentsError = "unexpected end of JSON input"
-	step := f.step("step-1", AgentTurnStatusRunning, call)
+	step := f.step("step-1", models.AgentTurnStatusRunning, call)
 	entry := step.entries[0]
-	if entry.State != ToolEntryError || entry.Tool.Result.Status != ToolResultRefused || resultValue(t, entry)["error"] != control.ArgumentsInvalidCode {
+	if entry.State != models.ToolEntryError || entry.Tool.Result.Status != models.ToolResultRefused || resultValue(t, entry)["error"] != control.ArgumentsInvalidCode {
 		t.Fatalf("entry = %s %#v", entry.State, entry.Tool.Result)
 	}
 	out, err := f.binding.Tools.ExecuteStepTools(f.ctx, f.input(step))
@@ -471,22 +472,22 @@ func (h *committedForkHandler) Run(ctx context.Context, x *control.ControlExecut
 	h.settles++
 	key := "fork-" + cc.Entry.ID
 	h.groups[key]++
-	meta, err := json.Marshal(&control.ControlEntryMeta{Kind: ControlToolFork, ForkID: key, GroupID: key})
+	meta, err := json.Marshal(&control.ControlEntryMeta{Kind: models.ControlToolFork, ForkID: key, GroupID: key})
 	if err != nil {
 		return control.ControlResult{}, err
 	}
 	now := x.Now()
-	moved, err := x.Sessions.TransitionToolEntry(ctx, ToolEntryTransitionRequest{
-		Scope: cc.Run.Scope, EntryID: cc.Entry.ID, RunID: cc.Run.ID, Lease: AgentRunLeaseGuard{WorkerID: cc.WorkerID, Now: now},
-		From: cc.Entry.State, ExpectedRevision: cc.Entry.Revision, To: ToolEntryAwaitingChild,
-		Wait: &ToolEntryWait{GroupID: key}, Kernel: &ToolEntryKernelPatch{Control: meta}, Now: now,
+	moved, err := x.Sessions.TransitionToolEntry(ctx, models.ToolEntryTransitionRequest{
+		Scope: cc.Run.Scope, EntryID: cc.Entry.ID, RunID: cc.Run.ID, Lease: models.AgentRunLeaseGuard{WorkerID: cc.WorkerID, Now: now},
+		From: cc.Entry.State, ExpectedRevision: cc.Entry.Revision, To: models.ToolEntryAwaitingChild,
+		Wait: &models.ToolEntryWait{GroupID: key}, Kernel: &models.ToolEntryKernelPatch{Control: meta}, Now: now,
 	})
 	if err != nil {
 		return control.ControlResult{}, err
 	}
 	entry := moved.Entry
 	return control.ControlResult{Kind: control.ControlParked, Entry: entry, Park: &agentrun.LoopPark{
-		Status: AgentRunStatusWaitingForDependency, Wake: &WakeCondition{Type: "run_dependencies", Reference: key},
+		Status: models.AgentRunStatusWaitingForDependency, Wake: &models.WakeCondition{Type: "run_dependencies", Reference: key},
 		Summary: "Waiting for the branches", Committed: true,
 	}}, nil
 }
@@ -498,10 +499,10 @@ func (h *committedForkHandler) Run(ctx context.Context, x *control.ControlExecut
 // CTL-6b).
 func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
 	fork := &committedForkHandler{groups: map[string]int{}}
-	f := newToolExecFixture(t, agentrun.ControlAuthority{ForkAllowed: true}, control.NewTool(ControlToolFork, fork))
+	f := newToolExecFixture(t, agentrun.ControlAuthority{ForkAllowed: true}, control.NewTool(models.ControlToolFork, fork))
 	// Step 1 asked for a fork; the step finished and was applied, then the
 	// worker died before the settle phase created the group.
-	step := f.step("step-1", AgentTurnStatusCompleted, toolCall("call-fork", "control_fork", `{"goal":"split"}`))
+	step := f.step("step-1", models.AgentTurnStatusCompleted, toolCall("call-fork", "control_fork", `{"goal":"split"}`))
 	if step.entries[0].Tool.RepeatEffect != string(RepeatEffectWrite) {
 		t.Fatalf("fork repeat effect = %q", step.entries[0].Tool.RepeatEffect)
 	}
@@ -509,8 +510,8 @@ func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
 		t.Fatal("the group exists before the resume")
 	}
 	// The next claim's step resumes the open entry before its model call.
-	next, err := f.store.CreateAgentTurn(f.ctx, &AgentTurn{
-		ID: "step-2", Scope: f.scope, RunID: f.run.ID, Status: AgentTurnStatusRunning, Producer: StepProducerModel, Revision: 1,
+	next, err := f.store.CreateAgentTurn(f.ctx, &models.AgentTurn{
+		ID: "step-2", Scope: f.scope, RunID: f.run.ID, Status: models.AgentTurnStatusRunning, Producer: models.StepProducerModel, Revision: 1,
 		CreatedAt: f.now, UpdatedAt: f.now,
 	})
 	if err != nil {
@@ -525,19 +526,19 @@ func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
 	if fork.settles != 1 || fork.groups["fork-"+step.entries[0].ID] != 1 {
 		t.Fatalf("settles = %d, groups = %v", fork.settles, fork.groups)
 	}
-	if out.Park == nil || !out.Park.Committed || out.Park.Status != AgentRunStatusWaitingForDependency {
+	if out.Park == nil || !out.Park.Committed || out.Park.Status != models.AgentRunStatusWaitingForDependency {
 		t.Fatalf("outcome = %#v", out)
 	}
 	stored := f.entry(step.entries[0])
-	if stored.State != ToolEntryAwaitingChild || stored.Tool.Wait == nil || stored.Tool.Wait.GroupID != "fork-"+step.entries[0].ID {
+	if stored.State != models.ToolEntryAwaitingChild || stored.Tool.Wait == nil || stored.Tool.Wait.GroupID != "fork-"+step.entries[0].ID {
 		t.Fatalf("entry = %s %#v", stored.State, stored.Tool.Wait)
 	}
 }
 
 // governedToolExecutor wires a claim tool executor over a governed fixture.
-func governedToolExecutor(t *testing.T, f *governedFixture) (agentrun.LoopToolExecutor, AgentSessionStore) {
+func governedToolExecutor(t *testing.T, f *governedFixture) (agentrun.LoopToolExecutor, models.AgentSessionStore) {
 	t.Helper()
-	sessions, ok := f.store.(AgentSessionStore)
+	sessions, ok := f.store.(models.AgentSessionStore)
 	if !ok {
 		t.Fatalf("%T is not a session store", f.store)
 	}
@@ -548,9 +549,9 @@ func governedToolExecutor(t *testing.T, f *governedFixture) (agentrun.LoopToolEx
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sessions.CreateRunAgentSession(f.ctx, CreateRunAgentSessionRequest{
+	if _, err := sessions.CreateRunAgentSession(f.ctx, models.CreateRunAgentSessionRequest{
 		Scope: f.scope, OwnerRunID: f.run.ID, AgentID: f.run.AssignedAgentID,
-		Lease: AgentRunLeaseGuard{WorkerID: governedWorker, Now: f.clock}, Now: f.clock,
+		Lease: models.AgentRunLeaseGuard{WorkerID: governedWorker, Now: f.clock}, Now: f.clock,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -560,7 +561,7 @@ func governedToolExecutor(t *testing.T, f *governedFixture) (agentrun.LoopToolEx
 }
 
 func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
-	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
 		var deployed []string
@@ -572,23 +573,23 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 		tools, sessions := governedToolExecutor(t, f)
 		f.binding.Tools = tools
 		step := appendToolStep(t, f.ctx, struct {
-			AgentSessionStore
-			AgentTurnStore
-		}{sessions, f.store}, f.run, f.binding, governedWorker, governedStep, AgentTurnStatusCompleted, f.clock,
-			ModelToolCall{ID: "call-prod", Name: governedDeploy, Arguments: deployArguments("production")},
-			ModelToolCall{ID: "call-staging", Name: governedDeploy, Arguments: deployArguments("staging")},
+			models.AgentSessionStore
+			models.AgentTurnStore
+		}{sessions, f.store}, f.run, f.binding, governedWorker, governedStep, models.AgentTurnStatusCompleted, f.clock,
+			models.ModelToolCall{ID: "call-prod", Name: governedDeploy, Arguments: deployArguments("production")},
+			models.ModelToolCall{ID: "call-staging", Name: governedDeploy, Arguments: deployArguments("staging")},
 			// A read after the skipped write must not overtake it.
-			ModelToolCall{ID: "call-check", Name: governedStatus, Arguments: json.RawMessage(`{"environment":"check"}`)},
+			models.ModelToolCall{ID: "call-check", Name: governedStatus, Arguments: json.RawMessage(`{"environment":"check"}`)},
 		)
 		in := agentrun.StepToolsInput{Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker, Assistant: step.assistant, Entries: step.entries}
 		out, err := tools.ExecuteStepTools(f.ctx, in)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if out.Park == nil || out.Park.Status != AgentRunStatusWaitingForApproval || out.Park.Committed || out.SettlePending {
+		if out.Park == nil || out.Park.Status != models.AgentRunStatusWaitingForApproval || out.Park.Committed || out.SettlePending {
 			t.Fatalf("outcome = %#v", out)
 		}
-		get := func(entry *SessionEntry) *SessionEntry {
+		get := func(entry *models.SessionEntry) *models.SessionEntry {
 			stored, err := sessions.GetSessionEntry(f.ctx, f.scope, entry.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -596,16 +597,16 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 			return stored
 		}
 		prod, staging := get(step.entries[0]), get(step.entries[1])
-		if prod.State != ToolEntryAwaitingApproval || prod.ActionCallID == "" || prod.Tool.Wait == nil || prod.Tool.Wait.ApprovalID == "" {
+		if prod.State != models.ToolEntryAwaitingApproval || prod.ActionCallID == "" || prod.Tool.Wait == nil || prod.Tool.Wait.ApprovalID == "" {
 			t.Fatalf("held write = %s %#v", prod.State, prod.Tool.Wait)
 		}
-		if staging.State != ToolEntryPending || staging.ActionCallID != "" || len(deployed) != 0 {
+		if staging.State != models.ToolEntryPending || staging.ActionCallID != "" || len(deployed) != 0 {
 			t.Fatalf("later write = %s (call %q), deployed %v", staging.State, staging.ActionCallID, deployed)
 		}
-		if check := get(step.entries[2]); check.State != ToolEntryPending || check.ActionCallID != "" {
+		if check := get(step.entries[2]); check.State != models.ToolEntryPending || check.ActionCallID != "" {
 			t.Fatalf("read after the skipped write = %s (call %q)", check.State, check.ActionCallID)
 		}
-		calls, err := f.store.ListActionCalls(f.ctx, ActionFilter{Scope: f.scope, RunID: f.run.ID})
+		calls, err := f.store.ListActionCalls(f.ctx, models.ActionFilter{Scope: f.scope, RunID: f.run.ID})
 		if err != nil || len(calls) != 1 {
 			t.Fatalf("action calls = %d, %v", len(calls), err)
 		}
@@ -613,11 +614,11 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 		f.parkOn(&GovernedPark{Status: out.Park.Status, Wake: out.Park.Wake, Summary: out.Park.Summary})
 		delete(f.policy, "deploy")
 		f.advance(time.Second)
-		f.decide(prod.Tool.Wait.ApprovalID, ApprovalDecisionApprove, "")
+		f.decide(prod.Tool.Wait.ApprovalID, models.ApprovalDecisionApprove, "")
 		f.advance(time.Second)
 		f.run = f.claim(governedWorker2)
-		next, err := f.store.CreateAgentTurn(f.ctx, &AgentTurn{
-			ID: "step-2", Scope: f.scope, RunID: f.run.ID, Status: AgentTurnStatusRunning, Producer: StepProducerModel, Revision: 1,
+		next, err := f.store.CreateAgentTurn(f.ctx, &models.AgentTurn{
+			ID: "step-2", Scope: f.scope, RunID: f.run.ID, Status: models.AgentTurnStatusRunning, Producer: models.StepProducerModel, Revision: 1,
 			CreatedAt: f.clock, UpdatedAt: f.clock,
 		})
 		if err != nil {
@@ -634,7 +635,7 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 			t.Fatalf("dispatched %v, want production, staging, then the read", deployed)
 		}
 		for _, entry := range step.entries {
-			if stored := get(entry); stored.State != ToolEntryCompleted {
+			if stored := get(entry); stored.State != models.ToolEntryCompleted {
 				t.Fatalf("after the decision %s = %s", entry.ToolCallID, stored.State)
 			}
 		}
@@ -642,16 +643,16 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 }
 
 func TestReplanParkNilWhenHeldApprovalDecided(t *testing.T) {
-	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
 		tools, sessions := governedToolExecutor(t, f)
 		f.binding.Tools = tools
 		step := appendToolStep(t, f.ctx, struct {
-			AgentSessionStore
-			AgentTurnStore
-		}{sessions, f.store}, f.run, f.binding, governedWorker, governedStep, AgentTurnStatusRunning, f.clock,
-			ModelToolCall{ID: "call-prod", Name: governedDeploy, Arguments: deployArguments("production")},
+			models.AgentSessionStore
+			models.AgentTurnStore
+		}{sessions, f.store}, f.run, f.binding, governedWorker, governedStep, models.AgentTurnStatusRunning, f.clock,
+			models.ModelToolCall{ID: "call-prod", Name: governedDeploy, Arguments: deployArguments("production")},
 		)
 		out, err := tools.ExecuteStepTools(f.ctx, agentrun.StepToolsInput{
 			Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker, Assistant: step.assistant, Entries: step.entries,
@@ -661,7 +662,7 @@ func TestReplanParkNilWhenHeldApprovalDecided(t *testing.T) {
 		}
 		// Still pending: the re-plan parks on the same approval.
 		park, err := tools.ReplanPark(f.ctx, agentrun.StepToolsInput{Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker})
-		if err != nil || park == nil || park.Status != AgentRunStatusWaitingForApproval || park.Wake.Reference != out.Park.Wake.Reference {
+		if err != nil || park == nil || park.Status != models.AgentRunStatusWaitingForApproval || park.Wake.Reference != out.Park.Wake.Reference {
 			t.Fatalf("replan while pending = %#v, %v", park, err)
 		}
 		// Decided while the Run is held: the park CAS fails and the re-plan says do not park.
@@ -670,7 +671,7 @@ func TestReplanParkNilWhenHeldApprovalDecided(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.advance(time.Second)
-		f.decide(entry.Tool.Wait.ApprovalID, ApprovalDecisionApprove, "")
+		f.decide(entry.Tool.Wait.ApprovalID, models.ApprovalDecisionApprove, "")
 		park, err = tools.ReplanPark(f.ctx, agentrun.StepToolsInput{Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker})
 		if err != nil || park != nil {
 			t.Fatalf("replan after the decision = %#v, %v", park, err)
@@ -682,14 +683,14 @@ func TestRepeatedReadRefusedByExecutor(t *testing.T) {
 	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	var last toolStep
 	for n := 1; n <= 3; n++ {
-		last = f.step(fmt.Sprintf("step-%d", n), AgentTurnStatusCompleted, toolCall(fmt.Sprintf("call-%d", n), "workspace_read_file", `{"path":"same.md"}`))
+		last = f.step(fmt.Sprintf("step-%d", n), models.AgentTurnStatusCompleted, toolCall(fmt.Sprintf("call-%d", n), "workspace_read_file", `{"path":"same.md"}`))
 		out, err := f.binding.Tools.ExecuteStepTools(f.ctx, f.input(last))
 		if err != nil || out.Failure != nil {
 			t.Fatalf("step %d = %#v, %v", n, out, err)
 		}
 	}
 	third := f.entry(last.entries[0])
-	if third.State != ToolEntryError || third.Tool.Guard == nil || third.Tool.Guard.Kind != action.RefusedLoopCallRepeat {
+	if third.State != models.ToolEntryError || third.Tool.Guard == nil || third.Tool.Guard.Kind != action.RefusedLoopCallRepeat {
 		t.Fatalf("third identical read = %s guard %#v", third.State, third.Tool.Guard)
 	}
 	if len(f.host.order) != 2 {
@@ -701,8 +702,8 @@ func TestRepeatedReadRefusedByExecutor(t *testing.T) {
 // appended (and finished and applied) but never went through phase 8.
 func (f *toolExecFixture) resumeNextStep(step toolStep) agentrun.StepToolsOutcome {
 	f.t.Helper()
-	next, err := f.store.CreateAgentTurn(f.ctx, &AgentTurn{
-		ID: "step-next", Scope: f.scope, RunID: f.run.ID, Status: AgentTurnStatusRunning, Producer: StepProducerModel, Revision: 1,
+	next, err := f.store.CreateAgentTurn(f.ctx, &models.AgentTurn{
+		ID: "step-next", Scope: f.scope, RunID: f.run.ID, Status: models.AgentTurnStatusRunning, Producer: models.StepProducerModel, Revision: 1,
 		CreatedAt: f.now, UpdatedAt: f.now,
 	})
 	if err != nil {
@@ -720,7 +721,7 @@ func (f *toolExecFixture) resumeNextStep(step toolStep) agentrun.StepToolsOutcom
 func TestResumeUncheckedStepRefusesSecondSettleCall(t *testing.T) {
 	f := newToolExecFixture(t, agentrun.ControlAuthority{CanWait: true, CanAskUser: true})
 	// The worker died between the append and phase 8.
-	step := f.step("step-1", AgentTurnStatusCompleted,
+	step := f.step("step-1", models.AgentTurnStatusCompleted,
 		toolCall("call-wait", "wait", `{"goal":"a"}`),
 		toolCall("call-ask", "ask_user", `{"goal":"b"}`),
 	)
@@ -729,28 +730,28 @@ func TestResumeUncheckedStepRefusesSecondSettleCall(t *testing.T) {
 		t.Fatalf("outcome = %#v", out)
 	}
 	ask := f.entry(step.entries[1])
-	if ask.State != ToolEntryError || resultValue(t, ask)["error"] != "control_one_settle_call" {
+	if ask.State != models.ToolEntryError || resultValue(t, ask)["error"] != "control_one_settle_call" {
 		t.Fatalf("second settle call = %s %v", ask.State, ask.Tool.Result)
 	}
-	if wait := f.entry(step.entries[0]); wait.State != ToolEntryCompleted || f.handlers[ControlToolWait].calls != 1 || f.handlers[ControlToolAskUser].calls != 0 {
-		t.Fatalf("first settle call = %s, wait calls %d, ask calls %d", wait.State, f.handlers[ControlToolWait].calls, f.handlers[ControlToolAskUser].calls)
+	if wait := f.entry(step.entries[0]); wait.State != models.ToolEntryCompleted || f.handlers[models.ControlToolWait].calls != 1 || f.handlers[models.ControlToolAskUser].calls != 0 {
+		t.Fatalf("first settle call = %s, wait calls %d, ask calls %d", wait.State, f.handlers[models.ControlToolWait].calls, f.handlers[models.ControlToolAskUser].calls)
 	}
 }
 
 func TestResumeUncheckedStepAppliesToolCheck(t *testing.T) {
 	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	checked := 0
-	f.binding.ToolCheck = func(ctx context.Context, in agentrun.StepToolsInput, entry *SessionEntry) (string, error) {
+	f.binding.ToolCheck = func(ctx context.Context, in agentrun.StepToolsInput, entry *models.SessionEntry) (string, error) {
 		checked++
 		return "Not in this conversation.", nil
 	}
-	step := f.step("step-1", AgentTurnStatusCompleted, toolCall("call-read", "workspace_read_file", `{"path":"a.md"}`))
+	step := f.step("step-1", models.AgentTurnStatusCompleted, toolCall("call-read", "workspace_read_file", `{"path":"a.md"}`))
 	out := f.resumeNextStep(step)
 	if out.Failure != nil || out.Park != nil || out.HostToolCalls != 0 {
 		t.Fatalf("outcome = %#v", out)
 	}
 	read := f.entry(step.entries[0])
-	if checked != 1 || read.State != ToolEntryError || read.Tool.Result.Status != ToolResultRefused || len(f.host.order) != 0 {
+	if checked != 1 || read.State != models.ToolEntryError || read.Tool.Result.Status != models.ToolResultRefused || len(f.host.order) != 0 {
 		t.Fatalf("checked %d, read = %s %#v, host ran %v", checked, read.State, read.Tool.Result, f.host.order)
 	}
 }
@@ -758,7 +759,7 @@ func TestResumeUncheckedStepAppliesToolCheck(t *testing.T) {
 // The keeper looks the Run up by scope and id; a missing scope made every
 // long computer or connected-app output fail the step.
 func TestToolOutputInvocationCarriesTheRunsScopeAndAgent(t *testing.T) {
-	run := &AgentRun{ID: "run-1", Scope: Scope{Kind: "tenant", ID: "9"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}, AssignedAgentID: "finn"}
+	run := &models.AgentRun{ID: "run-1", Scope: models.Scope{Kind: "tenant", ID: "9"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}, AssignedAgentID: "finn"}
 	got := toolOutputInvocation(run, "computer_run_command", "openseal.computer", "run_command", "call-1")
 	if got.RunID != "run-1" || got.Scope.Kind != "tenant" || got.Scope.ID != "9" || got.DeploymentID != "finn" || got.ExecutionDeploymentID != "finn" || got.ActionCallID != "call-1" {
 		t.Fatalf("invocation = %+v", got)

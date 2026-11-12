@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
@@ -13,11 +14,11 @@ import (
 // runStartActions serves ListActionCalls from a fixed set; every other
 // ActionStore method is unused by the preparer.
 type runStartActions struct {
-	ActionStore
+	models.ActionStore
 	lister fakeActionCallLister
 }
 
-func (a *runStartActions) ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error) {
+func (a *runStartActions) ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
 	return a.lister.ListActionCalls(ctx, filter)
 }
 
@@ -25,49 +26,49 @@ func (a *runStartActions) ListActionCalls(ctx context.Context, filter ActionFilt
 // the session path, as the run-start preparer reads them.
 type runStartHistory struct {
 	t     *testing.T
-	run   *AgentRun
-	path  *AgentSessionPath
-	calls map[string]*ActionCall
+	run   *models.AgentRun
+	path  *models.AgentSessionPath
+	calls map[string]*models.ActionCall
 	now   time.Time
 }
 
 func newRunStartHistory(t *testing.T) *runStartHistory {
 	t.Helper()
-	scope := Scope{Kind: "workspace", ID: "ws-guards"}
+	scope := models.Scope{Kind: "workspace", ID: "ws-guards"}
 	return &runStartHistory{
 		t:     t,
-		run:   &AgentRun{ID: "run-guards", Scope: scope, Kind: RunKindConversation, SessionID: "session-guards"},
-		path:  &AgentSessionPath{},
-		calls: map[string]*ActionCall{},
+		run:   &models.AgentRun{ID: "run-guards", Scope: scope, Kind: models.RunKindConversation, SessionID: "session-guards"},
+		path:  &models.AgentSessionPath{},
+		calls: map[string]*models.ActionCall{},
 		now:   time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC),
 	}
 }
 
 // add records a terminal loop call and its tool entry on the path.
-func (f *runStartHistory) add(id, skillID, action string, status ActionCallStatus, output map[string]interface{}, errorCode string, details map[string]string) *SessionEntry {
+func (f *runStartHistory) add(id, skillID, action string, status models.ActionCallStatus, output map[string]interface{}, errorCode string, details map[string]string) *models.SessionEntry {
 	f.t.Helper()
 	f.now = f.now.Add(time.Second)
-	call := &ActionCall{
+	call := &models.ActionCall{
 		ID: id, Scope: f.run.Scope, RunID: f.run.ID, SkillID: skillID, Action: action, Status: status,
-		Origin: ActionOriginLoop, Output: output, ErrorCode: errorCode, ErrorDetails: details,
+		Origin: models.ActionOriginLoop, Output: output, ErrorCode: errorCode, ErrorDetails: details,
 		CreatedAt: f.now, UpdatedAt: f.now,
 	}
 	f.calls[id] = call
-	state := ToolEntryCompleted
-	if status != ActionCallStatusSucceeded {
-		state = ToolEntryError
+	state := models.ToolEntryCompleted
+	if status != models.ActionCallStatusSucceeded {
+		state = models.ToolEntryError
 	}
-	entry := &SessionEntry{
+	entry := &models.SessionEntry{
 		ID: "entry-" + id, Scope: f.run.Scope, SessionID: f.run.SessionID, RunID: f.run.ID,
-		StepID: "step-" + id, Type: SessionEntryTool, State: state, ToolCallID: "tc-" + id, ActionCallID: id,
-		Tool: &ToolEntry{Name: skillID + "." + action},
+		StepID: "step-" + id, Type: models.SessionEntryTool, State: state, ToolCallID: "tc-" + id, ActionCallID: id,
+		Tool: &models.ToolEntry{Name: skillID + "." + action},
 	}
 	f.path.Entries = append(f.path.Entries, entry)
 	return entry
 }
 
 func (f *runStartHistory) rateLimitedLightpanda(id string) {
-	f.add(id, control.LightpandaBrowserSkillID, "lightpanda-read", ActionCallStatusFailed, nil,
+	f.add(id, control.LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusFailed, nil,
 		"source_rate_limited", map[string]string{"httpStatus": "429"})
 }
 
@@ -75,16 +76,16 @@ func TestRunStartNoteIdempotent(t *testing.T) {
 	// Governed-history notes: rate-limited source and pending setup.
 	g := newRunStartHistory(t)
 	g.rateLimitedLightpanda("read-429")
-	g.add("setup-1", SkillManagementSkillID, agentrun.SkillActionRequestSetup, ActionCallStatusSucceeded, map[string]interface{}{
+	g.add("setup-1", models.SkillManagementSkillID, agentrun.SkillActionRequestSetup, models.ActionCallStatusSucceeded, map[string]interface{}{
 		"setupRequest": map[string]interface{}{"id": "form-1", "status": "pending", "runId": g.run.ID, "actionCallId": "setup-1"},
 	}, "", nil)
 	actions := &runStartActions{}
 	for _, call := range g.calls {
 		actions.lister.calls = append(actions.lister.calls, call)
 	}
-	session := &AgentSession{ID: g.run.SessionID, Scope: g.run.Scope}
-	step := &AgentTurn{ID: "step-9", Scope: g.run.Scope, RunID: g.run.ID, Sequence: 9}
-	prepare := func(run *AgentRun, path *AgentSessionPath) []*SessionEntry {
+	session := &models.AgentSession{ID: g.run.SessionID, Scope: g.run.Scope}
+	step := &models.AgentTurn{ID: "step-9", Scope: g.run.Scope, RunID: g.run.ID, Sequence: 9}
+	prepare := func(run *models.AgentRun, path *models.AgentSessionPath) []*models.SessionEntry {
 		t.Helper()
 		out, err := NewRunStartPreparer(conversationtest.NewStore(t), actions).BeforeStep(context.Background(),
 			agentrun.StepInput{Run: run, Step: step, Session: session, Path: path}, agentrun.SteeringPlan{})
@@ -97,7 +98,7 @@ func TestRunStartNoteIdempotent(t *testing.T) {
 		return out.Entries
 	}
 	notes := prepare(g.run, g.path)
-	if len(notes) != 2 || notes[0].Note.Kind != NoteRateLimitedSource || notes[1].Note.Kind != NoteSetupPending {
+	if len(notes) != 2 || notes[0].Note.Kind != models.NoteRateLimitedSource || notes[1].Note.Kind != models.NoteSetupPending {
 		t.Fatalf("governed notes = %+v", notes)
 	}
 	if notes[0].SourceKey != RateLimitedSourceKey(g.run.ID, "read-429") || notes[0].Note.Text != control.LiveBrowserRateLimitedError {
@@ -115,29 +116,29 @@ func TestRunStartNoteIdempotent(t *testing.T) {
 	}
 
 	// Once on the path, neither comes again.
-	withNotes := &AgentSessionPath{Entries: append(append([]*SessionEntry{}, g.path.Entries...), notes...)}
+	withNotes := &models.AgentSessionPath{Entries: append(append([]*models.SessionEntry{}, g.path.Entries...), notes...)}
 	if got := prepare(g.run, withNotes); len(got) != 0 {
 		t.Fatalf("notes repeated: %+v", got)
 	}
 	// A step that ran no governed call since the newest assistant entry reads
 	// no history.
 	pages := actions.lister.pages
-	quiet := &AgentSessionPath{Entries: append(append([]*SessionEntry{}, g.path.Entries...),
-		&SessionEntry{ID: "assistant-10", RunID: g.run.ID, Type: SessionEntryAssistant})}
+	quiet := &models.AgentSessionPath{Entries: append(append([]*models.SessionEntry{}, g.path.Entries...),
+		&models.SessionEntry{ID: "assistant-10", RunID: g.run.ID, Type: models.SessionEntryAssistant})}
 	if got := prepare(g.run, quiet); len(got) != 0 || actions.lister.pages != pages {
 		t.Fatalf("quiet step: notes %+v, pages %d -> %d", got, pages, actions.lister.pages)
 	}
 	// Background task Runs park at the final answer instead of a setup note.
-	task := cloneAgentRun(g.run)
-	task.Kind = RunKindAgentWork
-	task.Context = map[string]interface{}{ConversationTaskContextKey: map[string]interface{}{"taskId": "t1"}}
-	if got := prepare(task, g.path); len(got) != 1 || got[0].Note.Kind != NoteRateLimitedSource {
+	task := models.CloneAgentRun(g.run)
+	task.Kind = models.RunKindAgentWork
+	task.Context = map[string]interface{}{models.ConversationTaskContextKey: map[string]interface{}{"taskId": "t1"}}
+	if got := prepare(task, g.path); len(got) != 1 || got[0].Note.Kind != models.NoteRateLimitedSource {
 		t.Fatalf("task Run notes = %+v", got)
 	}
 	// A newer Lightpanda success clears the rate limit.
-	g.add("read-ok", control.LightpandaBrowserSkillID, "lightpanda-read", ActionCallStatusSucceeded, nil, "", nil)
+	g.add("read-ok", control.LightpandaBrowserSkillID, "lightpanda-read", models.ActionCallStatusSucceeded, nil, "", nil)
 	actions.lister.calls = append(actions.lister.calls, g.calls["read-ok"])
-	if got := prepare(g.run, g.path); len(got) != 1 || got[0].Note.Kind != NoteSetupPending {
+	if got := prepare(g.run, g.path); len(got) != 1 || got[0].Note.Kind != models.NoteSetupPending {
 		t.Fatalf("after success notes = %+v", got)
 	}
 }

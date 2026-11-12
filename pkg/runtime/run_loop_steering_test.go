@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -13,7 +14,7 @@ import (
 
 // steeringRun stores run r1 (bound to a conversation session) with the given
 // interventions and cursor, and returns the stored Run and session.
-func steeringRun(t *testing.T, store *sqlite.Store, consumed int, interventions ...AgentRunIntervention) (*AgentRun, *AgentSession) {
+func steeringRun(t *testing.T, store *sqlite.Store, consumed int, interventions ...models.AgentRunIntervention) (*models.AgentRun, *models.AgentSession) {
 	t.Helper()
 	session := openLoopConversationSession(t, store, "r1")
 	run := getLoopRun(t, store, loopSessionScope, "r1")
@@ -23,7 +24,7 @@ func steeringRun(t *testing.T, store *sqlite.Store, consumed int, interventions 
 	return loopStoredSessionRun(t, store, "r1"), session
 }
 
-func addSteeringIntervention(t *testing.T, store *sqlite.Store, intervention AgentRunIntervention) *AgentRun {
+func addSteeringIntervention(t *testing.T, store *sqlite.Store, intervention models.AgentRunIntervention) *models.AgentRun {
 	t.Helper()
 	run := getLoopRun(t, store, loopSessionScope, "r1")
 	run.PendingInterventions = append(run.PendingInterventions, intervention)
@@ -31,15 +32,15 @@ func addSteeringIntervention(t *testing.T, store *sqlite.Store, intervention Age
 	return loopStoredSessionRun(t, store, "r1")
 }
 
-func steeringStep() *AgentTurn { return &AgentTurn{ID: "step-3", Sequence: 3} }
+func steeringStep() *models.AgentTurn { return &models.AgentTurn{ID: "step-3", Sequence: 3} }
 
-func steeringInput(run *AgentRun, session *AgentSession) agentrun.StepInput {
+func steeringInput(run *models.AgentRun, session *models.AgentSession) agentrun.StepInput {
 	return agentrun.StepInput{Run: run, Step: steeringStep(), Session: session, WorkerID: "w1", Mode: agentrun.StepModeNormal}
 }
 
-func steeringEntries(t *testing.T, store *sqlite.Store, sessionID string) []*SessionEntry {
+func steeringEntries(t *testing.T, store *sqlite.Store, sessionID string) []*models.SessionEntry {
 	t.Helper()
-	entries, err := store.ListAgentSessionEntries(context.Background(), SessionEntryFilter{Scope: loopSessionScope, SessionID: sessionID})
+	entries, err := store.ListAgentSessionEntries(context.Background(), models.SessionEntryFilter{Scope: loopSessionScope, SessionID: sessionID})
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
 	}
@@ -61,17 +62,17 @@ func (p *steeringPreparer) BeforeStep(_ context.Context, in agentrun.StepInput, 
 	return p.fn(in, plan), nil
 }
 
-func mixedSteeringPrefix() []AgentRunIntervention {
-	return []AgentRunIntervention{
+func mixedSteeringPrefix() []models.AgentRunIntervention {
+	return []models.AgentRunIntervention{
 		{ID: "old", Instruction: "already consumed"},
 		{ID: "card", Instruction: "card settled", ActionCallID: "call-1"},
-		{ID: "answer", Instruction: "yes", ConversationAnswer: &ConversationAnswerReceipt{AnswerMessageID: "m-answer"}},
-		{ID: "msg", Instruction: "also check the invoice", ConversationMessage: &ConversationMessageDelivery{
-			ConversationID: "c1", MessageID: "m7", Sequence: 7, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "u1"},
+		{ID: "answer", Instruction: "yes", ConversationAnswer: &models.ConversationAnswerReceipt{AnswerMessageID: "m-answer"}},
+		{ID: "msg", Instruction: "also check the invoice", ConversationMessage: &models.ConversationMessageDelivery{
+			ConversationID: "c1", MessageID: "m7", Sequence: 7, Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "u1"},
 		}},
-		{ID: "steer", Instruction: "use the staging project", Actor: ActivityActor{Type: "user", ID: "u2"}},
-		{ID: "setup", Instruction: "setup done", Actor: ActivityActor{Type: "system", ID: "kernel"},
-			SkillSetupResolution: &SkillSetupResolutionReceipt{RequestID: "req-1", Status: "completed"}},
+		{ID: "steer", Instruction: "use the staging project", Actor: models.ActivityActor{Type: "user", ID: "u2"}},
+		{ID: "setup", Instruction: "setup done", Actor: models.ActivityActor{Type: "system", ID: "kernel"},
+			SkillSetupResolution: &models.SkillSetupResolutionReceipt{RequestID: "req-1", Status: "completed"}},
 	}
 }
 
@@ -94,17 +95,17 @@ func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
 		t.Fatalf("entries = %d, want message, steer and setup only", len(entries))
 	}
 	message, steer, setup := entries[0], entries[1], entries[2]
-	if message.User.Origin != UserEntryChannelMessage || message.SourceKey != ChannelMessageSourceKey("m7") ||
+	if message.User.Origin != models.UserEntryChannelMessage || message.SourceKey != models.ChannelMessageSourceKey("m7") ||
 		message.User.MessageID != "m7" || message.User.MessageSequence != 7 || message.User.InterventionID != "msg" ||
-		message.User.Author != (SessionAuthor{Type: "user", ID: "u1"}) || message.User.Content[0].Text != "also check the invoice" {
+		message.User.Author != (models.SessionAuthor{Type: "user", ID: "u1"}) || message.User.Content[0].Text != "also check the invoice" {
 		t.Fatalf("message entry = %+v / %+v", message, message.User)
 	}
-	if steer.User.Origin != UserEntryIntervention || steer.SourceKey != InterventionSourceKey("steer") ||
-		steer.ID != SessionEntryID(session.ID, InterventionSourceKey("steer")) || steer.Step != 3 ||
-		steer.User.Author != (SessionAuthor{Type: "user", ID: "u2"}) {
+	if steer.User.Origin != models.UserEntryIntervention || steer.SourceKey != models.InterventionSourceKey("steer") ||
+		steer.ID != models.SessionEntryID(session.ID, models.InterventionSourceKey("steer")) || steer.Step != 3 ||
+		steer.User.Author != (models.SessionAuthor{Type: "user", ID: "u2"}) {
 		t.Fatalf("steer entry = %+v / %+v", steer, steer.User)
 	}
-	if setup.User.Author.Type != "service" || len(setup.User.Content) != 2 || setup.User.Content[1].Type != ContentPartJSON {
+	if setup.User.Author.Type != "service" || len(setup.User.Content) != 2 || setup.User.Content[1].Type != models.ContentPartJSON {
 		t.Fatalf("setup entry = %+v", setup.User)
 	}
 	after := loopStoredSessionRun(t, store, "r1")
@@ -128,10 +129,10 @@ func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
 	catchUp := &steeringPreparer{fn: func(in agentrun.StepInput, plan agentrun.SteeringPlan) *agentrun.StepContextAppend {
 		expected := in.Session.ChannelWatermark
 		return &agentrun.StepContextAppend{
-			Entries: []*SessionEntry{{
-				ID: SessionEntryID(in.Session.ID, ChannelMessageSourceKey("m7")), Type: SessionEntryUser, SourceKey: ChannelMessageSourceKey("m7"),
-				User: &UserEntry{Origin: UserEntryChannelMessage, MessageID: "m7", MessageSequence: 7,
-					Author: SessionAuthor{Type: "user", ID: "u1"}, Content: []ContentPart{storetest.TextPart("[u1] also check the invoice")}},
+			Entries: []*models.SessionEntry{{
+				ID: models.SessionEntryID(in.Session.ID, models.ChannelMessageSourceKey("m7")), Type: models.SessionEntryUser, SourceKey: models.ChannelMessageSourceKey("m7"),
+				User: &models.UserEntry{Origin: models.UserEntryChannelMessage, MessageID: "m7", MessageSequence: 7,
+					Author: models.SessionAuthor{Type: "user", ID: "u1"}, Content: []models.ContentPart{storetest.TextPart("[u1] also check the invoice")}},
 			}},
 			ExpectedChannelWatermark: &expected, ChannelWatermark: plan.ThroughMessageSequence,
 		}
@@ -151,13 +152,13 @@ func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
 
 func TestSteeringCursorCommitsWithEntries(t *testing.T) {
 	store := conversationtest.NewStore(t)
-	run, session := steeringRun(t, store, 0, AgentRunIntervention{ID: "steer", Instruction: "stop after the draft"})
+	run, session := steeringRun(t, store, 0, models.AgentRunIntervention{ID: "steer", Instruction: "stop after the draft"})
 	stale := int64(99)
 	moving := &steeringPreparer{fn: func(agentrun.StepInput, agentrun.SteeringPlan) *agentrun.StepContextAppend {
 		return &agentrun.StepContextAppend{ExpectedChannelWatermark: &stale, ChannelWatermark: 100}
 	}}
 	_, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{moving}, loopSessionNow)
-	if !errors.Is(err, ErrChannelWatermarkMoved) {
+	if !errors.Is(err, models.ErrChannelWatermarkMoved) {
 		t.Fatalf("append with a moving watermark = %v, want ErrChannelWatermarkMoved", err)
 	}
 	if moving.calls != stepContextAttempts {
@@ -195,8 +196,8 @@ func TestSteeringCursorCommitsWithEntries(t *testing.T) {
 func TestSteeringReplayAfterCrashAppendsOnce(t *testing.T) {
 	store := conversationtest.NewStore(t)
 	run, session := steeringRun(t, store, 0,
-		AgentRunIntervention{ID: "a", Instruction: "first"},
-		AgentRunIntervention{ID: "b", Instruction: "second"})
+		models.AgentRunIntervention{ID: "a", Instruction: "first"},
+		models.AgentRunIntervention{ID: "b", Instruction: "second"})
 	in := steeringInput(run, session)
 	if _, err := appendStepContext(context.Background(), store, in, nil, loopSessionNow); err != nil {
 		t.Fatalf("first append: %v", err)
@@ -218,7 +219,7 @@ func TestSteeringReplayAfterCrashAppendsOnce(t *testing.T) {
 	}
 
 	// A new intervention after the reload is the only thing the next step adds.
-	reloaded = addSteeringIntervention(t, store, AgentRunIntervention{ID: "c", Instruction: "third"})
+	reloaded = addSteeringIntervention(t, store, models.AgentRunIntervention{ID: "c", Instruction: "third"})
 	if _, err := appendStepContext(context.Background(), store, steeringInput(reloaded, session), nil, loopSessionNow); err != nil {
 		t.Fatalf("next step: %v", err)
 	}

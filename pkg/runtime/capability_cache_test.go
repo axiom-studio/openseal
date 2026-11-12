@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
@@ -21,23 +22,23 @@ import (
 // fixtureNoteAppender appends capabilities notes to a render fixture.
 type fixtureNoteAppender struct{ f *modelsteptest.RenderFixture }
 
-func (a fixtureNoteAppender) AppendAgentSessionEntries(_ context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
-	var out []*SessionEntry
+func (a fixtureNoteAppender) AppendAgentSessionEntries(_ context.Context, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
+	var out []*models.SessionEntry
 	for _, entry := range req.Entries {
 		out = append(out, a.f.Add(entry))
 	}
-	return &AppendAgentSessionEntriesResult{Entries: out}, nil
+	return &models.AppendAgentSessionEntriesResult{Entries: out}, nil
 }
 
 // fixtureNoteSessions is a render fixture as a model step producer's
 // session store.
 type fixtureNoteSessions struct{ fixtureNoteAppender }
 
-func (s fixtureNoteSessions) LoadAgentSessionPath(context.Context, Scope, string) (*AgentSessionPath, error) {
+func (s fixtureNoteSessions) LoadAgentSessionPath(context.Context, models.Scope, string) (*models.AgentSessionPath, error) {
 	return s.f.Path(), nil
 }
 
-func (s fixtureNoteSessions) GetActionCall(context.Context, Scope, string) (*ActionCall, error) {
+func (s fixtureNoteSessions) GetActionCall(context.Context, models.Scope, string) (*models.ActionCall, error) {
 	return nil, nil
 }
 
@@ -45,24 +46,26 @@ func (s fixtureNoteSessions) GetActionCall(context.Context, Scope, string) (*Act
 // note the step's path needs, and reports whether it appended one.
 func (f *prepareFixture) ensureNote(step string) bool {
 	f.t.Helper()
-	host := &modelsteptest.RecordingStepHost{Reply: func(req ModelStepRequest) ModelStepResult { return modelsteptest.StepResult(req, "Done.") }}
+	host := &modelsteptest.RecordingStepHost{Reply: func(req models.ModelStepRequest) models.ModelStepResult {
+		return modelsteptest.StepResult(req, "Done.")
+	}}
 	producer, err := modelstep.NewModelStepProducer(host, f.preparer, fixtureNoteSessions{fixtureNoteAppender{f.render}})
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	before := len(f.capabilityNotes())
 	path := f.render.Path()
-	in := agentrun.StepInput{Run: f.run, Step: &AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path, Binding: f.binding, Mode: agentrun.StepModeNormal}
+	in := agentrun.StepInput{Run: f.run, Step: &models.AgentTurn{ID: step, RunID: f.run.ID}, Session: path.Session, Path: path, Binding: f.binding, Mode: agentrun.StepModeNormal}
 	if _, err := producer.Produce(context.Background(), in); err != nil {
 		f.t.Fatal(err)
 	}
 	return len(f.capabilityNotes()) > before
 }
 
-func (f *prepareFixture) capabilityNotes() []*SessionEntry {
-	var notes []*SessionEntry
+func (f *prepareFixture) capabilityNotes() []*models.SessionEntry {
+	var notes []*models.SessionEntry
 	for _, entry := range f.render.Entries {
-		if entry.Note != nil && entry.Note.Kind == NoteCapabilities {
+		if entry.Note != nil && entry.Note.Kind == models.NoteCapabilities {
 			notes = append(notes, entry)
 		}
 	}
@@ -92,7 +95,7 @@ func TestPrepareStepPrefixStableAcrossLoad(t *testing.T) {
 		t.Fatalf("harness and core changed after a load:\n%v\n%v", toolNames(before.Tools), toolNames(after.Tools))
 	}
 	added := after.Tools[len(before.Tools):]
-	if len(added) != 1 || added[0].Name != "action_gmail_read" || added[0].Group != ModelStepToolLoaded || added[0].Surface != load.ID {
+	if len(added) != 1 || added[0].Name != "action_gmail_read" || added[0].Group != models.ModelStepToolLoaded || added[0].Surface != load.ID {
 		t.Fatalf("surfaced = %+v", added)
 	}
 	if mustJSON(t, after.Entries[:len(before.Entries)]) != mustJSON(t, before.Entries) {
@@ -134,10 +137,10 @@ func testSkillConnectStable(t *testing.T, small bool) {
 	first := f.prepare("step-2")
 
 	// Between Runs the user connects Slack: two actions and a prompt.
-	f.run = &AgentRun{ID: "run-2", Scope: loopSessionScope, AssignedAgentID: "agent-1"}
+	f.run = &models.AgentRun{ID: "run-2", Scope: loopSessionScope, AssignedAgentID: "agent-1"}
 	f.render.User("run-2", "post the launch notes to slack")
 	f.preparer.config.SkillPrompts = append(f.preparer.config.SkillPrompts,
-		HostedSkillPrompt{SkillID: "skill-slack", Version: "1", Reference: "skill-slack@1", Name: "Slack", Instructions: "Slack rules."})
+		models.HostedSkillPrompt{SkillID: "skill-slack", Version: "1", Reference: "skill-slack@1", Name: "Slack", Instructions: "Slack rules."})
 	for _, name := range []string{"slack.post", "slack.read"} {
 		f.binding.ModelActions = append(f.binding.ModelActions, capability.ModelAction{
 			Name: name, Description: "Slack " + name, SkillID: "skill-slack", Version: "1", Action: name,
@@ -164,7 +167,7 @@ func testSkillConnectStable(t *testing.T, small bool) {
 		!strings.Contains(delta, "- prompt:skill-slack@1 — Slack: ") || strings.Contains(delta, "action:notion.search") {
 		t.Fatalf("delta note = %q", delta)
 	}
-	if last := second.Entries[len(second.Entries)-1]; last.Note == nil || last.Note.Kind != string(NoteCapabilities) {
+	if last := second.Entries[len(second.Entries)-1]; last.Note == nil || last.Note.Kind != string(models.NoteCapabilities) {
 		t.Fatalf("the delta is not the last entry: %+v", last)
 	}
 	// Nothing changed since: no third note.
@@ -251,12 +254,12 @@ func TestSurfacedToolDefinitionFrozen(t *testing.T) {
 
 	// The executor answers a call of the revoked tool with is_error.
 	x := newToolExecFixture(t, agentrun.ControlAuthority{})
-	step := x.step("step-1", AgentTurnStatusRunning, toolCall("call-revoked", "action_gmail_send", `{}`))
+	step := x.step("step-1", models.AgentTurnStatusRunning, toolCall("call-revoked", "action_gmail_send", `{}`))
 	if _, err := x.binding.Tools.ExecuteStepTools(x.ctx, x.input(step)); err != nil {
 		t.Fatal(err)
 	}
 	stored := x.entry(step.entries[0])
-	if stored.State != ToolEntryError || !stored.Tool.Result.IsError || resultValue(t, stored)["error"] != loopToolNotAvailableCode {
+	if stored.State != models.ToolEntryError || !stored.Tool.Result.IsError || resultValue(t, stored)["error"] != loopToolNotAvailableCode {
 		t.Fatalf("revoked call = %s %v", stored.State, stored.Tool.Result)
 	}
 }
@@ -286,12 +289,12 @@ func TestLoadDescriptionModeIndependent(t *testing.T) {
 func TestLoadFreezesSurfacedToolsOnTheEntry(t *testing.T) {
 	x := newToolExecFixture(t, agentrun.ControlAuthority{})
 	x.binding.ModelActions = modelsteptest.CapabilityCatalogFixture().Actions
-	step := x.step("step-1", AgentTurnStatusRunning, toolCall("call-load", modelstep.LoadCapabilitiesTool, `{"ids":["action:notion.op2"]}`))
+	step := x.step("step-1", models.AgentTurnStatusRunning, toolCall("call-load", modelstep.LoadCapabilitiesTool, `{"ids":["action:notion.op2"]}`))
 	if _, err := x.binding.Tools.ExecuteStepTools(x.ctx, x.input(step)); err != nil {
 		t.Fatal(err)
 	}
 	stored := x.entry(step.entries[0])
-	if stored.State != ToolEntryCompleted || len(stored.Tool.SurfacedTools) != 8 {
+	if stored.State != models.ToolEntryCompleted || len(stored.Tool.SurfacedTools) != 8 {
 		t.Fatalf("load entry = %s %+v", stored.State, stored.Tool.SurfacedTools)
 	}
 	first := stored.Tool.SurfacedTools[0]
@@ -303,37 +306,39 @@ func TestLoadFreezesSurfacedToolsOnTheEntry(t *testing.T) {
 }
 
 func TestValidateSurfaces(t *testing.T) {
-	base := func() ModelStepRequest {
+	base := func() models.ModelStepRequest {
 		req := modelsteptest.ValidModelStepRequest()
 		req.Tools = req.Tools[:2]
 		assistant := modelsteptest.AssistantEntry("c1")
 		assistant.ToolCalls[0].Name = modelstep.LoadCapabilitiesTool
-		req.Entries = []SessionEntryView{
-			{ID: "u1", Sequence: 1, Type: SessionEntryUser, User: &UserEntryView{Content: []ContentPart{{Type: ContentPartText, Text: "hi"}}}},
-			{ID: "a1", Sequence: 2, Type: SessionEntryAssistant, Assistant: assistant},
-			{ID: "t1", Sequence: 3, Type: SessionEntryTool, Surfaces: []string{"x_one", "x_two"}, Tool: &ToolEntryView{
-				CallID: "c1", Name: modelstep.LoadCapabilitiesTool, Arguments: json.RawMessage(`{}`), State: ToolEntryCompleted,
-				Result: ToolResultView{Content: []ContentPart{{Type: ContentPartText, Text: "loaded"}}}}},
+		req.Entries = []models.SessionEntryView{
+			{ID: "u1", Sequence: 1, Type: models.SessionEntryUser, User: &models.UserEntryView{Content: []models.ContentPart{{Type: models.ContentPartText, Text: "hi"}}}},
+			{ID: "a1", Sequence: 2, Type: models.SessionEntryAssistant, Assistant: assistant},
+			{ID: "t1", Sequence: 3, Type: models.SessionEntryTool, Surfaces: []string{"x_one", "x_two"}, Tool: &models.ToolEntryView{
+				CallID: "c1", Name: modelstep.LoadCapabilitiesTool, Arguments: json.RawMessage(`{}`), State: models.ToolEntryCompleted,
+				Result: models.ToolResultView{Content: []models.ContentPart{{Type: models.ContentPartText, Text: "loaded"}}}}},
 		}
 		object := map[string]interface{}{"type": "object"}
 		req.Tools = append(req.Tools,
-			ModelStepTool{Name: "x_carried", InputSchema: object, Group: ModelStepToolLoaded},
-			ModelStepTool{Name: "x_one", InputSchema: object, Group: ModelStepToolLoaded, Surface: "t1"},
-			ModelStepTool{Name: "x_two", InputSchema: object, Group: ModelStepToolLoaded, Surface: "t1"})
+			models.ModelStepTool{Name: "x_carried", InputSchema: object, Group: models.ModelStepToolLoaded},
+			models.ModelStepTool{Name: "x_one", InputSchema: object, Group: models.ModelStepToolLoaded, Surface: "t1"},
+			models.ModelStepTool{Name: "x_two", InputSchema: object, Group: models.ModelStepToolLoaded, Surface: "t1"})
 		return req
 	}
 	if err := base().Validate(); err != nil {
 		t.Fatalf("valid request: %v", err)
 	}
-	cases := map[string]func(*ModelStepRequest){
-		"orphan surface":         func(r *ModelStepRequest) { r.Tools[3].Surface = "missing" },
-		"unlisted surfaced tool": func(r *ModelStepRequest) { r.Entries[2].Surfaces = []string{"x_one"} },
-		"listed but not a tool":  func(r *ModelStepRequest) { r.Entries[2].Surfaces = append(r.Entries[2].Surfaces, "x_ghost") },
-		"listed twice":           func(r *ModelStepRequest) { r.Entries[2].Surfaces = []string{"x_one", "x_two", "x_one"} },
-		"out of order":           func(r *ModelStepRequest) { r.Entries[2].Surfaces = []string{"x_two", "x_one"} },
-		"core with surface":      func(r *ModelStepRequest) { r.Tools[1].Surface = "t1" },
-		"carried after surfaced": func(r *ModelStepRequest) { r.Tools[2], r.Tools[3], r.Tools[4] = r.Tools[3], r.Tools[4], r.Tools[2] },
-		"surfaces on a user":     func(r *ModelStepRequest) { r.Entries[0].Surfaces = []string{"x_one"} },
+	cases := map[string]func(*models.ModelStepRequest){
+		"orphan surface":         func(r *models.ModelStepRequest) { r.Tools[3].Surface = "missing" },
+		"unlisted surfaced tool": func(r *models.ModelStepRequest) { r.Entries[2].Surfaces = []string{"x_one"} },
+		"listed but not a tool":  func(r *models.ModelStepRequest) { r.Entries[2].Surfaces = append(r.Entries[2].Surfaces, "x_ghost") },
+		"listed twice":           func(r *models.ModelStepRequest) { r.Entries[2].Surfaces = []string{"x_one", "x_two", "x_one"} },
+		"out of order":           func(r *models.ModelStepRequest) { r.Entries[2].Surfaces = []string{"x_two", "x_one"} },
+		"core with surface":      func(r *models.ModelStepRequest) { r.Tools[1].Surface = "t1" },
+		"carried after surfaced": func(r *models.ModelStepRequest) {
+			r.Tools[2], r.Tools[3], r.Tools[4] = r.Tools[3], r.Tools[4], r.Tools[2]
+		},
+		"surfaces on a user": func(r *models.ModelStepRequest) { r.Entries[0].Surfaces = []string{"x_one"} },
 	}
 	for name, mutate := range cases {
 		req := base()

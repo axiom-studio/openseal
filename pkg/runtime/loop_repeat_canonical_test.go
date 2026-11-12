@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -89,7 +91,7 @@ func TestRepeatKeyIncludesIdentityAndExternalOperation(t *testing.T) {
 	}
 
 	withOperation := func(resource, operation string) string {
-		return key(RepeatSubject{Identity: identity, Arguments: decodeTestArguments(t, `{"id":"LIN-6815","limit":1}`), ExternalOperation: &ExternalOperationIdentity{Resource: resource, Operation: operation}})
+		return key(RepeatSubject{Identity: identity, Arguments: decodeTestArguments(t, `{"id":"LIN-6815","limit":1}`), ExternalOperation: &activity.ExternalOperationIdentity{Resource: resource, Operation: operation}})
 	}
 	sent := withOperation("https://Example.com/a?b=2&a=1#frag", "send")
 	if sent == base {
@@ -112,7 +114,7 @@ func TestRepeatKeyIncludesIdentityAndExternalOperation(t *testing.T) {
 	if _, err := repeatKey(RepeatSubject{Arguments: map[string]interface{}{}}); err == nil {
 		t.Fatal("empty identity must be rejected")
 	}
-	if _, err := repeatKey(RepeatSubject{Identity: identity, ExternalOperation: &ExternalOperationIdentity{Resource: "", Operation: "send"}}); err == nil {
+	if _, err := repeatKey(RepeatSubject{Identity: identity, ExternalOperation: &activity.ExternalOperationIdentity{Resource: "", Operation: "send"}}); err == nil {
 		t.Fatal("invalid external operation must be rejected")
 	}
 }
@@ -134,9 +136,9 @@ func TestRepeatEffectOf(t *testing.T) {
 		{"governed unknown side effect fails closed", LoopToolGoverned, "", false, repeatGovernedOperation("x", "y"), RepeatEffectWrite},
 		{"governed repeatable write", LoopToolGoverned, capability.SideEffectWrite, true, repeatGovernedOperation("live-browser", "click"), RepeatEffectStateful},
 		{"governed repeatable read stays read", LoopToolGoverned, capability.SideEffectRead, true, repeatGovernedOperation("live-browser", "snapshot"), RepeatEffectRead},
-		{"card credential", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(SkillManagementSkillID, agentrun.SkillActionRequestCredential), RepeatEffectControl},
-		{"card setup", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(SkillManagementSkillID, agentrun.SkillActionRequestSetup), RepeatEffectControl},
-		{"card connection", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(SkillManagementSkillID, agentrun.SkillActionRequestConnection), RepeatEffectControl},
+		{"card credential", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(models.SkillManagementSkillID, agentrun.SkillActionRequestCredential), RepeatEffectControl},
+		{"card setup", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(models.SkillManagementSkillID, agentrun.SkillActionRequestSetup), RepeatEffectControl},
+		{"card connection", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation(models.SkillManagementSkillID, agentrun.SkillActionRequestConnection), RepeatEffectControl},
 		{"same action name on another skill is not a card", LoopToolGoverned, capability.SideEffectWrite, false, repeatGovernedOperation("other", agentrun.SkillActionRequestCredential), RepeatEffectWrite},
 
 		{"host list_directory", LoopToolHost, capability.SideEffectRead, false, workspace.OperationListDirectory, RepeatEffectRead},
@@ -183,23 +185,23 @@ func TestRepeatEffectOf(t *testing.T) {
 }
 
 func TestToolResultDigest(t *testing.T) {
-	result := func(status ToolResultStatus, parts ...ContentPart) *ToolResult {
-		return &ToolResult{Status: status, IsError: status != ToolResultSucceeded, Content: parts}
+	result := func(status models.ToolResultStatus, parts ...models.ContentPart) *models.ToolResult {
+		return &models.ToolResult{Status: status, IsError: status != models.ToolResultSucceeded, Content: parts}
 	}
-	base := modelstep.ToolResultDigest(result(ToolResultSucceeded, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"b":1,"a":2.0}`)}))
+	base := modelstep.ToolResultDigest(result(models.ToolResultSucceeded, models.ContentPart{Type: models.ContentPartJSON, Value: json.RawMessage(`{"b":1,"a":2.0}`)}))
 	if len(base) != 64 {
 		t.Fatalf("digest %q", base)
 	}
-	if modelstep.ToolResultDigest(result(ToolResultSucceeded, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"a":2,"b":1}`)})) != base {
+	if modelstep.ToolResultDigest(result(models.ToolResultSucceeded, models.ContentPart{Type: models.ContentPartJSON, Value: json.RawMessage(`{"a":2,"b":1}`)})) != base {
 		t.Fatal("canonically equal content must give the same digest")
 	}
-	if modelstep.ToolResultDigest(result(ToolResultFailed, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"a":2,"b":1}`)})) == base {
+	if modelstep.ToolResultDigest(result(models.ToolResultFailed, models.ContentPart{Type: models.ContentPartJSON, Value: json.RawMessage(`{"a":2,"b":1}`)})) == base {
 		t.Fatal("status must be part of the digest")
 	}
-	if modelstep.ToolResultDigest(result(ToolResultSucceeded, ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"a":3,"b":1}`)})) == base {
+	if modelstep.ToolResultDigest(result(models.ToolResultSucceeded, models.ContentPart{Type: models.ContentPartJSON, Value: json.RawMessage(`{"a":3,"b":1}`)})) == base {
 		t.Fatal("content must be part of the digest")
 	}
-	if modelstep.ToolResultDigest(result(ToolResultSucceeded)) != modelstep.ToolResultDigest(&ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{}}) {
+	if modelstep.ToolResultDigest(result(models.ToolResultSucceeded)) != modelstep.ToolResultDigest(&models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{}}) {
 		t.Fatal("nil and empty content must digest alike")
 	}
 	if modelstep.ToolResultDigest(nil) != "" {

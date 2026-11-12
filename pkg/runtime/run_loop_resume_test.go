@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 // Crash-resume scenarios of the run loop (D14, SPEC §3.7, section 02 §8).
@@ -32,10 +33,10 @@ type resumeStore struct {
 	*loopCrashStore
 	mu           sync.Mutex
 	beforeRecord func()
-	afterFinish  func(turn *AgentTurn)
+	afterFinish  func(turn *models.AgentTurn)
 }
 
-func (s *resumeStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentTurn, expectedRevision int64, events []*ActivityEvent) error {
+func (s *resumeStore) RecordAgentTurnStepModel(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, events []*models.ActivityEvent) error {
 	s.mu.Lock()
 	hook := s.beforeRecord
 	s.mu.Unlock()
@@ -45,13 +46,13 @@ func (s *resumeStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentT
 	return s.loopCrashStore.RecordAgentTurnStepModel(ctx, turn, expectedRevision, events)
 }
 
-func (s *resumeStore) UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expectedRevision int64, workerID string) error {
+func (s *resumeStore) UpdateAgentTurn(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, workerID string) error {
 	err := s.loopCrashStore.UpdateAgentTurn(ctx, turn, expectedRevision, workerID)
 	s.mu.Lock()
 	hook := s.afterFinish
 	s.mu.Unlock()
-	if err == nil && hook != nil && terminalAgentTurnStatus(turn.Status) {
-		hook(cloneAgentTurn(turn))
+	if err == nil && hook != nil && models.IsTerminalAgentTurnStatus(turn.Status) {
+		hook(models.CloneAgentTurn(turn))
 	}
 	return err
 }
@@ -60,12 +61,12 @@ func (s *resumeStore) UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expe
 // call; before runs inside Produce (a scenario arms the crash there).
 type resumeProducer struct {
 	mu      sync.Mutex
-	replies []*AssistantEntry
+	replies []*models.AssistantEntry
 	steps   []string // step id of every call
 	before  func(call int)
 }
 
-func (p *resumeProducer) Kind() StepProducerKind { return StepProducerModel }
+func (p *resumeProducer) Kind() models.StepProducerKind { return models.StepProducerModel }
 
 func (p *resumeProducer) Produce(_ context.Context, in agentrun.StepInput) (agentrun.StepOutput, error) {
 	p.mu.Lock()
@@ -90,16 +91,16 @@ func (p *resumeProducer) calls() []string {
 	return append([]string(nil), p.steps...)
 }
 
-func resumeSay(text string) *AssistantEntry {
-	return &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: loopModelName, Text: text, StopReason: ModelStopEnd}
+func resumeSay(text string) *models.AssistantEntry {
+	return &models.AssistantEntry{Provider: models.ModelStepProviderAnthropic, Model: loopModelName, Text: text, StopReason: models.ModelStopEnd}
 }
 
-func resumeAct(narration string, calls ...ModelToolCall) *AssistantEntry {
-	return &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: loopModelName, Text: narration, ToolCalls: calls, StopReason: ModelStopToolCalls}
+func resumeAct(narration string, calls ...models.ModelToolCall) *models.AssistantEntry {
+	return &models.AssistantEntry{Provider: models.ModelStepProviderAnthropic, Model: loopModelName, Text: narration, ToolCalls: calls, StopReason: models.ModelStopToolCalls}
 }
 
-func resumeCall(id, name string, args string) ModelToolCall {
-	return ModelToolCall{ID: id, Name: name, Arguments: json.RawMessage(args)}
+func resumeCall(id, name string, args string) models.ModelToolCall {
+	return models.ModelToolCall{ID: id, Name: name, Arguments: json.RawMessage(args)}
 }
 
 // resumeTools is a LoopToolExecutor over the real session log: ordinary
@@ -117,29 +118,29 @@ type resumeTools struct {
 	beforeSettle  func() error
 }
 
-func (x *resumeTools) plan(_ *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, _ []agentrun.LoopToolCall) ([]*SessionEntry, error) {
-	var entries []*SessionEntry
+func (x *resumeTools) plan(_ *agentrun.TurnRunnerBinding, session *models.AgentSession, step *models.AgentTurn, assistant *models.SessionEntry, _ []agentrun.LoopToolCall) ([]*models.SessionEntry, error) {
+	var entries []*models.SessionEntry
 	for _, call := range assistant.Assistant.ToolCalls {
-		entries = append(entries, &SessionEntry{
-			ID: SessionEntryID(session.ID, ToolEntryKey(step.ID, call.ID)), Scope: session.Scope, SessionID: session.ID,
-			RunID: assistant.RunID, StepID: step.ID, Step: step.Sequence, Type: SessionEntryTool, State: ToolEntryPending,
-			ToolCallID: call.ID, Tool: &ToolEntry{Name: call.Name, Arguments: call.Arguments, SideEffect: ToolSideEffectRead},
+		entries = append(entries, &models.SessionEntry{
+			ID: models.SessionEntryID(session.ID, models.ToolEntryKey(step.ID, call.ID)), Scope: session.Scope, SessionID: session.ID,
+			RunID: assistant.RunID, StepID: step.ID, Step: step.Sequence, Type: models.SessionEntryTool, State: models.ToolEntryPending,
+			ToolCallID: call.ID, Tool: &models.ToolEntry{Name: call.Name, Arguments: call.Arguments, SideEffect: models.ToolSideEffectRead},
 		})
 	}
 	return entries, nil
 }
 
-func (x *resumeTools) complete(ctx context.Context, in agentrun.StepToolsInput, entry *SessionEntry) error {
+func (x *resumeTools) complete(ctx context.Context, in agentrun.StepToolsInput, entry *models.SessionEntry) error {
 	now := x.h.clock.Now()
-	_, err := x.h.sessions().TransitionToolEntry(ctx, ToolEntryTransitionRequest{
-		Scope: in.Run.Scope, EntryID: entry.ID, RunID: in.Run.ID, Lease: AgentRunLeaseGuard{WorkerID: in.WorkerID, Now: now},
-		From: entry.State, ExpectedRevision: entry.Revision, To: ToolEntryCompleted, Now: now,
-		Result: &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: "ok: " + entry.Tool.Name}}},
+	_, err := x.h.sessions().TransitionToolEntry(ctx, models.ToolEntryTransitionRequest{
+		Scope: in.Run.Scope, EntryID: entry.ID, RunID: in.Run.ID, Lease: models.AgentRunLeaseGuard{WorkerID: in.WorkerID, Now: now},
+		From: entry.State, ExpectedRevision: entry.Revision, To: models.ToolEntryCompleted, Now: now,
+		Result: &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartText, Text: "ok: " + entry.Tool.Name}}},
 	})
 	return err
 }
 
-func (x *resumeTools) finalAnswer(entry *SessionEntry) *agentrun.FinalAnswer {
+func (x *resumeTools) finalAnswer(entry *models.SessionEntry) *agentrun.FinalAnswer {
 	var args struct {
 		Answer string `json:"answer"`
 	}
@@ -152,12 +153,12 @@ func (x *resumeTools) finalAnswer(entry *SessionEntry) *agentrun.FinalAnswer {
 
 // run settles entries in order: the final tool ends the walk (inline: as a
 // settle-phase call; resumed: with its answer).
-func (x *resumeTools) run(ctx context.Context, in agentrun.StepToolsInput, entries []*SessionEntry, inline bool) (agentrun.StepToolsOutcome, error) {
+func (x *resumeTools) run(ctx context.Context, in agentrun.StepToolsInput, entries []*models.SessionEntry, inline bool) (agentrun.StepToolsOutcome, error) {
 	for _, entry := range entries {
 		if entry == nil || entry.Tool == nil || !entry.State.Open() {
 			continue
 		}
-		if control.IsFinalTool(ControlToolName(entry.Tool.Name)) {
+		if control.IsFinalTool(models.ControlToolName(entry.Tool.Name)) {
 			if inline {
 				return agentrun.StepToolsOutcome{SettlePending: true}, nil
 			}
@@ -193,8 +194,8 @@ func (x *resumeTools) SettleStep(ctx context.Context, in agentrun.StepToolsInput
 			return agentrun.StepToolsOutcome{}, err
 		}
 	}
-	entries, err := x.h.sessions().ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: in.Run.Scope, StepID: in.Step.ID, Types: []SessionEntryType{SessionEntryTool},
+	entries, err := x.h.sessions().ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: in.Run.Scope, StepID: in.Step.ID, Types: []models.SessionEntryType{models.SessionEntryTool},
 	})
 	if err != nil {
 		return agentrun.StepToolsOutcome{}, err
@@ -264,10 +265,10 @@ func (f *resumeFinal) counts() (calls, posts int) {
 
 type resumeHarness struct {
 	t        *testing.T
-	raw      KernelStore
+	raw      models.KernelStore
 	store    *resumeStore
 	clock    *loopClock
-	scope    Scope
+	scope    models.Scope
 	runID    string
 	loop     *RunLoop
 	producer *resumeProducer
@@ -275,22 +276,22 @@ type resumeHarness struct {
 	final    *resumeFinal
 }
 
-func (h *resumeHarness) sessions() AgentSessionStore { return h.store }
+func (h *resumeHarness) sessions() models.AgentSessionStore { return h.store }
 
-func newResumeHarness(t *testing.T, raw KernelStore, budget *BudgetPolicy, stepLease time.Duration, replies ...*AssistantEntry) *resumeHarness {
+func newResumeHarness(t *testing.T, raw models.KernelStore, budget *models.BudgetPolicy, stepLease time.Duration, replies ...*models.AssistantEntry) *resumeHarness {
 	t.Helper()
 	ctx := context.Background()
 	h := &resumeHarness{
 		t: t, raw: raw, store: &resumeStore{loopCrashStore: newLoopCrashStore(t, raw)},
 		clock:    newLoopClock(time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)),
-		scope:    Scope{Kind: "tenant", ID: "resume-" + strings.ReplaceAll(t.Name(), "/", "-")},
+		scope:    models.Scope{Kind: "tenant", ID: "resume-" + strings.ReplaceAll(t.Name(), "/", "-")},
 		producer: &resumeProducer{replies: replies}, final: &resumeFinal{},
 	}
 	h.tools = &resumeTools{h: h}
-	portfolio := NewPortfolioService(raw, models.WithClock(h.clock.Now))
-	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: h.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a",
-		Goal: "resume work", Source: RunSourceObjective, Budget: budget,
+	portfolio := portfolio.NewPortfolioService(raw, models.WithClock(h.clock.Now))
+	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: h.scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a",
+		Goal: "resume work", Source: models.RunSourceObjective, Budget: budget,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -316,17 +317,17 @@ func newResumeHarness(t *testing.T, raw KernelStore, budget *BudgetPolicy, stepL
 func (h *resumeHarness) drive(worker string) RunLoopExit {
 	h.t.Helper()
 	ctx := context.Background()
-	claimed, err := h.raw.ClaimNextAgentRun(ctx, AgentRunClaim{
+	claimed, err := h.raw.ClaimNextAgentRun(ctx, models.AgentRunClaim{
 		Scope: h.scope, WorkerID: worker, Now: h.clock.Now(), LeaseDuration: resumeLease, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != h.runID {
 		h.t.Fatalf("claim by %s = %#v, %v", worker, claimed, err)
 	}
-	sessions := h.raw.(AgentSessionStore)
+	sessions := h.raw.(models.AgentSessionStore)
 	if claimed.SessionID == "" {
-		if _, err := sessions.CreateRunAgentSession(ctx, CreateRunAgentSessionRequest{
+		if _, err := sessions.CreateRunAgentSession(ctx, models.CreateRunAgentSessionRequest{
 			Scope: h.scope, OwnerRunID: claimed.ID, AgentID: "agent-a",
-			Lease: AgentRunLeaseGuard{WorkerID: worker, Now: h.clock.Now()}, Now: h.clock.Now(),
+			Lease: models.AgentRunLeaseGuard{WorkerID: worker, Now: h.clock.Now()}, Now: h.clock.Now(),
 		}); err != nil {
 			h.t.Fatal(err)
 		}
@@ -356,7 +357,7 @@ func (h *resumeHarness) crashed(exit RunLoopExit) {
 	h.store.mu.Unlock()
 }
 
-func (h *resumeHarness) runNow() *AgentRun {
+func (h *resumeHarness) runNow() *models.AgentRun {
 	h.t.Helper()
 	run, err := h.raw.GetAgentRun(context.Background(), h.scope, h.runID)
 	if err != nil {
@@ -365,18 +366,18 @@ func (h *resumeHarness) runNow() *AgentRun {
 	return run
 }
 
-func (h *resumeHarness) rows() []*AgentTurn {
+func (h *resumeHarness) rows() []*models.AgentTurn {
 	h.t.Helper()
-	rows, err := h.raw.ListAgentTurns(context.Background(), AgentTurnFilter{Scope: h.scope, RunID: h.runID})
+	rows, err := h.raw.ListAgentTurns(context.Background(), models.AgentTurnFilter{Scope: h.scope, RunID: h.runID})
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	return rows
 }
 
-func (h *resumeHarness) entries(types ...SessionEntryType) []*SessionEntry {
+func (h *resumeHarness) entries(types ...models.SessionEntryType) []*models.SessionEntry {
 	h.t.Helper()
-	entries, err := h.raw.(AgentSessionStore).ListAgentSessionEntries(context.Background(), SessionEntryFilter{
+	entries, err := h.raw.(models.AgentSessionStore).ListAgentSessionEntries(context.Background(), models.SessionEntryFilter{
 		Scope: h.scope, RunID: h.runID, Types: types,
 	})
 	if err != nil {
@@ -385,13 +386,13 @@ func (h *resumeHarness) entries(types ...SessionEntryType) []*SessionEntry {
 	return entries
 }
 
-func (h *resumeHarness) expectCompleted(exit RunLoopExit, answer string) *AgentRun {
+func (h *resumeHarness) expectCompleted(exit RunLoopExit, answer string) *models.AgentRun {
 	h.t.Helper()
 	if exit.Err != nil || exit.Reason != RunLoopExitFinal {
 		h.t.Fatalf("exit = %s, %v; want final", exit.Reason, exit.Err)
 	}
 	run := h.runNow()
-	if run.Status != AgentRunStatusCompleted || run.Output["summary"] != answer {
+	if run.Status != models.AgentRunStatusCompleted || run.Output["summary"] != answer {
 		h.t.Fatalf("run = %s output %#v; want completed with %q", run.Status, run.Output, answer)
 	}
 	if calls, posts := h.final.counts(); posts != 1 || calls < 1 {
@@ -401,7 +402,7 @@ func (h *resumeHarness) expectCompleted(exit RunLoopExit, answer string) *AgentR
 }
 
 func TestRunLoopResumeRunningStepWithoutAssistant(t *testing.T) {
-	eachLoopStore(t, "resume-no-assistant", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-no-assistant", func(t *testing.T, store models.KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease, resumeSay("first try"), resumeSay("done"))
 		h.producer.before = func(call int) {
 			if call == 0 {
@@ -409,7 +410,7 @@ func TestRunLoopResumeRunningStepWithoutAssistant(t *testing.T) {
 			}
 		}
 		h.crashed(h.drive(resumeWorkerA))
-		if got := h.entries(SessionEntryAssistant); len(got) != 0 {
+		if got := h.entries(models.SessionEntryAssistant); len(got) != 0 {
 			t.Fatalf("assistant entries after the crash = %d; want none", len(got))
 		}
 		h.clock.Advance(2 * resumeLease)
@@ -419,15 +420,15 @@ func TestRunLoopResumeRunningStepWithoutAssistant(t *testing.T) {
 			t.Fatalf("model calls = %v; want the same step called twice", calls)
 		}
 		rows := h.rows()
-		if len(rows) != 1 || rows[0].ID != calls[0] || rows[0].Status != AgentTurnStatusCompleted || rows[0].LeaseOwner != "" && rows[0].LeaseOwner != resumeWorkerB {
+		if len(rows) != 1 || rows[0].ID != calls[0] || rows[0].Status != models.AgentTurnStatusCompleted || rows[0].LeaseOwner != "" && rows[0].LeaseOwner != resumeWorkerB {
 			t.Fatalf("rows = %#v; want the one step row completed by the second worker", rows)
 		}
 	})
 }
 
 func TestRunLoopRedoModelCallReusesStepRow(t *testing.T) {
-	eachLoopStore(t, "resume-redo", func(t *testing.T, store KernelStore) {
-		h := newResumeHarness(t, store, &BudgetPolicy{MaxTurns: 5}, resumeLease, resumeSay("first try"), resumeSay("done"))
+	eachLoopStore(t, "resume-redo", func(t *testing.T, store models.KernelStore) {
+		h := newResumeHarness(t, store, &models.BudgetPolicy{MaxTurns: 5}, resumeLease, resumeSay("first try"), resumeSay("done"))
 		h.producer.before = func(call int) {
 			if call == 0 {
 				h.store.arm()
@@ -455,15 +456,15 @@ func TestRunLoopRedoModelCallReusesStepRow(t *testing.T) {
 }
 
 func TestRunLoopResumeAfterAssistantBeforeRecord(t *testing.T) {
-	eachLoopStore(t, "resume-before-record", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-before-record", func(t *testing.T, store models.KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease, resumeSay("done"))
 		h.store.beforeRecord = func() { h.store.arm() }
 		h.crashed(h.drive(resumeWorkerA))
-		assistants := h.entries(SessionEntryAssistant)
+		assistants := h.entries(models.SessionEntryAssistant)
 		if len(assistants) != 1 {
 			t.Fatalf("assistant entries after the crash = %d; want the appended one", len(assistants))
 		}
-		if rows := h.rows(); len(rows) != 1 || rows[0].AssistantEntryID != "" || rows[0].Status != AgentTurnStatusRunning {
+		if rows := h.rows(); len(rows) != 1 || rows[0].AssistantEntryID != "" || rows[0].Status != models.AgentTurnStatusRunning {
 			t.Fatalf("row after the crash = %#v; want running with no recorded model output", rows)
 		}
 		h.clock.Advance(2 * resumeLease)
@@ -472,14 +473,14 @@ func TestRunLoopResumeAfterAssistantBeforeRecord(t *testing.T) {
 			t.Fatalf("model calls = %d; want no second call", len(calls))
 		}
 		rows := h.rows()
-		if len(rows) != 1 || rows[0].AssistantEntryID != assistants[0].ID || !rows[0].Final || rows[0].StopReason != string(ModelStopEnd) {
+		if len(rows) != 1 || rows[0].AssistantEntryID != assistants[0].ID || !rows[0].Final || rows[0].StopReason != string(models.ModelStopEnd) {
 			t.Fatalf("row = %#v; want RecordStepModel backfilled from the entry", rows[0])
 		}
 	})
 }
 
 func TestRunLoopResumeRunningToolsDelegatesToExecutor(t *testing.T) {
-	eachLoopStore(t, "resume-tools", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-tools", func(t *testing.T, store models.KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease,
 			resumeAct("Looking it up", resumeCall("c1", "lookup", `{"q":"x"}`)), resumeSay("done"))
 		h.tools.beforeExecute = func() error {
@@ -488,8 +489,8 @@ func TestRunLoopResumeRunningToolsDelegatesToExecutor(t *testing.T) {
 		}
 		h.crashed(h.drive(resumeWorkerA))
 		h.tools.beforeExecute = nil
-		tools := h.entries(SessionEntryTool)
-		if len(tools) != 1 || tools[0].State != ToolEntryPending {
+		tools := h.entries(models.SessionEntryTool)
+		if len(tools) != 1 || tools[0].State != models.ToolEntryPending {
 			t.Fatalf("tool entries after the crash = %#v; want one pending", tools)
 		}
 		h.clock.Advance(2 * resumeLease)
@@ -506,14 +507,14 @@ func TestRunLoopResumeRunningToolsDelegatesToExecutor(t *testing.T) {
 		if len(calls) != 2 || len(rows) != 2 || calls[0] != rows[0].ID || calls[1] != rows[1].ID {
 			t.Fatalf("model calls = %v, rows = %d; want step 1 resumed without a model call, then step 2", calls, len(rows))
 		}
-		if tools = h.entries(SessionEntryTool); tools[0].State != ToolEntryCompleted {
+		if tools = h.entries(models.SessionEntryTool); tools[0].State != models.ToolEntryCompleted {
 			t.Fatalf("tool entry = %s; want completed", tools[0].State)
 		}
 	})
 }
 
 func TestRunLoopResumeStaleStepLeaseRequeues(t *testing.T) {
-	eachLoopStore(t, "resume-stale-lease", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-stale-lease", func(t *testing.T, store models.KernelStore) {
 		stepLease := 10 * time.Minute
 		h := newResumeHarness(t, store, nil, stepLease, resumeSay("first try"), resumeSay("done"))
 		h.producer.before = func(call int) {
@@ -533,7 +534,7 @@ func TestRunLoopResumeStaleStepLeaseRequeues(t *testing.T) {
 			t.Fatalf("exit = %s, %v; want requeued", exit.Reason, exit.Err)
 		}
 		run := h.runNow()
-		if run.Status != AgentRunStatusQueued || !run.AvailableAt.Equal(expires) {
+		if run.Status != models.AgentRunStatusQueued || !run.AvailableAt.Equal(expires) {
 			t.Fatalf("run = %s available %v; want queued at the step lease expiry %v", run.Status, run.AvailableAt, expires)
 		}
 		if calls := h.producer.calls(); len(calls) != 1 {
@@ -549,17 +550,17 @@ func TestRunLoopResumeStaleStepLeaseRequeues(t *testing.T) {
 }
 
 func TestRunLoopResumeAppliesFinishedUnappliedStep(t *testing.T) {
-	eachLoopStore(t, "resume-unapplied", func(t *testing.T, store KernelStore) {
-		h := newResumeHarness(t, store, &BudgetPolicy{MaxTurns: 5}, resumeLease,
+	eachLoopStore(t, "resume-unapplied", func(t *testing.T, store models.KernelStore) {
+		h := newResumeHarness(t, store, &models.BudgetPolicy{MaxTurns: 5}, resumeLease,
 			resumeAct("Looking it up", resumeCall("c1", "lookup", `{}`)), resumeSay("done"))
-		h.store.afterFinish = func(turn *AgentTurn) {
+		h.store.afterFinish = func(turn *models.AgentTurn) {
 			if turn.Sequence == 1 {
 				h.store.arm() // dies between FinishTurn and applyStep
 			}
 		}
 		h.crashed(h.drive(resumeWorkerA))
 		crashedRun := h.runNow()
-		if rows := h.rows(); len(rows) != 1 || rows[0].Status != AgentTurnStatusCompleted || crashedRun.LastAppliedTurn != 0 {
+		if rows := h.rows(); len(rows) != 1 || rows[0].Status != models.AgentTurnStatusCompleted || crashedRun.LastAppliedTurn != 0 {
 			t.Fatalf("after the crash: rows %#v, LastAppliedTurn %d; want one finished unapplied row", rows, crashedRun.LastAppliedTurn)
 		}
 		h.clock.Advance(2 * resumeLease)
@@ -570,7 +571,7 @@ func TestRunLoopResumeAppliesFinishedUnappliedStep(t *testing.T) {
 		if _, _, resume := h.tools.counts(); resume != 0 {
 			t.Fatalf("resume calls = %d; want none (the step's tools had finished)", resume)
 		}
-		events, err := store.ListActivity(context.Background(), ActivityFilter{Scope: h.scope, RunID: h.runID})
+		events, err := store.ListActivity(context.Background(), models.ActivityFilter{Scope: h.scope, RunID: h.runID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -587,9 +588,9 @@ func TestRunLoopResumeAppliesFinishedUnappliedStep(t *testing.T) {
 }
 
 func TestRunLoopResumeFinalToolStepDeliversOnce(t *testing.T) {
-	finalCall := resumeCall("c1", string(ControlToolFinalAnswer), `{"answer":"all done"}`)
+	finalCall := resumeCall("c1", string(models.ControlToolFinalAnswer), `{"answer":"all done"}`)
 	t.Run("crash before settle", func(t *testing.T) {
-		eachLoopStore(t, "resume-final-settle", func(t *testing.T, store KernelStore) {
+		eachLoopStore(t, "resume-final-settle", func(t *testing.T, store models.KernelStore) {
 			h := newResumeHarness(t, store, nil, resumeLease, resumeAct("", finalCall))
 			h.tools.beforeSettle = func() error {
 				h.store.arm()
@@ -612,7 +613,7 @@ func TestRunLoopResumeFinalToolStepDeliversOnce(t *testing.T) {
 		})
 	})
 	t.Run("crash after the reply was posted", func(t *testing.T) {
-		eachLoopStore(t, "resume-final-posted", func(t *testing.T, store KernelStore) {
+		eachLoopStore(t, "resume-final-posted", func(t *testing.T, store models.KernelStore) {
 			h := newResumeHarness(t, store, nil, resumeLease, resumeAct("", finalCall))
 			h.final.afterPost = func() { h.store.arm() }
 			h.crashed(h.drive(resumeWorkerA))
@@ -637,11 +638,11 @@ func TestRunLoopResumeFinalToolStepDeliversOnce(t *testing.T) {
 // its FinishTurn and its terminal transition: the next claim completes it
 // through the final chain (a replayed delivery), not a new model call.
 func TestRunLoopResumePlainFinalAfterFinish(t *testing.T) {
-	eachLoopStore(t, "resume-plain-final", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-plain-final", func(t *testing.T, store models.KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease, resumeSay("done"))
-		h.store.afterFinish = func(*AgentTurn) { h.store.arm() }
+		h.store.afterFinish = func(*models.AgentTurn) { h.store.arm() }
 		h.crashed(h.drive(resumeWorkerA))
-		if rows := h.rows(); len(rows) != 1 || rows[0].Status != AgentTurnStatusCompleted || h.runNow().LastAppliedTurn != 0 {
+		if rows := h.rows(); len(rows) != 1 || rows[0].Status != models.AgentTurnStatusCompleted || h.runNow().LastAppliedTurn != 0 {
 			t.Fatalf("after the crash: rows %#v; want the final row finished, unapplied", rows)
 		}
 		h.clock.Advance(2 * resumeLease)
@@ -660,8 +661,8 @@ func TestRunLoopResumePlainFinalAfterFinish(t *testing.T) {
 
 func assertFinalEntryDelivered(t *testing.T, h *resumeHarness) {
 	t.Helper()
-	tools := h.entries(SessionEntryTool)
-	if len(tools) != 1 || tools[0].State != ToolEntryCompleted || tools[0].Tool.Result == nil ||
+	tools := h.entries(models.SessionEntryTool)
+	if len(tools) != 1 || tools[0].State != models.ToolEntryCompleted || tools[0].Tool.Result == nil ||
 		len(tools[0].Tool.Result.Content) != 1 || !strings.Contains(string(tools[0].Tool.Result.Content[0].Value), finalDeliveredStatus) {
 		t.Fatalf("final entry = %#v; want completed delivered", tools)
 	}

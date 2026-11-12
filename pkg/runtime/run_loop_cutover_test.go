@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
@@ -18,9 +20,9 @@ import (
 )
 
 type cutoverTestStore interface {
-	RunLoopCutoverStore
-	ConversationStore
-	AgentRunScheduleStore
+	models.RunLoopCutoverStore
+	models.ConversationStore
+	models.AgentRunScheduleStore
 }
 
 func cutoverStores() []struct {
@@ -52,18 +54,18 @@ func cutoverStores() []struct {
 	return stores
 }
 
-var cutoverScope = Scope{Kind: "tenant", ID: "cutover"}
+var cutoverScope = models.Scope{Kind: "tenant", ID: "cutover"}
 
 // asOldRun rewrites a stored Run as one the old engine created: no Engine
 // marker, then mutate.
-func asOldRun(t *testing.T, store cutoverTestStore, runID string, mutate func(*AgentRun)) *AgentRun {
+func asOldRun(t *testing.T, store cutoverTestStore, runID string, mutate func(*models.AgentRun)) *models.AgentRun {
 	t.Helper()
 	ctx := context.Background()
 	current, err := store.GetAgentRun(ctx, cutoverScope, runID)
 	if err != nil || current == nil {
 		t.Fatalf("load %s: %#v, %v", runID, current, err)
 	}
-	run := cloneAgentRun(current)
+	run := models.CloneAgentRun(current)
 	// Old-engine Runs carry no engine marker and no session binding.
 	run.Engine = ""
 	run.SessionID = ""
@@ -71,9 +73,9 @@ func asOldRun(t *testing.T, store cutoverTestStore, runID string, mutate func(*A
 		mutate(run)
 	}
 	run.Revision = current.Revision + 1
-	event := &ActivityEvent{
-		ID: uuid.NewString(), Scope: run.Scope, EventType: "run.test_old_engine", Severity: ActivitySeverityInfo, RunID: run.ID,
-		Actor: ActivityActor{Type: "system", ID: "test"}, Summary: "Old engine Run", Visibility: ActivityVisibilityScope, CreatedAt: time.Now(),
+	event := &models.ActivityEvent{
+		ID: uuid.NewString(), Scope: run.Scope, EventType: "run.test_old_engine", Severity: models.ActivitySeverityInfo, RunID: run.ID,
+		Actor: models.ActivityActor{Type: "system", ID: "test"}, Summary: "Old engine Run", Visibility: models.ActivityVisibilityScope, CreatedAt: time.Now(),
 	}
 	if _, err := store.UpdateAgentRunWithEvent(ctx, run, current.Revision, event, nil); err != nil {
 		t.Fatalf("rewrite %s as old: %v", runID, err)
@@ -82,47 +84,47 @@ func asOldRun(t *testing.T, store cutoverTestStore, runID string, mutate func(*A
 	return stored
 }
 
-func cutoverManualRun(t *testing.T, store cutoverTestStore, key string, parentID string) *AgentRun {
+func cutoverManualRun(t *testing.T, store cutoverTestStore, key string, parentID string) *models.AgentRun {
 	t.Helper()
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
-	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(context.Background(), CreateAgentRunRequest{
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}
+	created, err := agentrun.NewRunCommandService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
 		Scope: cutoverScope, Owner: owner, AssignedAgentID: owner.ID, ConcurrencyKey: "agent-1:" + key, Goal: "Do " + key,
-		Source: RunSourceManual, IdempotencyKey: key, ParentRunID: parentID, Actor: ActivityActor{Type: "user", ID: "7"},
+		Source: models.RunSourceManual, IdempotencyKey: key, ParentRunID: parentID, Actor: models.ActivityActor{Type: "user", ID: "7"},
 	})
 	if err != nil {
 		t.Fatalf("create %s: %v", key, err)
 	}
-	if created.Run.Engine != RunEngineLoop {
+	if created.Run.Engine != models.RunEngineLoop {
 		t.Fatalf("new Run engine = %q", created.Run.Engine)
 	}
 	return created.Run
 }
 
 type cutoverLane struct {
-	conversation *Conversation
-	trigger      *ChannelMessage
-	run          *AgentRun
+	conversation *models.Conversation
+	trigger      *models.ChannelMessage
+	run          *models.AgentRun
 }
 
 // cutoverConversationRun opens a conversation, posts a request that needs an
 // answer and schedules its conversation Run.
 func cutoverConversationRun(t *testing.T, store cutoverTestStore, key string) cutoverLane {
 	t.Helper()
-	return cutoverConversationRunFor(t, store, key, ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"})
+	return cutoverConversationRunFor(t, store, key, models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"})
 }
 
 // cutoverAgentConversationRun is cutoverConversationRun in an Agent's
 // channel: the Run has an acting Agent and a lane session.
 func cutoverAgentConversationRun(t *testing.T, store cutoverTestStore, key string) cutoverLane {
 	t.Helper()
-	return cutoverConversationRunFor(t, store, key, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"})
+	return cutoverConversationRunFor(t, store, key, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"})
 }
 
-func cutoverConversationRunFor(t *testing.T, store cutoverTestStore, key string, owner ObjectiveOwner) cutoverLane {
+func cutoverConversationRunFor(t *testing.T, store cutoverTestStore, key string, owner models.ObjectiveOwner) cutoverLane {
 	t.Helper()
 	ctx := context.Background()
 	service := runtimeconversation.NewConversationService(store)
-	conversationtest.SeedSpace(t, store.(SpaceStore), cutoverScope)
+	conversationtest.SeedSpace(t, store.(models.SpaceStore), cutoverScope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: cutoverScope, Owner: owner,
 		Title: "Operations " + key, IdempotencyKey: "channel-" + key,
@@ -132,8 +134,8 @@ func cutoverConversationRunFor(t *testing.T, store cutoverTestStore, key string,
 	}
 	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: cutoverScope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"},
-		Intent: MessageIntentQuestion, Content: "Check the canary " + key, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "user-1"},
+		Intent: models.MessageIntentQuestion, Content: "Check the canary " + key, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		RequiresResponse: true, IdempotencyKey: "trigger-" + key,
 	})
 	if err != nil {
@@ -150,10 +152,10 @@ func cutoverConversationRunFor(t *testing.T, store cutoverTestStore, key string,
 	return cutoverLane{conversation: conversation, trigger: posted.Message, run: scheduled.Run}
 }
 
-func claimCutoverRun(t *testing.T, store cutoverTestStore, run *AgentRun) *AgentRun {
+func claimCutoverRun(t *testing.T, store cutoverTestStore, run *models.AgentRun) *models.AgentRun {
 	t.Helper()
 	runID := run.ID
-	claimed, err := store.ClaimNextAgentRun(context.Background(), AgentRunClaim{
+	claimed, err := store.ClaimNextAgentRun(context.Background(), models.AgentRunClaim{
 		Scope: cutoverScope, Kind: run.Kind, WorkerID: "old-worker", Now: time.Now(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != runID {
@@ -162,15 +164,15 @@ func claimCutoverRun(t *testing.T, store cutoverTestStore, run *AgentRun) *Agent
 	return claimed
 }
 
-func cutoverMessages(t *testing.T, store cutoverTestStore, conversationID string) []*ChannelMessage {
+func cutoverMessages(t *testing.T, store cutoverTestStore, conversationID string) []*models.ChannelMessage {
 	t.Helper()
-	messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(context.Background(), ChannelMessageFilter{Scope: cutoverScope, ConversationID: conversationID})
+	messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(context.Background(), models.ChannelMessageFilter{Scope: cutoverScope, ConversationID: conversationID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var cut []*ChannelMessage
+	var cut []*models.ChannelMessage
 	for _, message := range messages {
-		if message.Intent == MessageIntentSystem {
+		if message.Intent == models.MessageIntentSystem {
 			cut = append(cut, message)
 		}
 	}
@@ -186,7 +188,7 @@ func runCutover(t *testing.T, store cutoverTestStore) RunLoopCutoverReport {
 	return report
 }
 
-func requireRunStatus(t *testing.T, store cutoverTestStore, runID string, status AgentRunStatus) *AgentRun {
+func requireRunStatus(t *testing.T, store cutoverTestStore, runID string, status models.AgentRunStatus) *models.AgentRun {
 	t.Helper()
 	run, err := store.GetAgentRun(context.Background(), cutoverScope, runID)
 	if err != nil || run == nil || run.Status != status {
@@ -205,8 +207,8 @@ func TestCutoverCancelsOldInFlightRunsOncePerLane(t *testing.T) {
 			laneA := cutoverConversationRun(t, store, "a")
 			claimed := claimCutoverRun(t, store, laneA.run)
 			asOldRun(t, store, claimed.ID, nil)
-			step, err := NewAgentTurnService(store, store).BeginTurn(ctx, BeginAgentTurnRequest{
-				Scope: cutoverScope, RunID: claimed.ID, Producer: StepProducerModel, WorkerID: "old-worker", LeaseDuration: time.Hour,
+			step, err := activity.NewAgentTurnService(store, store).BeginTurn(ctx, activity.BeginAgentTurnRequest{
+				Scope: cutoverScope, RunID: claimed.ID, Producer: models.StepProducerModel, WorkerID: "old-worker", LeaseDuration: time.Hour,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -216,7 +218,7 @@ func TestCutoverCancelsOldInFlightRunsOncePerLane(t *testing.T) {
 			// Lane B: a chat Run that already applied an old Turn and was
 			// requeued.
 			laneB := cutoverConversationRun(t, store, "b")
-			asOldRun(t, store, laneB.run.ID, func(run *AgentRun) { run.LastAppliedTurn = 1 })
+			asOldRun(t, store, laneB.run.ID, func(run *models.AgentRun) { run.LastAppliedTurn = 1 })
 			// A Run the new engine created is not touched.
 			fresh := cutoverManualRun(t, store, "loop-run", "")
 
@@ -225,18 +227,18 @@ func TestCutoverCancelsOldInFlightRunsOncePerLane(t *testing.T) {
 				t.Fatalf("report = %#v", report)
 			}
 			for _, id := range []string{laneA.run.ID, laneB.run.ID} {
-				canceled := requireRunStatus(t, store, id, AgentRunStatusCanceled)
+				canceled := requireRunStatus(t, store, id, models.AgentRunStatusCanceled)
 				if canceled.FailureExplanation == nil || *canceled.FailureExplanation != *runLoopCutoverExplanation() {
 					t.Fatalf("canceled Run %s explanation = %#v", id, canceled.FailureExplanation)
 				}
 			}
-			requireRunStatus(t, store, child.ID, AgentRunStatusCanceled)
-			if got := requireRunStatus(t, store, fresh.ID, AgentRunStatusQueued); got.Revision != fresh.Revision {
+			requireRunStatus(t, store, child.ID, models.AgentRunStatusCanceled)
+			if got := requireRunStatus(t, store, fresh.ID, models.AgentRunStatusQueued); got.Revision != fresh.Revision {
 				t.Fatalf("loop Run was rewritten: %#v", got)
 			}
 			// The old running step is closed by the cancel.
 			closed, err := store.GetAgentTurn(ctx, cutoverScope, step.ID)
-			if err != nil || closed.Status != AgentTurnStatusCanceled || closed.FailureCode != agentrun.StepFailureRunEnded {
+			if err != nil || closed.Status != models.AgentTurnStatusCanceled || closed.FailureCode != agentrun.StepFailureRunEnded {
 				t.Fatalf("old step = %#v, %v", closed, err)
 			}
 			for _, lane := range []cutoverLane{laneA, laneB} {
@@ -246,8 +248,8 @@ func TestCutoverCancelsOldInFlightRunsOncePerLane(t *testing.T) {
 				}
 				message := messages[0]
 				if message.Content != RunLoopCutoverMessage || message.ResolvesMessageID != lane.trigger.ID || message.ReplyToMessageID != lane.trigger.ID ||
-					message.Sender != (ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"}) ||
-					len(message.References) != 1 || message.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: lane.run.ID}) {
+					message.Sender != (models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "openseal.conversation"}) ||
+					len(message.References) != 1 || message.References[0] != (models.ConversationReference{Kind: models.ConversationReferenceRun, ID: lane.run.ID}) {
 					t.Fatalf("cutover message = %#v", message)
 				}
 			}
@@ -275,20 +277,20 @@ func TestCutoverAdoptsNeverStartedQueuedRun(t *testing.T) {
 			// Queued but with a step row: it ran on the old engine.
 			stepped := cutoverManualRun(t, store, "stepped", "")
 			claimCutoverRun(t, store, stepped)
-			if _, err := NewAgentTurnService(store, store).BeginTurn(ctx, BeginAgentTurnRequest{
-				Scope: cutoverScope, RunID: stepped.ID, Producer: StepProducerModel, WorkerID: "old-worker", LeaseDuration: time.Hour,
+			if _, err := activity.NewAgentTurnService(store, store).BeginTurn(ctx, activity.BeginAgentTurnRequest{
+				Scope: cutoverScope, RunID: stepped.ID, Producer: models.StepProducerModel, WorkerID: "old-worker", LeaseDuration: time.Hour,
 			}); err != nil {
 				t.Fatal(err)
 			}
-			asOldRun(t, store, stepped.ID, func(run *AgentRun) {
-				run.Status, run.LeaseOwner, run.LeaseExpiresAt = AgentRunStatusQueued, "", nil
+			asOldRun(t, store, stepped.ID, func(run *models.AgentRun) {
+				run.Status, run.LeaseOwner, run.LeaseExpiresAt = models.AgentRunStatusQueued, "", nil
 			})
 			never := asOldRun(t, store, cutoverManualRun(t, store, "never", "").ID, nil)
 			// A queued chat Run that never started keeps its request open:
 			// the loop answers it, so no message is posted.
 			lane := cutoverAgentConversationRun(t, store, "queued")
 			laneSessionID := lane.run.SessionID
-			if laneSessionID == "" || laneSessionID != conversationSessionID(cutoverScope, lane.run.ConcurrencyKey) {
+			if laneSessionID == "" || laneSessionID != models.ConversationSessionID(cutoverScope, lane.run.ConcurrencyKey) {
 				t.Fatalf("scheduled chat Run session = %q", laneSessionID)
 			}
 			queuedChat := asOldRun(t, store, lane.run.ID, nil)
@@ -298,44 +300,44 @@ func TestCutoverAdoptsNeverStartedQueuedRun(t *testing.T) {
 			// A queued conversation task Run without a session cannot be
 			// bound by the cutover: it is canceled and its request answered.
 			taskLane := cutoverAgentConversationRun(t, store, "task")
-			asOldRun(t, store, taskLane.run.ID, func(run *AgentRun) {
-				run.Context[ConversationTaskContextKey] = "task-1"
+			asOldRun(t, store, taskLane.run.ID, func(run *models.AgentRun) {
+				run.Context[models.ConversationTaskContextKey] = "task-1"
 			})
 			// Not queued: a paused Run is canceled even though it never ran.
-			paused := asOldRun(t, store, cutoverManualRun(t, store, "paused", "").ID, func(run *AgentRun) {
-				run.Status, run.PausedFrom = AgentRunStatusPaused, AgentRunStatusQueued
+			paused := asOldRun(t, store, cutoverManualRun(t, store, "paused", "").ID, func(run *models.AgentRun) {
+				run.Status, run.PausedFrom = models.AgentRunStatusPaused, models.AgentRunStatusQueued
 			})
 
 			report := runCutover(t, store)
 			if report.Adopted != 2 || report.Canceled != 3 || report.Messages != 1 {
 				t.Fatalf("report = %#v", report)
 			}
-			for _, old := range []*AgentRun{never, queuedChat} {
-				adopted := requireRunStatus(t, store, old.ID, AgentRunStatusQueued)
-				if adopted.Engine != RunEngineLoop || adopted.Revision != old.Revision+1 || adopted.LastAppliedTurn != 0 {
+			for _, old := range []*models.AgentRun{never, queuedChat} {
+				adopted := requireRunStatus(t, store, old.ID, models.AgentRunStatusQueued)
+				if adopted.Engine != models.RunEngineLoop || adopted.Revision != old.Revision+1 || adopted.LastAppliedTurn != 0 {
 					t.Fatalf("adopted Run = %#v", adopted)
 				}
 			}
-			if got := requireRunStatus(t, store, queuedChat.ID, AgentRunStatusQueued); got.SessionID != laneSessionID {
+			if got := requireRunStatus(t, store, queuedChat.ID, models.AgentRunStatusQueued); got.SessionID != laneSessionID {
 				t.Fatalf("adopted chat Run session = %q, want lane %q", got.SessionID, laneSessionID)
 			}
-			if got := requireRunStatus(t, store, never.ID, AgentRunStatusQueued); got.SessionID != "" {
+			if got := requireRunStatus(t, store, never.ID, models.AgentRunStatusQueued); got.SessionID != "" {
 				t.Fatalf("adopted manual Run session = %q", got.SessionID)
 			}
-			requireRunStatus(t, store, stepped.ID, AgentRunStatusCanceled)
-			requireRunStatus(t, store, paused.ID, AgentRunStatusCanceled)
-			requireRunStatus(t, store, taskLane.run.ID, AgentRunStatusCanceled)
+			requireRunStatus(t, store, stepped.ID, models.AgentRunStatusCanceled)
+			requireRunStatus(t, store, paused.ID, models.AgentRunStatusCanceled)
+			requireRunStatus(t, store, taskLane.run.ID, models.AgentRunStatusCanceled)
 			// The loop can open the lane session for the adopted chat Run
 			// (on stores that already have the session log).
-			sessions, ok := store.(AgentSessionStore)
+			sessions, ok := store.(models.AgentSessionStore)
 			if !ok {
 				return
 			}
 			claimed := claimCutoverRun(t, store, queuedChat)
-			conversationID, _ := claimed.Context[conversationRunContextConversationID].(string)
-			opened, err := sessions.OpenConversationAgentSession(ctx, OpenConversationAgentSessionRequest{
+			conversationID, _ := claimed.Context[models.ConversationRunConversationIDContextKey].(string)
+			opened, err := sessions.OpenConversationAgentSession(ctx, models.OpenConversationAgentSessionRequest{
 				Scope: cutoverScope, ConversationID: conversationID, AgentID: claimed.AssignedAgentID, RunID: claimed.ID,
-				Lease: AgentRunLeaseGuard{WorkerID: claimed.LeaseOwner, Now: time.Now()}, Now: time.Now(),
+				Lease: models.AgentRunLeaseGuard{WorkerID: claimed.LeaseOwner, Now: time.Now()}, Now: time.Now(),
 			})
 			if err != nil || opened.Session.ID != laneSessionID {
 				t.Fatalf("open lane session = %#v, %v", opened, err)
@@ -374,17 +376,17 @@ func TestCutoverIdempotent(t *testing.T) {
 			if adopted, canceled, messages := reports[0].Adopted+reports[1].Adopted, reports[0].Canceled+reports[1].Canceled, reports[0].Messages+reports[1].Messages; adopted != 1 || canceled != 1 || messages != 1 {
 				t.Fatalf("concurrent reports = %#v", reports)
 			}
-			canceled := requireRunStatus(t, store, lane.run.ID, AgentRunStatusCanceled)
-			adopted := requireRunStatus(t, store, queued.ID, AgentRunStatusQueued)
+			canceled := requireRunStatus(t, store, lane.run.ID, models.AgentRunStatusCanceled)
+			adopted := requireRunStatus(t, store, queued.ID, models.AgentRunStatusQueued)
 
 			again := runCutover(t, store)
 			if again != (RunLoopCutoverReport{}) {
 				t.Fatalf("second cutover = %#v", again)
 			}
-			if run := requireRunStatus(t, store, lane.run.ID, AgentRunStatusCanceled); run.Revision != canceled.Revision {
+			if run := requireRunStatus(t, store, lane.run.ID, models.AgentRunStatusCanceled); run.Revision != canceled.Revision {
 				t.Fatalf("second cutover rewrote the canceled Run: %#v", run)
 			}
-			if run := requireRunStatus(t, store, queued.ID, AgentRunStatusQueued); run.Revision != adopted.Revision {
+			if run := requireRunStatus(t, store, queued.ID, models.AgentRunStatusQueued); run.Revision != adopted.Revision {
 				t.Fatalf("second cutover rewrote the adopted Run: %#v", run)
 			}
 			if messages := cutoverMessages(t, store, lane.conversation.ID); len(messages) != 1 {
@@ -403,14 +405,14 @@ type failingCutoverStore struct {
 
 var errCutoverTestFailure = errors.New("store unavailable")
 
-func (s *failingCutoverStore) ListRunLoopCutoverCandidates(ctx context.Context) ([]RunLoopCutoverRef, error) {
+func (s *failingCutoverStore) ListRunLoopCutoverCandidates(ctx context.Context) ([]models.RunLoopCutoverRef, error) {
 	if s.failList {
 		return nil, errCutoverTestFailure
 	}
 	return s.cutoverTestStore.ListRunLoopCutoverCandidates(ctx)
 }
 
-func (s *failingCutoverStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent, lease *AgentRunLeaseGuard) (*ActivityEvent, error) {
+func (s *failingCutoverStore) UpdateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, expectedRevision int64, event *models.ActivityEvent, lease *models.AgentRunLeaseGuard) (*models.ActivityEvent, error) {
 	if s.failUpdate {
 		return nil, errCutoverTestFailure
 	}
@@ -422,7 +424,7 @@ type failingCutoverConversations struct {
 	*runtimeconversation.ConversationService
 }
 
-func (failingCutoverConversations) PostChannelMessage(context.Context, runtimeconversation.PostChannelMessageRequest) (*ChannelMessageCommitResult, error) {
+func (failingCutoverConversations) PostChannelMessage(context.Context, runtimeconversation.PostChannelMessageRequest) (*models.ChannelMessageCommitResult, error) {
 	return nil, errCutoverTestFailure
 }
 
@@ -454,7 +456,7 @@ func TestCutoverFailsClosed(t *testing.T) {
 			if _, err := RunLoopCutover(ctx, store, failingCutoverConversations{runtimeconversation.NewConversationService(store)}); !errors.Is(err, errCutoverTestFailure) {
 				t.Fatalf("post failure: cutover err = %v", err)
 			}
-			if run := requireRunStatus(t, store, running.ID, AgentRunStatusRunning); run.Engine != "" {
+			if run := requireRunStatus(t, store, running.ID, models.AgentRunStatusRunning); run.Engine != "" {
 				t.Fatalf("failed cutover marked the Run: %#v", run)
 			}
 			if messages := cutoverMessages(t, store, lane.conversation.ID); len(messages) != 0 {
@@ -465,8 +467,8 @@ func TestCutoverFailsClosed(t *testing.T) {
 			if report.Canceled != 1 || report.Messages != 1 {
 				t.Fatalf("recovered cutover = %#v", report)
 			}
-			requireRunStatus(t, store, running.ID, AgentRunStatusCanceled)
-			if run := requireRunStatus(t, store, queued.ID, AgentRunStatusQueued); run.Engine != RunEngineLoop {
+			requireRunStatus(t, store, running.ID, models.AgentRunStatusCanceled)
+			if run := requireRunStatus(t, store, queued.ID, models.AgentRunStatusQueued); run.Engine != models.RunEngineLoop {
 				t.Fatalf("queued Run was not adopted: %#v", run)
 			}
 		})

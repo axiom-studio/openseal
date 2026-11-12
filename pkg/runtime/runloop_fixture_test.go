@@ -22,6 +22,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -38,24 +39,24 @@ func loopScriptDigest(seed string) string {
 	return "sha256:" + strings.Repeat(seed, 64)[:64]
 }
 
-var loopSessionScope = Scope{Kind: "org", ID: "o1"}
+var loopSessionScope = models.Scope{Kind: "org", ID: "o1"}
 
 var loopSessionNow = time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 
-func loopSessionLease() AgentRunLeaseGuard {
-	return AgentRunLeaseGuard{WorkerID: "w1", Now: loopSessionNow}
+func loopSessionLease() models.AgentRunLeaseGuard {
+	return models.AgentRunLeaseGuard{WorkerID: "w1", Now: loopSessionNow}
 }
 
-func putLoopSessionRun(t *testing.T, store *sqlite.Store, runID, sessionID string, status AgentRunStatus, interventions int) *AgentRun {
+func putLoopSessionRun(t *testing.T, store *sqlite.Store, runID, sessionID string, status models.AgentRunStatus, interventions int) *models.AgentRun {
 	t.Helper()
 	expires := loopSessionNow.Add(time.Minute)
-	run := &AgentRun{
-		ID: runID, Scope: loopSessionScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, Goal: "session test",
+	run := &models.AgentRun{
+		ID: runID, Scope: loopSessionScope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-a"}, Goal: "session test",
 		Status: status, Revision: 1, SessionID: sessionID,
 		LeaseOwner: "w1", LeaseExpiresAt: &expires, CreatedAt: loopSessionNow, UpdatedAt: loopSessionNow,
 	}
 	for i := 0; i < interventions; i++ {
-		run.PendingInterventions = append(run.PendingInterventions, AgentRunIntervention{ID: "iv" + string(rune('a'+i)), Instruction: "steer"})
+		run.PendingInterventions = append(run.PendingInterventions, models.AgentRunIntervention{ID: "iv" + string(rune('a'+i)), Instruction: "steer"})
 	}
 	return putLoopRun(t, store, run)
 }
@@ -64,7 +65,7 @@ func putLoopSessionRun(t *testing.T, store *sqlite.Store, runID, sessionID strin
 // can rebind or relabel a Run mid-scenario. A new Run is created; an existing
 // one is rewritten through the store's update outside any lease, which moves
 // its revision on by one (returned in the written Run).
-func putLoopRun(t testing.TB, store *sqlite.Store, run *AgentRun) *AgentRun {
+func putLoopRun(t testing.TB, store *sqlite.Store, run *models.AgentRun) *models.AgentRun {
 	t.Helper()
 	ctx := context.Background()
 	current, err := store.GetAgentRun(ctx, run.Scope, run.ID)
@@ -77,12 +78,12 @@ func putLoopRun(t testing.TB, store *sqlite.Store, run *AgentRun) *AgentRun {
 		}
 		return run
 	}
-	next := cloneAgentRun(run)
+	next := models.CloneAgentRun(run)
 	next.Revision = current.Revision + 1
-	event := &ActivityEvent{
-		ID: uuid.NewString(), Scope: run.Scope, EventType: "run.status_changed", Severity: ActivitySeverityInfo,
-		AgentID: run.AssignedAgentID, RunID: run.ID, Actor: ActivityActor{Type: "system", ID: "test"},
-		Summary: "Test rewrote the Run", Visibility: ActivityVisibilityScope, CreatedAt: run.UpdatedAt,
+	event := &models.ActivityEvent{
+		ID: uuid.NewString(), Scope: run.Scope, EventType: "run.status_changed", Severity: models.ActivitySeverityInfo,
+		AgentID: run.AssignedAgentID, RunID: run.ID, Actor: models.ActivityActor{Type: "system", ID: "test"},
+		Summary: "Test rewrote the Run", Visibility: models.ActivityVisibilityScope, CreatedAt: run.UpdatedAt,
 	}
 	if _, err := store.UpdateAgentRunWithEvent(ctx, next, current.Revision, event, nil); err != nil {
 		t.Fatalf("rewrite run %s: %v", run.ID, err)
@@ -90,7 +91,7 @@ func putLoopRun(t testing.TB, store *sqlite.Store, run *AgentRun) *AgentRun {
 	return next
 }
 
-func loopStoredSessionRun(t *testing.T, store *sqlite.Store, runID string) *AgentRun {
+func loopStoredSessionRun(t *testing.T, store *sqlite.Store, runID string) *models.AgentRun {
 	t.Helper()
 	run, err := store.GetAgentRun(context.Background(), loopSessionScope, runID)
 	if err != nil {
@@ -99,11 +100,11 @@ func loopStoredSessionRun(t *testing.T, store *sqlite.Store, runID string) *Agen
 	return run
 }
 
-func openLoopConversationSession(t *testing.T, store *sqlite.Store, runID string) *AgentSession {
+func openLoopConversationSession(t *testing.T, store *sqlite.Store, runID string) *models.AgentSession {
 	t.Helper()
-	sessionID := ConversationAgentSessionID(loopSessionScope, ConversationRunLane("c1", "", "agent-a"))
-	putLoopSessionRun(t, store, runID, sessionID, AgentRunStatusRunning, 0)
-	opened, err := store.OpenConversationAgentSession(context.Background(), OpenConversationAgentSessionRequest{
+	sessionID := models.ConversationAgentSessionID(loopSessionScope, models.ConversationRunLane("c1", "", "agent-a"))
+	putLoopSessionRun(t, store, runID, sessionID, models.AgentRunStatusRunning, 0)
+	opened, err := store.OpenConversationAgentSession(context.Background(), models.OpenConversationAgentSessionRequest{
 		Scope: loopSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: runID, Lease: loopSessionLease(), Now: loopSessionNow,
 	})
 	if err != nil {
@@ -113,7 +114,7 @@ func openLoopConversationSession(t *testing.T, store *sqlite.Store, runID string
 }
 
 // getLoopRun reads a Run that the test knows exists.
-func getLoopRun(t testing.TB, store *sqlite.Store, scope Scope, id string) *AgentRun {
+func getLoopRun(t testing.TB, store *sqlite.Store, scope models.Scope, id string) *models.AgentRun {
 	t.Helper()
 	run, err := store.GetAgentRun(context.Background(), scope, id)
 	if err != nil {
@@ -124,7 +125,7 @@ func getLoopRun(t testing.TB, store *sqlite.Store, scope Scope, id string) *Agen
 
 // proposeLoopPersonAction proposes send as the governed tool call of run loop
 // step stepID, as the loop does for the Run's lease owner.
-func proposeLoopPersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catalog, scope Scope, run *AgentRun, now time.Time, stepID, key string, policy action.ActionPolicyEvaluator) *ActionProposalResult {
+func proposeLoopPersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catalog, scope models.Scope, run *models.AgentRun, now time.Time, stepID, key string, policy action.ActionPolicyEvaluator) *models.ActionProposalResult {
 	t.Helper()
 	if policy == nil {
 		policy = action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
@@ -134,9 +135,9 @@ func proposeLoopPersonAction(t *testing.T, store *sqlite.Store, catalog *skill.C
 	coordinator := action.NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return now }))
 	proposal, err := coordinator.Propose(context.Background(), action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, TurnID: stepID, WorkerID: "agent-worker", DeploymentID: "release-agent",
-		Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Send a message to ana@example.com",
+		Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, Summary: "Send a message to ana@example.com",
 		SkillID: "mail", SkillVersion: "1.0.0", Action: "send", Arguments: map[string]interface{}{"to": "ana@example.com"}, IdempotencyKey: key,
-		ExternalOperation: &ExternalOperationIdentity{Resource: "mailbox-ana", Operation: "send"},
+		ExternalOperation: &activity.ExternalOperationIdentity{Resource: "mailbox-ana", Operation: "send"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +147,7 @@ func proposeLoopPersonAction(t *testing.T, store *sqlite.Store, catalog *skill.C
 
 // executeLoopPersonAction executes the loop call inline for the Run's lease
 // owner, as the governed executor does.
-func executeLoopPersonAction(t *testing.T, worker *action.ActionWorker, scope Scope, proposal *ActionProposalResult) *ActionExecutionResult {
+func executeLoopPersonAction(t *testing.T, worker *action.ActionWorker, scope models.Scope, proposal *models.ActionProposalResult) *models.ActionExecutionResult {
 	t.Helper()
 	result, err := worker.ExecuteOwnLoopCall(context.Background(), scope, proposal.Call.ID, "agent-worker")
 	if err != nil {
@@ -172,7 +173,7 @@ func openLoopPostgresStore(t testing.TB, prefix string, options ...postgres.Post
 
 type loopStoreCase struct {
 	name string
-	open func(*testing.T) KernelStore
+	open func(*testing.T) models.KernelStore
 }
 
 // loopStoreMatrix is SQLite always, plus Postgres when
@@ -181,7 +182,7 @@ type loopStoreCase struct {
 func loopStoreMatrix(t *testing.T, prefix string) []loopStoreCase {
 	t.Helper()
 	cases := []loopStoreCase{
-		{name: "sqlite", open: func(t *testing.T) KernelStore {
+		{name: "sqlite", open: func(t *testing.T) models.KernelStore {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), prefix+".db"))
 			if err != nil {
 				t.Fatal(err)
@@ -191,7 +192,7 @@ func loopStoreMatrix(t *testing.T, prefix string) []loopStoreCase {
 		}},
 	}
 	if dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN"); dsn != "" {
-		cases = append(cases, loopStoreCase{name: "postgres", open: func(t *testing.T) KernelStore {
+		cases = append(cases, loopStoreCase{name: "postgres", open: func(t *testing.T) models.KernelStore {
 			store, _ := openLoopPostgresStore(t, prefix+"_")
 			return store
 		}})
@@ -200,7 +201,7 @@ func loopStoreMatrix(t *testing.T, prefix string) []loopStoreCase {
 }
 
 // eachLoopStore runs test once per store in the matrix, as a subtest per store.
-func eachLoopStore(t *testing.T, prefix string, test func(t *testing.T, store KernelStore)) {
+func eachLoopStore(t *testing.T, prefix string, test func(t *testing.T, store models.KernelStore)) {
 	t.Helper()
 	for _, c := range loopStoreMatrix(t, prefix) {
 		c := c
@@ -234,14 +235,14 @@ var errLoopCrash = errors.New("simulated crash: replica is dead")
 // dead replica: no cleanup, no lease release. The session-store methods go
 // to the wrapped store's AgentSessionStore.
 type loopCrashStore struct {
-	KernelStore
-	sessions AgentSessionStore
+	models.KernelStore
+	sessions models.AgentSessionStore
 	dead     atomic.Bool
 }
 
-func newLoopCrashStore(t testing.TB, store KernelStore) *loopCrashStore {
+func newLoopCrashStore(t testing.TB, store models.KernelStore) *loopCrashStore {
 	t.Helper()
-	sessions, ok := store.(AgentSessionStore)
+	sessions, ok := store.(models.AgentSessionStore)
 	if !ok {
 		t.Fatalf("crash store: %T is not an AgentSessionStore", store)
 	}
@@ -286,93 +287,93 @@ var _ = []any{
 	(*loopCrashStore).PersistActionExecution,
 }
 
-var _ KernelStore = (*loopCrashStore)(nil)
-var _ AgentSessionStore = (*loopCrashStore)(nil)
+var _ models.KernelStore = (*loopCrashStore)(nil)
+var _ models.AgentSessionStore = (*loopCrashStore)(nil)
 
 // Session store.
 
-func (s *loopCrashStore) OpenConversationAgentSession(ctx context.Context, req OpenConversationAgentSessionRequest) (*OpenAgentSessionResult, error) {
+func (s *loopCrashStore) OpenConversationAgentSession(ctx context.Context, req models.OpenConversationAgentSessionRequest) (*models.OpenAgentSessionResult, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.sessions.OpenConversationAgentSession(ctx, req)
 }
 
-func (s *loopCrashStore) CreateRunAgentSession(ctx context.Context, req CreateRunAgentSessionRequest) (*OpenAgentSessionResult, error) {
+func (s *loopCrashStore) CreateRunAgentSession(ctx context.Context, req models.CreateRunAgentSessionRequest) (*models.OpenAgentSessionResult, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.sessions.CreateRunAgentSession(ctx, req)
 }
 
-func (s *loopCrashStore) AppendAgentSessionEntries(ctx context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
+func (s *loopCrashStore) AppendAgentSessionEntries(ctx context.Context, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.sessions.AppendAgentSessionEntries(ctx, req)
 }
 
-func (s *loopCrashStore) TransitionToolEntry(ctx context.Context, req ToolEntryTransitionRequest) (*ToolEntryTransitionResult, error) {
+func (s *loopCrashStore) TransitionToolEntry(ctx context.Context, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.sessions.TransitionToolEntry(ctx, req)
 }
 
-func (s *loopCrashStore) GetAgentSession(ctx context.Context, scope Scope, sessionID string) (*AgentSession, error) {
+func (s *loopCrashStore) GetAgentSession(ctx context.Context, scope models.Scope, sessionID string) (*models.AgentSession, error) {
 	return s.sessions.GetAgentSession(ctx, scope, sessionID)
 }
 
-func (s *loopCrashStore) GetSessionEntry(ctx context.Context, scope Scope, entryID string) (*SessionEntry, error) {
+func (s *loopCrashStore) GetSessionEntry(ctx context.Context, scope models.Scope, entryID string) (*models.SessionEntry, error) {
 	return s.sessions.GetSessionEntry(ctx, scope, entryID)
 }
 
-func (s *loopCrashStore) LoadAgentSessionPath(ctx context.Context, scope Scope, sessionID string) (*AgentSessionPath, error) {
+func (s *loopCrashStore) LoadAgentSessionPath(ctx context.Context, scope models.Scope, sessionID string) (*models.AgentSessionPath, error) {
 	return s.sessions.LoadAgentSessionPath(ctx, scope, sessionID)
 }
 
-func (s *loopCrashStore) ListAgentSessionEntries(ctx context.Context, filter SessionEntryFilter) ([]*SessionEntry, error) {
+func (s *loopCrashStore) ListAgentSessionEntries(ctx context.Context, filter models.SessionEntryFilter) ([]*models.SessionEntry, error) {
 	return s.sessions.ListAgentSessionEntries(ctx, filter)
 }
 
 // Runs and activity.
 
-func (s *loopCrashStore) CreateAgentRun(ctx context.Context, run *AgentRun) error {
+func (s *loopCrashStore) CreateAgentRun(ctx context.Context, run *models.AgentRun) error {
 	if err := s.refused(); err != nil {
 		return err
 	}
 	return s.KernelStore.CreateAgentRun(ctx, run)
 }
 
-func (s *loopCrashStore) CreateAgentRunWithEvent(ctx context.Context, run *AgentRun, event *ActivityEvent) (*ActivityEvent, error) {
+func (s *loopCrashStore) CreateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.KernelStore.CreateAgentRunWithEvent(ctx, run, event)
 }
 
-func (s *loopCrashStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun, expectedRevision int64, event *ActivityEvent, lease *AgentRunLeaseGuard) (*ActivityEvent, error) {
+func (s *loopCrashStore) UpdateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, expectedRevision int64, event *models.ActivityEvent, lease *models.AgentRunLeaseGuard) (*models.ActivityEvent, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.KernelStore.UpdateAgentRunWithEvent(ctx, run, expectedRevision, event, lease)
 }
 
-func (s *loopCrashStore) AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error) {
+func (s *loopCrashStore) AppendActivity(ctx context.Context, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.KernelStore.AppendActivity(ctx, event)
 }
 
-func (s *loopCrashStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error) {
+func (s *loopCrashStore) ClaimNextAgentRun(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRun, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.KernelStore.ClaimNextAgentRun(ctx, claim)
 }
 
-func (s *loopCrashStore) RenewAgentRunLease(ctx context.Context, scope Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentRun, error) {
+func (s *loopCrashStore) RenewAgentRunLease(ctx context.Context, scope models.Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentRun, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
@@ -381,28 +382,28 @@ func (s *loopCrashStore) RenewAgentRunLease(ctx context.Context, scope Scope, ru
 
 // Steps.
 
-func (s *loopCrashStore) CreateAgentTurn(ctx context.Context, turn *AgentTurn) (*AgentTurn, error) {
+func (s *loopCrashStore) CreateAgentTurn(ctx context.Context, turn *models.AgentTurn) (*models.AgentTurn, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.KernelStore.CreateAgentTurn(ctx, turn)
 }
 
-func (s *loopCrashStore) UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expectedRevision int64, workerID string) error {
+func (s *loopCrashStore) UpdateAgentTurn(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, workerID string) error {
 	if err := s.refused(); err != nil {
 		return err
 	}
 	return s.KernelStore.UpdateAgentTurn(ctx, turn, expectedRevision, workerID)
 }
 
-func (s *loopCrashStore) ClaimAgentTurn(ctx context.Context, scope Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentTurn, error) {
+func (s *loopCrashStore) ClaimAgentTurn(ctx context.Context, scope models.Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentTurn, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.KernelStore.ClaimAgentTurn(ctx, scope, turnID, workerID, now, leaseDuration)
 }
 
-func (s *loopCrashStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentTurn, expectedRevision int64, events []*ActivityEvent) error {
+func (s *loopCrashStore) RecordAgentTurnStepModel(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, events []*models.ActivityEvent) error {
 	if err := s.refused(); err != nil {
 		return err
 	}
@@ -411,35 +412,35 @@ func (s *loopCrashStore) RecordAgentTurnStepModel(ctx context.Context, turn *Age
 
 // Actions and approvals.
 
-func (s *loopCrashStore) CreateActionProposal(ctx context.Context, proposal ActionProposalRecord) (*ActionProposalResult, error) {
+func (s *loopCrashStore) CreateActionProposal(ctx context.Context, proposal models.ActionProposalRecord) (*models.ActionProposalResult, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.KernelStore.CreateActionProposal(ctx, proposal)
 }
 
-func (s *loopCrashStore) ResolveApproval(ctx context.Context, resolution ApprovalResolutionRecord) (*ApprovalResolutionResult, error) {
+func (s *loopCrashStore) ResolveApproval(ctx context.Context, resolution models.ApprovalResolutionRecord) (*models.ApprovalResolutionResult, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.KernelStore.ResolveApproval(ctx, resolution)
 }
 
-func (s *loopCrashStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error) {
+func (s *loopCrashStore) ClaimNextAction(ctx context.Context, claim models.ActionClaim) (*models.ActionCall, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.KernelStore.ClaimNextAction(ctx, claim)
 }
 
-func (s *loopCrashStore) RenewActionLease(ctx context.Context, scope Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*ActionCall, error) {
+func (s *loopCrashStore) RenewActionLease(ctx context.Context, scope models.Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*models.ActionCall, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}
 	return s.KernelStore.RenewActionLease(ctx, scope, actionID, workerID, now, leaseDuration)
 }
 
-func (s *loopCrashStore) PersistActionExecution(ctx context.Context, execution ActionExecutionRecord) (*ActionExecutionResult, error) {
+func (s *loopCrashStore) PersistActionExecution(ctx context.Context, execution models.ActionExecutionRecord) (*models.ActionExecutionResult, error) {
 	if err := s.refused(); err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -17,16 +18,16 @@ func TestCompactionCarriesSurfacedTools(t *testing.T) {
 
 	// Summarize up to the second load: the first load's tool is carried.
 	kept := late.ID
-	f.render.Add(&SessionEntry{RunID: "run-1", Type: SessionEntryCompaction, Compaction: &CompactionEntry{
+	f.render.Add(&models.SessionEntry{RunID: "run-1", Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntry{
 		Summary: "Earlier work.", FirstKeptEntryID: f.render.Entries[len(f.render.Entries)-3].ID, TokensBefore: 9000,
 		CarriedTools: early.Tool.SurfacedTools,
-		Provider:     "anthropic", Model: "claude-test", Trigger: CompactionTriggerThreshold,
+		Provider:     "anthropic", Model: "claude-test", Trigger: models.CompactionTriggerThreshold,
 	}})
 	after := f.prepare("step-3")
-	loadedTools := func(req ModelStepRequest) []ModelStepTool {
-		var tools []ModelStepTool
+	loadedTools := func(req models.ModelStepRequest) []models.ModelStepTool {
+		var tools []models.ModelStepTool
 		for _, tool := range req.Tools {
-			if tool.Group == ModelStepToolLoaded {
+			if tool.Group == models.ModelStepToolLoaded {
 				tools = append(tools, tool)
 			}
 		}

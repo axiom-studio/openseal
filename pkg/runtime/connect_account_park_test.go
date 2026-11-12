@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -43,11 +44,11 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 	}))
 	result := executeLoopPersonAction(t, worker, scope, proposal)
 	call := result.Call
-	if dispatches != 0 || call.Status != ActionCallStatusFailed || call.FailurePhase != ActionFailureBeforeDispatch ||
+	if dispatches != 0 || call.Status != models.ActionCallStatusFailed || call.FailurePhase != models.ActionFailureBeforeDispatch ||
 		!strings.HasPrefix(call.Error, "connect_account_required: ") || call.ExternalOperationDigest != "" || !skillbinding.IsParkedConnectAccountCall(call) {
 		t.Fatalf("parked call = %#v", call)
 	}
-	if len(checks) != 1 || checks[0].ActingUser != actiontest.ActingUser || checks[0].Umbrella != (ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}) ||
+	if len(checks) != 1 || checks[0].ActingUser != actiontest.ActingUser || checks[0].Umbrella != (models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}) ||
 		checks[0].BindingID != "mail-binding" || checks[0].References["google"].ID != skill.PersonCredentialReferenceID || checks[0].Requirements["google"].OAuth2 == nil {
 		t.Fatalf("availability request = %#v", checks)
 	}
@@ -55,7 +56,7 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 	if err != nil || card == nil {
 		t.Fatalf("card = %#v, %v", card, err)
 	}
-	if card.Kind != SkillSetupKindConnectAccount || card.Mode != "per_person" || card.RequestedFor != actiontest.ActingUser || card.Status != "pending" ||
+	if card.Kind != models.SkillSetupKindConnectAccount || card.Mode != "per_person" || card.RequestedFor != actiontest.ActingUser || card.Status != "pending" ||
 		card.ConversationID != "conversation-1" || card.RunID != run.ID || len(card.Slots) != 1 || card.Slots[0].Name != "google" ||
 		card.Reason != "This Agent uses each person's own Google account." {
 		t.Fatalf("card = %#v", card)
@@ -66,12 +67,12 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Status != AgentRunStatusRunning || stored.FailureExplanation != nil {
+	if stored.Status != models.AgentRunStatusRunning || stored.FailureExplanation != nil {
 		t.Fatalf("a parked call changed its Run: %s %#v", stored.Status, stored.FailureExplanation)
 	}
 	parker := newGovernedParker(store, nil, nil)
 	wake, summary, err := parker.governedCardWait(context.Background(), stored, call)
-	if err != nil || wake == nil || wake.Type != ConnectAccountWakeType || wake.Reference != card.ID || summary != skillbinding.ConnectAccountWaitSummary(card) {
+	if err != nil || wake == nil || wake.Type != models.ConnectAccountWakeType || wake.Reference != card.ID || summary != skillbinding.ConnectAccountWaitSummary(card) {
 		t.Fatalf("card wait = %#v %q %v", wake, summary, err)
 	}
 
@@ -88,11 +89,11 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 		t.Fatalf("a resolved card still parks: %#v %v", wake, err)
 	}
 	retry := proposeLoopPersonAction(t, store, catalog, scope, stored, now, "step-2", "send-1-retry", nil)
-	if !retry.Created || retry.Call.ID == call.ID || retry.Call.Status != ActionCallStatusReady || retry.Call.DuplicateOfActionCallID != "" {
+	if !retry.Created || retry.Call.ID == call.ID || retry.Call.Status != models.ActionCallStatusReady || retry.Call.DuplicateOfActionCallID != "" {
 		t.Fatalf("retry not admitted: %#v", retry.Call)
 	}
 	result = executeLoopPersonAction(t, worker, scope, retry)
-	if result.Call.ID != retry.Call.ID || result.Call.Status != ActionCallStatusSucceeded || dispatches != 1 {
+	if result.Call.ID != retry.Call.ID || result.Call.Status != models.ActionCallStatusSucceeded || dispatches != 1 {
 		t.Fatalf("retry = %#v dispatches=%d", result.Call, dispatches)
 	}
 	last := resolutions[len(resolutions)-1]

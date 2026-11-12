@@ -7,30 +7,31 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 )
 
 func TestCatchUpWatermarkConflictRetries(t *testing.T) {
-	conversationtest.ForCatchUpStores(t, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *conversationtest.CatchUpFixture) {
+	conversationtest.ForCatchUpStores(t, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, func(t *testing.T, f *conversationtest.CatchUpFixture) {
 		runA, session := f.Open("")
 		first := f.Say("m1", "from Maya")
 		// Run A parks; Run B of another person runs on the same lane session.
 		runB := f.Run(session.ID, true)
 		second := f.Say("m2", "from Lee")
-		stale := cloneAgentSession(session)
+		stale := models.CloneAgentSession(session)
 
 		// B catches up through m2 while A is preparing from the stale watermark.
 		bPreparer := &catchUpPreparer{f: f, through: second.Sequence}
 		aPreparer := &catchUpPreparer{f: f, through: second.Sequence}
 		aPreparer.before = func() {
-			if _, err := appendStepContext(t.Context(), f.Store, agentrun.StepInput{Run: runB, Step: &AgentTurn{Sequence: 1}, Session: stale, WorkerID: "w1"}, []agentrun.StepPreparer{bPreparer}, f.Now); err != nil {
+			if _, err := appendStepContext(t.Context(), f.Store, agentrun.StepInput{Run: runB, Step: &models.AgentTurn{Sequence: 1}, Session: stale, WorkerID: "w1"}, []agentrun.StepPreparer{bPreparer}, f.Now); err != nil {
 				t.Fatalf("run B context: %v", err)
 			}
 		}
 		third := f.Say("m3", "Maya again")
 		aPreparer.through = third.Sequence
-		result, err := appendStepContext(t.Context(), f.Store, agentrun.StepInput{Run: runA, Step: &AgentTurn{Sequence: 2}, Session: stale, WorkerID: "w1"}, []agentrun.StepPreparer{aPreparer}, f.Now)
+		result, err := appendStepContext(t.Context(), f.Store, agentrun.StepInput{Run: runA, Step: &models.AgentTurn{Sequence: 2}, Session: stale, WorkerID: "w1"}, []agentrun.StepPreparer{aPreparer}, f.Now)
 		if err != nil {
 			t.Fatalf("run A context: %v", err)
 		}
@@ -63,7 +64,7 @@ func TestCatchUpWatermarkConflictRetries(t *testing.T) {
 			moving.before = bump
 		}
 		moving.before = bump
-		if _, err := appendStepContext(t.Context(), f.Store, agentrun.StepInput{Run: runA, Step: &AgentTurn{Sequence: 3}, Session: result.Session, WorkerID: "w1"}, []agentrun.StepPreparer{moving}, f.Now); !errors.Is(err, ErrChannelWatermarkMoved) || moving.calls != stepContextAttempts {
+		if _, err := appendStepContext(t.Context(), f.Store, agentrun.StepInput{Run: runA, Step: &models.AgentTurn{Sequence: 3}, Session: result.Session, WorkerID: "w1"}, []agentrun.StepPreparer{moving}, f.Now); !errors.Is(err, models.ErrChannelWatermarkMoved) || moving.calls != stepContextAttempts {
 			t.Fatalf("endless watermark conflicts = %v after %d tries, want ErrChannelWatermarkMoved after %d", err, moving.calls, stepContextAttempts)
 		}
 	})
