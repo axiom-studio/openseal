@@ -996,6 +996,8 @@ func conversationResultMap(value interface{}) map[string]interface{} {
 	return result
 }
 
+// ConversationResultString is the trimmed string at key in a Run result, or
+// "" when it is missing or not a string.
 func ConversationResultString(value map[string]interface{}, key string) string {
 	if value == nil {
 		return ""

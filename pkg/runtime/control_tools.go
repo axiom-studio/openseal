@@ -316,7 +316,7 @@ type ControlExecutor struct {
 	Collaboration *CollaborationService
 	Tasks         *conversationrun.ConversationTaskService
 	Conversations *conversation.ConversationService
-	Reporting     ConversationStore // projectConversationRunbookStart / runbookSourceMessage
+	Reporting     ConversationStore // conversationrun.ProjectConversationRunbookStart / runbookSourceMessage
 	Now           func() time.Time
 
 	// handlers are the tools x runs; nil runs builtinControlTools.

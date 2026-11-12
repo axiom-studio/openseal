@@ -12,7 +12,7 @@ import (
 // has active work, and always with the catalog schema: no per-step run id
 // enum and no tool appearing with work (both broke the prompt cache). A run
 // id that is not active work is refused at call time instead
-// (conversation_loop.go checkToolCall).
+// (conversationrun/conversation_loop.go checkToolCall).
 func TestConversationRunBindingOffersRunControlWithAndWithoutActiveWork(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
 		definition := agentrun.RunManagementSkill()

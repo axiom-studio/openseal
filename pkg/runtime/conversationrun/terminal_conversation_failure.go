@@ -29,11 +29,13 @@ func (e undeliverableReport) Is(target error) bool {
 
 func undeliverable(reason string) error { return undeliverableReport{reason: reason} }
 
+// TerminalConversationFailureReplyKey is the idempotency key of the failure
+// reply to a terminal Run at its current revision.
 func TerminalConversationFailureReplyKey(run *models.AgentRun) string {
 	return "conversation-failure:" + run.ID + ":" + strconv.FormatInt(run.Revision, 10)
 }
 
-// projectFailedConversationReply first checks the normal Agent response key.
+// ProjectFailedConversationReply first checks the normal Agent response key.
 // Otherwise outbox recovery and external delivery share one immutable failure
 // key per terminal attempt rather than creating additional status messages.
 func ProjectFailedConversationReply(ctx context.Context, store models.ConversationStore, run *models.AgentRun) error {

@@ -25,7 +25,7 @@ func conversationRunHasFollowUp(run *models.AgentRun, messageID string) bool {
 	return false
 }
 
-// externalInboxItemIsFollowUp reports whether an inbox item's message was
+// ExternalInboxItemIsFollowUp reports whether an inbox item's message was
 // delivered into another message's Run. That Run's own inbox item projects
 // its progress and reply; the follow-up item must not duplicate them.
 func ExternalInboxItemIsFollowUp(item *models.ExternalConversationInboxItem, run *models.AgentRun) bool {

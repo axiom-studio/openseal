@@ -19,6 +19,9 @@ func runReportingChannelKey(owner models.ObjectiveOwner, policy *runbook.Reporti
 	return "run-reporting-channel:" + string(owner.Type) + ":" + owner.ID + ":" + policy.Channel
 }
 
+// PrepareRunReporting opens the reporting channel a Runbook's policy selects
+// and records it in a new Run's context values; it returns the channel and the
+// key of the Run's start message.
 func PrepareRunReporting(
 	ctx context.Context,
 	store models.ConversationStore,
@@ -52,7 +55,7 @@ func PrepareRunReporting(
 	return channel, messageKey, nil
 }
 
-// ensureRunReportingChannel materializes the durable work channel selected by
+// EnsureRunReportingChannel materializes the durable work channel selected by
 // an active Runbook. Activations and Runs both call this boundary so accepted
 // compositions expose their channel immediately while execution safely reuses
 // the same owner-scoped Conversation. person is the one the activation acts
@@ -78,6 +81,8 @@ func EnsureRunReportingChannel(
 	return channel, err
 }
 
+// ProjectRunReportingStart posts a Run's start message to its reporting
+// channel when the Run reports the started milestone.
 func ProjectRunReportingStart(
 	ctx context.Context,
 	store models.ConversationStore,
@@ -114,7 +119,7 @@ func ProjectRunReportingStart(
 	return err
 }
 
-// projectConversationRunbookStart acknowledges an on-demand operation as soon
+// ProjectConversationRunbookStart acknowledges an on-demand operation as soon
 // as its durable child Run exists. The conversation parent may remain blocked
 // on work or approval for hours; users must not need to send the command again
 // merely to learn whether it started. A Run may start several operations, so
@@ -157,6 +162,8 @@ func ProjectConversationRunbookStart(ctx context.Context, store models.Conversat
 	return err
 }
 
+// ProjectTerminalRunReporting posts a terminal Run's report to the
+// conversation it reports to.
 func ProjectTerminalRunReporting(ctx context.Context, store models.ConversationStore, run *models.AgentRun) error {
 	if store == nil || run == nil || !models.IsTerminalAgentRunStatus(run.Status) {
 		return nil
@@ -303,12 +310,12 @@ func ProjectTerminalRunReporting(ctx context.Context, store models.ConversationS
 	return err
 }
 
-// routineOccurrenceRun reports whether run is an occurrence of a routine.
+// RoutineOccurrenceRun reports whether run is an occurrence of a routine.
 func RoutineOccurrenceRun(run *models.AgentRun) bool {
 	return run != nil && run.Context[models.ScheduledTaskContextKey] == true
 }
 
-// silentRoutineOccurrence reports a completed routine occurrence that
+// SilentRoutineOccurrence reports a completed routine occurrence that
 // finished silent: it posts nothing in the chat or any mirror of it.
 func SilentRoutineOccurrence(run *models.AgentRun) bool {
 	if !RoutineOccurrenceRun(run) || run.Kind == models.RunKindConversation || run.Status != models.AgentRunStatusCompleted {
@@ -328,6 +335,8 @@ func terminalRunStatusLabel(status models.AgentRunStatus) string {
 	return string(runes)
 }
 
+// ProjectRunReportingStartForRun posts the start message of a reporting root
+// Run to the channel named in its context.
 func ProjectRunReportingStartForRun(ctx context.Context, store models.ConversationStore, run *models.AgentRun) error {
 	if store == nil || run == nil || !models.RunReportsMilestone(run, runbook.ReportingStarted) {
 		return nil

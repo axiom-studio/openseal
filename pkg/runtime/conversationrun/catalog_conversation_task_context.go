@@ -12,6 +12,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
+// ResolveCatalogConversationTaskContext is the conversation task context of a
+// catalog Agent's Run.
+//
 // The conversation adapter lowers the Run kind for ordinary Agent cognition.
 // Recover the source through its durable identity rather than treating that
 // lowered kind or copied context as authority to create independent work.

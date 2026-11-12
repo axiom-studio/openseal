@@ -23,7 +23,7 @@ func conversationOperationSummary(output map[string]interface{}) string {
 	return ""
 }
 
-// conversationOperationSavedOutput is a finished operation's user-facing
+// ConversationOperationSavedOutput is a finished operation's user-facing
 // output. A failed or canceled operation has none: the loop writes
 // Output.summary only on a final answer, so no partial draft can exist.
 func ConversationOperationSavedOutput(_ context.Context, _ models.PortfolioStore, operation *models.AgentRun) (string, error) {

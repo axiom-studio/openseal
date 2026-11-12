@@ -110,7 +110,7 @@ func newChildFixture(t *testing.T, store KernelStore, opts ...loopOption) *child
 	t.Helper()
 	f := newLoopFixture(t, store, opts...)
 	// Task admission checks the source lease against the wall clock
-	// (conversation_task.go), so the fake clock starts at wall time.
+	// (conversationrun/conversation_task.go), so the fake clock starts at wall time.
 	if ahead := time.Until(f.clock.Now()); ahead < 0 {
 		f.clock.Advance(-ahead)
 	}

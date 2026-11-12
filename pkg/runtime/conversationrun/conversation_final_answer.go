@@ -389,6 +389,9 @@ func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, 
 
 const FinalModeSpoken agentrun.FinalAnswerMode = "spoken" // conversation responseMode == "spoken"
 
+// FinalOutputSummaryKey is the final output field that holds the answer text.
 const FinalOutputSummaryKey = "summary"
 
+// FinalOutputVisualRejectionKey is the final output field that records why
+// the answer's visual was not posted.
 const FinalOutputVisualRejectionKey = "visualRejection"
