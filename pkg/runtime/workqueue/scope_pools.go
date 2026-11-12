@@ -19,7 +19,7 @@ type scopePool interface {
 	IdleFor(time.Time) time.Duration
 }
 
-// scopePools keeps one pool per scope that has work.
+// ScopePools keeps one pool per scope that has work.
 //
 // While the work queue is healthy a scope gets a pool the first time the
 // queue delivers work for it, after a point check that the scope may run
@@ -33,7 +33,7 @@ type scopePool interface {
 type ScopePools[P scopePool] struct {
 	name      string
 	source    WorkerScopeSource
-	gate      *workScopeGate
+	gate      *WorkScopeGate
 	interval  time.Duration
 	retire    time.Duration
 	dueFamily models.WorkFamily
@@ -51,7 +51,7 @@ type ScopePools[P scopePool] struct {
 }
 
 // retire is how long a queue-driven pool stays idle before it stops;
-// supervisors pass poolRetireAfter.
+// supervisors pass PoolRetireAfter.
 func NewScopePools[P scopePool](name string, source WorkerScopeSource, interval, retire time.Duration, dueFamily models.WorkFamily, logger *zap.SugaredLogger, create func(models.Scope) (P, error)) *ScopePools[P] {
 	return &ScopePools[P]{
 		name: name, source: source, gate: NewWorkScopeGate(source, interval), interval: interval, retire: retire, dueFamily: dueFamily,
@@ -104,7 +104,7 @@ func (s *ScopePools[P]) Each(fn func(P)) {
 
 func (s *ScopePools[P]) Wake() { s.Each(func(pool P) { pool.Wake() }) }
 
-// wakeScope wakes the scope's pool, or asks for one while the queue is
+// WakeScope wakes the scope's pool, or asks for one while the queue is
 // healthy. The read lock orders the wake before any retirement check, so a
 // woken pool is never retired by a concurrent pass.
 func (s *ScopePools[P]) WakeScope(scope models.Scope) {

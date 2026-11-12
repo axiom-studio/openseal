@@ -75,7 +75,7 @@ func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
 }
 
 // AgentRunWorkerSupervisor runs an isolated, kind-aware Run pool per scope
-// with Run work. See scopePools for when a scope has a pool.
+// with Run work. See workqueue.ScopePools for when a scope has a pool.
 type AgentRunWorkerSupervisor struct {
 	store    KernelStore
 	resolver TurnRunnerResolver

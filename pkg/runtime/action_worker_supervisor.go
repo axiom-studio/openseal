@@ -45,7 +45,7 @@ func (c *DynamicActionWorkerConfig) applyDefaults() error {
 }
 
 // ActionWorkerSupervisor runs an isolated worker pool per scope with
-// ActionCall work. See scopePools for when a scope has a pool.
+// ActionCall work. See workqueue.ScopePools for when a scope has a pool.
 type ActionWorkerSupervisor struct {
 	store       KernelStore
 	catalog     ActionExecutionCatalog

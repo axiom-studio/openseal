@@ -4,7 +4,7 @@ import (
 	"sync"
 )
 
-// workerPollSignal broadcasts latency hints without losing a notification
+// WorkerPollSignal broadcasts latency hints without losing a notification
 // between an empty durable claim and the following wait. Periodic polling is
 // still authoritative for missed notifications and process restarts.
 type WorkerPollSignal struct {

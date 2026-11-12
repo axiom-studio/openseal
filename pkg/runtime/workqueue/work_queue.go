@@ -225,13 +225,13 @@ func (h *workDueHeap) Pop() any {
 	return entry
 }
 
-// workScopeGate admits a queued scope to worker supervision. It prefers a
+// WorkScopeGate admits a queued scope to worker supervision. It prefers a
 // point lookup and caches answers, so admitting a scope never lists every
 // scope; sources without a point lookup fall back to a throttled listing.
-type workScopeGate struct {
+type WorkScopeGate struct {
 	source  WorkerScopeSource
 	checker WorkScopeChecker
-	known   *knownWorkerScopes
+	known   *KnownWorkerScopes
 	mu      sync.Mutex
 	cache   map[models.Scope]workScopeAnswer
 	now     func() time.Time
@@ -248,8 +248,8 @@ const (
 	workScopeCacheLimit  = 65536
 )
 
-func NewWorkScopeGate(source WorkerScopeSource, refresh time.Duration) *workScopeGate {
-	gate := &workScopeGate{source: source, cache: make(map[models.Scope]workScopeAnswer), now: time.Now}
+func NewWorkScopeGate(source WorkerScopeSource, refresh time.Duration) *WorkScopeGate {
+	gate := &WorkScopeGate{source: source, cache: make(map[models.Scope]workScopeAnswer), now: time.Now}
 	gate.checker, _ = source.(WorkScopeChecker)
 	if gate.checker == nil {
 		gate.known = NewKnownWorkerScopes(source, refresh)
@@ -257,10 +257,10 @@ func NewWorkScopeGate(source WorkerScopeSource, refresh time.Duration) *workScop
 	return gate
 }
 
-// filter keeps the scopes that may run workers. Lookup failures drop the
+// Filter keeps the scopes that may run workers. Lookup failures drop the
 // scope for this pass; its work stays durable and is retried when the
 // scope is next scheduled.
-func (g *workScopeGate) Filter(ctx context.Context, scopes []models.Scope) ([]models.Scope, error) {
+func (g *WorkScopeGate) Filter(ctx context.Context, scopes []models.Scope) ([]models.Scope, error) {
 	if g.checker == nil {
 		g.mu.Lock()
 		defer g.mu.Unlock()
@@ -281,7 +281,7 @@ func (g *workScopeGate) Filter(ctx context.Context, scopes []models.Scope) ([]mo
 	return result, errors.Join(errs...)
 }
 
-func (g *workScopeGate) active(ctx context.Context, scope models.Scope) (bool, error) {
+func (g *WorkScopeGate) active(ctx context.Context, scope models.Scope) (bool, error) {
 	now := g.now()
 	g.mu.Lock()
 	answer, ok := g.cache[scope]
@@ -306,7 +306,7 @@ func (g *workScopeGate) active(ctx context.Context, scope models.Scope) (bool, e
 	return active, nil
 }
 
-// poolActivity tracks whether a scope pool is doing anything, so a
+// PoolActivity tracks whether a scope pool is doing anything, so a
 // queue-driven supervisor can retire pools of idle scopes. A retired scope
 // costs nothing until the queue delivers its next item.
 type PoolActivity struct {
@@ -326,7 +326,7 @@ func (a *PoolActivity) End() {
 	a.busy.Add(-1)
 }
 
-// idleFor returns how long the pool has done nothing, or zero while busy.
+// IdleFor returns how long the pool has done nothing, or zero while busy.
 func (a *PoolActivity) IdleFor(now time.Time) time.Duration {
 	if a.busy.Load() > 0 {
 		return 0
@@ -334,7 +334,7 @@ func (a *PoolActivity) IdleFor(now time.Time) time.Duration {
 	return max(now.Sub(time.Unix(0, a.last.Load())), 0)
 }
 
-// poolRetireAfter is how long a queue-driven scope pool stays idle before its
+// PoolRetireAfter is how long a queue-driven scope pool stays idle before its
 // supervisor stops it. Its next deadline is already in the queue.
 const PoolRetireAfter = time.Minute
 
