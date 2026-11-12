@@ -211,8 +211,8 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 			t.Fatalf("summary request = step %s instruction %q preview %v; step 4 is %s",
 				summary.StepID, summary.SummaryInstruction, summary.Stream.AnswerPreview, after.StepID)
 		}
-		if !reflect.DeepEqual(summary.System, after.System) || !slices.Equal(toolNames(summary.Tools), toolNames(after.Tools)) {
-			t.Fatalf("summary System/Tools differ from the step's: tools %v vs %v", toolNames(summary.Tools), toolNames(after.Tools))
+		if !reflect.DeepEqual(summary.System, after.System) || !slices.Equal(kitToolNames(summary.Tools), kitToolNames(after.Tools)) {
+			t.Fatalf("summary System/Tools differ from the step's: tools %v vs %v", kitToolNames(summary.Tools), kitToolNames(after.Tools))
 		}
 		summarized := viewEntryIDs(summary.Entries)
 		for _, entry := range log[:first] {
@@ -502,4 +502,14 @@ func TestLoopCompactionNeverSplitsAToolCallFromItsResult(t *testing.T) {
 			t.Fatalf("lookups dispatched = %d, want 6", f.dispatch.count("lookup"))
 		}
 	})
+}
+
+// kitToolNames is the tool names of tools, in order. It is a copy of the run
+// loop tests' toolNames; change them together.
+func kitToolNames(tools []ModelStepTool) []string {
+	names := make([]string, len(tools))
+	for i, tool := range tools {
+		names[i] = tool.Name
+	}
+	return names
 }
