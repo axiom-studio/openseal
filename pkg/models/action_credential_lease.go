@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -350,7 +351,7 @@ func CheckCurrentActionCredentialBinding(lease ActionCredentialLease, call *Acti
 		binding.Scope.Kind != lease.Scope.Kind || binding.Scope.ID != lease.Scope.ID ||
 		binding.DeploymentID != lease.BindingOwnerID || binding.ID != lease.BindingID || binding.Revision != lease.BindingRevision ||
 		binding.SkillID != lease.SkillID || binding.SkillVersion != lease.SkillVersion ||
-		!stringSliceContains(binding.AllowedActions, lease.Action) ||
+		!slices.Contains(binding.AllowedActions, lease.Action) ||
 		riskLevelRank(call.Risk) < 0 || riskLevelRank(binding.MaximumRisk) < riskLevelRank(call.Risk) ||
 		!credentialReferencesContainExact(binding.Credentials, call.CredentialRefs) {
 		return ErrActionCredentialLeaseMismatch
@@ -373,15 +374,6 @@ func credentialReferencesContainExact(available, selected map[string]skill.Crede
 		}
 	}
 	return true
-}
-
-func stringSliceContains(values []string, expected string) bool {
-	for _, value := range values {
-		if value == expected {
-			return true
-		}
-	}
-	return false
 }
 
 func riskLevelRank(value skill.RiskLevel) int {
