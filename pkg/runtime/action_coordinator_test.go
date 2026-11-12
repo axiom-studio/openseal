@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -17,7 +18,7 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 	catalog, scope := governedActionCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := claimedActionRun(t, store, scope, now, "worker")
-	seedActionCall(t, store, &ActionCall{
+	storetest.SeedActionCall(t, store, &ActionCall{
 		ID: "prepared-comment", Scope: scope, RunID: run.ID, TurnID: "step-0", DeploymentID: "release-agent",
 		SkillID: "browser", SkillVersion: "2.0.0", Action: "fill", Status: ActionCallStatusSucceeded,
 		Origin: ActionOriginLoop, Execution: ActionExecutionLoop,

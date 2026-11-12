@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -36,7 +37,7 @@ func (f *runHistoryFixture) add(call ActionCall) {
 	}
 	call.Scope, call.TurnID = f.scope, "step-1"
 	call.CreatedAt, call.UpdatedAt, call.CompletedAt = completed, completed, &completed
-	seedActionCall(f.t, f.store, &call)
+	storetest.SeedActionCall(f.t, f.store, &call)
 }
 
 func (f *runHistoryFixture) history() RunActionHistory {

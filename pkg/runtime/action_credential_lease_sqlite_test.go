@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -206,7 +207,7 @@ func createSQLiteActionCredentialLeaseFixture(t *testing.T, ctx context.Context,
 	if run, err = store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "run-worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute}); err != nil || run == nil {
 		t.Fatalf("claim run = %#v, %v", run, err)
 	}
-	seedActionCall(t, store, &ActionCall{
+	storetest.SeedActionCall(t, store, &ActionCall{
 		ID: uuid.NewString(), Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: deploymentID, BindingID: binding.ID, BindingRevision: binding.Revision,
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: "read", Status: ActionCallStatusReady, Origin: ActionOriginVM,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, CredentialRefs: binding.Credentials,

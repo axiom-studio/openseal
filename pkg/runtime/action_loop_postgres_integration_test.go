@@ -51,7 +51,7 @@ func TestNextActionDeadlineIgnoresLoopCalls(t *testing.T) {
 	worker.Origin, worker.Execution, worker.AvailableAt = ActionOriginVM, "", f.now.Add(2*time.Hour)
 	worker.InvocationDigest = ComputeActionInvocationDigest(worker)
 	worker.SemanticDigest = ComputeActionSemanticDigest(worker)
-	seedActionCall(t, store, worker)
+	storetest.SeedActionCall(t, store, worker)
 	deadline, err = store.NextActionDeadline(ctx, f.scope, f.now)
 	if err != nil || deadline == nil || !deadline.Equal(worker.AvailableAt) {
 		t.Fatalf("deadline = %v, %v; want the worker call's %v", deadline, err, worker.AvailableAt)
