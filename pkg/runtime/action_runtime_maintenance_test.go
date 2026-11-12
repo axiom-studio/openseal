@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -178,8 +179,7 @@ func TestActionRuntimeMaintenanceCoordinatorRejectsBeforeCatalogAndPolicy(t *tes
 		coordinator := NewActionCoordinator(kernel, kernel, &actionLifecycleCountingCatalog{ActionExecutionCatalog: fixture.catalog, calls: &catalogCalls}, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 			policyCalls++
 			return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-		}), nil)
-		coordinator.now = func() time.Time { return fixture.now.Add(time.Second) }
+		}), nil, models.WithClock(func() time.Time { return fixture.now.Add(time.Second) }))
 		result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
 			Scope: before.Scope, RunID: before.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
 			BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision, SkillID: fixture.binding.SkillID, SkillVersion: fixture.binding.SkillVersion,
@@ -220,8 +220,7 @@ func TestActionRuntimeMaintenanceObservedAfterClaimDefersWithoutFailure(t *testi
 				}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 					dispatches++
 					return map[string]interface{}{"providerResult": "delivered"}, nil
-				}))
-				worker.now = func() time.Time { return fixture.now.Add(2 * time.Second) }
+				}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
 				// The loop parks the call on maintenance (awaiting_event until
 				// RetryAt); the call stays ready and nothing is charged.
 				result, err := worker.ExecuteOwnLoopCall(t.Context(), before.Scope, fixture.proposal.Call.ID, "agent-worker")
@@ -281,8 +280,7 @@ func TestActionRuntimeMaintenanceVerifiedReleaseUsesFreshVersion(t *testing.T) {
 				t.Fatalf("released action used stale executable authority: %#v", input)
 			}
 			return map[string]interface{}{"providerResult": "delivered"}, nil
-		}))
-		worker.now = func() time.Time { return fixture.now.Add(3 * time.Second) }
+		}), models.WithClock(func() time.Time { return fixture.now.Add(3 * time.Second) }))
 		completed, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "agent-worker")
 		if err != nil || completed == nil || completed.Call.Status != ActionCallStatusSucceeded || dispatches != 1 {
 			t.Fatalf("fresh-version dispatch failed: %#v, %v, dispatches=%d", completed, err, dispatches)
@@ -476,8 +474,7 @@ func actionRuntimeMaintenanceWorker(kernel KernelStore, fixture *actionBindingFe
 	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		(*dispatches)++
 		return map[string]interface{}{"providerResult": "delivered"}, nil
-	}))
-	worker.now = func() time.Time { return fixture.now.Add(2 * time.Second) }
+	}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
 	return worker
 }
 

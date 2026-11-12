@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -59,8 +60,7 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 			return map[string]interface{}{"providerResult": "delivered"}, nil
 		},
 	}
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return start }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return start }))
 	created, err := portfolio.CreateAgentRun(f.ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent",
 		Goal: "ship the release", Source: RunSourceObjective,
@@ -86,19 +86,16 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 			return nil, f.validate(input)
 		}
 		return nil, nil
-	})})
-	coordinator.now = now
+	})}, models.WithClock(now))
 	f.actions = coordinator
-	f.approvals = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-	f.approvals.now = now
+	f.approvals = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(now))
 	f.worker = NewActionWorker(store, catalog,
 		CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 			return map[string]string{"token": "loop-secret"}, nil
 		}), ActionDispatcherFunc(func(_ context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
 			f.dispatches++
 			return f.dispatch(input)
-		}))
-	f.worker.now = now
+		}), models.WithClock(now))
 	f.executor, err = NewGovernedToolExecutor(GovernedToolExecutorConfig{
 		Actions: coordinator, Approvals: f.approvals, Worker: f.worker, Store: store, Now: now,
 		Observer: ActionProposalObserverFunc(func(context.Context, *AgentRun, *AgentTurn, *ActionProposalResult) error {

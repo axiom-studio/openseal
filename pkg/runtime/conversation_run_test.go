@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -407,8 +408,7 @@ func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
 func TestTeamRoutingRunCompletesWithResponderRunIds(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{team: true}, func(t *testing.T, f *chatLoopFixture) {
 		trigger := f.post("route", "user-1", "Who can check the canary?")
-		commands := NewRunCommandService(f.store)
-		commands.now = func() time.Time { return f.now }
+		commands := NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
 		created, err := commands.CreateAgentRun(f.ctx, conversationAgentRunRequest(f.conversation, trigger))
 		if err != nil {
 			t.Fatal(err)

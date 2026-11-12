@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -97,11 +98,10 @@ func TestRunProgressAcknowledgementWorkerUsesNativeProgressCapability(t *testing
 	})
 	worker, err := NewRunProgressAcknowledgementWorker(fixture.store, fixture.catalog, renderer, RunProgressAcknowledgementWorkerConfig{
 		MinimumInterval: time.Nanosecond,
-	})
+	}, models.WithClock(func() time.Time { return fixture.now.Add(time.Millisecond) }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker.now = func() time.Time { return fixture.now.Add(time.Millisecond) }
 	deliveries, err := worker.ProcessScope(context.Background(), fixture.endpoint.Scope)
 	if err != nil || len(deliveries) != 1 || deliveries[0].Operation != capability.ConversationDeliveryTypingIndicator ||
 		deliveries[0].Parameters["status"] != "Inspecting it, obviously." || deliveries[0].ExternalThreadID != "thread" ||
@@ -131,11 +131,10 @@ func TestRunProgressAcknowledgementWorkerFallsBackToText(t *testing.T) {
 	})
 	worker, err := NewRunProgressAcknowledgementWorker(fixture.store, fixture.catalog, renderer, RunProgressAcknowledgementWorkerConfig{
 		MinimumRunAge: time.Nanosecond, MinimumInterval: time.Nanosecond,
-	})
+	}, models.WithClock(func() time.Time { return fixture.now.Add(time.Minute) }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker.now = func() time.Time { return fixture.now.Add(time.Minute) }
 	deliveries, err := worker.ProcessScope(context.Background(), fixture.endpoint.Scope)
 	if err != nil || len(deliveries) != 1 || deliveries[0].Operation != capability.ConversationDeliveryMessageSend {
 		t.Fatalf("text fallback delivery = %#v, %v", deliveries, err)

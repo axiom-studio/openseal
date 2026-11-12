@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestSkillRuntimeMaintenanceResolverErrorParksBeforeStartingTurn(t *testing.T) {
@@ -15,8 +17,7 @@ func TestSkillRuntimeMaintenanceResolverErrorParksBeforeStartingTurn(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		portfolio := NewPortfolioService(store)
-		portfolio.now = func() time.Time { return request.Now }
+		portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return request.Now }))
 		run, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: request.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher", Goal: "Continue the original conversation", Source: RunSourceManual})
 		if err != nil {
 			t.Fatal(err)

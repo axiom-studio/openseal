@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestAgentTurnsEnforceOneActiveTurn(t *testing.T) {
@@ -26,7 +28,8 @@ func TestAgentTurnsEnforceOneActiveTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turns := NewAgentTurnService(store, store)
+	turnsClock := time.Now
+	turns := NewAgentTurnService(store, store, models.WithClock(func() time.Time { return turnsClock() }))
 	const count = 20
 	errs := make(chan error, count)
 	var wg sync.WaitGroup
@@ -84,11 +87,11 @@ func TestAgentTurnsEnforceOneActiveTurn(t *testing.T) {
 	if second.Sequence != 2 {
 		t.Fatalf("second turn sequence = %d, want 2", second.Sequence)
 	}
-	turns.now = func() time.Time { return second.LeaseExpiresAt.Add(-time.Second) }
+	turnsClock = func() time.Time { return second.LeaseExpiresAt.Add(-time.Second) }
 	if _, err := turns.ClaimTurn(ctx, scope, second.ID, "recovery-worker", time.Minute); !errors.Is(err, ErrTurnLeaseHeld) {
 		t.Fatalf("live lease claim error = %v", err)
 	}
-	turns.now = func() time.Time { return second.LeaseExpiresAt.Add(time.Second) }
+	turnsClock = func() time.Time { return second.LeaseExpiresAt.Add(time.Second) }
 	reclaimed, err := turns.ClaimTurn(ctx, scope, second.ID, "recovery-worker", time.Minute)
 	if err != nil {
 		t.Fatal(err)

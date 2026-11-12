@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -23,6 +24,7 @@ type nestedActionFixture struct {
 	turn        *AgentTurn
 	catalog     *skill.Catalog
 	coordinator *ActionCoordinator
+	clock       func() time.Time // the coordinator's clock
 	binding     *TurnRunnerBinding
 	closeTurn   func()
 }
@@ -104,8 +106,7 @@ func newNestedActionFixtureWith(t *testing.T, store KernelStore, definition *ski
 	if len(binding.ModelActions) != 2 {
 		t.Fatalf("offered actions = %#v", binding.ModelActions)
 	}
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "check the repo", Source: RunSourceObjective,
 	})
@@ -133,10 +134,10 @@ func newNestedActionFixtureWith(t *testing.T, store KernelStore, definition *ski
 			EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	coordinator := NewActionCoordinator(store, store, catalog, policy, nil)
-	coordinator.now = func() time.Time { return now.Add(time.Second) }
-	fixture := &nestedActionFixture{store: store, scope: scope, now: now, run: run, turn: turn, catalog: catalog, coordinator: coordinator, binding: binding}
-	fixture.closeTurn = coordinator.OpenNestedActionTurn(run, turn, binding)
+	fixture := &nestedActionFixture{store: store, scope: scope, now: now, run: run, turn: turn, catalog: catalog, binding: binding}
+	fixture.clock = func() time.Time { return now.Add(time.Second) }
+	fixture.coordinator = NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return fixture.clock() }))
+	fixture.closeTurn = fixture.coordinator.OpenNestedActionTurn(run, turn, binding)
 	t.Cleanup(fixture.closeTurn)
 	return fixture
 }
@@ -189,8 +190,7 @@ func (f *nestedActionFixture) worker(t *testing.T) *ActionWorker {
 			t.Fatalf("nested dispatch input = %#v", input)
 		}
 		return map[string]interface{}{"content": "hello", "path": input.Arguments["path"]}, nil
-	}))
-	worker.now = func() time.Time { return f.now.Add(2 * time.Second) }
+	}), models.WithClock(func() time.Time { return f.now.Add(2 * time.Second) }))
 	return worker
 }
 
@@ -308,8 +308,7 @@ func TestNestedActionRequiresTheRunsRunningStep(t *testing.T) {
 			worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 				t.Fatal("a nested call of a finished step was dispatched")
 				return nil, nil
-			}))
-			worker.now = func() time.Time { return f.now.Add(2 * time.Second) }
+			}), models.WithClock(func() time.Time { return f.now.Add(2 * time.Second) }))
 			executed, err := worker.RunOnce(ctx, f.scope, "action-worker", time.Minute)
 			if err != nil {
 				t.Fatal(err)
@@ -405,8 +404,7 @@ func TestNestedWriteActionWaitsForApprovalWithoutChangingTheRun(t *testing.T) {
 			}
 			f.assertRunUnchanged(t)
 
-			approvals := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{})
-			approvals.now = func() time.Time { return f.now.Add(2 * time.Second) }
+			approvals := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return f.now.Add(2 * time.Second) }))
 			resolved, err := approvals.Resolve(ctx, ResolveApprovalRequest{
 				Scope: f.scope, ApprovalID: result.Approval.ID, ExpectedRevision: result.Approval.Revision, DecisionID: "decision-1",
 				Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "user"},

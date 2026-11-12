@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -113,8 +114,7 @@ func assertCanceledApproval(t *testing.T, store cancellationStore) {
 			Disposition: ActionDispositionRequireApproval, Reason: "human review is required", ApprovalTTL: time.Hour,
 			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}},
 		}, nil
-	}), nil)
-	coordinator.now = func() time.Time { return now }
+	}), nil, models.WithClock(func() time.Time { return now }))
 	proposal, err := coordinator.Propose(ctx, loop.request(ProposeActionRequest{
 		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0", Action: "reply",
 		Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "reply-1", Summary: "Send reviewed reply",

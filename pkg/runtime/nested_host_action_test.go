@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -78,8 +79,7 @@ func (f *nestedActionFixture) refusingWorker(t *testing.T, at time.Time) *Action
 	worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		t.Fatal("an action worker dispatched a host call")
 		return nil, nil
-	}))
-	worker.now = func() time.Time { return at }
+	}), models.WithClock(func() time.Time { return at }))
 	return worker
 }
 
@@ -227,8 +227,7 @@ func TestNestedHostPushWaitsForApprovalAndHonorsTheDecision(t *testing.T) {
 			if _, err := f.coordinator.AcquireNestedHostAction(ctx, f.scope, f.run.ID, f.turn.ID, pushed.Call.ID, f.hostIssuer(t, &issued)); !errors.Is(err, ErrNestedHostActionNotReady) {
 				t.Fatalf("acquire before approval err = %v", err)
 			}
-			approvals := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{})
-			approvals.now = func() time.Time { return f.now.Add(2 * time.Second) }
+			approvals := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return f.now.Add(2 * time.Second) }))
 			if _, err := approvals.Resolve(ctx, ResolveApprovalRequest{
 				Scope: f.scope, ApprovalID: pushed.Approval.ID, ExpectedRevision: pushed.Approval.Revision, DecisionID: "decision-1",
 				Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "user"},
@@ -238,7 +237,7 @@ func TestNestedHostPushWaitsForApprovalAndHonorsTheDecision(t *testing.T) {
 			if executed, err := f.refusingWorker(t, f.now.Add(3*time.Second)).RunOnce(ctx, f.scope, "action-worker", time.Minute); err != nil || executed != nil {
 				t.Fatalf("worker claimed an approved host call: %#v, %v", executed, err)
 			}
-			f.coordinator.now = func() time.Time { return f.now.Add(3 * time.Second) }
+			f.clock = func() time.Time { return f.now.Add(3 * time.Second) }
 			grant, err := f.coordinator.AcquireNestedHostAction(ctx, f.scope, f.run.ID, f.turn.ID, pushed.Call.ID, f.hostIssuer(t, &issued))
 			if err != nil {
 				t.Fatal(err)

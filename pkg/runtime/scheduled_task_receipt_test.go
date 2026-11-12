@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // The create_task approval names the activation the approved call creates, so
@@ -18,8 +20,7 @@ func TestCreateTaskApprovalNamesItsActivation(t *testing.T) {
 	validator, _ := NewRunbookActionValidator(store)
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
-	}), []ActionProposalValidator{validator})
-	coordinator.now = func() time.Time { return now }
+	}), []ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
 	result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: RunbookActionCreateTask, Arguments: args, IdempotencyKey: " routine-key ", Summary: "Create recurring research", Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
 	if err != nil || result.Approval == nil {
 		t.Fatalf("result=%#v err=%v", result, err)

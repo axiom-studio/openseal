@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -191,8 +192,7 @@ func newTestActionPool(t *testing.T, store KernelStore, catalog *skill.Catalog, 
 func createActionPoolWork(t *testing.T, store KernelStore, catalog *skill.Catalog, scope Scope) *ActionProposalResult {
 	t.Helper()
 	now := time.Now().Add(-2 * time.Second)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
 	})
@@ -215,8 +215,7 @@ func createActionPoolWork(t *testing.T, store KernelStore, catalog *skill.Catalo
 	}
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-	}), nil)
-	coordinator.now = func() time.Time { return now.Add(time.Second) }
+	}), nil, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	proposal, err := coordinator.Propose(t.Context(), ProposeActionRequest{
 		Scope: scope, RunID: claimed.ID, TurnID: step.ID, WorkerID: "agent-worker", DeploymentID: "release-agent", Origin: ActionOriginVM, OriginRef: "command-1",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: "deploy-" + run.ID,

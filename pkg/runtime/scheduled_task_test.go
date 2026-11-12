@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -146,8 +147,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 				for occurrence := 0; occurrence < occurrences; occurrence++ {
 					current, _ := store.GetRunbookActivation(t.Context(), run.Scope, a.ID)
 					now := current.NextRunAt.Add(time.Second)
-					scheduler := NewRunbookScheduler(store)
-					scheduler.now = func() time.Time { return now }
+					scheduler := NewRunbookScheduler(store, models.WithClock(func() time.Time { return now }))
 					r, err := scheduler.ReconcileScope(t.Context(), run.Scope, 20)
 					if err != nil || r.Scheduled != 1 {
 						t.Fatalf("schedule=%#v,%v", r, err)
@@ -264,8 +264,7 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 			coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 				policyCalls++
 				return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-			}), []ActionProposalValidator{validator})
-			coordinator.now = func() time.Time { return now }
+			}), []ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
 			invalid := []struct {
 				name  string
 				value interface{}
@@ -366,8 +365,7 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 			validator, _ := NewRunbookActionValidator(store)
 			coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 				return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
-			}), []ActionProposalValidator{validator})
-			coordinator.now = func() time.Time { return now }
+			}), []ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
 			result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: RunbookActionCreateTask, Arguments: args, IdempotencyKey: "user-schedule", Summary: "Create recurring research", Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
 			if err != nil {
 				t.Fatal(err)
@@ -396,8 +394,7 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 	store := newTestKernelStore(t)
 	source, _, bound, args := scheduledTaskFixture(t, store)
 	a := dispatchTaskForTest(t, store, source, bound, args, "create")["activation"].(*RunbookActivation)
-	scheduler := NewRunbookScheduler(store)
-	scheduler.now = func() time.Time { return a.NextRunAt.Add(time.Second) }
+	scheduler := NewRunbookScheduler(store, models.WithClock(func() time.Time { return a.NextRunAt.Add(time.Second) }))
 	if _, err := scheduler.ReconcileScope(t.Context(), source.Scope, 10); err != nil {
 		t.Fatal(err)
 	}

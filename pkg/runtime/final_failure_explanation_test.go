@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -215,8 +216,7 @@ func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
 	if err != nil || opened.Session.ID != run.SessionID {
 		t.Fatalf("open session = %+v %v", opened, err)
 	}
-	activity := NewRunActivityService(store, store)
-	activity.now = func() time.Time { return now }
+	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
 	failed, _, err := activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: "w", Error: "provider down",
 		FailureExplanation: beginRunFailureExplanation(run, RunFailureKindExecution, "provider_unavailable", "The model provider was unavailable.", "", ""),

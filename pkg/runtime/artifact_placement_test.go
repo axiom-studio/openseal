@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -131,10 +132,10 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	catalogs := []*ArtifactCatalog{NewArtifactCatalog(newTestKernelStore(t)), NewArtifactCatalog(sqlite)}
 	stamp := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
+	clock := models.WithClock(func() time.Time { return stamp })
+	catalogs := []*ArtifactCatalog{NewArtifactCatalog(newTestKernelStore(t), clock), NewArtifactCatalog(sqlite, clock)}
 	for _, catalog := range catalogs {
-		catalog.now = func() time.Time { return stamp }
 		for i := 0; i < 90; i++ {
 			artifact := validCatalogArtifact(fmt.Sprintf("asset-%03d", i), 1)
 			// Every third artifact predates placement and has neither field.

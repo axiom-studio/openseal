@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -34,10 +35,9 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 	t.Helper()
 	ctx := context.Background()
 	clock := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
-	spaces := NewSpaceService(store)
-	spaces.now = func() time.Time { clock = clock.Add(time.Second); return clock }
-	conversations := NewConversationService(store)
-	conversations.now = spaces.now
+	tick := models.WithClock(func() time.Time { clock = clock.Add(time.Second); return clock })
+	spaces := NewSpaceService(store, tick)
+	conversations := NewConversationService(store, tick)
 	scope := Scope{Kind: "tenant", ID: "owner-default-" + strings.ReplaceAll(t.Name(), "/", "-")}
 	const ana, ben, solo, stranger = "7", "8", "", "404"
 	drifter := ObjectiveOwner{Type: OwnerTypeAgent, ID: "drifter"}
@@ -433,9 +433,8 @@ func TestSetSpaceOwnerGivesEachOwnerTheirOldestSpaceAsDefault(t *testing.T) {
 	for name, store := range map[string]SpaceStore{"sqlite": sqlite} {
 		t.Run(name, func(t *testing.T) {
 			ctx, scope := context.Background(), Scope{Kind: "tenant", ID: "owner-change"}
-			spaces := NewSpaceService(store)
 			clock := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
-			spaces.now = func() time.Time { clock = clock.Add(time.Minute); return clock }
+			spaces := NewSpaceService(store, models.WithClock(func() time.Time { clock = clock.Add(time.Minute); return clock }))
 			shared, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Shared", Look: DefaultSpaceLook, OwnerID: "nobody"})
 			if err != nil {
 				t.Fatal(err)

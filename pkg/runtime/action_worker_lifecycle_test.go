@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -289,8 +290,7 @@ func getActionLifecycleRun(t *testing.T, store KernelStore, call *ActionCall) *A
 func transitionActionLifecycleRun(t *testing.T, store KernelStore, call *ActionCall, status AgentRunStatus, wake *WakeCondition, now time.Time) *AgentRun {
 	t.Helper()
 	run := getActionLifecycleRun(t, store, call)
-	service := NewRunActivityService(store, store)
-	service.now = func() time.Time { return now }
+	service := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
 	updated, _, err := service.TransitionRun(t.Context(), call.Scope, call.RunID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: status, WakeCondition: wake,
 		Actor: ActivityActor{Type: "user", ID: "alice"}, Summary: "Update the current workstream",

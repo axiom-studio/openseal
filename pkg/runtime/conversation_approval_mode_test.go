@@ -420,8 +420,7 @@ func proposeLoopForApprovalModeWithContext(t *testing.T, store *sqlite.Store, co
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, AssignedAgentID: "assistant", Goal: key, Source: RunSourceObjective,
 		Context: runContext,
@@ -542,8 +541,7 @@ func TestApprovalWithoutReviewContextIsNamedByActionIntent(t *testing.T) {
 	coordinator := NewActionCoordinator(store, store, approvalModeCatalog(t), NewDefaultActionPolicy(), nil)
 	scope := conversation.Scope
 	now := time.Now().UTC()
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, AssignedAgentID: "assistant", Goal: "search", Source: RunSourceObjective,
 		Context: map[string]interface{}{"conversationId": conversation.ID},

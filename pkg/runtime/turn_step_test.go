@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -205,8 +206,7 @@ func TestRecordStepModelLeaseLost(t *testing.T) {
 			t.Fatalf("foreign worker record error = %v, want ErrTurnLeaseHeld", err)
 		}
 
-		late := NewAgentTurnService(store, store)
-		late.now = func() time.Time { return time.Now().Add(2 * time.Minute) }
+		late := NewAgentTurnService(store, store, models.WithClock(func() time.Time { return time.Now().Add(2 * time.Minute) }))
 		if _, err := late.RecordStepModel(ctx, scope, step.ID, record); !errors.Is(err, ErrTurnLeaseHeld) {
 			t.Fatalf("expired lease record error = %v, want ErrTurnLeaseHeld", err)
 		}

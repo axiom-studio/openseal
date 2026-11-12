@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -107,8 +108,7 @@ func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *Conversati
 		if _, err := store.CreateAgentTurn(t.Context(), turn); err != nil {
 			t.Fatal(err)
 		}
-		tasks := NewConversationTaskService(store)
-		tasks.now = func() time.Time { return record.Task.CreatedAt }
+		tasks := NewConversationTaskService(store, models.WithClock(func() time.Time { return record.Task.CreatedAt }))
 		source, err := store.GetAgentRun(t.Context(), scope, record.Task.SourceRunID)
 		if err != nil {
 			t.Fatal(err)

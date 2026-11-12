@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -39,8 +40,7 @@ func newLoopStoreFixture(t *testing.T, store KernelStore) *loopStoreFixture {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "loop-" + uuid.NewString()[:8]}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "check the repo", Source: RunSourceObjective,
 	})

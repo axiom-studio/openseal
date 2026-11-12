@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
@@ -116,8 +117,7 @@ func newFinalDeliveryFixture(t *testing.T, base conversationThreadStartTestStore
 		request.SessionID = conversationSessionID(scope, request.ConcurrencyKey)
 		request.IdempotencyKey = "member-" + trigger.ID
 	}
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, request)
 	if err != nil {
 		t.Fatalf("create run: %v", err)

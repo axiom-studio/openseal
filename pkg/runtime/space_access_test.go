@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -30,8 +31,7 @@ func exerciseSpaceAccess(t *testing.T, store SpaceStore) {
 	t.Helper()
 	ctx := context.Background()
 	clock := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
-	spaces := NewSpaceService(store)
-	spaces.now = func() time.Time { clock = clock.Add(time.Second); return clock }
+	spaces := NewSpaceService(store, models.WithClock(func() time.Time { clock = clock.Add(time.Second); return clock }))
 	scope := Scope{Kind: "tenant", ID: "access-" + strings.ReplaceAll(t.Name(), "/", "-")}
 	other := Scope{Kind: "tenant", ID: scope.ID + "-other"}
 	const ana, ben, cy = "7", "8", "9"

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -113,8 +114,7 @@ func TestSkillReferenceUpgradeMovesOlderConversationAndCallbackPinsAtomically(t 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	service := NewSkillReferenceUpgradeService(store, catalog)
-	service.now = func() time.Time { return now.Add(time.Hour) }
+	service := NewSkillReferenceUpgradeService(store, catalog, models.WithClock(func() time.Time { return now.Add(time.Hour) }))
 	plan, err := service.Plan(ctx, PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: owner.ID, BindingID: "slack", ToVersion: "1.1.0"})
 	if err != nil {
 		t.Fatal(err)

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
@@ -160,8 +161,7 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 					} else {
 						request.Error, request.FailureExplanation = runError, tc.explanation
 					}
-					activity := NewRunActivityService(store, store)
-					activity.now = func() time.Time { return now }
+					activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
 					work, _, err := activity.TransitionRun(t.Context(), running.Scope, running.ID, request)
 					if err != nil {
 						t.Fatal(err)

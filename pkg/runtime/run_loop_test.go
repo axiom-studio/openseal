@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // ---------------------------------------------------------------------------
@@ -48,8 +49,7 @@ func (f *loopFixture) withLoopCompactor(binding *TurnRunnerBinding) {
 	if !ok {
 		f.t.Fatalf("binding producer is %T, want the model step producer", binding.Producer)
 	}
-	activity := NewRunActivityService(f.store, f.store)
-	activity.now = f.clock.Now
+	activity := NewRunActivityService(f.store, f.store, models.WithClock(f.clock.Now))
 	binding.Compactor = &LoopCompactor{
 		Host: binding.Host, Sessions: f.store.(AgentSessionStore), Requests: producer.preparer,
 		Budget: newRunActivityCompactionBudget(f.store, activity, f.clock.Now), Now: f.clock.Now,

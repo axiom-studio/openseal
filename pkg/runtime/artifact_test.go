@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -33,8 +34,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 		t.Run(factory.name, func(t *testing.T) {
 			store, closeStore := factory.open(t)
 			defer closeStore()
-			catalog := NewArtifactCatalog(store)
-			catalog.now = func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }
+			catalog := NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }))
 			ctx := context.Background()
 			artifact := validCatalogArtifact("research-report", 1)
 
@@ -107,8 +107,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 
 func TestArtifactCatalogConcurrentReplayCreatesOneVersion(t *testing.T) {
 	store := newTestKernelStore(t)
-	catalog := NewArtifactCatalog(store)
-	catalog.now = func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }
+	catalog := NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC) }))
 	artifact := validCatalogArtifact("game-log", 1)
 	var created atomic.Int32
 	var wait sync.WaitGroup
@@ -204,9 +203,8 @@ func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	catalog := NewArtifactCatalog(sqlite)
 	stamp := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
-	catalog.now = func() time.Time { return stamp }
+	catalog := NewArtifactCatalog(sqlite, models.WithClock(func() time.Time { return stamp }))
 	for i := 0; i < 125; i++ {
 		artifact := validCatalogArtifact(fmt.Sprintf("artifact-%03d", i), 1)
 		if i%2 == 0 {

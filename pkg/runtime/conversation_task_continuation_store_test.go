@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type conversationContinuationTestStore interface {
@@ -45,8 +47,7 @@ func conversationContinuationFixture(t *testing.T, store conversationContinuatio
 	if err != nil {
 		t.Fatal(err)
 	}
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond) }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond) }))
 	run, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: owner.ID,
 		ConcurrencyKey: ConversationRunLane(conversation.ID, "", owner.ID), Goal: "Respond to an Agent channel message", Source: RunSourceChat, Budget: &BudgetPolicy{MaxTurns: 20, MaxAttempts: 30, MaxDurationMS: 600000},
 		Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: posted.Message.ID},

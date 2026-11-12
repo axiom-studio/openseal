@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 	"github.com/google/uuid"
@@ -41,8 +42,7 @@ func sourceFailureRun(t *testing.T, store sourceFailureStore, at time.Time) (*Ag
 	}
 	trigger := posted.Message
 	lane := ConversationRunLane(conversation.ID, trigger.ID, owner.ID)
-	commands := NewRunCommandService(store)
-	commands.now = func() time.Time { return at }
+	commands := NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
 	created, err := commands.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: RunKindConversation, Source: RunSourceChat,
 		Goal: "Check the recent email request", ConcurrencyKey: lane, SessionID: ConversationAgentSessionID(scope, lane),
@@ -168,8 +168,7 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				activity := NewRunActivityService(store, store)
-				activity.now = func() time.Time { return now }
+				activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
 				failed, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{
 					ExpectedRevision: current.Revision, Status: AgentRunStatusFailed, LeaseOwner: "w", Error: "PRIVATE_RUN_ERROR",
 					FailureExplanation: explanation, EventType: "run.failed", Summary: "Run failed",

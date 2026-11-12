@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -97,8 +98,7 @@ func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) 
 				if _, err := kernel.CreateAgentTurn(context.Background(), turn); err != nil {
 					b.Fatal(err)
 				}
-				service := NewConversationTaskService(kernel)
-				service.now = func() time.Time { return record.Task.CreatedAt }
+				service := NewConversationTaskService(kernel, models.WithClock(func() time.Time { return record.Task.CreatedAt }))
 				result, err := service.Start(context.Background(), StartConversationTaskRequest{Scope: record.Task.Scope, SourceRunID: record.Task.SourceRunID, ExpectedSourceRevision: 1, WorkerID: "task-worker", TurnID: turn.ID, AssignedAgentID: record.Task.TargetAgentID, TaskKey: record.Task.TaskKey, Goal: record.Task.Goal, Acknowledgment: record.Task.Acknowledgment, Budget: cloneBudgetPolicy(record.Task.RequestedBudget)})
 				if err != nil {
 					b.Fatal(err)
@@ -412,8 +412,7 @@ func conversationTaskBenchmarkPost(t testing.TB, store ConversationTaskKernelSto
 	if err != nil || conversation == nil {
 		t.Fatalf("benchmark conversation: %v", err)
 	}
-	service := NewConversationService(store)
-	service.now = func() time.Time { return at }
+	service := NewConversationService(store, models.WithClock(func() time.Time { return at }))
 	_, err = service.PostChannelMessage(context.Background(), PostChannelMessageRequest{ID: id, Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, Intent: MessageIntentQuestion, Content: "Review the requested result", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: reply, RequiresResponse: true, IdempotencyKey: "benchmark-message-" + id})
 	if err != nil {
 		t.Fatal(err)

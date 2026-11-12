@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -147,10 +148,9 @@ func TestAcceptedRunCreationSchedulerRetainsPinAcrossOccurrenceDeliveryRetry(t *
 			Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"},
 		})
 		wrapped := &acceptedCreationCursorFailure{KernelStore: store}
-		scheduler := NewRunbookScheduler(wrapped)
-		scheduler.SetAcceptedRunExecutionPreparer(preparer)
 		now := time.Now().UTC()
-		scheduler.now = func() time.Time { return now }
+		scheduler := NewRunbookScheduler(wrapped, models.WithClock(func() time.Time { return now }))
+		scheduler.SetAcceptedRunExecutionPreparer(preparer)
 		initialized, err := scheduler.ReconcileScope(t.Context(), activation.Scope, 10)
 		if err != nil || initialized.Initialized != 1 || preparer.calls != 0 {
 			t.Fatalf("schedule initialization prepared execution: %#v, %v", initialized, err)

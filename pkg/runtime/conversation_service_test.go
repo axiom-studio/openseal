@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
@@ -130,9 +132,8 @@ func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
 func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *testing.T) {
 	t.Parallel()
 	store := newTestKernelStore(t)
-	service := NewConversationService(store)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	service.now = func() time.Time { return now }
+	service := NewConversationService(store, models.WithClock(func() time.Time { return now }))
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, store, scope)

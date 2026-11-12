@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // Crash-resume scenarios of the run loop (D14, SPEC §3.7, section 02 §8).
@@ -281,8 +283,7 @@ func newResumeHarness(t *testing.T, raw KernelStore, budget *BudgetPolicy, stepL
 		producer: &resumeProducer{replies: replies}, final: &resumeFinal{},
 	}
 	h.tools = &resumeTools{h: h}
-	portfolio := NewPortfolioService(raw)
-	portfolio.now = h.clock.Now
+	portfolio := NewPortfolioService(raw, models.WithClock(h.clock.Now))
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: h.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: "agent-a",
 		Goal: "resume work", Source: RunSourceObjective, Budget: budget,

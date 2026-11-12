@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -24,8 +25,7 @@ func TestWorkingFilesAreLeftOutOfResultsUntilHandedOver(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "one"}
 	stores := map[string]ArtifactStore{"sqlite": sqlite}
 	for name, store := range stores {
-		catalog := NewArtifactCatalog(store)
-		catalog.now = func() time.Time { return time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC) }
+		catalog := NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC) }))
 		for _, id := range []string{"report.pdf", "plot.py", "panel.png", "upload.csv"} {
 			if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: validCatalogArtifact(id, 1)}); err != nil {
 				t.Fatal(err)

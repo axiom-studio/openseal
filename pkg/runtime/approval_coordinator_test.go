@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -37,8 +38,7 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 					return errors.New("not authorized")
 				}
 				return nil
-			}))
-			approvalCoordinator.now = func() time.Time { return now.Add(2 * time.Second) }
+			}), models.WithClock(func() time.Time { return now.Add(2 * time.Second) }))
 			approvalCoordinator.newID = func() string { return "approval-event" }
 			result, err := approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
 				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
@@ -85,10 +85,10 @@ func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	store := newTestKernelStore(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
+	coordinatorClock := func() time.Time { return now.Add(2 * time.Second) }
 	coordinator := NewApprovalCoordinator(store, store, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error {
 		return errors.New("RBAC denied")
-	}))
-	coordinator.now = func() time.Time { return now.Add(2 * time.Second) }
+	}), models.WithClock(func() time.Time { return coordinatorClock() }))
 	_, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 		DecisionID: "unauthorized", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "mallory"},
@@ -100,7 +100,7 @@ func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	if err != nil || unchanged.Status != ApprovalStatusPending {
 		t.Fatalf("unauthorized decision mutated approval: %#v, %v", unchanged, err)
 	}
-	coordinator.now = func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }
+	coordinatorClock = func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }
 	expired, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 		DecisionID: "expiry", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "system", ID: "expiry-worker"},
@@ -137,12 +137,12 @@ func TestApprovalCoordinatorAppliesReviewedTimeoutApprovalAcrossStores(t *testin
 				t.Fatalf("persisted timeout policy = %#v, %v", stored, err)
 			}
 
-			coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-			coordinator.now = func() time.Time { return stored.ExpiresAt.Add(-time.Second) }
+			coordinatorClock := func() time.Time { return stored.ExpiresAt.Add(-time.Second) }
+			coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return coordinatorClock() }))
 			if _, err = coordinator.ResolveTimeout(t.Context(), stored.Scope, stored.ID, stored.Revision, stored.ID); err == nil || !strings.Contains(err.Error(), "deadline has not elapsed") {
 				t.Fatalf("early timeout resolution = %v", err)
 			}
-			coordinator.now = func() time.Time { return stored.ExpiresAt.Add(time.Second) }
+			coordinatorClock = func() time.Time { return stored.ExpiresAt.Add(time.Second) }
 			result, err := coordinator.ResolveTimeout(t.Context(), stored.Scope, stored.ID, stored.Revision, stored.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -173,8 +173,7 @@ func TestApprovalCoordinatorExpiresApprovalAfterRunLeavesWaitingState(t *testing
 	if err != nil || paused.Run.Status != AgentRunStatusPaused {
 		t.Fatalf("pause pending approval run = %#v, %v", paused, err)
 	}
-	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-	coordinator.now = func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }
+	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }))
 	expired, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 		DecisionID: "orphan-expiry", Principal: ApprovalPrincipal{Type: "system", ID: "expiry-worker"}, Reason: "deadline elapsed",
@@ -207,8 +206,7 @@ func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 			defer cleanup()
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 			proposal := createApprovalForStore(t, store, now)
-			coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-			coordinator.now = func() time.Time { return now.Add(2 * time.Second) }
+			coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return now.Add(2 * time.Second) }))
 			result, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
 				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
 				DecisionID: "reject-release", Decision: ApprovalDecisionReject, Principal: ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "change is not authorized",
@@ -233,8 +231,7 @@ func TestApprovalCoordinatorResumesRunWithReviewerGuidance(t *testing.T) {
 	store := newTestKernelStore(t)
 	now := time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC)
 	proposal := createApprovalForStore(t, store, now)
-	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-	coordinator.now = func() time.Time { return now.Add(time.Second) }
+	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 
 	_, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID,
@@ -283,8 +280,7 @@ func createApprovalForStoreWithTimeout(t *testing.T, store KernelStore, now time
 	t.Helper()
 	ctx := context.Background()
 	_, scope := governedActionCatalog(t)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
 		Budget: &BudgetPolicy{MaxActions: 1},

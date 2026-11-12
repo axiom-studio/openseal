@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 const (
@@ -633,9 +635,7 @@ func TestLoopApprovalModeIsCarriedOnTheStepRequest(t *testing.T) {
 		if !ok {
 			t.Fatalf("%T has no approval modes", f.chats)
 		}
-		service := NewConversationApprovalModeService(modes)
-		service.now = f.clock.Now
-		service.approvals.now = f.clock.Now
+		service := NewConversationApprovalModeService(modes, models.WithClock(f.clock.Now))
 		current, err := f.convs.GetConversation(f.ctx, f.scope, conversation.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -707,8 +707,7 @@ func TestLoopReviewerGuidanceReachesTheModel(t *testing.T) {
 func (f *loopFixture) cancelRun(run *AgentRun) *AgentRun {
 	f.t.Helper()
 	current := f.mustRun(run.ID)
-	commands := NewRunCommandService(f.chats)
-	commands.now = f.clock.Now
+	commands := NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
 	result, err := commands.CommandAgentRun(f.ctx, AgentRunCommandRequest{
 		Scope: f.scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: AgentRunCommandCancel,
 		Actor: ActivityActor{Type: "user", ID: loopFixtureUser},

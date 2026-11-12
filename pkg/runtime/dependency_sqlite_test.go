@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -35,8 +36,7 @@ func TestSQLiteDependencyFanInSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	createSQLiteDependencySource(t, store, scope, "source-restart")
-	coordinator := NewDependencyCoordinator(store)
-	coordinator.now = func() time.Time { return time.Date(2026, 7, 10, 14, 1, 0, 0, time.UTC) }
+	coordinator := NewDependencyCoordinator(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 14, 1, 0, 0, time.UTC) }))
 	create := CreateRunDependencyGroupRequest{
 		ID: "join-restart", Scope: scope, SourceRunID: "source-restart", ExpectedSourceRevision: 1,
 		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
@@ -66,8 +66,7 @@ func TestSQLiteDependencyFanInSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator = NewDependencyCoordinator(restarted)
-	coordinator.now = func() time.Time { return time.Date(2026, 7, 10, 14, 2, 0, 0, time.UTC) }
+	coordinator = NewDependencyCoordinator(restarted, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 14, 2, 0, 0, time.UTC) }))
 	group, err := coordinator.GetRunDependencyGroup(ctx, scope, "join-restart")
 	if err != nil || group.Status != RunDependencyGroupWaiting || group.Revision != 2 {
 		t.Fatalf("restored group = %#v, err = %v", group, err)

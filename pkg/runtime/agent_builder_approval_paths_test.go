@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -101,8 +102,7 @@ func agentBuilderCards() map[string]map[string]interface{} {
 }
 
 func (f *loopStoreFixture) resolveWith(authorizer ApprovalAuthorizer, approval *ApprovalCheckpoint, decision ApprovalDecision, principal ApprovalPrincipal, reason string) (*ApprovalResolutionResult, error) {
-	coordinator := NewApprovalCoordinator(f.store, f.store, authorizer)
-	coordinator.now = func() time.Time { return f.now.Add(time.Second) }
+	coordinator := NewApprovalCoordinator(f.store, f.store, authorizer, models.WithClock(func() time.Time { return f.now.Add(time.Second) }))
 	return coordinator.Resolve(f.ctx, ResolveApprovalRequest{
 		Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision,
 		DecisionID: "decision-" + approval.ID, Decision: decision, Principal: principal, Reason: reason,
@@ -176,8 +176,7 @@ func TestAgentBuilderApprovalPathsTimeoutNeverApproves(t *testing.T) {
 	// approve.
 	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f, approval := cardApproval(t, store, "timeout", createAgentCard(), ApprovalTimeoutApprove)
-		coordinator := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{})
-		coordinator.now = func() time.Time { return approval.ExpiresAt.Add(time.Second) }
+		coordinator := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(time.Second) }))
 		result, err := coordinator.ResolveTimeout(f.ctx, f.scope, approval.ID, approval.Revision, approval.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -269,8 +268,7 @@ func TestAgentBuilderApprovalPathsOtherCardsUnchanged(t *testing.T) {
 				t.Fatalf("%s approval-mode approve = %#v, %v", name, result, err)
 			}
 			f, timed := cardApproval(t, store, "timeout-"+name, card, ApprovalTimeoutApprove)
-			timer := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{})
-			timer.now = func() time.Time { return timed.ExpiresAt.Add(time.Second) }
+			timer := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return timed.ExpiresAt.Add(time.Second) }))
 			if result, err := timer.ResolveTimeout(f.ctx, f.scope, timed.ID, timed.Revision, timed.ID); err != nil || result.Approval.Status != ApprovalStatusApproved {
 				t.Fatalf("%s timeout auto-approve = %#v, %v", name, result, err)
 			}

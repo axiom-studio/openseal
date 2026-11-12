@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -37,8 +38,7 @@ func newRepeatExecFixture(t *testing.T) *repeatExecFixture {
 	if f.run.SessionID == "" {
 		t.Fatal("the Run has no session")
 	}
-	coordinator := NewActionCoordinator(store, store, nil, nil, nil)
-	coordinator.now = func() time.Time { return f.now }
+	coordinator := NewActionCoordinator(store, store, nil, nil, nil, models.WithClock(func() time.Time { return f.now }))
 	return &repeatExecFixture{loopStoreFixture: f, sessions: store, coordinator: coordinator}
 }
 

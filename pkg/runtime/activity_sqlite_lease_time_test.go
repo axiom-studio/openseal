@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -18,9 +19,9 @@ func TestSQLiteRunTransitionLeaseUsesAbsoluteTimeAndExactExpiry(t *testing.T) {
 	scope := Scope{Kind: "local", ID: "lease-offset"}
 	now := time.Date(2026, 10, 3, 0, 0, 0, 123456789, time.UTC)
 	offset := time.FixedZone("caller", 5*60*60+30*60)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
-	activity := NewRunActivityService(store, store)
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	at := now
+	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return at }))
 	for _, tc := range []struct {
 		name string
 		at   time.Time
@@ -39,7 +40,7 @@ func TestSQLiteRunTransitionLeaseUsesAbsoluteTimeAndExactExpiry(t *testing.T) {
 			if err != nil || claimed == nil || claimed.ID != run.ID {
 				t.Fatalf("claim: %#v %v", claimed, err)
 			}
-			activity.now = func() time.Time { return tc.at }
+			at = tc.at
 			updated, _, err := activity.TransitionRun(t.Context(), scope, run.ID, RunTransitionRequest{ExpectedRevision: claimed.Revision, Status: AgentRunStatusWaitingForEvent, LeaseOwner: "owner", WakeCondition: &WakeCondition{Type: "event", Reference: "ready"}})
 			if tc.lost {
 				if !errors.Is(err, ErrLeaseLost) {

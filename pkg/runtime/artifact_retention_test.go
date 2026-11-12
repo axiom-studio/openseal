@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type retentionContentStore struct{ available map[string]bool }
@@ -41,11 +43,10 @@ func TestArtifactRetentionSweepDeletesDueBytesAndPreservesLegalHold(t *testing.T
 		}
 	}
 	content := &retentionContentStore{available: map[string]bool{"content:due": true, "content:held": true, "content:future": true}}
-	service, err := NewArtifactRetentionService(store, content, content)
+	service, err := NewArtifactRetentionService(store, content, content, models.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.now = func() time.Time { return now }
 	result, err := service.Sweep(ctx, validCatalogArtifact("scope", 1).Scope, 0, 50)
 	if err != nil {
 		t.Fatal(err)

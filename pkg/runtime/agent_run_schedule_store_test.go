@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func TestAgentRunClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
@@ -14,8 +16,7 @@ func TestAgentRunClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "work", Source: RunSourceObjective,
@@ -85,8 +86,7 @@ func TestAgentRunAttemptBudgetSurvivesLeaseRecovery(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "attempt-budget"}
 	now := time.Now().UTC()
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "recover at most once", Source: RunSourceObjective, Budget: &BudgetPolicy{MaxAttempts: 1, MaxTurns: 5},
@@ -111,8 +111,7 @@ func TestAgentRunClaimHonorsCapacityAndScope(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "one"}
 	otherScope := Scope{Kind: "tenant", ID: "two"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	service := NewPortfolioService(store)
-	service.now = func() time.Time { return now }
+	service := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	for i := 0; i < 2; i++ {
 		_, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
@@ -159,8 +158,7 @@ func TestAgentRunClaimHonorsConcurrencyKeyCapacity(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "conversation-capacity"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	for _, candidate := range []struct {
 		key      string
 		priority int
@@ -210,8 +208,7 @@ func TestAgentRunClaimIsolatesRunKinds(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "kinds"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	agentRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "ordinary work",
 	})

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // Catch-up (run-loop section 05 §4, CONV-03), on the SQLite store
@@ -85,8 +87,7 @@ func (f *catchUpFixture) laneSessionID(threadRoot string) string {
 // worker w1. Runs are claimed as they are created, so the claim takes this one.
 func (f *catchUpFixture) run(sessionID string, claim bool) *AgentRun {
 	f.t.Helper()
-	portfolio := NewPortfolioService(f.store)
-	portfolio.now = func() time.Time { return f.now }
+	portfolio := NewPortfolioService(f.store, models.WithClock(func() time.Time { return f.now }))
 	run, err := portfolio.CreateAgentRun(f.t.Context(), CreateAgentRunRequest{
 		Scope: f.conversation.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: f.agentID}, AssignedAgentID: f.agentID,
 		Goal: "answer the chat", Source: RunSourceObjective, SessionID: sessionID,

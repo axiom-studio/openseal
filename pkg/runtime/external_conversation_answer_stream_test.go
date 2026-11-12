@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // streamChatHost is a provider chat: sends post messages, updates edit them
@@ -67,18 +68,27 @@ func newAnswerStreamFixture(t *testing.T, operations ...capability.ConversationD
 	var err error
 	fixture.progress, err = NewRunProgressAcknowledgementWorker(fixture.store, fixture.catalog, RunProgressAcknowledgementRendererFunc(func(context.Context, RunProgressAcknowledgementRequest) (string, error) {
 		return "", errors.New("streaming must not render progress")
-	}), RunProgressAcknowledgementWorkerConfig{})
+	}), RunProgressAcknowledgementWorkerConfig{}, fixture.clockOption())
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.progress.now = func() time.Time { return fixture.clock }
-	if fixture.replies, err = NewExternalConversationReplyWorker(fixture.store, fixture.catalog); err != nil {
+	if fixture.replies, err = NewExternalConversationReplyWorker(fixture.store, fixture.catalog, fixture.clockOption()); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.delivery, err = NewExternalConversationDeliveryWorker(fixture.store, fixture.catalog, fixture.host, ExternalConversationDeliveryWorkerConfig{WorkerID: "delivery"}); err != nil {
+	if fixture.delivery, err = NewExternalConversationDeliveryWorker(fixture.store, fixture.catalog, fixture.host, ExternalConversationDeliveryWorkerConfig{WorkerID: "delivery"}, fixture.clockOption()); err != nil {
 		t.Fatal(err)
 	}
 	return fixture
+}
+
+// clockOption gives a worker the fixture's clock, so every worker reads the
+// same time. Each reading moves it on by a microsecond, as a real clock moves
+// between two calls, so deliveries queued one after another keep their order.
+func (f *answerStreamFixture) clockOption() models.ServiceOption {
+	return models.WithClock(func() time.Time {
+		f.clock = f.clock.Add(time.Microsecond)
+		return f.clock
+	})
 }
 
 func (f *answerStreamFixture) preview(text string, reset bool) {
@@ -195,7 +205,7 @@ func TestExternalAnswerStreamEditsOneMessageAndFinishesIt(t *testing.T) {
 	}
 	f.deliverAll()
 	// A restarted reply worker finds the streamed message in the outbox.
-	replies, err := NewExternalConversationReplyWorker(f.store, f.catalog)
+	replies, err := NewExternalConversationReplyWorker(f.store, f.catalog, f.clockOption())
 	if err != nil {
 		t.Fatal(err)
 	}

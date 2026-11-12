@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // Paused approvals on the run loop (12-tests §5.2,
@@ -15,8 +17,7 @@ import (
 func (f *loopFixture) commandRun(runID string, kind AgentRunCommandKind) *AgentRun {
 	f.t.Helper()
 	current := f.mustRun(runID)
-	commands := NewRunCommandService(f.chats)
-	commands.now = f.clock.Now
+	commands := NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
 	result, err := commands.CommandAgentRun(f.ctx, AgentRunCommandRequest{
 		Scope: f.scope, RunID: runID, ExpectedRevision: current.Revision, Kind: kind,
 		Actor: ActivityActor{Type: "user", ID: loopFixtureUser},

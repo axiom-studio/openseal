@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // A provider message whose thread history was unavailable keeps its source
@@ -19,8 +21,7 @@ func TestExternalMessageSourceSurvivesUnavailableHistoryAndReachesStep(t *testin
 		ChannelID: item.Event.ExternalConversationID, ParticipantID: item.Event.ExternalParticipantID, ParticipantDisplayName: "Kev",
 		ChannelName: "engineering", ChannelType: "private_channel",
 	}}}
-	worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, false)
-	worker.now = func() time.Time { return now }
+	worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, false, models.WithClock(func() time.Time { return now }))
 	applied, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err != nil {
 		t.Fatal(err)

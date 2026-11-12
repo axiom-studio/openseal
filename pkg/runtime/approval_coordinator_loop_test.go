@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -24,8 +25,7 @@ func newLoopApprovalFixture(t *testing.T, store KernelStore, budget *BudgetPolic
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "loop-" + uuid.NewString()[:8]}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "push the fix", Source: RunSourceObjective,
 		Budget: budget,
@@ -102,8 +102,7 @@ func (f *loopStoreFixture) parkOn(approvalID string) {
 }
 
 func (f *loopStoreFixture) approvalCoordinator(at time.Time) *ApprovalCoordinator {
-	coordinator := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{})
-	coordinator.now = func() time.Time { return at }
+	coordinator := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return at }))
 	return coordinator
 }
 
@@ -462,8 +461,7 @@ func TestLoopHeldApprovalRetriesWhenRunMoves(t *testing.T) {
 		at := f.now.Add(time.Second)
 		portfolio := &raceRunPortfolio{PortfolioStore: store, store: store, now: at}
 		portfolio.races.Store(approvalResolveAttempts - 1)
-		coordinator := NewApprovalCoordinator(portfolio, store, EligibleApprovalAuthorizer{})
-		coordinator.now = func() time.Time { return at }
+		coordinator := NewApprovalCoordinator(portfolio, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return at }))
 		result, err := f.decide(coordinator, approval, ApprovalDecisionApprove, "")
 		if err != nil || !result.Resolved || result.Call.Status != ActionCallStatusReady {
 			t.Fatalf("decision after racing heartbeats = %#v, %v", result, err)

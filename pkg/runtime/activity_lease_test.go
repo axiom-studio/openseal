@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -30,8 +31,7 @@ func TestRunTransitionsRejectStaleLeaseOwners(t *testing.T) {
 			ctx := context.Background()
 			scope := Scope{Kind: "local", ID: "test"}
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-			portfolio := NewPortfolioService(store)
-			portfolio.now = func() time.Time { return now }
+			portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 			run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 				AssignedAgentID: "agent", Goal: "work", Source: RunSourceObjective,
@@ -45,8 +45,7 @@ func TestRunTransitionsRejectStaleLeaseOwners(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			activity := NewRunActivityService(store, store)
-			activity.now = func() time.Time { return now.Add(10 * time.Second) }
+			activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now.Add(10 * time.Second) }))
 			wake := &WakeCondition{Type: "event", Reference: "work.ready"}
 			_, _, err = activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
 				ExpectedRevision: claimed.Revision, Status: AgentRunStatusWaitingForEvent,

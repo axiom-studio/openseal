@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
@@ -25,8 +26,7 @@ func TestPostgresAgentRunAttemptBudgetIsReplicaSafeAndRestartDurable(t *testing.
 
 	scope := Scope{Kind: "tenant", ID: "attempt-budget"}
 	now := time.Now().UTC()
-	portfolio := NewPortfolioService(primary)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(primary, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "execute within one claim", Source: RunSourceObjective, Budget: &BudgetPolicy{MaxAttempts: 1, MaxTurns: 4},

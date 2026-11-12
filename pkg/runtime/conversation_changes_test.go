@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -29,8 +30,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			ctx := context.Background()
 			scope := Scope{Kind: "tenant", ID: "changes"}
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-			conversations := NewConversationService(conversationStore)
-			conversations.now = func() time.Time { return now }
+			conversations := NewConversationService(conversationStore, models.WithClock(func() time.Time { return now }))
 			seedTestSpace(t, store.(SpaceStore), scope)
 			conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
@@ -56,11 +56,10 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			changes, err := NewConversationChangeService(conversationStore, store)
+			changes, err := NewConversationChangeService(conversationStore, store, models.WithClock(func() time.Time { return now }))
 			if err != nil {
 				t.Fatal(err)
 			}
-			changes.now = func() time.Time { return now }
 			initial, err := changes.ListChanges(ctx, ConversationChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, ActiveAt: now,
 			})

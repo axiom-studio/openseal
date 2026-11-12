@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -56,12 +57,10 @@ func newHandoffCommandFixtureWithParent(t *testing.T, store handoffCommandTestSt
 	t.Helper()
 	f := &handoffCommandFixture{
 		t: t, store: store, scope: Scope{Kind: "tenant", ID: "handoff-ownership"},
-		now:       time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
-		portfolio: NewPortfolioService(store), collaboration: NewCollaborationService(store), commands: NewRunCommandService(store),
+		now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
 	}
-	f.portfolio.now = func() time.Time { return f.now }
-	f.collaboration.now = func() time.Time { return f.now }
-	f.commands.now = func() time.Time { return f.now }
+	clock := models.WithClock(func() time.Time { return f.now })
+	f.portfolio, f.collaboration, f.commands = NewPortfolioService(store, clock), NewCollaborationService(store, clock), NewRunCommandService(store, clock)
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}
 	if teamOwned {
 		owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}
@@ -144,8 +143,7 @@ func (f *handoffCommandFixture) childOf(parentID, agentID string) *AgentRun {
 func (f *handoffCommandFixture) transition(id string, status AgentRunStatus, output map[string]interface{}) *AgentRun {
 	f.t.Helper()
 	run := f.run(id)
-	activity := NewRunActivityService(f.store, f.store)
-	activity.now = func() time.Time { return f.now }
+	activity := NewRunActivityService(f.store, f.store, models.WithClock(func() time.Time { return f.now }))
 	updated, _, err := activity.TransitionRun(f.t.Context(), f.scope, id, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: status, Output: output, LeaseOwner: run.LeaseOwner,
 		Actor: ActivityActor{Type: "test", ID: "handoff-worker"}, Summary: "Advance fixture run",
@@ -602,8 +600,7 @@ func TestRunCommandsHandoffAcceptanceDuringRecursiveDiscoveryUsesCanonicalSource
 			ownedAfterAcceptance = f.childOf(f.childID, "marketing-helper")
 			requestAfterAcceptance = f.request()
 		}
-		commands := NewRunCommandService(wrapped)
-		commands.now = func() time.Time { return f.now }
+		commands := NewRunCommandService(wrapped, models.WithClock(func() time.Time { return f.now }))
 		if err := commands.CascadeTerminalRun(t.Context(), outer); err != nil {
 			t.Fatal(err)
 		}
@@ -624,12 +621,10 @@ func TestRunCommandsHandoffGroupedReceiptDoesNotTransferOwnershipAfterQuorum(t *
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
 		f := &handoffCommandFixture{
 			t: t, store: store, scope: Scope{Kind: "tenant", ID: "handoff-ownership"},
-			now:       time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
-			portfolio: NewPortfolioService(store), collaboration: NewCollaborationService(store), commands: NewRunCommandService(store),
+			now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC),
 		}
-		f.portfolio.now = func() time.Time { return f.now }
-		f.collaboration.now = func() time.Time { return f.now }
-		f.commands.now = func() time.Time { return f.now }
+		clock := models.WithClock(func() time.Time { return f.now })
+		f.portfolio, f.collaboration, f.commands = NewPortfolioService(store, clock), NewCollaborationService(store, clock), NewRunCommandService(store, clock)
 		source, err := f.portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
 			Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
 			Goal: "Accept the first adequate result", Source: RunSourceManual,
@@ -638,8 +633,7 @@ func TestRunCommandsHandoffGroupedReceiptDoesNotTransferOwnershipAfterQuorum(t *
 			t.Fatal(err)
 		}
 		f.sourceID = source.ID
-		coordinator := NewDependencyCoordinator(store)
-		coordinator.now = func() time.Time { return f.now }
+		coordinator := NewDependencyCoordinator(store, models.WithClock(func() time.Time { return f.now }))
 		group, err := coordinator.CreateRunDependencyGroup(t.Context(), CreateRunDependencyGroupRequest{
 			ID: "owned-group", Scope: f.scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision,
 			Policy: RunDependencyPolicy{Mode: FanInModeQuorum, Quorum: 1, FailureMode: DependencyFailureWait},
@@ -709,8 +703,7 @@ func TestRunCommandsHandoffUnavailableReceiptReaderFailsClosed(t *testing.T) {
 		beforeEvents := map[string][]*ActivityEvent{
 			source.ID: f.events(source.ID), child.ID: f.events(child.ID), grandchild.ID: f.events(grandchild.ID),
 		}
-		commands := NewRunCommandService(handoffRunCommandStoreOnly{RunCommandStore: store})
-		commands.now = func() time.Time { return f.now }
+		commands := NewRunCommandService(handoffRunCommandStoreOnly{RunCommandStore: store}, models.WithClock(func() time.Time { return f.now }))
 		if err := commands.CascadeTerminalRun(t.Context(), source); !errors.Is(err, ErrInvalidRunTransition) {
 			t.Fatalf("unavailable scoped receipt reader: %v", err)
 		}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -15,9 +16,8 @@ func TestCallbackRegistryPinsExactAdapterAndLifecycle(t *testing.T) {
 	store := newTestKernelStore(t)
 	catalog := skill.NewCatalogWithStore(store)
 	definition, binding := registerCallbackFixture(t, ctx, catalog)
-	registry := NewCallbackRegistry(store, catalog)
 	clock := time.Date(2026, 7, 30, 1, 2, 3, 0, time.UTC)
-	registry.now = func() time.Time { return clock }
+	registry := NewCallbackRegistry(store, catalog, models.WithClock(func() time.Time { return clock }))
 	registry.newID = func() string { return "opaque-route" }
 	created, err := registry.Create(ctx, CreateCallbackRegistrationRequest{
 		ID: "slack-approval", Scope: Scope{Kind: "tenant", ID: "one"},

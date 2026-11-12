@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -46,8 +47,7 @@ func personActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 // actingUser.
 func claimedPersonChatRun(t *testing.T, store *sqlite.Store, scope Scope, now time.Time, actingUser string) *AgentRun {
 	t.Helper()
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "send mail",
 		Source: RunSourceObjective, Kind: RunKindConversation, ActingUser: actingUser,
@@ -72,8 +72,7 @@ func proposePersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catal
 			return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
 		})
 	}
-	coordinator := NewActionCoordinator(store, store, catalog, policy, nil)
-	coordinator.now = func() time.Time { return now }
+	coordinator := NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return now }))
 	proposal, err := coordinator.Propose(context.Background(), ProposeActionRequest{
 		Scope: scope, RunID: run.ID, TurnID: stepID, WorkerID: "agent-worker", DeploymentID: "release-agent",
 		Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Send a message to ana@example.com",

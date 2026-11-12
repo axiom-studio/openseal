@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -406,8 +407,7 @@ func TestDependencyRetirementSourceCancellationBetweenReadAndCommitIsFenced(t *t
 			canceled = fixture.command(t, AgentRunCommandCancel)
 			before = fixture.snapshot(t)
 		}}
-		coordinator := NewDependencyCoordinator(wrapped)
-		coordinator.now = func() time.Time { return fixture.now.Add(10 * time.Second) }
+		coordinator := NewDependencyCoordinator(wrapped, models.WithClock(func() time.Time { return fixture.now.Add(10 * time.Second) }))
 		if _, err := coordinator.ReconcileRunDependencyGroup(t.Context(), request); !errors.Is(err, ErrRevisionConflict) {
 			t.Fatalf("stale source accepted across cancellation: %v", err)
 		}
@@ -451,8 +451,7 @@ func TestDependencyRetirementHistoricalTypedSourceCleansUpAfterAuthorityChanges(
 			forDependencyRetirementStores(t, func(t *testing.T, store dependencyRetirementStore) {
 				catalog, scope, binding := runSkillDependencyFixture(t, store)
 				now := time.Now().UTC().Round(0)
-				portfolio := NewPortfolioService(store)
-				portfolio.now = func() time.Time { return now }
+				portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 				source, err := portfolio.CreateAgentRun(t.Context(), runSkillDependencyRequest(scope))
 				if err != nil {
 					t.Fatal(err)
@@ -461,8 +460,7 @@ func TestDependencyRetirementHistoricalTypedSourceCleansUpAfterAuthorityChanges(
 				if err != nil {
 					t.Fatal(err)
 				}
-				coordinator := NewDependencyCoordinator(store)
-				coordinator.now = func() time.Time { return now.Add(time.Second) }
+				coordinator := NewDependencyCoordinator(store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 				group, err := coordinator.CreateRunDependencyGroup(t.Context(), CreateRunDependencyGroupRequest{Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision, Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureWait}, Dependencies: []RunDependencySpec{{ID: "branch", TargetRunID: child.ID, Kind: RunDependencyKindRun}}, Actor: ActivityActor{Type: "worker", ID: "typed-worker"}})
 				if err != nil {
 					t.Fatal(err)
@@ -470,8 +468,7 @@ func TestDependencyRetirementHistoricalTypedSourceCleansUpAfterAuthorityChanges(
 				fixture := &dependencyRetirementFixture{store: store, scope: scope, groupID: group.Group.ID, sourceID: source.ID, childIDs: map[string]string{"branch": child.ID}, now: now}
 				// The source ends before mutable executable authority is replaced;
 				// this is cleanup of history, not admission of new execution.
-				activity := NewRunActivityService(store, store)
-				activity.now = func() time.Time { return now.Add(2 * time.Second) }
+				activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now.Add(2 * time.Second) }))
 				if _, _, err := activity.TransitionRun(t.Context(), scope, source.ID, RunTransitionRequest{ExpectedRevision: group.Source.Revision, Status: AgentRunStatusCanceled, Actor: ActivityActor{Type: "user", ID: "operator"}}); err != nil {
 					t.Fatal(err)
 				}
@@ -547,21 +544,19 @@ func newDependencyRetirementFixtureInScope(t *testing.T, store dependencyRetirem
 func newDependencyRetirementFixtureWithPolicy(t *testing.T, store dependencyRetirementStore, scope Scope, policy RunDependencyPolicy) *dependencyRetirementFixture {
 	t.Helper()
 	fixture := &dependencyRetirementFixture{store: store, scope: scope, childIDs: make(map[string]string), now: time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)}
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return fixture.now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return fixture.now }))
 	source, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: fixture.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead", Goal: "Join two independently running branches", Source: RunSourceManual, Checkpoint: map[string]interface{}{"committed": "preserve"}, Budget: &BudgetPolicy{MaxTurns: 10}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	fixture.sourceID = source.ID
-	scheduler := NewAgentRunScheduler(store)
-	scheduler.now = func() time.Time { return fixture.now.Add(time.Second) }
+	schedulerClock := func() time.Time { return fixture.now.Add(time.Second) }
+	scheduler := NewAgentRunScheduler(store, models.WithClock(func() time.Time { return schedulerClock() }))
 	claimed, err := scheduler.ClaimNext(t.Context(), AgentRunClaimRequest{Scope: fixture.scope, WorkerID: "source-worker", LeaseDuration: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != source.ID {
 		t.Fatalf("claim source=%#v, %v", claimed, err)
 	}
-	forks := NewRunForkCoordinator(store)
-	forks.now = func() time.Time { return fixture.now.Add(2 * time.Second) }
+	forks := NewRunForkCoordinator(store, models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
 	branches := []RunForkBranch{
 		{ID: "alpha", Goal: "Branch alpha", Checkpoint: map[string]interface{}{"branch": "alpha"}, Budget: &BudgetPolicy{MaxTurns: 2}},
 		{ID: "beta", Goal: "Branch beta", Checkpoint: map[string]interface{}{"branch": "beta"}, Budget: &BudgetPolicy{MaxTurns: 2}},
@@ -584,8 +579,7 @@ func newDependencyRetirementFixtureWithPolicy(t *testing.T, store dependencyReti
 			}
 			dependencies = append(dependencies, RunDependencySpec{ID: branch.ID, TargetRunID: child.ID, Kind: RunDependencyKindRun})
 		}
-		coordinator := fixture.coordinator()
-		coordinator.now = func() time.Time { return fixture.now.Add(2 * time.Second) }
+		coordinator := NewDependencyCoordinator(store, models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
 		group, err = coordinator.CreateRunDependencyGroup(t.Context(), CreateRunDependencyGroupRequest{
 			Scope: fixture.scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision,
 			Policy: policy, Dependencies: dependencies, Actor: ActivityActor{Type: "worker", ID: "source-worker"},
@@ -610,7 +604,7 @@ func newDependencyRetirementFixtureWithPolicy(t *testing.T, store dependencyReti
 	if len(fixture.childIDs) != len(branches) || fixture.childIDs["alpha"] == "" || fixture.childIDs["beta"] == "" {
 		t.Fatalf("fork edges=%#v", group.Dependencies)
 	}
-	scheduler.now = func() time.Time { return fixture.now.Add(3 * time.Second) }
+	schedulerClock = func() time.Time { return fixture.now.Add(3 * time.Second) }
 	for range len(branches) {
 		child, err := scheduler.ClaimNext(t.Context(), AgentRunClaimRequest{Scope: fixture.scope, WorkerID: "child-worker", LeaseDuration: time.Minute})
 		if err != nil || child == nil || child.ParentRunID != source.ID {
@@ -621,8 +615,7 @@ func newDependencyRetirementFixtureWithPolicy(t *testing.T, store dependencyReti
 }
 
 func (f *dependencyRetirementFixture) coordinator() *DependencyCoordinator {
-	coordinator := NewDependencyCoordinator(f.store)
-	coordinator.now = func() time.Time { return f.now.Add(10 * time.Second) }
+	coordinator := NewDependencyCoordinator(f.store, models.WithClock(func() time.Time { return f.now.Add(10 * time.Second) }))
 	return coordinator
 }
 
@@ -669,8 +662,7 @@ func (f *dependencyRetirementFixture) finishChild(t *testing.T, branch string, s
 	if err != nil || child == nil {
 		t.Fatalf("get child=%#v, %v", child, err)
 	}
-	service := NewRunActivityService(f.store, f.store)
-	service.now = func() time.Time { return f.now.Add(4 * time.Second) }
+	service := NewRunActivityService(f.store, f.store, models.WithClock(func() time.Time { return f.now.Add(4 * time.Second) }))
 	errorText := ""
 	if status != AgentRunStatusCompleted {
 		errorText = "durable " + string(status) + " child outcome"
@@ -702,8 +694,7 @@ func (f *dependencyRetirementFixture) command(t *testing.T, kind AgentRunCommand
 	if err != nil {
 		t.Fatal(err)
 	}
-	commands := NewRunCommandService(f.store)
-	commands.now = func() time.Time { return f.now.Add(5 * time.Second) }
+	commands := NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now.Add(5 * time.Second) }))
 	result, err := commands.CommandAgentRun(t.Context(), AgentRunCommandRequest{Scope: f.scope, RunID: f.sourceID, ExpectedRevision: source.Revision, Kind: kind, Actor: ActivityActor{Type: "user", ID: "operator"}})
 	if err != nil {
 		t.Fatal(err)
@@ -722,8 +713,7 @@ func (f *dependencyRetirementFixture) terminateSource(t *testing.T, status Agent
 		f.command(t, AgentRunCommandCancel)
 		return
 	}
-	service := NewRunActivityService(f.store, f.store)
-	service.now = func() time.Time { return f.now.Add(5 * time.Second) }
+	service := NewRunActivityService(f.store, f.store, models.WithClock(func() time.Time { return f.now.Add(5 * time.Second) }))
 	source := f.snapshot(t).source
 	if status == AgentRunStatusCompleted {
 		var err error

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -114,25 +115,18 @@ func newChildFixture(t *testing.T, store KernelStore, opts ...loopOption) *child
 		t.Fatalf("%T lacks the dependency and collaboration stores", f.raw)
 	}
 	teams := childTeamCatalog{scope: capability.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}}
-	collab := NewCollaborationService(stores)
+	collab := NewCollaborationService(stores, models.WithClock(f.clock.Now))
 	collab.teams = teams
 	collab.store = childCollaborationStore{CollaborationStore: stores, childTeamCatalog: teams}
-	collab.now = f.clock.Now
-	commands := NewRunCommandService(stores)
-	commands.now = f.clock.Now
+	commands := NewRunCommandService(stores, models.WithClock(f.clock.Now))
 	c := &childFixture{
-		loopFixture: f, forks: NewRunForkCoordinator(stores), collab: collab,
+		loopFixture: f, forks: NewRunForkCoordinator(stores, models.WithClock(f.clock.Now)), collab: collab,
 		inbox:    &AgentRequestInboxReconciler{collaboration: collab, commands: commands, now: f.clock.Now},
 		runbooks: map[string]*runbook.Definition{}, claims: map[string]int{},
 	}
-	c.forks.now = f.clock.Now
-	// The fixture's scheduler creates chat Runs on the wall clock; the
-	// claims run on the fake clock.
-	f.scheduler.runs.now = f.clock.Now
 	c.forks.SetAcceptedRunExecutionPreparer(childRunbookPreparer{c})
 	if tasks, ok := f.raw.(ConversationTaskKernelStore); ok {
-		f.control.Tasks = NewConversationTaskService(tasks)
-		f.control.Tasks.now = f.clock.Now
+		f.control.Tasks = NewConversationTaskService(tasks, models.WithClock(f.clock.Now))
 	}
 	f.control.Forks = c.forks
 	// The task completion review reads the task through the portfolio.

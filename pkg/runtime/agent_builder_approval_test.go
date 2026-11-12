@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -30,8 +31,7 @@ func agentBuilderApprovalCoordinator(t *testing.T, policy ActionPolicyEvaluator,
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	coordinator := NewActionCoordinator(store, store, fixture.catalog, policy, []ActionProposalValidator{fixture.validator})
-	coordinator.now = func() time.Time { return now }
+	coordinator := NewActionCoordinator(store, store, fixture.catalog, policy, []ActionProposalValidator{fixture.validator}, models.WithClock(func() time.Time { return now }))
 	return fixture, store, claimed, coordinator
 }
 
@@ -130,14 +130,12 @@ func TestAgentBuilderApprovalExpiresAndNeverApproves(t *testing.T) {
 	}
 	approval := result.Approval
 
-	early := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-	early.now = func() time.Time { return approval.ExpiresAt.Add(-time.Minute) }
+	early := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(-time.Minute) }))
 	if _, err := early.ResolveTimeout(ctx, fixture.scope, approval.ID, approval.Revision, approval.ID); err == nil {
 		t.Fatal("a card was timed out before its 30 days elapsed")
 	}
 
-	late := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-	late.now = func() time.Time { return approval.ExpiresAt.Add(time.Second) }
+	late := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return approval.ExpiresAt.Add(time.Second) }))
 	resolved, err := late.ResolveTimeout(ctx, fixture.scope, approval.ID, approval.Revision, approval.ID)
 	if err != nil {
 		t.Fatal(err)

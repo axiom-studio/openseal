@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 // Self-tests of the run-loop test kit (run-loop section 12 §3.6).
@@ -320,8 +322,7 @@ func TestLoopTestkitCrashStoreRefusesWritesAfterArm(t *testing.T) {
 		scope := Scope{Kind: "tenant", ID: "kit-crash"}
 		now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 		store := newCrashStore(t, base)
-		portfolio := NewPortfolioService(store)
-		portfolio.now = func() time.Time { return now }
+		portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 		create := func() (*AgentRun, error) {
 			return portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}, AssignedAgentID: "finn",

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -71,7 +72,7 @@ func contextTestHistory(event NormalizedExternalConversationEvent) *ExternalConv
 	}}
 }
 
-func newContextTestWorker(t *testing.T, store *sqlite.Store, resolver ExternalConversationAdapterResolver, host ExternalConversationContextHost, crash bool) (*ExternalConversationInboxWorker, *crashAfterExternalConversationDispatch) {
+func newContextTestWorker(t *testing.T, store *sqlite.Store, resolver ExternalConversationAdapterResolver, host ExternalConversationContextHost, crash bool, opts ...models.ServiceOption) (*ExternalConversationInboxWorker, *crashAfterExternalConversationDispatch) {
 	t.Helper()
 	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
 	if err != nil {
@@ -81,7 +82,7 @@ func newContextTestWorker(t *testing.T, store *sqlite.Store, resolver ExternalCo
 	worker, err := NewExternalConversationInboxWorker(store, dispatcher, ExternalConversationInboxWorkerConfig{
 		WorkerID: "context-worker", BaseRetry: time.Second, MaximumRetry: time.Minute,
 		ContextHost: host, ContextCatalog: resolver,
-	})
+	}, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,8 +106,8 @@ func TestExternalConversationContextImportsParentAndRepliesBeforeFirstMention(t 
 	if err := catalog.Bind(ctx, &nextBinding); err != nil {
 		t.Fatal(err)
 	}
-	worker, dispatcher := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, true)
-	worker.now = func() time.Time { return now }
+	workerClock := func() time.Time { return now }
+	worker, dispatcher := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, true, models.WithClock(func() time.Time { return workerClock() }))
 	if _, err := worker.ProcessOne(ctx, endpoint.Scope); err == nil {
 		t.Fatal("expected synthetic post-dispatch crash")
 	}
@@ -114,7 +115,7 @@ func TestExternalConversationContextImportsParentAndRepliesBeforeFirstMention(t 
 		host.requests[0].Adapter.Binding.Revision != nextBinding.Revision || host.requests[0].Endpoint.Adapter.BindingRevision != nextBinding.Revision {
 		t.Fatalf("provider context was not routed using the current binding: %#v", host.requests)
 	}
-	worker.now = func() time.Time { return now.Add(time.Second) }
+	workerClock = func() time.Time { return now.Add(time.Second) }
 	applied, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err != nil || applied.Status != ExternalConversationInboxApplied || applied.RunID == "" {
 		t.Fatalf("application = %#v, %v", applied, err)
@@ -140,7 +141,7 @@ func TestExternalConversationContextImportsParentAndRepliesBeforeFirstMention(t 
 	}
 	// A delayed event for an imported historical message must remain context.
 	receiveContextTestEvent(t, store, endpoint, "delayed-earlier-reply", "earlier-reply", item.Event.ExternalThreadID, now.Add(2*time.Second))
-	worker.now = func() time.Time { return now.Add(2 * time.Second) }
+	workerClock = func() time.Time { return now.Add(2 * time.Second) }
 	late, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err != nil || late.RunID != "" || dispatcher.dispatches != 2 {
 		t.Fatalf("delayed history woke work: %#v, %v", late, err)
@@ -153,8 +154,8 @@ func TestExternalConversationContextRefreshesMissingRepliesAndKeepsThreadsSepara
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	first := receiveContextTestEvent(t, store, endpoint, "first-thread-first-mention", "mention-one", "parent-one", now)
 	host := &recordingContextHost{result: contextTestHistory(first.Event)}
-	worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, false)
-	worker.now = func() time.Time { return now }
+	workerClock := func() time.Time { return now }
+	worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, false, models.WithClock(func() time.Time { return workerClock() }))
 	applied, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +168,7 @@ func TestExternalConversationContextRefreshesMissingRepliesAndKeepsThreadsSepara
 		ExternalConversationID: first.Event.ExternalConversationID, ExternalThreadID: first.Event.ExternalThreadID,
 		ExternalMessageID: "missed-reply", ExternalParticipantID: "human-three", Text: "I can supply photos.", OccurredAt: now.Add(time.Second),
 	})
-	worker.now = func() time.Time { return second.Event.OccurredAt }
+	workerClock = func() time.Time { return second.Event.OccurredAt }
 	if _, err := worker.ProcessOne(ctx, endpoint.Scope); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +179,7 @@ func TestExternalConversationContextRefreshesMissingRepliesAndKeepsThreadsSepara
 	other := receiveContextTestEvent(t, store, endpoint, "second-thread-mention", "mention-three", "parent-two", now.Add(2*time.Minute))
 	host.result = contextTestHistory(other.Event)
 	host.result.Messages[0].ExternalMessageID = "other-thread-reply"
-	worker.now = func() time.Time { return other.Event.OccurredAt }
+	workerClock = func() time.Time { return other.Event.OccurredAt }
 	otherApplied, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err != nil {
 		t.Fatal(err)
@@ -203,8 +204,7 @@ func TestExternalConversationContextUnthreadedMentionDoesNotReadWholeChannel(t *
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	receiveContextTestEvent(t, store, endpoint, "unthreaded-mention", "mention", "", now)
 	host := &recordingContextHost{err: errors.New("must not read the entire channel")}
-	worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, false)
-	worker.now = func() time.Time { return now }
+	worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, false, models.WithClock(func() time.Time { return now }))
 	applied, err := worker.ProcessOne(t.Context(), endpoint.Scope)
 	if err != nil || applied.RunID == "" || len(host.requests) != 0 {
 		t.Fatalf("unthreaded read = %#v, reads=%d, %v", applied, len(host.requests), err)
@@ -221,8 +221,7 @@ func TestExternalConversationContextReadFailureDoesNotHideTrigger(t *testing.T) 
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	receiveContextTestEvent(t, store, endpoint, "unavailable-context", "mention", "parent", now)
 	host := &recordingContextHost{err: errors.New("read permission unavailable")}
-	worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, false)
-	worker.now = func() time.Time { return now }
+	worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, false, models.WithClock(func() time.Time { return now }))
 	applied, err := worker.ProcessOne(t.Context(), endpoint.Scope)
 	if err != nil || applied.RunID == "" {
 		t.Fatalf("trigger did not proceed: %#v, %v", applied, err)
@@ -245,8 +244,7 @@ func TestExternalConversationContextPermissionCodeIsSafeAndPreserved(t *testing.
 			receiveContextTestEvent(t, store, endpoint, "permission-context", "mention", "parent", now)
 			worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, &recordingContextHost{
 				result: &ExternalConversationContextResult{Status: ExternalConversationContextUnavailable, ErrorCode: code},
-			}, false)
-			worker.now = func() time.Time { return now }
+			}, false, models.WithClock(func() time.Time { return now }))
 			applied, err := worker.ProcessOne(t.Context(), endpoint.Scope)
 			if err != nil {
 				t.Fatal(err)
@@ -281,8 +279,7 @@ func TestExternalConversationContextBindingChangeDuringReadDoesNotImportStaleDat
 			t.Fatal(err)
 		}
 	}}
-	worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, false)
-	worker.now = func() time.Time { return now }
+	worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, host, false, models.WithClock(func() time.Time { return now }))
 	applied, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err != nil || applied.RunID == "" {
 		t.Fatalf("trigger = %#v, %v", applied, err)
@@ -346,8 +343,7 @@ func TestExternalConversationContextRejectsCrossDestinationAndOversizedResults(t
 				message.Text = "conflicting source content"
 				result.Messages = append(result.Messages, message)
 			}
-			worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, &recordingContextHost{result: result}, false)
-			worker.now = func() time.Time { return now }
+			worker, _ := newContextTestWorker(t, store, contextHistoryResolver{catalog}, &recordingContextHost{result: result}, false, models.WithClock(func() time.Time { return now }))
 			applied, err := worker.ProcessOne(t.Context(), endpoint.Scope)
 			if err != nil || applied.RunID == "" {
 				t.Fatalf("unsafe history blocked trigger: %#v, %v", applied, err)
@@ -386,8 +382,7 @@ func TestExternalConversationContextRequiresFeatureDeclaration(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	receiveContextTestEvent(t, store, endpoint, "no-history-feature", "mention", "parent", now)
 	host := &recordingContextHost{err: errors.New("must not be called")}
-	worker, _ := newContextTestWorker(t, store, catalog, host, false)
-	worker.now = func() time.Time { return now }
+	worker, _ := newContextTestWorker(t, store, catalog, host, false, models.WithClock(func() time.Time { return now }))
 	applied, err := worker.ProcessOne(t.Context(), endpoint.Scope)
 	if err != nil || applied.RunID == "" || len(host.requests) != 0 {
 		t.Fatalf("undeclared provider history used: %#v, reads=%d, %v", applied, len(host.requests), err)

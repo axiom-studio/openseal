@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -81,8 +82,7 @@ func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) 
 			}
 			return nil
 		}),
-	})
-	service.now = func() time.Time { return time.Date(2026, 7, 30, 2, 0, 0, 0, time.UTC) }
+	}, models.WithClock(func() time.Time { return time.Date(2026, 7, 30, 2, 0, 0, 0, time.UTC) }))
 	host := &callbackHostStub{result: &CallbackHostResult{
 		StatusCode: http.StatusOK,
 		Events: []NormalizedCallbackEvent{{
@@ -117,15 +117,14 @@ func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
+	now := time.Date(2026, 8, 20, 20, 19, 36, 0, time.UTC)
 	service := NewCallbackIngressService(store, catalog, map[string]CallbackEventConsumer{
 		"approvals": CallbackEventConsumerFunc(func(context.Context, *CallbackRegistration, CallbackSubscription, EventEnvelope) error {
 			consumed++
 			time.Sleep(50 * time.Millisecond)
 			return nil
 		}),
-	})
-	now := time.Date(2026, 8, 20, 20, 19, 36, 0, time.UTC)
-	service.now = func() time.Time { return now }
+	}, models.WithClock(func() time.Time { return now }))
 	wakes := 0
 	service.SetDurableDispatcher(func() { wakes++ })
 	host := &callbackHostStub{result: &CallbackHostResult{
@@ -154,11 +153,10 @@ func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.
 
 	worker, err := NewCallbackEventWorker(store, service, CallbackEventWorkerConfig{
 		WorkerID: "callback-worker", LeaseDuration: time.Minute, BaseRetry: time.Second, MaximumRetry: time.Minute,
-	})
+	}, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker.now = func() time.Time { return now.Add(time.Second) }
 	applied, err := worker.ProcessOne(ctx, registration.Scope)
 	if err != nil {
 		t.Fatal(err)
@@ -177,14 +175,13 @@ func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
+	now := time.Date(2026, 8, 20, 20, 19, 36, 0, time.UTC)
 	service := NewCallbackIngressService(store, catalog, map[string]CallbackEventConsumer{
 		"approvals": CallbackEventConsumerFunc(func(context.Context, *CallbackRegistration, CallbackSubscription, EventEnvelope) error {
 			consumed++
 			return nil
 		}),
-	})
-	now := time.Date(2026, 8, 20, 20, 19, 36, 0, time.UTC)
-	service.now = func() time.Time { return now }
+	}, models.WithClock(func() time.Time { return now }))
 	service.SetDurableDispatcher(nil)
 	host := &callbackHostStub{result: &CallbackHostResult{StatusCode: http.StatusOK, Events: []NormalizedCallbackEvent{{
 		ID: "restart-event", Type: "approval.decided", Source: "slack", OccurredAt: now,
@@ -195,11 +192,10 @@ func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
 	if claimed, err := store.ClaimCallbackEvent(ctx, registration.Scope, "stopped-worker", now, time.Second); err != nil || claimed == nil {
 		t.Fatalf("initial claim = %#v, %v", claimed, err)
 	}
-	worker, err := NewCallbackEventWorker(store, service, CallbackEventWorkerConfig{WorkerID: "restarted-worker", LeaseDuration: time.Minute})
+	worker, err := NewCallbackEventWorker(store, service, CallbackEventWorkerConfig{WorkerID: "restarted-worker", LeaseDuration: time.Minute}, models.WithClock(func() time.Time { return now.Add(2 * time.Second) }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker.now = func() time.Time { return now.Add(2 * time.Second) }
 	recovered, err := worker.ProcessOne(ctx, registration.Scope)
 	if err != nil || recovered == nil || recovered.Status != CallbackEventApplied || recovered.Attempts != 2 || consumed != 1 {
 		t.Fatalf("recovered callback = %#v consumed=%d err=%v", recovered, consumed, err)

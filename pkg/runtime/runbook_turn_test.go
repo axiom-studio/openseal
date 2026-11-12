@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -23,12 +24,12 @@ func runbookRef(pointer string) *runbook.Value {
 	return &value
 }
 
-func newTestRunbookProducer(t *testing.T, definition *runbook.Definition, entrypoint string, calls ActionCallReader) *RunbookStepProducer {
+func newTestRunbookProducer(t *testing.T, definition *runbook.Definition, entrypoint string, calls ActionCallReader, opts ...models.ServiceOption) *RunbookStepProducer {
 	t.Helper()
 	if calls == nil {
 		calls = fixedActionCalls{}
 	}
-	producer, err := NewRunbookStepProducer(definition, entrypoint, calls)
+	producer, err := NewRunbookStepProducer(definition, entrypoint, calls, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,9 +427,8 @@ func TestRunbookProducerWaitsOnceAndResumesFromCheckpoint(t *testing.T) {
 	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "wait", Version: "1", Name: "Wait", Entrypoints: map[string]string{"event": "wait"}, Steps: map[string]runbook.Step{
 		"wait": {Kind: runbook.StepWait, Wait: &runbook.WaitStep{Duration: time.Minute, Next: "done"}}, "done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 	}}
-	producer := newTestRunbookProducer(t, definition, "event", nil)
 	now := time.Date(2026, 7, 12, 5, 0, 0, 0, time.UTC)
-	producer.now = func() time.Time { return now }
+	producer := newTestRunbookProducer(t, definition, "event", nil, models.WithClock(func() time.Time { return now }))
 	first := produceRunbook(t, producer, runbookInput(&AgentRun{ID: "run"}, 1, nil, nil))
 	if first.Park == nil || first.Park.Status != AgentRunStatusSleeping || first.Park.Wake == nil || first.Park.Wake.Type != "timer" || !first.Park.Wake.WakeAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("first=%#v", first)

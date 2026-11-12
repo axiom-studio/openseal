@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -32,8 +33,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	}
 
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(primary)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(primary, models.WithClock(func() time.Time { return now }))
 	scope := Scope{Kind: "tenant", ID: "postgres-e2e"}
 	otherScope := Scope{Kind: "tenant", ID: "other"}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"}
@@ -246,10 +246,8 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		}
 	}
 
-	turnServices := []*AgentTurnService{NewAgentTurnService(primary, primary), NewAgentTurnService(replica, replica)}
-	for _, service := range turnServices {
-		service.now = func() time.Time { return now }
-	}
+	clock := models.WithClock(func() time.Time { return now })
+	turnServices := []*AgentTurnService{NewAgentTurnService(primary, primary, clock), NewAgentTurnService(replica, replica, clock)}
 	turns := make(chan *AgentTurn, 2)
 	turnErrors := make(chan error, 2)
 	wait = sync.WaitGroup{}
@@ -392,9 +390,8 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	if createdProposals != 1 || proposal == nil || proposal.Approval == nil {
 		t.Fatalf("created proposals = %d, proposal=%#v", createdProposals, proposal)
 	}
-	approvals := NewApprovalCoordinator(replica, replica, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }))
 	approvalNow := proposal.Approval.CreatedAt.Add(time.Second)
-	approvals.now = func() time.Time { return approvalNow }
+	approvals := NewApprovalCoordinator(replica, replica, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }), models.WithClock(func() time.Time { return approvalNow }))
 	resolved, err := approvals.Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
 	if err != nil || !resolved.Resolved || resolved.Call.Status != ActionCallStatusReady || resolved.Run.Status != AgentRunStatusWaitingForDependency {
 		t.Fatalf("resolved approval = %#v, %v", resolved, err)

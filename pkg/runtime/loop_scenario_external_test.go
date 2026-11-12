@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -87,14 +88,13 @@ func newExternalLoopFixture(t *testing.T, store KernelStore, provider string, op
 	var err error
 	if f.progress, err = NewRunProgressAcknowledgementWorker(ext, f.adapters, renderer, RunProgressAcknowledgementWorkerConfig{
 		MinimumRunAge: time.Nanosecond, MinimumInterval: time.Nanosecond,
-	}); err != nil {
+	}, models.WithClock(f.clock.Now)); err != nil {
 		t.Fatal(err)
 	}
-	f.progress.now = f.clock.Now
-	if f.replies, err = NewExternalConversationReplyWorker(ext, f.adapters); err != nil {
+	if f.replies, err = NewExternalConversationReplyWorker(ext, f.adapters, models.WithClock(f.clock.Now)); err != nil {
 		t.Fatal(err)
 	}
-	if f.delivery, err = NewExternalConversationDeliveryWorker(ext, f.adapters, f.host, ExternalConversationDeliveryWorkerConfig{WorkerID: "delivery"}); err != nil {
+	if f.delivery, err = NewExternalConversationDeliveryWorker(ext, f.adapters, f.host, ExternalConversationDeliveryWorkerConfig{WorkerID: "delivery"}, models.WithClock(f.clock.Now)); err != nil {
 		t.Fatal(err)
 	}
 	return f

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -38,8 +39,7 @@ func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 			ApprovalTimeout: ApprovalTimeoutApprove,
 		}, nil
 	})
-	coordinator := NewActionCoordinator(store, store, catalog, policy, nil)
-	coordinator.now = func() time.Time { return now.Add(time.Second) }
+	coordinator := NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	ids := []string{"call", "approval", "event"}
 	coordinator.newID = func() string {
 		id := ids[0]
@@ -106,8 +106,7 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 	decision := ActionDispositionAllow
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: decision, Reason: "test"}, nil
-	}), nil)
-	coordinator.now = func() time.Time { return now.Add(time.Second) }
+	}), nil, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	coordinator.newID = func() string { return "id-" + string(decision) }
 	base := ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0", Action: "deploy"}
 	invalid := loopProposeRequest(base, "invalid")
@@ -290,8 +289,7 @@ func claimedActionRun(t *testing.T, store *sqlite.Store, scope Scope, now time.T
 // claimedOwnedActionRun claims a run of release-agent under owner.
 func claimedOwnedActionRun(t *testing.T, store *sqlite.Store, scope Scope, now time.Time, worker string, owner ObjectiveOwner) *AgentRun {
 	t.Helper()
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
 	})

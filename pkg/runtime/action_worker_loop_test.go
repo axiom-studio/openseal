@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -130,8 +131,7 @@ func newLoopWorkerFixture(t *testing.T, store KernelStore, budget *BudgetPolicy)
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "loop-worker"}
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent",
 		Goal: "ship the release", Source: RunSourceObjective, Budget: budget,
@@ -158,6 +158,11 @@ func (f *loopWorkerFixture) propose(id, action string) *ActionCall {
 // worker counts catalog resolutions, credential resolutions and dispatches;
 // its clock is f.clock.
 func (f *loopWorkerFixture) worker(dispatch ActionDispatcherFunc) *ActionWorker {
+	return f.workerWithClock(dispatch, func() time.Time { return f.clock })
+}
+
+// workerWithClock is worker reading time from clock.
+func (f *loopWorkerFixture) workerWithClock(dispatch ActionDispatcherFunc, clock models.Clock) *ActionWorker {
 	worker := NewActionWorker(f.store, &actionLifecycleCountingCatalog{ActionExecutionCatalog: f.catalog, calls: &f.catalogCalls},
 		CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 			f.credentialCalls++
@@ -165,8 +170,7 @@ func (f *loopWorkerFixture) worker(dispatch ActionDispatcherFunc) *ActionWorker 
 		}), ActionDispatcherFunc(func(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
 			f.dispatches++
 			return dispatch(ctx, input)
-		}))
-	worker.now = func() time.Time { return f.clock }
+		}), models.WithClock(clock))
 	return worker
 }
 
@@ -233,7 +237,7 @@ func TestExecuteOwnLoopCallDispatchesInlineUnderCallLease(t *testing.T) {
 		before := f.currentRun()
 		poolClaimedDuringDispatch := false
 		var clockTicks atomic.Int64
-		worker := f.worker(func(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
+		worker := f.workerWithClock(func(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
 			if input.Call.Status != ActionCallStatusRunning || input.Call.LeaseOwner != loopWorkerID || input.Credentials["token"] != "loop-secret" ||
 				input.Run == nil || input.Run.ID != call.RunID || input.Arguments["environment"] != "production" {
 				t.Fatalf("dispatch input = %#v", input)
@@ -261,8 +265,7 @@ func TestExecuteOwnLoopCallDispatchesInlineUnderCallLease(t *testing.T) {
 					return nil, ctx.Err()
 				}
 			}
-		})
-		worker.now = func() time.Time { return f.clock.Add(time.Duration(clockTicks.Add(1)) * 10 * time.Millisecond) }
+		}, func() time.Time { return f.clock.Add(time.Duration(clockTicks.Add(1)) * 10 * time.Millisecond) })
 		worker.loopLease = 45 * time.Millisecond
 		onClaim := false
 		worker.onClaim = func() { onClaim = true }
@@ -473,8 +476,7 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				}), ActionDispatcherFunc(func(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
 					f.dispatches++
 					return succeedDispatch(ctx, input)
-				}))
-				worker.now = func() time.Time { return f.clock }
+				}), models.WithClock(func() time.Time { return f.clock }))
 				result, err := f.execute(worker, call.ID)
 				var held *LoopActionMaintenanceError
 				if result != nil || !errors.As(err, &held) || !errors.Is(err, ErrSkillRuntimeMaintenance) {
@@ -619,8 +621,7 @@ func TestLoopConnectAccountParkedCallKeepsCardOutput(t *testing.T) {
 	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		return map[string]interface{}{"sent": true}, nil
-	}))
-	worker.now = func() time.Time { return now.Add(time.Second) }
+	}), models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	worker.setCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
 		return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapPersonSignIn}}, nil
 	}))

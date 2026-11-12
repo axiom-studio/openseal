@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -241,8 +242,7 @@ func (f *chatLoopFixture) startMember(trigger *ChannelMessage, agentID string) *
 	request.ConcurrencyKey = ConversationRunLane(f.conversation.ID, "", agentID)
 	request.SessionID = conversationSessionID(f.conversation.Scope, request.ConcurrencyKey)
 	request.IdempotencyKey = "member-" + agentID + "-" + trigger.ID
-	commands := NewRunCommandService(f.store)
-	commands.now = func() time.Time { return f.now }
+	commands := NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
 	result, err := commands.CreateAgentRun(f.ctx, request)
 	if err != nil {
 		f.t.Fatalf("create member run: %v", err)

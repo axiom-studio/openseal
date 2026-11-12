@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -38,8 +39,7 @@ func TestActionWorkerDispatchesOpaqueCredentialLeaseWithDurableAuthority(t *test
 			t.Fatalf("durable dispatch authority = call %#v run %#v", input.Call, input.Run)
 		}
 		return map[string]interface{}{"ok": true}, nil
-	}))
-	worker.now = func() time.Time { return now.Add(2 * time.Second) }
+	}), models.WithClock(func() time.Time { return now.Add(2 * time.Second) }))
 	worker.newID = func() string { return "opaque-lease-execution" }
 	result, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "agent-worker")
 	if err != nil {
@@ -71,6 +71,7 @@ func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	catalog, proposal := createRunnableAction(t, store, now)
 	attempts := 0
+	current := now.Add(2 * time.Second)
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"token": "raw-secret-value"}, nil
 	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
@@ -79,9 +80,7 @@ func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
 			return nil, errors.New("provider rejected raw-secret-value")
 		}
 		return map[string]interface{}{"ok": true}, nil
-	}))
-	current := now.Add(2 * time.Second)
-	worker.now = func() time.Time { return current }
+	}), models.WithClock(func() time.Time { return current }))
 	first, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "agent-worker")
 	if err != nil {
 		t.Fatal(err)
@@ -104,8 +103,7 @@ func TestActionWorkerReturnsFailureWithoutLeakingCredentials(t *testing.T) {
 func createRunnableAction(t *testing.T, store KernelStore, now time.Time) (*skill.Catalog, *ActionProposalResult) {
 	t.Helper()
 	catalog, scope := governedActionCatalog(t)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
 	})

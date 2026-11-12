@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -318,8 +319,7 @@ func TestRoutineEventOccurrenceCountSurvivesCrash(t *testing.T) {
 	h.pass()
 	h.finishRuns()
 	// A new process: the count comes from the started batch rows.
-	restarted := NewRoutineEventDispatcher(h.store, h.matcher)
-	restarted.now = h.clock
+	restarted := NewRoutineEventDispatcher(h.store, h.matcher, models.WithClock(h.clock))
 	h.dispatcher = restarted
 	h.offer(activation, 1)
 	// It creates the Run and stops before marking the batch.

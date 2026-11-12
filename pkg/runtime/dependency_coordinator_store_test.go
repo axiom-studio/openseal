@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -31,8 +32,8 @@ func TestDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "one"}
 	store := newTestKernelStore(t)
 	createDependencySource(t, store, scope, "source-all")
-	coordinator := NewDependencyCoordinator(store)
-	coordinator.now = func() time.Time { return time.Date(2026, 7, 10, 12, 1, 0, 0, time.UTC) }
+	coordinatorClock := func() time.Time { return time.Date(2026, 7, 10, 12, 1, 0, 0, time.UTC) }
+	coordinator := NewDependencyCoordinator(store, models.WithClock(func() time.Time { return coordinatorClock() }))
 
 	create := CreateRunDependencyGroupRequest{
 		ID: "join-all", Scope: scope, SourceRunID: "source-all", ExpectedSourceRevision: 1,
@@ -61,7 +62,7 @@ func TestDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 		t.Fatalf("conflicting replay error = %v", err)
 	}
 
-	coordinator.now = func() time.Time { return time.Date(2026, 7, 10, 12, 2, 0, 0, time.UTC) }
+	coordinatorClock = func() time.Time { return time.Date(2026, 7, 10, 12, 2, 0, 0, time.UTC) }
 	first, err := coordinator.ResolveRunDependency(ctx, ResolveRunDependencyRequest{
 		Scope: scope, GroupID: "join-all", DependencyID: "analysis", ExpectedDependencyRevision: 1,
 		State: RunDependencyStateSatisfied, Result: map[string]interface{}{"finding": "conversion increased"},
@@ -70,7 +71,7 @@ func TestDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 	if err != nil || first.Evaluation.Wake || first.Source.Status != AgentRunStatusWaitingForDependency || len(first.Events) != 1 {
 		t.Fatalf("first completion = %#v, err = %v", first, err)
 	}
-	coordinator.now = func() time.Time { return time.Date(2026, 7, 10, 12, 3, 0, 0, time.UTC) }
+	coordinatorClock = func() time.Time { return time.Date(2026, 7, 10, 12, 3, 0, 0, time.UTC) }
 	secondRequest := ResolveRunDependencyRequest{
 		Scope: scope, GroupID: "join-all", DependencyID: "research", ExpectedDependencyRevision: 1,
 		State: RunDependencyStateSatisfied, Result: map[string]interface{}{"finding": "users need durable retries"},
@@ -101,8 +102,7 @@ func TestDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "concurrent"}
 	store := newTestKernelStore(t)
 	createDependencySource(t, store, scope, "source-any")
-	coordinator := NewDependencyCoordinator(store)
-	coordinator.now = func() time.Time { return time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC) }
+	coordinator := NewDependencyCoordinator(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC) }))
 	_, err := coordinator.CreateRunDependencyGroup(ctx, CreateRunDependencyGroupRequest{
 		ID: "join-any", Scope: scope, SourceRunID: "source-any", ExpectedSourceRevision: 1,
 		Policy: RunDependencyPolicy{Mode: FanInModeAny, FailureMode: DependencyFailureFailFast},

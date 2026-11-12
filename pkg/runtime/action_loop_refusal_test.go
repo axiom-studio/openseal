@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 func refusedLoopCallRequest(f *loopStoreFixture, prior *ActionCall, code string) RefusedLoopCallRequest {
@@ -23,8 +25,7 @@ func TestNewRefusedLoopCallRow(t *testing.T) {
 	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newLoopStoreFixture(t, store)
 		prior := f.propose(f.loopCall("prior"))
-		coordinator := NewActionCoordinator(store, store, nil, nil, nil)
-		coordinator.now = func() time.Time { return f.now }
+		coordinator := NewActionCoordinator(store, store, nil, nil, nil, models.WithClock(func() time.Time { return f.now }))
 
 		result, err := coordinator.RecordRefusedLoopCall(f.ctx, refusedLoopCallRequest(f, prior, RefusedLoopCallRepeat))
 		if err != nil || result == nil || !result.Created || result.Run != nil {

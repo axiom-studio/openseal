@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -186,8 +187,7 @@ func (f *chatLoopFixture) startRun(trigger *ChannelMessage) *AgentRun {
 		request.SessionID = conversationSessionID(f.conversation.Scope, request.ConcurrencyKey)
 		request.IdempotencyKey = "member-" + trigger.ID
 	}
-	commands := NewRunCommandService(f.store)
-	commands.now = func() time.Time { return f.now }
+	commands := NewRunCommandService(f.store, models.WithClock(func() time.Time { return f.now }))
 	result, err := commands.CreateAgentRun(f.ctx, request)
 	if err != nil {
 		f.t.Fatalf("create run: %v", err)
@@ -553,8 +553,7 @@ func TestRunControlInvalidRunIdIsToolError(t *testing.T) {
 
 		trigger := f.post("pause", "user-1", "Pause the export.")
 		run := f.startRun(trigger)
-		portfolio := NewPortfolioService(f.store)
-		portfolio.now = func() time.Time { return f.now }
+		portfolio := NewPortfolioService(f.store, models.WithClock(func() time.Time { return f.now }))
 		work, err := portfolio.CreateAgentRun(f.ctx, CreateAgentRunRequest{
 			Scope: run.Scope, Kind: RunKindAgentWork, ParentRunID: run.ID, Owner: run.Owner, AssignedAgentID: "agent-1",
 			Goal: "Export the report", Source: RunSourceFork, IdempotencyKey: "work-" + run.ID,

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -61,10 +62,9 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	t.Helper()
 	ctx := context.Background()
 	clock := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
-	spaces := NewSpaceService(store)
-	spaces.now = func() time.Time { clock = clock.Add(time.Second); return clock }
-	conversations := NewConversationService(store)
-	conversations.now = spaces.now
+	tick := models.WithClock(func() time.Time { clock = clock.Add(time.Second); return clock })
+	spaces := NewSpaceService(store, tick)
+	conversations := NewConversationService(store, tick)
 	scope := Scope{Kind: "tenant", ID: "spaces-" + strings.ReplaceAll(t.Name(), "/", "-")}
 
 	const owner = "7"

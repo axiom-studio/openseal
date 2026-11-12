@@ -233,8 +233,7 @@ func newControlFixture(t *testing.T, calls []LoopToolCall) *controlFixture {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	store := newTestKernelStore(t)
 	scope := Scope{Kind: "tenant", ID: "control-" + uuid.NewString()[:8]}
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	created, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}, AssignedAgentID: "agent-1",
 		Goal: "work", Source: RunSourceObjective,

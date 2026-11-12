@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
 )
@@ -87,8 +88,7 @@ func finishOwnedDependencyRepairChild(t *testing.T, fixture *dependencyRetiremen
 	checkpoint := maps.Clone(child.Checkpoint)
 	checkpoint["branch"] = branch
 	checkpoint["committed"] = "terminal"
-	service := NewRunActivityService(fixture.store, fixture.store)
-	service.now = func() time.Time { return fixture.now.Add(4 * time.Second) }
+	service := NewRunActivityService(fixture.store, fixture.store, models.WithClock(func() time.Time { return fixture.now.Add(4 * time.Second) }))
 	if _, _, err := service.TransitionRun(t.Context(), fixture.scope, child.ID, RunTransitionRequest{
 		ExpectedRevision: child.Revision, Status: AgentRunStatusCompleted,
 		Actor: ActivityActor{Type: "worker", ID: "child-worker"}, LeaseOwner: "child-worker",

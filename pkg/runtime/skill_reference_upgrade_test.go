@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -37,8 +38,7 @@ func TestSkillReferenceUpgradeEstablishesLifecycleForWorkforceBinding(t *testing
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 27, 0, 0, 0, 0, time.UTC)
-	service := NewSkillReferenceUpgradeService(store, catalog)
-	service.now = func() time.Time { return now }
+	service := NewSkillReferenceUpgradeService(store, catalog, models.WithClock(func() time.Time { return now }))
 	plan, err := service.Plan(ctx, PlanSkillReferenceUpgradeRequest{
 		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "researcher", BindingID: "browser", ToVersion: "1.1.0",
 	})
@@ -136,8 +136,7 @@ func TestSkillReferenceUpgradeMovesConversationAndCallbackAdaptersAtomically(t *
 	}); err != nil {
 		t.Fatal(err)
 	}
-	service := NewSkillReferenceUpgradeService(store, catalog)
-	service.now = func() time.Time { return now.Add(time.Hour) }
+	service := NewSkillReferenceUpgradeService(store, catalog, models.WithClock(func() time.Time { return now.Add(time.Hour) }))
 	plan, err := service.Plan(ctx, PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: owner.ID, BindingID: "slack", ToVersion: "1.1.0"})
 	if err != nil {
 		t.Fatal(err)

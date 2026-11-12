@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -358,24 +359,18 @@ func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFi
 		t.Fatalf("%T is not a conversation store", store)
 	}
 	f.chats = chats
-	f.convs = NewConversationService(chats)
-	f.convs.now = f.clock.Now
-	f.portfolio = NewPortfolioService(f.store)
-	f.portfolio.now = f.clock.Now
-	scheduler, err := NewConversationRunScheduler(chats, chats, ConversationRunSchedulerConfig{})
+	clock := models.WithClock(f.clock.Now)
+	f.convs = NewConversationService(chats, clock)
+	f.portfolio = NewPortfolioService(f.store, clock)
+	scheduler, err := NewConversationRunScheduler(chats, chats, ConversationRunSchedulerConfig{}, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler.conversations.now = f.clock.Now
-	scheduler.approvals.now = f.clock.Now
-	scheduler.runs.now = f.clock.Now
 	f.scheduler = scheduler
-	runner, err := NewConversationRunTurnRunner(chats, f.coordinator(), ConversationRunTurnRunnerConfig{AttachmentContent: &answerVisualContent{}})
+	runner, err := NewConversationRunTurnRunner(chats, f.coordinator(), ConversationRunTurnRunnerConfig{AttachmentContent: &answerVisualContent{}}, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner.now = f.clock.Now
-	runner.conversations.now = f.clock.Now
 	f.runner = runner
 	f.build()
 	return f
@@ -421,20 +416,17 @@ func (f *loopFixture) coordinator() *ConversationCoordinator {
 func (f *loopFixture) build() {
 	f.t.Helper()
 	policy := ActionPolicyEvaluatorFunc(f.policy.evaluate)
-	f.actions = NewActionCoordinator(f.store, f.store, f.catalog, policy, nil)
-	f.actions.now = f.clock.Now
-	f.approve = NewApprovalCoordinator(f.store, f.store, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }))
-	f.approve.now = f.clock.Now
-	f.executor = NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(f.dispatch.Dispatch))
-	f.executor.now = f.clock.Now
+	clock := models.WithClock(f.clock.Now)
+	f.actions = NewActionCoordinator(f.store, f.store, f.catalog, policy, nil, clock)
+	f.approve = NewApprovalCoordinator(f.store, f.store, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }), clock)
+	f.executor = NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(f.dispatch.Dispatch), clock)
 	governed, err := NewGovernedToolExecutor(GovernedToolExecutorConfig{
 		Actions: f.actions, Approvals: f.approve, Worker: f.executor, Store: f.store, Now: f.clock.Now,
 	})
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	activity := NewRunActivityService(f.store, f.store)
-	activity.now = f.clock.Now
+	activity := NewRunActivityService(f.store, f.store, models.WithClock(f.clock.Now))
 	f.control = &ControlExecutor{
 		Portfolio: f.store, Sessions: f.store.(AgentSessionStore), Activity: activity,
 		Conversations: f.convs, Reporting: f.chats, Now: f.clock.Now,

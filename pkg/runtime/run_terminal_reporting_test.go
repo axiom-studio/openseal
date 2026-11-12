@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
@@ -45,8 +46,7 @@ func terminalReportingContractRun(t *testing.T, store terminalReportingContractS
 		t.Fatal(err)
 	}
 	key := uuid.NewString()
-	commands := NewRunCommandService(store)
-	commands.now = func() time.Time { return at }
+	commands := NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
 	created, err := commands.CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Report the completed background work", Source: RunSourceSchedule, IdempotencyKey: key,
 		Context: map[string]interface{}{
@@ -62,8 +62,7 @@ func terminalReportingContractRun(t *testing.T, store terminalReportingContractS
 
 func terminalReportingContractComplete(t *testing.T, store terminalReportingContractStore, run *AgentRun, at time.Time) *AgentRun {
 	t.Helper()
-	activity := NewRunActivityService(store, store)
-	activity.now = func() time.Time { return at }
+	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return at }))
 	running, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning})
 	if err != nil {
 		t.Fatal(err)
@@ -79,11 +78,17 @@ func terminalReportingContractComplete(t *testing.T, store terminalReportingCont
 
 func terminalReportingContractWorker(t *testing.T, store terminalReportingContractStore, at time.Time) *RunTerminalReportingWorker {
 	t.Helper()
-	worker, err := NewRunTerminalReportingWorker(store, RunTerminalReportingWorkerOptions{WorkerID: "report-worker", LeaseDuration: time.Minute, BatchSize: 10, Concurrency: 2})
+	return terminalReportingContractWorkerWithClock(t, store, func() time.Time { return at })
+}
+
+// terminalReportingContractWorkerWithClock is terminalReportingContractWorker
+// reading time from clock.
+func terminalReportingContractWorkerWithClock(t *testing.T, store terminalReportingContractStore, clock models.Clock) *RunTerminalReportingWorker {
+	t.Helper()
+	worker, err := NewRunTerminalReportingWorker(store, RunTerminalReportingWorkerOptions{WorkerID: "report-worker", LeaseDuration: time.Minute, BatchSize: 10, Concurrency: 2}, models.WithClock(clock))
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker.now = func() time.Time { return at }
 	return worker
 }
 
@@ -195,7 +200,7 @@ func TestTerminalRunReportingContractConflictBackoffAndActiveScopeGate(t *testin
 		run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-retry"}, now)
 		run = terminalReportingContractComplete(t, store, run, now)
 		conflicted := &terminalReportingConflictStore{terminalReportingContractStore: store, remaining: 2}
-		worker := terminalReportingContractWorker(t, conflicted, now)
+		worker := terminalReportingContractWorkerWithClock(t, conflicted, func() time.Time { return now })
 		if delivered, err := worker.ProcessBatch(t.Context()); !errors.Is(err, ErrRevisionConflict) || delivered != 0 {
 			t.Fatalf("exhausted revision retry should retain work: delivered=%d error=%v", delivered, err)
 		}
@@ -207,7 +212,6 @@ func TestTerminalRunReportingContractConflictBackoffAndActiveScopeGate(t *testin
 			t.Fatalf("backoff was ignored: delivered=%d error=%v", delivered, err)
 		}
 		now = intent.AvailableAt
-		worker.now = func() time.Time { return now }
 		worker.options.ScopeAllowed = func(_ context.Context, scope Scope) (bool, error) {
 			if scope != run.Scope {
 				t.Errorf("tenant gate checked wrong scope: %#v", scope)
@@ -393,8 +397,7 @@ func TestTerminalRunReportingContractFailedTerminalCommitRollsBackIntent(t *test
 		store := terminalReportingContractFixture(t, fixture)
 		now := runStoreContractEpoch
 		run, _, _ := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "report-atomic-failure"}, now)
-		activity := NewRunActivityService(store, store)
-		activity.now = func() time.Time { return now }
+		activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
 		running, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning})
 		if err != nil {
 			t.Fatal(err)

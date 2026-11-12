@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -46,9 +47,8 @@ func newSurfaceInteractionFixture(t *testing.T, store KernelStore) surfaceIntera
 	t.Helper()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "cards"}
-	conversations := NewConversationService(store.(ConversationStore))
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
-	conversations.now = func() time.Time { now = now.Add(time.Second); return now }
+	conversations := NewConversationService(store.(ConversationStore), models.WithClock(func() time.Time { now = now.Add(time.Second); return now }))
 	seedTestSpace(t, store.(SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "family"}, Title: "Trip", IdempotencyKey: "trip",

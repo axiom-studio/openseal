@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -31,8 +32,7 @@ func TestWakeSignalsRequeueRunsExactlyOnce(t *testing.T) {
 			ctx := context.Background()
 			scope := Scope{Kind: "local", ID: "test"}
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-			portfolio := NewPortfolioService(store)
-			portfolio.now = func() time.Time { return now }
+			portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 			run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 				Goal: "wait", Source: RunSourceEvent,
@@ -46,8 +46,7 @@ func TestWakeSignalsRequeueRunsExactlyOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			activity := NewRunActivityService(store, store)
-			activity.now = func() time.Time { return now.Add(time.Second) }
+			activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 			waiting, _, err := activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
 				ExpectedRevision: claimed.Revision, Status: AgentRunStatusWaitingForEvent, LeaseOwner: "worker",
 				WakeCondition: &WakeCondition{Type: "event", Reference: "jobs", Predicate: map[string]interface{}{"state": "ready"}},
@@ -145,8 +144,7 @@ func TestWakeSignalSurvivesSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{Kind: "local", ID: "test"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 		Goal: "sleep", Source: RunSourceSchedule,
@@ -161,8 +159,7 @@ func TestWakeSignalSurvivesSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	due := now.Add(time.Hour)
-	activity := NewRunActivityService(store, store)
-	activity.now = func() time.Time { return now.Add(time.Second) }
+	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	_, _, err = activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: claimed.Revision, Status: AgentRunStatusSleeping, LeaseOwner: "worker",
 		WakeCondition: &WakeCondition{Type: "timer", WakeAt: &due, Reference: "schedule"},

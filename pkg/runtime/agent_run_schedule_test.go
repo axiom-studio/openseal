@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestCreateAgentRunInitializesDurableQueueMetadata(t *testing.T) {
 	store := newTestKernelStore(t)
-	service := NewPortfolioService(store)
 	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
-	service.now = func() time.Time { return now }
+	service := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	available := now.Add(time.Hour)
 	deadline := now.Add(2 * time.Hour)
 	run, err := service.CreateAgentRun(context.Background(), CreateAgentRunRequest{
@@ -49,8 +49,7 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 			ctx := t.Context()
 			scope := Scope{Kind: "tenant", ID: "portfolio-capacity-" + testCase.name}
 			now := time.Date(2026, 8, 7, 4, 0, 0, 0, time.UTC)
-			portfolio := NewPortfolioService(store)
-			portfolio.now = func() time.Time { return now }
+			portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 			team := ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}
 			otherTeam := ObjectiveOwner{Type: OwnerTypeTeam, ID: "support-team"}
 			objectiveA, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
@@ -102,8 +101,7 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 			}
 
 			objectiveScope := Scope{Kind: "tenant", ID: "objective-capacity-" + testCase.name}
-			objectivePortfolio := NewPortfolioService(store)
-			objectivePortfolio.now = func() time.Time { return now }
+			objectivePortfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 			objectiveOwner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}
 			left, err := objectivePortfolio.CreateObjective(ctx, CreateObjectiveRequest{
 				Scope: objectiveScope, Owner: objectiveOwner, Title: "Release", Goal: "Release safely", Status: ObjectiveStatusActive,
@@ -168,8 +166,7 @@ func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
 			scope := Scope{Kind: "tenant", ID: "objective-policy-" + testCase.name}
 			owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "portfolio-team"}
 			now := time.Date(2026, 8, 7, 8, 0, 0, 0, time.UTC)
-			portfolio := NewPortfolioService(store)
-			portfolio.now = func() time.Time { return now }
+			portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 			limited, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
 				Scope: scope, Owner: owner, Title: "Primary", Goal: "Ship primary work", Status: ObjectiveStatusActive,
 				ExecutionPolicy: &ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
@@ -245,8 +242,7 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 			now := time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC)
 			scope := Scope{Kind: "tenant", ID: "admission-decision-" + testCase.name}
 			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "autonomous-agent"}
-			portfolio := NewPortfolioService(store)
-			portfolio.now = func() time.Time { return now }
+			portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 			objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
 				Scope: scope, Owner: owner, Title: "Bounded", Goal: "Run serially", Status: ObjectiveStatusActive,
 				ExecutionPolicy: &ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
@@ -267,8 +263,7 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 					firstRunID = run.ID
 				}
 			}
-			scheduler := NewAgentRunScheduler(store)
-			scheduler.now = func() time.Time { return now }
+			scheduler := NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
 			inspection, err := scheduler.Inspect(ctx, AgentRunClaimRequest{Scope: scope})
 			if err != nil || inspection == nil || inspection.Outcome != AgentRunAdmissionReady || inspection.Run == nil {
 				t.Fatalf("ready inspection = %#v, %v", inspection, err)
@@ -317,8 +312,7 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 			now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.UTC)
 			scope := Scope{Kind: "tenant", ID: "objective-resources-" + testCase.name}
 			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "research-agent"}
-			portfolio := NewPortfolioService(store)
-			portfolio.now = func() time.Time { return now }
+			portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 			objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
 				Scope: scope, Owner: owner, Title: "Browser research", Goal: "Research without sharing sessions", Status: ObjectiveStatusActive,
 				ExecutionPolicy: &ObjectiveExecutionPolicy{ResourceCapacities: map[string]int{"browser": 1}},
@@ -337,8 +331,7 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 				}
 				runIDs = append(runIDs, run.ID)
 			}
-			scheduler := NewAgentRunScheduler(store)
-			scheduler.now = func() time.Time { return now }
+			scheduler := NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
 			first, err := scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour})
 			if err != nil || first == nil || first.ResourceRequirements["browser"] != 1 {
 				t.Fatalf("first resource claim = %#v, %v", first, err)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 )
 
 type crashAfterExternalConversationDispatch struct {
@@ -62,13 +63,14 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 	dispatcher := &crashAfterExternalConversationDispatch{
 		next: NewCanonicalExternalConversationDispatcher(scheduler), crashOnce: true,
 	}
+	workerClock := time.Now
 	worker, err := NewExternalConversationInboxWorker(store, dispatcher, ExternalConversationInboxWorkerConfig{
 		WorkerID: "inbox-worker", LeaseDuration: time.Minute, BaseRetry: time.Second, MaximumRetry: time.Minute,
-	})
+	}, models.WithClock(func() time.Time { return workerClock() }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker.now = func() time.Time { return now }
+	workerClock = func() time.Time { return now }
 
 	failed, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err == nil || failed == nil || failed.Status != ExternalConversationInboxRetry || failed.Attempt != 1 {
@@ -89,7 +91,7 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 		t.Fatalf("Runs after crash = %#v, %v", runs, err)
 	}
 
-	worker.now = func() time.Time { return now.Add(time.Second) }
+	workerClock = func() time.Time { return now.Add(time.Second) }
 	applied, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err != nil || applied == nil || applied.Status != ExternalConversationInboxApplied ||
 		applied.ChannelMessageID != messages[0].ID || applied.RunID != runs[0].ID || applied.Attempt != 2 {

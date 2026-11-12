@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -101,8 +102,7 @@ func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *t
 				}
 				coordinator := NewActionCoordinator(fixture.store, intercepted, fixture.catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 					return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-				}), nil)
-				coordinator.now = func() time.Time { return fixture.now.Add(time.Second) }
+				}), nil, models.WithClock(func() time.Time { return fixture.now.Add(time.Second) }))
 				result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
 					Scope: run.Scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
 					BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision,
@@ -228,8 +228,7 @@ func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.
 				defer proposals.Done()
 				coordinator := NewActionCoordinator(fixture.store, fixture.store, fixture.catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 					return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-				}), nil)
-				coordinator.now = func() time.Time { return fixture.now.Add(time.Second) }
+				}), nil, models.WithClock(func() time.Time { return fixture.now.Add(time.Second) }))
 				<-start
 				outcomes[index], failures[index] = coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
 					Scope: run.Scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
@@ -355,8 +354,7 @@ func newActionBindingFenceFixture(t *testing.T, kernel KernelStore) *actionBindi
 
 func newActionBindingFenceRunningRun(t *testing.T, store KernelStore, scope Scope, now time.Time) *AgentRun {
 	t.Helper()
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "Deploy safely", Source: RunSourceObjective,
 	})
@@ -379,8 +377,7 @@ func completeActionBindingFenceFixture(t *testing.T, fixture *actionBindingFence
 		return map[string]string{"token": "secret"}, nil
 	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		return map[string]interface{}{"providerResult": "delivered"}, nil
-	}))
-	worker.now = func() time.Time { return fixture.now.Add(2 * time.Second) }
+	}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
 	completed, err := worker.ExecuteOwnLoopCall(t.Context(), fixture.proposal.Call.Scope, fixture.proposal.Call.ID, "agent-worker")
 	if err != nil || completed == nil || completed.Call.Status != ActionCallStatusSucceeded {
 		t.Fatalf("complete fixture = %#v, %v", completed, err)

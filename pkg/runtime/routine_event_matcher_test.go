@@ -12,6 +12,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -54,11 +55,9 @@ func newRoutineEventHarnessOn(t *testing.T, store *sqlite.Store) *routineEventHa
 		t: t, ctx: t.Context(), store: store, scope: Scope{Kind: "tenant", ID: "event-routines"},
 		owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}, now: time.Now().UTC(),
 	}
-	h.matcher = NewRoutineEventMatcher(h.store)
+	h.matcher = NewRoutineEventMatcher(h.store, models.WithClock(h.clock))
 	t.Cleanup(h.matcher.Close)
-	h.matcher.now = h.clock
-	h.dispatcher = NewRoutineEventDispatcher(h.store, h.matcher)
-	h.dispatcher.now = h.clock
+	h.dispatcher = NewRoutineEventDispatcher(h.store, h.matcher, models.WithClock(h.clock))
 	seedTestSpace(t, h.store, h.scope)
 	h.deployOwner()
 	h.conversation, h.message = h.chat("Inbox")

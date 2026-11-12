@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -33,12 +34,10 @@ func convRunner(f *loopFixture, config ConversationRunTurnRunnerConfig) {
 	if config.AttachmentContent == nil {
 		config.AttachmentContent = &answerVisualContent{}
 	}
-	runner, err := NewConversationRunTurnRunner(f.chats, f.coordinator(), config)
+	runner, err := NewConversationRunTurnRunner(f.chats, f.coordinator(), config, models.WithClock(f.clock.Now))
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	runner.now = f.clock.Now
-	runner.conversations.now = f.clock.Now
 	f.runner = runner
 }
 
@@ -621,8 +620,6 @@ func convRoute(f *loopFixture, conversationID string, trigger *ChannelMessage) *
 func TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone(t *testing.T) {
 	eachStore(t, "conv-team", func(t *testing.T, store KernelStore) {
 		f := newLoopFixture(t, store, withTeam("finn", "scout"))
-		// The routing Run creates the member Runs on the fixture clock.
-		f.runner.runs.now = f.clock.Now
 		f.model.add(&modelRule{name: "member", reply: func(v stepView) ModelStepResult {
 			return finalAnswer(map[string]any{"answer": v.Request().AgentID + " checked the canary."})
 		}})

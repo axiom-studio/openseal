@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -91,8 +92,7 @@ func waitSettleCard(f *loopFixture, runID, wakeType, requestID, actionCallID, in
 		f.t.Fatalf("run %s = %s %#v, want waiting for %s %s", runID, run.Status, run.WakeCondition, wakeType, requestID)
 	}
 	actor := ActivityActor{Type: "service", ID: wakeType + "-coordinator"}
-	activity := NewRunActivityService(f.store, f.store)
-	activity.now = f.clock.Now
+	activity := NewRunActivityService(f.store, f.store, models.WithClock(f.clock.Now))
 	if _, _, err := activity.TransitionRun(f.ctx, f.scope, runID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: AgentRunStatusQueued, Summary: "Received the card result; continuing",
 		EventType: "run.interaction_settled", Actor: actor, CorrelationID: requestID, CausationID: actionCallID,
@@ -349,8 +349,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			}
 
 			// The person solves the captcha through the run command service.
-			commands := NewRunCommandService(f.chats)
-			commands.now = f.clock.Now
+			commands := NewRunCommandService(f.chats, models.WithClock(f.clock.Now))
 			if _, err := commands.CommandAgentRun(f.ctx, AgentRunCommandRequest{
 				Scope: f.scope, RunID: run.ID, ExpectedRevision: parked.Revision, Kind: AgentRunCommandResolveHumanIntervention,
 				HumanInterventionID: parked.HumanInterventions[0].ID, Instruction: "Solved the captcha.",
@@ -459,8 +458,7 @@ func TestWaitToolParksUntilTimer(t *testing.T) {
 			t.Fatalf("wait entries = %#v, wake %#v", waits, parked.WakeCondition)
 		}
 
-		wake := NewAgentRunWakeService(f.store, f.store)
-		wake.now, wake.activity.now = f.clock.Now, f.clock.Now
+		wake := NewAgentRunWakeService(f.store, f.store, models.WithClock(f.clock.Now))
 		// Before the timer nothing wakes.
 		f.clock.Advance(599 * time.Second)
 		if result, err := wake.WakeDueTimers(f.ctx, f.scope, f.clock.Now()); err != nil || len(result.Runs) != 0 {

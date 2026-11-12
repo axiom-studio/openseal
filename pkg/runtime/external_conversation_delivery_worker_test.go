@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -172,18 +173,19 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 		t.Fatal(err)
 	}
 	host := &ephemeralRetryHost{}
+	workerClock := time.Now
 	worker, err := NewExternalConversationDeliveryWorker(store, catalog, host, ExternalConversationDeliveryWorkerConfig{
 		WorkerID: "typing-worker", BaseRetry: time.Nanosecond, MaximumRetry: time.Second,
-	})
+	}, models.WithClock(func() time.Time { return workerClock() }))
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Add(time.Second)
-	worker.now = func() time.Time { return now }
+	workerClock = func() time.Time { return now }
 	if retry, processErr := worker.ProcessOne(ctx, endpoint.Scope); processErr == nil || retry == nil || retry.Status != ExternalConversationDeliveryRetry {
 		t.Fatalf("first typing attempt = %#v, %v", retry, processErr)
 	}
-	worker.now = func() time.Time { return now.Add(time.Second) }
+	workerClock = func() time.Time { return now.Add(time.Second) }
 	delivered, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err != nil || delivered == nil || delivered.Status != ExternalConversationDeliveryDelivered {
 		t.Fatalf("retried typing delivery = %#v, %v", delivered, err)
@@ -235,6 +237,7 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 				t.Fatal(err)
 			}
 			host := &acknowledgementRecoveryHost{provider: provider, acknowledged: map[string]string{}}
+			workerClock := time.Now
 			worker, err := NewExternalConversationDeliveryWorker(
 				store,
 				catalog,
@@ -243,18 +246,19 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 					WorkerID: "delivery-worker", LeaseDuration: time.Minute,
 					BaseRetry: time.Second, MaximumRetry: time.Minute,
 				},
+				models.WithClock(func() time.Time { return workerClock() }),
 			)
 			if err != nil {
 				t.Fatal(err)
 			}
 			now := time.Now().UTC().Add(time.Second)
-			worker.now = func() time.Time { return now }
+			workerClock = func() time.Time { return now }
 			retry, err := worker.ProcessOne(ctx, endpoint.Scope)
 			if err == nil || retry == nil || retry.Status != ExternalConversationDeliveryRetry || retry.Attempt != 1 {
 				t.Fatalf("lost acknowledgement = %#v, %v", retry, err)
 			}
 
-			worker.now = func() time.Time { return now.Add(time.Second) }
+			workerClock = func() time.Time { return now.Add(time.Second) }
 			delivered, err := worker.ProcessOne(ctx, endpoint.Scope)
 			if err != nil || delivered == nil || delivered.Status != ExternalConversationDeliveryDelivered ||
 				delivered.ProviderMessageID != provider+"/message/1" || delivered.Attempt != 2 {

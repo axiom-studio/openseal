@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -138,22 +139,20 @@ func TestExternalConversationDeliveryPersistsCheckpointAcrossWorkerRestart(t *te
 	}
 	host := &checkpointConversationHost{}
 	config := ExternalConversationDeliveryWorkerConfig{WorkerID: "worker-one", BaseRetry: time.Nanosecond, MaximumRetry: time.Second}
-	worker, err := NewExternalConversationDeliveryWorker(store, catalog, host, config)
+	now := time.Now().UTC().Add(time.Second)
+	worker, err := NewExternalConversationDeliveryWorker(store, catalog, host, config, models.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := time.Now().UTC().Add(time.Second)
-	worker.now = func() time.Time { return now }
 	result, err := worker.ProcessOne(t.Context(), endpoint.Scope)
 	if err != nil || result == nil || result.Status != ExternalConversationDeliveryRetry || result.Progress["providerFileId"] != "F-uploaded" {
 		t.Fatalf("checkpoint=%#v %v", result, err)
 	}
 	config.WorkerID = "worker-restarted"
-	worker, err = NewExternalConversationDeliveryWorker(store, catalog, host, config)
+	worker, err = NewExternalConversationDeliveryWorker(store, catalog, host, config, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker.now = func() time.Time { return now.Add(time.Second) }
 	result, err = worker.ProcessOne(t.Context(), endpoint.Scope)
 	if err != nil || result == nil || result.Status != ExternalConversationDeliveryDelivered || host.calls != 2 {
 		t.Fatalf("restart=%#v %v", result, err)

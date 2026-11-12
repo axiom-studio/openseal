@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
@@ -24,6 +25,7 @@ type loopProposeFixture struct {
 	now         time.Time
 	run         *AgentRun
 	coordinator *ActionCoordinator
+	clock       func() time.Time // the coordinator's clock
 	decision    ActionPolicyDecision
 	evaluations int
 }
@@ -34,11 +36,11 @@ func newLoopProposeFixture(t *testing.T, store KernelStore, mutate func(*CreateA
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	f := &loopProposeFixture{t: t, ctx: context.Background(), store: store, scope: scope, now: now, decision: ActionPolicyDecision{Disposition: ActionDispositionAllow}}
 	f.run = claimLoopProposeRun(t, store, scope, now, loopProposeWorker, mutate)
+	f.clock = func() time.Time { return now.Add(time.Second) }
 	f.coordinator = NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		f.evaluations++
 		return f.decision, nil
-	}), validators)
-	f.coordinator.now = func() time.Time { return now.Add(time.Second) }
+	}), validators, models.WithClock(func() time.Time { return f.clock() }))
 	return f
 }
 
@@ -46,8 +48,7 @@ func newLoopProposeFixture(t *testing.T, store KernelStore, mutate func(*CreateA
 // worker under an hour-long lease.
 func claimLoopProposeRun(t *testing.T, store KernelStore, scope Scope, now time.Time, worker string, mutate func(*CreateAgentRunRequest)) *AgentRun {
 	t.Helper()
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	req := CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
 	}
@@ -391,7 +392,7 @@ func TestLoopProposeRequiresLiveLeaseOfRunningRun(t *testing.T) {
 		t.Fatalf("foreign worker error = %v", err)
 	}
 	expired := f.request("expired")
-	f.coordinator.now = func() time.Time { return f.now.Add(2 * time.Hour) }
+	f.clock = func() time.Time { return f.now.Add(2 * time.Hour) }
 	if _, err := f.coordinator.Propose(f.ctx, expired); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("expired lease error = %v", err)
 	}
@@ -531,8 +532,7 @@ func TestLoopProposePersonCredentialApproverIsActingUser(t *testing.T) {
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
-	}), nil)
-	coordinator.now = func() time.Time { return now }
+	}), nil, models.WithClock(func() time.Time { return now }))
 	proposal, err := coordinator.Propose(context.Background(), loopProposeRequest(ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: "release-agent",
 		SkillID: "mail", SkillVersion: "1.0.0", Action: "send", Arguments: map[string]interface{}{"to": "ada@example.com"},

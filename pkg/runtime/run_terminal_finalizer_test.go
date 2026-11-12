@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
@@ -63,8 +64,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 31, 8, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store)
-	portfolio.now = func() time.Time { return now }
+	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "use session", Source: RunSourceObjective,
@@ -90,8 +90,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 		Output: map[string]interface{}{"sessionId": "agent-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now,
 		Revision: 1, CreatedAt: now.Add(time.Millisecond), UpdatedAt: now.Add(time.Millisecond),
 	})
-	activity := NewRunActivityService(store, store)
-	activity.now = func() time.Time { return now.Add(time.Second) }
+	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	terminal, _, err := activity.TransitionRun(ctx, scope, claimed.ID, RunTransitionRequest{
 		ExpectedRevision: claimed.Revision, Status: AgentRunStatusCompleted, LeaseOwner: "worker",
 		Summary: "done", Actor: ActivityActor{Type: "worker", ID: "worker"},
@@ -107,8 +106,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 			t.Fatalf("finalizer dispatch = %#v", input)
 		}
 		return map[string]interface{}{"released": true}, nil
-	}))
-	finalizer.now = func() time.Time { return now.Add(2 * time.Second) }
+	}), models.WithClock(func() time.Time { return now.Add(2 * time.Second) }))
 	if err := finalizer.FinalizeRun(ctx, terminal); err != nil {
 		t.Fatal(err)
 	}
@@ -176,8 +174,7 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 	finalizer := NewActionRunTerminalFinalizer(store, catalog, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
 		return map[string]interface{}{"released": true}, nil
-	}))
-	finalizer.now = func() time.Time { return now.Add(time.Second) }
+	}), models.WithClock(func() time.Time { return now.Add(time.Second) }))
 	if err := finalizer.FinalizeRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}

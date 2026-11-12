@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -20,6 +21,7 @@ type interactionChangeFixture struct {
 	trigger      *ChannelMessage
 	run          *AgentRun
 	changes      *ConversationChangeService
+	clock        func() time.Time // the change service's clock
 }
 
 func interactionChangeStores() []struct {
@@ -43,7 +45,7 @@ func interactionChangeStores() []struct {
 
 func newInteractionChangeFixture(t *testing.T, store KernelStore) *interactionChangeFixture {
 	t.Helper()
-	f := &interactionChangeFixture{ctx: context.Background(), store: store, scope: Scope{Kind: "tenant", ID: "interactions"}}
+	f := &interactionChangeFixture{ctx: context.Background(), store: store, scope: Scope{Kind: "tenant", ID: "interactions"}, clock: time.Now}
 	conversationStore := store.(ConversationStore)
 	conversations := NewConversationService(conversationStore)
 	seedTestSpace(t, store.(SpaceStore), f.scope)
@@ -70,7 +72,7 @@ func newInteractionChangeFixture(t *testing.T, store KernelStore) *interactionCh
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.changes, err = NewConversationChangeService(conversationStore, store)
+	f.changes, err = NewConversationChangeService(conversationStore, store, models.WithClock(func() time.Time { return f.clock() }))
 	if err != nil {
 		t.Fatal(err)
 	}

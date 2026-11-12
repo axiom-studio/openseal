@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -68,12 +69,11 @@ func TestExternalConversationReplyWorkerBacksOffAndStopsFailingItems(t *testing.
 			t.Fatal(err)
 		}
 	}
-	worker, err := NewExternalConversationReplyWorker(store, catalog)
+	clock := now
+	worker, err := NewExternalConversationReplyWorker(store, catalog, models.WithClock(func() time.Time { return clock }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	clock := now
-	worker.now = func() time.Time { return clock }
 	load := func(id string) *ExternalConversationInboxItem {
 		item, err := store.GetExternalConversationInboxItem(ctx, endpoint.Scope, id)
 		if err != nil || item == nil {

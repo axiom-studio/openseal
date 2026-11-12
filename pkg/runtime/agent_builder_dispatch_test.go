@@ -9,6 +9,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -652,8 +653,7 @@ func TestAgentBuilderParkedRunDoesNotBlockNewChatRuns(t *testing.T) {
 		if f.run.Status != AgentRunStatusWaitingForApproval {
 			t.Fatalf("parked Run = %s", f.run.Status)
 		}
-		portfolio := NewPortfolioService(store)
-		portfolio.now = func() time.Time { return f.now }
+		portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return f.now }))
 		next, err := portfolio.CreateAgentRun(f.ctx, CreateAgentRunRequest{
 			Scope: f.scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 			AssignedAgentID: "agent", Goal: "Build another Agent", Source: RunSourceChat,

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -156,8 +157,7 @@ func TestTargetedSkillBindingApprovalOnlyThroughHostRoute(t *testing.T) {
 			requireStillPending(t, f, moded)
 
 			f, timed := cardApproval(t, store, operation+"-timeout", card, ApprovalTimeoutApprove)
-			timer := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{})
-			timer.now = func() time.Time { return timed.ExpiresAt.Add(time.Second) }
+			timer := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}, models.WithClock(func() time.Time { return timed.ExpiresAt.Add(time.Second) }))
 			result, err := timer.ResolveTimeout(f.ctx, f.scope, timed.ID, timed.Revision, timed.ID)
 			if err != nil || result.Approval.Status != ApprovalStatusExpired || result.Call.Status != ActionCallStatusDenied {
 				t.Fatalf("timeout of a targeted %s card = %#v, %v", operation, result, err)

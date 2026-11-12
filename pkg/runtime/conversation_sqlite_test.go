@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -24,10 +25,8 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	}
 	ctx := context.Background()
 	fixed := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	primaryService := NewConversationService(primary)
-	primaryService.now = func() time.Time { return fixed }
-	replicaService := NewConversationService(replica)
-	replicaService.now = func() time.Time { return fixed }
+	primaryService := NewConversationService(primary, models.WithClock(func() time.Time { return fixed }))
+	replicaService := NewConversationService(replica, models.WithClock(func() time.Time { return fixed }))
 	scope := Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, primary, scope)
 	conversation, _, err := primaryService.CreateConversation(ctx, CreateConversationRequest{
@@ -123,8 +122,8 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		t.Fatal(err)
 	}
 	defer restarted.Close()
-	restartedService := NewConversationService(restarted)
-	restartedService.now = func() time.Time { return fixed }
+	restartedServiceClock := func() time.Time { return fixed }
+	restartedService := NewConversationService(restarted, models.WithClock(func() time.Time { return restartedServiceClock() }))
 	restored, err := restartedService.GetConversation(ctx, scope, conversation.ID)
 	if err != nil || restored.Revision != 3 || restored.LastSequence != 1 {
 		t.Fatalf("restored conversation = %#v, err = %v", restored, err)
@@ -165,7 +164,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	if foreign, err := restartedService.GetConversation(ctx, Scope{Kind: "tenant", ID: "other"}, conversation.ID); err == nil || foreign != nil {
 		t.Fatalf("foreign conversation = %#v, err = %v", foreign, err)
 	}
-	restartedService.now = func() time.Time { return fixed.Add(31 * time.Second) }
+	restartedServiceClock = func() time.Time { return fixed.Add(31 * time.Second) }
 	active, err := restartedService.ListPresence(ctx, scope, conversation.ID)
 	if err != nil || len(active) != 0 {
 		t.Fatalf("expired presence = %#v, err = %v", active, err)

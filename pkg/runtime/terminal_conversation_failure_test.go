@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/google/uuid"
 )
 
@@ -32,8 +33,7 @@ func terminalFailureConversationFixture(t *testing.T, store terminalReportingCon
 	if err != nil {
 		t.Fatal(err)
 	}
-	commands := NewRunCommandService(store)
-	commands.now = func() time.Time { return at }
+	commands := NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
 	created, err := commands.CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: RunKindConversation, Source: RunSourceChat,
 		Goal: "Check the recent email request", ConcurrencyKey: conversation.ID + ":thread:" + posted.Message.ID,
@@ -48,8 +48,7 @@ func terminalFailureConversationFixture(t *testing.T, store terminalReportingCon
 
 func failTerminalConversation(t *testing.T, store terminalReportingContractStore, run *AgentRun, at time.Time, code string) *AgentRun {
 	t.Helper()
-	activity := NewRunActivityService(store, store)
-	activity.now = func() time.Time { return at }
+	activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return at }))
 	running, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning})
 	if err != nil {
 		t.Fatal(err)
@@ -131,8 +130,7 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 		if err != nil || len(claims) != 1 {
 			t.Fatalf("first attempt claim: %#v %v", claims, err)
 		}
-		commands := NewRunCommandService(store)
-		commands.now = func() time.Time { return now.Add(time.Second) }
+		commands := NewRunCommandService(store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
 		retry, err := commands.RetryConversationRun(t.Context(), AgentRunCommandRequest{Scope: first.Scope, RunID: first.ID, ExpectedRevision: first.Revision, Actor: ActivityActor{Type: "user", ID: "kev"}})
 		if err != nil || retry.Run.ID != first.ID {
 			t.Fatalf("explicit safe retry stopped working: %#v %v", retry, err)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -502,8 +503,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 		t.Fatalf("current adapter is incompatible: provider %q/%q modes %#v/%q", resolvedAfterAmendment.Adapter.Provider, endpoint.Provider, resolvedAfterAmendment.Adapter.EndpointModes, endpoint.Mode)
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	transport := NewExternalConversationTransportService(store, catalog)
-	transport.now = func() time.Time { return now }
+	transport := NewExternalConversationTransportService(store, catalog, models.WithClock(func() time.Time { return now }))
 	event := NormalizedExternalConversationEvent{
 		ID: "event/non-mention", Type: capability.ConversationEventMessageReceived,
 		ExternalConversationID: "C/one", ExternalThreadID: "171.001",
@@ -540,8 +540,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 		t.Fatalf("undeclared event error = %v", err)
 	}
 
-	conversations := NewConversationService(store)
-	conversations.now = func() time.Time { return now }
+	conversations := NewConversationService(store, models.WithClock(func() time.Time { return now }))
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},

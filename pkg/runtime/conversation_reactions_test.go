@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -39,9 +40,8 @@ func TestConversationReactionsAcrossStores(t *testing.T) {
 func testConversationReactions(t *testing.T, store ConversationStore) {
 	ctx := context.Background()
 	fixed := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
-	service := NewConversationService(store)
 	tick := 0
-	service.now = func() time.Time { tick++; return fixed.Add(time.Duration(tick) * time.Second) }
+	service := NewConversationService(store, models.WithClock(func() time.Time { tick++; return fixed.Add(time.Duration(tick) * time.Second) }))
 	projector := &recordingReactionProjector{}
 	service.SetReactionProjector(projector)
 	scope := Scope{Kind: "tenant", ID: "one"}
