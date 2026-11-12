@@ -277,10 +277,6 @@ func conversationSessionID(scope Scope, lane string) string {
 	return models.ConversationSessionID(scope, lane)
 }
 
-func newRunSession(scope Scope, runID, agentID string) *AgentSession {
-	return models.NewRunSession(scope, runID, agentID)
-}
-
 func conversationRunSession(ctx context.Context, sessions AgentSessionStore, run *AgentRun) (*AgentSession, error) {
 	return models.ConversationRunSession(ctx, sessions, run)
 }

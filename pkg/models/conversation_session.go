@@ -41,17 +41,6 @@ func conversationLaneSession(scope Scope, conversationID, threadRoot, agentID st
 	}
 }
 
-// NewRunSession is the in-memory shape of the parentless run-owned session of
-// runID (routines, cross-Agent children, deterministic Runs) before its row
-// exists. CreateRunAgentSession creates it at the Run's first claim.
-func NewRunSession(scope Scope, runID, agentID string) *AgentSession {
-	id := RunAgentSessionID(scope, runID)
-	return &AgentSession{
-		ID: id, Scope: scope, Kind: AgentSessionKindRun, AgentID: agentID, OwnerRunID: runID,
-		RootSessionID: id, NextSequence: 1,
-	}
-}
-
 // ConversationRunSession resolves the session a conversation Run writes to.
 // It returns (nil, nil) for Runs that have no session (Team routing Runs and
 // pinned-runbook Runs). A lane session whose row does not exist yet comes back
@@ -111,7 +100,7 @@ func validateConversationRunSession(run *AgentRun) error {
 
 // ChildSessionRequest describes a same-Agent session that branches from a
 // parent (self-fork, conversation task, promotion; A3). Cross-Agent children
-// and routines get a parentless run session instead (NewRunSession).
+// and routines get a parentless run session instead (AgentSessionKindRun).
 type ChildSessionRequest struct {
 	Scope           Scope
 	ParentSessionID string // required

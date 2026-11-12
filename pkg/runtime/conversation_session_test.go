@@ -162,7 +162,7 @@ func TestChildSessionRequiresForkEntryAndParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := created.Session
-	if session.ID != RunAgentSessionID(testSessionScope, "child") || session.ID != newRunSession(testSessionScope, "child", "agent-a").ID ||
+	if session.ID != RunAgentSessionID(testSessionScope, "child") ||
 		session.ParentSessionID != parent.ID || session.ForkSequence != 2 || session.ForkEntryID != "p2" ||
 		session.ConversationID != "c1" || session.NextSequence != 2 {
 		t.Fatalf("child session = %+v", session)
