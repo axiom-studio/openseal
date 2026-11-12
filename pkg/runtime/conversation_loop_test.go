@@ -963,10 +963,16 @@ func TestRunPromotedMidFlightCountsAsStartedInChild(t *testing.T) {
 		if promoted.Session.Kind != AgentSessionKindRun {
 			t.Fatalf("promoted session = %#v", promoted.Session)
 		}
-		loop := promoted.Preparers[1].(*conversationLoop)
-		started, err := loop.runStarted(f.ctx, f.run(run.ID), promoted.Session)
-		if err != nil || !started {
-			t.Fatalf("started = %v, %v", started, err)
+		// The chat preparer counts the Run as started in its child: with no
+		// steering it has nothing to add, where an unstarted Run would get
+		// StartRun's trigger and run_context entries.
+		if len(promoted.Preparers) != 2 {
+			t.Fatalf("preparers = %d, want the run-start and chat preparers", len(promoted.Preparers))
+		}
+		step := &AgentTurn{ID: run.ID + "-step-2", Sequence: 2}
+		part, err := promoted.Preparers[1].BeforeStep(f.ctx, StepInput{Run: f.run(run.ID), Session: promoted.Session, Binding: promoted, WorkerID: chatLoopWorker, Step: step}, SteeringPlan{})
+		if err != nil || part != nil {
+			t.Fatalf("the promoted Run did not count as started: %#v, %v", part, err)
 		}
 		// The second step appends nothing to the child: StartRun does not run again.
 		if result := f.prepare(run, promoted, 2); result.Append != nil && len(result.Append.Entries) > 0 {
