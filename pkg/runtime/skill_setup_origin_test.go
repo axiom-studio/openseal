@@ -71,7 +71,7 @@ func TestSkillSetupTaskOriginSupportsIndependentWorkAndExactForkLineage(t *testi
 				expires := now.Add(time.Minute)
 				call := &ActionCall{
 					ID: "task-setup-call", Scope: run.Scope, RunID: run.ID, TurnID: step.ID, DeploymentID: "agent",
-					IdempotencyKey: loopIdempotencyKey(step.ID, "call-setup", nil),
+					IdempotencyKey: "loop:" + step.ID + ":call-setup",
 					SkillID:        SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup,
 					Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
 					Status: ActionCallStatusRunning, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectNone,

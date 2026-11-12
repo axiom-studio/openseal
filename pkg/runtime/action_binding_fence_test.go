@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"sync"
@@ -30,7 +31,7 @@ func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *tes
 				case "stale":
 					proposal.Call.BindingRevision++
 				case "disabled":
-					binding := cloneUpgradeBinding(fixture.binding)
+					binding := cloneTestBinding(fixture.binding)
 					binding.Disabled = true
 					binding.Revision++
 					if err := fixture.store.SaveSkillBinding(t.Context(), binding, fixture.binding.Revision); err != nil {
@@ -93,7 +94,7 @@ func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *t
 					if (proposal.Call.DuplicateOfActionCallID != "") != (path == "duplicate_receipt") {
 						t.Fatalf("wrong coordinator path exercised: %#v", proposal.Call)
 					}
-					binding := cloneUpgradeBinding(fixture.binding)
+					binding := cloneTestBinding(fixture.binding)
 					binding.Disabled = true
 					binding.Revision++
 					if err := fixture.store.SaveSkillBinding(t.Context(), binding, fixture.binding.Revision); err != nil {
@@ -386,7 +387,7 @@ func completeActionBindingFenceFixture(t *testing.T, fixture *actionBindingFence
 }
 
 func actionBindingFenceUpgrade(fixture *actionBindingFenceFixture) *SkillReferenceUpgradeMutation {
-	next := cloneUpgradeBinding(fixture.binding)
+	next := cloneTestBinding(fixture.binding)
 	next.SkillVersion = "1.1.0"
 	next.Revision++
 	next.UpdatedAt = fixture.now.Add(time.Minute)
@@ -417,4 +418,18 @@ func (s *actionBindingFenceProposalStore) CreateActionProposal(ctx context.Conte
 	s.creates++
 	s.beforeCreate(proposal)
 	return s.ActionStore.CreateActionProposal(ctx, proposal)
+}
+
+// cloneTestBinding deep-copies a binding so a test can change the copy
+// without touching the fixture's binding.
+func cloneTestBinding(value *skill.Binding) *skill.Binding {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	var copy skill.Binding
+	if err := json.Unmarshal(payload, &copy); err != nil {
+		panic(err)
+	}
+	return &copy
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ...*skill.Definition) (*AgentRun, *skill.Catalog, *skill.BoundAction, map[string]interface{}) {
@@ -86,9 +87,17 @@ func withScheduleArgument(args map[string]interface{}, key string, value interfa
 	result["trigger"] = trigger
 	return result
 }
+
+// routineActionStore is the store the routine actions need: they also read
+// and write the chat.
+type routineActionStore interface {
+	KernelStore
+	ConversationStore
+}
+
 func dispatchTaskForTest(t *testing.T, store KernelStore, run *AgentRun, bound *skill.BoundAction, args map[string]interface{}, callID string) map[string]interface{} {
 	t.Helper()
-	d, err := NewRunbookActionDispatcher(store.(runbookActionStore), nil)
+	d, err := NewRunbookActionDispatcher(store.(routineActionStore), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +136,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 				if err := catalog.ValidateInput(t.Context(), bound, args); err != nil {
 					t.Fatal(err)
 				}
-				validator, _ := NewRunbookActionValidator(store.(runbookActionStore))
+				validator, _ := NewRunbookActionValidator(store.(routineActionStore))
 				if _, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args}); err != nil {
 					t.Fatal(err)
 				}
@@ -259,7 +268,7 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 			if err != nil || claimed == nil {
 				t.Fatalf("claim=%#v,%v", claimed, err)
 			}
-			validator, _ := NewRunbookActionValidator(store.(runbookActionStore))
+			validator, _ := NewRunbookActionValidator(store.(routineActionStore))
 			policyCalls := 0
 			coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 				policyCalls++
@@ -340,8 +349,23 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 	}
 	other := cloneAgentRun(run)
 	other.Owner.ID = "foreign"
-	if _, _, err := resolveOwnedTaskStatus(t.Context(), store, other, resume); err == nil {
+	validator, err := NewRunbookActionValidator(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: other, Bound: statusBound, Arguments: resume}); err == nil {
 		t.Fatal("foreign ownership accepted")
+	}
+	// A Team chat with the Agent on its roster passes the roster check and
+	// still does not own the Agent's routine.
+	teamChat := cloneAgentRun(run)
+	teamChat.Owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}
+	validator.SetRoutineTeams(scheduledTaskTeams{team: &kernelteam.Deployment{
+		ID: "team", Scope: capability.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, Status: kernelteam.DeploymentActive,
+		Roster: []kernelteam.RosterAssignment{{ID: run.AssignedAgentID, AgentDeploymentID: run.AssignedAgentID}},
+	}})
+	if _, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: teamChat, Bound: statusBound, Arguments: resume}); err == nil || !strings.Contains(err.Error(), "not owned by this chat") {
+		t.Fatalf("foreign Team chat ownership accepted: %v", err)
 	}
 	encoded, _ := json.Marshal(active)
 	if !strings.Contains(string(encoded), `"task"`) {
@@ -431,4 +455,14 @@ func TestScheduledTaskSurvivesAgentDefinitionSynchronization(t *testing.T) {
 	if err != nil || len(updates) != 0 {
 		t.Fatalf("amendment changed chat-authored tasks: %#v,%v", updates, err)
 	}
+}
+
+// scheduledTaskTeams serves one Team deployment to the routine roster check.
+type scheduledTaskTeams struct{ team *kernelteam.Deployment }
+
+func (c scheduledTaskTeams) GetDeployment(_ context.Context, _ skill.ScopeReference, id string) (*kernelteam.Deployment, error) {
+	if c.team == nil || c.team.ID != id {
+		return nil, kernelteam.ErrDeploymentNotFound
+	}
+	return c.team, nil
 }

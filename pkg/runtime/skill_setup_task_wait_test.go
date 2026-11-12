@@ -170,7 +170,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup,
 		Arguments: arguments,
 		Summary:   "Ask for Reddit setup",
-		Origin:    ActionOriginLoop, Execution: ActionExecutionLoop, IdempotencyKey: loopIdempotencyKey(step.ID, "call-setup", nil), CausationID: step.ID,
+		Origin:    ActionOriginLoop, Execution: ActionExecutionLoop, IdempotencyKey: "loop:" + step.ID + ":call-setup", CausationID: step.ID,
 	})
 	if err != nil {
 		t.Fatal(err)

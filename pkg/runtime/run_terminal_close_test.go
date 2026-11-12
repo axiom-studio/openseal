@@ -199,7 +199,10 @@ func TestTerminalRunClosesOpenToolEntries(t *testing.T) {
 				}
 				_, err = sessions.TransitionToolEntry(context.Background(), ToolEntryTransitionRequest{
 					Scope: run.Scope, EntryID: entry.ID, RunID: run.ID, From: entry.State, To: ToolEntryError,
-					Result: terminalRunToolResult(AgentRunStatusCanceled),
+					Result: &ToolResult{
+						Status: ToolResultCanceled, IsError: true,
+						Content: []ContentPart{{Type: ContentPartText, Text: "Not run: the request was canceled"}},
+					},
 				})
 				if !errors.Is(err, ErrLeaseLost) {
 					t.Fatalf("lease-less close of a running run = %v, want ErrLeaseLost", err)

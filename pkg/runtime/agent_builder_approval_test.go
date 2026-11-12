@@ -85,7 +85,7 @@ func TestAgentBuilderApprovalCardPolicy(t *testing.T) {
 		if approval == nil || result.Call.Status != ActionCallStatusWaitingApproval {
 			t.Fatalf("%s was not held for review: %#v", tc.action, result)
 		}
-		if !approval.ExpiresAt.Equal(now.Add(30*24*time.Hour)) || approval.ExpiresAt.Sub(approval.CreatedAt) != agentBuilderApprovalTTL {
+		if !approval.ExpiresAt.Equal(now.Add(30*24*time.Hour)) || approval.ExpiresAt.Sub(approval.CreatedAt) != 30*24*time.Hour {
 			t.Fatalf("%s card expires at %s (created %s)", tc.action, approval.ExpiresAt, approval.CreatedAt)
 		}
 		if approval.TimeoutDecision != ApprovalTimeoutExpire {

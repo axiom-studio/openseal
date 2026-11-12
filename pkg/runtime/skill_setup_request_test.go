@@ -109,7 +109,7 @@ func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{Scope: scope, RunID: run.ID, TurnID: step.ID, WorkerID: "worker", DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Read the community"}, Summary: "Ask for Reddit setup",
-		Origin: ActionOriginLoop, Execution: ActionExecutionLoop, IdempotencyKey: loopIdempotencyKey(step.ID, "call-setup", nil), CausationID: step.ID})
+		Origin: ActionOriginLoop, Execution: ActionExecutionLoop, IdempotencyKey: "loop:" + step.ID + ":call-setup", CausationID: step.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

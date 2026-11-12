@@ -288,8 +288,9 @@ func TestSkillBindingTargetConnectionRequestIsOwnedByTheTarget(t *testing.T) {
 		}
 		return nil, nil
 	})
-	f.dispatcher.UseAppCatalog(&AppCatalogRef{})
-	f.dispatcher.apps.Set(fakeAppCatalog{entries: []AppCatalogEntry{{Slug: "linear", Name: "Linear", Official: true, SignIn: AppSignInOAuth}}})
+	apps := &AppCatalogRef{}
+	apps.Set(fakeAppCatalog{entries: []AppCatalogEntry{{Slug: "linear", Name: "Linear", Official: true, SignIn: AppSignInOAuth}}})
+	f.dispatcher.UseAppCatalog(apps)
 	run := f.chatRun(t, "finn")
 	result, err := f.dispatch(t, run, "connect", SkillActionRequestConnection, map[string]interface{}{"app": "linear", SkillActionTargetAgentArgument: "researcher"})
 	if err != nil || result["setupRequest"] == nil {
