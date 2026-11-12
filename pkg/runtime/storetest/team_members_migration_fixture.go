@@ -1,4 +1,4 @@
-package runtime
+package storetest
 
 import (
 	"context"
@@ -55,8 +55,8 @@ var roleSlotTeamRows = map[string]map[string]string{
 	},
 }
 
-// memberTeamRows is what migration 85 makes of roleSlotTeamRows.
-var memberTeamRows = map[string]map[string]string{
+// MemberTeamRows is what migration 85 makes of roleSlotTeamRows.
+var MemberTeamRows = map[string]map[string]string{
 	"team_definitions": {
 		"solo/0":   `{"id":"solo","version":"0","displayName":"Solo","purpose":"Help","routing":{"notes":"Maya first"},"approvals":{"maximumRisk":"write"},"digest":"sha256:solo-0"}`,
 		"solo/1":   `{"id":"solo","version":"1","displayName":"Solo","purpose":"Help","approvals":{"maximumRisk":"write"},"amendments":{"agentMayPropose":true,"allowedFields":["purpose","members"]},"digest":"sha256:solo-1"}`,
@@ -84,9 +84,9 @@ var memberTeamRows = map[string]map[string]string{
 	},
 }
 
-// rolledBackTeamRows is what rolling migration 85 back makes of
-// memberTeamRows: every member holds a role of its own, in every version.
-var rolledBackTeamRows = func() map[string]map[string]string {
+// RolledBackTeamRows is what rolling migration 85 back makes of
+// MemberTeamRows: every member holds a role of its own, in every version.
+var RolledBackTeamRows = func() map[string]map[string]string {
 	soloRoles := `"roles":[
 		{"id":"maya-1","displayName":"Maya","purpose":"Owns pricing","minimumMembers":1,"maximumMembers":1,"channelParticipation":"active"},
 		{"id":"otto-2","displayName":"Otto","purpose":"Owns press","minimumMembers":1,"maximumMembers":1,"channelParticipation":"observe_only"}]`
@@ -123,9 +123,9 @@ var rolledBackTeamRows = func() map[string]map[string]string {
 	}
 }()
 
-// seedRoleSlotTeams inserts roleSlotTeamRows. query adapts "?" placeholders
+// SeedRoleSlotTeams inserts roleSlotTeamRows. query adapts "?" placeholders
 // and bare table names to the database.
-func seedRoleSlotTeams(t *testing.T, db *sql.DB, query func(string) string) {
+func SeedRoleSlotTeams(t *testing.T, db *sql.DB, query func(string) string) {
 	t.Helper()
 	now := time.Now().UTC()
 	exec := func(statement string, args ...interface{}) {
@@ -152,9 +152,9 @@ func seedRoleSlotTeams(t *testing.T, db *sql.DB, query func(string) string) {
 	}
 }
 
-// requireTeamRows compares every stored Team payload, and each definition's
+// RequireTeamRows compares every stored Team payload, and each definition's
 // digest column, with want.
-func requireTeamRows(t *testing.T, db *sql.DB, query func(string) string, stage string, want map[string]map[string]string) {
+func RequireTeamRows(t *testing.T, db *sql.DB, query func(string) string, stage string, want map[string]map[string]string) {
 	t.Helper()
 	for table, rows := range want {
 		key, payload := "id", "payload"
@@ -186,8 +186,8 @@ func requireTeamRows(t *testing.T, db *sql.DB, query func(string) string, stage 
 	}
 }
 
-// requireMemberTeamsLoad reads the migrated Teams through the store.
-func requireMemberTeamsLoad(t *testing.T, store kernelteam.Store) {
+// RequireMemberTeamsLoad reads the migrated Teams through the store.
+func RequireMemberTeamsLoad(t *testing.T, store kernelteam.Store) {
 	t.Helper()
 	ctx := context.Background()
 	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}

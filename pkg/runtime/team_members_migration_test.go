@@ -3,6 +3,8 @@ package runtime
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestSQLiteTeamMembersMigrationReplacesRoleSlots(t *testing.T) {
@@ -12,7 +14,7 @@ func TestSQLiteTeamMembersMigrationReplacesRoleSlots(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := func(statement string) string { return statement }
-	seedRoleSlotTeams(t, store.db, plain)
+	storetest.SeedRoleSlotTeams(t, store.db, plain)
 	reopen := func() {
 		t.Helper()
 		if err := store.Close(); err != nil {
@@ -24,10 +26,10 @@ func TestSQLiteTeamMembersMigrationReplacesRoleSlots(t *testing.T) {
 	}
 	reopen()
 	defer func() { _ = store.Close() }()
-	requireTeamRows(t, store.db, plain, "migrated", memberTeamRows)
-	requireMemberTeamsLoad(t, store)
+	storetest.RequireTeamRows(t, store.db, plain, "migrated", storetest.MemberTeamRows)
+	storetest.RequireMemberTeamsLoad(t, store)
 	reopen()
-	requireTeamRows(t, store.db, plain, "migrated again", memberTeamRows)
+	storetest.RequireTeamRows(t, store.db, plain, "migrated again", storetest.MemberTeamRows)
 
 	// SQLite has no rollback command; the PostgreSQL rollback runs the same
 	// transformation.
@@ -42,8 +44,8 @@ func TestSQLiteTeamMembersMigrationReplacesRoleSlots(t *testing.T) {
 		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
-		requireTeamRows(t, store.db, plain, stage, rolledBackTeamRows)
+		storetest.RequireTeamRows(t, store.db, plain, stage, storetest.RolledBackTeamRows)
 	}
 	reopen()
-	requireMemberTeamsLoad(t, store)
+	storetest.RequireMemberTeamsLoad(t, store)
 }

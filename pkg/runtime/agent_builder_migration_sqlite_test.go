@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 // SQLite store test (schema migrations): it moves to store/sqlite in U2.9,
@@ -27,7 +29,7 @@ func seedSQLiteChangeSets(t *testing.T, path string) string {
 	defer store.Close()
 	ctx := context.Background()
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: builderCutoverScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "author", Source: RunSourceManual,
+		Scope: storetest.BuilderCutoverScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "author", Source: RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -52,10 +54,10 @@ func seedSQLiteChangeSets(t *testing.T, path string) string {
 			t.Fatal(err)
 		}
 	}
-	for index, row := range cutoverLineageRows {
+	for index, row := range storetest.CutoverLineageRows {
 		if _, err := sqlDB.Exec(`INSERT INTO workforce_change_sets (scope_kind, scope_id, id, parent_id, status, revision, idempotency_key, request_digest, candidate_digest, created_at, updated_at, payload)
-			VALUES (?,?,?,?,?,1,?,'digest','digest',?,?,?)`, builderCutoverScope.Kind, builderCutoverScope.ID, row.id, row.parentID, row.status,
-			"key-"+row.id, now.Add(time.Duration(index)*time.Second), now, row.payload(t, builderCutoverScope)); err != nil {
+			VALUES (?,?,?,?,?,1,?,'digest','digest',?,?,?)`, storetest.BuilderCutoverScope.Kind, storetest.BuilderCutoverScope.ID, row.ID, row.ParentID, row.Status,
+			"key-"+row.ID, now.Add(time.Duration(index)*time.Second), now, row.Payload(t, storetest.BuilderCutoverScope)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -65,7 +67,7 @@ func seedSQLiteChangeSets(t *testing.T, path string) string {
 	}
 	for _, table := range []string{"agent_deployments", "team_deployments"} {
 		if _, err := sqlDB.Exec(`INSERT INTO `+table+` (scope_kind, scope_id, id, definition_id, active_version, revision, updated_at, payload)
-			VALUES (?,?,?,'definition-1','1',1,?,?)`, builderCutoverScope.Kind, builderCutoverScope.ID, "paused-"+table, now,
+			VALUES (?,?,?,'definition-1','1',1,?,?)`, storetest.BuilderCutoverScope.Kind, storetest.BuilderCutoverScope.ID, "paused-"+table, now,
 			`{"id":"paused-`+table+`","rolloutStatus":"paused","status":"paused","activation":{"changeSetId":"cs-applied"}}`); err != nil {
 			t.Fatal(err)
 		}
@@ -115,9 +117,9 @@ func TestAgentBuilderMigrationSQLiteKeepsLeafDraftsAndRetiresChangeSets(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCutoverLeafDrafts(t, drafts)
+	storetest.AssertCutoverLeafDrafts(t, drafts)
 
-	run, err := store.GetAgentRun(ctx, builderCutoverScope, runID)
+	run, err := store.GetAgentRun(ctx, storetest.BuilderCutoverScope, runID)
 	if err != nil || run.Status != AgentRunStatusCanceled || run.LeaseOwner != "" {
 		t.Fatalf("authoring run = %#v, %v; want canceled without lease", run, err)
 	}
@@ -161,7 +163,7 @@ func TestAgentBuilderMigrationSQLiteKeepsLeafDraftsAndRetiresChangeSets(t *testi
 	if left, err := store.ListAgentBuilderCutoverDrafts(ctx); err != nil || len(left) != 0 {
 		t.Fatalf("drafts after drop = %#v, %v", left, err)
 	}
-	if err := store.DeleteAgentBuilderCutoverDraft(ctx, builderCutoverScope, "cs-amend"); err != nil {
+	if err := store.DeleteAgentBuilderCutoverDraft(ctx, storetest.BuilderCutoverScope, "cs-amend"); err != nil {
 		t.Fatalf("delete after drop = %v", err)
 	}
 }

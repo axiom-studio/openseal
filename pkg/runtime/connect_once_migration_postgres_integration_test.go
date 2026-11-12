@@ -23,18 +23,18 @@ func TestPostgresConnectOnceMigration(t *testing.T) {
 		_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 		_ = store.Close()
 	})
-	h := connectOnceMigrationHarness{
-		db:    func() *sql.DB { return pgSchema.DB },
-		table: func(name string) string { return pgSchema.Table(name) },
-		store: func() connectOnceMigrationStore { return store },
-		rerun: func(t *testing.T) {
+	h := storetest.ConnectOnceMigrationHarness{
+		DB:    func() *sql.DB { return pgSchema.DB },
+		Table: func(name string) string { return pgSchema.Table(name) },
+		Store: func() storetest.ConnectOnceMigrationStore { return store },
+		Rerun: func(t *testing.T) {
 			t.Helper()
 			if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("schema_migrations")+` WHERE version = $1`, connectOnceMigrationVersion); err != nil {
 				t.Fatal(err)
 			}
 		},
 	}
-	runConnectOnceMigrationCase(t, h, func(t *testing.T) {
+	storetest.RunConnectOnceMigrationCase(t, h, func(t *testing.T) {
 		t.Helper()
 		if err := store.Close(); err != nil {
 			t.Fatal(err)

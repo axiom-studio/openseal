@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -43,12 +44,12 @@ func TestPostgresSkillDefinitionIdentityProbeUsesLiveIndexedMetadata(t *testing.
 		_, _ = unrelated.db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+unrelated.quotedSchema()+` CASCADE`)
 	})
 	replica := open(primary.schema)
-	testSkillDefinitionIdentityProbeContract(t, primary, unrelated)
+	storetest.RunSkillDefinitionIdentityProbeContract(t, primary, unrelated)
 	before, err := replica.ListSkillDefinitionIdentities(ctx, "research", "1.0.0")
 	if err != nil || len(before) != 3 {
 		t.Fatalf("replica identities = %#v, %v", before, err)
 	}
-	if err := skill.NewCatalogWithStore(replica).Register(ctx, skillIdentityProbeDefinition("research", "1.0.0", "catalog::@replica/research")); err != nil {
+	if err := skill.NewCatalogWithStore(replica).Register(ctx, storetest.SkillIdentityProbeDefinition("research", "1.0.0", "catalog::@replica/research")); err != nil {
 		t.Fatal(err)
 	}
 	after, err := primary.ListSkillDefinitionIdentities(ctx, "research", "1.0.0")
@@ -61,7 +62,7 @@ func TestPostgresSkillDefinitionIdentityProbeUsesLiveIndexedMetadata(t *testing.
 	if _, err := primary.db.ExecContext(ctx, `ALTER TABLE `+primary.table("skill_definitions")+` ALTER COLUMN payload SET STORAGE EXTERNAL`); err != nil {
 		t.Fatal(err)
 	}
-	large := skillIdentityProbeDefinition("research", "1.0.0", "catalog::@large/research")
+	large := storetest.SkillIdentityProbeDefinition("research", "1.0.0", "catalog::@large/research")
 	large.Prompt.Instructions = strings.Repeat("Keep the immutable payload outside the metadata read path. ", 512)
 	if err := skill.NewCatalogWithStore(primary).Register(ctx, large); err != nil {
 		t.Fatal(err)

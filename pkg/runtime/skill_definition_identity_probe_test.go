@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -18,9 +19,9 @@ import (
 func TestSkillDefinitionIdentityProbeIsLiveExactAndIsolated(t *testing.T) {
 	for _, fixture := range []struct {
 		name string
-		open func(*testing.T) skillIdentityProbeTestStore
+		open func(*testing.T) storetest.SkillIdentityProbeStore
 	}{
-		{name: "sqlite", open: func(t *testing.T) skillIdentityProbeTestStore {
+		{name: "sqlite", open: func(t *testing.T) storetest.SkillIdentityProbeStore {
 			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "identities.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -30,7 +31,7 @@ func TestSkillDefinitionIdentityProbeIsLiveExactAndIsolated(t *testing.T) {
 		}},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
-			testSkillDefinitionIdentityProbeContract(t, fixture.open(t), fixture.open(t))
+			storetest.RunSkillDefinitionIdentityProbeContract(t, fixture.open(t), fixture.open(t))
 		})
 	}
 }
@@ -92,7 +93,7 @@ func TestSkillDefinitionIdentityProbePreservesAcceptedEmbeddedSeparators(t *test
 			t.Run(name, func(t *testing.T) {
 				ctx := context.Background()
 				store := newTestKernelStore(t)
-				definition := skillIdentityProbeDefinition(test.id, test.version, source)
+				definition := storetest.SkillIdentityProbeDefinition(test.id, test.version, source)
 				writer := skill.NewCatalogWithStore(store)
 				if err := writer.Register(ctx, definition); err != nil {
 					t.Fatalf("existing accepted identity could not register: %v", err)
@@ -110,7 +111,7 @@ func TestSkillDefinitionIdentityProbePreservesAcceptedEmbeddedSeparators(t *test
 				if err := skill.NewCatalogWithStore(store).Register(ctx, definition); !errors.Is(err, skill.ErrDefinitionImmutable) {
 					t.Fatalf("exact identity overwrite was allowed: %v", err)
 				}
-				later := skillIdentityProbeDefinition(test.id, test.version, "catalog::@later/research")
+				later := storetest.SkillIdentityProbeDefinition(test.id, test.version, "catalog::@later/research")
 				if err := skill.NewCatalogWithStore(store).Register(ctx, later); err != nil {
 					t.Fatal(err)
 				}
@@ -148,13 +149,13 @@ func TestSQLiteSkillDefinitionIdentityProbeSeesReplicaPublisherAndRestart(t *tes
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	if err := skill.NewCatalogWithStore(primary).Register(ctx, skillIdentityProbeDefinition("research", "1.0.0", "")); err != nil {
+	if err := skill.NewCatalogWithStore(primary).Register(ctx, storetest.SkillIdentityProbeDefinition("research", "1.0.0", "")); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := replica.ListSkillDefinitionIdentities(ctx, "research", "1.0.0"); err != nil || len(got) != 1 || got[0].SourceIdentity != "" {
 		t.Fatalf("replica builtin identity = %#v, %v", got, err)
 	}
-	if err := skill.NewCatalogWithStore(replica).Register(ctx, skillIdentityProbeDefinition("research", "1.0.0", "catalog::@replica/research")); err != nil {
+	if err := skill.NewCatalogWithStore(replica).Register(ctx, storetest.SkillIdentityProbeDefinition("research", "1.0.0", "catalog::@replica/research")); err != nil {
 		t.Fatal(err)
 	}
 	want := []capability.SkillIdentity{

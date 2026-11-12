@@ -44,13 +44,13 @@ func TestPostgresTeamMembersMigrationReplacesRoleSlotsAndRollsBackTwice(t *testi
 			t.Fatal(err)
 		}
 	}
-	seedRoleSlotTeams(t, pgSchema.DB, query)
+	storetest.SeedRoleSlotTeams(t, pgSchema.DB, query)
 	if _, err := pgSchema.DB.ExecContext(ctx, `DELETE FROM `+pgSchema.Table("schema_migrations")+` WHERE version = $1`, teamMembersMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
 	reopen()
-	requireTeamRows(t, pgSchema.DB, query, "migrated", memberTeamRows)
-	requireMemberTeamsLoad(t, store)
+	storetest.RequireTeamRows(t, pgSchema.DB, query, "migrated", storetest.MemberTeamRows)
+	storetest.RequireMemberTeamsLoad(t, store)
 	// A second open finds the migration applied; one that lost only the
 	// ledger row runs it again and changes nothing.
 	reopen()
@@ -58,19 +58,19 @@ func TestPostgresTeamMembersMigrationReplacesRoleSlotsAndRollsBackTwice(t *testi
 		t.Fatal(err)
 	}
 	reopen()
-	requireTeamRows(t, pgSchema.DB, query, "migrated again", memberTeamRows)
+	storetest.RequireTeamRows(t, pgSchema.DB, query, "migrated again", storetest.MemberTeamRows)
 
 	for _, stage := range []string{"rolled back", "rolled back again"} {
 		if err := store.RollbackPostgresMigrations(ctx, teamMembersMigrationVersion-1); err != nil {
 			t.Fatalf("%s: %v", stage, err)
 		}
-		requireTeamRows(t, pgSchema.DB, query, stage, rolledBackTeamRows)
+		storetest.RequireTeamRows(t, pgSchema.DB, query, stage, storetest.RolledBackTeamRows)
 		if version, err := store.PostgresSchemaVersion(ctx); err != nil || version != teamMembersMigrationVersion-1 {
 			t.Fatalf("%s: schema version = %d, %v", stage, version, err)
 		}
 	}
 	reopen()
-	requireMemberTeamsLoad(t, store)
+	storetest.RequireMemberTeamsLoad(t, store)
 	// After a rollback past the Team tables, this rollback finds them gone.
 	if err := store.RollbackPostgresMigrations(ctx, 10); err != nil {
 		t.Fatal(err)

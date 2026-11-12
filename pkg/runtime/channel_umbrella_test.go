@@ -7,12 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "tenant-1"}
-	gateway := externalConversationGatewayFixture(scope)
+	gateway := storetest.IngressGateway(scope)
 	for name, mutate := range map[string]func(*ExternalConversationIngressGateway){
 		"no owner":           func(g *ExternalConversationIngressGateway) { g.Owner = ObjectiveOwner{} },
 		"another deployment": func(g *ExternalConversationIngressGateway) { g.Owner.ID = "other" },
@@ -57,7 +58,7 @@ func TestSQLiteChannelUmbrellaBackfill(t *testing.T) {
 	}
 	scope := Scope{Kind: "tenant", ID: "tenant-1"}
 	if _, err := NewExternalConversationGatewayService(store).Create(context.Background(), CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
-		Gateway: externalConversationGatewayFixture(scope), Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
+		Gateway: storetest.IngressGateway(scope), Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {
