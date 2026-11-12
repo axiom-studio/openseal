@@ -472,7 +472,7 @@ func TestDecisionRunPlainTextGetsNoteThenFails(t *testing.T) {
 func (f *controlFixture) governedEntry(callID, skillID, action string, output map[string]interface{}) {
 	f.t.Helper()
 	actionID := "action-" + callID
-	putStoredAction(f.t, f.store, &ActionCall{
+	f.putAction(&ActionCall{
 		ID: actionID, Scope: f.run.Scope, RunID: f.run.ID, SkillID: skillID, Action: action,
 		Status: ActionCallStatusSucceeded, Origin: ActionOriginLoop, Output: output, CreatedAt: f.now, UpdatedAt: f.now,
 	})
@@ -701,7 +701,7 @@ func (f *controlFixture) addRunActionCall(id string, status ActionCallStatus, si
 // addActionCallFor stores a finished action call of the given Run.
 func (f *controlFixture) addActionCallFor(runID, id string, status ActionCallStatus, sideEffect skill.SideEffect) {
 	f.t.Helper()
-	putStoredAction(f.t, f.store, &ActionCall{
+	f.putAction(&ActionCall{
 		ID: id, Scope: f.run.Scope, RunID: runID, SkillID: "mail", Action: "send", Status: status,
 		SideEffect: sideEffect, Origin: ActionOriginLoop, CreatedAt: f.now, UpdatedAt: f.now,
 	})
@@ -784,7 +784,9 @@ func TestRoutineOccurrenceSilentRefusedAfterChildWrite(t *testing.T) {
 	}
 	child := cloneAgentRun(f.run)
 	child.ID, child.ParentRunID, child.RootRunID = "occurrence-child", f.run.ID, rootID
-	putStoredRun(f.t, f.store, child)
+	if err := f.store.CreateAgentRun(f.ctx, child); err != nil {
+		t.Fatalf("create child run: %v", err)
+	}
 	f.addActionCallFor(child.ID, "child-sent", ActionCallStatusSucceeded, skill.SideEffectExternal)
 	requireRejected(t, f, f.settleFinal("quiet", ControlAuthority{RoutineOccurrence: true}), "quiet", finalSilentAfterChangeCode)
 }

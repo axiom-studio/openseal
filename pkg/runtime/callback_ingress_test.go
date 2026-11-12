@@ -207,7 +207,7 @@ func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
 
 func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store, db := newTestSQLiteStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
@@ -221,7 +221,7 @@ func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T)
 	_, err := service.Receive(ctx, CallbackPublicRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte("forged"),
 	}, &callbackHostStub{err: verificationErr})
-	if receipts := countStoreRows(t, store, "callback_events"); !errors.Is(err, verificationErr) || consumed != 0 || receipts != 0 {
+	if receipts := countRows(t, db, "callback_events"); !errors.Is(err, verificationErr) || consumed != 0 || receipts != 0 {
 		t.Fatalf("verification failure = %v, consumed %d, receipts %d", err, consumed, receipts)
 	}
 }

@@ -110,7 +110,8 @@ func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
 }
 
 func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *testing.T) {
-	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
+	kernel, db := newTestSQLiteStore(t)
+	store := &agentRequestInboxTeamStore{SQLiteStore: kernel}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -128,7 +129,7 @@ func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *te
 	// Simulate a decision Run authored by an older OpenSeal release. Its
 	// idempotency fingerprint no longer matches the current enriched input,
 	// but its authoritative request lineage remains unchanged.
-	rewriteStoredPayload(t, store.SQLiteStore, "agent_runs", request.Scope, runs[0].ID, func(persisted *AgentRun) {
+	rewriteRowPayload(t, db, "agent_runs", request.Scope, runs[0].ID, func(persisted *AgentRun) {
 		inbox := persisted.Context[AgentRequestInboxContextKey].(map[string]interface{})
 		delete(inbox, "clarificationQuestion")
 		delete(inbox, "clarificationResponse")

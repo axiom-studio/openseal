@@ -14,7 +14,7 @@ func steeringRun(t *testing.T, store *SQLiteStore, consumed int, interventions .
 	run := getStoredRun(t, store, testSessionScope, "r1")
 	run.PendingInterventions = interventions
 	run.ConsumedInterventions = consumed
-	putStoredRun(t, store, run)
+	putTestRun(t, store, run)
 	return testStoredSessionRun(t, store, "r1"), session
 }
 
@@ -22,8 +22,7 @@ func addSteeringIntervention(t *testing.T, store *SQLiteStore, intervention Agen
 	t.Helper()
 	run := getStoredRun(t, store, testSessionScope, "r1")
 	run.PendingInterventions = append(run.PendingInterventions, intervention)
-	run.Revision++
-	putStoredRun(t, store, run)
+	putTestRun(t, store, run)
 	return testStoredSessionRun(t, store, "r1")
 }
 

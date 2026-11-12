@@ -10,9 +10,17 @@ import (
 	"go.uber.org/zap"
 )
 
+// terminalFinalizerStore is a kernel store whose action calls are the ones a
+// test states (the finalizer only lists a Run's calls), and which records the
+// activity filters the finalizer asks for.
 type terminalFinalizerStore struct {
 	*SQLiteStore
+	actions         actionCallRecords
 	activityFilters []ActivityFilter
+}
+
+func (s *terminalFinalizerStore) ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error) {
+	return s.actions.ListActionCalls(ctx, filter)
 }
 
 func (s *terminalFinalizerStore) ListActivity(ctx context.Context, filter ActivityFilter) ([]*ActivityEvent, error) {
@@ -67,14 +75,14 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	putStoredAction(t, store.SQLiteStore, &ActionCall{
+	store.actions.put(&ActionCall{
 		ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "binding", BindingRevision: 1,
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Arguments: map[string]interface{}{},
 		Output: map[string]interface{}{"sessionId": "agent-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	})
-	putStoredAction(t, store.SQLiteStore, &ActionCall{
+	store.actions.put(&ActionCall{
 		ID: "reuse-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "binding", BindingRevision: 1,
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Arguments: map[string]interface{}{},
@@ -125,7 +133,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 
 func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := &terminalFinalizerStore{SQLiteStore: newTestKernelStore(t)}
 	catalog := skill.NewCatalog()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	definition := &skill.Definition{
@@ -159,8 +167,10 @@ func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t
 	}
 	now := time.Date(2026, 7, 31, 19, 0, 0, 0, time.UTC)
 	run := &AgentRun{ID: "historical", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "cleanup", Source: RunSourceObjective, Status: AgentRunStatusCanceled, CreatedAt: now, UpdatedAt: now}
-	putStoredRun(t, store, cloneAgentRun(run))
-	putStoredAction(t, store, &ActionCall{ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: binding.ID, BindingRevision: 1, SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Output: map[string]interface{}{"sessionId": "old-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now})
+	if err := store.CreateAgentRun(ctx, cloneAgentRun(run)); err != nil {
+		t.Fatal(err)
+	}
+	store.actions.put(&ActionCall{ID: "start-call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: binding.ID, BindingRevision: 1, SkillID: definition.ID, SkillVersion: definition.Version, Action: "start", Status: ActionCallStatusSucceeded, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Output: map[string]interface{}{"sessionId": "old-session"}, MaxAttempts: 1, Attempt: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	dispatches := 0
 	finalizer := NewActionRunTerminalFinalizer(store, catalog, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		dispatches++
@@ -198,7 +208,9 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 			CreatedAt: start.Add(time.Duration(index) * time.Second),
 			UpdatedAt: start.Add(time.Duration(index) * time.Second),
 		}
-		putStoredRun(t, store, run)
+		if err := store.CreateAgentRun(ctx, run); err != nil {
+			t.Fatal(err)
+		}
 	}
 	finalized := make([]string, 0, 206)
 	seen := make(map[string]bool, 206)
@@ -223,7 +235,9 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 		Goal: "newly terminal cleanup", Source: RunSourceObjective, Status: AgentRunStatusCanceled,
 		CreatedAt: start.Add(205 * time.Second), UpdatedAt: start.Add(205 * time.Second),
 	}
-	putStoredRun(t, store, newest)
+	if err := store.CreateAgentRun(ctx, newest); err != nil {
+		t.Fatal(err)
+	}
 	for range 20 {
 		pool.lastFinalizationScan = time.Time{}
 		pool.reconcileTerminalRunFinalizers(ctx)
