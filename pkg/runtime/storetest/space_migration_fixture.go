@@ -61,8 +61,9 @@ func AssertSpacesBackfilled(t *testing.T, store SpaceConversationStore, scope, a
 }
 
 // AssertSpaceAccessBackfilled checks a migrated database that had the legacy
-// Default space and one space a person made. Migration 85 then leaves the
-// legacy space as it is and makes the person's space their default.
+// Default space and one space a person made. Migration 86 then leaves the
+// legacy space as it is and makes the person's space their default, and
+// migration 87 opens the legacy space to everyone again.
 func AssertSpaceAccessBackfilled(t *testing.T, store models.SpaceStore, scope models.Scope, workID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -70,7 +71,7 @@ func AssertSpaceAccessBackfilled(t *testing.T, store models.SpaceStore, scope mo
 	if err != nil || len(listed) != 2 {
 		t.Fatalf("spaces = %+v, err = %v", listed, err)
 	}
-	if listed[0].ID != LegacyDefaultSpaceID(scope) || listed[0].Access != models.SpaceAccessOwner || listed[0].OwnerID != LegacyDefaultSpaceOwner ||
+	if listed[0].ID != LegacyDefaultSpaceID(scope) || listed[0].Access != models.SpaceAccessEveryone || listed[0].OwnerID != LegacyDefaultSpaceOwner ||
 		!listed[0].IsDefault || listed[0].Name != "Default" {
 		t.Fatalf("Default = %+v", listed[0])
 	}
@@ -83,8 +84,8 @@ func AssertSpaceAccessBackfilled(t *testing.T, store models.SpaceStore, scope mo
 	if people, err := store.ListSpacePeople(ctx, scope, workID); err != nil || len(people) != 0 {
 		t.Fatalf("people = %+v, err = %v", people, err)
 	}
-	// Nothing was shared before the migration, so another person sees none.
-	if visible, err := store.VisibleSpaces(ctx, scope, "8"); err != nil || len(visible) != 0 {
+	// Only the space no person owns is shared; another person sees just it.
+	if visible, err := store.VisibleSpaces(ctx, scope, "8"); err != nil || len(visible) != 1 || visible[0] != LegacyDefaultSpaceID(scope) {
 		t.Fatalf("visible to another person = %v, err = %v", visible, err)
 	}
 }

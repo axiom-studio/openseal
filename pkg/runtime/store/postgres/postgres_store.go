@@ -483,6 +483,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.migrateOwnerDefaultSpace(ctx, tx); err != nil {
 		return fmt.Errorf("owner default space migration: %w", err)
 	}
+	if err := s.migrateOpenSystemSpaces(ctx, tx); err != nil {
+		return fmt.Errorf("open system spaces migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err

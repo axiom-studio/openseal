@@ -395,7 +395,7 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	t.Cleanup(func() { _ = reopened.Close() })
 	listed, err := reopened.ListSpaces(ctx, scope)
 	if err != nil || len(listed) != 1 || listed[0].ID != newID || !listed[0].IsDefault || listed[0].Name != "Shared" ||
-		listed[0].Access != SpaceAccessOwner || listed[0].OwnerID != storetest.LegacyDefaultSpaceOwner {
+		listed[0].Access != SpaceAccessEveryone || listed[0].OwnerID != storetest.LegacyDefaultSpaceOwner {
 		t.Fatalf("spaces = %+v, err = %v", listed, err)
 	}
 	members, err := reopened.ListSpaceMembers(ctx, scope, newID)

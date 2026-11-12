@@ -15,7 +15,7 @@ import (
 // A v77 database keeps its Personal space: migration 78 renames the column,
 // moves the id to default-<md5> with its members and conversations, and
 // keeps a name someone gave the space. Migration 86 leaves it the default
-// space of the owner it has.
+// space of the owner it has, and migration 87 opens it to everyone.
 func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	pgSchema := storetest.NewPostgresSchema(t, "default_space_")
 	dsn := pgSchema.DSN
@@ -56,7 +56,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 		`UPDATE ` + pgSchema.Table("space_members") + ` SET space_id = '` + oldID + `'`,
 		`ALTER TABLE ` + pgSchema.Table("space_members") + ` ADD FOREIGN KEY (scope_kind, scope_id, space_id) REFERENCES ` + pgSchema.Table("spaces") + ` (scope_kind, scope_id, id) ON DELETE CASCADE`,
 		`UPDATE ` + pgSchema.Table("conversations") + ` SET space_id = '` + oldID + `', payload = jsonb_set(payload, '{spaceId}', to_jsonb('` + oldID + `'::text))`,
-		`DELETE FROM ` + pgSchema.Table("schema_migrations") + ` WHERE version IN (78, 84, 86)`,
+		`DELETE FROM ` + pgSchema.Table("schema_migrations") + ` WHERE version IN (78, 84, 86, 87)`,
 	} {
 		if _, err := pgSchema.DB.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
@@ -70,7 +70,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	t.Cleanup(func() { _ = reopened.Close() })
 	listed, err := reopened.ListSpaces(ctx, scope)
 	if err != nil || len(listed) != 1 || listed[0].ID != newID || !listed[0].IsDefault || listed[0].Name != "Shared" ||
-		listed[0].Access != SpaceAccessOwner || listed[0].OwnerID != storetest.LegacyDefaultSpaceOwner {
+		listed[0].Access != SpaceAccessEveryone || listed[0].OwnerID != storetest.LegacyDefaultSpaceOwner {
 		t.Fatalf("spaces = %+v, err = %v", listed, err)
 	}
 	members, err := reopened.ListSpaceMembers(ctx, scope, newID)
