@@ -11,11 +11,11 @@ import (
 
 type retentionContentStore struct{ available map[string]bool }
 
-func (s *retentionContentStore) Available(_ context.Context, _ Scope, ref string) (bool, error) {
+func (s *retentionContentStore) Available(_ context.Context, _ models.Scope, ref string) (bool, error) {
 	return s.available[ref], nil
 }
 
-func (s *retentionContentStore) Delete(_ context.Context, _ Scope, ref string) (bool, error) {
+func (s *retentionContentStore) Delete(_ context.Context, _ models.Scope, ref string) (bool, error) {
 	deleted := s.available[ref]
 	delete(s.available, ref)
 	return deleted, nil
@@ -38,7 +38,7 @@ func TestArtifactRetentionSweepDeletesDueBytesAndPreservesLegalHold(t *testing.T
 		artifact := validCatalogArtifact(fixture.id, 1)
 		artifact.ContentRef = "content:" + fixture.id
 		artifact.Digest = digestFor(fixture.id)
-		artifact.Retention = ArtifactRetention{ExpiresAt: &fixture.expires, LegalHold: fixture.hold}
+		artifact.Retention = models.ArtifactRetention{ExpiresAt: &fixture.expires, LegalHold: fixture.hold}
 		if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); err != nil {
 			t.Fatal(err)
 		}

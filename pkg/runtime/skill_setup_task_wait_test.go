@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -22,10 +24,10 @@ import (
 )
 
 type skillSetupTaskTestStore interface {
-	KernelStore
-	ConversationStore
-	ConversationTaskStore
-	AgentRunAdmissionStore
+	models.KernelStore
+	models.ConversationStore
+	models.ConversationTaskStore
+	models.AgentRunAdmissionStore
 }
 
 // SQLite is closed and reopened, rather than merely constructing a new service,
@@ -56,27 +58,27 @@ func forSkillSetupTaskStores(t *testing.T, test func(*testing.T, skillSetupTaskT
 
 type skillSetupTaskWaitFixture struct {
 	store   skillSetupTaskTestStore
-	task    *ConversationTaskResult
+	task    *models.ConversationTaskResult
 	catalog *skill.Catalog
-	request *SkillSetupRequest
-	call    *ActionCall
+	request *models.SkillSetupRequest
+	call    *models.ActionCall
 	// step is the running step whose request_setup tool call opened the
 	// form; wait settles it with the Run's park.
-	step *AgentTurn
+	step *models.AgentTurn
 }
 
-func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *ConversationTaskResult {
+func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *models.ConversationTaskResult {
 	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "task-sql"}
+	scope := models.Scope{Kind: "tenant", ID: "task-sql"}
 	conversations := conversation.NewConversationService(store)
-	seedTestSpace(t, store.(SpaceStore), scope)
+	seedTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), conversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "task-agent"}, Title: "Task setup", IdempotencyKey: "task-setup-chat",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "task-agent"}, Title: "Task setup", IdempotencyKey: "task-setup-chat",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	message := conversationruntest.PostMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion, "Read the community in the background", "task-setup-source")
+	message := conversationruntest.PostMessage(t, conversations, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion, "Read the community in the background", "task-setup-source")
 	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
@@ -85,14 +87,14 @@ func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *Conve
 	if err != nil || scheduled == nil || scheduled.Run == nil {
 		t.Fatalf("schedule setup task source: %#v %v", scheduled, err)
 	}
-	source, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
-		Scope: scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	source, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{
+		Scope: scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
 	if err != nil || source == nil || source.ID != scheduled.Run.ID {
 		t.Fatalf("claim setup task source: %#v %v", source, err)
 	}
 	settled := conversationruntest.SettleTaskSource(t, store, scope, source.ID, "worker", conversationruntest.TaskSourceProposal{
-		Goal: "Read the community and report the outcome", Acknowledgment: "I have started reading the community.", Budget: &BudgetPolicy{MaxTurns: 5}})
+		Goal: "Read the community and report the outcome", Acknowledgment: "I have started reading the community.", Budget: &models.BudgetPolicy{MaxTurns: 5}})
 	task, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +115,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	t.Helper()
 	const sourceIdentity = "https://skills.example::reddit.reader"
 	task := admitSkillSetupWaitTask(t, store)
-	if task.SourceRun.Status != AgentRunStatusCompleted || task.WorkRun.ParentRunID != "" {
+	if task.SourceRun.Status != models.AgentRunStatusCompleted || task.WorkRun.ParentRunID != "" {
 		t.Fatal("fixture must be independent work whose source already completed")
 	}
 	claim := storetest.ConversationTaskAdmissionClaim(time.Now().UTC().Add(time.Second), 0)
@@ -152,12 +154,12 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	}
 	if err := catalog.Bind(t.Context(), &skill.Binding{
 		ID: "setup-actions", Revision: 1, Scope: skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID},
-		DeploymentID: run.AssignedAgentID, SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion,
+		DeploymentID: run.AssignedAgentID, SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion,
 		AllowedActions: []string{agentrun.SkillActionRequestSetup, skillbinding.SkillActionListSetupRequests}, MaximumRisk: skill.RiskLevelRead,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	validator, err := skillbinding.NewSkillBindingActionValidator(catalog, teamRosterReader(store))
+	validator, err := skillbinding.NewSkillBindingActionValidator(catalog, models.TeamRosterReaderOf(store))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,23 +169,23 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	}
 	// The run loop proposes request_setup as a governed tool call of its
 	// running step and executes it inline under the Run's lease.
-	steps := NewAgentTurnService(store, store)
-	step, err := steps.BeginTurn(t.Context(), BeginAgentTurnRequest{Scope: run.Scope, RunID: run.ID, SessionID: run.SessionID, Producer: StepProducerModel,
+	steps := activity.NewAgentTurnService(store, store)
+	step, err := steps.BeginTurn(t.Context(), activity.BeginAgentTurnRequest{Scope: run.Scope, RunID: run.ID, SessionID: run.SessionID, Producer: models.StepProducerModel,
 		WorkerID: "setup-worker", LeaseDuration: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
 	proposal, err := action.NewActionCoordinator(store, store, catalog, action.NewDefaultActionPolicy(), []action.ActionProposalValidator{validator}).Propose(t.Context(), action.ProposeActionRequest{
 		Scope: run.Scope, RunID: run.ID, TurnID: step.ID, WorkerID: "setup-worker", DeploymentID: run.AssignedAgentID,
-		SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: agentrun.SkillActionRequestSetup,
+		SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: agentrun.SkillActionRequestSetup,
 		Arguments: arguments,
 		Summary:   "Ask for Reddit setup",
-		Origin:    ActionOriginLoop, Execution: ActionExecutionLoop, IdempotencyKey: "loop:" + step.ID + ":call-setup", CausationID: step.ID,
+		Origin:    models.ActionOriginLoop, Execution: models.ActionExecutionLoop, IdempotencyKey: "loop:" + step.ID + ":call-setup", CausationID: step.ID,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proposal.Approval != nil || proposal.Call.Status != ActionCallStatusReady {
+	if proposal.Approval != nil || proposal.Call.Status != models.ActionCallStatusReady {
 		t.Fatalf("setup request proposal: %#v", proposal)
 	}
 	provider := skill.DiscoveryProviderFunc(func(_ context.Context, request skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
@@ -209,7 +211,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 		t.Fatal(err)
 	}
 	executed, err := action.NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(t.Context(), run.Scope, proposal.Call.ID, "setup-worker")
-	if err != nil || executed == nil || executed.Call.Status != ActionCallStatusSucceeded {
+	if err != nil || executed == nil || executed.Call.Status != models.ActionCallStatusSucceeded {
 		if executed != nil && executed.Call != nil {
 			t.Fatalf("canonical setup execution: status=%s action error=%s worker error=%v", executed.Call.Status, executed.Call.Error, err)
 		}
@@ -222,7 +224,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	return &skillSetupTaskWaitFixture{store: store, task: task, catalog: catalog, request: request, call: executed.Call, step: step}
 }
 
-func (f *skillSetupTaskWaitFixture) wait(t *testing.T) *AgentRun {
+func (f *skillSetupTaskWaitFixture) wait(t *testing.T) *models.AgentRun {
 	t.Helper()
 	current, err := f.store.GetAgentRun(t.Context(), f.request.Scope, f.request.RunID)
 	if err != nil || current == nil {
@@ -238,19 +240,19 @@ func (f *skillSetupTaskWaitFixture) wait(t *testing.T) *AgentRun {
 	if err != nil || step == nil {
 		t.Fatalf("load setup step: %#v %v", step, err)
 	}
-	if step, err = NewAgentTurnService(f.store, f.store).FinishTurn(t.Context(), f.request.Scope, step.ID, FinishAgentTurnRequest{
-		ExpectedRevision: step.Revision, Status: AgentTurnStatusCompleted, WorkerID: "setup-worker"}); err != nil {
+	if step, err = activity.NewAgentTurnService(f.store, f.store).FinishTurn(t.Context(), f.request.Scope, step.ID, activity.FinishAgentTurnRequest{
+		ExpectedRevision: step.Revision, Status: models.AgentTurnStatusCompleted, WorkerID: "setup-worker"}); err != nil {
 		t.Fatalf("finish setup step: %v", err)
 	}
-	waiting, _, err := NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), f.request.Scope, f.request.RunID, RunTransitionRequest{
+	waiting, _, err := activity.NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), f.request.Scope, f.request.RunID, activity.RunTransitionRequest{
 		ExpectedRevision: current.Revision, TurnID: step.ID, AppliedTurn: step.Sequence, LeaseOwner: "setup-worker",
-		Status: AgentRunStatusWaitingForEvent, Summary: "Complete the Reddit setup form to continue this task.",
-		WakeCondition: &WakeCondition{Type: conversationrun.ConversationTaskSkillSetupWakeType, Reference: f.request.ID}, Checkpoint: checkpoint,
+		Status: models.AgentRunStatusWaitingForEvent, Summary: "Complete the Reddit setup form to continue this task.",
+		WakeCondition: &models.WakeCondition{Type: conversationrun.ConversationTaskSkillSetupWakeType, Reference: f.request.ID}, Checkpoint: checkpoint,
 	})
 	if err != nil {
 		t.Fatalf("park setup task: %v", err)
 	}
-	if waiting.Status != AgentRunStatusWaitingForEvent || waiting.WakeCondition == nil || waiting.WakeCondition.Reference != f.request.ID {
+	if waiting.Status != models.AgentRunStatusWaitingForEvent || waiting.WakeCondition == nil || waiting.WakeCondition.Reference != f.request.ID {
 		t.Fatalf("wait for exact setup: %#v", waiting)
 	}
 	// Compare durable snapshots; the persisted checkpoint normalizes JSON
@@ -264,7 +266,7 @@ func (f *skillSetupTaskWaitFixture) wait(t *testing.T) *AgentRun {
 
 func (f *skillSetupTaskWaitFixture) resolve(t *testing.T, status string) {
 	t.Helper()
-	request := cloneSkillSetupRequest(f.request)
+	request := models.CloneSkillSetupRequest(f.request)
 	request.Status, request.ResolvedBy = status, f.task.Task.AuthenticatedActor.ID
 	request.Revision++
 	request.UpdatedAt = time.Now().UTC()
@@ -286,9 +288,9 @@ func (f *skillSetupTaskWaitFixture) reconcile(t *testing.T) (*agentrun.AgentRunC
 	return scheduler.ReconcileSkillSetupTask(t.Context(), f.request.Scope, f.request.ID)
 }
 
-func skillSetupCompletionEvents(t *testing.T, store skillSetupTaskTestStore, run *AgentRun) int {
+func skillSetupCompletionEvents(t *testing.T, store skillSetupTaskTestStore, run *models.AgentRun) int {
 	t.Helper()
-	events, err := store.ListActivity(t.Context(), ActivityFilter{Scope: run.Scope, RunID: run.ID, Limit: 100})
+	events, err := store.ListActivity(t.Context(), models.ActivityFilter{Scope: run.Scope, RunID: run.ID, Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +311,7 @@ func TestSkillSetupTaskResolutionPreservesOperatorPauseAndCancel(t *testing.T) {
 				waiting := f.wait(t)
 				changed, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
 					Scope: waiting.Scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: command,
-					Actor: ActivityActor{Type: "user", ID: f.task.Task.AuthenticatedActor.ID},
+					Actor: models.ActivityActor{Type: "user", ID: f.task.Task.AuthenticatedActor.ID},
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -359,7 +361,7 @@ func TestSkillSetupTaskReconciliationRecoversResolutionBeforeWait(t *testing.T) 
 			t.Fatal(err)
 		}
 		resumed, err := f.store.GetAgentRun(t.Context(), waiting.Scope, waiting.ID)
-		if err != nil || resumed == nil || resumed.Status != AgentRunStatusQueued || len(resumed.PendingInterventions) != 1 || skillSetupCompletionEvents(t, f.store, resumed) != 1 {
+		if err != nil || resumed == nil || resumed.Status != models.AgentRunStatusQueued || len(resumed.PendingInterventions) != 1 || skillSetupCompletionEvents(t, f.store, resumed) != 1 {
 			t.Fatalf("scope reconciliation lost resolved setup: %#v %v", resumed, err)
 		}
 		if _, err := scheduler.ReconcileScope(t.Context(), waiting.Scope); err != nil {
@@ -385,7 +387,7 @@ func (f *skillSetupTaskWaitFixture) upgrade(t *testing.T) {
 	}
 	// Match the host's explicit prepareSkillSetupUpgrade mutation. The original
 	// action receipt stays immutable; only the canonical request advances by CAS.
-	upgraded := cloneSkillSetupRequest(f.request)
+	upgraded := models.CloneSkillSetupRequest(f.request)
 	upgraded.SkillVersion, upgraded.SkillName = selected.Version, selected.Name
 	upgraded.Kind = "configure"
 	upgraded.InstallationReference, upgraded.SourceDigest = "", ""
@@ -402,7 +404,7 @@ func TestSkillSetupTaskAuthorizedUpgradeResumesSameWorkAfterRestart(t *testing.T
 		t.Run(kind, func(t *testing.T) {
 			forSkillSetupTaskStores(t, func(t *testing.T, store skillSetupTaskTestStore, restart func() skillSetupTaskTestStore) {
 				f := newSkillSetupTaskFixtureForKind(t, store, kind)
-				original := cloneSkillSetupRequest(f.request)
+				original := models.CloneSkillSetupRequest(f.request)
 				if original.SourceIdentity == "" || len(original.RequiredActions) != 1 || !original.EnablePrompt || kind == "install" && (original.InstallationReference == "" || original.SourceDigest == "") {
 					t.Fatal("upgrade fixture lacks canonical source or installation proof")
 				}
@@ -410,13 +412,13 @@ func TestSkillSetupTaskAuthorizedUpgradeResumesSameWorkAfterRestart(t *testing.T
 				f.upgrade(t)
 				f.store = restart()
 				pending, handled, err := f.reconcile(t)
-				if err != nil || !handled || pending == nil || pending.Run.Revision != waiting.Revision || pending.Run.Status != AgentRunStatusWaitingForEvent || skillSetupCompletionEvents(t, f.store, waiting) != 0 {
+				if err != nil || !handled || pending == nil || pending.Run.Revision != waiting.Revision || pending.Run.Status != models.AgentRunStatusWaitingForEvent || skillSetupCompletionEvents(t, f.store, waiting) != 0 {
 					t.Fatalf("pending upgrade did not preserve task wait: %#v %v %v", pending, handled, err)
 				}
 				f.resolve(t, "resolved")
 				f.store = restart()
 				resumed, handled, err := f.reconcile(t)
-				if err != nil || !handled || resumed == nil || resumed.Run.ID != waiting.ID || resumed.Run.Status != AgentRunStatusQueued || resumed.Run.WakeCondition != nil || len(resumed.Run.PendingInterventions) != 1 {
+				if err != nil || !handled || resumed == nil || resumed.Run.ID != waiting.ID || resumed.Run.Status != models.AgentRunStatusQueued || resumed.Run.WakeCondition != nil || len(resumed.Run.PendingInterventions) != 1 {
 					t.Fatalf("upgraded setup did not resume original task: %#v %v %v", resumed, handled, err)
 				}
 				receipt := resumed.Run.PendingInterventions[0].SkillSetupResolution
@@ -447,12 +449,12 @@ func TestSkillSetupTaskAuthorizedUpgradeResumesSameWorkAfterRestart(t *testing.T
 func TestSkillSetupTaskBindingUpgradeRebaseResumesSameWorkAfterRestart(t *testing.T) {
 	forSkillSetupTaskStores(t, func(t *testing.T, store skillSetupTaskTestStore, restart func() skillSetupTaskTestStore) {
 		f := newSkillSetupTaskFixtureForKind(t, store, "configure", "1.0.0")
-		original := cloneSkillSetupRequest(f.request)
-		if original.Phase != SkillSetupPhaseBindingUpgrade || original.SkillVersion != "2.0.0" || original.BindingVersion != "1.0.0" || original.BindingRevision != 1 || original.BindingID != "reddit-account" {
+		original := models.CloneSkillSetupRequest(f.request)
+		if original.Phase != models.SkillSetupPhaseBindingUpgrade || original.SkillVersion != "2.0.0" || original.BindingVersion != "1.0.0" || original.BindingRevision != 1 || original.BindingID != "reddit-account" {
 			t.Fatalf("setup did not retain the old account and newer requested target: %#v", original)
 		}
 		waiting := f.wait(t)
-		upgradeStore, ok := store.(SkillReferenceUpgradeStore)
+		upgradeStore, ok := store.(models.SkillReferenceUpgradeStore)
 		if !ok {
 			t.Fatal("binding upgrade fixture requires canonical reference upgrade storage")
 		}
@@ -464,10 +466,10 @@ func TestSkillSetupTaskBindingUpgradeRebaseResumesSameWorkAfterRestart(t *testin
 		if err != nil {
 			t.Fatal(err)
 		}
-		actor := ActivityActor{Type: "user", ID: f.task.Task.AuthenticatedActor.ID}
+		actor := models.ActivityActor{Type: "user", ID: f.task.Task.AuthenticatedActor.ID}
 		if _, err := service.Apply(t.Context(), skillbinding.ApplySkillReferenceUpgradeRequest{
 			Plan: plan, Actor: actor, Reason: "Upgrade the saved account to the reviewed installed version",
-			Approval: &SkillReferenceUpgradeApproval{Principal: actor, Reason: "Approve the reviewed account upgrade"},
+			Approval: &models.SkillReferenceUpgradeApproval{Principal: actor, Reason: "Approve the reviewed account upgrade"},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -480,7 +482,7 @@ func TestSkillSetupTaskBindingUpgradeRebaseResumesSameWorkAfterRestart(t *testin
 		if err != nil {
 			t.Fatal(err)
 		}
-		if rebased.SkillVersion != original.SkillVersion || rebased.Phase != SkillSetupPhaseConfiguration || rebased.BindingVersion != original.SkillVersion || rebased.BindingRevision <= original.BindingRevision || rebased.Revision != original.Revision+1 || rebased.Status != "pending" {
+		if rebased.SkillVersion != original.SkillVersion || rebased.Phase != models.SkillSetupPhaseConfiguration || rebased.BindingVersion != original.SkillVersion || rebased.BindingRevision <= original.BindingRevision || rebased.Revision != original.Revision+1 || rebased.Status != "pending" {
 			t.Fatalf("binding rebase changed the target or prematurely resolved setup: %#v", rebased)
 		}
 		if err := store.SaveSkillSetupRequest(t.Context(), rebased, original.Revision); err != nil {
@@ -489,7 +491,7 @@ func TestSkillSetupTaskBindingUpgradeRebaseResumesSameWorkAfterRestart(t *testin
 		f.request = rebased
 		f.store = restart()
 		pending, handled, err := f.reconcile(t)
-		if err != nil || !handled || pending == nil || pending.Run.Revision != waiting.Revision || pending.Run.Status != AgentRunStatusWaitingForEvent || skillSetupCompletionEvents(t, f.store, waiting) != 0 {
+		if err != nil || !handled || pending == nil || pending.Run.Revision != waiting.Revision || pending.Run.Status != models.AgentRunStatusWaitingForEvent || skillSetupCompletionEvents(t, f.store, waiting) != 0 {
 			t.Fatalf("binding rebase woke work before configuration: %#v %v %v", pending, handled, err)
 		}
 		// The upgrade itself is not a saved configuration. Record the subsequent
@@ -514,7 +516,7 @@ func TestSkillSetupTaskBindingUpgradeRebaseResumesSameWorkAfterRestart(t *testin
 		}
 		f.store = restart()
 		resumed, handled, err := f.reconcile(t)
-		if err != nil || !handled || resumed == nil || resumed.Run.ID != waiting.ID || resumed.Run.Status != AgentRunStatusQueued || resumed.Run.WakeCondition != nil || len(resumed.Run.PendingInterventions) != 1 {
+		if err != nil || !handled || resumed == nil || resumed.Run.ID != waiting.ID || resumed.Run.Status != models.AgentRunStatusQueued || resumed.Run.WakeCondition != nil || len(resumed.Run.PendingInterventions) != 1 {
 			t.Fatalf("rebased setup did not resume original task: %#v %v %v", resumed, handled, err)
 		}
 		receipt := resumed.Run.PendingInterventions[0].SkillSetupResolution
@@ -541,16 +543,16 @@ func TestSkillSetupTaskOrdinaryConfigurationCannotForgeBindingRebase(t *testing.
 		t.Run(scenario, func(t *testing.T) {
 			forSkillSetupTaskStores(t, func(t *testing.T, store skillSetupTaskTestStore, _ func() skillSetupTaskTestStore) {
 				f := newSkillSetupTaskFixtureForKind(t, store, "configure", "2.0.0")
-				if f.request.Phase != SkillSetupPhaseConfiguration || f.request.BindingVersion != f.request.SkillVersion {
+				if f.request.Phase != models.SkillSetupPhaseConfiguration || f.request.BindingVersion != f.request.SkillVersion {
 					t.Fatal("fixture must start with an ordinary same-version account configuration")
 				}
 				waiting := f.wait(t)
 				f.resolve(t, "resolved")
-				proof := &skillSetupTaskProofOverrideStore{skillSetupTaskTestStore: store, request: func(request *SkillSetupRequest) {
+				proof := &skillSetupTaskProofOverrideStore{skillSetupTaskTestStore: store, request: func(request *models.SkillSetupRequest) {
 					if scenario == "binding-revision" {
 						request.BindingRevision++
 					} else {
-						request.Phase, request.BindingVersion = SkillSetupPhaseBindingUpgrade, "1.0.0"
+						request.Phase, request.BindingVersion = models.SkillSetupPhaseBindingUpgrade, "1.0.0"
 						request.Status = "dismissed"
 						request.ResolvedBindingID, request.ResolvedBindingRevision = "", 0
 					}
@@ -560,7 +562,7 @@ func TestSkillSetupTaskOrdinaryConfigurationCannotForgeBindingRebase(t *testing.
 					t.Fatal(err)
 				}
 				result, handled, err := scheduler.ReconcileSkillSetupTask(t.Context(), waiting.Scope, f.request.ID)
-				if !handled || !errors.Is(err, ErrInvalidSkillSetup) || result != nil && result.Run != nil && result.Run.Status == AgentRunStatusQueued {
+				if !handled || !errors.Is(err, models.ErrInvalidSkillSetup) || result != nil && result.Run != nil && result.Run.Status == models.AgentRunStatusQueued {
 					t.Fatalf("ordinary setup accepted forged %s rebase: %#v %v %v", scenario, result, handled, err)
 				}
 				unchanged, err := store.GetAgentRun(t.Context(), waiting.Scope, waiting.ID)
@@ -577,11 +579,11 @@ func TestSkillSetupTaskUpgradeRejectsUnversionedOrRepurposedTarget(t *testing.T)
 		t.Run(scenario, func(t *testing.T) {
 			forSkillSetupTaskStores(t, func(t *testing.T, store skillSetupTaskTestStore, _ func() skillSetupTaskTestStore) {
 				f := newSkillSetupTaskFixture(t, store)
-				original := cloneSkillSetupRequest(f.request)
+				original := models.CloneSkillSetupRequest(f.request)
 				waiting := f.wait(t)
 				f.upgrade(t)
 				f.resolve(t, "resolved")
-				proof := &skillSetupTaskProofOverrideStore{skillSetupTaskTestStore: store, request: func(request *SkillSetupRequest) {
+				proof := &skillSetupTaskProofOverrideStore{skillSetupTaskTestStore: store, request: func(request *models.SkillSetupRequest) {
 					switch scenario {
 					case "same-version":
 						request.SkillVersion = original.SkillVersion
@@ -602,7 +604,7 @@ func TestSkillSetupTaskUpgradeRejectsUnversionedOrRepurposedTarget(t *testing.T)
 					t.Fatal(err)
 				}
 				result, handled, err := scheduler.ReconcileSkillSetupTask(t.Context(), waiting.Scope, original.ID)
-				if !handled || !errors.Is(err, ErrInvalidSkillSetup) || result != nil && result.Run != nil && result.Run.Status == AgentRunStatusQueued {
+				if !handled || !errors.Is(err, models.ErrInvalidSkillSetup) || result != nil && result.Run != nil && result.Run.Status == models.AgentRunStatusQueued {
 					t.Fatalf("forged %s upgrade accepted: %#v %v %v", scenario, result, handled, err)
 				}
 				unchanged, err := store.GetAgentRun(t.Context(), waiting.Scope, waiting.ID)
@@ -633,7 +635,7 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 		if len(requests) != 1 || requests[0].(map[string]interface{})["id"] != f.request.ID {
 			t.Fatalf("task setup list: %#v", listed)
 		}
-		forged := cloneAgentRun(run)
+		forged := models.CloneAgentRun(run)
 		forged.ID, forged.RootRunID, forged.ConcurrencyKey = "copied-work", "copied-work", "copied-task"
 		if err := store.CreateAgentRun(t.Context(), forged); err != nil {
 			t.Fatal(err)
@@ -653,27 +655,27 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 }
 
 // dispatch runs one SkillManagement action of run as a call of that run.
-func (f *skillSetupTaskWaitFixture) dispatch(t *testing.T, dispatcher *skillbinding.SkillBindingActionDispatcher, run *AgentRun, action, callID string, arguments map[string]interface{}) (map[string]interface{}, error) {
+func (f *skillSetupTaskWaitFixture) dispatch(t *testing.T, dispatcher *skillbinding.SkillBindingActionDispatcher, run *models.AgentRun, action, callID string, arguments map[string]interface{}) (map[string]interface{}, error) {
 	t.Helper()
-	bound, err := f.catalog.Resolve(t.Context(), skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, run.AssignedAgentID, SkillManagementSkillID, skillbinding.SkillManagementSkillVersion, action)
+	bound, err := f.catalog.Resolve(t.Context(), skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, run.AssignedAgentID, models.SkillManagementSkillID, skillbinding.SkillManagementSkillVersion, action)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return dispatcher.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: bound, Arguments: arguments,
-		Call: &ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID}})
+		Call: &models.ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID}})
 }
 
 // Override only reads to exercise persisted-proof validation without relying on
 // a backend's internal representation or rewriting immutable channel history.
 type skillSetupTaskProofOverrideStore struct {
 	skillSetupTaskTestStore
-	request func(*SkillSetupRequest)
-	run     func(*AgentRun)
-	message func(*ChannelMessage)
-	action  func(*ActionCall)
+	request func(*models.SkillSetupRequest)
+	run     func(*models.AgentRun)
+	message func(*models.ChannelMessage)
+	action  func(*models.ActionCall)
 }
 
-func (s *skillSetupTaskProofOverrideStore) GetSkillSetupRequest(ctx context.Context, scope Scope, id string) (*SkillSetupRequest, error) {
+func (s *skillSetupTaskProofOverrideStore) GetSkillSetupRequest(ctx context.Context, scope models.Scope, id string) (*models.SkillSetupRequest, error) {
 	request, err := s.skillSetupTaskTestStore.GetSkillSetupRequest(ctx, scope, id)
 	if request != nil && s.request != nil {
 		s.request(request)
@@ -681,7 +683,7 @@ func (s *skillSetupTaskProofOverrideStore) GetSkillSetupRequest(ctx context.Cont
 	return request, err
 }
 
-func (s *skillSetupTaskProofOverrideStore) GetAgentRun(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
+func (s *skillSetupTaskProofOverrideStore) GetAgentRun(ctx context.Context, scope models.Scope, id string) (*models.AgentRun, error) {
 	run, err := s.skillSetupTaskTestStore.GetAgentRun(ctx, scope, id)
 	if run != nil && s.run != nil {
 		s.run(run)
@@ -689,7 +691,7 @@ func (s *skillSetupTaskProofOverrideStore) GetAgentRun(ctx context.Context, scop
 	return run, err
 }
 
-func (s *skillSetupTaskProofOverrideStore) GetChannelMessage(ctx context.Context, scope Scope, conversationID, id string) (*ChannelMessage, error) {
+func (s *skillSetupTaskProofOverrideStore) GetChannelMessage(ctx context.Context, scope models.Scope, conversationID, id string) (*models.ChannelMessage, error) {
 	message, err := s.skillSetupTaskTestStore.GetChannelMessage(ctx, scope, conversationID, id)
 	if message != nil && s.message != nil {
 		s.message(message)
@@ -697,7 +699,7 @@ func (s *skillSetupTaskProofOverrideStore) GetChannelMessage(ctx context.Context
 	return message, err
 }
 
-func (s *skillSetupTaskProofOverrideStore) GetActionCall(ctx context.Context, scope Scope, id string) (*ActionCall, error) {
+func (s *skillSetupTaskProofOverrideStore) GetActionCall(ctx context.Context, scope models.Scope, id string) (*models.ActionCall, error) {
 	action, err := s.skillSetupTaskTestStore.GetActionCall(ctx, scope, id)
 	if action != nil && s.action != nil {
 		s.action(action)
@@ -716,31 +718,31 @@ func TestSkillSetupTaskResolutionRejectsForgedProvenance(t *testing.T) {
 				scope := waiting.Scope
 				switch scenario {
 				case "run":
-					proof.request = func(request *SkillSetupRequest) { request.RunID = f.task.SourceRun.ID }
+					proof.request = func(request *models.SkillSetupRequest) { request.RunID = f.task.SourceRun.ID }
 				case "task":
-					proof.run = func(run *AgentRun) {
+					proof.run = func(run *models.AgentRun) {
 						if run.ID == waiting.ID {
-							run.Context[ConversationTaskContextKey] = "other-task"
+							run.Context[models.ConversationTaskContextKey] = "other-task"
 						}
 					}
 				case "source":
-					proof.request = func(request *SkillSetupRequest) { request.TriggerMessageID = "other-source" }
+					proof.request = func(request *models.SkillSetupRequest) { request.TriggerMessageID = "other-source" }
 				case "thread":
-					proof.message = func(message *ChannelMessage) { message.ThreadRootID = "other-thread" }
+					proof.message = func(message *models.ChannelMessage) { message.ThreadRootID = "other-thread" }
 				case "actor":
-					proof.message = func(message *ChannelMessage) { message.Sender.ID = "other-user" }
+					proof.message = func(message *models.ChannelMessage) { message.Sender.ID = "other-user" }
 				case "tenant":
 					scope.ID = "other-tenant"
 				case "action":
-					proof.request = func(request *SkillSetupRequest) { request.ActionCallID = "other-action" }
+					proof.request = func(request *models.SkillSetupRequest) { request.ActionCallID = "other-action" }
 				case "failed-action":
-					proof.action = func(action *ActionCall) { action.Status = ActionCallStatusFailed }
+					proof.action = func(action *models.ActionCall) { action.Status = models.ActionCallStatusFailed }
 				case "action-output":
-					proof.action = func(action *ActionCall) {
+					proof.action = func(action *models.ActionCall) {
 						action.Output["setupRequest"].(map[string]interface{})["id"] = "other-request"
 					}
 				case "wait-reference":
-					proof.run = func(run *AgentRun) {
+					proof.run = func(run *models.AgentRun) {
 						if run.ID == waiting.ID {
 							run.WakeCondition.Reference = "other-request"
 						}
@@ -751,7 +753,7 @@ func TestSkillSetupTaskResolutionRejectsForgedProvenance(t *testing.T) {
 					t.Fatal(err)
 				}
 				result, _, _ := scheduler.ReconcileSkillSetupTask(t.Context(), scope, f.request.ID)
-				if result != nil && result.Run != nil && result.Run.Status == AgentRunStatusQueued {
+				if result != nil && result.Run != nil && result.Run.Status == models.AgentRunStatusQueued {
 					t.Fatalf("forged %s resumed work: %#v", scenario, result)
 				}
 				unchanged, err := store.GetAgentRun(t.Context(), waiting.Scope, waiting.ID)

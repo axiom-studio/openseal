@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
@@ -21,7 +22,7 @@ func TestExternalMessageSourceSurvivesUnavailableHistoryAndReachesStep(t *testin
 	store, catalog, endpoint := externalconversationtest.EndpointFixture(t, ctx, "slack")
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	item := externalconversationtest.ReceiveContextEvent(t, store, endpoint, "identity-message", "trigger", "thread", now)
-	host := &externalconversationtest.RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: conversation.ExternalConversationContextUnavailable, Source: &ExternalMessageSource{
+	host := &externalconversationtest.RecordingContextHost{Result: &externalconversation.ExternalConversationContextResult{Status: conversation.ExternalConversationContextUnavailable, Source: &models.ExternalMessageSource{
 		ChannelID: item.Event.ExternalConversationID, ParticipantID: item.Event.ExternalParticipantID, ParticipantDisplayName: "Kev",
 		ChannelName: "engineering", ChannelType: "private_channel",
 	}}}
@@ -30,7 +31,7 @@ func TestExternalMessageSourceSurvivesUnavailableHistoryAndReachesStep(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
+	messages, err := store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
 	if err != nil || len(messages) != 1 {
 		t.Fatalf("messages=%#v err=%v", messages, err)
 	}
@@ -42,12 +43,12 @@ func TestExternalMessageSourceSurvivesUnavailableHistoryAndReachesStep(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	var restored ChannelMessage
+	var restored models.ChannelMessage
 	if err := json.Unmarshal(encoded, &restored); err != nil || restored.ExternalSource == nil || *restored.ExternalSource != *message.ExternalSource {
 		t.Fatalf("source does not round-trip: %#v %v", restored.ExternalSource, err)
 	}
 	message.ExternalSource.ChannelName = "mutated"
-	again, err := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
+	again, err := store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: applied.ConversationID, Limit: 20})
 	if err != nil || again[0].ExternalSource.ChannelName != "engineering" {
 		t.Fatal("source shared mutable storage")
 	}
@@ -60,21 +61,21 @@ func TestExternalMessageSourceSurvivesUnavailableHistoryAndReachesStep(t *testin
 	// The scheduler stamped the Run on the wall clock; the fixture clock is
 	// truncated to the millisecond, so step past the Run's AvailableAt.
 	f.Now = f.Now.Add(time.Second)
-	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: endpoint.Scope, WorkerID: runlooptest.ChatWorker, Now: f.Now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
-	if err != nil || run == nil || run.Context[conversationRunContextTriggerID] != again[0].ID {
+	run, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: endpoint.Scope, WorkerID: runlooptest.ChatWorker, Now: f.Now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	if err != nil || run == nil || run.Context[models.ConversationRunTriggerIDContextKey] != again[0].ID {
 		t.Fatalf("claim = %#v, %v", run, err)
 	}
 	producer := &runlooptest.ChatProducer{Answers: []string{"I can pick up the first two."}}
 	binding := bindChatAgent(f, run, producer, endpoint.Owner.ID)
-	if exit := f.Drive(run, binding); exit.Run.Status != AgentRunStatusCompleted || len(producer.Paths) != 1 {
+	if exit := f.Drive(run, binding); exit.Run.Status != models.AgentRunStatusCompleted || len(producer.Paths) != 1 {
 		t.Fatalf("exit %s, run %s, steps %d", exit.Reason, exit.Run.Status, len(producer.Paths))
 	}
-	var trigger, runContext *SessionEntry
+	var trigger, runContext *models.SessionEntry
 	for _, entry := range producer.Paths[0] {
 		switch {
 		case entry.User != nil && entry.User.MessageID == again[0].ID:
 			trigger = entry
-		case entry.Note != nil && entry.Note.Kind == NoteRunContext:
+		case entry.Note != nil && entry.Note.Kind == models.NoteRunContext:
 			runContext = entry
 		}
 	}
@@ -99,8 +100,8 @@ func TestExternalMessageSourceSurvivesUnavailableHistoryAndReachesStep(t *testin
 }
 
 func TestExternalMessageSourceRejectsLabelsForDifferentSenderOrChannel(t *testing.T) {
-	for _, extra := range []*ExternalMessageSource{{ChannelID: "other", ParticipantID: "U1", ChannelName: "wrong"}, {ChannelID: "C1", ParticipantID: "other", ChannelName: "wrong"}} {
-		got := externalMessageSource(&ExternalConversationEndpoint{Provider: "slack"}, NormalizedExternalConversationEvent{ExternalConversationID: "C1", ExternalParticipantID: "U1", Source: extra})
+	for _, extra := range []*models.ExternalMessageSource{{ChannelID: "other", ParticipantID: "U1", ChannelName: "wrong"}, {ChannelID: "C1", ParticipantID: "other", ChannelName: "wrong"}} {
+		got := activity.NewExternalMessageSource(&models.ExternalConversationEndpoint{Provider: "slack"}, models.NormalizedExternalConversationEvent{ExternalConversationID: "C1", ExternalParticipantID: "U1", Source: extra})
 		if got.ChannelName != "" || got.ChannelID != "C1" || got.ParticipantID != "U1" {
 			t.Fatalf("unmatched source accepted: %#v", got)
 		}
@@ -110,24 +111,24 @@ func TestExternalMessageSourceRejectsLabelsForDifferentSenderOrChannel(t *testin
 func TestExternalMessageSourcePreservesRawProviderMessageIDOnlyForMatchingProvenance(t *testing.T) {
 	for _, test := range []struct {
 		name    string
-		mutate  func(*ExternalMessageSource)
+		mutate  func(*models.ExternalMessageSource)
 		wantRaw bool
 	}{
-		{"matching provenance", func(*ExternalMessageSource) {}, true},
-		{"different provider", func(s *ExternalMessageSource) { s.Provider = "slack" }, false},
-		{"different channel", func(s *ExternalMessageSource) { s.ChannelID = "other-chat" }, false},
-		{"different sender", func(s *ExternalMessageSource) { s.ParticipantID = "other-sender" }, false},
-		{"empty ID", func(s *ExternalMessageSource) { s.MessageID = "" }, false},
-		{"invalid ID", func(s *ExternalMessageSource) { s.MessageID = "102\n" }, false},
-		{"oversized ID", func(s *ExternalMessageSource) { s.MessageID = strings.Repeat("x", 1025) }, false},
+		{"matching provenance", func(*models.ExternalMessageSource) {}, true},
+		{"different provider", func(s *models.ExternalMessageSource) { s.Provider = "slack" }, false},
+		{"different channel", func(s *models.ExternalMessageSource) { s.ChannelID = "other-chat" }, false},
+		{"different sender", func(s *models.ExternalMessageSource) { s.ParticipantID = "other-sender" }, false},
+		{"empty ID", func(s *models.ExternalMessageSource) { s.MessageID = "" }, false},
+		{"invalid ID", func(s *models.ExternalMessageSource) { s.MessageID = "102\n" }, false},
+		{"oversized ID", func(s *models.ExternalMessageSource) { s.MessageID = strings.Repeat("x", 1025) }, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			extra := &ExternalMessageSource{Provider: "telegram", ChannelID: "chat-A", ParticipantID: "Kev", MessageID: "102"}
+			extra := &models.ExternalMessageSource{Provider: "telegram", ChannelID: "chat-A", ParticipantID: "Kev", MessageID: "102"}
 			test.mutate(extra)
-			event := NormalizedExternalConversationEvent{
+			event := models.NormalizedExternalConversationEvent{
 				ExternalConversationID: "chat-A", ExternalMessageID: "chat-A:102", ExternalParticipantID: "Kev", Source: extra,
 			}
-			source := externalMessageSource(&ExternalConversationEndpoint{Provider: "telegram"}, event)
+			source := activity.NewExternalMessageSource(&models.ExternalConversationEndpoint{Provider: "telegram"}, event)
 			want := event.ExternalMessageID
 			if test.wantRaw {
 				want = "102"

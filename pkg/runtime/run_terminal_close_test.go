@@ -7,15 +7,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 type terminalCloseTestStore interface {
-	RunCommandStore
-	AgentTurnStore
-	AgentRunScheduleStore
+	models.RunCommandStore
+	models.AgentTurnStore
+	models.AgentRunScheduleStore
 }
 
 func terminalCloseStores() []struct {
@@ -39,43 +41,43 @@ func terminalCloseStores() []struct {
 
 // claimedTerminalCloseRun creates a Run and claims it as worker "loop-worker",
 // so it is running under a live lease.
-func claimedTerminalCloseRun(t *testing.T, store terminalCloseTestStore, key string) (*agentrun.RunCommandService, *AgentRun) {
+func claimedTerminalCloseRun(t *testing.T, store terminalCloseTestStore, key string) (*agentrun.RunCommandService, *models.AgentRun) {
 	t.Helper()
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "close"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
+	scope := models.Scope{Kind: "tenant", ID: "close"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}
 	service := agentrun.NewRunCommandService(store)
-	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
+	created, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, ConcurrencyKey: "agent-1:" + key, Goal: "Do the work",
-		Source: RunSourceManual, IdempotencyKey: key, Actor: ActivityActor{Type: "user", ID: "7"},
+		Source: models.RunSourceManual, IdempotencyKey: key, Actor: models.ActivityActor{Type: "user", ID: "7"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{
+	claimed, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{
 		Scope: scope, WorkerID: "loop-worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
-	if err != nil || claimed == nil || claimed.ID != created.Run.ID || claimed.Status != AgentRunStatusRunning {
+	if err != nil || claimed == nil || claimed.ID != created.Run.ID || claimed.Status != models.AgentRunStatusRunning {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	return service, claimed
 }
 
-func cancelTerminalCloseRun(t *testing.T, store terminalCloseTestStore, service *agentrun.RunCommandService, runID string) *AgentRun {
+func cancelTerminalCloseRun(t *testing.T, store terminalCloseTestStore, service *agentrun.RunCommandService, runID string) *models.AgentRun {
 	t.Helper()
 	ctx := context.Background()
-	current, err := store.GetAgentRun(ctx, Scope{Kind: "tenant", ID: "close"}, runID)
+	current, err := store.GetAgentRun(ctx, models.Scope{Kind: "tenant", ID: "close"}, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 		Scope: current.Scope, RunID: current.ID, ExpectedRevision: current.Revision,
-		Kind: agentrun.AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "7"},
+		Kind: agentrun.AgentRunCommandCancel, Actor: models.ActivityActor{Type: "user", ID: "7"},
 	})
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-	if result.Run.Status != AgentRunStatusCanceled {
+	if result.Run.Status != models.AgentRunStatusCanceled {
 		t.Fatalf("canceled run = %#v", result.Run)
 	}
 	return result.Run
@@ -88,10 +90,10 @@ func TestCancelFinishesRunningStep(t *testing.T) {
 				ctx := context.Background()
 				store := fixture.store(t)
 				service, run := claimedTerminalCloseRun(t, store, "cancel-live-step")
-				turns := NewAgentTurnService(store, store)
+				turns := activity.NewAgentTurnService(store, store)
 				// The step the loop is running, under the Run's lease owner.
-				live, err := turns.BeginTurn(ctx, BeginAgentTurnRequest{
-					Scope: run.Scope, RunID: run.ID, Producer: StepProducerModel, WorkerID: "loop-worker", LeaseDuration: time.Minute,
+				live, err := turns.BeginTurn(ctx, activity.BeginAgentTurnRequest{
+					Scope: run.Scope, RunID: run.ID, Producer: models.StepProducerModel, WorkerID: "loop-worker", LeaseDuration: time.Minute,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -100,8 +102,8 @@ func TestCancelFinishesRunningStep(t *testing.T) {
 				assertStepEndedByRun(t, store, run.Scope, live.ID)
 				// The loop's own finish of the step now fails instead of
 				// overwriting the close.
-				if _, err := turns.FinishTurn(ctx, run.Scope, live.ID, FinishAgentTurnRequest{
-					ExpectedRevision: live.Revision, Status: AgentTurnStatusCompleted, WorkerID: "loop-worker",
+				if _, err := turns.FinishTurn(ctx, run.Scope, live.ID, activity.FinishAgentTurnRequest{
+					ExpectedRevision: live.Revision, Status: models.AgentTurnStatusCompleted, WorkerID: "loop-worker",
 				}); err == nil {
 					t.Fatal("the loop finished a step the cancel had already closed")
 				}
@@ -122,10 +124,10 @@ func TestCancelFinishesRunningStep(t *testing.T) {
 				ctx := context.Background()
 				store := fixture.store(t)
 				service, run := claimedTerminalCloseRun(t, store, "cancel-released-step")
-				turns := NewAgentTurnService(store, store)
+				turns := activity.NewAgentTurnService(store, store)
 				// A step released by a lost worker: running, but without a lease.
-				released, err := turns.BeginTurn(ctx, BeginAgentTurnRequest{
-					Scope: run.Scope, RunID: run.ID, Producer: StepProducerModel, WorkerID: "lost-worker", LeaseDuration: time.Minute,
+				released, err := turns.BeginTurn(ctx, activity.BeginAgentTurnRequest{
+					Scope: run.Scope, RunID: run.ID, Producer: models.StepProducerModel, WorkerID: "lost-worker", LeaseDuration: time.Minute,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -140,13 +142,13 @@ func TestCancelFinishesRunningStep(t *testing.T) {
 	}
 }
 
-func assertStepEndedByRun(t *testing.T, store terminalCloseTestStore, scope Scope, stepID string) {
+func assertStepEndedByRun(t *testing.T, store terminalCloseTestStore, scope models.Scope, stepID string) {
 	t.Helper()
 	step, err := store.GetAgentTurn(context.Background(), scope, stepID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if step.Status != AgentTurnStatusCanceled || step.FailureCode != agentrun.StepFailureRunEnded || step.CompletedAt == nil ||
+	if step.Status != models.AgentTurnStatusCanceled || step.FailureCode != agentrun.StepFailureRunEnded || step.CompletedAt == nil ||
 		step.LeaseOwner != "" || step.LeaseExpiresAt != nil || step.Error == "" {
 		t.Fatalf("step %s after cancel = %#v", stepID, step)
 	}
@@ -156,7 +158,7 @@ func TestTerminalRunClosesOpenToolEntries(t *testing.T) {
 	for _, fixture := range terminalCloseStores() {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
-			if _, ok := store.(AgentSessionStore); !ok {
+			if _, ok := store.(models.AgentSessionStore); !ok {
 				t.Skip("this store has no session log yet (SQLite: store-5)")
 			}
 			t.Run("cancel", func(t *testing.T) {
@@ -164,7 +166,7 @@ func TestTerminalRunClosesOpenToolEntries(t *testing.T) {
 				service, run := claimedTerminalCloseRun(t, store, "cancel-tools")
 				open, done := seedTerminalCloseToolEntries(t, store, run)
 				cancelTerminalCloseRun(t, store, service, run.ID)
-				assertTerminalCloseToolEntries(t, store.(AgentSessionStore), run.Scope, open, done, "Not run: the request was canceled")
+				assertTerminalCloseToolEntries(t, store.(models.AgentSessionStore), run.Scope, open, done, "Not run: the request was canceled")
 			})
 			t.Run("loop terminal exit", func(t *testing.T) {
 				ctx := context.Background()
@@ -177,9 +179,9 @@ func TestTerminalRunClosesOpenToolEntries(t *testing.T) {
 				}
 				// The loop fails the Run under its lease, then the worker's
 				// terminal finalization cascades.
-				failed, _, err := NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-					ExpectedRevision: current.Revision, Status: AgentRunStatusFailed, Summary: "Run failed",
-					Error: "repeat limit", LeaseOwner: "loop-worker", Actor: ActivityActor{Type: "runtime", ID: "loop"},
+				failed, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, activity.RunTransitionRequest{
+					ExpectedRevision: current.Revision, Status: models.AgentRunStatusFailed, Summary: "Run failed",
+					Error: "repeat limit", LeaseOwner: "loop-worker", Actor: models.ActivityActor{Type: "runtime", ID: "loop"},
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -187,31 +189,31 @@ func TestTerminalRunClosesOpenToolEntries(t *testing.T) {
 				if err := service.CascadeTerminalRun(ctx, failed); err != nil {
 					t.Fatal(err)
 				}
-				assertTerminalCloseToolEntries(t, store.(AgentSessionStore), run.Scope, open, done, "Not run: the request was failed")
+				assertTerminalCloseToolEntries(t, store.(models.AgentSessionStore), run.Scope, open, done, "Not run: the request was failed")
 			})
 			t.Run("lease-less close needs a terminal run", func(t *testing.T) {
 				store := fixture.store(t)
 				_, run := claimedTerminalCloseRun(t, store, "running-tools")
 				open, _ := seedTerminalCloseToolEntries(t, store, run)
-				sessions := store.(AgentSessionStore)
+				sessions := store.(models.AgentSessionStore)
 				entry, err := sessions.GetSessionEntry(context.Background(), run.Scope, open[0])
 				if err != nil {
 					t.Fatal(err)
 				}
-				_, err = sessions.TransitionToolEntry(context.Background(), ToolEntryTransitionRequest{
-					Scope: run.Scope, EntryID: entry.ID, RunID: run.ID, From: entry.State, To: ToolEntryError,
-					Result: &ToolResult{
-						Status: ToolResultCanceled, IsError: true,
-						Content: []ContentPart{{Type: ContentPartText, Text: "Not run: the request was canceled"}},
+				_, err = sessions.TransitionToolEntry(context.Background(), models.ToolEntryTransitionRequest{
+					Scope: run.Scope, EntryID: entry.ID, RunID: run.ID, From: entry.State, To: models.ToolEntryError,
+					Result: &models.ToolResult{
+						Status: models.ToolResultCanceled, IsError: true,
+						Content: []models.ContentPart{{Type: models.ContentPartText, Text: "Not run: the request was canceled"}},
 					},
 				})
-				if !errors.Is(err, ErrLeaseLost) {
+				if !errors.Is(err, models.ErrLeaseLost) {
 					t.Fatalf("lease-less close of a running run = %v, want ErrLeaseLost", err)
 				}
-				_, err = sessions.TransitionToolEntry(context.Background(), ToolEntryTransitionRequest{
-					Scope: run.Scope, EntryID: entry.ID, RunID: run.ID, From: entry.State, To: ToolEntryRunning,
+				_, err = sessions.TransitionToolEntry(context.Background(), models.ToolEntryTransitionRequest{
+					Scope: run.Scope, EntryID: entry.ID, RunID: run.ID, From: entry.State, To: models.ToolEntryRunning,
 				})
-				if !errors.Is(err, ErrInvalidToolEntryTransition) {
+				if !errors.Is(err, models.ErrInvalidToolEntryTransition) {
 					t.Fatalf("lease-less start = %v, want ErrInvalidToolEntryTransition", err)
 				}
 			})
@@ -222,20 +224,20 @@ func TestTerminalRunClosesOpenToolEntries(t *testing.T) {
 // seedTerminalCloseToolEntries opens the Run's session and appends one step
 // with three tool calls: pending, awaiting approval, and completed. It
 // returns the open and the completed entry ids.
-func seedTerminalCloseToolEntries(t *testing.T, store terminalCloseTestStore, run *AgentRun) ([]string, string) {
+func seedTerminalCloseToolEntries(t *testing.T, store terminalCloseTestStore, run *models.AgentRun) ([]string, string) {
 	t.Helper()
 	ctx := context.Background()
-	sessions := store.(AgentSessionStore)
+	sessions := store.(models.AgentSessionStore)
 	now := time.Now()
-	lease := AgentRunLeaseGuard{WorkerID: "loop-worker", Now: now}
-	opened, err := sessions.CreateRunAgentSession(ctx, CreateRunAgentSessionRequest{
+	lease := models.AgentRunLeaseGuard{WorkerID: "loop-worker", Now: now}
+	opened, err := sessions.CreateRunAgentSession(ctx, models.CreateRunAgentSessionRequest{
 		Scope: run.Scope, OwnerRunID: run.ID, AgentID: run.AssignedAgentID, Lease: lease, Now: now,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	step, err := NewAgentTurnService(store, store).BeginTurn(ctx, BeginAgentTurnRequest{
-		Scope: run.Scope, RunID: run.ID, SessionID: opened.Session.ID, Producer: StepProducerModel,
+	step, err := activity.NewAgentTurnService(store, store).BeginTurn(ctx, activity.BeginAgentTurnRequest{
+		Scope: run.Scope, RunID: run.ID, SessionID: opened.Session.ID, Producer: models.StepProducerModel,
 		WorkerID: "loop-worker", LeaseDuration: time.Minute,
 	})
 	if err != nil {
@@ -243,25 +245,25 @@ func seedTerminalCloseToolEntries(t *testing.T, store terminalCloseTestStore, ru
 	}
 	prefix := run.ID + ":"
 	assistant := storetest.AssistantSessionEntry(prefix+"assistant", step.ID, "call-1", "call-2", "call-3")
-	pending := storetest.ToolSessionEntry(prefix+"tool-1", step.ID, "call-1", ToolEntryPending)
-	awaiting := storetest.ToolSessionEntry(prefix+"tool-2", step.ID, "call-2", ToolEntryPending)
-	completed := storetest.ToolSessionEntry(prefix+"tool-3", step.ID, "call-3", ToolEntryCompleted)
-	if _, err := sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
+	pending := storetest.ToolSessionEntry(prefix+"tool-1", step.ID, "call-1", models.ToolEntryPending)
+	awaiting := storetest.ToolSessionEntry(prefix+"tool-2", step.ID, "call-2", models.ToolEntryPending)
+	completed := storetest.ToolSessionEntry(prefix+"tool-3", step.ID, "call-3", models.ToolEntryCompleted)
+	if _, err := sessions.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: run.Scope, SessionID: opened.Session.ID, RunID: run.ID, Lease: &lease, Now: now,
-		Entries: []*SessionEntry{assistant, pending, awaiting, completed},
+		Entries: []*models.SessionEntry{assistant, pending, awaiting, completed},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sessions.TransitionToolEntry(ctx, ToolEntryTransitionRequest{
+	if _, err := sessions.TransitionToolEntry(ctx, models.ToolEntryTransitionRequest{
 		Scope: run.Scope, EntryID: awaiting.ID, RunID: run.ID, Lease: lease, Now: now,
-		From: ToolEntryPending, To: ToolEntryAwaitingApproval, Wait: &ToolEntryWait{ApprovalID: "approval-1"},
+		From: models.ToolEntryPending, To: models.ToolEntryAwaitingApproval, Wait: &models.ToolEntryWait{ApprovalID: "approval-1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	return []string{pending.ID, awaiting.ID}, completed.ID
 }
 
-func assertTerminalCloseToolEntries(t *testing.T, sessions AgentSessionStore, scope Scope, open []string, done, text string) {
+func assertTerminalCloseToolEntries(t *testing.T, sessions models.AgentSessionStore, scope models.Scope, open []string, done, text string) {
 	t.Helper()
 	ctx := context.Background()
 	for _, id := range open {
@@ -270,7 +272,7 @@ func assertTerminalCloseToolEntries(t *testing.T, sessions AgentSessionStore, sc
 			t.Fatal(err)
 		}
 		result := entry.Tool.Result
-		if entry.State != ToolEntryError || result == nil || !result.IsError || result.Status != ToolResultCanceled ||
+		if entry.State != models.ToolEntryError || result == nil || !result.IsError || result.Status != models.ToolResultCanceled ||
 			len(result.Content) != 1 || result.Content[0].Text != text || entry.Tool.Wait != nil || entry.Tool.CompletedAt == nil {
 			t.Fatalf("entry %s after the run ended = state %s, tool %#v", id, entry.State, entry.Tool)
 		}
@@ -279,10 +281,10 @@ func assertTerminalCloseToolEntries(t *testing.T, sessions AgentSessionStore, sc
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entry.State != ToolEntryCompleted || entry.Revision != 1 || entry.Tool.Result.Content[0].Text != "done" {
+	if entry.State != models.ToolEntryCompleted || entry.Revision != 1 || entry.Tool.Result.Content[0].Text != "done" {
 		t.Fatalf("a finished entry was rewritten: %#v", entry)
 	}
-	left, err := sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{Scope: scope, RunID: entry.RunID, States: OpenToolEntryStates})
+	left, err := sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{Scope: scope, RunID: entry.RunID, States: OpenToolEntryStates})
 	if err != nil {
 		t.Fatal(err)
 	}

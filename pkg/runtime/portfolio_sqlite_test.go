@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -15,33 +17,33 @@ func TestSQLitePortfolioRoundTripAndScopeIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	service := NewPortfolioService(store)
+	service := portfolio.NewPortfolioService(store)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	otherScope := Scope{Kind: "tenant", ID: "other"}
-	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	otherScope := models.Scope{Kind: "tenant", ID: "other"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "gtm"}
 
-	objective, err := service.CreateObjective(ctx, CreateObjectiveRequest{
+	objective, err := service.CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Launch", Goal: "Launch the product",
-		Status: ObjectiveStatusActive, Priority: 100,
-		Budget:          &BudgetPolicy{MaxTotalTokens: 50000},
+		Status: models.ObjectiveStatusActive, Priority: 100,
+		Budget:          &models.BudgetPolicy{MaxTotalTokens: 50000},
 		SuccessCriteria: map[string]interface{}{"qualifiedLeads": float64(25)},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.GetObjective(ctx, otherScope, objective.ID); !errors.Is(err, ErrObjectiveNotFound) {
+	if _, err := service.GetObjective(ctx, otherScope, objective.ID); !errors.Is(err, models.ErrObjectiveNotFound) {
 		t.Fatalf("cross-scope objective read error = %v", err)
 	}
 
-	run, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
+	run, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: "marketing",
-		Goal: "Draft launch content", Source: RunSourceObjective, Priority: 50,
+		Goal: "Draft launch content", Source: models.RunSourceObjective, Priority: 50,
 		Context:       map[string]interface{}{"release": "v2"},
 		Plan:          map[string]interface{}{"next": "draft"},
 		Checkpoint:    map[string]interface{}{"turn": float64(3)},
-		WakeCondition: &WakeCondition{Type: "event", Reference: "approval:launch"},
-		Budget:        &BudgetPolicy{MaxTotalTokens: 25000},
+		WakeCondition: &models.WakeCondition{Type: "event", Reference: "approval:launch"},
+		Budget:        &models.BudgetPolicy{MaxTotalTokens: 25000},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +57,7 @@ func TestSQLitePortfolioRoundTripAndScopeIsolation(t *testing.T) {
 		loaded.WakeCondition == nil || loaded.WakeCondition.Reference != "approval:launch" {
 		t.Fatalf("run did not round-trip: %#v", loaded)
 	}
-	if _, err := service.GetAgentRun(ctx, otherScope, run.ID); !errors.Is(err, ErrRunNotFound) {
+	if _, err := service.GetAgentRun(ctx, otherScope, run.ID); !errors.Is(err, models.ErrRunNotFound) {
 		t.Fatalf("cross-scope run read error = %v", err)
 	}
 
@@ -64,14 +66,14 @@ func TestSQLitePortfolioRoundTripAndScopeIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := service.UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{ExpectedRevision: allocatedObjective.Revision, ProgressSummary: &summary})
+	updated, err := service.UpdateObjective(ctx, scope, objective.ID, portfolio.UpdateObjectiveRequest{ExpectedRevision: allocatedObjective.Revision, ProgressSummary: &summary})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.Revision != allocatedObjective.Revision+1 || updated.ProgressSummary != summary {
 		t.Fatalf("objective update did not round-trip: %#v", updated)
 	}
-	if _, err := service.UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{ExpectedRevision: 1, ProgressSummary: &summary}); !errors.Is(err, ErrRevisionConflict) {
+	if _, err := service.UpdateObjective(ctx, scope, objective.ID, portfolio.UpdateObjectiveRequest{ExpectedRevision: 1, ProgressSummary: &summary}); !errors.Is(err, models.ErrRevisionConflict) {
 		t.Fatalf("stale update error = %v", err)
 	}
 }

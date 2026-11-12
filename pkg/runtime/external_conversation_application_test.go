@@ -8,13 +8,14 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func checkApplicationRouteMatching(t *testing.T, store ExternalConversationEndpointStore) {
+func checkApplicationRouteMatching(t *testing.T, store models.ExternalConversationEndpointStore) {
 	t.Helper()
 	ctx := context.Background()
 	_, _, endpoint := externalconversationtest.EndpointFixture(t, ctx, "slack")
@@ -24,7 +25,7 @@ func checkApplicationRouteMatching(t *testing.T, store ExternalConversationEndpo
 	if err := store.CreateExternalConversationEndpoint(ctx, endpoint); err != nil {
 		t.Fatal(err)
 	}
-	route := ExternalConversationVerifiedRoute{Provider: endpoint.Provider, InstallationID: "T123", ApplicationID: "A123", Address: "C123", SkillID: endpoint.Adapter.SkillID, SkillVersion: endpoint.Adapter.SkillVersion, SourceIdentity: endpoint.Adapter.SourceIdentity, AdapterID: endpoint.Adapter.AdapterID}
+	route := models.ExternalConversationVerifiedRoute{Provider: endpoint.Provider, InstallationID: "T123", ApplicationID: "A123", Address: "C123", SkillID: endpoint.Adapter.SkillID, SkillVersion: endpoint.Adapter.SkillVersion, SourceIdentity: endpoint.Adapter.SourceIdentity, AdapterID: endpoint.Adapter.AdapterID}
 	for _, tc := range []struct {
 		pin, event string
 		want       int
@@ -55,41 +56,41 @@ func TestSQLiteApplicationRouteMatching(t *testing.T) {
 func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		mutate func(*ExternalConversationEndpoint, *externalconversation.ExternalConversationGatewayHostResult)
+		mutate func(*models.ExternalConversationEndpoint, *externalconversation.ExternalConversationGatewayHostResult)
 		want   int
 	}{
 		{name: "verified application with no saved pin", want: 1},
-		{name: "explicit matching pin", want: 1, mutate: func(e *ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "explicit matching pin", want: 1, mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
 			e.ApplicationID = "A123"
 		}},
-		{name: "wrong app", mutate: func(e *ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "wrong app", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
 			e.ApplicationID = "another-app"
 		}},
-		{name: "missing event app cannot bypass pin", mutate: func(e *ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "missing event app cannot bypass pin", mutate: func(e *models.ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
 			e.ApplicationID = "A123"
 			h.Events[0].ApplicationID = ""
 		}},
-		{name: "other tenant", mutate: func(e *ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "other tenant", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
 			e.Scope.ID = "other"
 		}},
-		{name: "other deployment", mutate: func(e *ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "other deployment", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
 			e.DeploymentID = "other"
 			e.Owner.ID = "other"
 			e.Handler.ID = "other"
 		}},
-		{name: "other binding", mutate: func(e *ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "other binding", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
 			e.Adapter.BindingID = "other"
 		}},
-		{name: "stale binding", mutate: func(e *ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "stale binding", mutate: func(e *models.ExternalConversationEndpoint, _ *externalconversation.ExternalConversationGatewayHostResult) {
 			e.Adapter.BindingRevision++
 		}},
-		{name: "other workspace", mutate: func(_ *ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "other workspace", mutate: func(_ *models.ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
 			h.Events[0].InstallationID = "other"
 		}},
-		{name: "other channel", mutate: func(_ *ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "other channel", mutate: func(_ *models.ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
 			h.Events[0].Address = "other"
 		}},
-		{name: "unverified event", mutate: func(_ *ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
+		{name: "unverified event", mutate: func(_ *models.ExternalConversationEndpoint, h *externalconversation.ExternalConversationGatewayHostResult) {
 			h.StatusCode = http.StatusUnauthorized
 			h.Events = nil
 		}},
@@ -98,13 +99,13 @@ func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 			ctx := context.Background()
 			store, db := newTestSQLiteStore(t)
 			catalog, endpoint := externalconversationtest.EndpointFixtureOn(t, ctx, store, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
-			gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
+			gateway := models.ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
 			endpoint.InstallationID = "T123"
 			endpoint.ApplicationID = ""
 			endpoint.Address = "C123"
 			host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []externalconversation.ExternalConversationGatewayEvent{{
 				InstallationID: "T123", ApplicationID: "A123", Address: "C123",
-				Event: NormalizedExternalConversationEvent{ID: "event-1", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C123", ExternalMessageID: "171.003", ExternalParticipantID: "U123", Text: "hi", OrderingKey: "C123:171.003", OccurredAt: time.Now().UTC()},
+				Event: models.NormalizedExternalConversationEvent{ID: "event-1", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C123", ExternalMessageID: "171.003", ExternalParticipantID: "U123", Text: "hi", OrderingKey: "C123:171.003", OccurredAt: time.Now().UTC()},
 			}}}}
 			if tc.mutate != nil {
 				tc.mutate(endpoint, host.Result)

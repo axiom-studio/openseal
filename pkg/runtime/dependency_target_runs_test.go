@@ -6,12 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 type atomicForkStore interface {
-	KernelStore
-	RunDependencyStore
+	models.KernelStore
+	models.RunDependencyStore
 }
 
 func TestDependencyFanOutAtomicallyCreatesTargetRuns(t *testing.T) {
@@ -40,7 +42,7 @@ func TestDependencyFanOutAtomicallyCreatesTargetRuns(t *testing.T) {
 			}
 			for _, target := range record.TargetRuns {
 				persisted, err := store.GetAgentRun(t.Context(), target.Scope, target.ID)
-				if err != nil || persisted == nil || persisted.ParentRunID != record.SourceRun.ID || persisted.Status != AgentRunStatusQueued {
+				if err != nil || persisted == nil || persisted.ParentRunID != record.SourceRun.ID || persisted.Status != models.AgentRunStatusQueued {
 					t.Fatalf("target=%#v error=%v", persisted, err)
 				}
 			}
@@ -66,21 +68,21 @@ func TestDependencyFanOutRejectsUnsealedTargetWithoutMutation(t *testing.T) {
 	}
 }
 
-func atomicTargetRunFixture(t *testing.T, store atomicForkStore) RunDependencyGroupCreateRecord {
+func atomicTargetRunFixture(t *testing.T, store atomicForkStore) models.RunDependencyGroupCreateRecord {
 	t.Helper()
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "7"}
-	portfolio := NewPortfolioService(store)
-	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "parent", Source: RunSourceManual})
+	scope := models.Scope{Kind: "tenant", ID: "7"}
+	portfolio := runtimeportfolio.NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "parent", Source: models.RunSourceManual})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	targets := make([]*AgentRun, 0, 2)
+	targets := make([]*models.AgentRun, 0, 2)
 	for _, id := range []string{"child-a", "child-b"} {
-		target, err := buildAgentRun(ctx, store, CreateAgentRunRequest{
+		target, err := runtimeportfolio.BuildAgentRun(ctx, store, models.CreateAgentRunRequest{
 			Scope: scope, ParentRunID: source.ID, Owner: source.Owner, AssignedAgentID: source.AssignedAgentID,
-			Goal: "branch " + id, Source: RunSourceRequest, Checkpoint: map[string]interface{}{"branch": id},
+			Goal: "branch " + id, Source: models.RunSourceRequest, Checkpoint: map[string]interface{}{"branch": id},
 		}, id, now)
 		if err != nil {
 			t.Fatal(err)
@@ -88,21 +90,21 @@ func atomicTargetRunFixture(t *testing.T, store atomicForkStore) RunDependencyGr
 		targets = append(targets, target)
 	}
 	sealedAt := now
-	group := &RunDependencyGroup{
+	group := &models.RunDependencyGroup{
 		ID: "fork", Scope: scope, SourceRunID: source.ID,
-		Policy:        RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		ExpectedCount: 2, Status: RunDependencyGroupWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now, SealedAt: &sealedAt,
+		Policy:        models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast},
+		ExpectedCount: 2, Status: models.RunDependencyGroupWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now, SealedAt: &sealedAt,
 		IdempotencyKey: "fork-once",
 	}
-	edges := []*RunDependency{
-		{ID: "a", Scope: scope, GroupID: group.ID, SourceRunID: source.ID, TargetRunID: targets[0].ID, Kind: RunDependencyKindRun, State: RunDependencyStatePending, Required: true, Revision: 1, CreatedAt: now, UpdatedAt: now},
-		{ID: "b", Scope: scope, GroupID: group.ID, SourceRunID: source.ID, TargetRunID: targets[1].ID, Kind: RunDependencyKindRun, State: RunDependencyStatePending, Required: true, Revision: 1, CreatedAt: now, UpdatedAt: now},
+	edges := []*models.RunDependency{
+		{ID: "a", Scope: scope, GroupID: group.ID, SourceRunID: source.ID, TargetRunID: targets[0].ID, Kind: models.RunDependencyKindRun, State: models.RunDependencyStatePending, Required: true, Revision: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: "b", Scope: scope, GroupID: group.ID, SourceRunID: source.ID, TargetRunID: targets[1].ID, Kind: models.RunDependencyKindRun, State: models.RunDependencyStatePending, Required: true, Revision: 1, CreatedAt: now, UpdatedAt: now},
 	}
-	updatedSource := cloneAgentRun(source)
-	updatedSource.Status = AgentRunStatusWaitingForDependency
-	updatedSource.WakeCondition = &WakeCondition{Type: "run_dependencies", Reference: group.ID}
+	updatedSource := models.CloneAgentRun(source)
+	updatedSource.Status = models.AgentRunStatusWaitingForDependency
+	updatedSource.WakeCondition = &models.WakeCondition{Type: "run_dependencies", Reference: group.ID}
 	updatedSource.Revision++
 	updatedSource.UpdatedAt = now
-	event := &ActivityEvent{ID: "fork-event", Scope: scope, RunID: source.ID, EventType: "dependency.group_created", Summary: "Forked two branches", Actor: ActivityActor{Type: "worker", ID: "worker"}, Visibility: ActivityVisibilityScope, CorrelationID: group.ID, CreatedAt: now}
-	return RunDependencyGroupCreateRecord{Group: group, Dependencies: edges, TargetRuns: targets, SourceRun: updatedSource, ExpectedSourceRevision: source.Revision, Event: event}
+	event := &models.ActivityEvent{ID: "fork-event", Scope: scope, RunID: source.ID, EventType: "dependency.group_created", Summary: "Forked two branches", Actor: models.ActivityActor{Type: "worker", ID: "worker"}, Visibility: models.ActivityVisibilityScope, CorrelationID: group.ID, CreatedAt: now}
+	return models.RunDependencyGroupCreateRecord{Group: group, Dependencies: edges, TargetRuns: targets, SourceRun: updatedSource, ExpectedSourceRevision: source.Revision, Event: event}
 }

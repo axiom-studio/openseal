@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -18,52 +19,52 @@ import (
 
 // sourceFailureStore is a canonical store with the session log.
 type sourceFailureStore interface {
-	KernelStore
-	ConversationStore
+	models.KernelStore
+	models.ConversationStore
 }
 
 // sourceFailureRun is a claimed, private-thread chat Run of finn whose lane
 // session is open, so its steps can record tool entries.
-func sourceFailureRun(t *testing.T, store sourceFailureStore, at time.Time) (*AgentRun, *ChannelMessage) {
+func sourceFailureRun(t *testing.T, store sourceFailureStore, at time.Time) (*models.AgentRun, *models.ChannelMessage) {
 	t.Helper()
 	ctx := t.Context()
-	scope := Scope{Kind: "tenant", ID: "source-failure-" + uuid.NewString()[:8]}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
+	scope := models.Scope{Kind: "tenant", ID: "source-failure-" + uuid.NewString()[:8]}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}
 	service := runtimeconversation.NewConversationService(store)
-	seedTestSpace(t, store.(SpaceStore), scope)
+	seedTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "kev"}, Intent: models.MessageIntentQuestion,
 		Content: "Check my recent emails", StartThread: true, ResponseMode: "spoken", RequiresResponse: true,
-		Audience:       ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantAgent, ID: owner.ID}}},
+		Audience:       models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{{Type: models.ConversationParticipantAgent, ID: owner.ID}}},
 		IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	trigger := posted.Message
-	lane := ConversationRunLane(conversation.ID, trigger.ID, owner.ID)
+	lane := models.ConversationRunLane(conversation.ID, trigger.ID, owner.ID)
 	commands := agentrun.NewRunCommandService(store, models.WithClock(func() time.Time { return at }))
-	created, err := commands.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: RunKindConversation, Source: RunSourceChat,
-		Goal: "Check the recent email request", ConcurrencyKey: lane, SessionID: ConversationAgentSessionID(scope, lane),
-		Context:        map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID, "threadRootMessageId": trigger.ID},
+	created, err := commands.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: models.RunKindConversation, Source: models.RunSourceChat,
+		Goal: "Check the recent email request", ConcurrencyKey: lane, SessionID: models.ConversationAgentSessionID(scope, lane),
+		Context:        map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID, models.ConversationRunTriggerIDContextKey: trigger.ID, "threadRootMessageId": trigger.ID},
 		IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "w", Now: at, LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	run, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "w", Now: at, LeaseDuration: time.Hour, AgingInterval: time.Minute})
 	if err != nil || run == nil || run.ID != created.Run.ID {
 		t.Fatalf("claim = %+v %v", run, err)
 	}
-	if _, err := store.OpenConversationAgentSession(ctx, OpenConversationAgentSessionRequest{
+	if _, err := store.OpenConversationAgentSession(ctx, models.OpenConversationAgentSessionRequest{
 		Scope: scope, ConversationID: conversation.ID, ThreadRootID: trigger.ID, AgentID: owner.ID, RunID: run.ID,
-		Lease: AgentRunLeaseGuard{WorkerID: "w", Now: at}, Now: at,
+		Lease: models.AgentRunLeaseGuard{WorkerID: "w", Now: at}, Now: at,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +78,7 @@ func sourceFailureRun(t *testing.T, store sourceFailureStore, at time.Time) (*Ag
 // failedSourceCall records one step of the Run that made a governed call
 // which failed with callError (and code/details when typed): the stored
 // failed loop call, the assistant entry and the error tool entry naming it.
-func failedSourceCall(t *testing.T, store KernelStore, sessions AgentSessionStore, run *AgentRun, step, skillID, callError, code string, details map[string]string, at time.Time) {
+func failedSourceCall(t *testing.T, store models.KernelStore, sessions models.AgentSessionStore, run *models.AgentRun, step, skillID, callError, code string, details map[string]string, at time.Time) {
 	t.Helper()
 	ctx := t.Context()
 	current, err := store.GetAgentRun(ctx, run.Scope, run.ID)
@@ -85,46 +86,46 @@ func failedSourceCall(t *testing.T, store KernelStore, sessions AgentSessionStor
 		t.Fatal(err)
 	}
 	id := run.ID + ":" + step
-	call := &ActionCall{
+	call := &models.ActionCall{
 		ID: id, Scope: run.Scope, RunID: run.ID, TurnID: step, DeploymentID: run.AssignedAgentID,
-		SkillID: skillID, SkillVersion: "1.0.0", Action: "read", Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
-		Status: ActionCallStatusReady, Risk: "read", SideEffect: "read", Arguments: map[string]interface{}{},
+		SkillID: skillID, SkillVersion: "1.0.0", Action: "read", Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
+		Status: models.ActionCallStatusReady, Risk: "read", SideEffect: "read", Arguments: map[string]interface{}{},
 		IdempotencyKey: "loop:" + step + ":" + id, MaxAttempts: 1, AvailableAt: at, Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}
-	call.InvocationDigest = ComputeActionInvocationDigest(call)
-	call.SemanticDigest = ComputeActionSemanticDigest(call)
-	if _, err := store.CreateActionProposal(ctx, ActionProposalRecord{
-		Call: call, ExpectedRunRevision: current.Revision, Lease: &AgentRunLeaseGuard{WorkerID: "w", Now: at},
-		Event: &ActivityEvent{ID: "proposed-" + id, Scope: run.Scope, EventType: "action.proposed", Severity: ActivitySeverityInfo, RunID: run.ID, TurnID: step,
-			Actor: ActivityActor{Type: "worker", ID: "w"}, Summary: "Proposed read", Visibility: ActivityVisibilityScope, CreatedAt: at},
+	call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+	call.SemanticDigest = models.ComputeActionSemanticDigest(call)
+	if _, err := store.CreateActionProposal(ctx, models.ActionProposalRecord{
+		Call: call, ExpectedRunRevision: current.Revision, Lease: &models.AgentRunLeaseGuard{WorkerID: "w", Now: at},
+		Event: &models.ActivityEvent{ID: "proposed-" + id, Scope: run.Scope, EventType: "action.proposed", Severity: models.ActivitySeverityInfo, RunID: run.ID, TurnID: step,
+			Actor: models.ActivityActor{Type: "worker", ID: "w"}, Summary: "Proposed read", Visibility: models.ActivityVisibilityScope, CreatedAt: at},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAction(ctx, ActionClaim{Scope: run.Scope, WorkerID: "w", Now: at, LeaseDuration: LoopActionLease, OwnActionID: id})
+	claimed, err := store.ClaimNextAction(ctx, models.ActionClaim{Scope: run.Scope, WorkerID: "w", Now: at, LeaseDuration: models.LoopActionLease, OwnActionID: id})
 	if err != nil || claimed == nil {
 		t.Fatalf("own claim = %#v, %v", claimed, err)
 	}
-	failed := cloneActionCall(claimed)
-	failed.Status, failed.Error, failed.ErrorCode, failed.ErrorDetails = ActionCallStatusFailed, callError, code, details
+	failed := models.CloneActionCall(claimed)
+	failed.Status, failed.Error, failed.ErrorCode, failed.ErrorDetails = models.ActionCallStatusFailed, callError, code, details
 	failed.CompletedAt, failed.LeaseOwner, failed.LeaseExpiresAt, failed.UpdatedAt = &at, "", nil, at
 	failed.Revision++
-	if _, err := store.PersistActionExecution(ctx, ActionExecutionRecord{
+	if _, err := store.PersistActionExecution(ctx, models.ActionExecutionRecord{
 		Call: failed, ExpectedCallRevision: claimed.Revision, ExpectedRunRevision: current.Revision, WorkerID: "w", Now: at,
-		Event: &ActivityEvent{ID: "failed-" + id, Scope: run.Scope, RunID: run.ID, EventType: "action.failed", Summary: "Action failed", CreatedAt: at},
+		Event: &models.ActivityEvent{ID: "failed-" + id, Scope: run.Scope, RunID: run.ID, EventType: "action.failed", Summary: "Action failed", CreatedAt: at},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tool := storetest.ToolSessionEntry(id+":tool", step, "call-"+step, ToolEntryError)
+	tool := storetest.ToolSessionEntry(id+":tool", step, "call-"+step, models.ToolEntryError)
 	tool.ActionCallID = id
 	appendSourceStep(t, sessions, run, step, at, tool)
 }
 
-func appendSourceStep(t *testing.T, sessions AgentSessionStore, run *AgentRun, step string, at time.Time, tool *SessionEntry) {
+func appendSourceStep(t *testing.T, sessions models.AgentSessionStore, run *models.AgentRun, step string, at time.Time, tool *models.SessionEntry) {
 	t.Helper()
 	assistant := storetest.AssistantSessionEntry(run.ID+":"+step+":assistant", step, tool.ToolCallID)
-	if _, err := sessions.AppendAgentSessionEntries(t.Context(), AppendAgentSessionEntriesRequest{
-		Scope: run.Scope, SessionID: run.SessionID, RunID: run.ID, Lease: &AgentRunLeaseGuard{WorkerID: "w", Now: at}, Now: at,
-		Entries: []*SessionEntry{assistant, tool},
+	if _, err := sessions.AppendAgentSessionEntries(t.Context(), models.AppendAgentSessionEntriesRequest{
+		Scope: run.Scope, SessionID: run.SessionID, RunID: run.ID, Lease: &models.AgentRunLeaseGuard{WorkerID: "w", Now: at}, Now: at,
+		Entries: []*models.SessionEntry{assistant, tool},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +137,7 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 				store := externalconversationtest.TerminalReportingStoreOf(t, fixture.store)
 				kernel := fixture.store.(sourceFailureStore)
-				sessions := AgentSessionStore(kernel)
+				sessions := models.AgentSessionStore(kernel)
 				now := runStoreContractEpoch
 				run, trigger := sourceFailureRun(t, kernel, now)
 				kind := code
@@ -167,15 +168,15 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 					explanation = runtimeconversation.BeginRunFailureExplanation(run, runtimeconversation.RunFailureKindExecution, "action_failed", "A tool failed.", "", "")
 				case "recovered rate limit":
 					// The model moved past the 429 and later steps succeeded.
-					appendSourceStep(t, sessions, run, "step-2", now, storetest.ToolSessionEntry(run.ID+":step-2:tool", "step-2", "call-step-2", ToolEntryCompleted))
+					appendSourceStep(t, sessions, run, "step-2", now, storetest.ToolSessionEntry(run.ID+":step-2:tool", "step-2", "call-step-2", models.ToolEntryCompleted))
 				}
 				current, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				activity := NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
-				failed, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{
-					ExpectedRevision: current.Revision, Status: AgentRunStatusFailed, LeaseOwner: "w", Error: "PRIVATE_RUN_ERROR",
+				activity := runtimeactivity.NewRunActivityService(store, store, models.WithClock(func() time.Time { return now }))
+				failed, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, runtimeactivity.RunTransitionRequest{
+					ExpectedRevision: current.Revision, Status: models.AgentRunStatusFailed, LeaseOwner: "w", Error: "PRIVATE_RUN_ERROR",
 					FailureExplanation: explanation, EventType: "run.failed", Summary: "Run failed",
 				})
 				if err != nil {

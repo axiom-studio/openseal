@@ -5,9 +5,11 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration/collaborationtest"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -17,26 +19,26 @@ type countingConversationStore struct {
 	conversationReads int
 }
 
-func (s *countingConversationStore) GetConversation(ctx context.Context, scope Scope, id string) (*Conversation, error) {
+func (s *countingConversationStore) GetConversation(ctx context.Context, scope models.Scope, id string) (*models.Conversation, error) {
 	s.conversationReads++
 	return s.Store.GetConversation(ctx, scope, id)
 }
 
 func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t *testing.T) {
 	ctx := t.Context()
-	scope := Scope{Kind: "tenant", ID: "deleted-conversation-projection"}
+	scope := models.Scope{Kind: "tenant", ID: "deleted-conversation-projection"}
 	store := &countingConversationStore{Store: newTestKernelStore(t)}
-	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "requester"}, AssignedAgentID: "requester",
-		Goal: "Coordinate work", Source: RunSourceManual,
+	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "requester"}, AssignedAgentID: "requester",
+		Goal: "Coordinate work", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = collaboration.NewCollaborationService(store).CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "requester"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"},
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "requester"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"},
 		Goal:      "Review work", ConversationRefs: []string{"deleted-channel"}, IdempotencyKey: "deleted-channel-request",
 	}); err != nil {
 		t.Fatal(err)
@@ -57,7 +59,7 @@ func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t
 }
 
 func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "conversation-projection"}
+	scope := models.Scope{Kind: "tenant", ID: "conversation-projection"}
 	store := &collaborationtest.TeamStore{
 		Store: newTestKernelStore(t),
 		Deployment: &kernelteam.Deployment{
@@ -78,24 +80,24 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 	}
 	seedTestSpace(t, store, scope)
 	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"},
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "release-team"},
 		Title: "Release coordination", IdempotencyKey: "release-coordination",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "reviewer-agent",
-		Goal: "Coordinate release evidence", Source: RunSourceManual,
+	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "reviewer-agent",
+		Goal: "Coordinate release evidence", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	service := collaboration.NewCollaborationService(store)
 	created, err := service.CreateAgentRequest(t.Context(), collaboration.CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindHandoff,
-		Requester:   CollaborationParty{Type: OwnerTypeTeam, ID: "release-team"},
-		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: "specialist-agent"},
+		Scope: scope, Kind: models.AgentRequestKindHandoff,
+		Requester:   models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "release-team"},
+		Recipient:   models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "specialist-agent"},
 		SourceRunID: source.ID, Goal: "Prepare the release evidence", SemanticRole: "specialist",
 		AcceptanceCriteria: map[string]interface{}{"reviewed": true}, ConversationRefs: []string{conversation.ID},
 		IdempotencyKey: "release-evidence-handoff",
@@ -113,7 +115,7 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 	accepted, err := service.RespondAgentRequest(t.Context(), collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
 		Decision: collaboration.AgentRequestDecisionAccept, Principal: created.Request.Recipient,
-		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "specialist-agent"}, AssignedAgentID: "specialist-agent",
+		Actor: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "specialist-agent"}, AssignedAgentID: "specialist-agent",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +138,7 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 	reviewed, err := service.ReviewAgentRequestCompletion(t.Context(), collaboration.ReviewAgentRequestCompletionRequest{
 		Scope: scope, RequestID: completed.Request.ID, ExpectedRevision: completed.Request.Revision,
 		ExpectedChildRevision: completed.Child.Revision, Principal: completed.Request.Requester,
-		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer-agent"}, Approve: true,
+		Actor: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "reviewer-agent"}, Approve: true,
 		Summary: "Evidence satisfies the review criteria", IdempotencyKey: "release-evidence-review",
 	})
 	if err != nil {
@@ -149,7 +151,7 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 	if _, err = projector.Reconcile(t.Context(), scope); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(t.Context(), ChannelMessageFilter{
+	messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(t.Context(), models.ChannelMessageFilter{
 		Scope: scope, ConversationID: conversation.ID, Limit: 20,
 	})
 	if err != nil {
@@ -159,17 +161,17 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 		t.Fatalf("messages = %#v", messages)
 	}
 	root, acceptance, completion, decision := messages[0], messages[1], messages[2], messages[3]
-	if root.Intent != MessageIntentHandoff || !root.RequiresResponse || len(root.References) != 2 ||
-		root.References[0] != (ConversationReference{Kind: ConversationReferenceRequest, ID: reviewed.Request.ID}) {
+	if root.Intent != models.MessageIntentHandoff || !root.RequiresResponse || len(root.References) != 2 ||
+		root.References[0] != (models.ConversationReference{Kind: models.ConversationReferenceRequest, ID: reviewed.Request.ID}) {
 		t.Fatalf("handoff = %#v", root)
 	}
-	if acceptance.Intent != MessageIntentAcknowledgment || acceptance.ResolvesMessageID != root.ID || acceptance.ThreadRootID != root.ID {
+	if acceptance.Intent != models.MessageIntentAcknowledgment || acceptance.ResolvesMessageID != root.ID || acceptance.ThreadRootID != root.ID {
 		t.Fatalf("acceptance = %#v", acceptance)
 	}
-	if completion.Intent != MessageIntentProposal || !completion.RequiresResponse || completion.ThreadRootID != root.ID {
+	if completion.Intent != models.MessageIntentProposal || !completion.RequiresResponse || completion.ThreadRootID != root.ID {
 		t.Fatalf("completion = %#v", completion)
 	}
-	if decision.Intent != MessageIntentDecision || decision.ResolvesMessageID != completion.ID ||
+	if decision.Intent != models.MessageIntentDecision || decision.ResolvesMessageID != completion.ID ||
 		decision.ThreadRootID != root.ID || decision.Sender.ID != "reviewer-agent" {
 		t.Fatalf("decision = %#v", decision)
 	}
@@ -187,28 +189,28 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	scope := Scope{Kind: "tenant", ID: "escalation-projection"}
+	scope := models.Scope{Kind: "tenant", ID: "escalation-projection"}
 	store := newTestKernelStore(t)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coordinator"},
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "coordinator"},
 		Title: "Incident coordination", IdempotencyKey: "incident-coordination",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coordinator"}, AssignedAgentID: "coordinator",
-		Goal: "Restore the service", Source: RunSourceManual,
+	source, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "coordinator"}, AssignedAgentID: "coordinator",
+		Goal: "Restore the service", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	service := collaboration.NewCollaborationService(store)
 	created, err := service.CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindEscalation, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "coordinator"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "incident-commander"},
+		Scope: scope, Kind: models.AgentRequestKindEscalation, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "coordinator"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "incident-commander"},
 		Goal:      "Resolve the production blocker", ConversationRefs: []string{conversation.ID},
 		IdempotencyKey: "escalate-production-blocker",
 	})
@@ -229,7 +231,7 @@ func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted.Child.Source != RunSourceEscalation || accepted.Source.Status != AgentRunStatusWaitingForDependency ||
+	if accepted.Child.Source != models.RunSourceEscalation || accepted.Source.Status != models.AgentRunStatusWaitingForDependency ||
 		accepted.Source.WakeCondition == nil || accepted.Source.WakeCondition.Reference != created.Request.ID {
 		t.Fatalf("accepted escalation = %#v / %#v", accepted.Source, accepted.Child)
 	}
@@ -241,24 +243,24 @@ func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.Request.Status != AgentRequestStatusCompleted || completed.Source.Status != AgentRunStatusQueued {
+	if completed.Request.Status != models.AgentRequestStatusCompleted || completed.Source.Status != models.AgentRunStatusQueued {
 		t.Fatalf("completed escalation = %#v / %#v", completed.Request, completed.Source)
 	}
 	if _, err = projector.Reconcile(ctx, scope); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(ctx, ChannelMessageFilter{
+	messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(ctx, models.ChannelMessageFilter{
 		Scope: scope, ConversationID: conversation.ID, Limit: 20,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 3 || messages[0].Intent != MessageIntentEscalation ||
-		messages[1].Intent != MessageIntentAcknowledgment || messages[2].Intent != MessageIntentUpdate ||
+	if len(messages) != 3 || messages[0].Intent != models.MessageIntentEscalation ||
+		messages[1].Intent != models.MessageIntentAcknowledgment || messages[2].Intent != models.MessageIntentUpdate ||
 		messages[1].ThreadRootID != messages[0].ID || messages[2].ThreadRootID != messages[0].ID {
 		t.Fatalf("escalation messages = %#v", messages)
 	}
-	events, err := store.ListActivity(ctx, ActivityFilter{
+	events, err := store.ListActivity(ctx, models.ActivityFilter{
 		Scope: scope, RunIDs: []string{source.ID, accepted.Child.ID},
 		EventTypes: []string{"escalation.requested", "escalation.accepted", "escalation.completed"}, Descending: true, Limit: 20,
 	})

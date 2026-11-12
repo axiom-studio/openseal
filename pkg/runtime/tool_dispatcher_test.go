@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -40,8 +41,8 @@ Publish the requested release.
 	var invokedName string
 	var invokedArguments map[string]interface{}
 	var invokedCredentials map[string]string
-	var invocation ToolInvocation
-	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value ToolInvocation) (map[string]interface{}, error) {
+	var invocation models.ToolInvocation
+	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value models.ToolInvocation) (map[string]interface{}, error) {
 		invocation = value
 		invokedName, invokedArguments, invokedCredentials = value.Name, value.Arguments, value.Credentials
 		return map[string]interface{}{"published": true}, nil
@@ -50,7 +51,7 @@ Publish the requested release.
 		t.Fatal(err)
 	}
 	output, err := dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
-		Call: &ActionCall{ID: "call", RunID: "run", PreparedRuntime: &skill.PreparedRuntime{
+		Call: &models.ActionCall{ID: "call", RunID: "run", PreparedRuntime: &skill.PreparedRuntime{
 			PreparationID: "sha256:" + strings.Repeat("a", 64), RuntimeID: "oci://runtime.test/publisher@sha256:" + strings.Repeat("b", 64),
 			Revision: "sha256:" + strings.Repeat("c", 64), Adapter: "oci-builder/v1", OperatingSystem: "linux", Architecture: "amd64", Executables: []string{"publisher"},
 		}},
@@ -89,9 +90,9 @@ func TestToolActionDispatcherUsesOnlyBoundDefinitionIdentity(t *testing.T) {
 	}
 	spoofed := map[string]interface{}{"skillSourceIdentity": "https://foreign.example/skills::fetch", "skillDefinitionDigest": "sha256:" + strings.Repeat("f", 64)}
 	binding := &skill.Binding{SourceIdentity: definition.Source.Identity, Config: spoofed}
-	var invocation ToolInvocation
+	var invocation models.ToolInvocation
 	var calls int
-	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value ToolInvocation) (map[string]interface{}, error) {
+	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value models.ToolInvocation) (map[string]interface{}, error) {
 		calls++
 		invocation = value
 		return map[string]interface{}{"ok": true}, nil
@@ -138,7 +139,7 @@ func TestToolActionDispatcherUsesOnlyBoundDefinitionIdentity(t *testing.T) {
 
 func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *testing.T) {
 	now, call, run, fields := actiontest.CredentialLeaseFixture()
-	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+	lease, err := models.NewActionCredentialLease(models.CreateActionCredentialLeaseRequest{
 		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: actiontest.CredentialLeaseTransport,
 		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-transport-00000001",
 	})
@@ -156,8 +157,8 @@ func TestToolActionDispatcherCarriesOpaqueCredentialLeaseWithoutPlaintext(t *tes
 	bound := &skill.BoundAction{Definition: definition, Action: definition.Actions[call.Action], Binding: &skill.Binding{
 		ID: call.BindingID, Revision: call.BindingRevision, Scope: skill.ScopeReference{Kind: call.Scope.Kind, ID: call.Scope.ID}, DeploymentID: call.DeploymentID,
 	}}
-	var invocation ToolInvocation
-	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value ToolInvocation) (map[string]interface{}, error) {
+	var invocation models.ToolInvocation
+	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value models.ToolInvocation) (map[string]interface{}, error) {
 		invocation = value
 		return map[string]interface{}{"ok": true}, nil
 	}))
@@ -214,8 +215,8 @@ func TestToolActionDispatcherSeparatesTeamAuthorityFromAgentExecution(t *testing
 		Actions: map[string]skill.Action{"run": {Name: "run", Description: "Fetch", InputSchema: map[string]interface{}{"type": "object"}, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported}},
 	}
 	binding := &skill.Binding{ID: "team-fetch", Scope: skill.ScopeReference{Kind: "tenant", ID: "one"}, DeploymentID: "research-team"}
-	var invocation ToolInvocation
-	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value ToolInvocation) (map[string]interface{}, error) {
+	var invocation models.ToolInvocation
+	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value models.ToolInvocation) (map[string]interface{}, error) {
 		invocation = value
 		return map[string]interface{}{"ok": true}, nil
 	}))
@@ -223,7 +224,7 @@ func TestToolActionDispatcherSeparatesTeamAuthorityFromAgentExecution(t *testing
 		t.Fatal(err)
 	}
 	_, err = dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
-		Run:   &AgentRun{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "researcher-agent"},
+		Run:   &models.AgentRun{Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "researcher-agent"},
 		Bound: &skill.BoundAction{Definition: definition, Action: definition.Actions["run"], Binding: binding}, Arguments: map[string]interface{}{},
 	})
 	if err != nil {
@@ -234,7 +235,7 @@ func TestToolActionDispatcherSeparatesTeamAuthorityFromAgentExecution(t *testing
 	}
 
 	_, err = dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
-		Run:   &AgentRun{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "other-team"}, AssignedAgentID: "researcher-agent"},
+		Run:   &models.AgentRun{Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "other-team"}, AssignedAgentID: "researcher-agent"},
 		Bound: &skill.BoundAction{Definition: definition, Action: definition.Actions["run"], Binding: binding}, Arguments: map[string]interface{}{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "owned outside") {
@@ -247,8 +248,8 @@ func TestToolActionDispatcherSeparatesBindingConfigFromModelArguments(t *testing
 		ID: "fetch", Version: "1", Name: "Fetch", Transport: skill.TransportReference{Kind: "tool", Endpoint: "fetch"},
 		Actions: map[string]skill.Action{"run": {Name: "run", Description: "Fetch", InputSchema: map[string]interface{}{"type": "object"}, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported}},
 	}
-	var invocation ToolInvocation
-	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value ToolInvocation) (map[string]interface{}, error) {
+	var invocation models.ToolInvocation
+	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value models.ToolInvocation) (map[string]interface{}, error) {
 		invocation = value
 		return map[string]interface{}{"ok": true}, nil
 	}))

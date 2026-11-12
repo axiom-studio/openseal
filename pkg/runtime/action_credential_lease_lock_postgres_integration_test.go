@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
 )
@@ -42,9 +43,9 @@ func TestPostgresActionCredentialLeaseSerializesWithProposalWithoutDeadlock(t *t
 	waitForBlockedPostgresActionRunQueries(t, ctx, pgSchema, 1)
 
 	now := time.Now().UTC()
-	proposedCall := cloneActionCall(call)
+	proposedCall := models.CloneActionCall(call)
 	proposedCall.ID = uuid.NewString()
-	proposedCall.Status = ActionCallStatusReady
+	proposedCall.Status = models.ActionCallStatusReady
 	proposedCall.Revision = 1
 	proposedCall.Attempt = 0
 	proposedCall.LeaseOwner = ""
@@ -52,17 +53,17 @@ func TestPostgresActionCredentialLeaseSerializesWithProposalWithoutDeadlock(t *t
 	proposedCall.Arguments = map[string]interface{}{}
 	proposedCall.CreatedAt, proposedCall.UpdatedAt, proposedCall.AvailableAt = now, now, now
 	proposedCall.IdempotencyKey = "concurrent-proposal"
-	proposedCall.InvocationDigest = ComputeActionInvocationDigest(proposedCall)
-	proposedRun := cloneAgentRun(run)
-	proposedRun.Status = AgentRunStatusWaitingForDependency
-	proposedRun.WakeCondition = &WakeCondition{Type: "action", Reference: proposedCall.ID}
+	proposedCall.InvocationDigest = models.ComputeActionInvocationDigest(proposedCall)
+	proposedRun := models.CloneAgentRun(run)
+	proposedRun.Status = models.AgentRunStatusWaitingForDependency
+	proposedRun.WakeCondition = &models.WakeCondition{Type: "action", Reference: proposedCall.ID}
 	proposedRun.Revision++
 	proposedRun.UpdatedAt = now
 	submitted := make(chan error, 1)
 	go func() {
-		_, err := primary.CreateActionProposal(ctx, ActionProposalRecord{
+		_, err := primary.CreateActionProposal(ctx, models.ActionProposalRecord{
 			Call: proposedCall, Run: proposedRun, ExpectedRunRevision: run.Revision, RequireBindingFence: true,
-			Event: &ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: run.ID, EventType: "action.proposed", Summary: "Concurrent proposal", CreatedAt: now},
+			Event: &models.ActivityEvent{ID: uuid.NewString(), Scope: run.Scope, RunID: run.ID, EventType: "action.proposed", Summary: "Concurrent proposal", CreatedAt: now},
 		})
 		submitted <- err
 	}()
@@ -77,7 +78,7 @@ func TestPostgresActionCredentialLeaseSerializesWithProposalWithoutDeadlock(t *t
 		t.Fatalf("proposal failed under redemption contention: %v", err)
 	}
 	storedCall, err := primary.GetActionCall(ctx, proposedCall.Scope, proposedCall.ID)
-	if err != nil || storedCall.Status != ActionCallStatusReady {
+	if err != nil || storedCall.Status != models.ActionCallStatusReady {
 		t.Fatalf("concurrent proposal did not commit: %#v %v", storedCall, err)
 	}
 }

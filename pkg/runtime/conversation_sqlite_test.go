@@ -28,24 +28,24 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	fixed := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	primaryService := runtimeconversation.NewConversationService(primary, models.WithClock(func() time.Time { return fixed }))
 	replicaService := runtimeconversation.NewConversationService(replica, models.WithClock(func() time.Time { return fixed }))
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, primary, scope)
 	conversation, _, err := primaryService.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, Title: "Release", IdempotencyKey: "release-v1",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "product"}, Title: "Release", IdempotencyKey: "release-v1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	question, err := primaryService.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
-		Content: "Is it ready?", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}, Intent: models.MessageIntentQuestion,
+		Content: "Is it ready?", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, RequiresResponse: true,
 		IdempotencyKey: "question-v1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: "developer"}
+	agent := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "developer"}
 	cursor, _, err := primaryService.AdvanceCursor(ctx, runtimeconversation.AdvanceConversationCursorRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: agent,
 		DeliveredSequence: question.Message.Sequence, ReadSequence: question.Message.Sequence,
@@ -54,24 +54,24 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		t.Fatal(err)
 	}
 	presence, err := primaryService.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
-		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: ConversationPresenceWorking,
+		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: models.ConversationPresenceWorking,
 		Summary: "Checking release", RunID: "release-run", TTL: 30 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	thinkingParticipant := ConversationParticipant{Type: ConversationParticipantAgent, ID: "reviewer"}
+	thinkingParticipant := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "reviewer"}
 	thinkingPresence, err := primaryService.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: thinkingParticipant,
-		State: ConversationPresenceThinking, Summary: "Evaluating evidence", TTL: 30 * time.Second,
+		State: models.ConversationPresenceThinking, Summary: "Evaluating evidence", TTL: 30 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	typingParticipant := ConversationParticipant{Type: ConversationParticipantAgent, ID: "release-manager"}
+	typingParticipant := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "release-manager"}
 	typingPresence, err := primaryService.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: typingParticipant,
-		State: ConversationPresenceTyping, Summary: "Writing the decision", TTL: 30 * time.Second,
+		State: models.ConversationPresenceTyping, Summary: "Writing the decision", TTL: 30 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	roundRequest := runtimeconversation.CommitConversationRoutingRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: question.Conversation.Revision,
 		TriggerMessageID: question.Message.ID, IdempotencyKey: "round-v1",
-		Responders: []ConversationResponder{{Participant: agent, Addressed: ConversationAddressedRouted, Reason: "owns the release"}},
+		Responders: []models.ConversationResponder{{Participant: agent, Addressed: models.ConversationAddressedRouted, Reason: "owns the release"}},
 	}
 	services := []*runtimeconversation.ConversationService{primaryService, replicaService}
 	var committed atomic.Int32
@@ -129,7 +129,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	if err != nil || restored.Revision != 3 || restored.LastSequence != 1 {
 		t.Fatalf("restored conversation = %#v, err = %v", restored, err)
 	}
-	messages, err := restartedService.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	messages, err := restartedService.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(messages) != 1 {
 		t.Fatalf("restored messages = %#v, err = %v", messages, err)
 	}
@@ -138,15 +138,15 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		t.Fatalf("restored cursor = %#v, err = %v", restoredCursor, err)
 	}
 	restoredPresence, err := restarted.GetConversationPresence(ctx, scope, conversation.ID, agent)
-	if err != nil || restoredPresence.LeaseID != presence.LeaseID || restoredPresence.State != ConversationPresenceWorking || restoredPresence.RunID != "release-run" {
+	if err != nil || restoredPresence.LeaseID != presence.LeaseID || restoredPresence.State != models.ConversationPresenceWorking || restoredPresence.RunID != "release-run" {
 		t.Fatalf("restored presence = %#v, err = %v", restoredPresence, err)
 	}
 	restoredThinking, err := restarted.GetConversationPresence(ctx, scope, conversation.ID, thinkingParticipant)
-	if err != nil || restoredThinking.LeaseID != thinkingPresence.LeaseID || restoredThinking.State != ConversationPresenceThinking || restoredThinking.RunID != "" {
+	if err != nil || restoredThinking.LeaseID != thinkingPresence.LeaseID || restoredThinking.State != models.ConversationPresenceThinking || restoredThinking.RunID != "" {
 		t.Fatalf("restored thinking presence = %#v, err = %v", restoredThinking, err)
 	}
 	restoredTyping, err := restarted.GetConversationPresence(ctx, scope, conversation.ID, typingParticipant)
-	if err != nil || restoredTyping.LeaseID != typingPresence.LeaseID || restoredTyping.State != ConversationPresenceTyping || restoredTyping.RunID != "" {
+	if err != nil || restoredTyping.LeaseID != typingPresence.LeaseID || restoredTyping.State != models.ConversationPresenceTyping || restoredTyping.RunID != "" {
 		t.Fatalf("restored typing presence = %#v, err = %v", restoredTyping, err)
 	}
 	roundReplay, err := restartedService.CommitConversationRouting(ctx, roundRequest)
@@ -158,11 +158,11 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		loadedRound.Round.Responders[0].Reason != "owns the release" {
 		t.Fatalf("loaded round = %#v, err = %v", loadedRound, err)
 	}
-	rounds, err := restartedService.ListParticipationRounds(ctx, ParticipationRoundFilter{Scope: scope, ConversationID: conversation.ID})
+	rounds, err := restartedService.ListParticipationRounds(ctx, models.ParticipationRoundFilter{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(rounds) != 1 || rounds[0].Round.ID != roundReplay.Round.ID {
 		t.Fatalf("rounds = %#v, err = %v", rounds, err)
 	}
-	if foreign, err := restartedService.GetConversation(ctx, Scope{Kind: "tenant", ID: "other"}, conversation.ID); err == nil || foreign != nil {
+	if foreign, err := restartedService.GetConversation(ctx, models.Scope{Kind: "tenant", ID: "other"}, conversation.ID); err == nil || foreign != nil {
 		t.Fatalf("foreign conversation = %#v, err = %v", foreign, err)
 	}
 	restartedServiceClock = func() time.Time { return fixed.Add(31 * time.Second) }

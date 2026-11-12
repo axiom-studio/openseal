@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -26,25 +27,25 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 	})
 	service := runtimeconversation.NewConversationService(store)
 	for _, tenant := range []string{"one", "two"} {
-		scope := Scope{Kind: "tenant", ID: tenant}
+		scope := models.Scope{Kind: "tenant", ID: tenant}
 		seedTestSpace(t, store, scope)
-		conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Quorum planning", IdempotencyKey: "plan"})
+		conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Quorum planning", IdempotencyKey: "plan"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion, Content: "Decide the nebula rollout", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "question"})
+		_, err = service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}, Intent: models.MessageIntentQuestion, Content: "Decide the nebula rollout", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "question"})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	hits, err := store.SearchWorkspacePage(ctx, Scope{Kind: "tenant", ID: "one"}, "nebula rollout", 20, 0)
+	hits, err := store.SearchWorkspacePage(ctx, models.Scope{Kind: "tenant", ID: "one"}, "nebula rollout", 20, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(hits) != 1 || hits[0].Kind != "message" || hits[0].Message.Content != "Decide the nebula rollout" || hits[0].Conversation.Scope.ID != "one" {
 		t.Fatalf("search hits = %#v", hits)
 	}
-	other, err := store.SearchWorkspacePage(ctx, Scope{Kind: "tenant", ID: "two"}, "Quorum", 20, 0)
+	other, err := store.SearchWorkspacePage(ctx, models.Scope{Kind: "tenant", ID: "two"}, "Quorum", 20, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range []struct{ query, kind string }{{"Nebula report", "artifact"}, {"release approved", "run"}} {
-		matches, err := store.SearchWorkspacePage(ctx, Scope{Kind: "tenant", ID: "one"}, test.query, 20, 0)
+		matches, err := store.SearchWorkspacePage(ctx, models.Scope{Kind: "tenant", ID: "one"}, test.query, 20, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -75,7 +76,7 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 	if _, err := pgSchema.DB.ExecContext(ctx, `UPDATE `+pgSchema.Table("conversations")+` SET status='archived' WHERE scope_kind='tenant' AND scope_id='one'`); err != nil {
 		t.Fatal(err)
 	}
-	archived, err := store.SearchWorkspacePage(ctx, Scope{Kind: "tenant", ID: "one"}, "nebula", 20, 0)
+	archived, err := store.SearchWorkspacePage(ctx, models.Scope{Kind: "tenant", ID: "one"}, "nebula", 20, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

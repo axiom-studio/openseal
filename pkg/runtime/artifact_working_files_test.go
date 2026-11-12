@@ -23,8 +23,8 @@ func TestWorkingFilesAreLeftOutOfResultsUntilHandedOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	scope := Scope{Kind: "tenant", ID: "one"}
-	stores := map[string]ArtifactStore{"sqlite": sqlite}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
+	stores := map[string]models.ArtifactStore{"sqlite": sqlite}
 	for name, store := range stores {
 		catalog := artifactcatalog.NewArtifactCatalog(store, models.WithClock(func() time.Time { return time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC) }))
 		for _, id := range []string{"report.pdf", "plot.py", "panel.png", "upload.csv"} {
@@ -32,7 +32,7 @@ func TestWorkingFilesAreLeftOutOfResultsUntilHandedOver(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		list := func(filter ArtifactFilter) []string {
+		list := func(filter models.ArtifactFilter) []string {
 			t.Helper()
 			filter.Scope, filter.LatestOnly, filter.Limit = scope, true, 50
 			artifacts, err := catalog.List(ctx, filter)
@@ -53,31 +53,31 @@ func TestWorkingFilesAreLeftOutOfResultsUntilHandedOver(t *testing.T) {
 			}
 		}
 		all := []string{"panel.png", "plot.py", "report.pdf", "upload.csv"}
-		check("results before anything is marked", list(ArtifactFilter{Files: ArtifactFilesResults}), all)
+		check("results before anything is marked", list(models.ArtifactFilter{Files: models.ArtifactFilesResults}), all)
 
-		saved := []savedArtifact{{Ref: artifactRef("report.pdf")}, {Ref: artifactRef("plot.py")}, {Ref: artifactRef("panel.png")}, {Ref: artifactRef("plot.py")}}
-		if err := markRunFiles(ctx, store, scope, saved, []ConversationReference{{Kind: ConversationReferenceRun, ID: "run-1"}, artifactRef("report.pdf")}); err != nil {
+		saved := []models.SavedArtifact{{Ref: artifactRef("report.pdf")}, {Ref: artifactRef("plot.py")}, {Ref: artifactRef("panel.png")}, {Ref: artifactRef("plot.py")}}
+		if err := models.MarkRunFiles(ctx, store, scope, saved, []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: "run-1"}, artifactRef("report.pdf")}); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		check("results", list(ArtifactFilter{Files: ArtifactFilesResults}), []string{"report.pdf", "upload.csv"})
-		check("working files", list(ArtifactFilter{Files: ArtifactFilesWorking}), []string{"panel.png", "plot.py"})
-		check("everything", list(ArtifactFilter{}), all)
+		check("results", list(models.ArtifactFilter{Files: models.ArtifactFilesResults}), []string{"report.pdf", "upload.csv"})
+		check("working files", list(models.ArtifactFilter{Files: models.ArtifactFilesWorking}), []string{"panel.png", "plot.py"})
+		check("everything", list(models.ArtifactFilter{}), all)
 		// The paths that filter in Go agree with the SQL page.
-		check("results with an evidence filter", list(ArtifactFilter{Files: ArtifactFilesResults, EvidenceTarget: "https://forum.example/research/thread-7"}),
-			list(ArtifactFilter{Files: ArtifactFilesResults}))
+		check("results with an evidence filter", list(models.ArtifactFilter{Files: models.ArtifactFilesResults, EvidenceTarget: "https://forum.example/research/thread-7"}),
+			list(models.ArtifactFilter{Files: models.ArtifactFilesResults}))
 
 		// A later reply hands the chart over: it is a result again.
-		if err := markRunFiles(ctx, store, scope, []savedArtifact{{Ref: artifactRef("panel.png")}}, []ConversationReference{artifactRef("panel.png")}); err != nil {
+		if err := models.MarkRunFiles(ctx, store, scope, []models.SavedArtifact{{Ref: artifactRef("panel.png")}}, []models.ConversationReference{artifactRef("panel.png")}); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		check("results after a later hand-over", list(ArtifactFilter{Files: ArtifactFilesResults}), []string{"panel.png", "report.pdf", "upload.csv"})
+		check("results after a later hand-over", list(models.ArtifactFilter{Files: models.ArtifactFilesResults}), []string{"panel.png", "report.pdf", "upload.csv"})
 
-		if _, err := catalog.List(ctx, ArtifactFilter{Scope: scope, Files: "scratch"}); err == nil {
+		if _, err := catalog.List(ctx, models.ArtifactFilter{Scope: scope, Files: "scratch"}); err == nil {
 			t.Fatalf("%s: an unknown files value was accepted", name)
 		}
 	}
 }
 
-func artifactRef(id string) ConversationReference {
-	return ConversationReference{Kind: ConversationReferenceArtifact, ID: id, Version: 1}
+func artifactRef(id string) models.ConversationReference {
+	return models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: id, Version: 1}
 }

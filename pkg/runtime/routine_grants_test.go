@@ -9,9 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -20,8 +22,8 @@ import (
 
 type routineOwnerAddressesForTest map[string][]string
 
-func (r routineOwnerAddressesForTest) RoutineOwnerAddresses(_ context.Context, _ Scope, owner ConversationParticipant) ([]string, error) {
-	if owner.Type != ConversationParticipantUser {
+func (r routineOwnerAddressesForTest) RoutineOwnerAddresses(_ context.Context, _ models.Scope, owner models.ConversationParticipant) ([]string, error) {
+	if owner.Type != models.ConversationParticipantUser {
 		return nil, errors.New("not a user")
 	}
 	return r[owner.ID], nil
@@ -29,14 +31,14 @@ func (r routineOwnerAddressesForTest) RoutineOwnerAddresses(_ context.Context, _
 
 type routineGrantFixtureState struct {
 	store     *sqlite.Store
-	run       *AgentRun
+	run       *models.AgentRun
 	catalog   *skill.Catalog
 	bound     *skill.BoundAction
 	args      map[string]interface{}
 	validator *routine.RunbookActionValidator
 	owners    routineOwnerAddressesForTest
 	// occurrence is the routine occurrence last claimed, still running.
-	occurrence *AgentRun
+	occurrence *models.AgentRun
 }
 
 func routineGrantFixture(t *testing.T) *routineGrantFixtureState {
@@ -95,7 +97,7 @@ func (f *routineGrantFixtureState) resolve(t *testing.T, args map[string]interfa
 }
 
 // createRoutine proposes, validates and dispatches create_task with the brief.
-func (f *routineGrantFixtureState) createRoutine(t *testing.T, grants ...map[string]interface{}) (*RunbookActivation, map[string]interface{}) {
+func (f *routineGrantFixtureState) createRoutine(t *testing.T, grants ...map[string]interface{}) (*models.RunbookActivation, map[string]interface{}) {
 	t.Helper()
 	resolved, err := f.resolve(t, f.withGrants(grants...))
 	if err != nil {
@@ -109,7 +111,7 @@ func (f *routineGrantFixtureState) createRoutine(t *testing.T, grants ...map[str
 		t.Fatal(err)
 	}
 	result := dispatchTaskForTest(t, f.store, f.run, f.bound, resolved, "create-briefed-task")
-	return result["activation"].(*RunbookActivation), preview
+	return result["activation"].(*models.RunbookActivation), preview
 }
 
 func TestCreateTaskAlwaysAsksForItsBriefInEveryMode(t *testing.T) {
@@ -118,12 +120,12 @@ func TestCreateTaskAlwaysAsksForItsBriefInEveryMode(t *testing.T) {
 		t.Fatalf("create_task review = %q, want always", action.Review)
 	}
 	policy := runtimeaction.NewDefaultActionPolicy()
-	policy.ApprovalTimeout = ApprovalTimeoutApprove
+	policy.ApprovalTimeout = models.ApprovalTimeoutApprove
 	definition := routine.RunbookManagementSkill()
 	bound := &skill.BoundAction{Definition: definition, Binding: f.bound.Binding, Action: definition.Actions[runtimeaction.RunbookActionCreateTask]}
-	for _, mode := range []ConversationApprovalMode{"", ConversationApprovalManual, ConversationApprovalAuto, ConversationApprovalSkip} {
-		decision, err := policy.EvaluateAction(t.Context(), runtimeaction.ActionPolicyInput{Run: f.run, Bound: bound, ApprovalMode: mode, RoutineGrant: &RoutineGrant{Action: "openseal.runbooks.create_task", Label: "x"}})
-		if err != nil || decision.Disposition != runtimeaction.ActionDispositionRequireApproval || decision.ApprovalTimeout != ApprovalTimeoutExpire {
+	for _, mode := range []models.ConversationApprovalMode{"", models.ConversationApprovalManual, models.ConversationApprovalAuto, models.ConversationApprovalSkip} {
+		decision, err := policy.EvaluateAction(t.Context(), runtimeaction.ActionPolicyInput{Run: f.run, Bound: bound, ApprovalMode: mode, RoutineGrant: &models.RoutineGrant{Action: "openseal.runbooks.create_task", Label: "x"}})
+		if err != nil || decision.Disposition != runtimeaction.ActionDispositionRequireApproval || decision.ApprovalTimeout != models.ApprovalTimeoutExpire {
 			t.Fatalf("mode %q create_task decision = %#v, %v", mode, decision, err)
 		}
 	}
@@ -190,7 +192,7 @@ func TestApprovedBriefGrantsArePersistedOnTheRoutine(t *testing.T) {
 	if preview["operation"] != runtimeaction.RunbookActionCreateTask || brief["summary"] != "Every morning at 8, reads the forecast and emails you a summary." || brief["deliverTo"] != "kev@example.com, from your Gmail" || len(brief["grants"].([]interface{})) != 2 {
 		t.Fatalf("approval preview = %#v", preview)
 	}
-	want := []RoutineGrant{{Action: "mail.search", Label: "Search the web"}, {Action: "mail.send", Label: "Email you the summary", ToOwnerOnly: true}}
+	want := []models.RoutineGrant{{Action: "mail.search", Label: "Search the web"}, {Action: "mail.send", Label: "Email you the summary", ToOwnerOnly: true}}
 	stored, err := f.store.GetRunbookActivation(t.Context(), f.run.Scope, activation.ID)
 	if err != nil || stored.Task == nil || !reflect.DeepEqual(stored.Task.Grants, want) {
 		t.Fatalf("persisted grants = %#v, %v", stored.Task, err)
@@ -199,7 +201,7 @@ func TestApprovedBriefGrantsArePersistedOnTheRoutine(t *testing.T) {
 	// (here, missing labels never filled by the catalog) cannot be stored.
 	unresolved := f.withGrants(map[string]interface{}{"action": "mail.note"})
 	d, _ := routine.NewRunbookActionDispatcher(f.store, nil)
-	if _, err := d.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: f.run, Bound: f.bound, Call: &ActionCall{ID: "unapproved", Scope: f.run.Scope, RunID: f.run.ID, DeploymentID: f.run.AssignedAgentID, IdempotencyKey: "unapproved"}, Arguments: unresolved}); err == nil {
+	if _, err := d.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: f.run, Bound: f.bound, Call: &models.ActionCall{ID: "unapproved", Scope: f.run.Scope, RunID: f.run.ID, DeploymentID: f.run.AssignedAgentID, IdempotencyKey: "unapproved"}, Arguments: unresolved}); err == nil {
 		t.Fatal("dispatch stored a grant without an approved label")
 	}
 }
@@ -207,23 +209,23 @@ func TestApprovedBriefGrantsArePersistedOnTheRoutine(t *testing.T) {
 // routineOccurrence creates and claims a scheduled occurrence of activation.
 // The previous occurrence completes first: a loop call leaves its Run
 // running, and the routine's objective admits one running occurrence.
-func (f *routineGrantFixtureState) routineOccurrence(t *testing.T, activation *RunbookActivation, key string) *AgentRun {
+func (f *routineGrantFixtureState) routineOccurrence(t *testing.T, activation *models.RunbookActivation, key string) *models.AgentRun {
 	t.Helper()
 	now := time.Now().UTC()
 	f.completeOccurrence(t, now)
-	run, err := NewPortfolioService(f.store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+	run, err := portfolio.NewPortfolioService(f.store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
-		Goal: activation.Task.Goal, Source: RunSourceSchedule, IdempotencyKey: key,
+		Goal: activation.Task.Goal, Source: models.RunSourceSchedule, IdempotencyKey: key,
 		Context: map[string]interface{}{
-			conversationRunContextConversationID: activation.Task.ConversationID, conversationRunContextTriggerID: activation.Task.SourceMessageID,
-			scheduledTaskContextKey: true, "runbookActivationId": activation.ID,
+			models.ConversationRunConversationIDContextKey: activation.Task.ConversationID, models.ConversationRunTriggerIDContextKey: activation.Task.SourceMessageID,
+			models.ScheduledTaskContextKey: true, "runbookActivationId": activation.ID,
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 10; attempt++ {
-		claimed, err := f.store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: activation.Scope, WorkerID: "worker", Now: now.Add(time.Second), LeaseDuration: time.Hour, AgingInterval: time.Minute})
+		claimed, err := f.store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: activation.Scope, WorkerID: "worker", Now: now.Add(time.Second), LeaseDuration: time.Hour, AgingInterval: time.Minute})
 		if err != nil || claimed == nil {
 			t.Fatalf("claim: %#v %v", claimed, err)
 		}
@@ -247,17 +249,17 @@ func (f *routineGrantFixtureState) completeOccurrence(t *testing.T, now time.Tim
 		t.Fatal(err)
 	}
 	f.occurrence = nil
-	if current.Status != AgentRunStatusRunning {
+	if current.Status != models.AgentRunStatusRunning {
 		return
 	}
-	completed := cloneAgentRun(current)
-	completed.Status, completed.LeaseOwner, completed.LeaseExpiresAt = AgentRunStatusCompleted, "", nil
+	completed := models.CloneAgentRun(current)
+	completed.Status, completed.LeaseOwner, completed.LeaseExpiresAt = models.AgentRunStatusCompleted, "", nil
 	completed.Revision++
 	completed.UpdatedAt = now
-	event := &ActivityEvent{
-		ID: "complete-" + current.ID, Scope: current.Scope, EventType: "run.updated", Severity: ActivitySeverityInfo,
-		AgentID: current.AssignedAgentID, RunID: current.ID, Actor: ActivityActor{Type: "worker", ID: "worker"},
-		Summary: "Routine occurrence completed", Visibility: ActivityVisibilityScope, CreatedAt: now,
+	event := &models.ActivityEvent{
+		ID: "complete-" + current.ID, Scope: current.Scope, EventType: "run.updated", Severity: models.ActivitySeverityInfo,
+		AgentID: current.AssignedAgentID, RunID: current.ID, Actor: models.ActivityActor{Type: "worker", ID: "worker"},
+		Summary: "Routine occurrence completed", Visibility: models.ActivityVisibilityScope, CreatedAt: now,
 	}
 	if _, err := f.store.UpdateAgentRunWithEvent(t.Context(), completed, current.Revision, event, nil); err != nil {
 		t.Fatalf("complete occurrence %s: %v", current.ID, err)
@@ -265,20 +267,20 @@ func (f *routineGrantFixtureState) completeOccurrence(t *testing.T, now time.Tim
 }
 
 // reviewEverything sets the routine's chat to manual approval.
-func (f *routineGrantFixtureState) reviewEverything(t *testing.T, activation *RunbookActivation) {
+func (f *routineGrantFixtureState) reviewEverything(t *testing.T, activation *models.RunbookActivation) {
 	t.Helper()
 	conversation, err := f.store.GetConversation(t.Context(), f.run.Scope, activation.Task.ConversationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtimeconversation.NewConversationApprovalModeService(f.store).SetApprovalMode(t.Context(), runtimeconversation.SetConversationApprovalModeRequest{Scope: f.run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalManual, Actor: ActivityActor{Type: "user", ID: "user"}}); err != nil {
+	if _, err := runtimeconversation.NewConversationApprovalModeService(f.store).SetApprovalMode(t.Context(), runtimeconversation.SetConversationApprovalModeRequest{Scope: f.run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: models.ConversationApprovalManual, Actor: models.ActivityActor{Type: "user", ID: "user"}}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (f *routineGrantFixtureState) propose(t *testing.T, coordinator *runtimeaction.ActionCoordinator, run *AgentRun, action, key string, arguments map[string]interface{}) *ActionProposalResult {
+func (f *routineGrantFixtureState) propose(t *testing.T, coordinator *runtimeaction.ActionCoordinator, run *models.AgentRun, action, key string, arguments map[string]interface{}) *models.ActionProposalResult {
 	t.Helper()
-	result, err := coordinator.Propose(t.Context(), runtimeaction.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, SkillID: "mail", SkillVersion: "1.0.0", Action: action, Arguments: arguments, IdempotencyKey: key})
+	result, err := coordinator.Propose(t.Context(), runtimeaction.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, SkillID: "mail", SkillVersion: "1.0.0", Action: action, Arguments: arguments, IdempotencyKey: key})
 	if err != nil {
 		t.Fatalf("%s: %v", key, err)
 	}
@@ -317,11 +319,11 @@ func TestRoutineRunsPerformGrantedActionsWithoutAsking(t *testing.T) {
 	// The same send from the chat itself, not a routine run, still asks.
 	chat := f.run
 	chat.Context = maps.Clone(chat.Context)
-	if grant, err := resolveRoutineGrant(t.Context(), f.store, f.store, f.owners, chat, &skill.BoundAction{Definition: &skill.Definition{ID: "mail"}, Action: skill.Action{Name: "send"}}, map[string]interface{}{"to": "kev@example.com"}); err != nil || grant != nil {
+	if grant, err := models.ResolveRoutineGrant(t.Context(), f.store, f.store, f.owners, chat, &skill.BoundAction{Definition: &skill.Definition{ID: "mail"}, Action: skill.Action{Name: "send"}}, map[string]interface{}{"to": "kev@example.com"}); err != nil || grant != nil {
 		t.Fatalf("chat run used a routine grant: %#v %v", grant, err)
 	}
 	// Without an owner address resolver, owner-only grants never apply.
-	if grant, err := resolveRoutineGrant(t.Context(), f.store, f.store, nil, f.routineOccurrence(t, activation, "no-resolver"), &skill.BoundAction{Definition: &skill.Definition{ID: "mail"}, Action: skill.Action{Name: "send"}}, map[string]interface{}{"to": "kev@example.com"}); err != nil || grant != nil {
+	if grant, err := models.ResolveRoutineGrant(t.Context(), f.store, f.store, nil, f.routineOccurrence(t, activation, "no-resolver"), &skill.BoundAction{Definition: &skill.Definition{ID: "mail"}, Action: skill.Action{Name: "send"}}, map[string]interface{}{"to": "kev@example.com"}); err != nil || grant != nil {
 		t.Fatalf("owner-only grant applied without owner addresses: %#v %v", grant, err)
 	}
 }
@@ -337,10 +339,10 @@ func TestRoutineGrantWithoutOwnerLimitAndRevoke(t *testing.T) {
 	}
 
 	service := routine.NewRunbookActivationService(f.store)
-	if _, err := service.RevokeGrants(t.Context(), f.run.Scope, activation.ID, routine.RevokeRoutineGrantsRequest{Requester: ConversationParticipant{Type: ConversationParticipantUser, ID: "someone-else"}}); !errors.Is(err, routine.ErrRoutineGrantsNotOwner) {
+	if _, err := service.RevokeGrants(t.Context(), f.run.Scope, activation.ID, routine.RevokeRoutineGrantsRequest{Requester: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "someone-else"}}); !errors.Is(err, routine.ErrRoutineGrantsNotOwner) {
 		t.Fatalf("another user revoked: %v", err)
 	}
-	owner := routine.RevokeRoutineGrantsRequest{Requester: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}}
+	owner := routine.RevokeRoutineGrantsRequest{Requester: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "user"}}
 	revoked, err := service.RevokeGrants(t.Context(), f.run.Scope, activation.ID, owner)
 	if err != nil || revoked.Task.Grants != nil || revoked.Revision != activation.Revision+1 {
 		t.Fatalf("revoke = %#v, %v", revoked, err)
@@ -349,7 +351,7 @@ func TestRoutineGrantWithoutOwnerLimitAndRevoke(t *testing.T) {
 	if err != nil || again.Revision != revoked.Revision {
 		t.Fatalf("revoke is not idempotent: %#v, %v", again, err)
 	}
-	if _, err := service.RevokeGrants(t.Context(), f.run.Scope, "missing", owner); !errors.Is(err, ErrRunbookActivationNotFound) {
+	if _, err := service.RevokeGrants(t.Context(), f.run.Scope, "missing", owner); !errors.Is(err, models.ErrRunbookActivationNotFound) {
 		t.Fatalf("missing routine: %v", err)
 	}
 	run = f.routineOccurrence(t, activation, "after-revoke")

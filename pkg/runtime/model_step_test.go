@@ -5,76 +5,77 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"strings"
 	"testing"
 	"time"
 )
 
-func modelStepTestAssistant(calls ...string) *AssistantEntry {
-	a := &AssistantEntry{
-		Provider: ModelStepProviderAnthropic, Model: "claude-test",
+func modelStepTestAssistant(calls ...string) *models.AssistantEntry {
+	a := &models.AssistantEntry{
+		Provider: models.ModelStepProviderAnthropic, Model: "claude-test",
 		SystemDigest: "sha256:aa", ToolsDigest: "sha256:bb",
-		StopReason: ModelStopEnd, Usage: ModelStepUsage{Attempts: 1},
+		StopReason: models.ModelStopEnd, Usage: models.ModelStepUsage{Attempts: 1},
 	}
 	for _, id := range calls {
-		a.ToolCalls = append(a.ToolCalls, ModelToolCall{ID: id, Name: "lookup", Arguments: json.RawMessage(`{"q":"x"}`)})
+		a.ToolCalls = append(a.ToolCalls, models.ModelToolCall{ID: id, Name: "lookup", Arguments: json.RawMessage(`{"q":"x"}`)})
 	}
 	if len(calls) > 0 {
-		a.StopReason = ModelStopToolCalls
+		a.StopReason = models.ModelStopToolCalls
 	}
 	return a
 }
 
-func userView(id string, seq int64, text string) SessionEntryView {
-	return SessionEntryView{ID: id, Sequence: seq, Type: SessionEntryUser, CreatedAt: time.Unix(seq, 0).UTC(),
-		User: &UserEntryView{Author: &EntryAuthor{Kind: EntryAuthorPerson, ID: "u1", Label: "Ana"}, Content: []ContentPart{{Type: ContentPartText, Text: text}}}}
+func userView(id string, seq int64, text string) models.SessionEntryView {
+	return models.SessionEntryView{ID: id, Sequence: seq, Type: models.SessionEntryUser, CreatedAt: time.Unix(seq, 0).UTC(),
+		User: &models.UserEntryView{Author: &models.EntryAuthor{Kind: models.EntryAuthorPerson, ID: "u1", Label: "Ana"}, Content: []models.ContentPart{{Type: models.ContentPartText, Text: text}}}}
 }
 
-func assistantView(id string, seq int64, calls ...string) SessionEntryView {
-	return SessionEntryView{ID: id, Sequence: seq, Type: SessionEntryAssistant, Assistant: modelStepTestAssistant(calls...)}
+func assistantView(id string, seq int64, calls ...string) models.SessionEntryView {
+	return models.SessionEntryView{ID: id, Sequence: seq, Type: models.SessionEntryAssistant, Assistant: modelStepTestAssistant(calls...)}
 }
 
-func toolView(id string, seq int64, callID string, state ToolEntryState) SessionEntryView {
-	return SessionEntryView{ID: id, Sequence: seq, Type: SessionEntryTool, Tool: &ToolEntryView{
+func toolView(id string, seq int64, callID string, state models.ToolEntryState) models.SessionEntryView {
+	return models.SessionEntryView{ID: id, Sequence: seq, Type: models.SessionEntryTool, Tool: &models.ToolEntryView{
 		CallID: callID, Name: "lookup", Arguments: json.RawMessage(`{"q":"x"}`), State: state,
-		Result: ToolResultView{Content: []ContentPart{{Type: ContentPartText, Text: "ok"}}, IsError: state != ToolEntryCompleted},
+		Result: models.ToolResultView{Content: []models.ContentPart{{Type: models.ContentPartText, Text: "ok"}}, IsError: state != models.ToolEntryCompleted},
 	}}
 }
 
-func validModelStepRequest() ModelStepRequest {
-	return ModelStepRequest{
-		APIVersion: ModelStepAPIVersion,
-		Purpose:    ModelStepPurposeStep,
-		Scope:      Scope{Kind: "tenant", ID: "t1"},
+func validModelStepRequest() models.ModelStepRequest {
+	return models.ModelStepRequest{
+		APIVersion: models.ModelStepAPIVersion,
+		Purpose:    models.ModelStepPurposeStep,
+		Scope:      models.Scope{Kind: "tenant", ID: "t1"},
 		RunID:      "run-1", StepID: "step-1", SessionID: "session-1", AgentID: "agent-1",
 		DefinitionID: "def-1", DefinitionVersion: "1",
-		System: ModelStepSystem{
+		System: models.ModelStepSystem{
 			AgentInstructions: []string{"Be helpful."},
-			Sections:          []ModelStepSystemSection{{ID: "progress_rules", Title: "Progress", Text: "Report."}},
+			Sections:          []models.ModelStepSystemSection{{ID: "progress_rules", Title: "Progress", Text: "Report."}},
 		},
-		Tools: []ModelStepTool{
-			{Name: "turn_final_answer", Description: "Final.", InputSchema: map[string]interface{}{"type": "object"}, Group: ModelStepToolHarness},
-			{Name: "lookup", Description: "Look up.", InputSchema: map[string]interface{}{"type": "object"}, Group: ModelStepToolCore},
-			{Name: "skill-live-browser_open", Description: "Open.", InputSchema: map[string]interface{}{"type": "object"}, Group: ModelStepToolLoaded, Capability: "skill-live-browser.open"},
+		Tools: []models.ModelStepTool{
+			{Name: "turn_final_answer", Description: "Final.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness},
+			{Name: "lookup", Description: "Look up.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolCore},
+			{Name: "skill-live-browser_open", Description: "Open.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolLoaded, Capability: "skill-live-browser.open"},
 		},
-		Entries: []SessionEntryView{
+		Entries: []models.SessionEntryView{
 			userView("e1", 1, "hello"),
 			assistantView("e2", 2, "c1", "c2"),
-			toolView("e3", 3, "c1", ToolEntryCompleted),
+			toolView("e3", 3, "c1", models.ToolEntryCompleted),
 			userView("e4", 4, "steer"),
-			toolView("e5", 5, "c2", ToolEntryError),
+			toolView("e5", 5, "c2", models.ToolEntryError),
 		},
-		Stream: ModelStepStream{FinalAnswerTool: "turn_final_answer", AnswerPreview: true},
+		Stream: models.ModelStepStream{FinalAnswerTool: "turn_final_answer", AnswerPreview: true},
 	}
 }
 
-func expectModelStepInvalid(t *testing.T, req ModelStepRequest, want string) {
+func expectModelStepInvalid(t *testing.T, req models.ModelStepRequest, want string) {
 	t.Helper()
 	err := req.Validate()
 	if err == nil {
 		t.Fatalf("Validate() = nil, want error containing %q", want)
 	}
-	if !errors.Is(err, ErrInvalidModelStepRequest) {
+	if !errors.Is(err, models.ErrInvalidModelStepRequest) {
 		t.Fatalf("Validate() = %v, want ErrInvalidModelStepRequest", err)
 	}
 	if !strings.Contains(err.Error(), want) {
@@ -90,22 +91,22 @@ func TestModelStepRequestValidateAcceptsValidStep(t *testing.T) {
 
 func TestModelStepRequestValidateAcceptsCompactedPath(t *testing.T) {
 	req := validModelStepRequest()
-	req.Entries = []SessionEntryView{
-		{ID: "c", Sequence: 10, Type: SessionEntryCompaction, Compaction: &CompactionEntryView{Summary: "Earlier work.", FirstKeptEntryID: "e7", TokensBefore: 9000}},
+	req.Entries = []models.SessionEntryView{
+		{ID: "c", Sequence: 10, Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntryView{Summary: "Earlier work.", FirstKeptEntryID: "e7", TokensBefore: 9000}},
 		userView("e7", 7, "kept"),
 		assistantView("e8", 8, "c1"),
-		toolView("e9", 9, "c1", ToolEntryInterrupted),
-		{ID: "e11", Sequence: 11, Type: SessionEntryNote, Note: &NoteEntryView{Kind: string(NoteHost), Text: "note"}},
+		toolView("e9", 9, "c1", models.ToolEntryInterrupted),
+		{ID: "e11", Sequence: 11, Type: models.SessionEntryNote, Note: &models.NoteEntryView{Kind: string(models.NoteHost), Text: "note"}},
 		userView("e12", 12, "after"),
-		{ID: "e13", Sequence: 13, Type: SessionEntryModelChange, ModelChange: &ModelChangeEntry{Provider: "openai-responses", Model: "gpt-x"}},
+		{ID: "e13", Sequence: 13, Type: models.SessionEntryModelChange, ModelChange: &models.ModelChangeEntry{Provider: "openai-responses", Model: "gpt-x"}},
 		assistantView("e14", 14),
 	}
 	if err := req.Validate(); err != nil {
 		t.Fatalf("Validate() = %v", err)
 	}
 	// A compaction with nothing kept and nothing after it is still a path.
-	req.Entries = []SessionEntryView{
-		{ID: "c", Sequence: 10, Type: SessionEntryCompaction, Compaction: &CompactionEntryView{Summary: "All of it."}},
+	req.Entries = []models.SessionEntryView{
+		{ID: "c", Sequence: 10, Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntryView{Summary: "All of it."}},
 		userView("e11", 11, "next"),
 	}
 	if err := req.Validate(); err != nil {
@@ -115,23 +116,23 @@ func TestModelStepRequestValidateAcceptsCompactedPath(t *testing.T) {
 
 func TestModelStepRequestValidateRejectsCompactedPathOrder(t *testing.T) {
 	req := validModelStepRequest()
-	req.Entries = []SessionEntryView{
-		{ID: "c", Sequence: 10, Type: SessionEntryCompaction, Compaction: &CompactionEntryView{Summary: "s", FirstKeptEntryID: "e7"}},
+	req.Entries = []models.SessionEntryView{
+		{ID: "c", Sequence: 10, Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntryView{Summary: "s", FirstKeptEntryID: "e7"}},
 		userView("e7", 7, "kept"),
 		userView("e12", 12, "after"),
 		userView("e8", 8, "late kept"),
 	}
 	expectModelStepInvalid(t, req, "kept tail must come before")
 
-	req.Entries = []SessionEntryView{
-		{ID: "c", Sequence: 10, Type: SessionEntryCompaction, Compaction: &CompactionEntryView{Summary: "s", FirstKeptEntryID: "e7"}},
+	req.Entries = []models.SessionEntryView{
+		{ID: "c", Sequence: 10, Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntryView{Summary: "s", FirstKeptEntryID: "e7"}},
 		userView("e8", 8, "a"),
 		userView("e7", 7, "b"),
 	}
 	expectModelStepInvalid(t, req, "out of sequence order")
 
-	req.Entries = []SessionEntryView{
-		{ID: "c", Sequence: 10, Type: SessionEntryCompaction, Compaction: &CompactionEntryView{Summary: "s", FirstKeptEntryID: "e6"}},
+	req.Entries = []models.SessionEntryView{
+		{ID: "c", Sequence: 10, Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntryView{Summary: "s", FirstKeptEntryID: "e6"}},
 		userView("e7", 7, "a"),
 	}
 	expectModelStepInvalid(t, req, "kept tail does not start there")
@@ -152,19 +153,19 @@ func TestModelStepRequestValidateRejectsUnpairedToolCall(t *testing.T) {
 	expectModelStepInvalid(t, req, "tool call c2 of assistant entry e2 has no tool entry")
 
 	req = validModelStepRequest()
-	req.Entries = append(req.Entries[:5:5], assistantView("e6", 6), toolView("e7", 7, "c2", ToolEntryCompleted))
+	req.Entries = append(req.Entries[:5:5], assistantView("e6", 6), toolView("e7", 7, "c2", models.ToolEntryCompleted))
 	expectModelStepInvalid(t, req, "answers no call of the preceding assistant entry")
 
 	req = validModelStepRequest()
-	req.Entries = append(req.Entries[:5:5], toolView("e6", 6, "c2", ToolEntryCompleted))
+	req.Entries = append(req.Entries[:5:5], toolView("e6", 6, "c2", models.ToolEntryCompleted))
 	expectModelStepInvalid(t, req, "a second time")
 
 	req = validModelStepRequest()
-	req.Entries = []SessionEntryView{
+	req.Entries = []models.SessionEntryView{
 		userView("e1", 1, "hi"),
 		assistantView("e2", 2, "c1"),
 		assistantView("e3", 3),
-		toolView("e4", 4, "c1", ToolEntryCompleted),
+		toolView("e4", 4, "c1", models.ToolEntryCompleted),
 	}
 	expectModelStepInvalid(t, req, "tool call c1 of assistant entry e2 has no tool entry")
 }
@@ -207,7 +208,7 @@ func TestModelStepRequestValidateRejectsToolGroupOrder(t *testing.T) {
 
 	// Several tools in the same group, and empty groups, are fine.
 	req = validModelStepRequest()
-	req.Tools = []ModelStepTool{req.Tools[0], req.Tools[2], {Name: "more", InputSchema: map[string]interface{}{"type": "object"}, Group: ModelStepToolLoaded}}
+	req.Tools = []models.ModelStepTool{req.Tools[0], req.Tools[2], {Name: "more", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolLoaded}}
 	if err := req.Validate(); err != nil {
 		t.Fatalf("Validate() = %v", err)
 	}
@@ -215,28 +216,28 @@ func TestModelStepRequestValidateRejectsToolGroupOrder(t *testing.T) {
 
 func TestModelStepRequestValidateRejectsCompactionNotFirst(t *testing.T) {
 	req := validModelStepRequest()
-	req.Entries = []SessionEntryView{
+	req.Entries = []models.SessionEntryView{
 		userView("e1", 1, "hi"),
-		{ID: "c", Sequence: 2, Type: SessionEntryCompaction, Compaction: &CompactionEntryView{Summary: "s"}},
+		{ID: "c", Sequence: 2, Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntryView{Summary: "s"}},
 	}
 	expectModelStepInvalid(t, req, "must be the first entry")
 
-	req.Entries = []SessionEntryView{
-		{ID: "c", Sequence: 5, Type: SessionEntryCompaction, Compaction: &CompactionEntryView{Summary: "s"}},
+	req.Entries = []models.SessionEntryView{
+		{ID: "c", Sequence: 5, Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntryView{Summary: "s"}},
 		userView("e6", 6, "hi"),
-		{ID: "c2", Sequence: 7, Type: SessionEntryCompaction, Compaction: &CompactionEntryView{Summary: "s"}},
+		{ID: "c2", Sequence: 7, Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntryView{Summary: "s"}},
 	}
 	expectModelStepInvalid(t, req, "must be the first entry")
 }
 
 func TestModelStepRequestValidateRejectsLeadingToolEntry(t *testing.T) {
 	req := validModelStepRequest()
-	req.Entries = []SessionEntryView{toolView("e1", 1, "c1", ToolEntryCompleted), userView("e2", 2, "hi")}
+	req.Entries = []models.SessionEntryView{toolView("e1", 1, "c1", models.ToolEntryCompleted), userView("e2", 2, "hi")}
 	expectModelStepInvalid(t, req, "cannot start with a tool entry")
 
-	req.Entries = []SessionEntryView{
-		{ID: "c", Sequence: 5, Type: SessionEntryCompaction, Compaction: &CompactionEntryView{Summary: "s", FirstKeptEntryID: "e3"}},
-		toolView("e3", 3, "c1", ToolEntryCompleted),
+	req.Entries = []models.SessionEntryView{
+		{ID: "c", Sequence: 5, Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntryView{Summary: "s", FirstKeptEntryID: "e3"}},
+		toolView("e3", 3, "c1", models.ToolEntryCompleted),
 	}
 	expectModelStepInvalid(t, req, "cannot start with a tool entry")
 }
@@ -244,31 +245,33 @@ func TestModelStepRequestValidateRejectsLeadingToolEntry(t *testing.T) {
 func TestModelStepRequestValidateRejectsBadIdentity(t *testing.T) {
 	cases := []struct {
 		name   string
-		mutate func(*ModelStepRequest)
+		mutate func(*models.ModelStepRequest)
 		want   string
 	}{
-		{"version", func(r *ModelStepRequest) { r.APIVersion = "openseal.hosted-turn/v14" }, "apiVersion"},
-		{"purpose", func(r *ModelStepRequest) { r.Purpose = "chat" }, "unknown purpose"},
-		{"scope", func(r *ModelStepRequest) { r.Scope = Scope{} }, "scope"},
-		{"run", func(r *ModelStepRequest) { r.RunID = " " }, "runId"},
-		{"step", func(r *ModelStepRequest) { r.StepID = "" }, "stepId"},
-		{"agent", func(r *ModelStepRequest) { r.AgentID = "" }, "agentId"},
-		{"session", func(r *ModelStepRequest) { r.SessionID = "" }, "sessionId"},
-		{"attempt", func(r *ModelStepRequest) { r.Attempt = -1 }, "attempt"},
-		{"max output", func(r *ModelStepRequest) { r.MaxOutputTokens = -5 }, "maxOutputTokens"},
-		{"stray instruction", func(r *ModelStepRequest) { r.SummaryInstruction = "Summarize." }, "only for summary"},
-		{"section id", func(r *ModelStepRequest) { r.System.Sections[0].ID = "Progress Rules" }, "invalid id"},
-		{"section dup", func(r *ModelStepRequest) {
-			r.System.Sections = append(r.System.Sections, ModelStepSystemSection{ID: "progress_rules", Title: "Again"})
+		{"version", func(r *models.ModelStepRequest) { r.APIVersion = "openseal.hosted-turn/v14" }, "apiVersion"},
+		{"purpose", func(r *models.ModelStepRequest) { r.Purpose = "chat" }, "unknown purpose"},
+		{"scope", func(r *models.ModelStepRequest) { r.Scope = models.Scope{} }, "scope"},
+		{"run", func(r *models.ModelStepRequest) { r.RunID = " " }, "runId"},
+		{"step", func(r *models.ModelStepRequest) { r.StepID = "" }, "stepId"},
+		{"agent", func(r *models.ModelStepRequest) { r.AgentID = "" }, "agentId"},
+		{"session", func(r *models.ModelStepRequest) { r.SessionID = "" }, "sessionId"},
+		{"attempt", func(r *models.ModelStepRequest) { r.Attempt = -1 }, "attempt"},
+		{"max output", func(r *models.ModelStepRequest) { r.MaxOutputTokens = -5 }, "maxOutputTokens"},
+		{"stray instruction", func(r *models.ModelStepRequest) { r.SummaryInstruction = "Summarize." }, "only for summary"},
+		{"section id", func(r *models.ModelStepRequest) { r.System.Sections[0].ID = "Progress Rules" }, "invalid id"},
+		{"section dup", func(r *models.ModelStepRequest) {
+			r.System.Sections = append(r.System.Sections, models.ModelStepSystemSection{ID: "progress_rules", Title: "Again"})
 		}, "duplicate system section"},
-		{"no entries", func(r *ModelStepRequest) { r.Entries = nil }, "entries are required"},
-		{"dup entry", func(r *ModelStepRequest) { r.Entries[3].ID = "e1" }, "duplicate entry id"},
-		{"zero sequence", func(r *ModelStepRequest) { r.Entries[0].Sequence = 0 }, "positive sequence"},
-		{"wrong payload", func(r *ModelStepRequest) { r.Entries[0].Type = SessionEntryNote }, "exactly the note payload"},
-		{"two payloads", func(r *ModelStepRequest) { r.Entries[0].Note = &NoteEntryView{Kind: "host", Text: "x"} }, "exactly the user payload"},
-		{"assistant limits", func(r *ModelStepRequest) { r.Entries[1].Assistant.Limits = &AssistantModelLimits{ContextTokens: 1} }, "kernel-only"},
-		{"author kind", func(r *ModelStepRequest) { r.Entries[0].User.Author.Kind = "user" }, "author kind"},
-		{"tool args", func(r *ModelStepRequest) { r.Entries[2].Tool.Arguments = json.RawMessage(`[1]`) }, "JSON object"},
+		{"no entries", func(r *models.ModelStepRequest) { r.Entries = nil }, "entries are required"},
+		{"dup entry", func(r *models.ModelStepRequest) { r.Entries[3].ID = "e1" }, "duplicate entry id"},
+		{"zero sequence", func(r *models.ModelStepRequest) { r.Entries[0].Sequence = 0 }, "positive sequence"},
+		{"wrong payload", func(r *models.ModelStepRequest) { r.Entries[0].Type = models.SessionEntryNote }, "exactly the note payload"},
+		{"two payloads", func(r *models.ModelStepRequest) { r.Entries[0].Note = &models.NoteEntryView{Kind: "host", Text: "x"} }, "exactly the user payload"},
+		{"assistant limits", func(r *models.ModelStepRequest) {
+			r.Entries[1].Assistant.Limits = &models.AssistantModelLimits{ContextTokens: 1}
+		}, "kernel-only"},
+		{"author kind", func(r *models.ModelStepRequest) { r.Entries[0].User.Author.Kind = "user" }, "author kind"},
+		{"tool args", func(r *models.ModelStepRequest) { r.Entries[2].Tool.Arguments = json.RawMessage(`[1]`) }, "JSON object"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -282,7 +285,7 @@ func TestModelStepRequestValidateRejectsBadIdentity(t *testing.T) {
 func TestModelStepRequestValidatePurposes(t *testing.T) {
 	t.Run("summary", func(t *testing.T) {
 		req := validModelStepRequest()
-		req.Purpose = ModelStepPurposeSummary
+		req.Purpose = models.ModelStepPurposeSummary
 		expectModelStepInvalid(t, req, "needs summaryInstruction")
 		req.SummaryInstruction = "Summarize the conversation so far."
 		if err := req.Validate(); err != nil {
@@ -293,11 +296,11 @@ func TestModelStepRequestValidatePurposes(t *testing.T) {
 	})
 	t.Run("explanation", func(t *testing.T) {
 		req := validModelStepRequest()
-		req.Purpose = ModelStepPurposeExplanation
+		req.Purpose = models.ModelStepPurposeExplanation
 		expectModelStepInvalid(t, req, "sends no tools")
 		req.Tools = nil
 		expectModelStepInvalid(t, req, "not a listed tool")
-		req.Stream = ModelStepStream{}
+		req.Stream = models.ModelStepStream{}
 		if err := req.Validate(); err != nil {
 			t.Fatalf("explanation = %v", err)
 		}
@@ -306,12 +309,12 @@ func TestModelStepRequestValidatePurposes(t *testing.T) {
 	})
 	t.Run("acknowledgement", func(t *testing.T) {
 		req := validModelStepRequest()
-		req.Purpose = ModelStepPurposeAcknowledgement
+		req.Purpose = models.ModelStepPurposeAcknowledgement
 		req.SessionID = ""
-		req.Stream = ModelStepStream{}
+		req.Stream = models.ModelStepStream{}
 		expectModelStepInvalid(t, req, "sends no tools")
-		req.Tools = []ModelStepTool{}
-		req.Entries = []SessionEntryView{userView("ack-1", 1, "Please book the flight.")}
+		req.Tools = []models.ModelStepTool{}
+		req.Entries = []models.SessionEntryView{userView("ack-1", 1, "Please book the flight.")}
 		if err := req.Validate(); err != nil {
 			t.Fatalf("acknowledgement = %v", err)
 		}
@@ -322,28 +325,28 @@ func TestModelStepRequestValidateContentParts(t *testing.T) {
 	png := base64.StdEncoding.EncodeToString([]byte("\x89PNG fake"))
 	req := validModelStepRequest()
 	req.Entries[0].User.Content = append(req.Entries[0].User.Content,
-		ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{"a":1}`)},
-		ContentPart{Type: ContentPartFile, Path: "chat-files/report.pdf", MimeType: "application/pdf", SizeBytes: 900},
-		ContentPart{Type: ContentPartImage, MediaType: "image/png", Detail: "low", DataBase64: png},
+		models.ContentPart{Type: models.ContentPartJSON, Value: json.RawMessage(`{"a":1}`)},
+		models.ContentPart{Type: models.ContentPartFile, Path: "chat-files/report.pdf", MimeType: "application/pdf", SizeBytes: 900},
+		models.ContentPart{Type: models.ContentPartImage, MediaType: "image/png", Detail: "low", DataBase64: png},
 	)
 	req.Entries[2].Tool.Result.Content = append(req.Entries[2].Tool.Result.Content,
-		ContentPart{Type: ContentPartImage, MediaType: "image/webp", DataBase64: png, ActionCallID: "ac-1"})
+		models.ContentPart{Type: models.ContentPartImage, MediaType: "image/webp", DataBase64: png, ActionCallID: "ac-1"})
 	if err := req.Validate(); err != nil {
 		t.Fatalf("Validate() = %v", err)
 	}
 
 	cases := []struct {
 		name string
-		part ContentPart
+		part models.ContentPart
 		want string
 	}{
-		{"unknown type", ContentPart{Type: "audio"}, "unknown part type"},
-		{"bad json", ContentPart{Type: ContentPartJSON, Value: json.RawMessage(`{`)}, "valid value"},
-		{"image type", ContentPart{Type: ContentPartImage, MediaType: "image/gif", DataBase64: png}, "media type"},
-		{"image detail", ContentPart{Type: ContentPartImage, MediaType: "image/png", Detail: "max", DataBase64: png}, "detail"},
-		{"image without bytes", ContentPart{Type: ContentPartImage, MediaType: "image/png", ArtifactID: "a1"}, "base64 data"},
-		{"image too large", ContentPart{Type: ContentPartImage, MediaType: "image/png", DataBase64: base64.StdEncoding.EncodeToString(make([]byte, maxModelStepMediaBytes+1))}, "max"},
-		{"text with bytes", ContentPart{Type: ContentPartText, Text: "x", DataBase64: png}, "only image parts"},
+		{"unknown type", models.ContentPart{Type: "audio"}, "unknown part type"},
+		{"bad json", models.ContentPart{Type: models.ContentPartJSON, Value: json.RawMessage(`{`)}, "valid value"},
+		{"image type", models.ContentPart{Type: models.ContentPartImage, MediaType: "image/gif", DataBase64: png}, "media type"},
+		{"image detail", models.ContentPart{Type: models.ContentPartImage, MediaType: "image/png", Detail: "max", DataBase64: png}, "detail"},
+		{"image without bytes", models.ContentPart{Type: models.ContentPartImage, MediaType: "image/png", ArtifactID: "a1"}, "base64 data"},
+		{"image too large", models.ContentPart{Type: models.ContentPartImage, MediaType: "image/png", DataBase64: base64.StdEncoding.EncodeToString(make([]byte, models.MaxModelStepMediaBytes+1))}, "max"},
+		{"text with bytes", models.ContentPart{Type: models.ContentPartText, Text: "x", DataBase64: png}, "only image parts"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -354,7 +357,7 @@ func TestModelStepRequestValidateContentParts(t *testing.T) {
 	}
 
 	req = validModelStepRequest()
-	req.Entries[2].Tool.Result.Content = []ContentPart{{Type: ContentPartText, Text: strings.Repeat("x", MaxToolResultContentBytes+1)}}
+	req.Entries[2].Tool.Result.Content = []models.ContentPart{{Type: models.ContentPartText, Text: strings.Repeat("x", models.MaxToolResultContentBytes+1)}}
 	expectModelStepInvalid(t, req, "max")
 }
 
@@ -372,23 +375,23 @@ func TestModelStepJSONRoundTripKeepsNativeVerbatim(t *testing.T) {
 		json.RawMessage(`{"type":"reasoning","id":"rs_1","encrypted_content":"gAAAA\u003cx\u003e","summary":[]}`),
 		json.RawMessage(`{"type":"message","phase":"commentary","content":[{"type":"output_text","text":"hi"}]}`),
 	}
-	result := ModelStepResult{
-		APIVersion: ModelStepAPIVersion, StepID: "step-1",
-		Assistant: AssistantEntry{
-			Provider: ModelStepProviderAnthropic, Model: "claude-test", SystemDigest: "sha256:a", ToolsDigest: "sha256:b",
-			Text: "Checking.", ToolCalls: []ModelToolCall{{ID: "toolu_1", Name: "lookup", Arguments: json.RawMessage(`{"z":1,"a":[2, 3]}`)}},
-			Native:     &AssistantNative{Anthropic: anthropic, Responses: responses, ChatReasoningField: "reasoning_content", ChatReasoning: "r"},
-			StopReason: ModelStopToolCalls, Usage: ModelStepUsage{InputTokens: 10, OutputTokens: 5, Attempts: 1},
+	result := models.ModelStepResult{
+		APIVersion: models.ModelStepAPIVersion, StepID: "step-1",
+		Assistant: models.AssistantEntry{
+			Provider: models.ModelStepProviderAnthropic, Model: "claude-test", SystemDigest: "sha256:a", ToolsDigest: "sha256:b",
+			Text: "Checking.", ToolCalls: []models.ModelToolCall{{ID: "toolu_1", Name: "lookup", Arguments: json.RawMessage(`{"z":1,"a":[2, 3]}`)}},
+			Native:     &models.AssistantNative{Anthropic: anthropic, Responses: responses, ChatReasoningField: "reasoning_content", ChatReasoning: "r"},
+			StopReason: models.ModelStopToolCalls, Usage: models.ModelStepUsage{InputTokens: 10, OutputTokens: 5, Attempts: 1},
 		},
 		Narration: "Checking.",
-		Model:     ModelStepModelInfo{Provider: ModelStepProviderAnthropic, Model: "claude-test", ContextTokens: 200000},
-		Render:    ModelStepRenderInfo{EstimatedInputTokens: 100, ReasoningCutoffSequence: 4},
+		Model:     models.ModelStepModelInfo{Provider: models.ModelStepProviderAnthropic, Model: "claude-test", ContextTokens: 200000},
+		Render:    models.ModelStepRenderInfo{EstimatedInputTokens: 100, ReasoningCutoffSequence: 4},
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var decoded ModelStepResult
+	var decoded models.ModelStepResult
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
@@ -415,14 +418,14 @@ func TestModelStepJSONRoundTripKeepsNativeVerbatim(t *testing.T) {
 
 	// The request side carries the same native bytes through an assistant view.
 	req := validModelStepRequest()
-	req.Entries[1].Assistant.Native = &AssistantNative{Anthropic: anthropic}
-	req.Purpose = ModelStepPurposeSummary
+	req.Entries[1].Assistant.Native = &models.AssistantNative{Anthropic: anthropic}
+	req.Purpose = models.ModelStepPurposeSummary
 	req.SummaryInstruction = "Summarize."
 	encoded, err = json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var decodedReq ModelStepRequest
+	var decodedReq models.ModelStepRequest
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&decodedReq); err != nil {
@@ -433,7 +436,7 @@ func TestModelStepJSONRoundTripKeepsNativeVerbatim(t *testing.T) {
 			t.Fatalf("request anthropic block %d changed", i)
 		}
 	}
-	if decodedReq.SummaryInstruction != "Summarize." || decodedReq.Purpose != ModelStepPurposeSummary {
+	if decodedReq.SummaryInstruction != "Summarize." || decodedReq.Purpose != models.ModelStepPurposeSummary {
 		t.Fatalf("request lost purpose fields: %+v", decodedReq)
 	}
 	if err := decodedReq.Validate(); err != nil {

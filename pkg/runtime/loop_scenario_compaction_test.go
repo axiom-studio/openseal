@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -34,7 +35,7 @@ func bigLookups(f *looptest.Fixture, tokens int) {
 // shortens the path.
 func lookupScript(n int, answer string) *looptest.ModelRule {
 	done := 0
-	return &looptest.ModelRule{Name: "lookups", When: isStepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
+	return &looptest.ModelRule{Name: "lookups", When: isStepPurpose, Reply: func(v looptest.StepView) models.ModelStepResult {
 		if done < n {
 			done++
 			return looptest.Act(fmt.Sprintf("Looking up %d.", done), looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": fmt.Sprint(done)}))
@@ -43,15 +44,15 @@ func lookupScript(n int, answer string) *looptest.ModelRule {
 	}}
 }
 
-func isStepPurpose(v looptest.StepView) bool { return v.Purpose() == ModelStepPurposeStep }
+func isStepPurpose(v looptest.StepView) bool { return v.Purpose() == models.ModelStepPurposeStep }
 
 // summaryRule answers every compaction summary call; the i-th summary is
 // "Summary <i>: ...".
 func summaryRule() *looptest.ModelRule {
 	n := 0
 	return &looptest.ModelRule{Name: "summary",
-		When: func(v looptest.StepView) bool { return v.Purpose() == ModelStepPurposeSummary },
-		Reply: func(looptest.StepView) ModelStepResult {
+		When: func(v looptest.StepView) bool { return v.Purpose() == models.ModelStepPurposeSummary },
+		Reply: func(looptest.StepView) models.ModelStepResult {
 			n++
 			return looptest.Say(fmt.Sprintf("Summary %d: the earlier lookups found open issues.", n))
 		}}
@@ -62,24 +63,24 @@ func contextExceeded() error {
 }
 
 // compactionEntries is the Run's compaction entries in log order.
-func compactionEntries(f *looptest.Fixture, runID string) []*SessionEntry {
-	var out []*SessionEntry
+func compactionEntries(f *looptest.Fixture, runID string) []*models.SessionEntry {
+	var out []*models.SessionEntry
 	for _, entry := range f.Entries(runID) {
-		if entry.Type == SessionEntryCompaction {
+		if entry.Type == models.SessionEntryCompaction {
 			out = append(out, entry)
 		}
 	}
 	return out
 }
 
-func entryIndex(entries []*SessionEntry, id string) int {
-	return slices.IndexFunc(entries, func(e *SessionEntry) bool { return e.ID == id })
+func entryIndex(entries []*models.SessionEntry, id string) int {
+	return slices.IndexFunc(entries, func(e *models.SessionEntry) bool { return e.ID == id })
 }
 
 // summarizedActionCallIDs is the action calls of the tool entries before
 // compaction's first kept entry and after the previous compaction's first
 // kept entry (or the log start), in log order.
-func summarizedActionCallIDs(t *testing.T, log []*SessionEntry, previous, compaction *SessionEntry) []string {
+func summarizedActionCallIDs(t *testing.T, log []*models.SessionEntry, previous, compaction *models.SessionEntry) []string {
 	t.Helper()
 	from := 0
 	if previous != nil {
@@ -87,11 +88,11 @@ func summarizedActionCallIDs(t *testing.T, log []*SessionEntry, previous, compac
 	}
 	to := entryIndex(log, compaction.Compaction.FirstKeptEntryID)
 	if from < 0 || to < 0 {
-		t.Fatalf("first kept entries %v not in the log", []*SessionEntry{previous, compaction})
+		t.Fatalf("first kept entries %v not in the log", []*models.SessionEntry{previous, compaction})
 	}
 	var ids []string
 	for _, entry := range log[from:to] {
-		if entry.Type == SessionEntryTool && entry.ActionCallID != "" {
+		if entry.Type == models.SessionEntryTool && entry.ActionCallID != "" {
 			ids = append(ids, entry.ActionCallID)
 		}
 	}
@@ -101,28 +102,28 @@ func summarizedActionCallIDs(t *testing.T, log []*SessionEntry, previous, compac
 // requireCompactionKeepsToolPairs fails when compaction's kept tail starts
 // at a tool entry, or keeps a tool entry without the assistant entry that
 // called it, or summarizes away a tool entry whose call it keeps.
-func requireCompactionKeepsToolPairs(t *testing.T, log []*SessionEntry, compaction *SessionEntry) {
+func requireCompactionKeepsToolPairs(t *testing.T, log []*models.SessionEntry, compaction *models.SessionEntry) {
 	t.Helper()
 	first := entryIndex(log, compaction.Compaction.FirstKeptEntryID)
 	end := entryIndex(log, compaction.ID)
 	if first < 0 || end < 0 || first >= end {
 		t.Fatalf("first kept entry %q is not before compaction %s", compaction.Compaction.FirstKeptEntryID, compaction.ID)
 	}
-	if log[first].Type == SessionEntryTool {
+	if log[first].Type == models.SessionEntryTool {
 		t.Fatalf("kept tail starts at tool entry %s", log[first].ID)
 	}
 	// Scripted call ids restart after a compaction (looptest.StepView.Step counts the
 	// rendered path), so a call is keyed by its step row too.
 	callers := map[string]int{} // step id + tool call id -> index of its assistant entry
 	for i, entry := range log[:end] {
-		if entry.Type == SessionEntryAssistant && entry.Assistant != nil {
+		if entry.Type == models.SessionEntryAssistant && entry.Assistant != nil {
 			for _, call := range entry.Assistant.ToolCalls {
 				callers[entry.StepID+"/"+call.ID] = i
 			}
 		}
 	}
 	for i, entry := range log[:end] {
-		if entry.Type != SessionEntryTool {
+		if entry.Type != models.SessionEntryTool {
 			continue
 		}
 		caller, ok := callers[entry.StepID+"/"+entry.ToolCallID]
@@ -135,7 +136,7 @@ func requireCompactionKeepsToolPairs(t *testing.T, log []*SessionEntry, compacti
 	}
 }
 
-func viewEntryIDs(views []SessionEntryView) []string {
+func viewEntryIDs(views []models.SessionEntryView) []string {
 	out := make([]string, len(views))
 	for i, view := range views {
 		out[i] = view.ID
@@ -150,12 +151,12 @@ func viewEntryIDs(views []SessionEntryView) []string {
 // threshold after three 12k lookups, so step 4 starts with a threshold
 // compaction whose summary replaces everything before the kept tail.
 func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
-	looptest.EachStore(t, "compaction_threshold", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "compaction_threshold", func(t *testing.T, store models.KernelStore) {
 		f := looptest.NewFixture(t, store, looptest.WithContextWindow(64_000), looptest.WithRules(summaryRule(), lookupScript(3, "Issues 1 to 3 are open.")))
 		bigLookups(f, 12_000)
 		conversation, run := f.StartChat("check issues 1 to 3")
 		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, AgentRunStatusCompleted)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
 
 		log := f.Entries(run.ID)
 		compactions := compactionEntries(f, run.ID)
@@ -164,7 +165,7 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 		}
 		compaction := compactions[0]
 		payload := compaction.Compaction
-		if payload.Trigger != CompactionTriggerThreshold {
+		if payload.Trigger != models.CompactionTriggerThreshold {
 			t.Fatalf("trigger = %q, want threshold", payload.Trigger)
 		}
 		if payload.Summary != "Summary 1: the earlier lookups found open issues." {
@@ -178,7 +179,7 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 		// The kept tail is the newest ~12k (compactionKeepTokens(64k)): step 3's
 		// call and its result, cut at the assistant entry.
 		first := entryIndex(log, payload.FirstKeptEntryID)
-		if first < 0 || log[first].Type != SessionEntryAssistant || log[first].Step != 3 {
+		if first < 0 || log[first].Type != models.SessionEntryAssistant || log[first].Step != 3 {
 			t.Fatalf("first kept entry = %#v, want step 3's assistant entry", log[max(first, 0)])
 		}
 		var kept int64
@@ -202,8 +203,8 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 
 		// The summary call is the step's own request as a summary: same step,
 		// System and Tools, every rendered entry of the path, no preview.
-		summaries := f.Model.Calls(ModelStepPurposeSummary)
-		steps := f.Model.Calls(ModelStepPurposeStep)
+		summaries := f.Model.Calls(models.ModelStepPurposeSummary)
+		steps := f.Model.Calls(models.ModelStepPurposeStep)
 		if len(summaries) != 1 || len(steps) != 4 {
 			t.Fatalf("model calls: %d summaries, %d steps; want 1 and 4", len(summaries), len(steps))
 		}
@@ -217,7 +218,7 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 		}
 		summarized := viewEntryIDs(summary.Entries)
 		for _, entry := range log[:first] {
-			if entry.Type != SessionEntryNote && !slices.Contains(summarized, entry.ID) {
+			if entry.Type != models.SessionEntryNote && !slices.Contains(summarized, entry.ID) {
 				t.Fatalf("summary request lacks summarized entry %s (%s): %v", entry.ID, entry.Type, summarized)
 			}
 		}
@@ -229,7 +230,7 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 		}
 		var wantTail []string
 		for _, entry := range log[first:] {
-			if entry.ID == compaction.ID || entry.Step == 4 && entry.Type == SessionEntryAssistant {
+			if entry.ID == compaction.ID || entry.Step == 4 && entry.Type == models.SessionEntryAssistant {
 				continue
 			}
 			wantTail = append(wantTail, entry.ID)
@@ -244,14 +245,14 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 		// Log: the compaction sits after every lookup and before step 4's answer.
 		at := entryIndex(log, compaction.ID)
 		for i, entry := range log {
-			if entry.Type == SessionEntryTool && i > at {
+			if entry.Type == models.SessionEntryTool && i > at {
 				t.Fatalf("tool entry %s after the compaction", entry.ID)
 			}
-			if entry.Type == SessionEntryAssistant && entry.Step == 4 && i < at {
+			if entry.Type == models.SessionEntryAssistant && entry.Step == 4 && i < at {
 				t.Fatalf("step 4's assistant entry precedes the compaction")
 			}
 		}
-		if log[len(log)-1].Type != SessionEntryAssistant || log[len(log)-1].Step != 4 {
+		if log[len(log)-1].Type != models.SessionEntryAssistant || log[len(log)-1].Step != 4 {
 			t.Fatalf("log = %v, want step 4's answer last", f.EntryTypes(run.ID))
 		}
 
@@ -260,7 +261,7 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 			t.Fatalf("step rows = %d, want 4", n)
 		}
 		events := f.Events(run.ID, "session.compacted")
-		if len(events) != 1 || events[0].Payload["entryId"] != compaction.ID || events[0].Payload["trigger"] != CompactionTriggerThreshold {
+		if len(events) != 1 || events[0].Payload["entryId"] != compaction.ID || events[0].Payload["trigger"] != models.CompactionTriggerThreshold {
 			t.Fatalf("compaction events = %#v", events)
 		}
 		messages := f.Messages(conversation.ID)
@@ -274,12 +275,12 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 // the path grows past the threshold again; the second summary call reads the
 // first summary and its entry's actionCallIds are the union.
 func TestLoopLaterCompactionCarriesThePreviousSummary(t *testing.T) {
-	looptest.EachStore(t, "compaction_later", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "compaction_later", func(t *testing.T, store models.KernelStore) {
 		f := looptest.NewFixture(t, store, looptest.WithContextWindow(64_000), looptest.WithRules(summaryRule(), lookupScript(5, "Issues 1 to 5 are open.")))
 		bigLookups(f, 12_000)
-		run := f.StartRun(RunKindAgentWork, "Check issues 1 to 5")
+		run := f.StartRun(models.RunKindAgentWork, "Check issues 1 to 5")
 		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, AgentRunStatusCompleted)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
 
 		log := f.Entries(run.ID)
 		compactions := compactionEntries(f, run.ID)
@@ -287,7 +288,7 @@ func TestLoopLaterCompactionCarriesThePreviousSummary(t *testing.T) {
 			t.Fatalf("compactions = %d, want 2; log %v", len(compactions), f.EntryTypes(run.ID))
 		}
 		first, second := compactions[0], compactions[1]
-		summaries := f.Model.Calls(ModelStepPurposeSummary)
+		summaries := f.Model.Calls(models.ModelStepPurposeSummary)
 		if len(summaries) != 2 {
 			t.Fatalf("summary calls = %d, want 2", len(summaries))
 		}
@@ -306,7 +307,7 @@ func TestLoopLaterCompactionCarriesThePreviousSummary(t *testing.T) {
 			t.Fatalf("second actionCallIds = %v, want the union %v", second.Compaction.ActionCallIDs, want)
 		}
 		// The step after the second compaction renders only it and its tail.
-		steps := f.Model.Calls(ModelStepPurposeStep)
+		steps := f.Model.Calls(models.ModelStepPurposeStep)
 		last := steps[len(steps)-1]
 		if rendered := viewEntryIDs(last.Entries); len(rendered) == 0 || rendered[0] != second.ID || slices.Contains(rendered, first.ID) {
 			t.Fatalf("last step path = %v, want the second compaction first and not the first", rendered)
@@ -324,7 +325,7 @@ func overflowScript(rejections int) []*looptest.ModelRule {
 	return []*looptest.ModelRule{
 		summaryRule(),
 		{Name: "lookups", When: func(v looptest.StepView) bool { return isStepPurpose(v) && lookups < 3 },
-			Reply: func(v looptest.StepView) ModelStepResult {
+			Reply: func(v looptest.StepView) models.ModelStepResult {
 				lookups++
 				return looptest.Act(fmt.Sprintf("Looking up %d.", lookups), looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": fmt.Sprint(lookups)}))
 			}},
@@ -332,19 +333,19 @@ func overflowScript(rejections int) []*looptest.ModelRule {
 		{Name: "ok", When: func(v looptest.StepView) bool {
 			_, compacted := v.Compaction()
 			return isStepPurpose(v) && compacted
-		}, Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("ok") }},
+		}, Reply: func(looptest.StepView) models.ModelStepResult { return looptest.Say("ok") }},
 	}
 }
 
 // TestLoopLengthRejectionCompactsAndRetriesOnce: the host rejects step 4 for
 // length once; the loop compacts (overflow) and retries the same step.
 func TestLoopLengthRejectionCompactsAndRetriesOnce(t *testing.T) {
-	looptest.EachStore(t, "compaction_overflow_retry", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "compaction_overflow_retry", func(t *testing.T, store models.KernelStore) {
 		f := looptest.NewFixture(t, store, looptest.WithRules(overflowScript(1)...))
 		bigLookups(f, 5_000)
-		run := f.StartRun(RunKindAgentWork, "Check issues 1 to 3")
+		run := f.StartRun(models.RunKindAgentWork, "Check issues 1 to 3")
 		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, AgentRunStatusCompleted)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
 
 		var order []string
 		for _, req := range f.Model.Calls("") {
@@ -359,7 +360,7 @@ func TestLoopLengthRejectionCompactsAndRetriesOnce(t *testing.T) {
 			t.Fatalf("rejected %s, summary %s, retry %s: want one step", rejected.StepID, summary.StepID, retry.StepID)
 		}
 		compactions := compactionEntries(f, run.ID)
-		if len(compactions) != 1 || compactions[0].Compaction.Trigger != CompactionTriggerOverflow {
+		if len(compactions) != 1 || compactions[0].Compaction.Trigger != models.CompactionTriggerOverflow {
 			t.Fatalf("compactions = %#v, want one overflow compaction", compactions)
 		}
 		compaction := compactions[0]
@@ -387,11 +388,11 @@ func TestLoopLengthRejectionCompactsAndRetriesOnce(t *testing.T) {
 // ModelStepProducer writes: one full note, the last entry of the first
 // request; none on later steps; one full note again after the compaction
 // summarized the first, the last entry of the retry; never a duplicate.
-func requireCapabilityNotesThroughProducer(t *testing.T, f *looptest.Fixture, runID string, requests []ModelStepRequest, compaction *SessionEntry) {
+func requireCapabilityNotesThroughProducer(t *testing.T, f *looptest.Fixture, runID string, requests []models.ModelStepRequest, compaction *models.SessionEntry) {
 	t.Helper()
-	var notes []*SessionEntry
+	var notes []*models.SessionEntry
 	for _, entry := range f.Entries(runID) {
-		if entry.Type == SessionEntryNote && entry.Note != nil && entry.Note.Kind == NoteCapabilities {
+		if entry.Type == models.SessionEntryNote && entry.Note != nil && entry.Note.Kind == models.NoteCapabilities {
 			notes = append(notes, entry)
 		}
 	}
@@ -406,7 +407,7 @@ func requireCapabilityNotesThroughProducer(t *testing.T, f *looptest.Fixture, ru
 	if notes[0].Sequence > compaction.Sequence || notes[1].Sequence < compaction.Sequence {
 		t.Fatalf("notes at %d and %d around compaction %d", notes[0].Sequence, notes[1].Sequence, compaction.Sequence)
 	}
-	last := func(req ModelStepRequest) string { return req.Entries[len(req.Entries)-1].ID }
+	last := func(req models.ModelStepRequest) string { return req.Entries[len(req.Entries)-1].ID }
 	if got := last(requests[0]); got != notes[0].ID {
 		t.Fatalf("first request ends at %s, want the note %s", got, notes[0].ID)
 	}
@@ -415,11 +416,11 @@ func requireCapabilityNotesThroughProducer(t *testing.T, f *looptest.Fixture, ru
 		t.Fatalf("retry ends at %s, want the note %s", got, notes[1].ID)
 	}
 	for _, req := range requests[1 : len(requests)-1] {
-		if req.Purpose != ModelStepPurposeStep {
+		if req.Purpose != models.ModelStepPurposeStep {
 			continue
 		}
 		for _, view := range req.Entries {
-			if view.Note != nil && view.Note.Kind == string(NoteCapabilities) && view.ID != notes[0].ID {
+			if view.Note != nil && view.Note.Kind == string(models.NoteCapabilities) && view.ID != notes[0].ID {
 				t.Fatalf("step %s sees an extra capabilities note %s", req.StepID, view.ID)
 			}
 		}
@@ -430,12 +431,12 @@ func requireCapabilityNotesThroughProducer(t *testing.T, f *looptest.Fixture, ru
 // compaction is rejected again, so the Run fails with the context overflow
 // code and message, without a second compaction or another model call.
 func TestLoopSecondLengthRejectionFailsVisibly(t *testing.T) {
-	looptest.EachStore(t, "compaction_overflow_fail", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "compaction_overflow_fail", func(t *testing.T, store models.KernelStore) {
 		f := looptest.NewFixture(t, store, looptest.WithRules(overflowScript(0)...))
 		bigLookups(f, 5_000)
-		run := f.StartRun(RunKindAgentWork, "Check issues 1 to 3")
+		run := f.StartRun(models.RunKindAgentWork, "Check issues 1 to 3")
 		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, AgentRunStatusFailed)
+		f.MustStatus(done, models.AgentRunStatusFailed)
 
 		const overflowMessage = "The conversation is too long for the model's context, even after compacting it."
 		failure := done.FailureExplanation
@@ -467,10 +468,10 @@ func TestLoopSecondLengthRejectionFailsVisibly(t *testing.T) {
 // falls between a step's two parallel tool results; the cut moves down to the
 // step's assistant entry so the call and both results stay together.
 func TestLoopCompactionNeverSplitsAToolCallFromItsResult(t *testing.T) {
-	looptest.EachStore(t, "compaction_tool_pairs", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "compaction_tool_pairs", func(t *testing.T, store models.KernelStore) {
 		steps := 0
 		f := looptest.NewFixture(t, store, looptest.WithContextWindow(64_000), looptest.WithRules(summaryRule(), &looptest.ModelRule{Name: "pairs", When: isStepPurpose,
-			Reply: func(v looptest.StepView) ModelStepResult {
+			Reply: func(v looptest.StepView) models.ModelStepResult {
 				steps++
 				if steps > 3 {
 					return looptest.Say("All six are open.")
@@ -483,9 +484,9 @@ func TestLoopCompactionNeverSplitsAToolCallFromItsResult(t *testing.T) {
 		// Each result is 6k: the newest one alone is under the 12k keep, the
 		// newest two cross it, so the boundary falls between step 3's results.
 		bigLookups(f, 6_000)
-		run := f.StartRun(RunKindAgentWork, "Check issues 1 to 6")
+		run := f.StartRun(models.RunKindAgentWork, "Check issues 1 to 6")
 		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, AgentRunStatusCompleted)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
 
 		log := f.Entries(run.ID)
 		compactions := compactionEntries(f, run.ID)
@@ -496,7 +497,7 @@ func TestLoopCompactionNeverSplitsAToolCallFromItsResult(t *testing.T) {
 			requireCompactionKeepsToolPairs(t, log, compaction)
 		}
 		first := log[entryIndex(log, compactions[0].Compaction.FirstKeptEntryID)]
-		if first.Type != SessionEntryAssistant || first.Step != 3 || len(first.Assistant.ToolCalls) != 2 {
+		if first.Type != models.SessionEntryAssistant || first.Step != 3 || len(first.Assistant.ToolCalls) != 2 {
 			t.Fatalf("first kept entry = %s step %d, want step 3's two-call assistant entry", first.Type, first.Step)
 		}
 		if f.Dispatch.Count("lookup") != 6 {
@@ -507,7 +508,7 @@ func TestLoopCompactionNeverSplitsAToolCallFromItsResult(t *testing.T) {
 
 // kitToolNames is the tool names of tools, in order. It is a copy of the run
 // loop tests' toolNames; change them together.
-func kitToolNames(tools []ModelStepTool) []string {
+func kitToolNames(tools []models.ModelStepTool) []string {
 	names := make([]string, len(tools))
 	for i, tool := range tools {
 		names[i] = tool.Name

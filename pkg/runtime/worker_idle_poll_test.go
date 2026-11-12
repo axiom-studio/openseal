@@ -8,10 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -28,7 +30,7 @@ type countingActionPoolStore struct {
 	release   chan struct{}
 }
 
-func (s *countingActionPoolStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error) {
+func (s *countingActionPoolStore) ClaimNextAction(ctx context.Context, claim models.ActionClaim) (*models.ActionCall, error) {
 	n := s.claims.Add(1)
 	call, err := s.Store.ClaimNextAction(ctx, claim)
 	if n == 1 && s.entered != nil {
@@ -45,7 +47,7 @@ func (s *countingActionPoolStore) ClaimNextAction(ctx context.Context, claim Act
 	return call, err
 }
 
-func (s *countingActionPoolStore) GetAgentRun(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
+func (s *countingActionPoolStore) GetAgentRun(ctx context.Context, scope models.Scope, id string) (*models.AgentRun, error) {
 	s.hydration.Add(1)
 	if s.failRead {
 		return nil, errors.New("temporary Run hydration failure")
@@ -58,7 +60,7 @@ func TestActionWorkerPoolCoalescesIdleClaimsBeforeHydration(t *testing.T) {
 	pool, err := action.NewActionWorkerPool(store, skill.NewCatalog(), nil,
 		action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			return nil, errors.New("unexpected idle dispatch")
-		}), nil, action.ActionWorkerConfig{Scope: Scope{Kind: "tenant", ID: "idle"}, Concurrency: 8, PollInterval: 20 * time.Millisecond})
+		}), nil, action.ActionWorkerConfig{Scope: models.Scope{Kind: "tenant", ID: "idle"}, Concurrency: 8, PollInterval: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,15 +299,15 @@ func TestWorkerPollSignalBroadcastsAndCancelsAllWaiters(t *testing.T) {
 
 func TestAgentRunWorkerObservesTimerDeadlineWithoutWaitingForFallback(t *testing.T) {
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "timer-deadline"}
-	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "sleep then resume", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "timer-deadline"}
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "sleep then resume", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	producer := &timerStepProducer{steps: 1, wakeIn: 30 * time.Millisecond}
-	pool, err := runworker.NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	pool, err := runworker.NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return &agentrun.TurnRunnerBinding{DefinitionID: "agent", DefinitionVersion: "1", Producer: producer}, nil
 	}), nil, runworker.AgentRunWorkerConfig{Scope: scope, PollInterval: time.Hour})
 	if err != nil {
@@ -319,7 +321,7 @@ func TestAgentRunWorkerObservesTimerDeadlineWithoutWaitingForFallback(t *testing
 		if err != nil {
 			t.Fatal(err)
 		}
-		if current.Status == AgentRunStatusCompleted && producer.calls.Load() == 2 {
+		if current.Status == models.AgentRunStatusCompleted && producer.calls.Load() == 2 {
 			return
 		}
 		if time.Now().After(deadline) {

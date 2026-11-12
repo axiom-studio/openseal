@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -27,15 +28,15 @@ func TestSQLiteSpaceStore(t *testing.T) {
 
 func TestSpaceValidation(t *testing.T) {
 	t.Parallel()
-	service := NewSpaceService(newTestKernelStore(t))
-	scope := Scope{Kind: "tenant", ID: "one"}
+	service := portfolio.NewSpaceService(newTestKernelStore(t))
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	ctx := context.Background()
-	for _, request := range []CreateSpaceRequest{
-		{Scope: scope, Name: "   ", Look: SpaceLook("harbor")},
-		{Scope: scope, Name: strings.Repeat("a", 61), Look: SpaceLook("harbor")},
+	for _, request := range []portfolio.CreateSpaceRequest{
+		{Scope: scope, Name: "   ", Look: models.SpaceLook("harbor")},
+		{Scope: scope, Name: strings.Repeat("a", 61), Look: models.SpaceLook("harbor")},
 		{Scope: scope, Name: "Work", Look: "neon dusk"},
 		{Scope: scope, Name: "Work", Look: "x"},
-		{Scope: Scope{}, Name: "Work", Look: SpaceLook("harbor")},
+		{Scope: models.Scope{}, Name: "Work", Look: models.SpaceLook("harbor")},
 	} {
 		if _, err := service.CreateSpace(ctx, request); err == nil {
 			t.Fatalf("CreateSpace(%+v) succeeded", request)
@@ -44,15 +45,15 @@ func TestSpaceValidation(t *testing.T) {
 	if listed, err := service.ListSpaces(ctx, scope); err != nil || len(listed) != 0 {
 		t.Fatalf("refused creates left spaces = %+v, err = %v", listed, err)
 	}
-	space, err := service.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: strings.Repeat("é", 60), Look: SpaceLook("chalk")})
+	space, err := service.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: strings.Repeat("é", 60), Look: models.SpaceLook("chalk")})
 	if err != nil || space.Position != 0 || !space.IsDefault {
 		t.Fatalf("60-rune name: %+v %v", space, err)
 	}
-	badLook := SpaceLook("Neon Dusk")
-	if _, err := service.UpdateSpace(ctx, UpdateSpaceRequest{Scope: scope, SpaceID: space.ID, Look: &badLook}); !errors.Is(err, ErrInvalidSpace) {
+	badLook := models.SpaceLook("Neon Dusk")
+	if _, err := service.UpdateSpace(ctx, portfolio.UpdateSpaceRequest{Scope: scope, SpaceID: space.ID, Look: &badLook}); !errors.Is(err, models.ErrInvalidSpace) {
 		t.Fatalf("invalid look update: %v", err)
 	}
-	if _, _, err := service.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: scope, SpaceID: space.ID, Type: "user", MemberID: "u"}); !errors.Is(err, ErrInvalidSpace) {
+	if _, _, err := service.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: scope, SpaceID: space.ID, Type: "user", MemberID: "u"}); !errors.Is(err, models.ErrInvalidSpace) {
 		t.Fatalf("invalid member type: %v", err)
 	}
 }
@@ -64,17 +65,17 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	ctx := context.Background()
 	clock := time.Date(2026, 10, 31, 9, 0, 0, 0, time.UTC)
 	tick := models.WithClock(func() time.Time { clock = clock.Add(time.Second); return clock })
-	spaces := NewSpaceService(store, tick)
+	spaces := portfolio.NewSpaceService(store, tick)
 	conversations := conversation.NewConversationService(store, tick)
-	scope := Scope{Kind: "tenant", ID: "spaces-" + strings.ReplaceAll(t.Name(), "/", "-")}
+	scope := models.Scope{Kind: "tenant", ID: "spaces-" + strings.ReplaceAll(t.Name(), "/", "-")}
 
 	const owner = "7"
 	if listed, err := spaces.ListSpaces(ctx, scope); err != nil || len(listed) != 0 {
 		t.Fatalf("initial spaces = %+v, err = %v", listed, err)
 	}
-	defaultSpace, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Main", Look: DefaultSpaceLook, OwnerID: owner})
-	if err != nil || defaultSpace.ID == "" || !defaultSpace.IsDefault || defaultSpace.Name != "Main" || defaultSpace.Look != DefaultSpaceLook ||
-		defaultSpace.Position != 0 || defaultSpace.Scope != scope || defaultSpace.OwnerID != owner || defaultSpace.Access != SpaceAccessOwner {
+	defaultSpace, err := spaces.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: "Main", Look: models.DefaultSpaceLook, OwnerID: owner})
+	if err != nil || defaultSpace.ID == "" || !defaultSpace.IsDefault || defaultSpace.Name != "Main" || defaultSpace.Look != models.DefaultSpaceLook ||
+		defaultSpace.Position != 0 || defaultSpace.Scope != scope || defaultSpace.OwnerID != owner || defaultSpace.Access != models.SpaceAccessOwner {
 		t.Fatalf("defaultSpace = %+v, err = %v", defaultSpace, err)
 	}
 	if again, err := spaces.DefaultSpace(ctx, scope, " "+owner+" "); err != nil || again.ID != defaultSpace.ID || !again.IsDefault {
@@ -83,45 +84,45 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	if listed, err := spaces.ListSpaces(ctx, scope); err != nil || len(listed) != 1 || listed[0].ID != defaultSpace.ID || !listed[0].IsDefault {
 		t.Fatalf("spaces after the first = %+v, err = %v", listed, err)
 	}
-	work, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "  Work  ", Look: SpaceLook("harbor"), OwnerID: owner})
-	if err != nil || work.Name != "Work" || work.Position != 1 || work.IsDefault || work.OwnerID != owner || work.Access != SpaceAccessOwner {
+	work, err := spaces.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: "  Work  ", Look: models.SpaceLook("harbor"), OwnerID: owner})
+	if err != nil || work.Name != "Work" || work.Position != 1 || work.IsDefault || work.OwnerID != owner || work.Access != models.SpaceAccessOwner {
 		t.Fatalf("work = %+v, err = %v", work, err)
 	}
-	home, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Home", Look: SpaceLook("critter"), OwnerID: owner})
+	home, err := spaces.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: "Home", Look: models.SpaceLook("critter"), OwnerID: owner})
 	if err != nil || home.Position != 2 || home.IsDefault {
 		t.Fatalf("home = %+v, err = %v", home, err)
 	}
-	first, renamed, look := 0, "Household", SpaceLook("afterglow")
-	moved, err := spaces.UpdateSpace(ctx, UpdateSpaceRequest{Scope: scope, SpaceID: home.ID, Name: &renamed, Look: &look, Position: &first})
+	first, renamed, look := 0, "Household", models.SpaceLook("afterglow")
+	moved, err := spaces.UpdateSpace(ctx, portfolio.UpdateSpaceRequest{Scope: scope, SpaceID: home.ID, Name: &renamed, Look: &look, Position: &first})
 	if err != nil || moved.Position != 0 || moved.Name != renamed || moved.Look != look || !moved.UpdatedAt.After(home.UpdatedAt) {
 		t.Fatalf("moved = %+v, err = %v", moved, err)
 	}
 	assertSpaceOrder(t, spaces, scope, home.ID, defaultSpace.ID, work.ID)
 	far := 99
-	if _, err := spaces.UpdateSpace(ctx, UpdateSpaceRequest{Scope: scope, SpaceID: home.ID, Position: &far}); err != nil {
+	if _, err := spaces.UpdateSpace(ctx, portfolio.UpdateSpaceRequest{Scope: scope, SpaceID: home.ID, Position: &far}); err != nil {
 		t.Fatal(err)
 	}
 	assertSpaceOrder(t, spaces, scope, defaultSpace.ID, work.ID, home.ID)
-	if _, err := spaces.UpdateSpace(ctx, UpdateSpaceRequest{Scope: scope, SpaceID: home.ID, Position: &first}); err != nil {
+	if _, err := spaces.UpdateSpace(ctx, portfolio.UpdateSpaceRequest{Scope: scope, SpaceID: home.ID, Position: &first}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := spaces.UpdateSpace(ctx, UpdateSpaceRequest{Scope: scope, SpaceID: "missing", Name: &renamed}); !errors.Is(err, ErrSpaceNotFound) {
+	if _, err := spaces.UpdateSpace(ctx, portfolio.UpdateSpaceRequest{Scope: scope, SpaceID: "missing", Name: &renamed}); !errors.Is(err, models.ErrSpaceNotFound) {
 		t.Fatalf("update missing: %v", err)
 	}
 
-	put := func(spaceID string, memberType SpaceMemberType, id string, wantCreated bool, wantPosition int) {
+	put := func(spaceID string, memberType models.SpaceMemberType, id string, wantCreated bool, wantPosition int) {
 		t.Helper()
-		member, created, err := spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: memberType, MemberID: id})
+		member, created, err := spaces.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: memberType, MemberID: id})
 		if err != nil || created != wantCreated || member.Position != wantPosition || member.SpaceID != spaceID || member.Type != memberType || member.ID != id {
 			t.Fatalf("put %s/%s/%s = %+v created=%v err=%v", spaceID, memberType, id, member, created, err)
 		}
 	}
-	put(work.ID, SpaceMemberAgent, "finn", true, 0)
-	put(work.ID, SpaceMemberAgent, "finn", false, 0)
-	put(work.ID, SpaceMemberTeam, "eng", true, 1)
-	put(work.ID, SpaceMemberAgent, "solo", true, 2)
-	put(home.ID, SpaceMemberAgent, "finn", true, 0)
-	if _, _, err := spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: scope, SpaceID: "missing", Type: SpaceMemberAgent, MemberID: "finn"}); !errors.Is(err, ErrSpaceNotFound) {
+	put(work.ID, models.SpaceMemberAgent, "finn", true, 0)
+	put(work.ID, models.SpaceMemberAgent, "finn", false, 0)
+	put(work.ID, models.SpaceMemberTeam, "eng", true, 1)
+	put(work.ID, models.SpaceMemberAgent, "solo", true, 2)
+	put(home.ID, models.SpaceMemberAgent, "finn", true, 0)
+	if _, _, err := spaces.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: scope, SpaceID: "missing", Type: models.SpaceMemberAgent, MemberID: "finn"}); !errors.Is(err, models.ErrSpaceNotFound) {
 		t.Fatalf("put into missing space: %v", err)
 	}
 	members, err := spaces.ListSpaceMembers(ctx, scope, work.ID)
@@ -129,18 +130,18 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 		t.Fatalf("work members = %+v, err = %v", members, err)
 	}
 
-	create := func(key string, conversationOwner ObjectiveOwner, spaceID string) (*Conversation, error) {
+	create := func(key string, conversationOwner models.ObjectiveOwner, spaceID string) (*models.Conversation, error) {
 		conversation, _, err := conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
 			Scope: scope, Owner: conversationOwner, Title: "Chat " + key, SpaceID: spaceID, CreatedBy: owner, IdempotencyKey: key,
 		})
 		return conversation, err
 	}
-	finn := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
+	finn := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}
 	defaulted, err := create("finn-default", finn, "")
 	if err != nil || defaulted.SpaceID != home.ID {
 		t.Fatalf("owner's first space: %+v %v", defaulted, err)
 	}
-	orphan, err := create("orphan", ObjectiveOwner{Type: OwnerTypeAgent, ID: "nobody"}, "")
+	orphan, err := create("orphan", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "nobody"}, "")
 	if err != nil || orphan.SpaceID != defaultSpace.ID || orphan.CreatedBy != owner {
 		t.Fatalf("defaultSpace fallback: %+v %v", orphan, err)
 	}
@@ -148,17 +149,17 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	if err != nil || inWork.SpaceID != work.ID {
 		t.Fatalf("explicit space: %+v %v", inWork, err)
 	}
-	teamChat, err := create("eng", ObjectiveOwner{Type: OwnerTypeTeam, ID: "eng"}, "")
+	teamChat, err := create("eng", models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "eng"}, "")
 	if err != nil || teamChat.SpaceID != work.ID {
 		t.Fatalf("team space: %+v %v", teamChat, err)
 	}
-	if _, err := create("missing", finn, "missing"); !errors.Is(err, ErrSpaceNotFound) {
+	if _, err := create("missing", finn, "missing"); !errors.Is(err, models.ErrSpaceNotFound) {
 		t.Fatalf("unknown space: %v", err)
 	}
 	if replay, err := create("finn-work", finn, ""); err != nil || replay.ID != inWork.ID {
 		t.Fatalf("replay without space: %+v %v", replay, err)
 	}
-	if _, err := create("finn-work", finn, home.ID); !errors.Is(err, ErrMessageConflict) {
+	if _, err := create("finn-work", finn, home.ID); !errors.Is(err, models.ErrMessageConflict) {
 		t.Fatalf("replay with another space: %v", err)
 	}
 	if stored, err := conversations.GetConversation(ctx, scope, inWork.ID); err != nil || stored.SpaceID != work.ID {
@@ -167,7 +168,7 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	assertSpaceConversations(t, conversations, scope, work.ID, inWork.ID, teamChat.ID)
 	inSpace := func(spaceID string) int {
 		t.Helper()
-		listed, err := conversations.ListConversations(ctx, ConversationFilter{Scope: scope, SpaceID: spaceID})
+		listed, err := conversations.ListConversations(ctx, models.ConversationFilter{Scope: scope, SpaceID: spaceID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -178,8 +179,8 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 		spaceIDs []string
 		want     int
 	}{{[]string{work.ID}, 2}, {[]string{home.ID, "missing"}, inSpace(home.ID)}, {[]string{work.ID, home.ID}, 2 + inSpace(home.ID)}, {[]string{}, 0}, {nil, all}} {
-		listed, err := conversations.ListConversations(ctx, ConversationFilter{Scope: scope, SpaceIDs: test.spaceIDs})
-		if err != nil || len(listed) != test.want || (test.spaceIDs != nil && slices.ContainsFunc(listed, func(c *Conversation) bool { return !slices.Contains(test.spaceIDs, c.SpaceID) })) {
+		listed, err := conversations.ListConversations(ctx, models.ConversationFilter{Scope: scope, SpaceIDs: test.spaceIDs})
+		if err != nil || len(listed) != test.want || (test.spaceIDs != nil && slices.ContainsFunc(listed, func(c *models.Conversation) bool { return !slices.Contains(test.spaceIDs, c.SpaceID) })) {
 			t.Fatalf("SpaceIDs %v listed %d, err = %v; want %d", test.spaceIDs, len(listed), err, test.want)
 		}
 	}
@@ -190,16 +191,16 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 		t.Fatalf("update keeps space: %+v %v", updated, err)
 	}
 
-	if err := spaces.DeleteSpace(ctx, scope, defaultSpace.ID); !errors.Is(err, ErrDefaultSpaceProtected) {
+	if err := spaces.DeleteSpace(ctx, scope, defaultSpace.ID); !errors.Is(err, models.ErrDefaultSpaceProtected) {
 		t.Fatalf("delete defaultSpace: %v", err)
 	}
 	if err := spaces.DeleteSpace(ctx, scope, work.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := spaces.DeleteSpace(ctx, scope, work.ID); !errors.Is(err, ErrSpaceNotFound) {
+	if err := spaces.DeleteSpace(ctx, scope, work.ID); !errors.Is(err, models.ErrSpaceNotFound) {
 		t.Fatalf("delete twice: %v", err)
 	}
-	if _, err := spaces.ListSpaceMembers(ctx, scope, work.ID); !errors.Is(err, ErrSpaceNotFound) {
+	if _, err := spaces.ListSpaceMembers(ctx, scope, work.ID); !errors.Is(err, models.ErrSpaceNotFound) {
 		t.Fatalf("members of deleted space: %v", err)
 	}
 	assertSpaceConversations(t, conversations, scope, work.ID)
@@ -217,53 +218,53 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	if homeMembers, err := spaces.ListSpaceMembers(ctx, scope, home.ID); err != nil || len(homeMembers) != 1 || homeMembers[0].ID != "finn" {
 		t.Fatalf("home members = %+v, err = %v", homeMembers, err)
 	}
-	if err := spaces.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{Scope: scope, SpaceID: home.ID, Type: SpaceMemberAgent, MemberID: "finn"}); err != nil {
+	if err := spaces.DeleteSpaceMember(ctx, portfolio.DeleteSpaceMemberRequest{Scope: scope, SpaceID: home.ID, Type: models.SpaceMemberAgent, MemberID: "finn"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := spaces.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{Scope: scope, SpaceID: home.ID, Type: SpaceMemberAgent, MemberID: "finn"}); err != nil {
+	if err := spaces.DeleteSpaceMember(ctx, portfolio.DeleteSpaceMemberRequest{Scope: scope, SpaceID: home.ID, Type: models.SpaceMemberAgent, MemberID: "finn"}); err != nil {
 		t.Fatalf("delete absent member: %v", err)
 	}
 	if homeMembers, err := spaces.ListSpaceMembers(ctx, scope, home.ID); err != nil || len(homeMembers) != 0 {
 		t.Fatalf("home members after delete = %+v, err = %v", homeMembers, err)
 	}
 
-	placed, err := spaces.EnsureMemberHasSpace(ctx, scope, owner, SpaceMemberAgent, "fresh")
+	placed, err := spaces.EnsureMemberHasSpace(ctx, scope, owner, models.SpaceMemberAgent, "fresh")
 	if err != nil || placed == nil || placed.SpaceID != defaultSpace.ID || placed.Position != 2 {
 		t.Fatalf("fresh deployment placed = %+v, err = %v", placed, err)
 	}
 	for _, id := range []string{"fresh", "eng"} {
-		memberType := SpaceMemberAgent
+		memberType := models.SpaceMemberAgent
 		if id == "eng" {
-			memberType = SpaceMemberTeam
+			memberType = models.SpaceMemberTeam
 		}
 		if again, err := spaces.EnsureMemberHasSpace(ctx, scope, owner, memberType, id); err != nil || again != nil {
 			t.Fatalf("%s placed again = %+v, err = %v", id, again, err)
 		}
 	}
 	// "finn" is no longer in any space after its removal from home.
-	if placed, err := spaces.EnsureMemberHasSpace(ctx, scope, owner, SpaceMemberAgent, "finn"); err != nil || placed == nil || placed.SpaceID != defaultSpace.ID {
+	if placed, err := spaces.EnsureMemberHasSpace(ctx, scope, owner, models.SpaceMemberAgent, "finn"); err != nil || placed == nil || placed.SpaceID != defaultSpace.ID {
 		t.Fatalf("finn placed = %+v, err = %v", placed, err)
 	}
-	freshScope := Scope{Kind: scope.Kind, ID: scope.ID + "-fresh"}
+	freshScope := models.Scope{Kind: scope.Kind, ID: scope.ID + "-fresh"}
 	// A default space is the owner's in one scope only: placement in another
 	// scope finds none and creates none.
-	if placed, err := spaces.EnsureMemberHasSpace(ctx, freshScope, owner, SpaceMemberTeam, "crew"); !errors.Is(err, ErrNoDefaultSpace) || placed != nil {
+	if placed, err := spaces.EnsureMemberHasSpace(ctx, freshScope, owner, models.SpaceMemberTeam, "crew"); !errors.Is(err, models.ErrNoDefaultSpace) || placed != nil {
 		t.Fatalf("placement without a default space = %+v, err = %v", placed, err)
 	}
 	if freshSpaces, err := spaces.ListSpaces(ctx, freshScope); err != nil || len(freshSpaces) != 0 {
 		t.Fatalf("fresh scope = %+v, err = %v", freshSpaces, err)
 	}
 
-	other := Scope{Kind: scope.Kind, ID: scope.ID + "-other"}
+	other := models.Scope{Kind: scope.Kind, ID: scope.ID + "-other"}
 	if otherSpaces, err := spaces.ListSpaces(ctx, other); err != nil || len(otherSpaces) != 0 {
 		t.Fatalf("other scope = %+v, err = %v", otherSpaces, err)
 	}
-	if _, err := spaces.GetSpace(ctx, other, home.ID); !errors.Is(err, ErrSpaceNotFound) {
+	if _, err := spaces.GetSpace(ctx, other, home.ID); !errors.Is(err, models.ErrSpaceNotFound) {
 		t.Fatalf("cross-scope get: %v", err)
 	}
 }
 
-func assertSpaceOrder(t *testing.T, spaces *SpaceService, scope Scope, ids ...string) {
+func assertSpaceOrder(t *testing.T, spaces *portfolio.SpaceService, scope models.Scope, ids ...string) {
 	t.Helper()
 	listed, err := spaces.ListSpaces(context.Background(), scope)
 	if err != nil || len(listed) != len(ids) {
@@ -276,9 +277,9 @@ func assertSpaceOrder(t *testing.T, spaces *SpaceService, scope Scope, ids ...st
 	}
 }
 
-func assertSpaceConversations(t *testing.T, conversations *conversation.ConversationService, scope Scope, spaceID string, ids ...string) {
+func assertSpaceConversations(t *testing.T, conversations *conversation.ConversationService, scope models.Scope, spaceID string, ids ...string) {
 	t.Helper()
-	listed, err := conversations.ListConversations(context.Background(), ConversationFilter{Scope: scope, SpaceID: spaceID})
+	listed, err := conversations.ListConversations(context.Background(), models.ConversationFilter{Scope: scope, SpaceID: spaceID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,12 +306,12 @@ func TestSQLiteSpacesBackfillExistingData(t *testing.T) {
 	}
 	sqlDB := openTestSQLiteDB(t, path)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "legacy"}
-	agentOnly := Scope{Kind: "tenant", ID: "agents-only"}
+	scope := models.Scope{Kind: "tenant", ID: "legacy"}
+	agentOnly := models.Scope{Kind: "tenant", ID: "agents-only"}
 	// The conversation needs a space to be created; the rewind below drops it.
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -357,13 +358,13 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	}
 	sqlDB := openTestSQLiteDB(t, path)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "renamed"}
+	scope := models.Scope{Kind: "tenant", ID: "renamed"}
 	seeded := seedTestSpace(t, store, scope)
-	if _, _, err := store.PutSpaceMember(ctx, scope, &SpaceMember{SpaceID: seeded.ID, Type: SpaceMemberAgent, ID: "helper", AddedAt: time.Now().UTC()}); err != nil {
+	if _, _, err := store.PutSpaceMember(ctx, scope, &models.SpaceMember{SpaceID: seeded.ID, Type: models.SpaceMemberAgent, ID: "helper", AddedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -396,7 +397,7 @@ func TestSQLiteMigratesPersonalSpaceToDefault(t *testing.T) {
 	t.Cleanup(func() { _ = reopened.Close() })
 	listed, err := reopened.ListSpaces(ctx, scope)
 	if err != nil || len(listed) != 1 || listed[0].ID != newID || !listed[0].IsDefault || listed[0].Name != "Shared" ||
-		listed[0].Access != SpaceAccessEveryone || listed[0].OwnerID != storetest.LegacyDefaultSpaceOwner {
+		listed[0].Access != models.SpaceAccessEveryone || listed[0].OwnerID != storetest.LegacyDefaultSpaceOwner {
 		t.Fatalf("spaces = %+v, err = %v", listed, err)
 	}
 	members, err := reopened.ListSpaceMembers(ctx, scope, newID)

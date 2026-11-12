@@ -8,24 +8,25 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 func TestCreateAgentRunInitializesDurableQueueMetadata(t *testing.T) {
 	store := newTestKernelStore(t)
 	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
-	service := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	service := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	available := now.Add(time.Hour)
 	deadline := now.Add(2 * time.Hour)
-	run, err := service.CreateAgentRun(context.Background(), CreateAgentRunRequest{
-		Scope: Scope{Kind: "local", ID: "test"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
-		AssignedAgentID: "agent", Goal: "scheduled work", Source: RunSourceSchedule,
+	run, err := service.CreateAgentRun(context.Background(), models.CreateAgentRunRequest{
+		Scope: models.Scope{Kind: "local", ID: "test"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
+		AssignedAgentID: "agent", Goal: "scheduled work", Source: models.RunSourceSchedule,
 		AvailableAt: &available, Deadline: &deadline,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != AgentRunStatusQueued || !run.AvailableAt.Equal(available) || !run.QueueEnteredAt.Equal(now) ||
+	if run.Status != models.AgentRunStatusQueued || !run.AvailableAt.Equal(available) || !run.QueueEnteredAt.Equal(now) ||
 		run.Deadline == nil || !run.Deadline.Equal(deadline) || run.Revision != 1 {
 		t.Fatalf("unexpected queued run: %#v", run)
 	}
@@ -34,9 +35,9 @@ func TestCreateAgentRunInitializesDurableQueueMetadata(t *testing.T) {
 func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T) {
 	for _, testCase := range []struct {
 		name string
-		open func(*testing.T) (KernelStore, func())
+		open func(*testing.T) (models.KernelStore, func())
 	}{
-		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "portfolio-capacity.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -48,34 +49,34 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 			store, closeStore := testCase.open(t)
 			defer closeStore()
 			ctx := t.Context()
-			scope := Scope{Kind: "tenant", ID: "portfolio-capacity-" + testCase.name}
+			scope := models.Scope{Kind: "tenant", ID: "portfolio-capacity-" + testCase.name}
 			now := time.Date(2026, 8, 7, 4, 0, 0, 0, time.UTC)
-			portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-			team := ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}
-			otherTeam := ObjectiveOwner{Type: OwnerTypeTeam, ID: "support-team"}
-			objectiveA, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: scope, Owner: team, Title: "Market research", Goal: "Track the market", Status: ObjectiveStatusActive,
+			portfolio := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			team := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research-team"}
+			otherTeam := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "support-team"}
+			objectiveA, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+				Scope: scope, Owner: team, Title: "Market research", Goal: "Track the market", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			objectiveB, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: scope, Owner: team, Title: "Lead follow-up", Goal: "Follow up with leads", Status: ObjectiveStatusActive,
+			objectiveB, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+				Scope: scope, Owner: team, Title: "Lead follow-up", Goal: "Follow up with leads", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			objectiveC, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: scope, Owner: otherTeam, Title: "Support", Goal: "Handle customer questions", Status: ObjectiveStatusActive,
+			objectiveC, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+				Scope: scope, Owner: otherTeam, Title: "Support", Goal: "Handle customer questions", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			create := func(objective *Objective, agent string, priority int) *AgentRun {
+			create := func(objective *models.Objective, agent string, priority int) *models.AgentRun {
 				t.Helper()
-				run, createErr := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+				run, createErr := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 					Scope: scope, ObjectiveID: objective.ID, Owner: objective.Owner, AssignedAgentID: agent,
-					Goal: "Work on " + objective.Title, Source: RunSourceObjective, Priority: priority,
+					Goal: "Work on " + objective.Title, Source: models.RunSourceObjective, Priority: priority,
 				})
 				if createErr != nil {
 					t.Fatal(createErr)
@@ -87,7 +88,7 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 			create(objectiveB, "researcher-three", 8)
 			firstC := create(objectiveC, "supporter", 1)
 
-			ownerClaim := AgentRunClaim{
+			ownerClaim := models.AgentRunClaim{
 				Scope: scope, WorkerID: "owner-worker-one", Now: now, LeaseDuration: time.Minute,
 				AgingInterval: time.Minute, MaxActiveForOwner: 1,
 			}
@@ -101,26 +102,26 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 				t.Fatalf("independent owner claim = %#v, %v", claimed, err)
 			}
 
-			objectiveScope := Scope{Kind: "tenant", ID: "objective-capacity-" + testCase.name}
-			objectivePortfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-			objectiveOwner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}
-			left, err := objectivePortfolio.CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: objectiveScope, Owner: objectiveOwner, Title: "Release", Goal: "Release safely", Status: ObjectiveStatusActive,
+			objectiveScope := models.Scope{Kind: "tenant", ID: "objective-capacity-" + testCase.name}
+			objectivePortfolio := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			objectiveOwner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}
+			left, err := objectivePortfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+				Scope: objectiveScope, Owner: objectiveOwner, Title: "Release", Goal: "Release safely", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			right, err := objectivePortfolio.CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: objectiveScope, Owner: objectiveOwner, Title: "Documentation", Goal: "Publish docs", Status: ObjectiveStatusActive,
+			right, err := objectivePortfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+				Scope: objectiveScope, Owner: objectiveOwner, Title: "Documentation", Goal: "Publish docs", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			createObjectiveRun := func(objective *Objective, agent string, priority int) *AgentRun {
+			createObjectiveRun := func(objective *models.Objective, agent string, priority int) *models.AgentRun {
 				t.Helper()
-				run, createErr := objectivePortfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+				run, createErr := objectivePortfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 					Scope: objectiveScope, ObjectiveID: objective.ID, Owner: objective.Owner, AssignedAgentID: agent,
-					Goal: "Work on " + objective.Title, Source: RunSourceObjective, Priority: priority,
+					Goal: "Work on " + objective.Title, Source: models.RunSourceObjective, Priority: priority,
 				})
 				if createErr != nil {
 					t.Fatal(createErr)
@@ -130,7 +131,7 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 			leftFirst := createObjectiveRun(left, "developer-one", 10)
 			createObjectiveRun(left, "developer-two", 9)
 			rightFirst := createObjectiveRun(right, "writer", 1)
-			objectiveClaim := AgentRunClaim{
+			objectiveClaim := models.AgentRunClaim{
 				Scope: objectiveScope, WorkerID: "objective-worker-one", Now: now, LeaseDuration: time.Minute,
 				AgingInterval: time.Minute, MaxActiveForObjective: 1,
 			}
@@ -150,9 +151,9 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
 	for _, testCase := range []struct {
 		name string
-		open func(*testing.T) (KernelStore, func())
+		open func(*testing.T) (models.KernelStore, func())
 	}{
-		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objective-policy.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -164,28 +165,28 @@ func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
 			store, closeStore := testCase.open(t)
 			defer closeStore()
 			ctx := t.Context()
-			scope := Scope{Kind: "tenant", ID: "objective-policy-" + testCase.name}
-			owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "portfolio-team"}
+			scope := models.Scope{Kind: "tenant", ID: "objective-policy-" + testCase.name}
+			owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "portfolio-team"}
 			now := time.Date(2026, 8, 7, 8, 0, 0, 0, time.UTC)
-			portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-			limited, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: scope, Owner: owner, Title: "Primary", Goal: "Ship primary work", Status: ObjectiveStatusActive,
-				ExecutionPolicy: &ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
+			portfolio := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			limited, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Primary", Goal: "Ship primary work", Status: models.ObjectiveStatusActive,
+				ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			independent, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: scope, Owner: owner, Title: "Independent", Goal: "Keep independent work moving", Status: ObjectiveStatusActive,
+			independent, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Independent", Goal: "Keep independent work moving", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			create := func(objective *Objective, agent string, priority int) *AgentRun {
+			create := func(objective *models.Objective, agent string, priority int) *models.AgentRun {
 				t.Helper()
-				run, createErr := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+				run, createErr := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 					Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: agent,
-					Goal: "Work on " + objective.Title, Source: RunSourceObjective, Priority: priority,
+					Goal: "Work on " + objective.Title, Source: models.RunSourceObjective, Priority: priority,
 				})
 				if createErr != nil {
 					t.Fatal(createErr)
@@ -195,7 +196,7 @@ func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
 			first := create(limited, "agent-one", 10)
 			second := create(limited, "agent-two", 9)
 			other := create(independent, "agent-three", 1)
-			claim := AgentRunClaim{Scope: scope, WorkerID: "worker-one", Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute}
+			claim := models.AgentRunClaim{Scope: scope, WorkerID: "worker-one", Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute}
 			claimed, err := store.ClaimNextAgentRun(ctx, claim)
 			if err != nil || claimed == nil || claimed.ID != first.ID {
 				t.Fatalf("first claim = %#v, %v", claimed, err)
@@ -206,9 +207,9 @@ func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
 				t.Fatalf("policy did not backpressure the second Objective Run: %#v, %v", claimed, err)
 			}
 
-			limited, err = portfolio.UpdateObjective(ctx, scope, limited.ID, UpdateObjectiveRequest{
+			limited, err = portfolio.UpdateObjective(ctx, scope, limited.ID, runtimeportfolio.UpdateObjectiveRequest{
 				ExpectedRevision: limited.Revision,
-				ExecutionPolicy:  &ObjectiveExecutionPolicy{MaximumConcurrentRuns: 2},
+				ExecutionPolicy:  &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 2},
 				Summary:          "Increase Objective concurrency",
 			})
 			if err != nil || limited.ExecutionPolicy.MaximumConcurrentRuns != 2 {
@@ -226,9 +227,9 @@ func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
 func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T) {
 	for _, testCase := range []struct {
 		name string
-		open func(*testing.T) (KernelStore, func())
+		open func(*testing.T) (models.KernelStore, func())
 	}{
-		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "admission-decision.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -241,21 +242,21 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 			defer closeStore()
 			ctx := t.Context()
 			now := time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC)
-			scope := Scope{Kind: "tenant", ID: "admission-decision-" + testCase.name}
-			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "autonomous-agent"}
-			portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-			objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: scope, Owner: owner, Title: "Bounded", Goal: "Run serially", Status: ObjectiveStatusActive,
-				ExecutionPolicy: &ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
+			scope := models.Scope{Kind: "tenant", ID: "admission-decision-" + testCase.name}
+			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "autonomous-agent"}
+			portfolio := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Bounded", Goal: "Run serially", Status: models.ObjectiveStatusActive,
+				ExecutionPolicy: &models.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			firstRunID := ""
 			for _, suffix := range []string{"one", "two"} {
-				run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+				run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 					Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: "agent-" + suffix,
-					Goal: "Bounded work " + suffix, Source: RunSourceObjective,
+					Goal: "Bounded work " + suffix, Source: models.RunSourceObjective,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -266,23 +267,23 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 			}
 			scheduler := agentrun.NewAgentRunScheduler(store, models.WithClock(func() time.Time { return now }))
 			inspection, err := scheduler.Inspect(ctx, agentrun.AgentRunClaimRequest{Scope: scope})
-			if err != nil || inspection == nil || inspection.Outcome != AgentRunAdmissionReady || inspection.Run == nil {
+			if err != nil || inspection == nil || inspection.Outcome != models.AgentRunAdmissionReady || inspection.Run == nil {
 				t.Fatalf("ready inspection = %#v, %v", inspection, err)
 			}
 			stillQueued, err := portfolio.GetAgentRun(ctx, scope, firstRunID)
-			if err != nil || stillQueued.Status != AgentRunStatusQueued || stillQueued.LeaseOwner != "" {
+			if err != nil || stillQueued.Status != models.AgentRunStatusQueued || stillQueued.LeaseOwner != "" {
 				t.Fatalf("inspection acquired authority: %#v, %v", stillQueued, err)
 			}
 			if run, err := scheduler.ClaimNext(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour}); err != nil || run == nil {
 				t.Fatalf("initial claim = %#v, %v", run, err)
 			}
 			decision, err := scheduler.ClaimNextDecision(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
-			if err != nil || decision == nil || decision.Outcome != AgentRunAdmissionBackpressured || decision.Run != nil {
+			if err != nil || decision == nil || decision.Outcome != models.AgentRunAdmissionBackpressured || decision.Run != nil {
 				t.Fatalf("backpressure decision = %#v, %v", decision, err)
 			}
 			found := false
 			for _, block := range decision.Blocks {
-				if block.Reason == AgentRunAdmissionReasonObjectiveCapacity && block.ObjectiveID == objective.ID && block.Active == 1 && block.Limit == 1 {
+				if block.Reason == models.AgentRunAdmissionReasonObjectiveCapacity && block.ObjectiveID == objective.ID && block.Active == 1 && block.Limit == 1 {
 					found = true
 				}
 			}
@@ -296,9 +297,9 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 	for _, testCase := range []struct {
 		name string
-		open func(*testing.T) (KernelStore, func())
+		open func(*testing.T) (models.KernelStore, func())
 	}{
-		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "objective-resources.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -311,21 +312,21 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 			defer closeStore()
 			ctx := t.Context()
 			now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.UTC)
-			scope := Scope{Kind: "tenant", ID: "objective-resources-" + testCase.name}
-			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "research-agent"}
-			portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-			objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: scope, Owner: owner, Title: "Browser research", Goal: "Research without sharing sessions", Status: ObjectiveStatusActive,
-				ExecutionPolicy: &ObjectiveExecutionPolicy{ResourceCapacities: map[string]int{"browser": 1}},
+			scope := models.Scope{Kind: "tenant", ID: "objective-resources-" + testCase.name}
+			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "research-agent"}
+			portfolio := runtimeportfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+			objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Browser research", Goal: "Research without sharing sessions", Status: models.ObjectiveStatusActive,
+				ExecutionPolicy: &models.ObjectiveExecutionPolicy{ResourceCapacities: map[string]int{"browser": 1}},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			var runIDs []string
 			for _, agentID := range []string{"researcher-one", "researcher-two"} {
-				run, createErr := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+				run, createErr := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 					Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: agentID,
-					Goal: "Browse independently", Source: RunSourceObjective, ResourceRequirements: map[string]int{"browser": 1},
+					Goal: "Browse independently", Source: models.RunSourceObjective, ResourceRequirements: map[string]int{"browser": 1},
 				})
 				if createErr != nil {
 					t.Fatal(createErr)
@@ -342,12 +343,12 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 				queuedRunID = runIDs[1]
 			}
 			decision, err := scheduler.ClaimNextDecision(ctx, agentrun.AgentRunClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
-			if err != nil || decision == nil || decision.Outcome != AgentRunAdmissionBackpressured || decision.Run != nil {
+			if err != nil || decision == nil || decision.Outcome != models.AgentRunAdmissionBackpressured || decision.Run != nil {
 				t.Fatalf("resource admission decision = %#v, %v", decision, err)
 			}
 			found := false
 			for _, block := range decision.Blocks {
-				if block.RunID == queuedRunID && block.Reason == AgentRunAdmissionReasonResourceCapacity && block.Resource == "browser" &&
+				if block.RunID == queuedRunID && block.Reason == models.AgentRunAdmissionReasonResourceCapacity && block.Resource == "browser" &&
 					block.Requested == 1 && block.Reserved == 1 && block.Capacity == 1 {
 					found = true
 				}
@@ -355,9 +356,9 @@ func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
 			if !found || decision.NextWakeAt == nil || !decision.NextWakeAt.Equal(now.Add(time.Hour)) {
 				t.Fatalf("resource decision lacks evidence or wake: %#v", decision)
 			}
-			objective, err = portfolio.UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{
+			objective, err = portfolio.UpdateObjective(ctx, scope, objective.ID, runtimeportfolio.UpdateObjectiveRequest{
 				ExpectedRevision: objective.Revision,
-				ExecutionPolicy:  &ObjectiveExecutionPolicy{ResourceCapacities: map[string]int{"browser": 2}},
+				ExecutionPolicy:  &models.ObjectiveExecutionPolicy{ResourceCapacities: map[string]int{"browser": 2}},
 				Summary:          "Increase browser capacity",
 			})
 			if err != nil {

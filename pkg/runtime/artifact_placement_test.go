@@ -17,21 +17,21 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-type placementRuns map[string]*AgentRun
+type placementRuns map[string]*models.AgentRun
 
-func (r placementRuns) GetAgentRun(_ context.Context, _ Scope, runID string) (*AgentRun, error) {
+func (r placementRuns) GetAgentRun(_ context.Context, _ models.Scope, runID string) (*models.AgentRun, error) {
 	if run := r[runID]; run != nil {
 		return run, nil
 	}
-	return nil, ErrRunNotFound
+	return nil, models.ErrRunNotFound
 }
 
 type placementConversations struct {
-	byID map[string]*Conversation
+	byID map[string]*models.Conversation
 	err  error
 }
 
-func (c placementConversations) GetConversation(_ context.Context, _ Scope, conversationID string) (*Conversation, error) {
+func (c placementConversations) GetConversation(_ context.Context, _ models.Scope, conversationID string) (*models.Conversation, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
@@ -45,12 +45,12 @@ func TestArtifactCatalogRecordsTheChatAndSpaceAnArtifactWasMadeIn(t *testing.T) 
 		"run-delegate": {ID: "run-delegate", RootRunID: "run-chat"},
 		"run-schedule": {ID: "run-schedule", RootRunID: "run-schedule"},
 	}
-	conversations := placementConversations{byID: map[string]*Conversation{
+	conversations := placementConversations{byID: map[string]*models.Conversation{
 		"chat-sales":  {ID: "chat-sales", SpaceID: "space-sales"},
 		"chat-design": {ID: "chat-design", SpaceID: "space-design"},
 	}}
 	catalog := artifactcatalog.NewArtifactCatalog(newTestKernelStore(t)).WithPlacement(artifactcatalog.ArtifactPlacement{Runs: runs, Conversations: conversations})
-	register := func(id string, mutate func(*Artifact)) ArtifactProvenance {
+	register := func(id string, mutate func(*models.Artifact)) models.ArtifactProvenance {
 		t.Helper()
 		artifact := validCatalogArtifact(id, 1)
 		mutate(artifact)
@@ -63,24 +63,24 @@ func TestArtifactCatalogRecordsTheChatAndSpaceAnArtifactWasMadeIn(t *testing.T) 
 
 	tests := []struct {
 		name             string
-		mutate           func(*Artifact)
+		mutate           func(*models.Artifact)
 		wantConversation string
 		wantSpace        string
 	}{
-		{name: "chat run", mutate: func(a *Artifact) { a.Provenance.RunID = "run-chat" }, wantConversation: "chat-sales", wantSpace: "space-sales"},
-		{name: "delegated run uses its root chat", mutate: func(a *Artifact) { a.Provenance.RunID = "run-delegate" }, wantConversation: "chat-sales", wantSpace: "space-sales"},
-		{name: "app keeps its chat in metadata", mutate: func(a *Artifact) {
+		{name: "chat run", mutate: func(a *models.Artifact) { a.Provenance.RunID = "run-chat" }, wantConversation: "chat-sales", wantSpace: "space-sales"},
+		{name: "delegated run uses its root chat", mutate: func(a *models.Artifact) { a.Provenance.RunID = "run-delegate" }, wantConversation: "chat-sales", wantSpace: "space-sales"},
+		{name: "app keeps its chat in metadata", mutate: func(a *models.Artifact) {
 			a.Provenance.RunID = ""
 			a.MetadataSchema = nil
 			a.Metadata = map[string]interface{}{"conversationId": "chat-design"}
 		}, wantConversation: "chat-design", wantSpace: "space-design"},
-		{name: "explicit chat is kept", mutate: func(a *Artifact) {
+		{name: "explicit chat is kept", mutate: func(a *models.Artifact) {
 			a.Provenance.RunID = "run-chat"
 			a.Provenance.ConversationID = " chat-design "
 		}, wantConversation: "chat-design", wantSpace: "space-design"},
-		{name: "run outside a chat", mutate: func(a *Artifact) { a.Provenance.RunID = "run-schedule" }},
-		{name: "run that no longer exists", mutate: func(a *Artifact) { a.Provenance.RunID = "run-gone" }},
-		{name: "chat that no longer exists", mutate: func(a *Artifact) {
+		{name: "run outside a chat", mutate: func(a *models.Artifact) { a.Provenance.RunID = "run-schedule" }},
+		{name: "run that no longer exists", mutate: func(a *models.Artifact) { a.Provenance.RunID = "run-gone" }},
+		{name: "chat that no longer exists", mutate: func(a *models.Artifact) {
 			a.Provenance.RunID = ""
 			a.Provenance.ConversationID = "chat-gone"
 		}, wantConversation: "chat-gone"},
@@ -94,7 +94,7 @@ func TestArtifactCatalogRecordsTheChatAndSpaceAnArtifactWasMadeIn(t *testing.T) 
 		})
 	}
 
-	stored, err := catalog.Get(ctx, Scope{Kind: "tenant", ID: "one"}, "placed-0", 1)
+	stored, err := catalog.Get(ctx, models.Scope{Kind: "tenant", ID: "one"}, "placed-0", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,8 +159,8 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	scope := Scope{Kind: "tenant", ID: "one"}
-	listAll := func(catalog *artifactcatalog.ArtifactCatalog, filter ArtifactFilter) []string {
+	scope := models.Scope{Kind: "tenant", ID: "one"}
+	listAll := func(catalog *artifactcatalog.ArtifactCatalog, filter models.ArtifactFilter) []string {
 		t.Helper()
 		var ids []string
 		for filter.Offset = 0; ; filter.Offset += filter.Limit {
@@ -177,15 +177,15 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 		}
 	}
 	tests := []struct {
-		filter ArtifactFilter
+		filter models.ArtifactFilter
 		want   int
 	}{
-		{filter: ArtifactFilter{Scope: scope, LatestOnly: true, Limit: 7}, want: 90},
-		{filter: ArtifactFilter{Scope: scope, SpaceID: " space-sales ", LatestOnly: true, Limit: 7}, want: 29},
-		{filter: ArtifactFilter{Scope: scope, SpaceID: "space-design", LatestOnly: true, Limit: 7}, want: 31},
-		{filter: ArtifactFilter{Scope: scope, SpaceID: "space-sales", Limit: 7}, want: 30},
-		{filter: ArtifactFilter{Scope: scope, ConversationID: "chat-sales-0", SpaceID: "space-sales", LatestOnly: true, Limit: 4}, want: 15},
-		{filter: ArtifactFilter{Scope: scope, SpaceID: "space-unknown", LatestOnly: true, Limit: 7}, want: 0},
+		{filter: models.ArtifactFilter{Scope: scope, LatestOnly: true, Limit: 7}, want: 90},
+		{filter: models.ArtifactFilter{Scope: scope, SpaceID: " space-sales ", LatestOnly: true, Limit: 7}, want: 29},
+		{filter: models.ArtifactFilter{Scope: scope, SpaceID: "space-design", LatestOnly: true, Limit: 7}, want: 31},
+		{filter: models.ArtifactFilter{Scope: scope, SpaceID: "space-sales", Limit: 7}, want: 30},
+		{filter: models.ArtifactFilter{Scope: scope, ConversationID: "chat-sales-0", SpaceID: "space-sales", LatestOnly: true, Limit: 4}, want: 15},
+		{filter: models.ArtifactFilter{Scope: scope, SpaceID: "space-unknown", LatestOnly: true, Limit: 7}, want: 0},
 	}
 	for _, test := range tests {
 		pages := make([][]string, len(catalogs))
@@ -203,13 +203,13 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 
 func TestArtifactRejectsInvalidPlacementIdentifiers(t *testing.T) {
 	catalog := artifactcatalog.NewArtifactCatalog(newTestKernelStore(t))
-	for name, mutate := range map[string]func(*Artifact){
-		"conversation": func(a *Artifact) { a.Provenance.ConversationID = "chats/sales" },
-		"space":        func(a *Artifact) { a.Provenance.SpaceID = strings.Repeat("s", 129) },
+	for name, mutate := range map[string]func(*models.Artifact){
+		"conversation": func(a *models.Artifact) { a.Provenance.ConversationID = "chats/sales" },
+		"space":        func(a *models.Artifact) { a.Provenance.SpaceID = strings.Repeat("s", 129) },
 	} {
 		artifact := validCatalogArtifact("bad-"+name, 1)
 		mutate(artifact)
-		if _, err := catalog.Register(context.Background(), artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); !errors.Is(err, ErrInvalidArtifactRecord) {
+		if _, err := catalog.Register(context.Background(), artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); !errors.Is(err, models.ErrInvalidArtifactRecord) {
 			t.Fatalf("%s: error = %v", name, err)
 		}
 	}

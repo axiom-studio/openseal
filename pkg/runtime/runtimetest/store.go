@@ -6,14 +6,14 @@ package runtimetest
 import (
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
 // NewKernelStore returns an empty in-memory kernel store that is closed when
 // the test ends.
-func NewKernelStore(t testing.TB) *runtime.SQLiteStore {
+func NewKernelStore(t testing.TB) *sqlite.Store {
 	t.Helper()
-	store, err := runtime.NewInMemorySQLiteStore()
+	store, err := sqlite.NewInMemorySQLiteStore()
 	if err != nil {
 		t.Fatal(err)
 	}

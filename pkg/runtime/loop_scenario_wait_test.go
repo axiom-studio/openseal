@@ -19,6 +19,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
@@ -28,7 +29,7 @@ import (
 
 // waitCredentialRequestOutput is what request_credential returns for the
 // request it saved: the request's JSON under credentialRequest.
-func waitCredentialRequestOutput(request *CredentialRequest) (map[string]interface{}, error) {
+func waitCredentialRequestOutput(request *models.CredentialRequest) (map[string]interface{}, error) {
 	data, err := json.Marshal(request)
 	if err != nil {
 		return nil, err
@@ -62,7 +63,7 @@ func waitCardSkills(f *looptest.Fixture) {
 		}
 	}
 	bindings := []*skill.Binding{
-		{ID: "skills-binding", Scope: skillScope, DeploymentID: looptest.FixtureAgent, SkillID: SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion,
+		{ID: "skills-binding", Scope: skillScope, DeploymentID: looptest.FixtureAgent, SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion,
 			AllowedActions: []string{agentrun.SkillActionRequestCredential, agentrun.SkillActionRequestConnection}, MaximumRisk: skill.RiskLevelExternal, Revision: 1},
 		{ID: "mail-binding", Scope: skillScope, DeploymentID: looptest.FixtureAgent, SkillID: "mail", SkillVersion: "1.0.0",
 			AllowedActions: []string{"send_mail"}, MaximumRisk: skill.RiskLevelExternal, Revision: 1,
@@ -108,15 +109,15 @@ func waitTool(t *testing.T, v looptest.StepView, action string) string {
 func waitSettleCard(f *looptest.Fixture, runID, wakeType, requestID, actionCallID, instruction string) {
 	f.T.Helper()
 	run := f.MustRun(runID)
-	if run.Status != AgentRunStatusWaitingForEvent || run.WakeCondition == nil || run.WakeCondition.Type != wakeType || run.WakeCondition.Reference != requestID {
+	if run.Status != models.AgentRunStatusWaitingForEvent || run.WakeCondition == nil || run.WakeCondition.Type != wakeType || run.WakeCondition.Reference != requestID {
 		f.T.Fatalf("run %s = %s %#v, want waiting for %s %s", runID, run.Status, run.WakeCondition, wakeType, requestID)
 	}
-	actor := ActivityActor{Type: "service", ID: wakeType + "-coordinator"}
-	activity := NewRunActivityService(f.Store, f.Store, models.WithClock(f.Clock.Now))
-	if _, _, err := activity.TransitionRun(f.Ctx, f.Scope, runID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusQueued, Summary: "Received the card result; continuing",
+	actor := models.ActivityActor{Type: "service", ID: wakeType + "-coordinator"}
+	activity := runtimeactivity.NewRunActivityService(f.Store, f.Store, models.WithClock(f.Clock.Now))
+	if _, _, err := activity.TransitionRun(f.Ctx, f.Scope, runID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusQueued, Summary: "Received the card result; continuing",
 		EventType: "run.interaction_settled", Actor: actor, CorrelationID: requestID, CausationID: actionCallID,
-		Intervention: &AgentRunIntervention{ID: wakeType + "-result:" + requestID, Actor: actor, Instruction: instruction,
+		Intervention: &models.AgentRunIntervention{ID: wakeType + "-result:" + requestID, Actor: actor, Instruction: instruction,
 			CreatedAt: f.Clock.Now(), ActionCallID: actionCallID},
 	}); err != nil {
 		f.T.Fatalf("settle card %s: %v", requestID, err)
@@ -125,27 +126,27 @@ func waitSettleCard(f *looptest.Fixture, runID, wakeType, requestID, actionCallI
 
 // waitParked asserts the Run parked on wakeType with entry the tool entry
 // awaiting the event, the claim released, and returns the entry.
-func waitParked(f *looptest.Fixture, runID, tool, wakeType string) *SessionEntry {
+func waitParked(f *looptest.Fixture, runID, tool, wakeType string) *models.SessionEntry {
 	f.T.Helper()
 	run := f.MustRun(runID)
-	if run.Status != AgentRunStatusWaitingForEvent || run.WakeCondition == nil || run.WakeCondition.Type != wakeType {
+	if run.Status != models.AgentRunStatusWaitingForEvent || run.WakeCondition == nil || run.WakeCondition.Type != wakeType {
 		f.T.Fatalf("run %s = %s %#v (%#v), want waiting_for_event on %s; log %s", runID, run.Status, run.WakeCondition, run.FailureExplanation, wakeType, steerShape(f, runID))
 	}
 	if run.LeaseOwner != "" || run.LeaseExpiresAt != nil {
 		f.T.Fatalf("parked run %s still holds the claim: %q %v", runID, run.LeaseOwner, run.LeaseExpiresAt)
 	}
 	entries := convToolEntries(f, runID, tool)
-	if len(entries) != 1 || entries[0].State != ToolEntryAwaitingEvent {
+	if len(entries) != 1 || entries[0].State != models.ToolEntryAwaitingEvent {
 		f.T.Fatalf("%s entries = %#v, want one awaiting_event", tool, entries)
 	}
 	return entries[0]
 }
 
 // waitCompleted is the settled tool entry: completed, with its result text.
-func waitCompleted(f *looptest.Fixture, runID, tool string, index int) (*SessionEntry, string) {
+func waitCompleted(f *looptest.Fixture, runID, tool string, index int) (*models.SessionEntry, string) {
 	f.T.Helper()
 	entries := convToolEntries(f, runID, tool)
-	if len(entries) <= index || entries[index].State != ToolEntryCompleted || entries[index].Tool.Result == nil {
+	if len(entries) <= index || entries[index].State != models.ToolEntryCompleted || entries[index].Tool.Result == nil {
 		f.T.Fatalf("%s entries = %d, entry %d not completed: %#v", tool, len(entries), index, entries)
 	}
 	return entries[index], looptest.PartsText(entries[index].Tool.Result.Content)
@@ -153,12 +154,12 @@ func waitCompleted(f *looptest.Fixture, runID, tool string, index int) (*Session
 
 // waitCardRules: step 1 opens the card, the step that sees the card's
 // outcome answers with it.
-func waitCardRules(t *testing.T, tool string, open func(v looptest.StepView) ModelStepResult) []*looptest.ModelRule {
+func waitCardRules(t *testing.T, tool string, open func(v looptest.StepView) models.ModelStepResult) []*looptest.ModelRule {
 	return []*looptest.ModelRule{
 		{Name: "open card", Times: 1, Reply: open},
-		{Name: "answer", Reply: func(v looptest.StepView) ModelStepResult {
+		{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
 			for _, e := range v.ToolResultsSinceUser() {
-				if strings.HasSuffix(e.Tool.Name, tool) && e.Tool.State == ToolEntryCompleted {
+				if strings.HasSuffix(e.Tool.Name, tool) && e.Tool.State == models.ToolEntryCompleted {
 					return looptest.FinalAnswer(map[string]any{"answer": "Done after the card: " + looptest.PartsText(e.Tool.Result.Content)})
 				}
 			}
@@ -174,23 +175,23 @@ func waitCardRules(t *testing.T, tool string, open func(v looptest.StepView) Mod
 // card.
 func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 	t.Run("request_credential", func(t *testing.T) {
-		looptest.EachStore(t, "wait-credential", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "wait-credential", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store)
 			waitCardSkills(f)
 			f.Dispatch.On(agentrun.SkillActionRequestCredential, func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
-				conversationID, _ := in.Run.Context[conversationRunContextConversationID].(string)
-				triggerID, _ := in.Run.Context[conversationRunContextTriggerID].(string)
+				conversationID, _ := in.Run.Context[models.ConversationRunConversationIDContextKey].(string)
+				triggerID, _ := in.Run.Context[models.ConversationRunTriggerIDContextKey].(string)
 				now := f.Clock.Now()
-				request := &CredentialRequest{ID: "credential-request:" + in.Call.ID, Scope: in.Run.Scope, Owner: in.Run.Owner, DeploymentID: in.Run.Owner.ID,
+				request := &models.CredentialRequest{ID: "credential-request:" + in.Call.ID, Scope: in.Run.Scope, Owner: in.Run.Owner, DeploymentID: in.Run.Owner.ID,
 					AgentID: in.Run.AssignedAgentID, ConversationID: conversationID, TriggerMessageID: triggerID, RunID: in.Run.ID, ActionCallID: in.Call.ID,
-					Kind: CredentialRequestKindPaymentCard, Reason: "Add your card so I can pay", Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
-				if err := f.Raw.(CredentialRequestStore).SaveCredentialRequest(f.Ctx, request, 0); err != nil {
+					Kind: models.CredentialRequestKindPaymentCard, Reason: "Add your card so I can pay", Status: models.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
+				if err := f.Raw.(models.CredentialRequestStore).SaveCredentialRequest(f.Ctx, request, 0); err != nil {
 					return nil, err
 				}
 				return waitCredentialRequestOutput(request)
 			})
-			f.Model.Add(waitCardRules(t, agentrun.SkillActionRequestCredential, func(v looptest.StepView) ModelStepResult {
-				return looptest.Act("I need your card.", looptest.Call(waitTool(t, v, agentrun.SkillActionRequestCredential), map[string]any{"kind": CredentialRequestKindPaymentCard, "reason": "Add your card so I can pay"}))
+			f.Model.Add(waitCardRules(t, agentrun.SkillActionRequestCredential, func(v looptest.StepView) models.ModelStepResult {
+				return looptest.Act("I need your card.", looptest.Call(waitTool(t, v, agentrun.SkillActionRequestCredential), map[string]any{"kind": models.CredentialRequestKindPaymentCard, "reason": "Add your card so I can pay"}))
 			})...)
 			conversation, run := f.StartChat("Pay the invoice")
 			steerToRest(f, run.ID, 4)
@@ -204,12 +205,12 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			}
 
 			// The user saves the card.
-			credentials := f.Raw.(CredentialRequestStore)
+			credentials := f.Raw.(models.CredentialRequestStore)
 			request, err := credentials.GetCredentialRequest(f.Ctx, f.Scope, requestID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			request.Status, request.ResolvedBy, request.Revision, request.UpdatedAt = CredentialRequestStatusResolved, looptest.FixtureUser, request.Revision+1, f.Clock.Now()
+			request.Status, request.ResolvedBy, request.Revision, request.UpdatedAt = models.CredentialRequestStatusResolved, looptest.FixtureUser, request.Revision+1, f.Clock.Now()
 			if err := credentials.SaveCredentialRequest(f.Ctx, request, request.Revision-1); err != nil {
 				t.Fatal(err)
 			}
@@ -226,25 +227,25 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 	})
 
 	t.Run("connect_app", func(t *testing.T) {
-		looptest.EachStore(t, "wait-connect-app", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "wait-connect-app", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store)
 			waitCardSkills(f)
-			setups := f.Raw.(SkillSetupRequestStore)
+			setups := f.Raw.(models.SkillSetupRequestStore)
 			f.Dispatch.On(agentrun.SkillActionRequestConnection, func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
-				conversationID, _ := in.Run.Context[conversationRunContextConversationID].(string)
-				triggerID, _ := in.Run.Context[conversationRunContextTriggerID].(string)
+				conversationID, _ := in.Run.Context[models.ConversationRunConversationIDContextKey].(string)
+				triggerID, _ := in.Run.Context[models.ConversationRunTriggerIDContextKey].(string)
 				now := f.Clock.Now()
-				target := ConnectAppTarget{CatalogSlug: "linear", Name: "Linear"}
-				request := &SkillSetupRequest{ID: "connect-app:" + in.Call.ID, Scope: in.Run.Scope, Owner: in.Run.Owner, DeploymentID: in.Run.Owner.ID,
+				target := models.ConnectAppTarget{CatalogSlug: "linear", Name: "Linear"}
+				request := &models.SkillSetupRequest{ID: "connect-app:" + in.Call.ID, Scope: in.Run.Scope, Owner: in.Run.Owner, DeploymentID: in.Run.Owner.ID,
 					AgentID: in.Run.AssignedAgentID, ConversationID: conversationID, TriggerMessageID: triggerID, RunID: in.Run.ID, ActionCallID: in.Call.ID,
-					Kind: SkillSetupKindConnectApp, SkillID: "openseal.mcp", SkillVersion: "1.0.0", SkillName: "Linear", App: &target,
+					Kind: models.SkillSetupKindConnectApp, SkillID: "openseal.mcp", SkillVersion: "1.0.0", SkillName: "Linear", App: &target,
 					RequestedFor: in.Run.ActingUser, Reason: "Connect Linear to list your issues", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 				if err := setups.SaveSkillSetupRequest(f.Ctx, request, 0); err != nil {
 					return nil, err
 				}
 				return skillbinding.SkillSetupRequestResult(request)
 			})
-			f.Model.Add(waitCardRules(t, agentrun.SkillActionRequestConnection, func(v looptest.StepView) ModelStepResult {
+			f.Model.Add(waitCardRules(t, agentrun.SkillActionRequestConnection, func(v looptest.StepView) models.ModelStepResult {
 				return looptest.Act("Linear needs connecting.", looptest.Call(waitTool(t, v, agentrun.SkillActionRequestConnection), map[string]any{"app": "linear", "reason": "Connect Linear to list your issues"}))
 			})...)
 			conversation, run := f.StartChat("List my Linear issues")
@@ -273,7 +274,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 	})
 
 	t.Run("connect_account", func(t *testing.T) {
-		looptest.EachStore(t, "wait-connect-account", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "wait-connect-account", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store, looptest.WithCredentials(action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 				return map[string]string{"google": "token"}, nil
 			})))
@@ -293,11 +294,11 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 				&looptest.ModelRule{Name: "send", When: func(v looptest.StepView) bool {
 					content, _, ok := v.ToolResult(waitTool(t, v, "send_mail"))
 					return !ok || strings.Contains(content, "Retry the step that needed it.")
-				}, Reply: func(v looptest.StepView) ModelStepResult {
+				}, Reply: func(v looptest.StepView) models.ModelStepResult {
 					sends++
 					return looptest.Act("Sending.", looptest.ReviewedCall(waitTool(t, v, "send_mail"), map[string]any{"to": "ben@example.com"}, "Email ben"))
 				}},
-				&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) ModelStepResult {
+				&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
 					return looptest.FinalAnswer(map[string]any{"answer": "Ben has it now."})
 				}},
 			)
@@ -307,7 +308,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			}
 			steerToRest(f, run.ID, 4)
 			tool := waitTool(t, looptest.StepView{Req: convFirstStep(f, run.ID)}, "send_mail")
-			entry := waitParked(f, run.ID, tool, ConnectAccountWakeType)
+			entry := waitParked(f, run.ID, tool, models.ConnectAccountWakeType)
 			requestID := f.MustRun(run.ID).WakeCondition.Reference
 			if requestID != skillbinding.ConnectAccountRequestPrefix+entry.ActionCallID || f.Dispatch.Count("send_mail") != 0 {
 				t.Fatalf("connect account card %s for call %s, dispatches %d", requestID, entry.ActionCallID, f.Dispatch.Count("send_mail"))
@@ -315,9 +316,9 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 
 			// The person connects the account.
 			connected = true
-			setups := f.Raw.(SkillSetupRequestStore)
+			setups := f.Raw.(models.SkillSetupRequestStore)
 			card, err := setups.GetSkillSetupRequest(f.Ctx, f.Scope, requestID)
-			if err != nil || card == nil || card.Kind != SkillSetupKindConnectAccount || card.RequestedFor != looptest.FixtureUser {
+			if err != nil || card == nil || card.Kind != models.SkillSetupKindConnectAccount || card.RequestedFor != looptest.FixtureUser {
 				t.Fatalf("card = %#v, %v", card, err)
 			}
 			// The worker stamps the card from the wall clock.
@@ -326,13 +327,13 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			if err := setups.SaveSkillSetupRequest(f.Ctx, card, card.Revision-1); err != nil {
 				t.Fatal(err)
 			}
-			waitSettleCard(f, run.ID, ConnectAccountWakeType, requestID, entry.ActionCallID, skillbinding.ConnectAccountResolutionInstruction(card))
+			waitSettleCard(f, run.ID, models.ConnectAccountWakeType, requestID, entry.ActionCallID, skillbinding.ConnectAccountResolutionInstruction(card))
 			done := convDrive(f, run.ID)
 			// The parked call failed before dispatch; its settled entry keeps
 			// that failure and carries the card's outcome, and the retry is a
 			// new call.
 			sendEntries := convToolEntries(f, done.ID, tool)
-			if len(sendEntries) != 2 || sendEntries[0].State != ToolEntryError || sendEntries[1].State != ToolEntryCompleted {
+			if len(sendEntries) != 2 || sendEntries[0].State != models.ToolEntryError || sendEntries[1].State != models.ToolEntryCompleted {
 				t.Fatalf("send entries = %#v", sendEntries)
 			}
 			if result := looptest.PartsText(sendEntries[0].Tool.Result.Content); !strings.Contains(result, "The person you act for connected Google. Retry the step that needed it.") {
@@ -349,12 +350,12 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 	})
 
 	t.Run("human_intervention", func(t *testing.T) {
-		looptest.EachStore(t, "wait-human", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "wait-human", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store)
 			f.Dispatch.On("lookup", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 				return map[string]interface{}{"requiresHuman": true, "challenges": []interface{}{"captcha"}}, nil
 			})
-			f.Model.Add(waitCardRules(t, "lookup", func(v looptest.StepView) ModelStepResult {
+			f.Model.Add(waitCardRules(t, "lookup", func(v looptest.StepView) models.ModelStepResult {
 				return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "6815"}))
 			})...)
 			conversation, run := f.StartChat("Look up 6815")
@@ -362,7 +363,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			tool := looptest.GovernedTool(looptest.StepView{Req: convFirstStep(f, run.ID)}, "lookup")
 			waitParked(f, run.ID, tool, "human_intervention")
 			parked := f.MustRun(run.ID)
-			if len(parked.HumanInterventions) != 1 || parked.HumanInterventions[0].Status != HumanInterventionStatusPending ||
+			if len(parked.HumanInterventions) != 1 || parked.HumanInterventions[0].Status != models.HumanInterventionStatusPending ||
 				parked.WakeCondition.Reference != parked.HumanInterventions[0].ID {
 				t.Fatalf("human interventions = %#v, wake %#v", parked.HumanInterventions, parked.WakeCondition)
 			}
@@ -372,7 +373,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			if _, err := commands.CommandAgentRun(f.Ctx, agentrun.AgentRunCommandRequest{
 				Scope: f.Scope, RunID: run.ID, ExpectedRevision: parked.Revision, Kind: agentrun.AgentRunCommandResolveHumanIntervention,
 				HumanInterventionID: parked.HumanInterventions[0].ID, Instruction: "Solved the captcha.",
-				Actor: ActivityActor{Type: "user", ID: looptest.FixtureUser},
+				Actor: models.ActivityActor{Type: "user", ID: looptest.FixtureUser},
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -387,29 +388,29 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 	})
 
 	t.Run("clarification", func(t *testing.T) {
-		looptest.EachStore(t, "wait-ask", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "wait-ask", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store)
 			question := "Which environment, staging or production?"
-			f.Model.Add(waitCardRules(t, string(ControlToolAskUser), func(v looptest.StepView) ModelStepResult {
-				if !v.HasTool(string(ControlToolAskUser)) {
+			f.Model.Add(waitCardRules(t, string(models.ControlToolAskUser), func(v looptest.StepView) models.ModelStepResult {
+				if !v.HasTool(string(models.ControlToolAskUser)) {
 					t.Errorf("ask_user is not offered: %s", v.Describe())
 				}
-				return looptest.Act("", looptest.Call(string(ControlToolAskUser), map[string]any{"question": question}))
+				return looptest.Act("", looptest.Call(string(models.ControlToolAskUser), map[string]any{"question": question}))
 			})...)
 			conversation, run := f.StartChat("Deploy the release")
 			steerToRest(f, run.ID, 4)
-			waitParked(f, run.ID, string(ControlToolAskUser), "user_message")
+			waitParked(f, run.ID, string(models.ControlToolAskUser), "user_message")
 			asked := convAgentAnswer(f, conversation.ID)
-			if asked.Content != question || asked.Intent != MessageIntentQuestion || !asked.RequiresResponse {
+			if asked.Content != question || asked.Intent != models.MessageIntentQuestion || !asked.RequiresResponse {
 				t.Fatalf("question message = %#v", asked)
 			}
 
 			// The person answers in the chat; the scheduler resumes the same Run.
 			answer := convPost(f, conversation.ID, "staging", func(r *runtimeconversation.PostChannelMessageRequest) {
-				r.Intent, r.RequiresResponse = MessageIntentAnswer, true
+				r.Intent, r.RequiresResponse = models.MessageIntentAnswer, true
 			})
 			resumed := convSchedule(f, conversation.ID, answer)
-			if resumed.ID != run.ID || resumed.Status != AgentRunStatusQueued {
+			if resumed.ID != run.ID || resumed.Status != models.AgentRunStatusQueued {
 				t.Fatalf("answer scheduled %s (%s), want the asking Run %s resumed", resumed.ID, resumed.Status, run.ID)
 			}
 			// The scheduler's resume stamps AvailableAt from the wall clock.
@@ -417,13 +418,13 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 				f.Clock.Advance(resumed.AvailableAt.Sub(f.Clock.Now()) + time.Millisecond)
 			}
 			done := convDrive(f, run.ID)
-			entry, result := waitCompleted(f, done.ID, string(ControlToolAskUser), 0)
+			entry, result := waitCompleted(f, done.ID, string(models.ControlToolAskUser), 0)
 			if !strings.Contains(result, "staging") {
 				t.Fatalf("ask_user result = %q", result)
 			}
 			// The answer is the tool result, not a steering user entry.
 			for _, e := range convRunEntries(f, done.ID) {
-				if e.Type == SessionEntryUser && e.User != nil && e.User.MessageID == answer.ID && e.Sequence > entry.Sequence {
+				if e.Type == models.SessionEntryUser && e.User != nil && e.User.MessageID == answer.ID && e.Sequence > entry.Sequence {
 					t.Fatalf("the answer was also appended as a user entry: %#v", e)
 				}
 			}
@@ -446,34 +447,34 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 // timer, the timer wake loop queues it, and the resumed Run completes the
 // entry as elapsed and goes on.
 func TestWaitToolParksUntilTimer(t *testing.T) {
-	looptest.EachStore(t, "wait-timer", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "wait-timer", func(t *testing.T, store models.KernelStore) {
 		f := looptest.NewFixture(t, store, looptest.WithRules(
-			&looptest.ModelRule{Name: "wait", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
-				if !v.HasTool(string(ControlToolWait)) {
+			&looptest.ModelRule{Name: "wait", Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
+				if !v.HasTool(string(models.ControlToolWait)) {
 					t.Errorf("wait is not offered to background work: %s", v.Describe())
 				}
-				return looptest.Act("Waiting for the build.", looptest.Call(string(ControlToolWait), map[string]any{"seconds": 600}))
+				return looptest.Act("Waiting for the build.", looptest.Call(string(models.ControlToolWait), map[string]any{"seconds": 600}))
 			}},
-			&looptest.ModelRule{Name: "after", Reply: func(v looptest.StepView) ModelStepResult {
-				content, _, ok := v.ToolResult(string(ControlToolWait))
+			&looptest.ModelRule{Name: "after", Reply: func(v looptest.StepView) models.ModelStepResult {
+				content, _, ok := v.ToolResult(string(models.ControlToolWait))
 				if !ok {
 					t.Errorf("resumed step without the wait result: %s", v.Describe())
 				}
 				return looptest.Say("The build had time to finish: " + content)
 			}},
 		))
-		run := f.StartRun(RunKindAgentWork, "Check the nightly build after it finishes")
+		run := f.StartRun(models.RunKindAgentWork, "Check the nightly build after it finishes")
 		started := f.Clock.Now()
 		parked := f.DriveToRest(run.ID, 4)
-		if parked.Status != AgentRunStatusSleeping || parked.WakeCondition == nil || parked.WakeCondition.Type != "timer" ||
+		if parked.Status != models.AgentRunStatusSleeping || parked.WakeCondition == nil || parked.WakeCondition.Type != "timer" ||
 			parked.WakeCondition.WakeAt == nil || !parked.WakeCondition.WakeAt.Equal(started.Add(600*time.Second)) {
 			t.Fatalf("parked = %s %#v", parked.Status, parked.WakeCondition)
 		}
 		if parked.LeaseOwner != "" {
 			t.Fatalf("sleeping Run holds the claim: %q", parked.LeaseOwner)
 		}
-		waits := convToolEntries(f, run.ID, string(ControlToolWait))
-		if len(waits) != 1 || waits[0].State != ToolEntryAwaitingEvent || parked.WakeCondition.Reference != waits[0].ID {
+		waits := convToolEntries(f, run.ID, string(models.ControlToolWait))
+		if len(waits) != 1 || waits[0].State != models.ToolEntryAwaitingEvent || parked.WakeCondition.Reference != waits[0].ID {
 			t.Fatalf("wait entries = %#v, wake %#v", waits, parked.WakeCondition)
 		}
 
@@ -485,14 +486,14 @@ func TestWaitToolParksUntilTimer(t *testing.T) {
 		}
 		f.Clock.Advance(2 * time.Second)
 		result, err := wake.WakeDueTimers(f.Ctx, f.Scope, f.Clock.Now())
-		if err != nil || len(result.Runs) != 1 || result.Runs[0].Run.ID != run.ID || result.Runs[0].Run.Status != AgentRunStatusQueued {
+		if err != nil || len(result.Runs) != 1 || result.Runs[0].Run.ID != run.ID || result.Runs[0].Run.Status != models.AgentRunStatusQueued {
 			t.Fatalf("timer wake = %#v, %v", result, err)
 		}
 		done := f.DriveToRest(run.ID, 4)
-		if done.Status != AgentRunStatusCompleted {
+		if done.Status != models.AgentRunStatusCompleted {
 			t.Fatalf("resumed Run = %s (%#v)", done.Status, done.FailureExplanation)
 		}
-		_, content := waitCompleted(f, run.ID, string(ControlToolWait), 0)
+		_, content := waitCompleted(f, run.ID, string(models.ControlToolWait), 0)
 		var value map[string]interface{}
 		if err := json.Unmarshal([]byte(content), &value); err != nil || value["status"] != "elapsed" || fmt.Sprint(value["waitedSeconds"]) != "601" {
 			t.Fatalf("wait result = %q (%v)", content, err)

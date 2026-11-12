@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	runtimeroutine "github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -29,9 +30,9 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 			f := newInteractionChangeFixture(t, testCase.store(t))
 			ctx, store, scope := f.ctx, f.store, f.scope
 			owner := f.conversation.Owner
-			conversations := conversation.NewConversationService(store.(ConversationStore))
-			objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: scope, Owner: owner, Title: "Morning news", Goal: "Summarise the news every morning", Status: ObjectiveStatusActive,
+			conversations := conversation.NewConversationService(store.(models.ConversationStore))
+			objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Morning news", Goal: "Summarise the news every morning", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -47,19 +48,19 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 				t.Fatal(err)
 			}
 			// A scheduled task made from this chat is already linked to it.
-			task := &RunbookActivation{
+			task := &models.RunbookActivation{
 				ID: "chat-task", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, TriggerID: "weekly",
-				Task: &ScheduledAgentTask{Goal: "Send the weekly plan", ConversationID: f.conversation.ID, SourceMessageID: f.trigger.ID,
-					Script: &RoutineScript{Path: "scripts/plan.py", Digest: routineScriptDigestOf("a"), FilesVersion: 1, Command: "python3 scripts/plan.py", TimeoutSeconds: 60}},
+				Task: &models.ScheduledAgentTask{Goal: "Send the weekly plan", ConversationID: f.conversation.ID, SourceMessageID: f.trigger.ID,
+					Script: &models.RoutineScript{Path: "scripts/plan.py", Digest: routineScriptDigestOf("a"), FilesVersion: 1, Command: "python3 scripts/plan.py", TimeoutSeconds: 60}},
 				Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 8 * * 1", Timezone: "UTC"}},
-				Status:  RunbookActivationActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
+				Status:  models.RunbookActivationActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
 			}
 			if err := store.CreateRunbookActivation(ctx, task); err != nil {
 				t.Fatal(err)
 			}
 			// A scheduled task from another chat is not.
 			other := *task
-			other.ID, other.Task = "other-task", &ScheduledAgentTask{Goal: "Elsewhere", ConversationID: "other-chat", SourceMessageID: "m"}
+			other.ID, other.Task = "other-task", &models.ScheduledAgentTask{Goal: "Elsewhere", ConversationID: "other-chat", SourceMessageID: "m"}
 			if err := store.CreateRunbookActivation(ctx, &other); err != nil {
 				t.Fatal(err)
 			}
@@ -108,7 +109,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 			}
 
 			current, _ = store.GetRunbookActivation(ctx, scope, daily.ID)
-			if _, err := activations.Update(ctx, scope, daily.ID, runtimeroutine.UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: RunbookActivationPaused}); err != nil {
+			if _, err := activations.Update(ctx, scope, daily.ID, runtimeroutine.UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: models.RunbookActivationPaused}); err != nil {
 				t.Fatal(err)
 			}
 			paused := f.list(t, ran.Cursor)
@@ -116,7 +117,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 				t.Fatalf("paused runbook = %#v", paused.Runbooks)
 			}
 			current, _ = store.GetRunbookActivation(ctx, scope, daily.ID)
-			if _, err := activations.Update(ctx, scope, daily.ID, runtimeroutine.UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: RunbookActivationRetired}); err != nil {
+			if _, err := activations.Update(ctx, scope, daily.ID, runtimeroutine.UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: models.RunbookActivationRetired}); err != nil {
 				t.Fatal(err)
 			}
 			stopped := f.list(t, paused.Cursor)
@@ -134,10 +135,10 @@ func TestLinkRunbooks(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
 	service := conversation.NewConversationService(store)
-	scope := Scope{Kind: "tenant", ID: "links"}
+	scope := models.Scope{Kind: "tenant", ID: "links"}
 	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, conversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Chat", IdempotencyKey: "chat",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Chat", IdempotencyKey: "chat",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -150,19 +151,19 @@ func TestLinkRunbooks(t *testing.T) {
 	if err != nil || again.Revision != linked.Revision {
 		t.Fatalf("relinking changed the conversation: %#v, %v", again, err)
 	}
-	ids := make([]string, MaximumConversationRunbooks)
+	ids := make([]string, models.MaximumConversationRunbooks)
 	for index := range ids {
 		ids[index] = fmt.Sprintf("r%d", index)
 	}
 	full, err := service.LinkRunbooks(ctx, scope, conversation.ID, ids)
-	if err != nil || len(full.RunbookActivationIDs) != MaximumConversationRunbooks || full.RunbookActivationIDs[0] != "r0" ||
-		full.RunbookActivationIDs[MaximumConversationRunbooks-1] != ids[len(ids)-1] {
+	if err != nil || len(full.RunbookActivationIDs) != models.MaximumConversationRunbooks || full.RunbookActivationIDs[0] != "r0" ||
+		full.RunbookActivationIDs[models.MaximumConversationRunbooks-1] != ids[len(ids)-1] {
 		t.Fatalf("oldest links did not drop first: %v, %v", full.RunbookActivationIDs, err)
 	}
-	if _, err := service.LinkRunbooks(ctx, scope, conversation.ID, []string{strings.Repeat("x", 129)}); !errors.Is(err, ErrInvalidConversation) {
+	if _, err := service.LinkRunbooks(ctx, scope, conversation.ID, []string{strings.Repeat("x", 129)}); !errors.Is(err, models.ErrInvalidConversation) {
 		t.Fatalf("bad id: %v", err)
 	}
-	if _, err := service.LinkRunbooks(ctx, scope, "missing", []string{"a"}); !errors.Is(err, ErrConversationNotFound) {
+	if _, err := service.LinkRunbooks(ctx, scope, "missing", []string{"a"}); !errors.Is(err, models.ErrConversationNotFound) {
 		t.Fatalf("missing conversation: %v", err)
 	}
 	stored, _ := service.GetConversation(ctx, scope, conversation.ID)
@@ -180,8 +181,8 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 			owner := f.conversation.Owner
 			now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
 			f.clock = func() time.Time { return now }
-			objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: scope, Owner: owner, Title: "Order notes", Goal: "Summarize each new order", Status: ObjectiveStatusActive,
+			objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Order notes", Goal: "Summarize each new order", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -205,29 +206,29 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 				t.Fatalf("initial runbooks = %s changed=%v", runbookIDs(initial.Runbooks), initial.RunbooksChanged)
 			}
 			got := initial.Runbooks[0]
-			wantWhen := DescribeRoutineEventTrigger(routine.Task.Event)
+			wantWhen := models.DescribeRoutineEventTrigger(routine.Task.Event)
 			if got.Title != "Order notes" || got.Status != conversation.ConversationRunbookActive || got.Schedule != nil || got.Trigger == nil ||
-				got.Trigger.Kind != runbook.TriggerEvent || got.Trigger.EventKind != RoutineEventWebhook || got.Trigger.When == "" ||
+				got.Trigger.Kind != runbook.TriggerEvent || got.Trigger.EventKind != models.RoutineEventWebhook || got.Trigger.When == "" ||
 				got.Trigger.When != wantWhen || got.Trigger.SourceLabel != "your shop" || got.Trigger.MaxPerHour != 2 ||
 				got.LastFiredAt != nil || got.FiredLast24h != 0 || got.Pending != 0 || got.NextRunAt != nil || got.LastRun != nil {
 				t.Fatalf("new event routine = %#v trigger=%#v", got, got.Trigger)
 			}
 
 			// Two batches start event Runs inside the hour; one more event waits.
-			events := store.(RoutineEventStore)
-			var lastRun *AgentRun
+			events := store.(models.RoutineEventStore)
+			var lastRun *models.AgentRun
 			for index, ago := range []time.Duration{40 * time.Minute, 10 * time.Minute} {
 				at := now.Add(-ago)
 				event := storetest.RoutineEventFor(scope, routine, fmt.Sprintf("order-%d", index), at)
-				if _, err := events.InsertRoutineEvent(ctx, &RoutineEventRecord{Scope: scope, ActivationID: routine.ID, Event: event, State: RoutineEventPending, ReceivedAt: at}); err != nil {
+				if _, err := events.InsertRoutineEvent(ctx, &models.RoutineEventRecord{Scope: scope, ActivationID: routine.ID, Event: event, State: models.RoutineEventPending, ReceivedAt: at}); err != nil {
 					t.Fatal(err)
 				}
-				batch, err := events.ClaimRoutineEventBatch(ctx, scope, routine.ID, RoutineEventMaxBatchEvents, at)
+				batch, err := events.ClaimRoutineEventBatch(ctx, scope, routine.ID, models.RoutineEventMaxBatchEvents, at)
 				if err != nil || batch == nil {
 					t.Fatalf("claim = %#v, %v", batch, err)
 				}
-				lastRun, err = NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-					Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, Goal: routine.Task.Goal, Source: RunSourceEvent,
+				lastRun, err = portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+					Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, Goal: routine.Task.Goal, Source: models.RunSourceEvent,
 					Context: map[string]interface{}{"runbookActivationId": routine.ID}, IdempotencyKey: batch.ID,
 				})
 				if err != nil {
@@ -238,7 +239,7 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 				}
 			}
 			waiting := storetest.RoutineEventFor(scope, routine, "order-waiting", now.Add(-time.Minute))
-			if _, err := events.InsertRoutineEvent(ctx, &RoutineEventRecord{Scope: scope, ActivationID: routine.ID, Event: waiting, State: RoutineEventPending, ReceivedAt: now.Add(-time.Minute)}); err != nil {
+			if _, err := events.InsertRoutineEvent(ctx, &models.RoutineEventRecord{Scope: scope, ActivationID: routine.ID, Event: waiting, State: models.RoutineEventPending, ReceivedAt: now.Add(-time.Minute)}); err != nil {
 				t.Fatal(err)
 			}
 
@@ -260,7 +261,7 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 			activations := runtimeroutine.NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
 			current, _ := store.GetRunbookActivation(ctx, scope, routine.ID)
 			if _, err := activations.Update(ctx, scope, routine.ID, runtimeroutine.UpdateRunbookActivationRequest{
-				ExpectedRevision: current.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedNeedsSignIn,
+				ExpectedRevision: current.Revision, Status: models.RunbookActivationPaused, PausedReason: models.RoutinePausedNeedsSignIn,
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -268,7 +269,7 @@ func TestConversationRunbooksIncludeEventRoutines(t *testing.T) {
 			if !paused.RunbooksChanged || len(paused.Runbooks) != 1 {
 				t.Fatalf("paused runbooks = %#v", paused.Runbooks)
 			}
-			if got := paused.Runbooks[0]; got.Status != conversation.ConversationRunbookPaused || got.PausedReason != RoutinePausedNeedsSignIn || got.NextRunAt != nil {
+			if got := paused.Runbooks[0]; got.Status != conversation.ConversationRunbookPaused || got.PausedReason != models.RoutinePausedNeedsSignIn || got.NextRunAt != nil {
 				t.Fatalf("paused event routine = %#v", got)
 			}
 		})

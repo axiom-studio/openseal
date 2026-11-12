@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
@@ -18,7 +19,7 @@ import (
 
 // routineConnectionFixture is a Slack or Telegram endpoint in the harness
 // store, owned by the harness owner, on installation T123 and channel C123.
-func routineConnectionFixture(t *testing.T, h *routinetest.EventHarness, provider string, selection ExternalConversationMessageSelection) (*skill.Catalog, *ExternalConversationEndpoint) {
+func routineConnectionFixture(t *testing.T, h *routinetest.EventHarness, provider string, selection models.ExternalConversationMessageSelection) (*skill.Catalog, *models.ExternalConversationEndpoint) {
 	t.Helper()
 	catalog := skill.NewCatalog()
 	definition := skillbindingtest.SlackConversationSkillDefinition()
@@ -31,7 +32,7 @@ func routineConnectionFixture(t *testing.T, h *routinetest.EventHarness, provide
 	if err := catalog.Register(h.Ctx, definition); err != nil {
 		t.Fatal(err)
 	}
-	scope := Scope{Kind: "tenant", ID: provider}
+	scope := models.Scope{Kind: "tenant", ID: provider}
 	binding := &skill.Binding{
 		ID: provider, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: h.Owner.ID,
 		SkillID: definition.ID, SkillVersion: definition.Version,
@@ -43,13 +44,13 @@ func routineConnectionFixture(t *testing.T, h *routinetest.EventHarness, provide
 	}
 	endpoint, err := externalconversation.NewExternalConversationEndpointService(h.Store, catalog).Create(h.Ctx, externalconversation.CreateExternalConversationEndpointRequest{
 		ID: provider + "-endpoint", Scope: scope, Owner: h.Owner, DeploymentID: h.Owner.ID, Name: provider + " endpoint",
-		Adapter: ExternalConversationAdapterReference{
+		Adapter: models.ExternalConversationAdapterReference{
 			SkillID: definition.ID, SkillVersion: definition.Version, BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
 		},
 		Mode: capability.ConversationEndpointChannel, Address: "C123", InstallationID: "T123", ApplicationID: "A123",
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: h.Owner.ID},
-		Policy:  ExternalConversationPolicy{MessageSelection: selection, ReplyMode: ExternalConversationReplyThread, IgnoreBots: true},
-		Status:  ExternalConversationEndpointActive,
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: h.Owner.ID},
+		Policy:  models.ExternalConversationPolicy{MessageSelection: selection, ReplyMode: models.ExternalConversationReplyThread, IgnoreBots: true},
+		Status:  models.ExternalConversationEndpointActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -63,22 +64,22 @@ func routineConnectionFixture(t *testing.T, h *routinetest.EventHarness, provide
 
 // conversationRoutine creates an active routine on the endpoint's connection
 // that listens to channel C123.
-func conversationRoutine(h *routinetest.EventHarness, endpoint *ExternalConversationEndpoint, kind RoutineEventKind, field string) *RunbookActivation {
-	return h.Routine(string(kind), func(trigger *RoutineEventTrigger) {
-		*trigger = RoutineEventTrigger{
+func conversationRoutine(h *routinetest.EventHarness, endpoint *models.ExternalConversationEndpoint, kind models.RoutineEventKind, field string) *models.RunbookActivation {
+	return h.Routine(string(kind), func(trigger *models.RoutineEventTrigger) {
+		*trigger = models.RoutineEventTrigger{
 			Kind:        kind,
-			SourceRef:   RoutineConversationSourceRef(endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID, endpoint.InstallationID),
+			SourceRef:   models.RoutineConversationSourceRef(endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID, endpoint.InstallationID),
 			SourceLabel: "Acme " + endpoint.Provider, MaxPerHour: 20,
-			Filter: []RoutineEventCondition{{Field: field, Op: RoutineFilterEquals, Value: "C123", Label: "#support"}},
+			Filter: []models.RoutineEventCondition{{Field: field, Op: models.RoutineFilterEquals, Value: "C123", Label: "#support"}},
 		}
 	})
 }
 
 // waitingRoutineEvents claims the routine's waiting events as one batch and
 // returns their records in order.
-func waitingRoutineEvents(t *testing.T, h *routinetest.EventHarness, activation *RunbookActivation) []*RoutineEventRecord {
+func waitingRoutineEvents(t *testing.T, h *routinetest.EventHarness, activation *models.RunbookActivation) []*models.RoutineEventRecord {
 	t.Helper()
-	batch, err := h.Store.ClaimRoutineEventBatch(h.Ctx, h.Scope, activation.ID, RoutineEventMaxBatchEvents, h.Now)
+	batch, err := h.Store.ClaimRoutineEventBatch(h.Ctx, h.Scope, activation.ID, models.RoutineEventMaxBatchEvents, h.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,19 +90,19 @@ func waitingRoutineEvents(t *testing.T, h *routinetest.EventHarness, activation 
 	if err != nil {
 		t.Fatal(err)
 	}
-	byID := map[string]*RoutineEventRecord{}
+	byID := map[string]*models.RoutineEventRecord{}
 	for _, record := range records {
 		byID[record.Event.ID] = record
 	}
-	ordered := make([]*RoutineEventRecord, 0, len(batch.EventIDs))
+	ordered := make([]*models.RoutineEventRecord, 0, len(batch.EventIDs))
 	for _, id := range batch.EventIDs {
 		ordered = append(ordered, byID[id])
 	}
 	return ordered
 }
 
-func slackRoutineMessage(id, participant, name, text string, bot bool) NormalizedExternalConversationEvent {
-	return NormalizedExternalConversationEvent{
+func slackRoutineMessage(id, participant, name, text string, bot bool) models.NormalizedExternalConversationEvent {
+	return models.NormalizedExternalConversationEvent{
 		ID: "slack:message:T123:C123:" + id, Type: capability.ConversationEventMessageReceived,
 		ExternalConversationID: "C123", ExternalMessageID: id, ExternalThreadID: id,
 		ExternalParticipantID: participant, ParticipantDisplayName: name, ParticipantIsBot: bot,
@@ -113,12 +114,12 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	h := routinetest.NewEventHarness(t)
 	// The endpoint answers only mentions, so these messages get no chat
 	// reply; the routine hears them anyway (E14).
-	catalog, endpoint := routineConnectionFixture(t, h, "slack", ExternalConversationSelectMentions)
-	activation := conversationRoutine(h, endpoint, RoutineEventSlackMessage, "channel")
+	catalog, endpoint := routineConnectionFixture(t, h, "slack", models.ExternalConversationSelectMentions)
+	activation := conversationRoutine(h, endpoint, models.RoutineEventSlackMessage, "channel")
 	gateways := externalconversation.NewExternalConversationGatewayService(h.Store, nil)
 	registration := externalconversationtest.CreateActiveGateway(t, h.Ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
-		ID: "acme-slack", Name: "Acme Slack", Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "pinned tenant gateway",
-		Gateway: ExternalConversationIngressGateway{
+		ID: "acme-slack", Name: "Acme Slack", Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "pinned tenant gateway",
+		Gateway: models.ExternalConversationIngressGateway{
 			Scope: endpoint.Scope, Owner: h.Owner, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter,
 			Provider: "slack", InstallationID: "T123", ApplicationID: "A123",
 		},
@@ -143,8 +144,8 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 	}
 
 	stats := h.Matcher.RoutineEventStats()
-	if stats.In[RoutineEventSlackMessage] != 2 || stats.Matched[RoutineEventSlackMessage] != 1 {
-		t.Fatalf("slack stats in=%d matched=%d, want 2 and 1 (bot excluded)", stats.In[RoutineEventSlackMessage], stats.Matched[RoutineEventSlackMessage])
+	if stats.In[models.RoutineEventSlackMessage] != 2 || stats.Matched[models.RoutineEventSlackMessage] != 1 {
+		t.Fatalf("slack stats in=%d matched=%d, want 2 and 1 (bot excluded)", stats.In[models.RoutineEventSlackMessage], stats.Matched[models.RoutineEventSlackMessage])
 	}
 	records := waitingRoutineEvents(t, h, activation)
 	if len(records) != 1 {
@@ -178,12 +179,12 @@ func TestSlackMessageOffersRoutineEvent(t *testing.T) {
 
 func TestSlackRoutineIgnoresDirectMessages(t *testing.T) {
 	h := routinetest.NewEventHarness(t)
-	catalog, endpoint := routineConnectionFixture(t, h, "slack", ExternalConversationSelectAllMessages)
-	activation := conversationRoutine(h, endpoint, RoutineEventSlackMessage, "channel")
+	catalog, endpoint := routineConnectionFixture(t, h, "slack", models.ExternalConversationSelectAllMessages)
+	activation := conversationRoutine(h, endpoint, models.RoutineEventSlackMessage, "channel")
 	direct := slackRoutineMessage("172.001", "U1", "Ana Ruiz", "private note", false)
 	direct.Direct = true
 	host := &externalconversationtest.IngressHostStub{Result: &externalconversation.ExternalConversationIngressHostResult{
-		StatusCode: http.StatusOK, Events: []NormalizedExternalConversationEvent{direct},
+		StatusCode: http.StatusOK, Events: []models.NormalizedExternalConversationEvent{direct},
 	}}
 	service := externalconversation.NewExternalConversationTransportService(h.Store, catalog)
 	service.SetRoutineEventOfferer(h.Matcher)
@@ -192,12 +193,12 @@ func TestSlackRoutineIgnoresDirectMessages(t *testing.T) {
 	if _, err := service.NormalizeExternalConversationIngress(h.Ctx, request, host); err != nil {
 		t.Fatal(err)
 	}
-	if stats := h.Matcher.RoutineEventStats(); stats.In[RoutineEventSlackMessage] != 0 {
-		t.Fatalf("a direct message reached the matcher: in=%d", stats.In[RoutineEventSlackMessage])
+	if stats := h.Matcher.RoutineEventStats(); stats.In[models.RoutineEventSlackMessage] != 0 {
+		t.Fatalf("a direct message reached the matcher: in=%d", stats.In[models.RoutineEventSlackMessage])
 	}
 
 	// The same endpoint path offers a channel message.
-	host.Result.Events = []NormalizedExternalConversationEvent{slackRoutineMessage("172.002", "U1", "Ana Ruiz", "in the channel", false)}
+	host.Result.Events = []models.NormalizedExternalConversationEvent{slackRoutineMessage("172.002", "U1", "Ana Ruiz", "in the channel", false)}
 	if _, err := service.NormalizeExternalConversationIngress(h.Ctx, request, host); err != nil {
 		t.Fatal(err)
 	}
@@ -209,21 +210,21 @@ func TestSlackRoutineIgnoresDirectMessages(t *testing.T) {
 
 func TestTelegramMessageOffersRoutineEvent(t *testing.T) {
 	h := routinetest.NewEventHarness(t)
-	catalog, endpoint := routineConnectionFixture(t, h, "telegram", ExternalConversationSelectAllMessages)
-	activation := conversationRoutine(h, endpoint, RoutineEventTelegramMessage, "chat")
-	message := NormalizedExternalConversationEvent{
+	catalog, endpoint := routineConnectionFixture(t, h, "telegram", models.ExternalConversationSelectAllMessages)
+	activation := conversationRoutine(h, endpoint, models.RoutineEventTelegramMessage, "chat")
+	message := models.NormalizedExternalConversationEvent{
 		ID: "telegram:update:991", Type: capability.ConversationEventMessageReceived,
 		ExternalConversationID: "C123", ExternalMessageID: "C123:55", ExternalThreadID: "C123",
 		ExternalParticipantID: "42", ParticipantDisplayName: "Ana", Text: "Order 7 shipped?",
 		OrderingKey: "C123:C123", OccurredAt: time.Now().UTC(),
-		Attachments: []ExternalConversationAttachment{{ID: "file-1", Name: "label.pdf", MediaType: "application/pdf", SizeBytes: 10}},
+		Attachments: []models.ExternalConversationAttachment{{ID: "file-1", Name: "label.pdf", MediaType: "application/pdf", SizeBytes: 10}},
 		Attributes:  map[string]interface{}{"chatTitle": "Support desk", "participantUsername": "ana_r"},
 	}
 	// An unpinned gateway: authority comes from each mapped endpoint.
 	gateways := externalconversation.NewExternalConversationGatewayService(h.Store, nil)
 	registration := externalconversationtest.CreateActiveGateway(t, h.Ctx, gateways, externalconversation.CreateExternalConversationGatewayRequest{
-		ID: "telegram-bot", Name: "Telegram bot", Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "unpinned gateway",
-		Gateway: ExternalConversationIngressGateway{
+		ID: "telegram-bot", Name: "Telegram bot", Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "unpinned gateway",
+		Gateway: models.ExternalConversationIngressGateway{
 			Scope: endpoint.Scope, Owner: h.Owner, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: "telegram",
 		},
 	})
@@ -245,7 +246,7 @@ func TestTelegramMessageOffersRoutineEvent(t *testing.T) {
 		t.Fatalf("waiting events = %d, want 1", len(records))
 	}
 	event := records[0].Event
-	if event.ID != "telegram:update:991" || event.Kind != RoutineEventTelegramMessage || event.Summary != "Ana: Order 7 shipped?" {
+	if event.ID != "telegram:update:991" || event.Kind != models.RoutineEventTelegramMessage || event.Summary != "Ana: Order 7 shipped?" {
 		t.Fatalf("event = %#v", event)
 	}
 	want := map[string]string{"chat": "C123", "chatTitle": "Support desk", "sender": "42", "senderName": "Ana", "senderUsername": "ana_r", "bot": "false"}
@@ -265,11 +266,11 @@ func TestTelegramMessageOffersRoutineEvent(t *testing.T) {
 
 func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 	h := routinetest.NewEventHarness(t)
-	h.CreateCallbackRegistration("repo", h.Owner.ID, CallbackRegistrationActive)
-	h.CreateCallbackRegistration("quiet", h.Owner.ID, CallbackRegistrationActive)
-	activation := h.Routine("github", func(trigger *RoutineEventTrigger) {
-		*trigger = RoutineEventTrigger{Kind: RoutineEventGitHub, SourceRef: RoutineCallbackSourceRef("callback-repo"), SourceLabel: "acme/api (GitHub)", MaxPerHour: 20,
-			Filter: []RoutineEventCondition{{Field: "event", Op: RoutineFilterEquals, Value: "issues.opened"}}}
+	h.CreateCallbackRegistration("repo", h.Owner.ID, models.CallbackRegistrationActive)
+	h.CreateCallbackRegistration("quiet", h.Owner.ID, models.CallbackRegistrationActive)
+	activation := h.Routine("github", func(trigger *models.RoutineEventTrigger) {
+		*trigger = models.RoutineEventTrigger{Kind: models.RoutineEventGitHub, SourceRef: models.RoutineCallbackSourceRef("callback-repo"), SourceLabel: "acme/api (GitHub)", MaxPerHour: 20,
+			Filter: []models.RoutineEventCondition{{Field: "event", Op: models.RoutineFilterEquals, Value: "issues.opened"}}}
 	})
 	registration, err := h.Store.GetCallbackRegistration(h.Ctx, h.Scope, "callback-repo")
 	if err != nil || registration == nil {
@@ -277,9 +278,9 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 	}
 	// The shape the GitHub skill's callback adapter emits, reloaded from the
 	// receipt with json.Number.
-	issue := EventEnvelope{
+	issue := models.EventEnvelope{
 		ID: "github:delivery-1", Scope: h.Scope, Type: "github.issues.opened", Source: "github", Subject: "acme/api#12",
-		OccurredAt: h.Now, Actor: ActivityActor{Type: "callback", ID: registration.ID},
+		OccurredAt: h.Now, Actor: models.ActivityActor{Type: "callback", ID: registration.ID},
 		Attributes: map[string]interface{}{"owner": "acme", "repository": "api", "action": "opened", "number": json.Number("12")},
 		Payload: map[string]interface{}{
 			"repository": map[string]interface{}{"owner": "acme", "name": "api", "fullName": "acme/api"},
@@ -292,7 +293,7 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 	}
 	offered := &recordingRoutineOfferer{RoutineEventOfferer: h.Matcher}
 	consumer := externalconversation.NewRoutineCallbackConsumer(offered)
-	subscription := CallbackSubscription{EventType: "github.issues.opened", Consumer: "routines"}
+	subscription := models.CallbackSubscription{EventType: "github.issues.opened", Consumer: "routines"}
 
 	if err := consumer.ConsumeCallbackEvent(h.Ctx, registration, subscription, issue); err != nil {
 		t.Fatal(err)
@@ -308,8 +309,8 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 	if err := consumer.ConsumeCallbackEvent(h.Ctx, &other, subscription, issue); err != nil {
 		t.Fatal(err)
 	}
-	if stats := h.Matcher.RoutineEventStats(); stats.In[RoutineEventGitHub] != 1 || stats.Matched[RoutineEventGitHub] != 1 {
-		t.Fatalf("github stats in=%d matched=%d", stats.In[RoutineEventGitHub], stats.Matched[RoutineEventGitHub])
+	if stats := h.Matcher.RoutineEventStats(); stats.In[models.RoutineEventGitHub] != 1 || stats.Matched[models.RoutineEventGitHub] != 1 {
+		t.Fatalf("github stats in=%d matched=%d", stats.In[models.RoutineEventGitHub], stats.Matched[models.RoutineEventGitHub])
 	}
 	records := waitingRoutineEvents(t, h, activation)
 	if len(records) != 1 {
@@ -341,29 +342,29 @@ func TestGitHubCallbackRoutinesConsumer(t *testing.T) {
 		"repository":  map[string]interface{}{"fullName": "acme/api"},
 		"workflowRun": map[string]interface{}{"name": "CI", "branch": "main", "conclusion": "failure"},
 	}
-	if err := consumer.ConsumeCallbackEvent(h.Ctx, registration, CallbackSubscription{EventType: run.Type, Consumer: "routines"}, run); err != nil {
+	if err := consumer.ConsumeCallbackEvent(h.Ctx, registration, models.CallbackSubscription{EventType: run.Type, Consumer: "routines"}, run); err != nil {
 		t.Fatal(err)
 	}
 	mapped := offered.events[len(offered.events)-1]
-	if mapped.ID != run.ID || mapped.SourceRef != RoutineCallbackSourceRef(registration.ID) ||
+	if mapped.ID != run.ID || mapped.SourceRef != models.RoutineCallbackSourceRef(registration.ID) ||
 		mapped.Summary != "Workflow run completed in acme/api: CI (failure)" || mapped.Fields["branch"][0] != "main" || mapped.Fields["conclusion"][0] != "failure" {
 		t.Fatalf("workflow run event = %#v", mapped)
 	}
 	if err := mapped.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if stats := h.Matcher.RoutineEventStats(); stats.In[RoutineEventGitHub] != 2 || stats.Matched[RoutineEventGitHub] != 1 {
-		t.Fatalf("github stats in=%d matched=%d", stats.In[RoutineEventGitHub], stats.Matched[RoutineEventGitHub])
+	if stats := h.Matcher.RoutineEventStats(); stats.In[models.RoutineEventGitHub] != 2 || stats.Matched[models.RoutineEventGitHub] != 1 {
+		t.Fatalf("github stats in=%d matched=%d", stats.In[models.RoutineEventGitHub], stats.Matched[models.RoutineEventGitHub])
 	}
 }
 
 // recordingRoutineOfferer records each event offered to its offerer.
 type recordingRoutineOfferer struct {
 	externalconversation.RoutineEventOfferer
-	events []*RoutineEvent
+	events []*models.RoutineEvent
 }
 
-func (o *recordingRoutineOfferer) OfferRoutineEvent(ctx context.Context, event *RoutineEvent) (externalconversation.RoutineEventOffer, error) {
+func (o *recordingRoutineOfferer) OfferRoutineEvent(ctx context.Context, event *models.RoutineEvent) (externalconversation.RoutineEventOffer, error) {
 	o.events = append(o.events, event)
 	return o.RoutineEventOfferer.OfferRoutineEvent(ctx, event)
 }

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
 )
@@ -18,32 +19,32 @@ func TestEventSourcesListsConnections(t *testing.T) {
 	sources := result["sources"].([]*routine.RoutineEventSourceView)
 	bySource := map[string]*routine.RoutineEventSourceView{}
 	for _, source := range sources {
-		if source.Kind != RoutineEventCalendar {
+		if source.Kind != models.RoutineEventCalendar {
 			bySource[source.Source] = source
 		}
 	}
 	slack := bySource[f.SlackRef]
-	if slack == nil || slack.Kind != RoutineEventSlackMessage || slack.Label != "Acme Slack" || !slack.Available ||
+	if slack == nil || slack.Kind != models.RoutineEventSlackMessage || slack.Label != "Acme Slack" || !slack.Available ||
 		!reflect.DeepEqual(slack.Channels, []routine.RoutineEventSourceChannel{{ID: "C1", Name: "#support"}}) {
 		t.Fatalf("slack source=%#v", slack)
 	}
 	github := bySource[f.GitHubRef]
-	if github == nil || github.Kind != RoutineEventGitHub || github.Label != "acme/api (GitHub)" || !reflect.DeepEqual(github.EventTypes, []string{"issues.opened", "pull_request.opened"}) {
+	if github == nil || github.Kind != models.RoutineEventGitHub || github.Label != "acme/api (GitHub)" || !reflect.DeepEqual(github.EventTypes, []string{"issues.opened", "pull_request.opened"}) {
 		t.Fatalf("github source=%#v", github)
 	}
-	for _, missing := range []string{RoutineCallbackSourceRef("reg-approvals"), RoutineCallbackSourceRef("reg-other"), RoutineGoogleSourceRef("other", "g-other")} {
+	for _, missing := range []string{models.RoutineCallbackSourceRef("reg-approvals"), models.RoutineCallbackSourceRef("reg-other"), models.RoutineGoogleSourceRef("other", "g-other")} {
 		if bySource[missing] != nil {
 			t.Fatalf("listed %s", missing)
 		}
 	}
-	gmail := bySource[RoutineGoogleSourceRef("user", "g-user")]
-	if gmail == nil || gmail.Kind != RoutineEventGmailMessage || !gmail.Available || !reflect.DeepEqual(gmail.Fields, RoutineEventFilterFields(RoutineEventGmailMessage)) {
+	gmail := bySource[models.RoutineGoogleSourceRef("user", "g-user")]
+	if gmail == nil || gmail.Kind != models.RoutineEventGmailMessage || !gmail.Available || !reflect.DeepEqual(gmail.Fields, models.RoutineEventFilterFields(models.RoutineEventGmailMessage)) {
 		t.Fatalf("gmail source=%#v", gmail)
 	}
-	if webhook := bySource[routine.RoutineEventSourceNew]; webhook == nil || webhook.Kind != RoutineEventWebhook || !webhook.Available {
+	if webhook := bySource[routine.RoutineEventSourceNew]; webhook == nil || webhook.Kind != models.RoutineEventWebhook || !webhook.Available {
 		t.Fatalf("webhook source=%#v", webhook)
 	}
-	calendar := sources[slices.IndexFunc(sources, func(source *routine.RoutineEventSourceView) bool { return source.Kind == RoutineEventCalendar })]
+	calendar := sources[slices.IndexFunc(sources, func(source *routine.RoutineEventSourceView) bool { return source.Kind == models.RoutineEventCalendar })]
 	if calendar.Available || calendar.Reason != routine.RoutineEventSourceNeedsSignIn || calendar.SkillID != "google" {
 		t.Fatalf("calendar source=%#v", calendar)
 	}
@@ -70,22 +71,22 @@ func TestEventSourcesListsConnections(t *testing.T) {
 
 	checker := routine.NewRoutineEventSourceChecker(f.Store)
 	for _, check := range []struct {
-		kind      RoutineEventKind
+		kind      models.RoutineEventKind
 		sourceRef string
-		owner     ObjectiveOwner
+		owner     models.ObjectiveOwner
 		channels  []string
 		want      bool
 	}{
-		{RoutineEventSlackMessage, f.SlackRef, f.Run.Owner, nil, true},
-		{RoutineEventSlackMessage, f.SlackRef, f.Run.Owner, []string{"c1"}, true},
-		{RoutineEventSlackMessage, f.SlackRef, f.Run.Owner, []string{"C1", "C2"}, false},
-		{RoutineEventTelegramMessage, f.SlackRef, f.Run.Owner, nil, false},
-		{RoutineEventSlackMessage, f.SlackRef, ObjectiveOwner{Type: OwnerTypeAgent, ID: "someone-else"}, nil, false},
-		{RoutineEventGitHub, f.GitHubRef, f.Run.Owner, nil, true},
-		{RoutineEventGitHub, RoutineCallbackSourceRef("reg-approvals"), f.Run.Owner, nil, false},
-		{RoutineEventGitHub, RoutineCallbackSourceRef("missing"), f.Run.Owner, nil, false},
+		{models.RoutineEventSlackMessage, f.SlackRef, f.Run.Owner, nil, true},
+		{models.RoutineEventSlackMessage, f.SlackRef, f.Run.Owner, []string{"c1"}, true},
+		{models.RoutineEventSlackMessage, f.SlackRef, f.Run.Owner, []string{"C1", "C2"}, false},
+		{models.RoutineEventTelegramMessage, f.SlackRef, f.Run.Owner, nil, false},
+		{models.RoutineEventSlackMessage, f.SlackRef, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "someone-else"}, nil, false},
+		{models.RoutineEventGitHub, f.GitHubRef, f.Run.Owner, nil, true},
+		{models.RoutineEventGitHub, models.RoutineCallbackSourceRef("reg-approvals"), f.Run.Owner, nil, false},
+		{models.RoutineEventGitHub, models.RoutineCallbackSourceRef("missing"), f.Run.Owner, nil, false},
 	} {
-		subscription := RoutineEventSubscription{Scope: f.Run.Scope, Owner: check.owner, Kind: check.kind, SourceRef: check.sourceRef, Channels: check.channels}
+		subscription := models.RoutineEventSubscription{Scope: f.Run.Scope, Owner: check.owner, Kind: check.kind, SourceRef: check.sourceRef, Channels: check.channels}
 		got, err := checker.SourceExists(t.Context(), subscription)
 		if err != nil || got != check.want {
 			t.Fatalf("SourceExists(%s, %s, %s, %v)=%v, %v", check.kind, check.sourceRef, check.owner.ID, check.channels, got, err)

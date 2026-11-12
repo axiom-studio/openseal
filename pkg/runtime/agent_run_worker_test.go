@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
@@ -18,17 +19,17 @@ type countingAgentRunClaimStore struct {
 	claims atomic.Int64
 }
 
-func (s *countingAgentRunClaimStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
+func (s *countingAgentRunClaimStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
 	s.claims.Add(1)
 	return s.Store.ClaimNextAgentRunWithDecision(ctx, claim)
 }
 
 func TestAgentRunWorkerPoolCoalescesIdleClaimPolling(t *testing.T) {
 	store := &countingAgentRunClaimStore{Store: newTestKernelStore(t)}
-	pool, err := runworker.NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	pool, err := runworker.NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return nil, errors.New("unexpected resolver call")
 	}), nil, runworker.AgentRunWorkerConfig{
-		Scope: Scope{Kind: "tenant", ID: "idle"}, Concurrency: 8,
+		Scope: models.Scope{Kind: "tenant", ID: "idle"}, Concurrency: 8,
 		PollInterval: 25 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
 	})
 	if err != nil {

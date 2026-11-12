@@ -5,9 +5,11 @@ import (
 	"maps"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
@@ -15,16 +17,16 @@ import (
 )
 
 func TestChatRunsActForThePersonWhoAsked(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "acting"}
-	conversation := &Conversation{ID: "chat", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}}
-	initiator := ConversationParticipant{Type: ConversationParticipantUser, ID: "9"}
+	scope := models.Scope{Kind: "tenant", ID: "acting"}
+	conversation := &models.Conversation{ID: "chat", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}}
+	initiator := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "9"}
 	for name, test := range map[string]struct {
-		message *ChannelMessage
+		message *models.ChannelMessage
 		want    string
 	}{
-		"user":              {&ChannelMessage{ID: "m1", Scope: scope, ConversationID: "chat", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "7"}}, "7"},
-		"service initiator": {&ChannelMessage{ID: "m2", Scope: scope, ConversationID: "chat", Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "coordinator"}, Initiator: &initiator}, "9"},
-		"agent":             {&ChannelMessage{ID: "m3", Scope: scope, ConversationID: "chat", Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "helper"}}, ""},
+		"user":              {&models.ChannelMessage{ID: "m1", Scope: scope, ConversationID: "chat", Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "7"}}, "7"},
+		"service initiator": {&models.ChannelMessage{ID: "m2", Scope: scope, ConversationID: "chat", Sender: models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "coordinator"}, Initiator: &initiator}, "9"},
+		"agent":             {&models.ChannelMessage{ID: "m3", Scope: scope, ConversationID: "chat", Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "helper"}}, ""},
 	} {
 		if got := runtimeconversation.ConversationAgentRunRequest(conversation, test.message).ActingUser; got != test.want {
 			t.Errorf("%s: ActingUser = %q, want %q", name, got, test.want)
@@ -32,9 +34,9 @@ func TestChatRunsActForThePersonWhoAsked(t *testing.T) {
 	}
 
 	// A Team member's answer acts for the person the routing run acts for.
-	routing := &AgentRun{ID: "routing", Scope: scope, Owner: conversation.Owner, ActingUser: "7", Context: map[string]interface{}{}}
-	trigger := &ChannelMessage{ID: "m1", Scope: scope, ConversationID: "chat"}
-	member := runtimeconversation.TeamMemberRunRequest(routing, conversation, trigger, ConversationResponder{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "member"}}, "key")
+	routing := &models.AgentRun{ID: "routing", Scope: scope, Owner: conversation.Owner, ActingUser: "7", Context: map[string]interface{}{}}
+	trigger := &models.ChannelMessage{ID: "m1", Scope: scope, ConversationID: "chat"}
+	member := runtimeconversation.TeamMemberRunRequest(routing, conversation, trigger, models.ConversationResponder{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "member"}}, "key")
 	if member.ActingUser != "7" {
 		t.Fatalf("Team member run ActingUser = %q", member.ActingUser)
 	}
@@ -44,7 +46,7 @@ func TestDelegatedAgentRunWorksWithoutAnyConnection(t *testing.T) {
 	catalog, scope := newUmbrellaFixture(t)
 	// Agent "other" asked "member" for help: member's Gmail, member's Drive
 	// and other's connections all stay out.
-	delegated := &AgentRun{ID: "delegated", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"}, AssignedAgentID: "member", Context: map[string]interface{}{}}
+	delegated := &models.AgentRun{ID: "delegated", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other"}, AssignedAgentID: "member", Context: map[string]interface{}{}}
 	got := umbrellaRunActions(t, catalog, delegated)
 	if len(got) != 1 || got[0] != "member:notes" {
 		t.Fatalf("delegated run actions = %v, want only member:notes", got)
@@ -56,11 +58,11 @@ func TestDelegatedAgentRunWorksWithoutAnyConnection(t *testing.T) {
 	}
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	for name, test := range map[string]struct {
-		run     *AgentRun
+		run     *models.AgentRun
 		binding *skill.Binding
 		ok      bool
 	}{
-		"1:1 own connection":        {&AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "member"}, AssignedAgentID: "member"}, &skill.Binding{Scope: skillScope, ID: "gmail", DeploymentID: "member", Credentials: map[string]skill.CredentialReference{"access": {Kind: "oauth2", ID: "member-grant"}}}, true},
+		"1:1 own connection":        {&models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "member"}, AssignedAgentID: "member"}, &skill.Binding{Scope: skillScope, ID: "gmail", DeploymentID: "member", Credentials: map[string]skill.CredentialReference{"access": {Kind: "oauth2", ID: "member-grant"}}}, true},
 		"delegated own connection":  {delegated, &skill.Binding{Scope: skillScope, ID: "gmail", DeploymentID: "member", Credentials: map[string]skill.CredentialReference{"access": {Kind: "oauth2", ID: "member-grant"}}}, false},
 		"delegated plain binding":   {delegated, &skill.Binding{Scope: skillScope, ID: "notes", DeploymentID: "member"}, true},
 		"delegated owner's binding": {delegated, &skill.Binding{Scope: skillScope, ID: "notes", DeploymentID: "other"}, false},
@@ -74,16 +76,16 @@ func TestDelegatedAgentRunWorksWithoutAnyConnection(t *testing.T) {
 
 func TestOnlyTheActingPersonSteersARun(t *testing.T) {
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "steering"}
-	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", ActingUser: "7",
-		Goal: "Work for a person", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "steering"}
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", ActingUser: "7",
+		Goal: "Work for a person", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	commands := agentrun.NewRunCommandService(store)
-	command := func(kind agentrun.AgentRunCommandKind, actor ActivityActor) error {
+	command := func(kind agentrun.AgentRunCommandKind, actor models.ActivityActor) error {
 		current, err := store.GetAgentRun(t.Context(), scope, run.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -95,18 +97,18 @@ func TestOnlyTheActingPersonSteersARun(t *testing.T) {
 		_, err = commands.CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: current.Revision, Kind: kind, Actor: actor, Instruction: instruction, Summary: "steer"})
 		return err
 	}
-	other := ActivityActor{Type: "user", ID: "8"}
+	other := models.ActivityActor{Type: "user", ID: "8"}
 	for _, kind := range []agentrun.AgentRunCommandKind{agentrun.AgentRunCommandIntervene, agentrun.AgentRunCommandResolveHumanIntervention, agentrun.AgentRunCommandResume, agentrun.AgentRunCommandRetry} {
 		if err := command(kind, other); !errors.Is(err, agentrun.ErrRunCommandNotAuthorized) {
 			t.Errorf("%s by another user: err = %v", kind, err)
 		}
-		for _, allowed := range []ActivityActor{{Type: "user", ID: "7"}, {Type: "system", ID: "kernel"}, {Type: "agent", ID: "agent"}} {
+		for _, allowed := range []models.ActivityActor{{Type: "user", ID: "7"}, {Type: "system", ID: "kernel"}, {Type: "agent", ID: "agent"}} {
 			if err := command(kind, allowed); errors.Is(err, agentrun.ErrRunCommandNotAuthorized) {
 				t.Errorf("%s by %#v refused", kind, allowed)
 			}
 		}
 	}
-	if err := command(agentrun.AgentRunCommandIntervene, ActivityActor{Type: "user", ID: "7"}); err != nil {
+	if err := command(agentrun.AgentRunCommandIntervene, models.ActivityActor{Type: "user", ID: "7"}); err != nil {
 		t.Fatalf("the acting person's guidance: %v", err)
 	}
 	if err := command(agentrun.AgentRunCommandPause, other); err != nil {
@@ -117,9 +119,9 @@ func TestOnlyTheActingPersonSteersARun(t *testing.T) {
 	}
 
 	// A run that acts for no person keeps today's rules.
-	nobody, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "Work for no one", Source: RunSourceManual,
+	nobody, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "Work for no one", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -133,15 +135,15 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := t.Context()
 	run, catalog, bound, args := routinetest.ScheduledTask(t, store)
-	conversationID := run.Context[conversationRunContextConversationID].(string)
+	conversationID := run.Context[models.ConversationRunConversationIDContextKey].(string)
 	files := &routineScriptFiles{}
 	files.write(conversationID, "scripts/weekly.py", routineScriptDigestOf("a"))
 	validator, _ := routine.NewRunbookActionValidator(store)
 	validator.SetChatFiles(files)
 	dispatcher, _ := routine.NewRunbookActionDispatcher(store, nil)
 	dispatcher.SetChatFiles(files)
-	dispatch := func(as *AgentRun, b *skill.BoundAction, arguments map[string]interface{}, callID string) (map[string]interface{}, error) {
-		return dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Run: as, Bound: b, Call: &ActionCall{ID: callID, Scope: as.Scope, RunID: as.ID, DeploymentID: as.AssignedAgentID, IdempotencyKey: callID}, Arguments: arguments})
+	dispatch := func(as *models.AgentRun, b *skill.BoundAction, arguments map[string]interface{}, callID string) (map[string]interface{}, error) {
+		return dispatcher.DispatchAction(ctx, agentrun.ActionDispatchInput{Run: as, Bound: b, Call: &models.ActionCall{ID: callID, Scope: as.Scope, RunID: as.ID, DeploymentID: as.AssignedAgentID, IdempotencyKey: callID}, Arguments: arguments})
 	}
 	proposed := maps.Clone(args)
 	proposed["script"] = map[string]interface{}{"path": "scripts/weekly.py", "command": "python3 scripts/weekly.py"}
@@ -153,14 +155,14 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation := created["activation"].(*RunbookActivation)
+	activation := created["activation"].(*models.RunbookActivation)
 	if activation.Task.CreatedBy != "user" {
 		t.Fatalf("routine creator = %q", activation.Task.CreatedBy)
 	}
 
 	// Someone else in the same chat.
-	intruder, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: run.Scope, Kind: RunKindConversation, Owner: run.Owner, AssignedAgentID: run.AssignedAgentID,
-		ActingUser: "intruder", Goal: "Handle another request", Source: RunSourceChat, Context: maps.Clone(run.Context), IdempotencyKey: "intruder"})
+	intruder, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: run.Scope, Kind: models.RunKindConversation, Owner: run.Owner, AssignedAgentID: run.AssignedAgentID,
+		ActingUser: "intruder", Goal: "Handle another request", Source: models.RunSourceChat, Context: maps.Clone(run.Context), IdempotencyKey: "intruder"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +170,7 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	setStatus := func(as *AgentRun, status RunbookActivationStatus, callID string) (*RunbookActivation, error) {
+	setStatus := func(as *models.AgentRun, status models.RunbookActivationStatus, callID string) (*models.RunbookActivation, error) {
 		current, err := store.GetRunbookActivation(ctx, run.Scope, activation.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -177,15 +179,15 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		return result["activation"].(*RunbookActivation), nil
+		return result["activation"].(*models.RunbookActivation), nil
 	}
-	if _, err := setStatus(intruder, RunbookActivationPaused, "intruder-pause"); err != nil {
+	if _, err := setStatus(intruder, models.RunbookActivationPaused, "intruder-pause"); err != nil {
 		t.Fatalf("another person's pause: %v", err)
 	}
-	if _, err := setStatus(intruder, RunbookActivationActive, "intruder-resume"); !errors.Is(err, routine.ErrRoutineNotCreator) {
+	if _, err := setStatus(intruder, models.RunbookActivationActive, "intruder-resume"); !errors.Is(err, routine.ErrRoutineNotCreator) {
 		t.Fatalf("another person's resume: %v", err)
 	}
-	if _, err := setStatus(run, RunbookActivationActive, "creator-resume"); err != nil {
+	if _, err := setStatus(run, models.RunbookActivationActive, "creator-resume"); err != nil {
 		t.Fatalf("the creator's resume: %v", err)
 	}
 
@@ -212,20 +214,20 @@ func TestOnlyTheRoutineCreatorChangesItsScriptOrResumesIt(t *testing.T) {
 	// A routine with no recorded creator becomes the routine of whoever
 	// changes it next.
 	current, _ = store.GetRunbookActivation(ctx, run.Scope, activation.ID)
-	orphan := cloneRunbookActivation(current)
-	orphan.Task.CreatedBy, orphan.Status = "", RunbookActivationPaused
+	orphan := models.CloneRunbookActivation(current)
+	orphan.Task.CreatedBy, orphan.Status = "", models.RunbookActivationPaused
 	orphan.Revision++
 	if err := store.UpdateRunbookActivation(ctx, orphan, current.Revision); err != nil {
 		t.Fatal(err)
 	}
-	stamped, err := setStatus(intruder, RunbookActivationActive, "adopt")
+	stamped, err := setStatus(intruder, models.RunbookActivationActive, "adopt")
 	if err != nil || stamped.Task.CreatedBy != "intruder" {
 		t.Fatalf("adopted routine = %#v, %v", stamped, err)
 	}
-	if _, err := setStatus(run, RunbookActivationPaused, "creator-pause"); err != nil {
+	if _, err := setStatus(run, models.RunbookActivationPaused, "creator-pause"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := setStatus(run, RunbookActivationActive, "former-creator-resume"); !errors.Is(err, routine.ErrRoutineNotCreator) {
+	if _, err := setStatus(run, models.RunbookActivationActive, "former-creator-resume"); !errors.Is(err, routine.ErrRoutineNotCreator) {
 		t.Fatalf("former creator resumed an adopted routine: %v", err)
 	}
 }
@@ -236,8 +238,8 @@ func TestRoutineRunsActForTheirCreatorOnlyWithATask(t *testing.T) {
 	// TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores.)
 	store := newTestKernelStore(t)
 	run, _, bound, args := routinetest.ScheduledTask(t, store)
-	activation := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*RunbookActivation)
-	started, err := routine.StartRunbookActivation(t.Context(), store, run.Scope, activation.ID, routine.StartRunbookActivationRequest{IdempotencyKey: "start-now", Actor: ActivityActor{Type: "user", ID: "user"}})
+	activation := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*models.RunbookActivation)
+	started, err := routine.StartRunbookActivation(t.Context(), store, run.Scope, activation.ID, routine.StartRunbookActivationRequest{IdempotencyKey: "start-now", Actor: models.ActivityActor{Type: "user", ID: "user"}})
 	if err != nil || started.Run.ActingUser != "user" {
 		t.Fatalf("started routine run = %#v, %v", started, err)
 	}

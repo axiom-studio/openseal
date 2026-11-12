@@ -23,17 +23,17 @@ import (
 func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "scheduler"}
+	scope := models.Scope{Kind: "tenant", ID: "scheduler"}
 	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "engineering"},
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "engineering"},
 		Title: "Engineering", IdempotencyKey: "engineering-channel",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := conversationruntest.PostMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is the canary healthy?", "message-one")
+	first := conversationruntest.PostMessage(t, service, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion, "Is the canary healthy?", "message-one")
 	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{ConversationPageSize: 1, MessagePageSize: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -42,8 +42,8 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	if err != nil || replayed || created == nil || created.Run == nil {
 		t.Fatalf("initial schedule = %#v, replayed=%v, err=%v", created, replayed, err)
 	}
-	if created.Event == nil || created.Run.Kind != RunKindConversation || created.Run.ConcurrencyKey != ConversationRunLane(conversation.ID, "", created.Run.AssignedAgentID) ||
-		created.Run.Owner != conversation.Owner || created.Run.Context[conversationRunContextTriggerID] != first.ID {
+	if created.Event == nil || created.Run.Kind != models.RunKindConversation || created.Run.ConcurrencyKey != models.ConversationRunLane(conversation.ID, "", created.Run.AssignedAgentID) ||
+		created.Run.Owner != conversation.Owner || created.Run.Context[models.ConversationRunTriggerIDContextKey] != first.ID {
 		t.Fatalf("scheduled conversation Run = %#v", created)
 	}
 	replayedResult, replayed, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, first.ID)
@@ -57,12 +57,12 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	}
 	// A member's message without an @mention is not a wake in a Team channel;
 	// a second human message is.
-	second := conversationruntest.PostMessage(t, service, current, ConversationParticipantUser, MessageIntentQuestion, "Please review the release notes.", "message-two")
+	second := conversationruntest.PostMessage(t, service, current, models.ConversationParticipantUser, models.MessageIntentQuestion, "Please review the release notes.", "message-two")
 	current, err = service.GetConversation(ctx, scope, conversation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	conversationruntest.PostMessage(t, service, current, ConversationParticipantService, MessageIntentSystem, "Channel metadata synchronized.", "message-system")
+	conversationruntest.PostMessage(t, service, current, models.ConversationParticipantService, models.MessageIntentSystem, "Channel metadata synchronized.", "message-system")
 
 	reconciled, err := scheduler.ReconcileScope(ctx, scope)
 	if err != nil {
@@ -71,13 +71,13 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	if reconciled.Conversations != 1 || reconciled.Messages != 3 || reconciled.Scheduled != 1 || reconciled.Replayed != 1 || reconciled.Skipped != 1 {
 		t.Fatalf("reconcile result = %#v", reconciled)
 	}
-	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation, Owner: &conversation.Owner})
+	runs, err := store.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, Kind: models.RunKindConversation, Owner: &conversation.Owner})
 	if err != nil || len(runs) != 2 {
 		t.Fatalf("conversation Runs = %#v, %v", runs, err)
 	}
 	triggerIDs := map[interface{}]bool{}
 	for _, run := range runs {
-		triggerIDs[run.Context[conversationRunContextTriggerID]] = true
+		triggerIDs[run.Context[models.ConversationRunTriggerIDContextKey]] = true
 	}
 	if !triggerIDs[first.ID] || !triggerIDs[second.ID] {
 		t.Fatalf("scheduled trigger IDs = %#v", triggerIDs)
@@ -95,22 +95,22 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := Scope{Kind: "tenant", ID: "restart"}
+	scope := models.Scope{Kind: "tenant", ID: "restart"}
 	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"},
 		Title: "Operations", IdempotencyKey: "operations-channel",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := conversationruntest.PostMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "What is failing?", "restart-one")
+	first := conversationruntest.PostMessage(t, service, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion, "What is failing?", "restart-one")
 	current, err := service.GetConversation(ctx, scope, conversation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := conversationruntest.PostMessage(t, service, current, ConversationParticipantUser, MessageIntentUpdate, "The database is healthy.", "restart-two")
+	second := conversationruntest.PostMessage(t, service, current, models.ConversationParticipantUser, models.MessageIntentUpdate, "The database is healthy.", "restart-two")
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -136,16 +136,16 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer verified.Close()
-	runs, err := verified.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation})
+	runs, err := verified.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, Kind: models.RunKindConversation})
 	if err != nil || len(runs) != 2 {
 		t.Fatalf("persisted conversation Runs = %#v, %v", runs, err)
 	}
-	triggerIDs := map[interface{}]bool{runs[0].Context[conversationRunContextTriggerID]: true, runs[1].Context[conversationRunContextTriggerID]: true}
+	triggerIDs := map[interface{}]bool{runs[0].Context[models.ConversationRunTriggerIDContextKey]: true, runs[1].Context[models.ConversationRunTriggerIDContextKey]: true}
 	if !triggerIDs[first.ID] || !triggerIDs[second.ID] {
 		t.Fatalf("persisted trigger IDs = %#v", triggerIDs)
 	}
-	cursor, err := runtimeconversation.NewConversationService(verified).GetCursor(ctx, scope, conversation.ID, ConversationParticipant{
-		Type: ConversationParticipantService, ID: conversationRunSchedulerParticipant,
+	cursor, err := runtimeconversation.NewConversationService(verified).GetCursor(ctx, scope, conversation.ID, models.ConversationParticipant{
+		Type: models.ConversationParticipantService, ID: models.ConversationRunSchedulerParticipant,
 	})
 	if err != nil || cursor == nil || cursor.ReadSequence != 2 || cursor.DeliveredSequence != 2 {
 		t.Fatalf("persisted scheduler cursor = %#v, %v", cursor, err)
@@ -155,11 +155,11 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "canceled-conversation"}
+	scope := models.Scope{Kind: "tenant", ID: "canceled-conversation"}
 	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"},
 		Title: "Operations", IdempotencyKey: "canceled-channel",
 	})
 	if err != nil {
@@ -167,8 +167,8 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 	}
 	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"},
-		Intent: MessageIntentQuestion, Content: "Pause the project.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "user-1"},
+		Intent: models.MessageIntentQuestion, Content: "Pause the project.", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		RequiresResponse: true, IdempotencyKey: "canceled-trigger",
 	})
 	if err != nil {
@@ -181,31 +181,31 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 	}
 	canceled, err := agentrun.NewRunCommandService(store).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 		Scope: scope, RunID: scheduled.Run.ID, ExpectedRevision: scheduled.Run.Revision, Kind: agentrun.AgentRunCommandCancel,
-		Actor: ActivityActor{Type: "user", ID: "user-1"}, Summary: "Cancel the proposal",
+		Actor: models.ActivityActor{Type: "user", ID: "user-1"}, Summary: "Cancel the proposal",
 	})
-	if err != nil || canceled.Run.Status != AgentRunStatusCanceled {
+	if err != nil || canceled.Run.Status != models.AgentRunStatusCanceled {
 		t.Fatalf("canceled conversation Run = %#v, %v", canceled, err)
 	}
 	result, err := scheduler.ReconcileScope(ctx, scope)
 	if err != nil || result.Results != 1 {
 		t.Fatalf("canceled result reconciliation = %#v, %v", result, err)
 	}
-	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	messages, err := service.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(messages) != 2 {
 		t.Fatalf("canceled channel messages = %#v, %v", messages, err)
 	}
 	message := messages[1]
-	if message.Sender != (ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"}) ||
-		message.Intent != MessageIntentSystem || message.Content != "This request was canceled before completion." ||
+	if message.Sender != (models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "openseal.conversation"}) ||
+		message.Intent != models.MessageIntentSystem || message.Content != "This request was canceled before completion." ||
 		message.ReplyToMessageID != posted.Message.ID || message.ResolvesMessageID != posted.Message.ID ||
-		len(message.References) != 1 || message.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: scheduled.Run.ID}) {
+		len(message.References) != 1 || message.References[0] != (models.ConversationReference{Kind: models.ConversationReferenceRun, ID: scheduled.Run.ID}) {
 		t.Fatalf("canceled channel result = %#v", message)
 	}
 	replay, err := scheduler.ReconcileScope(ctx, scope)
 	if err != nil || replay.Results != 0 {
 		t.Fatalf("canceled result replay = %#v, %v", replay, err)
 	}
-	messages, _ = service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	messages, _ = service.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
 	if len(messages) != 2 {
 		t.Fatalf("canceled result duplicated: %#v", messages)
 	}
@@ -214,17 +214,17 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "legacy-round"}
+	scope := models.Scope{Kind: "tenant", ID: "legacy-round"}
 	service := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "engineering"},
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "engineering"},
 		Title: "Engineering", IdempotencyKey: "legacy-channel",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	trigger := conversationruntest.PostMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is the release ready?", "legacy-trigger")
+	trigger := conversationruntest.PostMessage(t, service, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion, "Is the release ready?", "legacy-trigger")
 	coordinator := conversationRunTestCoordinator(t, service)
 	if _, err := coordinator.Coordinate(ctx, runtimeconversation.ConversationRoutingRequest{
 		Scope: scope, ConversationID: conversation.ID, TriggerMessageID: trigger.ID, IdempotencyKey: "legacy-manual-round",
@@ -239,7 +239,7 @@ func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *
 	if err != nil || result.Messages != 1 || result.Scheduled != 0 || result.Skipped != 1 {
 		t.Fatalf("legacy reconciliation = %#v, %v", result, err)
 	}
-	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation})
+	runs, err := store.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, Kind: models.RunKindConversation})
 	if err != nil || len(runs) != 0 {
 		t.Fatalf("legacy messages were replayed as Runs: %#v, %v", runs, err)
 	}
@@ -250,7 +250,7 @@ func conversationRunTestCoordinator(t *testing.T, service *runtimeconversation.C
 	t.Helper()
 	participants := runtimeconversation.ConversationParticipantSourceFunc(func(context.Context, runtimeconversation.ConversationParticipantQuery) ([]runtimeconversation.ConversationParticipantBinding, error) {
 		return []runtimeconversation.ConversationParticipantBinding{{
-			Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-1"}, SemanticRoles: []string{"developer"},
+			Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "agent-1"}, SemanticRoles: []string{"developer"},
 		}}, nil
 	})
 	router := runtimeconversation.ConversationRouterFunc(func(context.Context, runtimeconversation.ConversationRouteRequest) (runtimeconversation.ConversationRouteDecision, error) {
@@ -263,8 +263,8 @@ func conversationRunTestCoordinator(t *testing.T, service *runtimeconversation.C
 	return coordinator
 }
 
-func conversationRunRoundKey(scope Scope, conversationID, triggerID string) string {
-	return "participation-round:" + hashString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+triggerID)
+func conversationRunRoundKey(scope models.Scope, conversationID, triggerID string) string {
+	return "participation-round:" + models.SHA256DigestString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+triggerID)
 }
 
 // chatRunResolver is the Agent's own loop binding as ResolveLoopBinding gives
@@ -274,14 +274,14 @@ type chatRunResolver struct {
 	store    runlooptest.ChatStore
 	producer agentrun.StepProducer
 	actions  []capability.ModelAction
-	resolved []*AgentRun
+	resolved []*models.AgentRun
 }
 
-func (r *chatRunResolver) ResolveTurnRunner(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
-	r.resolved = append(r.resolved, cloneAgentRun(run))
+func (r *chatRunResolver) ResolveTurnRunner(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	r.resolved = append(r.resolved, models.CloneAgentRun(run))
 	return &agentrun.TurnRunnerBinding{
 		DeploymentID: run.AssignedAgentID, DefinitionID: "agent-definition", DefinitionVersion: "7",
-		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model",
+		ModelProvider: string(models.ModelStepProviderAnthropic), Model: "chat-model",
 		ModelActions: append([]capability.ModelAction(nil), r.actions...),
 		Producer:     r.producer, Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(r.store, r.store)},
 		Authority: agentrun.ControlAuthority{AgentID: run.AssignedAgentID, CanAskUser: true, CanReact: true},
@@ -299,7 +299,7 @@ func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The Agent resolver binds the canonical conversation Run itself.
-		if len(resolver.resolved) != 1 || resolver.resolved[0].Kind != RunKindConversation || resolver.resolved[0].ID != run.ID {
+		if len(resolver.resolved) != 1 || resolver.resolved[0].Kind != models.RunKindConversation || resolver.resolved[0].ID != run.ID {
 			t.Fatalf("resolved Runs = %#v", resolver.resolved)
 		}
 		if binding.Producer != resolver.producer || binding.Session == nil || binding.Session.ID != run.SessionID {
@@ -319,13 +319,13 @@ func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
 		}
 		done := f.Run(run.ID)
 		messages := f.AgentMessages()
-		if done.Status != AgentRunStatusCompleted || len(messages) != 1 {
+		if done.Status != models.AgentRunStatusCompleted || len(messages) != 1 {
 			t.Fatalf("run = %s %#v, agent messages = %#v", done.Status, done.Output, messages)
 		}
 		answer := messages[0]
 		if answer.Content != "The release evidence is healthy." || answer.ReplyToMessageID != trigger.ID ||
-			answer.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-1"}) ||
-			len(answer.References) == 0 || answer.References[0].Kind != ConversationReferenceRun || answer.References[0].ID != run.ID {
+			answer.Sender != (models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "agent-1"}) ||
+			len(answer.References) == 0 || answer.References[0].Kind != models.ConversationReferenceRun || answer.References[0].ID != run.ID {
 			t.Fatalf("answer = %#v", answer)
 		}
 		if done.Output["messageId"] != answer.ID || done.Output["triggerMessageId"] != trigger.ID {
@@ -336,10 +336,10 @@ func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
 		path := f.Path(run.SessionID)
 		assistant := 0
 		for _, entry := range path {
-			if entry.Type == SessionEntryAssistant && entry.RunID == run.ID {
+			if entry.Type == models.SessionEntryAssistant && entry.RunID == run.ID {
 				assistant++
 			}
-			if entry.Type == SessionEntryUser && strings.Contains(runlooptest.ChatEntryText(entry), "currentMessage") {
+			if entry.Type == models.SessionEntryUser && strings.Contains(runlooptest.ChatEntryText(entry), "currentMessage") {
 				t.Fatalf("goal JSON in the session: %#v", entry)
 			}
 		}
@@ -360,7 +360,7 @@ func TestTeamRoutingRunCompletesWithResponderRunIds(t *testing.T) {
 		if created.Run.SessionID != "" || created.Run.AssignedAgentID != "" {
 			t.Fatalf("routing Run = %#v", created.Run)
 		}
-		claimed, err := f.Store.ClaimNextAgentRun(f.Ctx, AgentRunClaim{
+		claimed, err := f.Store.ClaimNextAgentRun(f.Ctx, models.AgentRunClaim{
 			Scope: f.Conversation.Scope, WorkerID: runlooptest.ChatWorker, Now: f.Now, LeaseDuration: time.Hour, AgingInterval: time.Minute,
 		})
 		if err != nil || claimed == nil || claimed.ID != created.Run.ID {
@@ -379,14 +379,14 @@ func TestTeamRoutingRunCompletesWithResponderRunIds(t *testing.T) {
 		}
 		done := f.Run(claimed.ID)
 		ids, _ := done.Output["responderRunIds"].([]interface{})
-		if done.Status != AgentRunStatusCompleted || len(ids) != 1 || done.Output["conversationId"] != f.Conversation.ID ||
+		if done.Status != models.AgentRunStatusCompleted || len(ids) != 1 || done.Output["conversationId"] != f.Conversation.ID ||
 			done.Output["triggerMessageId"] != trigger.ID || done.Output["participationRoundId"] == "" || done.Output["replayed"] != false {
 			t.Fatalf("routing Run = %s %#v", done.Status, done.Output)
 		}
 		member := f.Run(fmt.Sprint(ids[0]))
-		lane := ConversationRunLane(f.Conversation.ID, "", "agent-1")
-		if member.Kind != RunKindConversation || member.AssignedAgentID != "agent-1" || member.ConcurrencyKey != lane ||
-			member.SessionID != conversationSessionID(f.Conversation.Scope, lane) || member.Context[runtimeconversation.TeamRoutingRunContextKey] != claimed.ID {
+		lane := models.ConversationRunLane(f.Conversation.ID, "", "agent-1")
+		if member.Kind != models.RunKindConversation || member.AssignedAgentID != "agent-1" || member.ConcurrencyKey != lane ||
+			member.SessionID != models.ConversationSessionID(f.Conversation.Scope, lane) || member.Context[runtimeconversation.TeamRoutingRunContextKey] != claimed.ID {
 			t.Fatalf("member Run = %#v", member)
 		}
 		if len(f.AgentMessages()) != 0 {
@@ -413,7 +413,7 @@ func TestConversationRunOutsideParticipationEndsWithoutAgentBinding(t *testing.T
 			t.Fatalf("exit = %#v", exit)
 		}
 		done := f.Run(run.ID)
-		if done.Status != AgentRunStatusCompleted || done.Output["participationSkipped"] != true || len(f.AgentMessages()) != 0 {
+		if done.Status != models.AgentRunStatusCompleted || done.Output["participationSkipped"] != true || len(f.AgentMessages()) != 0 {
 			t.Fatalf("run = %s %#v, messages = %#v", done.Status, done.Output, f.AgentMessages())
 		}
 	})
@@ -423,7 +423,7 @@ func TestConversationRunPinnedRunbookKeepsAgentBindingWithoutChatSeams(t *testin
 	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
 		resolver := &chatRunResolver{store: f.Store, producer: &runlooptest.ChatProducer{}}
 		runner := f.ChatRunner(resolver, false)
-		run := cloneAgentRun(f.StartRun(f.Post("pinned", "user-1", "Handle this through the runbook.")))
+		run := models.CloneAgentRun(f.StartRun(f.Post("pinned", "user-1", "Handle this through the runbook.")))
 		run.Plan = map[string]interface{}{"runbook": map[string]interface{}{"id": "handler", "version": "1"}}
 		binding, err := runner.ResolveTurnRunner(f.Ctx, run)
 		if err != nil {
@@ -438,7 +438,7 @@ func TestConversationRunPinnedRunbookKeepsAgentBindingWithoutChatSeams(t *testin
 
 func TestConversationRunRefusesAgentBindingWithoutProducer(t *testing.T) {
 	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
-		runner := f.ChatRunner(runtimeconversation.TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		runner := f.ChatRunner(runtimeconversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 			return &agentrun.TurnRunnerBinding{DeploymentID: "agent-1"}, nil
 		}), false)
 		run := f.StartRun(f.Post("broken", "user-1", "Hello"))

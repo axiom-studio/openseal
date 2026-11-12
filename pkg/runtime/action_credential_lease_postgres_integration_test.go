@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -44,7 +46,7 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 		switch {
 		case err == nil:
 			succeeded++
-		case errors.Is(err, ErrActionCredentialLeaseReplay):
+		case errors.Is(err, models.ErrActionCredentialLeaseReplay):
 			replayed++
 		default:
 			t.Fatalf("redemption error = %v", err)
@@ -66,7 +68,7 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 		WHERE issuer=$1 AND audience=$2`, request.Lease.Issuer, request.Lease.Audience).Scan(&nonceDigest, &transport, &fieldsDigest); err != nil {
 		t.Fatal(err)
 	}
-	expectedFieldsDigest, err := digestActionCredentialFieldSelection(request.CredentialFields)
+	expectedFieldsDigest, err := models.ActionCredentialFieldSelectionDigest(request.CredentialFields)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,8 +80,8 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 		t.Fatal(err)
 	}
 	restarted := openPostgresStoreOn(t, pgSchema)
-	if err := restarted.RedeemActionCredentialLease(ctx, request); !errors.Is(err, ErrActionCredentialLeaseReplay) {
-		t.Fatalf("restart replay error = %v, want %v", err, ErrActionCredentialLeaseReplay)
+	if err := restarted.RedeemActionCredentialLease(ctx, request); !errors.Is(err, models.ErrActionCredentialLeaseReplay) {
+		t.Fatalf("restart replay error = %v, want %v", err, models.ErrActionCredentialLeaseReplay)
 	}
 }
 
@@ -93,8 +95,8 @@ func TestPostgresActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testi
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := primary.RedeemActionCredentialLease(ctx, request); !errors.Is(err, ErrActionCredentialLeaseMismatch) {
-		t.Fatalf("authority drift error = %v, want %v", err, ErrActionCredentialLeaseMismatch)
+	if err := primary.RedeemActionCredentialLease(ctx, request); !errors.Is(err, models.ErrActionCredentialLeaseMismatch) {
+		t.Fatalf("authority drift error = %v, want %v", err, models.ErrActionCredentialLeaseMismatch)
 	}
 	var consumed int
 	if err := pgSchema.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+pgSchema.Table("action_credential_lease_redemptions")+`
@@ -116,14 +118,14 @@ func newActionCredentialLeasePostgresStores(t *testing.T) (context.Context, *pos
 	return ctx, openPostgresStoreOn(t, pgSchema), openPostgresStoreOn(t, pgSchema), pgSchema
 }
 
-func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store *postgres.Store, pgSchema storetest.PostgresSchema, nonce string) (ActionCredentialLeaseRedemptionRequest, *skill.Binding) {
+func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store *postgres.Store, pgSchema storetest.PostgresSchema, nonce string) (models.ActionCredentialLeaseRedemptionRequest, *skill.Binding) {
 	t.Helper()
 	now := time.Now().UTC().Round(0)
-	scope := Scope{Kind: "tenant", ID: "tenant-credential-lease"}
+	scope := models.Scope{Kind: "tenant", ID: "tenant-credential-lease"}
 	const deploymentID = "research-agent"
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, AssignedAgentID: deploymentID,
-		Goal: "Research safely", Source: RunSourceManual,
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, AssignedAgentID: deploymentID,
+		Goal: "Research safely", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -151,9 +153,9 @@ func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Contex
 		t.Fatal(err)
 	}
 	expires := now.Add(2 * time.Minute)
-	call := &ActionCall{
+	call := &models.ActionCall{
 		ID: uuid.NewString(), Scope: scope, RunID: run.ID, DeploymentID: deploymentID, BindingID: binding.ID, BindingRevision: binding.Revision,
-		SkillID: definition.ID, SkillVersion: definition.Version, Action: "read", Status: ActionCallStatusRunning,
+		SkillID: definition.ID, SkillVersion: definition.Version, Action: "read", Status: models.ActionCallStatusRunning,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, CredentialRefs: binding.Credentials,
 		Attempt: 1, MaxAttempts: 3, AvailableAt: now, LeaseOwner: "runtime-worker", LeaseExpiresAt: &expires,
 		Revision: 2, CreatedAt: now, UpdatedAt: now,
@@ -172,12 +174,12 @@ func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Contex
 		t.Fatal(err)
 	}
 	fields := map[string][]string{"reddit": {"oauth.access_token"}}
-	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+	lease, err := models.NewActionCredentialLease(models.CreateActionCredentialLeaseRequest{
 		TenantID: scope.ID, Call: call, Run: run, CredentialFields: fields, Transport: definition.Transport.Endpoint,
 		Issuer: "credential-authority", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: nonce,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ActionCredentialLeaseRedemptionRequest{Lease: *lease, Transport: definition.Transport.Endpoint, CredentialFields: fields}, binding
+	return models.ActionCredentialLeaseRedemptionRequest{Lease: *lease, Transport: definition.Transport.Endpoint, CredentialFields: fields}, binding
 }

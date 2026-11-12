@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
@@ -24,10 +26,10 @@ func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	scope := Scope{Kind: "tenant", ID: "postgres-budget"}
-	objective, err := NewPortfolioService(primary).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Bounded", Goal: "Allocate once",
-		Budget: &BudgetPolicy{MaxTurns: 10},
+	scope := models.Scope{Kind: "tenant", ID: "postgres-budget"}
+	objective, err := portfolio.NewPortfolioService(primary).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Bounded", Goal: "Allocate once",
+		Budget: &models.BudgetPolicy{MaxTurns: 10},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -41,9 +43,9 @@ func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
 		go func(index int, store *postgres.Store) {
 			defer wait.Done()
 			<-start
-			_, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+			_, err := agentrun.NewRunCommandService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 				Scope: scope, ObjectiveID: objective.ID, Owner: objective.Owner, AssignedAgentID: objective.Owner.ID,
-				Goal: "Replica work", Budget: &BudgetPolicy{MaxTurns: 6}, IdempotencyKey: "replica-" + string(rune('a'+index)),
+				Goal: "Replica work", Budget: &models.BudgetPolicy{MaxTurns: 6}, IdempotencyKey: "replica-" + string(rune('a'+index)),
 			})
 			results <- err
 		}(index, store)
@@ -56,13 +58,13 @@ func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
 		switch {
 		case err == nil:
 			succeeded++
-		case errors.Is(err, ErrBudgetExhausted):
+		case errors.Is(err, models.ErrBudgetExhausted):
 			exhausted++
 		default:
 			t.Fatalf("unexpected replica error: %v", err)
 		}
 	}
-	loaded, err := NewPortfolioService(primary).GetObjective(ctx, scope, objective.ID)
+	loaded, err := portfolio.NewPortfolioService(primary).GetObjective(ctx, scope, objective.ID)
 	if err != nil || succeeded != 1 || exhausted != 1 || len(loaded.BudgetAllocations) != 1 {
 		t.Fatalf("replica allocation success=%d exhausted=%d objective=%#v err=%v", succeeded, exhausted, loaded, err)
 	}

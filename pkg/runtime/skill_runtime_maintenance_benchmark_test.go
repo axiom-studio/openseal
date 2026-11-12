@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -22,8 +24,8 @@ func BenchmarkSkillRuntimeMaintenanceMetadataTerminalHistory(b *testing.B) {
 			sqlDB := openTestSQLiteDB(b, path)
 			defer store.Close()
 			ctx := context.Background()
-			scope := Scope{Kind: "tenant", ID: "maintenance-benchmark"}
-			run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Completed historical work", Source: RunSourceManual})
+			scope := models.Scope{Kind: "tenant", ID: "maintenance-benchmark"}
+			run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Completed historical work", Source: models.RunSourceManual})
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -76,7 +78,7 @@ func BenchmarkSkillRuntimeMaintenanceMetadataTerminalHistory(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
-					if gate, err := store.GetSkillRuntimeMaintenance(ctx, scope, "release"); gate != nil || !errors.Is(err, ErrSkillRuntimeMaintenanceNotFound) {
+					if gate, err := store.GetSkillRuntimeMaintenance(ctx, scope, "release"); gate != nil || !errors.Is(err, models.ErrSkillRuntimeMaintenanceNotFound) {
 						b.Fatalf("unexpected gate: %#v %v", gate, err)
 					}
 				}

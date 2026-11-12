@@ -23,20 +23,20 @@ func supersedeRules() []*looptest.ModelRule {
 	return []*looptest.ModelRule{
 		{Name: "revise", When: func(v looptest.StepView) bool {
 			content, isError, ok := v.ToolResult(looptest.GovernedTool(v, "update_status"))
-			return ok && isError && strings.Contains(content, string(ToolResultSuperseded)) && strings.Contains(strings.Join(v.UserTexts(), "|"), "wontfix")
-		}, Reply: func(v looptest.StepView) ModelStepResult {
+			return ok && isError && strings.Contains(content, string(models.ToolResultSuperseded)) && strings.Contains(strings.Join(v.UserTexts(), "|"), "wontfix")
+		}, Reply: func(v looptest.StepView) models.ModelStepResult {
 			return looptest.Act("Using wontfix.", looptest.ReviewedCall(looptest.GovernedTool(v, "update_status"), map[string]any{"id": "6815", "status": "wontfix"}, "Mark issue 6815 wontfix"))
 		}},
 	}
 }
 
-func newSupersedeScenario(t *testing.T, store KernelStore) *looptest.Fixture {
+func newSupersedeScenario(t *testing.T, store models.KernelStore) *looptest.Fixture {
 	t.Helper()
 	return looptest.NewFixture(t, store, looptest.WithApprovalForWrites(), looptest.WithRules(supersedeRules()...), looptest.WithRules(approvalScenarioRules()...))
 }
 
 func TestLoopMessageDuringParkedApprovalSupersedesIt(t *testing.T) {
-	looptest.EachStore(t, "loop_supersede_parked", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "loop_supersede_parked", func(t *testing.T, store models.KernelStore) {
 		f := newSupersedeScenario(t, store)
 		conversation, run := f.ParkedApproval()
 		approval, call := assertParkedOnApproval(t, f, run)
@@ -47,14 +47,14 @@ func TestLoopMessageDuringParkedApprovalSupersedesIt(t *testing.T) {
 			t.Fatalf("the message started another Run: %d Runs", len(runs))
 		}
 		queued := f.MustRun(run.ID)
-		if queued.Status != AgentRunStatusQueued || queued.WakeCondition != nil {
+		if queued.Status != models.AgentRunStatusQueued || queued.WakeCondition != nil {
 			t.Fatalf("Run did not resume with the message: %s %#v", queued.Status, queued.WakeCondition)
 		}
 		got, err := f.Raw.GetApproval(f.Ctx, f.Scope, approval.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Status != ApprovalStatusSuperseded || got.DecisionReason != action.ApprovalSupersededReason || got.DecisionBy == nil ||
+		if got.Status != models.ApprovalStatusSuperseded || got.DecisionReason != action.ApprovalSupersededReason || got.DecisionBy == nil ||
 			*got.DecisionBy != action.ApprovalSupersededPrincipal || got.DecisionID != "superseded:"+got.ID || got.DecidedAt == nil ||
 			got.SupersededByMessageID != message.ID {
 			t.Fatalf("approval = %#v", got)
@@ -62,12 +62,12 @@ func TestLoopMessageDuringParkedApprovalSupersedesIt(t *testing.T) {
 		if title := action.PresentApproval(got).Title; !strings.HasPrefix(title, "Replaced by your message: ") {
 			t.Fatalf("approval outcome = %q", title)
 		}
-		if current, err := f.Raw.GetActionCall(f.Ctx, f.Scope, call.ID); err != nil || current.Status != ActionCallStatusDenied {
+		if current, err := f.Raw.GetActionCall(f.Ctx, f.Scope, call.ID); err != nil || current.Status != models.ActionCallStatusDenied {
 			t.Fatalf("call = %#v, %v", current, err)
 		}
 		audited := false
 		for _, event := range f.Events(run.ID, "approval.superseded") {
-			audited = audited || event.Actor == (ActivityActor{Type: "system", ID: "kernel"}) && event.CorrelationID == message.ID
+			audited = audited || event.Actor == (models.ActivityActor{Type: "system", ID: "kernel"}) && event.CorrelationID == message.ID
 		}
 		if !audited {
 			t.Fatal("the supersede was not audited")
@@ -76,8 +76,8 @@ func TestLoopMessageDuringParkedApprovalSupersedesIt(t *testing.T) {
 		// The resumed step sees the replaced call's result, then the
 		// message, and proposes the change: a new approval, nothing run.
 		reparked := f.DriveToRest(run.ID, 3)
-		f.MustStatus(reparked, AgentRunStatusWaitingForApproval)
-		resumed := looptest.StepView{Req: f.Model.Calls(ModelStepPurposeStep)[1]}
+		f.MustStatus(reparked, models.AgentRunStatusWaitingForApproval)
+		resumed := looptest.StepView{Req: f.Model.Calls(models.ModelStepPurposeStep)[1]}
 		if got := resumed.Describe(); !strings.Contains(got, "tool:"+looptest.GovernedTool(resumed, "update_status")+":error user") {
 			t.Fatalf("resumed step = %s", got)
 		}
@@ -97,14 +97,14 @@ func TestLoopMessageDuringParkedApprovalSupersedesIt(t *testing.T) {
 // Replays and a second quick message converge on one decision; replaying
 // them never closes the revised approval proposed after the messages.
 func TestLoopApprovalSupersedeIsIdempotent(t *testing.T) {
-	looptest.EachStore(t, "loop_supersede_idempotent", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "loop_supersede_idempotent", func(t *testing.T, store models.KernelStore) {
 		f := newSupersedeScenario(t, store)
 		conversation, run := f.ParkedApproval()
 		approval := f.Approvals(run.ID)[0]
 		f.Clock.Advance(time.Second)
 		first := f.PostUser(conversation.ID, looptest.FixtureUser, "make it wontfix instead")
 		second := f.PostUser(conversation.ID, looptest.FixtureUser, "and mention the owner")
-		for _, message := range []*ChannelMessage{first, second, first} {
+		for _, message := range []*models.ChannelMessage{first, second, first} {
 			if _, _, err := f.Scheduler.ScheduleMessage(f.Ctx, f.Scope, conversation.ID, message.ID); err != nil {
 				t.Fatal(err)
 			}
@@ -112,14 +112,14 @@ func TestLoopApprovalSupersedeIsIdempotent(t *testing.T) {
 		if runs := f.ConversationRuns(conversation.ID); len(runs) != 1 {
 			t.Fatalf("runs = %d", len(runs))
 		}
-		if current := f.MustRun(run.ID); current.Status != AgentRunStatusQueued {
+		if current := f.MustRun(run.ID); current.Status != models.AgentRunStatusQueued {
 			t.Fatalf("run = %s", current.Status)
 		}
 		resolved, err := f.Raw.GetApproval(f.Ctx, f.Scope, approval.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if resolved.Status != ApprovalStatusSuperseded || resolved.Revision != approval.Revision+1 || resolved.SupersededByMessageID != first.ID {
+		if resolved.Status != models.ApprovalStatusSuperseded || resolved.Revision != approval.Revision+1 || resolved.SupersededByMessageID != first.ID {
 			t.Fatalf("approval resolved more than once: %#v", resolved)
 		}
 		replay, err := schedulerApprovals(f).ResolveSupersededByMessage(f.Ctx, f.Scope, resolved.ID, approval.Revision, second.ID)
@@ -130,31 +130,31 @@ func TestLoopApprovalSupersedeIsIdempotent(t *testing.T) {
 		// One step reads both messages and proposes the revision.
 		f.Clock.Advance(time.Second)
 		reparked := f.DriveToRest(run.ID, 3)
-		f.MustStatus(reparked, AgentRunStatusWaitingForApproval)
-		resumed := looptest.StepView{Req: f.Model.Calls(ModelStepPurposeStep)[1]}
+		f.MustStatus(reparked, models.AgentRunStatusWaitingForApproval)
+		resumed := looptest.StepView{Req: f.Model.Calls(models.ModelStepPurposeStep)[1]}
 		if users := strings.Join(resumed.UserTexts(), "|"); !strings.Contains(users, "wontfix instead|[") || !strings.HasSuffix(users, "\nand mention the owner") {
 			t.Fatalf("resumed step users = %q", users)
 		}
 		revised := reparked.WakeCondition.Reference
-		for _, message := range []*ChannelMessage{first, second} {
+		for _, message := range []*models.ChannelMessage{first, second} {
 			if _, _, err := f.Scheduler.ScheduleMessage(f.Ctx, f.Scope, conversation.ID, message.ID); err != nil {
 				t.Fatal(err)
 			}
 		}
-		if current, err := f.Raw.GetApproval(f.Ctx, f.Scope, revised); err != nil || current.Status != ApprovalStatusPending {
+		if current, err := f.Raw.GetApproval(f.Ctx, f.Scope, revised); err != nil || current.Status != models.ApprovalStatusPending {
 			t.Fatalf("replay closed the revised approval: %#v, %v", current, err)
 		}
-		f.MustStatus(f.MustRun(run.ID), AgentRunStatusWaitingForApproval)
+		f.MustStatus(f.MustRun(run.ID), models.AgentRunStatusWaitingForApproval)
 	})
 }
 
 // A decision that lands first wins; the message is still delivered to the
 // same Run and read after the call ran.
 func TestLoopApprovalDecidedConcurrentlyWithMessage(t *testing.T) {
-	looptest.EachStore(t, "loop_supersede_decided", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "loop_supersede_decided", func(t *testing.T, store models.KernelStore) {
 		f := looptest.NewFixture(t, store, looptest.WithApprovalForWrites(), looptest.WithRules(
 			&looptest.ModelRule{Name: "closed-and-asked", When: func(v looptest.StepView) bool { return strings.Contains(v.LastUserText(), "is it done") },
-				Reply: func(v looptest.StepView) ModelStepResult {
+				Reply: func(v looptest.StepView) models.ModelStepResult {
 					if content, isError, ok := v.ToolResult(looptest.GovernedTool(v, "update_status")); !ok || isError {
 						return looptest.Say("Not closed: " + content)
 					}
@@ -165,9 +165,9 @@ func TestLoopApprovalDecidedConcurrentlyWithMessage(t *testing.T) {
 		approval := f.Approvals(run.ID)[0]
 		f.Clock.Advance(time.Second)
 		message := f.Post(conversation.ID, looptest.FixtureUser, "is it done?")
-		f.Decide(run.ID, ApprovalDecisionApprove, "")
+		f.Decide(run.ID, models.ApprovalDecisionApprove, "")
 		// The kernel's supersede of the observed revision loses cleanly.
-		if _, err := schedulerApprovals(f).ResolveSupersededByMessage(f.Ctx, f.Scope, approval.ID, approval.Revision, message.ID); !errors.Is(err, ErrApprovalResolved) {
+		if _, err := schedulerApprovals(f).ResolveSupersededByMessage(f.Ctx, f.Scope, approval.ID, approval.Revision, message.ID); !errors.Is(err, models.ErrApprovalResolved) {
 			t.Fatalf("late supersede error = %v", err)
 		}
 		if _, _, err := f.Scheduler.ScheduleMessage(f.Ctx, f.Scope, conversation.ID, message.ID); err != nil {
@@ -176,11 +176,11 @@ func TestLoopApprovalDecidedConcurrentlyWithMessage(t *testing.T) {
 		if runs := f.ConversationRuns(conversation.ID); len(runs) != 1 {
 			t.Fatalf("runs = %d", len(runs))
 		}
-		if current, err := f.Raw.GetApproval(f.Ctx, f.Scope, approval.ID); err != nil || current.Status != ApprovalStatusApproved || current.DecisionID != "decision-"+approval.ID {
+		if current, err := f.Raw.GetApproval(f.Ctx, f.Scope, approval.ID); err != nil || current.Status != models.ApprovalStatusApproved || current.DecisionID != "decision-"+approval.ID {
 			t.Fatalf("approval = %#v, %v", current, err)
 		}
 		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, AgentRunStatusCompleted)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
 		if f.Dispatch.Count("update_status") != 1 {
 			t.Fatalf("dispatch = %d", f.Dispatch.Count("update_status"))
 		}
@@ -196,12 +196,12 @@ func TestLoopApprovalDecidedConcurrentlyWithMessage(t *testing.T) {
 // Declining is a decision, not a failure: the model reads the rejection and
 // the Run completes without a failure explanation.
 func TestLoopDeclinedApprovalCompletesCalmly(t *testing.T) {
-	looptest.EachStore(t, "loop_supersede_declined", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "loop_supersede_declined", func(t *testing.T, store models.KernelStore) {
 		f := newApprovalScenario(t, store)
 		conversation, run := f.ParkedApproval()
-		f.Decide(run.ID, ApprovalDecisionReject, "")
+		f.Decide(run.ID, models.ApprovalDecisionReject, "")
 		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, AgentRunStatusCompleted)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
 		if done.FailureExplanation != nil {
 			t.Fatalf("a declined approval failed the Run: %#v", done.FailureExplanation)
 		}

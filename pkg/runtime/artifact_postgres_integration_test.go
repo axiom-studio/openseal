@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
@@ -54,8 +55,8 @@ func TestPostgresArtifactCatalogIsConcurrentRecoverableAndScoped(t *testing.T) {
 	second := validCatalogArtifact(artifact.ID, 2)
 	second.ContentRef = "object-store:postgres-report-v2"
 	second.Digest = digestFor("postgres-version-two")
-	second.Evidence = append(second.Evidence, EvidenceLink{
-		Relation: EvidenceRelationDerivedFrom, TargetKind: EvidenceTargetArtifact, TargetRef: "postgres-report:1",
+	second.Evidence = append(second.Evidence, models.EvidenceLink{
+		Relation: models.EvidenceRelationDerivedFrom, TargetKind: models.EvidenceTargetArtifact, TargetRef: "postgres-report:1",
 	})
 	if _, err := artifactcatalog.NewArtifactCatalog(replica).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: second, ExpectedLatestVersion: 1}); err != nil {
 		t.Fatal(err)
@@ -64,13 +65,13 @@ func TestPostgresArtifactCatalogIsConcurrentRecoverableAndScoped(t *testing.T) {
 	if err != nil || latest.Version != 2 {
 		t.Fatalf("latest = %#v, %v", latest, err)
 	}
-	listed, err := artifactcatalog.NewArtifactCatalog(primary).List(ctx, ArtifactFilter{
+	listed, err := artifactcatalog.NewArtifactCatalog(primary).List(ctx, models.ArtifactFilter{
 		Scope: artifact.Scope, LatestOnly: true, EvidenceTarget: "postgres-report:1",
 	})
 	if err != nil || len(listed) != 1 || listed[0].Version != 2 {
 		t.Fatalf("listed = %#v, %v", listed, err)
 	}
-	if crossScope, err := replica.GetArtifact(ctx, Scope{Kind: "tenant", ID: "other"}, artifact.ID, 0); err != nil || crossScope != nil {
+	if crossScope, err := replica.GetArtifact(ctx, models.Scope{Kind: "tenant", ID: "other"}, artifact.ID, 0); err != nil || crossScope != nil {
 		t.Fatalf("cross-scope artifact = %#v, %v", crossScope, err)
 	}
 	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {

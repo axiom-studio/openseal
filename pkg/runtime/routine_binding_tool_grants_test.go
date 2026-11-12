@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -53,15 +54,15 @@ func (f *routineGrantFixtureState) withBindingTools(t *testing.T) {
 	}
 }
 
-func (f *routineGrantFixtureState) proposeTool(t *testing.T, coordinator *runtimeaction.ActionCoordinator, run *AgentRun, slug, action, tool, key string) *ActionProposalResult {
+func (f *routineGrantFixtureState) proposeTool(t *testing.T, coordinator *runtimeaction.ActionCoordinator, run *models.AgentRun, slug, action, tool, key string) *models.ActionProposalResult {
 	t.Helper()
 	return f.proposeBindingTool(t, coordinator, run, slug+"-binding", 1, action, tool, slug+"-"+tool, key)
 }
 
-func (f *routineGrantFixtureState) proposeBindingTool(t *testing.T, coordinator *runtimeaction.ActionCoordinator, run *AgentRun, bindingID string, revision int64, action, tool, hash, key string) *ActionProposalResult {
+func (f *routineGrantFixtureState) proposeBindingTool(t *testing.T, coordinator *runtimeaction.ActionCoordinator, run *models.AgentRun, bindingID string, revision int64, action, tool, hash, key string) *models.ActionProposalResult {
 	t.Helper()
 	result, err := coordinator.Propose(t.Context(), runtimeaction.ProposeActionRequest{
-		Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, BindingID: bindingID, BindingRevision: revision,
+		Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, BindingID: bindingID, BindingRevision: revision,
 		SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: action, IdempotencyKey: key,
 		Arguments: map[string]interface{}{"tool": tool, "hash": hash, "arguments": map[string]interface{}{"title": "Forecast"}},
 	})
@@ -146,8 +147,8 @@ func TestRoutineGrantCoversOnlyTheGrantedBindingTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	next := cloneRunbookActivation(stored)
-	next.Task.Grants = []RoutineGrant{{Action: "openseal.connector.call", Label: "Use connected tools"}}
+	next := models.CloneRunbookActivation(stored)
+	next.Task.Grants = []models.RoutineGrant{{Action: "openseal.connector.call", Label: "Use connected tools"}}
 	next.Revision++
 	if err := f.store.UpdateRunbookActivation(t.Context(), next, stored.Revision); err != nil {
 		t.Fatal(err)

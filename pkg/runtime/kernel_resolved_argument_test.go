@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -32,7 +33,7 @@ func TestKernelResolvedActionArgumentResolverUsesDurableAgentSession(t *testing.
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			resolved, handled, err := resolver.ResolveActionProposalArguments(context.Background(), agentrun.ActionProposalValidationInput{
-				Run:       &AgentRun{AssignedAgentID: test.assignedAgentID},
+				Run:       &models.AgentRun{AssignedAgentID: test.assignedAgentID},
 				Bound:     &skill.BoundAction{Action: action},
 				Arguments: map[string]interface{}{"sessionId": "model-spoofed"},
 			})
@@ -51,7 +52,7 @@ func TestKernelResolvedActionArgumentResolverRequiresAssignedAgent(t *testing.T)
 		}},
 	}}
 	_, _, err := (runtimeaction.KernelResolvedActionArgumentResolver{}).ResolveActionProposalArguments(context.Background(), agentrun.ActionProposalValidationInput{
-		Run: &AgentRun{Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}}, Bound: &skill.BoundAction{Action: action},
+		Run: &models.AgentRun{Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}}, Bound: &skill.BoundAction{Action: action},
 	})
 	if err == nil {
 		t.Fatal("unassigned Team action received an Agent session")

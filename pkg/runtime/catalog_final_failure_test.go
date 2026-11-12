@@ -7,6 +7,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
@@ -15,9 +16,9 @@ import (
 )
 
 func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
-	for _, owner := range []ObjectiveOwner{{Type: OwnerTypeAgent, ID: "seal"}, {Type: OwnerTypeTeam, ID: "team"}} {
+	for _, owner := range []models.ObjectiveOwner{{Type: models.OwnerTypeAgent, ID: "seal"}, {Type: models.OwnerTypeTeam, ID: "team"}} {
 		t.Run(string(owner.Type), func(t *testing.T) {
-			scope := Scope{Kind: "tenant", ID: "11"}
+			scope := models.Scope{Kind: "tenant", ID: "11"}
 			catalog := &bindingCatalog{
 				deployment: &kernelagent.AgentDeployment{
 					ID: "seal", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "seal",
@@ -28,10 +29,10 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 				// Activation is deliberately unavailable. Even a broken Skill
 				// must not block the final answer.
 			}
-			run := &AgentRun{
-				ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: owner, AssignedAgentID: "seal", Status: AgentRunStatusRunning,
+			run := &models.AgentRun{
+				ID: "run", Scope: scope, Kind: models.RunKindAgentWork, Owner: owner, AssignedAgentID: "seal", Status: models.AgentRunStatusRunning,
 				Goal: "Explain the stopped attempt", Context: map[string]interface{}{},
-				FailureExplanation: &RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "action_failed", Message: "The image service rejected the request."},
+				FailureExplanation: &models.RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "action_failed", Message: "The image service rejected the request."},
 			}
 			config := bindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{})
 			config.SkillHosts = runworker.SkillHostCapabilityResolverFunc(func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error) {

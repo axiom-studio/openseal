@@ -15,17 +15,17 @@ import (
 	"github.com/google/uuid"
 )
 
-func assertTerminalConversationFailure(t *testing.T, store externalconversationtest.TerminalReportingStore, run *AgentRun, trigger *ChannelMessage, code string) *ChannelMessage {
+func assertTerminalConversationFailure(t *testing.T, store externalconversationtest.TerminalReportingStore, run *models.AgentRun, trigger *models.ChannelMessage, code string) *models.ChannelMessage {
 	t.Helper()
 	message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, conversationrun.TerminalConversationFailureReplyKey(run))
-	if err != nil || message == nil || message.Content != runtimeconversation.TerminalFailureReply(code) || message.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}) || message.Intent != MessageIntentAnswer || message.ReplyToMessageID != trigger.ID || message.ResolvesMessageID != trigger.ID || message.ThreadRootID != trigger.ID || message.ResponseMode != trigger.ResponseMode {
+	if err != nil || message == nil || message.Content != runtimeconversation.TerminalFailureReply(code) || message.Sender != (models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID}) || message.Intent != models.MessageIntentAnswer || message.ReplyToMessageID != trigger.ID || message.ResolvesMessageID != trigger.ID || message.ThreadRootID != trigger.ID || message.ResponseMode != trigger.ResponseMode {
 		t.Fatalf("failure reply lost canonical actor, cause or call thread: %#v %v", message, err)
 	}
 	if strings.Contains(message.Content, "NEVER-PUBLISH") || !strings.Contains(message.Content, "Ask me to try again") {
 		t.Fatal("private diagnostics escaped or manual retry missing")
 	}
 	canonical, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
-	if err != nil || canonical.Status != AgentRunStatusFailed || canonical.Revision != run.Revision {
+	if err != nil || canonical.Status != models.AgentRunStatusFailed || canonical.Revision != run.Revision {
 		t.Fatal("reply delivery mutated or re-executed the failed attempt")
 	}
 	return message
@@ -53,7 +53,7 @@ func TestTerminalConversationFailureAtomicCrashRestartAndPrivateCallThread(t *te
 			id      string
 			visible bool
 		}{{"kev", true}, {"other-user", false}} {
-			messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: trigger.ConversationID, ThreadRootID: trigger.ID, Limit: 20, Viewer: &ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: viewer.id}}})
+			messages, err := runtimeconversation.NewConversationService(store).ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: run.Scope, ConversationID: trigger.ConversationID, ThreadRootID: trigger.ID, Limit: 20, Viewer: &models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: viewer.id}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -77,12 +77,12 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 		now := runStoreContractEpoch
 		first, _, trigger := conversationruntest.TerminalFailureConversation(t, store, now, false)
 		first = conversationruntest.FailTerminalConversation(t, store, first, now, "provider_rate_limited")
-		claims, err := store.ClaimRunTerminalReports(t.Context(), RunTerminalReportingClaim{WorkerID: "old-delivery", Now: now, LeaseDuration: time.Minute, Limit: 1})
+		claims, err := store.ClaimRunTerminalReports(t.Context(), models.RunTerminalReportingClaim{WorkerID: "old-delivery", Now: now, LeaseDuration: time.Minute, Limit: 1})
 		if err != nil || len(claims) != 1 {
 			t.Fatalf("first attempt claim: %#v %v", claims, err)
 		}
 		commands := agentrun.NewRunCommandService(store, models.WithClock(func() time.Time { return now.Add(time.Second) }))
-		retry, err := commands.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: first.Scope, RunID: first.ID, ExpectedRevision: first.Revision, Actor: ActivityActor{Type: "user", ID: "kev"}})
+		retry, err := commands.RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: first.Scope, RunID: first.ID, ExpectedRevision: first.Revision, Actor: models.ActivityActor{Type: "user", ID: "kev"}})
 		if err != nil || retry.Run.ID != first.ID {
 			t.Fatalf("explicit safe retry stopped working: %#v %v", retry, err)
 		}
@@ -91,10 +91,10 @@ func TestTerminalConversationFailureManualRetryDoesNotOverwriteLeasedAttempt(t *
 		if err != nil || latest.TerminalRevision != second.Revision || latest.LeaseOwner != "" {
 			t.Fatalf("new attempt replaced old lease or missing latest receipt: %#v %v", latest, err)
 		}
-		completion := RunTerminalReportingCompletion{Scope: first.Scope, RunID: first.ID, Status: first.Status, TerminalRevision: first.Revision, WorkerID: claims[0].LeaseOwner, LeaseExpiresAt: *claims[0].LeaseExpiresAt, Now: now.Add(3 * time.Second)}
+		completion := models.RunTerminalReportingCompletion{Scope: first.Scope, RunID: first.ID, Status: first.Status, TerminalRevision: first.Revision, WorkerID: claims[0].LeaseOwner, LeaseExpiresAt: *claims[0].LeaseExpiresAt, Now: now.Add(3 * time.Second)}
 		wrong := completion
 		wrong.TerminalRevision = second.Revision
-		if err := store.CompleteRunTerminalReport(t.Context(), wrong); !errors.Is(err, ErrLeaseLost) {
+		if err := store.CompleteRunTerminalReport(t.Context(), wrong); !errors.Is(err, models.ErrLeaseLost) {
 			t.Fatalf("old lease could acknowledge new attempt: %v", err)
 		}
 		if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store, claims[0].Run); err != nil {
@@ -118,13 +118,13 @@ func TestTerminalConversationFailureRejectsForgedOriginAndPreservesSavedAnswer(t
 	store := newTestKernelStore(t)
 	run, conversation, trigger := conversationruntest.TerminalFailureConversation(t, store, runStoreContractEpoch, false)
 	run = conversationruntest.FailTerminalConversation(t, store, run, runStoreContractEpoch, "provider_invalid_response")
-	for _, mutate := range []func(*AgentRun){
-		func(r *AgentRun) { r.Owner.ID = "other-agent" },
-		func(r *AgentRun) { r.AssignedAgentID = "other-agent" },
-		func(r *AgentRun) { r.Context["threadRootMessageId"] = "another-thread" },
-		func(r *AgentRun) { r.Context[conversationRunContextTriggerID] = "other-message" },
+	for _, mutate := range []func(*models.AgentRun){
+		func(r *models.AgentRun) { r.Owner.ID = "other-agent" },
+		func(r *models.AgentRun) { r.AssignedAgentID = "other-agent" },
+		func(r *models.AgentRun) { r.Context["threadRootMessageId"] = "another-thread" },
+		func(r *models.AgentRun) { r.Context[models.ConversationRunTriggerIDContextKey] = "other-message" },
 	} {
-		forged := cloneAgentRun(run)
+		forged := models.CloneAgentRun(run)
 		mutate(forged)
 		if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, forged); err == nil {
 			t.Fatal("forged origin published an Agent answer")
@@ -132,8 +132,8 @@ func TestTerminalConversationFailureRejectsForgedOriginAndPreservesSavedAnswer(t
 	}
 	service := runtimeconversation.NewConversationService(store)
 	posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: trigger.Sequence + 1,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}, Intent: MessageIntentAnswer, Content: "The saved explanation", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
-		References: []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}, IdempotencyKey: conversationTaskFinalResponseKey(run)})
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: run.AssignedAgentID}, Intent: models.MessageIntentAnswer, Content: "The saved explanation", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
+		References: []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}, IdempotencyKey: models.ConversationTaskFinalResponseKey(run)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,18 +150,18 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
 		store := externalconversationtest.TerminalReportingStoreOf(t, fixture.store)
 		for _, startsThread := range []bool{false, true} {
-			scope := Scope{Kind: "tenant", ID: "canonical-scheduled-failure-" + uuid.NewString()}
-			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
+			scope := models.Scope{Kind: "tenant", ID: "canonical-scheduled-failure-" + uuid.NewString()}
+			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "finn"}
 			service := runtimeconversation.NewConversationService(store)
-			seedTestSpace(t, store.(SpaceStore), scope)
+			seedTestSpace(t, store.(models.SpaceStore), scope)
 			conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{Scope: scope, Owner: owner, Title: "Scheduled user question", IdempotencyKey: uuid.NewString()})
 			if err != nil {
 				t.Fatal(err)
 			}
 			posted, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-				Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion,
-				Content: "Check my calendar", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, StartThread: startsThread,
+				Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "kev"}, Intent: models.MessageIntentQuestion,
+				Content: "Check my calendar", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, StartThread: startsThread,
 				IdempotencyKey: uuid.NewString(),
 			})
 			if err != nil || posted.Message.RequiresResponse {
@@ -197,17 +197,17 @@ func TestTerminalConversationFailureResponseFlagCannotAuthorizeControlSource(t *
 	}
 	control, err := runtimeconversation.NewConversationService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentSystem,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "kev"}, Intent: models.MessageIntentSystem,
 		Content: "Control projection", RequiresResponse: true, StartThread: true,
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: uuid.NewString(),
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	forged := cloneAgentRun(run)
-	forged.Context[conversationRunContextTriggerID] = control.Message.ID
+	forged := models.CloneAgentRun(run)
+	forged.Context[models.ConversationRunTriggerIDContextKey] = control.Message.ID
 	forged.Context["threadRootMessageId"] = control.Message.ID
-	if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, forged); !errors.Is(err, ErrInvalidAgentRun) {
+	if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, forged); !errors.Is(err, models.ErrInvalidAgentRun) {
 		t.Fatalf("response flag authorized a source the kernel cannot schedule: %v", err)
 	}
 	current, err = store.GetConversation(t.Context(), run.Scope, conversation.ID)
@@ -222,17 +222,17 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 		now := runStoreContractEpoch
 		run, _, trigger := conversationruntest.TerminalFailureConversation(t, store, now, false)
 		run = conversationruntest.FailTerminalConversation(t, store, run, now, "workspace_credits_exhausted")
-		if run.CreditError == nil || run.CreditError.Code != RunCreditErrorWorkspaceCreditsExhausted {
+		if run.CreditError == nil || run.CreditError.Code != models.RunCreditErrorWorkspaceCreditsExhausted {
 			t.Fatalf("credit stop is not typed on the Run: %#v", run.CreditError)
 		}
 		if count, err := externalconversationtest.TerminalReportingWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 			t.Fatalf("credit stop report was not acknowledged: %d %v", count, err)
 		}
-		if message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, conversationrun.TerminalConversationFailureReplyKey(run)); message != nil || !errors.Is(err, ErrChannelMessageNotFound) && err != nil {
+		if message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, conversationrun.TerminalConversationFailureReplyKey(run)); message != nil || !errors.Is(err, models.ErrChannelMessageNotFound) && err != nil {
 			t.Fatalf("an application chat received a failure answer for a credit stop: %#v %v", message, err)
 		}
-		retry, err := agentrun.NewRunCommandService(store).RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Actor: ActivityActor{Type: "user", ID: "kev"}})
-		if err != nil || retry.Run.CreditError != nil || retry.Run.Status != AgentRunStatusQueued {
+		retry, err := agentrun.NewRunCommandService(store).RetryConversationRun(t.Context(), agentrun.AgentRunCommandRequest{Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Actor: models.ActivityActor{Type: "user", ID: "kev"}})
+		if err != nil || retry.Run.CreditError != nil || retry.Run.Status != models.AgentRunStatusQueued {
 			t.Fatalf("retry after adding credits kept the credit stop: %#v %v", retry, err)
 		}
 		other := conversationruntest.FailTerminalConversation(t, store, retry.Run, now.Add(time.Second), "provider_rate_limited")
@@ -252,15 +252,15 @@ func TestFailedConversationReplySkipsServiceWakeWithoutRetry(t *testing.T) {
 	}
 	wake, err := runtimeconversation.NewConversationService(store).PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "skill-setup-coordinator"}, Intent: MessageIntentUpdate,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "skill-setup-coordinator"}, Intent: models.MessageIntentUpdate,
 		Content: "Gmail is connected", StartThread: true,
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: uuid.NewString(),
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	woken := cloneAgentRun(run)
-	woken.Context[conversationRunContextTriggerID] = wake.Message.ID
+	woken := models.CloneAgentRun(run)
+	woken.Context[models.ConversationRunTriggerIDContextKey] = wake.Message.ID
 	woken.Context["threadRootMessageId"] = wake.Message.ID
 	if err := conversationrun.ProjectFailedConversationReply(t.Context(), store, woken); err != nil {
 		t.Fatalf("a service wake has nobody waiting and must not be retried: %v", err)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -15,9 +16,9 @@ import (
 func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) {
 	for _, fixture := range []struct {
 		name  string
-		store func(*testing.T) KernelStore
+		store func(*testing.T) models.KernelStore
 	}{
-		{name: "sqlite", store: func(t *testing.T) KernelStore {
+		{name: "sqlite", store: func(t *testing.T) models.KernelStore {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-changes.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -28,14 +29,14 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
-			conversationStore := store.(ConversationStore)
+			conversationStore := store.(models.ConversationStore)
 			ctx := context.Background()
-			scope := Scope{Kind: "tenant", ID: "changes"}
+			scope := models.Scope{Kind: "tenant", ID: "changes"}
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 			conversations := runtimeconversation.NewConversationService(conversationStore, models.WithClock(func() time.Time { return now }))
-			seedTestSpace(t, store.(SpaceStore), scope)
+			seedTestSpace(t, store.(models.SpaceStore), scope)
 			conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
+				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"},
 				Title: "Operations", IdempotencyKey: "operations-channel",
 			})
 			if err != nil {
@@ -43,8 +44,8 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			}
 			question, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-				Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
-				Content: "What is the release state?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+				Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}, Intent: models.MessageIntentQuestion,
+				Content: "What is the release state?", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 				RequiresResponse: true, IdempotencyKey: "release-question",
 			})
 			if err != nil {
@@ -67,7 +68,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			})
 			if err != nil || !initial.HasChanges || initial.HasMore || !initial.RunsChanged || !initial.ActivityChanged || !initial.PresenceChanged ||
 				len(initial.Messages) != 1 || len(initial.Rounds) != 0 ||
-				len(initial.Runs) != 1 || initial.Runs[0].ID != scheduled.Run.ID || initial.Runs[0].Status != AgentRunStatusQueued ||
+				len(initial.Runs) != 1 || initial.Runs[0].ID != scheduled.Run.ID || initial.Runs[0].Status != models.AgentRunStatusQueued ||
 				len(initial.Activity) != 1 || initial.Activity[0].EventType != "run.created" || initial.Activity[0].Category != "run" ||
 				initial.Activity[0].Payload != nil || !initial.Activity[0].DetailAvailable ||
 				len(initial.Presence) != 0 || initial.Cursor == "" {
@@ -82,18 +83,18 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 				t.Fatalf("unchanged projection = %#v, %v", unchanged, err)
 			}
 
-			running, _, err := NewRunActivityService(store, store).TransitionRun(ctx, scope, scheduled.Run.ID, RunTransitionRequest{
-				ExpectedRevision: scheduled.Run.Revision, Status: AgentRunStatusRunning,
-				Actor: ActivityActor{Type: "worker", ID: "conversation-worker"}, Summary: "Review started",
-				ActivityUsageDelta: &BudgetUsage{Turns: 1, InputTokens: 80, OutputTokens: 20, CostMicros: 50_000},
+			running, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, scope, scheduled.Run.ID, activity.RunTransitionRequest{
+				ExpectedRevision: scheduled.Run.Revision, Status: models.AgentRunStatusRunning,
+				Actor: models.ActivityActor{Type: "worker", ID: "conversation-worker"}, Summary: "Review started",
+				ActivityUsageDelta: &models.BudgetUsage{Turns: 1, InputTokens: 80, OutputTokens: 20, CostMicros: 50_000},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			presence, err := conversations.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
 				Scope: scope, ConversationID: conversation.ID,
-				Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "accountant"},
-				State:       ConversationPresenceWorking, Summary: "Reviewing evidence", RunID: running.ID, TTL: time.Minute,
+				Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "accountant"},
+				State:       models.ConversationPresenceWorking, Summary: "Reviewing evidence", RunID: running.ID, TTL: time.Minute,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -102,7 +103,7 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 				Scope: scope, ConversationID: conversation.ID, Cursor: initial.Cursor, ActiveAt: now,
 			})
 			if err != nil || !working.HasChanges || !working.RunsChanged || !working.ActivityChanged || !working.PresenceChanged ||
-				len(working.Runs) != 1 || working.Runs[0].Status != AgentRunStatusRunning ||
+				len(working.Runs) != 1 || working.Runs[0].Status != models.AgentRunStatusRunning ||
 				len(working.Activity) != 2 || working.Activity[0].Summary != "Review started" ||
 				working.Activity[0].UsageDelta == nil || working.Activity[0].UsageDelta.InputTokens != 80 ||
 				working.Activity[0].UsageDelta.OutputTokens != 20 || working.Activity[0].UsageDelta.CostMicros != 50_000 ||
@@ -117,9 +118,9 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			round, err := conversations.CommitConversationRouting(ctx, runtimeconversation.CommitConversationRoutingRequest{
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 				TriggerMessageID: question.Message.ID, IdempotencyKey: "release-round",
-				Responders: []ConversationResponder{{
-					Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "accountant"},
-					Addressed:   ConversationAddressedRouted, Reason: "owns the ledger",
+				Responders: []models.ConversationResponder{{
+					Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "accountant"},
+					Addressed:   models.ConversationAddressedRouted, Reason: "owns the ledger",
 				}},
 			})
 			if err != nil || round.Round.ConversationRevision != 3 || len(round.Messages) != 0 {
@@ -156,31 +157,31 @@ func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 	store := newTestKernelStore(t)
 	conversations := runtimeconversation.NewConversationService(store)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "private-stream"}
+	scope := models.Scope{Kind: "tenant", ID: "private-stream"}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Private stream", IdempotencyKey: "channel"})
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Title: "Private stream", IdempotencyKey: "channel"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sender := ConversationParticipant{Type: ConversationParticipantUser, ID: "sender"}
-	target := ConversationParticipant{Type: ConversationParticipantAgent, ID: "target"}
-	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "viewer"}}
-	hidden, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: sender, Intent: MessageIntentUpdate, Content: "target only", Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{target}}, IdempotencyKey: "hidden"})
+	sender := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "sender"}
+	target := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "target"}
+	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "viewer"}}
+	hidden, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: sender, Intent: models.MessageIntentUpdate, Content: "target only", Audience: models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{target}}, IdempotencyKey: "hidden"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: hidden.Conversation.Revision, Sender: sender, Intent: MessageIntentUpdate, Content: "channel update", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "public"})
+	_, err = conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: hidden.Conversation.Revision, Sender: sender, Intent: models.MessageIntentUpdate, Content: "channel update", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "public"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	changes, _ := runtimeconversation.NewConversationChangeService(store, store)
 	now := time.Now().UTC()
-	for _, run := range []*AgentRun{
-		{ID: "hidden-root", Kind: RunKindConversation, RootRunID: "hidden-root", ConcurrencyKey: conversation.ID, Context: map[string]interface{}{conversationRunContextTriggerID: hidden.Message.ID}},
-		{ID: "hidden-child", Kind: RunKindAgentWork, RootRunID: "hidden-root", ParentRunID: "hidden-root"},
+	for _, run := range []*models.AgentRun{
+		{ID: "hidden-root", Kind: models.RunKindConversation, RootRunID: "hidden-root", ConcurrencyKey: conversation.ID, Context: map[string]interface{}{models.ConversationRunTriggerIDContextKey: hidden.Message.ID}},
+		{ID: "hidden-child", Kind: models.RunKindAgentWork, RootRunID: "hidden-root", ParentRunID: "hidden-root"},
 	} {
 		run.Scope, run.Owner = scope, conversation.Owner
-		run.Goal, run.Source, run.Status = "Private task contents", RunSourceChat, AgentRunStatusRunning
+		run.Goal, run.Source, run.Status = "Private task contents", models.RunSourceChat, models.AgentRunStatusRunning
 		run.Revision, run.CreatedAt, run.UpdatedAt, run.AvailableAt, run.QueueEnteredAt = 1, now, now, now, now
 		if err := store.CreateAgentRun(ctx, run); err != nil {
 			t.Fatal(err)
@@ -196,7 +197,7 @@ func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 	if len(first.Runs) != 0 || len(first.Activity) != 0 {
 		t.Fatal("private execution leaked to a viewer without message access")
 	}
-	allowed := ConversationViewer{Participant: target}
+	allowed := models.ConversationViewer{Participant: target}
 	private, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Viewer: &allowed})
 	if err != nil || len(private.Runs) != 2 {
 		t.Fatalf("authorized viewer lost execution: %#v, %v", private, err)
@@ -208,9 +209,9 @@ func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 	if len(second.Messages) != 1 || second.Messages[0].Content != "channel update" {
 		t.Fatalf("second=%#v", second)
 	}
-	if _, _, err := NewRunActivityService(store, store).TransitionRun(ctx, scope, "hidden-child", RunTransitionRequest{
-		ExpectedRevision: 1, Status: AgentRunStatusFailed,
-		Actor: ActivityActor{Type: "worker", ID: "private-worker"}, Summary: "Private failure details",
+	if _, _, err := activity.NewRunActivityService(store, store).TransitionRun(ctx, scope, "hidden-child", activity.RunTransitionRequest{
+		ExpectedRevision: 1, Status: models.AgentRunStatusFailed,
+		Actor: models.ActivityActor{Type: "worker", ID: "private-worker"}, Summary: "Private failure details",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -231,11 +232,11 @@ func TestConversationChangeCursorSurvivesSQLiteRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := Scope{Kind: "tenant", ID: "restart"}
+	scope := models.Scope{Kind: "tenant", ID: "restart"}
 	conversations := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"},
 		Title: "Restart", IdempotencyKey: "restart-channel",
 	})
 	if err != nil {
@@ -243,8 +244,8 @@ func TestConversationChangeCursorSurvivesSQLiteRestart(t *testing.T) {
 	}
 	first, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentUpdate,
-		Content: "First durable fact", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "first",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}, Intent: models.MessageIntentUpdate,
+		Content: "First durable fact", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "first",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -272,8 +273,8 @@ func TestConversationChangeCursorSurvivesSQLiteRestart(t *testing.T) {
 	}
 	second, err := restartedConversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentUpdate,
-		Content: "Second durable fact", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "second",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}, Intent: models.MessageIntentUpdate,
+		Content: "Second durable fact", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "second",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -10,9 +10,10 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
@@ -46,7 +47,7 @@ func skillSetupTaskFixture(t *testing.T) (*skillbinding.SkillBindingActionDispat
 	t.Helper()
 	store, db := newOriginTestStore(t)
 	start := skillSetupTaskStart(t, store)
-	result, err := runtime.NewConversationTaskService(store).Start(t.Context(), start)
+	result, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), start)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,21 +67,21 @@ func skillSetupTaskFixture(t *testing.T) (*skillbinding.SkillBindingActionDispat
 // is a copy of the conversation task fixtures (settledTaskSourceFixture,
 // taskStartRequest) on exported API, kept here because those fixtures live
 // with the conversation run tests.
-func skillSetupTaskStart(t *testing.T, store *sqlite.Store) runtime.StartConversationTaskRequest {
+func skillSetupTaskStart(t *testing.T, store *sqlite.Store) conversationrun.StartConversationTaskRequest {
 	t.Helper()
 	ctx := t.Context()
 	scope := models.Scope{Kind: "tenant", ID: "worker-task"}
 	if _, err := portfolio.NewSpaceService(store).CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: "Home", Look: models.DefaultSpaceLook}); err != nil {
 		t.Fatalf("seed space: %v", err)
 	}
-	conversations := runtime.NewConversationService(store)
-	conversation, _, err := conversations.CreateConversation(ctx, runtime.CreateConversationRequest{
+	conversations := runtimeconversation.NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := conversations.PostChannelMessage(ctx, runtime.PostChannelMessageRequest{
+	posted, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "sender-" + string(models.ConversationParticipantUser)},
 		Intent: models.MessageIntentQuestion, Content: "Review the release in the background", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "task-user-message",
@@ -88,7 +89,7 @@ func skillSetupTaskStart(t *testing.T, store *sqlite.Store) runtime.StartConvers
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler, err := runtime.NewConversationRunScheduler(store, store, runtime.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +157,7 @@ func skillSetupTaskStart(t *testing.T, store *sqlite.Store) runtime.StartConvers
 	if err != nil || current == nil {
 		t.Fatalf("get source: %#v %v", current, err)
 	}
-	return runtime.StartConversationTaskRequest{Scope: scope, SourceRunID: run.ID, ExpectedSourceRevision: current.Revision, WorkerID: "worker",
+	return conversationrun.StartConversationTaskRequest{Scope: scope, SourceRunID: run.ID, ExpectedSourceRevision: current.Revision, WorkerID: "worker",
 		TurnID: step.ID, ToolEntryID: entryID, AssignedAgentID: run.AssignedAgentID, TaskKey: models.StartTaskKey(entryID),
 		Goal: goal, Acknowledgment: ack}
 }

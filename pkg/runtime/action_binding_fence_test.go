@@ -12,7 +12,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -21,12 +23,12 @@ import (
 func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *testing.T) {
 	for _, invalidAuthority := range []string{"missing", "unqualified", "stale", "disabled", "deleted", "foreign_scope", "foreign_deployment", "foreign_skill", "foreign_version"} {
 		t.Run(invalidAuthority, func(t *testing.T) {
-			actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 				fixture := newActionBindingFenceFixture(t, kernel)
 				before := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 				proposal := fixture.proposal
-				proposal.Call = cloneActionCall(proposal.Call)
-				proposal.Event = cloneActivityEvent(proposal.Event)
+				proposal.Call = models.CloneActionCall(proposal.Call)
+				proposal.Event = models.CloneActivityEvent(proposal.Event)
 				switch invalidAuthority {
 				case "missing":
 					proposal.Call.BindingID = "missing-binding"
@@ -56,8 +58,8 @@ func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *tes
 				case "foreign_version":
 					proposal.Call.SkillVersion = "1.1.0"
 				}
-				proposal.Call.InvocationDigest = ComputeActionInvocationDigest(proposal.Call)
-				proposal.Call.SemanticDigest = ComputeActionSemanticDigest(proposal.Call)
+				proposal.Call.InvocationDigest = models.ComputeActionInvocationDigest(proposal.Call)
+				proposal.Call.SemanticDigest = models.ComputeActionSemanticDigest(proposal.Call)
 				result, err := fixture.store.CreateActionProposal(t.Context(), proposal)
 				if result != nil || !errors.Is(err, skill.ErrBindingUnavailable) {
 					t.Fatalf("atomic proposal accepted invalid binding authority: %#v, %v", result, err)
@@ -66,11 +68,11 @@ func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *tes
 				if !reflect.DeepEqual(before, after) {
 					t.Fatalf("rejected proposal changed its parent: before=%#v after=%#v", before, after)
 				}
-				calls, err := fixture.store.ListActionCalls(t.Context(), ActionFilter{Scope: before.Scope, RunID: before.ID})
+				calls, err := fixture.store.ListActionCalls(t.Context(), models.ActionFilter{Scope: before.Scope, RunID: before.ID})
 				if err != nil || len(calls) != 0 {
 					t.Fatalf("rejected proposal inserted an action: %#v, %v", calls, err)
 				}
-				events, err := fixture.store.ListActivity(t.Context(), ActivityFilter{Scope: before.Scope, RunID: before.ID})
+				events, err := fixture.store.ListActivity(t.Context(), models.ActivityFilter{Scope: before.Scope, RunID: before.ID})
 				if err != nil || len(events) != 0 {
 					t.Fatalf("rejected proposal appended activity: %#v, %v", events, err)
 				}
@@ -82,16 +84,16 @@ func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *tes
 func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *testing.T) {
 	for _, path := range []string{"ordinary", "duplicate_receipt"} {
 		t.Run(path, func(t *testing.T) {
-			actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 				fixture := newActionBindingFenceFixture(t, kernel)
 				run := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 				if path == "duplicate_receipt" {
 					completeActionBindingFenceFixture(t, fixture)
 					run = newActionBindingFenceRunningRun(t, fixture.store, fixture.proposal.Call.Scope, fixture.now)
 				}
-				before := cloneAgentRun(run)
+				before := models.CloneAgentRun(run)
 				intercepted := &actionBindingFenceProposalStore{ActionStore: fixture.store}
-				intercepted.beforeCreate = func(proposal ActionProposalRecord) {
+				intercepted.beforeCreate = func(proposal models.ActionProposalRecord) {
 					if !proposal.RequireBindingFence {
 						t.Fatal("durable coordinator omitted the atomic binding fence")
 					}
@@ -113,7 +115,7 @@ func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *t
 					BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision,
 					SkillID: fixture.binding.SkillID, SkillVersion: fixture.binding.SkillVersion, Action: "deploy",
 					Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: fixture.proposal.Call.IdempotencyKey,
-					ExternalOperation: &ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"},
+					ExternalOperation: &activity.ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"},
 				}, "deploy-production"))
 				if result != nil || !errors.Is(err, skill.ErrBindingUnavailable) || intercepted.creates != 1 {
 					t.Fatalf("coordinator did not fence binding change after catalog resolution: %#v, %v, creates=%d", result, err, intercepted.creates)
@@ -122,7 +124,7 @@ func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *t
 				if err != nil || !reflect.DeepEqual(before, after) {
 					t.Fatalf("rejected coordinator proposal changed its parent: %#v, %v", after, err)
 				}
-				calls, err := fixture.store.ListActionCalls(t.Context(), ActionFilter{Scope: run.Scope, RunID: run.ID})
+				calls, err := fixture.store.ListActionCalls(t.Context(), models.ActionFilter{Scope: run.Scope, RunID: run.ID})
 				if err != nil || len(calls) != 0 {
 					t.Fatalf("rejected coordinator proposal inserted an action: %#v, %v", calls, err)
 				}
@@ -132,11 +134,11 @@ func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *t
 }
 
 func TestActionBindingFencePreservesIdempotentReceiptAfterUpgrade(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 		fixture := newActionBindingFenceFixture(t, kernel)
 		completeActionBindingFenceFixture(t, fixture)
 		before := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
-		baseline, err := fixture.store.ListActivity(t.Context(), ActivityFilter{Scope: before.Scope, RunID: before.ID})
+		baseline, err := fixture.store.ListActivity(t.Context(), models.ActivityFilter{Scope: before.Scope, RunID: before.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,11 +146,11 @@ func TestActionBindingFencePreservesIdempotentReceiptAfterUpgrade(t *testing.T) 
 			t.Fatal(err)
 		}
 		replayed, err := fixture.store.CreateActionProposal(t.Context(), fixture.proposal)
-		if err != nil || replayed == nil || replayed.Created || replayed.Call.ID != fixture.proposal.Call.ID || replayed.Call.Status != ActionCallStatusSucceeded || replayed.Call.SkillVersion != "1.0.0" {
+		if err != nil || replayed == nil || replayed.Created || replayed.Call.ID != fixture.proposal.Call.ID || replayed.Call.Status != models.ActionCallStatusSucceeded || replayed.Call.SkillVersion != "1.0.0" {
 			t.Fatalf("binding upgrade lost the immutable idempotent receipt: %#v, %v", replayed, err)
 		}
 		after := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
-		events, err := fixture.store.ListActivity(t.Context(), ActivityFilter{Scope: before.Scope, RunID: before.ID})
+		events, err := fixture.store.ListActivity(t.Context(), models.ActivityFilter{Scope: before.Scope, RunID: before.ID})
 		if err != nil || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(baseline, events) {
 			t.Fatalf("idempotent replay changed Run or activity: parent=%#v events=%#v, %v", after, events, err)
 		}
@@ -162,10 +164,10 @@ func TestActionBindingFencePreservesIdempotentReceiptAfterUpgrade(t *testing.T) 
 func TestActionBindingFenceSerializesProposalAndUpgrade(t *testing.T) {
 	for _, ordering := range []string{"proposal_first", "upgrade_first", "concurrent"} {
 		t.Run(ordering, func(t *testing.T) {
-			actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 				fixture := newActionBindingFenceFixture(t, kernel)
 				mutation := actionBindingFenceUpgrade(fixture)
-				var proposed *ActionProposalResult
+				var proposed *models.ActionProposalResult
 				var proposalErr, upgradeErr error
 				propose := func() { proposed, proposalErr = fixture.store.CreateActionProposal(t.Context(), fixture.proposal) }
 				upgrade := func() { upgradeErr = fixture.store.ApplySkillReferenceUpgrade(t.Context(), mutation) }
@@ -186,7 +188,7 @@ func TestActionBindingFenceSerializesProposalAndUpgrade(t *testing.T) {
 					workers.Wait()
 				}
 				if proposalErr == nil {
-					if proposed == nil || !proposed.Created || !errors.Is(upgradeErr, ErrSkillReferenceUpgradeBusy) {
+					if proposed == nil || !proposed.Created || !errors.Is(upgradeErr, models.ErrSkillReferenceUpgradeBusy) {
 						t.Fatalf("upgrade passed newly committed outstanding work: proposal=%#v, proposalErr=%v, upgradeErr=%v", proposed, proposalErr, upgradeErr)
 					}
 				} else if upgradeErr != nil || !errors.Is(proposalErr, skill.ErrBindingUnavailable) {
@@ -197,12 +199,12 @@ func TestActionBindingFenceSerializesProposalAndUpgrade(t *testing.T) {
 					t.Fatalf("get binding = %#v, %v", bindings, err)
 				}
 				run := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
-				calls, err := fixture.store.ListActionCalls(t.Context(), ActionFilter{Scope: run.Scope, RunID: run.ID})
+				calls, err := fixture.store.ListActionCalls(t.Context(), models.ActionFilter{Scope: run.Scope, RunID: run.ID})
 				if err != nil {
 					t.Fatal(err)
 				}
 				// A loop proposal never parks its Run; it stays running either way.
-				if run.Status != AgentRunStatusRunning || run.WakeCondition != nil {
+				if run.Status != models.AgentRunStatusRunning || run.WakeCondition != nil {
 					t.Fatalf("proposal changed its Run: %#v", run)
 				}
 				if proposalErr == nil {
@@ -218,18 +220,18 @@ func TestActionBindingFenceSerializesProposalAndUpgrade(t *testing.T) {
 }
 
 func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 		fixture := newActionBindingFenceFixture(t, kernel)
 		firstRun := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 		secondRun := newActionBindingFenceRunningRun(t, fixture.store, firstRun.Scope, fixture.now)
-		runs := []*AgentRun{firstRun, secondRun}
-		var outcomes [2]*ActionProposalResult
+		runs := []*models.AgentRun{firstRun, secondRun}
+		var outcomes [2]*models.ActionProposalResult
 		var failures [2]error
 		start := make(chan struct{})
 		var proposals sync.WaitGroup
 		proposals.Add(2)
 		for index, run := range runs {
-			go func(index int, run *AgentRun) {
+			go func(index int, run *models.AgentRun) {
 				defer proposals.Done()
 				coordinator := action.NewActionCoordinator(fixture.store, fixture.store, fixture.catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 					return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow}, nil
@@ -240,28 +242,28 @@ func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.
 					BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision,
 					SkillID: fixture.binding.SkillID, SkillVersion: fixture.binding.SkillVersion, Action: "deploy",
 					Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: fixture.proposal.Call.IdempotencyKey,
-					ExternalOperation: &ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"},
+					ExternalOperation: &activity.ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"},
 				}, "deploy-production"))
 			}(index, run)
 		}
 		close(start)
 		proposals.Wait()
-		var original *ActionCall
+		var original *models.ActionCall
 		for index, result := range outcomes {
 			if failures[index] == nil {
-				if result == nil || !result.Created || result.Call.Status != ActionCallStatusReady || result.Call.DuplicateOfActionCallID != "" || original != nil {
+				if result == nil || !result.Created || result.Call.Status != models.ActionCallStatusReady || result.Call.DuplicateOfActionCallID != "" || original != nil {
 					t.Fatalf("same external operation created more than one original: outcomes=%#v failures=%v", outcomes, failures)
 				}
 				original = result.Call
-			} else if result != nil || !errors.Is(failures[index], ErrExternalOperationClaimed) {
+			} else if result != nil || !errors.Is(failures[index], models.ErrExternalOperationClaimed) {
 				t.Fatalf("competing operation was not durably fenced: result=%#v, error=%v", result, failures[index])
 			}
 		}
 		if original == nil || original.ExternalOperationDigest != fixture.proposal.Call.ExternalOperationDigest {
 			t.Fatalf("no original operation receipt: outcomes=%#v failures=%v", outcomes, failures)
 		}
-		calls, err := fixture.store.ListActionCalls(t.Context(), ActionFilter{Scope: firstRun.Scope})
-		if err != nil || len(calls) != 1 || calls[0].ID != original.ID || calls[0].Status != ActionCallStatusReady {
+		calls, err := fixture.store.ListActionCalls(t.Context(), models.ActionFilter{Scope: firstRun.Scope})
+		if err != nil || len(calls) != 1 || calls[0].ID != original.ID || calls[0].Status != models.ActionCallStatusReady {
 			t.Fatalf("competing operation created another executable action: %#v, %v", calls, err)
 		}
 		// Loop proposals leave both Runs as they were; the winner runs its call
@@ -275,13 +277,13 @@ func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.
 				t.Fatalf("loop proposal changed its Run: before=%#v after=%#v", before, after)
 			}
 		}
-		claimed, err := fixture.store.ClaimNextAction(t.Context(), ActionClaim{
-			Scope: firstRun.Scope, WorkerID: "agent-worker", Now: fixture.now.Add(2 * time.Second), LeaseDuration: LoopActionLease, OwnActionID: original.ID,
+		claimed, err := fixture.store.ClaimNextAction(t.Context(), models.ActionClaim{
+			Scope: firstRun.Scope, WorkerID: "agent-worker", Now: fixture.now.Add(2 * time.Second), LeaseDuration: models.LoopActionLease, OwnActionID: original.ID,
 		})
 		if err != nil || claimed == nil || claimed.ID != original.ID {
 			t.Fatalf("own claim of the original operation = %#v, %v", claimed, err)
 		}
-		secondClaim, err := fixture.store.ClaimNextAction(t.Context(), ActionClaim{
+		secondClaim, err := fixture.store.ClaimNextAction(t.Context(), models.ActionClaim{
 			Scope: firstRun.Scope, WorkerID: "another-action-worker", Now: fixture.now.Add(3 * time.Second), LeaseDuration: time.Minute,
 		})
 		if err != nil || secondClaim != nil {
@@ -291,20 +293,20 @@ func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.
 }
 
 type actionBindingFenceStore interface {
-	KernelStore
+	models.KernelStore
 	skill.CatalogStore
-	SkillReferenceUpgradeStore
+	models.SkillReferenceUpgradeStore
 }
 
 type actionBindingFenceFixture struct {
 	store    actionBindingFenceStore
 	catalog  *skill.Catalog
 	binding  *skill.Binding
-	proposal ActionProposalRecord
+	proposal models.ActionProposalRecord
 	now      time.Time
 }
 
-func newActionBindingFenceFixture(t *testing.T, kernel KernelStore) *actionBindingFenceFixture {
+func newActionBindingFenceFixture(t *testing.T, kernel models.KernelStore) *actionBindingFenceFixture {
 	t.Helper()
 	store, ok := kernel.(actionBindingFenceStore)
 	if !ok {
@@ -329,7 +331,7 @@ func newActionBindingFenceFixture(t *testing.T, kernel KernelStore) *actionBindi
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := Scope{Kind: "tenant", ID: "binding-fence-" + uuid.NewString()}
+	scope := models.Scope{Kind: "tenant", ID: "binding-fence-" + uuid.NewString()}
 	binding.Scope = skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	binding.CreatedAt, binding.UpdatedAt = now, now
 	if err := catalog.Bind(t.Context(), binding); err != nil {
@@ -340,15 +342,15 @@ func newActionBindingFenceFixture(t *testing.T, kernel KernelStore) *actionBindi
 		t.Fatal(err)
 	}
 	run := newActionBindingFenceRunningRun(t, store, scope, now)
-	call := &ActionCall{
+	call := &models.ActionCall{
 		ID: uuid.NewString(), Scope: scope, RunID: run.ID, DeploymentID: binding.DeploymentID,
 		BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion,
-		Action: "deploy", Status: ActionCallStatusReady, Risk: skill.RiskLevelProduction, SideEffect: skill.SideEffectExternal,
+		Action: "deploy", Status: models.ActionCallStatusReady, Risk: skill.RiskLevelProduction, SideEffect: skill.SideEffectExternal,
 		Arguments: map[string]interface{}{"environment": "production"}, CredentialRefs: binding.Credentials,
 		IdempotencyKey: "loop:" + actiontest.LoopProposalStep + ":deploy-production", MaxAttempts: 3, AvailableAt: now.Add(time.Second), Revision: 1,
 		CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),
 	}
-	call.ExternalOperationDigest, err = computeExternalOperationDigest(scope, run.Owner, run.ObjectiveID, &ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"}, call.IdempotencyKey)
+	call.ExternalOperationDigest, err = activity.ComputeExternalOperationDigest(scope, run.Owner, run.ObjectiveID, &activity.ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"}, call.IdempotencyKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,16 +359,16 @@ func newActionBindingFenceFixture(t *testing.T, kernel KernelStore) *actionBindi
 	return &actionBindingFenceFixture{store: store, catalog: catalog, binding: binding, now: now, proposal: proposal}
 }
 
-func newActionBindingFenceRunningRun(t *testing.T, store KernelStore, scope Scope, now time.Time) *AgentRun {
+func newActionBindingFenceRunningRun(t *testing.T, store models.KernelStore, scope models.Scope, now time.Time) *models.AgentRun {
 	t.Helper()
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "Deploy safely", Source: RunSourceObjective,
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	run, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "Deploy safely", Source: models.RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: scope, WorkerID: "agent-worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: scope, WorkerID: "agent-worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim running fixture = %#v, %v", claimed, err)
 	}
@@ -384,27 +386,27 @@ func completeActionBindingFenceFixture(t *testing.T, fixture *actionBindingFence
 		return map[string]interface{}{"providerResult": "delivered"}, nil
 	}), models.WithClock(func() time.Time { return fixture.now.Add(2 * time.Second) }))
 	completed, err := worker.ExecuteOwnLoopCall(t.Context(), fixture.proposal.Call.Scope, fixture.proposal.Call.ID, "agent-worker")
-	if err != nil || completed == nil || completed.Call.Status != ActionCallStatusSucceeded {
+	if err != nil || completed == nil || completed.Call.Status != models.ActionCallStatusSucceeded {
 		t.Fatalf("complete fixture = %#v, %v", completed, err)
 	}
-	actiontest.TransitionParentRun(t, fixture.store, fixture.proposal.Call, AgentRunStatusCanceled, nil, fixture.now.Add(3*time.Second))
+	actiontest.TransitionParentRun(t, fixture.store, fixture.proposal.Call, models.AgentRunStatusCanceled, nil, fixture.now.Add(3*time.Second))
 }
 
-func actionBindingFenceUpgrade(fixture *actionBindingFenceFixture) *SkillReferenceUpgradeMutation {
+func actionBindingFenceUpgrade(fixture *actionBindingFenceFixture) *models.SkillReferenceUpgradeMutation {
 	next := cloneTestBinding(fixture.binding)
 	next.SkillVersion = "1.1.0"
 	next.Revision++
 	next.UpdatedAt = fixture.now.Add(time.Minute)
-	plan := &SkillReferenceUpgradePlan{
+	plan := &models.SkillReferenceUpgradePlan{
 		APIVersion: skillbinding.SkillReferenceUpgradeAPIVersion, Scope: fixture.proposal.Call.Scope,
 		DeploymentID: next.DeploymentID, BindingID: next.ID, ExpectedBindingRevision: fixture.binding.Revision,
-		From:   SkillReferenceIdentity{ID: fixture.binding.SkillID, Version: fixture.binding.SkillVersion, SourceIdentity: fixture.binding.SourceIdentity},
-		To:     SkillReferenceIdentity{ID: next.SkillID, Version: next.SkillVersion, SourceIdentity: next.SourceIdentity},
+		From:   models.SkillReferenceIdentity{ID: fixture.binding.SkillID, Version: fixture.binding.SkillVersion, SourceIdentity: fixture.binding.SourceIdentity},
+		To:     models.SkillReferenceIdentity{ID: next.SkillID, Version: next.SkillVersion, SourceIdentity: next.SourceIdentity},
 		Digest: "sha256:reviewed-binding-fence",
 	}
-	return &SkillReferenceUpgradeMutation{
+	return &models.SkillReferenceUpgradeMutation{
 		Plan: plan, Binding: next,
-		Receipt: &SkillReferenceUpgradeReceipt{
+		Receipt: &models.SkillReferenceUpgradeReceipt{
 			APIVersion: skillbinding.SkillReferenceUpgradeAPIVersion, PlanDigest: plan.Digest, Scope: plan.Scope,
 			DeploymentID: next.DeploymentID, BindingID: next.ID, BindingRevision: next.Revision,
 			From: plan.From, To: plan.To, AppliedAt: next.UpdatedAt,
@@ -413,12 +415,12 @@ func actionBindingFenceUpgrade(fixture *actionBindingFenceFixture) *SkillReferen
 }
 
 type actionBindingFenceProposalStore struct {
-	ActionStore
-	beforeCreate func(ActionProposalRecord)
+	models.ActionStore
+	beforeCreate func(models.ActionProposalRecord)
 	creates      int
 }
 
-func (s *actionBindingFenceProposalStore) CreateActionProposal(ctx context.Context, proposal ActionProposalRecord) (*ActionProposalResult, error) {
+func (s *actionBindingFenceProposalStore) CreateActionProposal(ctx context.Context, proposal models.ActionProposalRecord) (*models.ActionProposalResult, error) {
 	s.creates++
 	s.beforeCreate(proposal)
 	return s.ActionStore.CreateActionProposal(ctx, proposal)

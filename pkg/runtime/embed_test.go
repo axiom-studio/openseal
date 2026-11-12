@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
@@ -15,11 +16,11 @@ import (
 
 func testEmbedPublicKey() string { return base64.RawURLEncoding.EncodeToString(make([]byte, 32)) }
 
-func testEmbedPermissions() EmbedPermissionPolicy {
-	return EmbedPermissionPolicy{
+func testEmbedPermissions() models.EmbedPermissionPolicy {
+	return models.EmbedPermissionPolicy{
 		AllowTextChat: true, MaximumMessages: 20, SessionTTLSeconds: 3600, MaximumInputBytes: 8192,
 		MaximumActionRisk: skill.RiskLevelRead,
-		ActionGrants:      []EmbedActionGrant{{BindingID: "crm", Action: "lookup"}},
+		ActionGrants:      []models.EmbedActionGrant{{BindingID: "crm", Action: "lookup"}},
 	}
 }
 
@@ -29,10 +30,10 @@ func TestEmbedSessionCreatesDistinctCanonicalAgentConversations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := Scope{Kind: "tenant", ID: "1"}
+	scope := models.Scope{Kind: "tenant", ID: "1"}
 	installation, err := service.CreateInstallation(t.Context(), runtimeconversation.CreateEmbedInstallationRequest{
 		Scope: scope, DeploymentID: "support-agent", Name: "Support chat", AllowedOrigins: []string{"https://example.com"},
-		Identity: EmbedIdentityPolicy{Mode: EmbedIdentityAnonymous}, Permissions: testEmbedPermissions(),
+		Identity: models.EmbedIdentityPolicy{Mode: models.EmbedIdentityAnonymous}, Permissions: testEmbedPermissions(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -50,13 +51,13 @@ func TestEmbedSessionCreatesDistinctCanonicalAgentConversations(t *testing.T) {
 		t.Fatalf("openings shared identity: first=%#v second=%#v", first.Session, second.Session)
 	}
 	conversation, err := runtimeconversation.NewConversationService(store).GetConversation(t.Context(), scope, first.Session.ConversationID)
-	if err != nil || conversation.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: "support-agent"}) || conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceEmbedSession {
+	if err != nil || conversation.Owner != (models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "support-agent"}) || conversation.Origin == nil || conversation.Origin.Kind != models.ConversationReferenceEmbedSession {
 		t.Fatalf("canonical conversation = %#v, %v", conversation, err)
 	}
 	if _, _, err := service.Authenticate(t.Context(), installation.PublicRoute, first.Session.ID, first.Capability, "https://evil.example"); !errors.Is(err, runtimeconversation.ErrEmbedOriginDenied) {
 		t.Fatalf("foreign origin error = %v", err)
 	}
-	if _, _, err := service.Authenticate(t.Context(), installation.PublicRoute, first.Session.ID, "wrong", "https://example.com"); !errors.Is(err, ErrEmbedSessionUnauthorized) {
+	if _, _, err := service.Authenticate(t.Context(), installation.PublicRoute, first.Session.ID, "wrong", "https://example.com"); !errors.Is(err, models.ErrEmbedSessionUnauthorized) {
 		t.Fatalf("wrong capability error = %v", err)
 	}
 }
@@ -65,8 +66,8 @@ func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testin
 	store := newTestKernelStore(t)
 	service, _ := runtimeconversation.NewEmbedSessionService(store, store)
 	installation, err := service.CreateInstallation(t.Context(), runtimeconversation.CreateEmbedInstallationRequest{
-		Scope: Scope{Kind: "tenant", ID: "1"}, DeploymentID: "support-agent", Name: "Signed support", AllowedOrigins: []string{"https://app.example.com"},
-		Identity:    EmbedIdentityPolicy{Mode: EmbedIdentitySigned, Issuer: "https://identity.example.com", Audience: "support", KeyID: "support-key", PublicKey: testEmbedPublicKey(), RequiredClaims: []string{"userId"}},
+		Scope: models.Scope{Kind: "tenant", ID: "1"}, DeploymentID: "support-agent", Name: "Signed support", AllowedOrigins: []string{"https://app.example.com"},
+		Identity:    models.EmbedIdentityPolicy{Mode: models.EmbedIdentitySigned, Issuer: "https://identity.example.com", Audience: "support", KeyID: "support-key", PublicKey: testEmbedPublicKey(), RequiredClaims: []string{"userId"}},
 		Permissions: testEmbedPermissions(),
 	})
 	if err != nil {
@@ -93,7 +94,7 @@ func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testin
 	authority := context["authority"].(map[string]interface{})
 	// The action authority gate reads the session authority from the Run.
 	allows := func(action string) bool {
-		run := &AgentRun{Context: map[string]interface{}{agentrun.RunContextSessionKey: map[string]interface{}{"authority": authority}}}
+		run := &models.AgentRun{Context: map[string]interface{}{agentrun.RunContextSessionKey: map[string]interface{}{"authority": authority}}}
 		bound := &skill.BoundAction{Binding: &skill.Binding{ID: "crm"}, Action: skill.Action{Name: action, Risk: skill.RiskLevelRead}}
 		_, err := skillbinding.EmbedSessionActionAuthorityValidator{}.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: run, Bound: bound})
 		return err == nil
@@ -111,8 +112,8 @@ func TestSQLiteEmbedSessionCapabilityAndClaimsSurviveRestart(t *testing.T) {
 	}
 	service, _ := runtimeconversation.NewEmbedSessionService(store, store)
 	installation, err := service.CreateInstallation(t.Context(), runtimeconversation.CreateEmbedInstallationRequest{
-		Scope: Scope{Kind: "tenant", ID: "7"}, DeploymentID: "support-agent", Name: "Support", AllowedOrigins: []string{"https://app.example.com"},
-		Identity: EmbedIdentityPolicy{Mode: EmbedIdentitySigned, Issuer: "issuer", Audience: "audience", KeyID: "key", PublicKey: testEmbedPublicKey(), RequiredClaims: []string{"userId"}}, Permissions: testEmbedPermissions(),
+		Scope: models.Scope{Kind: "tenant", ID: "7"}, DeploymentID: "support-agent", Name: "Support", AllowedOrigins: []string{"https://app.example.com"},
+		Identity: models.EmbedIdentityPolicy{Mode: models.EmbedIdentitySigned, Issuer: "issuer", Audience: "audience", KeyID: "key", PublicKey: testEmbedPublicKey(), RequiredClaims: []string{"userId"}}, Permissions: testEmbedPermissions(),
 	})
 	if err != nil {
 		t.Fatal(err)

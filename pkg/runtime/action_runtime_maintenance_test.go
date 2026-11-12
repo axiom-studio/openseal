@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -22,12 +23,12 @@ import (
 func TestActionRuntimeMaintenanceSerializesGateAndSubmission(t *testing.T) {
 	for _, ordering := range []string{"proposal_first", "gate_first", "concurrent"} {
 		t.Run(ordering, func(t *testing.T) {
-			actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 				fixture := newActionRuntimeMaintenanceFixture(t, kernel)
-				maintenance := kernel.(SkillRuntimeMaintenanceStore)
+				maintenance := kernel.(models.SkillRuntimeMaintenanceStore)
 				before := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
-				var result *ActionProposalResult
-				var gate *SkillRuntimeMaintenance
+				var result *models.ActionProposalResult
+				var gate *models.SkillRuntimeMaintenance
 				var proposalErr, gateErr error
 				propose := func() { result, proposalErr = kernel.CreateActionProposal(t.Context(), fixture.proposal) }
 				acquire := func() {
@@ -50,11 +51,11 @@ func TestActionRuntimeMaintenanceSerializesGateAndSubmission(t *testing.T) {
 					workers.Wait()
 				}
 				if proposalErr == nil {
-					if result == nil || !result.Created || gate != nil || !errors.Is(gateErr, ErrSkillReferenceUpgradeBusy) {
+					if result == nil || !result.Created || gate != nil || !errors.Is(gateErr, models.ErrSkillReferenceUpgradeBusy) {
 						t.Fatalf("maintenance crossed a committed proposal: result=%#v gate=%#v proposalErr=%v gateErr=%v", result, gate, proposalErr, gateErr)
 					}
 					stored, err := maintenance.GetSkillRuntimeMaintenance(t.Context(), before.Scope, fixture.binding.SkillID)
-					if stored != nil || !errors.Is(err, ErrSkillRuntimeMaintenanceNotFound) {
+					if stored != nil || !errors.Is(err, models.ErrSkillRuntimeMaintenanceNotFound) {
 						t.Fatalf("busy acquisition left a gate behind: %#v, %v", stored, err)
 					}
 				} else {
@@ -70,9 +71,9 @@ func TestActionRuntimeMaintenanceSerializesGateAndSubmission(t *testing.T) {
 }
 
 func TestActionRuntimeMaintenanceCoversLogicalSkillAndPreservesTenantIsolation(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 		fixture := newActionRuntimeMaintenanceFixture(t, kernel)
-		maintenance := kernel.(SkillRuntimeMaintenanceStore)
+		maintenance := kernel.(models.SkillRuntimeMaintenanceStore)
 		otherVersion := actionRuntimeMaintenanceBinding(t, fixture, "other-version", fixture.binding.SkillID, "1.1.0", fixture.binding.SourceIdentity)
 		unrelated := actionRuntimeMaintenanceBinding(t, fixture, "unrelated-skill", "unrelated-release", "1.0.0", fixture.binding.SourceIdentity)
 		otherSource := actionRuntimeMaintenanceBinding(t, fixture, "other-source", fixture.binding.SkillID, "1.0.0", "native::another-release-publisher")
@@ -109,9 +110,9 @@ func TestActionRuntimeMaintenanceCoversLogicalSkillAndPreservesTenantIsolation(t
 }
 
 func TestActionRuntimeMaintenanceOwnerExpiryDoesNotReopenSubmissionOrClaim(t *testing.T) {
-	actiontest.ForEachBackend(t, func(t *testing.T, kernel KernelStore, backend actiontest.Backend) {
+	actiontest.ForEachBackend(t, func(t *testing.T, kernel models.KernelStore, backend actiontest.Backend) {
 		fixture := newActionRuntimeMaintenanceFixture(t, kernel)
-		maintenance := kernel.(SkillRuntimeMaintenanceStore)
+		maintenance := kernel.(models.SkillRuntimeMaintenanceStore)
 		request := actionRuntimeMaintenanceRequest(t, fixture)
 		request.Now = fixture.now.Add(-10 * time.Minute)
 		request.LeaseDuration = time.Minute
@@ -127,7 +128,7 @@ func TestActionRuntimeMaintenanceOwnerExpiryDoesNotReopenSubmissionOrClaim(t *te
 		assertActionRuntimeMaintenanceError(t, err, before.Scope, fixture.binding.SkillID)
 		assertActionRuntimeMaintenanceNoSubmission(t, kernel, fixture.proposal.Call, before)
 		seedActionRuntimeMaintenanceLegacyCall(t, backend, fixture)
-		claimed, err := kernel.ClaimNextAction(t.Context(), ActionClaim{Scope: before.Scope, WorkerID: "agent-worker", Now: fixture.now.Add(2 * time.Second), LeaseDuration: LoopActionLease, OwnActionID: fixture.proposal.Call.ID})
+		claimed, err := kernel.ClaimNextAction(t.Context(), models.ActionClaim{Scope: before.Scope, WorkerID: "agent-worker", Now: fixture.now.Add(2 * time.Second), LeaseDuration: models.LoopActionLease, OwnActionID: fixture.proposal.Call.ID})
 		if err != nil || claimed != nil {
 			t.Fatalf("expired owner reopened execution: %#v, %v", claimed, err)
 		}
@@ -139,9 +140,9 @@ func TestActionRuntimeMaintenanceOwnerExpiryDoesNotReopenSubmissionOrClaim(t *te
 }
 
 func TestActionRuntimeMaintenanceStableGateSkipsLegacyReadyCallBeforeAuthority(t *testing.T) {
-	actiontest.ForEachBackend(t, func(t *testing.T, kernel KernelStore, backend actiontest.Backend) {
+	actiontest.ForEachBackend(t, func(t *testing.T, kernel models.KernelStore, backend actiontest.Backend) {
 		fixture := newActionRuntimeMaintenanceFixture(t, kernel)
-		gate, err := kernel.(SkillRuntimeMaintenanceStore).AcquireSkillRuntimeMaintenance(t.Context(), actionRuntimeMaintenanceRequest(t, fixture))
+		gate, err := kernel.(models.SkillRuntimeMaintenanceStore).AcquireSkillRuntimeMaintenance(t.Context(), actionRuntimeMaintenanceRequest(t, fixture))
 		if err != nil || gate == nil || !gate.Active {
 			t.Fatalf("acquire = %#v, %v", gate, err)
 		}
@@ -171,9 +172,9 @@ func TestActionRuntimeMaintenanceStableGateSkipsLegacyReadyCallBeforeAuthority(t
 }
 
 func TestActionRuntimeMaintenanceCoordinatorRejectsBeforeCatalogAndPolicy(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 		fixture := newActionRuntimeMaintenanceFixture(t, kernel)
-		gate, err := kernel.(SkillRuntimeMaintenanceStore).AcquireSkillRuntimeMaintenance(t.Context(), actionRuntimeMaintenanceRequest(t, fixture))
+		gate, err := kernel.(models.SkillRuntimeMaintenanceStore).AcquireSkillRuntimeMaintenance(t.Context(), actionRuntimeMaintenanceRequest(t, fixture))
 		if err != nil || gate == nil || !gate.Active {
 			t.Fatalf("acquire = %#v, %v", gate, err)
 		}
@@ -199,7 +200,7 @@ func TestActionRuntimeMaintenanceCoordinatorRejectsBeforeCatalogAndPolicy(t *tes
 func TestActionRuntimeMaintenanceObservedAfterClaimDefersWithoutFailure(t *testing.T) {
 	for _, boundary := range []string{"after_claim", "after_catalog"} {
 		t.Run(boundary, func(t *testing.T) {
-			actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 				fixture := newActionRuntimeMaintenanceFixture(t, kernel)
 				fixture.proposal.Call.MaxAttempts = 1
 				if _, err := kernel.CreateActionProposal(t.Context(), fixture.proposal); err != nil {
@@ -207,11 +208,11 @@ func TestActionRuntimeMaintenanceObservedAfterClaimDefersWithoutFailure(t *testi
 				}
 				before := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
 				request := actionRuntimeMaintenanceRequest(t, fixture)
-				gate, _, err := nextSkillRuntimeMaintenance(nil, request)
+				gate, _, err := models.NextSkillRuntimeMaintenance(nil, request)
 				if err != nil {
 					t.Fatal(err)
 				}
-				wrapped := &actionRuntimeMaintenanceObservationStore{KernelStore: kernel, maintenance: kernel.(SkillRuntimeMaintenanceStore), gate: gate, active: boundary == "after_claim"}
+				wrapped := &actionRuntimeMaintenanceObservationStore{KernelStore: kernel, maintenance: kernel.(models.SkillRuntimeMaintenanceStore), gate: gate, active: boundary == "after_claim"}
 				catalogCalls, credentialCalls, dispatches := 0, 0, 0
 				catalog := &actiontest.MaintenanceCatalog{ActionExecutionCatalog: fixture.catalog, Calls: &catalogCalls}
 				if boundary == "after_catalog" {
@@ -228,11 +229,11 @@ func TestActionRuntimeMaintenanceObservedAfterClaimDefersWithoutFailure(t *testi
 				// RetryAt); the call stays ready and nothing is charged.
 				result, err := worker.ExecuteOwnLoopCall(t.Context(), before.Scope, fixture.proposal.Call.ID, "agent-worker")
 				var held *action.LoopActionMaintenanceError
-				if result != nil || !errors.As(err, &held) || held.Call == nil || held.Call.ID != fixture.proposal.Call.ID || held.Call.Status != ActionCallStatusReady || held.RetryAt.IsZero() {
+				if result != nil || !errors.As(err, &held) || held.Call == nil || held.Call.ID != fixture.proposal.Call.ID || held.Call.Status != models.ActionCallStatusReady || held.RetryAt.IsZero() {
 					t.Fatalf("maintenance observation became a failure or false result: %#v, %v", result, err)
 				}
 				deferred, err := kernel.GetActionCall(t.Context(), before.Scope, fixture.proposal.Call.ID)
-				if err != nil || deferred.Status != ActionCallStatusReady || deferred.CompletedAt != nil || deferred.Output != nil || deferred.Error != "" || deferred.LeaseOwner != "" || deferred.LeaseExpiresAt != nil {
+				if err != nil || deferred.Status != models.ActionCallStatusReady || deferred.CompletedAt != nil || deferred.Output != nil || deferred.Error != "" || deferred.LeaseOwner != "" || deferred.LeaseExpiresAt != nil {
 					t.Fatalf("maintenance observation closed the call: %#v, %v", deferred, err)
 				}
 				if dispatches != 0 || boundary == "after_claim" && (catalogCalls != 0 || credentialCalls != 0) {
@@ -247,18 +248,18 @@ func TestActionRuntimeMaintenanceObservedAfterClaimDefersWithoutFailure(t *testi
 }
 
 func TestActionRuntimeMaintenanceVerifiedReleaseUsesFreshVersion(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 		fixture := newActionRuntimeMaintenanceFixture(t, kernel)
-		maintenance := kernel.(SkillRuntimeMaintenanceStore)
+		maintenance := kernel.(models.SkillRuntimeMaintenanceStore)
 		gate, err := maintenance.AcquireSkillRuntimeMaintenance(t.Context(), actionRuntimeMaintenanceRequest(t, fixture))
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx := WithSkillRuntimeMaintenance(t.Context(), gate)
+		ctx := models.WithSkillRuntimeMaintenance(t.Context(), gate)
 		if err := fixture.store.ApplySkillReferenceUpgrade(ctx, actionBindingFenceUpgrade(fixture)); err != nil {
 			t.Fatal(err)
 		}
-		released, err := maintenance.CompleteSkillRuntimeMaintenance(ctx, SkillRuntimeMaintenanceCompletion{
+		released, err := maintenance.CompleteSkillRuntimeMaintenance(ctx, models.SkillRuntimeMaintenanceCompletion{
 			Scope: gate.Scope, SkillID: gate.SkillID, OperationID: gate.OperationID, Owner: gate.Owner,
 			ExpectedRevision: gate.Revision, VerifiedVersion: "1.1.0", Now: fixture.now.Add(2 * time.Second),
 		})
@@ -285,42 +286,42 @@ func TestActionRuntimeMaintenanceVerifiedReleaseUsesFreshVersion(t *testing.T) {
 			return map[string]interface{}{"providerResult": "delivered"}, nil
 		}), models.WithClock(func() time.Time { return fixture.now.Add(3 * time.Second) }))
 		completed, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "agent-worker")
-		if err != nil || completed == nil || completed.Call.Status != ActionCallStatusSucceeded || dispatches != 1 {
+		if err != nil || completed == nil || completed.Call.Status != models.ActionCallStatusSucceeded || dispatches != 1 {
 			t.Fatalf("fresh-version dispatch failed: %#v, %v, dispatches=%d", completed, err, dispatches)
 		}
 	})
 }
 
 func TestActionRuntimeMaintenancePreservesExistingReceiptReplay(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 		fixture := newActionRuntimeMaintenanceFixture(t, kernel)
 		completeActionBindingFenceFixture(t, fixture)
-		maintenance := kernel.(SkillRuntimeMaintenanceStore)
+		maintenance := kernel.(models.SkillRuntimeMaintenanceStore)
 		gate, err := maintenance.AcquireSkillRuntimeMaintenance(t.Context(), actionRuntimeMaintenanceRequest(t, fixture))
 		if err != nil || gate == nil || !gate.Active {
 			t.Fatalf("acquire after terminal receipt = %#v, %v", gate, err)
 		}
 		before := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
-		baseline, err := kernel.ListActivity(t.Context(), ActivityFilter{Scope: before.Scope, RunID: before.ID})
+		baseline, err := kernel.ListActivity(t.Context(), models.ActivityFilter{Scope: before.Scope, RunID: before.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
 		replayed, err := kernel.CreateActionProposal(t.Context(), fixture.proposal)
-		if err != nil || replayed == nil || replayed.Created || replayed.Call.Status != ActionCallStatusSucceeded || replayed.Call.ID != fixture.proposal.Call.ID {
+		if err != nil || replayed == nil || replayed.Created || replayed.Call.Status != models.ActionCallStatusSucceeded || replayed.Call.ID != fixture.proposal.Call.ID {
 			t.Fatalf("active gate rejected an existing immutable receipt: %#v, %v", replayed, err)
 		}
 		after := actiontest.ParentRun(t, kernel, fixture.proposal.Call)
-		events, err := kernel.ListActivity(t.Context(), ActivityFilter{Scope: before.Scope, RunID: before.ID})
+		events, err := kernel.ListActivity(t.Context(), models.ActivityFilter{Scope: before.Scope, RunID: before.ID})
 		if err != nil || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(baseline, events) {
 			t.Fatalf("gated replay mutated Run or activity: parent=%#v events=%#v, %v", after, events, err)
 		}
 	})
 }
 
-func newActionRuntimeMaintenanceFixture(t *testing.T, kernel KernelStore) *actionBindingFenceFixture {
+func newActionRuntimeMaintenanceFixture(t *testing.T, kernel models.KernelStore) *actionBindingFenceFixture {
 	t.Helper()
 	fixture := newActionBindingFenceFixture(t, kernel)
-	if _, ok := kernel.(SkillRuntimeMaintenanceStore); !ok {
+	if _, ok := kernel.(models.SkillRuntimeMaintenanceStore); !ok {
 		t.Fatal("maintenance fixture requires a durable maintenance store")
 	}
 	base, _ := actiontest.GovernedCatalog(t)
@@ -345,7 +346,7 @@ func newActionRuntimeMaintenanceFixture(t *testing.T, kernel KernelStore) *actio
 		t.Fatal(err)
 	}
 	fixture.binding = binding
-	current := actiontest.MutateParentRun(t, kernel, fixture.proposal.Call, fixture.now, func(run *AgentRun) {
+	current := actiontest.MutateParentRun(t, kernel, fixture.proposal.Call, fixture.now, func(run *models.AgentRun) {
 		expires := fixture.now.Add(time.Minute)
 		run.LeaseExpiresAt = &expires
 	})
@@ -354,15 +355,15 @@ func newActionRuntimeMaintenanceFixture(t *testing.T, kernel KernelStore) *actio
 	fixture.proposal.Call.CreatedAt, fixture.proposal.Call.UpdatedAt = fixture.now.Add(time.Second), fixture.now.Add(time.Second)
 	fixture.proposal.Call.AvailableAt = fixture.now.Add(time.Second)
 	fixture.proposal.Call.BindingRevision = binding.Revision
-	fixture.proposal.Call.InvocationDigest = ComputeActionInvocationDigest(fixture.proposal.Call)
-	fixture.proposal.Call.SemanticDigest = ComputeActionSemanticDigest(fixture.proposal.Call)
+	fixture.proposal.Call.InvocationDigest = models.ComputeActionInvocationDigest(fixture.proposal.Call)
+	fixture.proposal.Call.SemanticDigest = models.ComputeActionSemanticDigest(fixture.proposal.Call)
 	fixture.proposal.Event.CreatedAt = fixture.now.Add(time.Second)
 	return fixture
 }
 
 func newActionRuntimeMaintenanceTenantFixture(t *testing.T, original *actionBindingFenceFixture) *actionBindingFenceFixture {
 	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "maintenance-isolation-" + uuid.NewString()}
+	scope := models.Scope{Kind: "tenant", ID: "maintenance-isolation-" + uuid.NewString()}
 	catalog := skill.NewCatalogWithStore(original.store)
 	binding := cloneTestBinding(original.binding)
 	binding.Scope, binding.Revision = skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, 1
@@ -370,11 +371,11 @@ func newActionRuntimeMaintenanceTenantFixture(t *testing.T, original *actionBind
 		t.Fatal(err)
 	}
 	run := newActionBindingFenceRunningRun(t, original.store, scope, original.now)
-	call := cloneActionCall(original.proposal.Call)
+	call := models.CloneActionCall(original.proposal.Call)
 	call.ID, call.Scope, call.RunID, call.BindingRevision = uuid.NewString(), scope, run.ID, binding.Revision
-	call.InvocationDigest, call.SemanticDigest = ComputeActionInvocationDigest(call), ComputeActionSemanticDigest(call)
+	call.InvocationDigest, call.SemanticDigest = models.ComputeActionInvocationDigest(call), models.ComputeActionSemanticDigest(call)
 	var err error
-	call.ExternalOperationDigest, err = computeExternalOperationDigest(scope, run.Owner, run.ObjectiveID, &ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"}, call.IdempotencyKey)
+	call.ExternalOperationDigest, err = activity.ComputeExternalOperationDigest(scope, run.Owner, run.ObjectiveID, &activity.ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"}, call.IdempotencyKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,17 +384,17 @@ func newActionRuntimeMaintenanceTenantFixture(t *testing.T, original *actionBind
 	return &actionBindingFenceFixture{store: original.store, catalog: catalog, binding: binding, now: original.now, proposal: proposal}
 }
 
-func actionRuntimeMaintenanceRequest(t *testing.T, fixture *actionBindingFenceFixture) SkillRuntimeMaintenanceRequest {
+func actionRuntimeMaintenanceRequest(t *testing.T, fixture *actionBindingFenceFixture) models.SkillRuntimeMaintenanceRequest {
 	t.Helper()
-	bindings, err := fixture.store.(SkillRuntimeMaintenanceStore).ListSkillRuntimeMaintenanceBindings(t.Context(), fixture.proposal.Call.Scope, fixture.binding.SkillID, "", "", 100)
+	bindings, err := fixture.store.(models.SkillRuntimeMaintenanceStore).ListSkillRuntimeMaintenanceBindings(t.Context(), fixture.proposal.Call.Scope, fixture.binding.SkillID, "", "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := make([]SkillRuntimeMaintenanceBindingRevision, len(bindings))
+	expected := make([]models.SkillRuntimeMaintenanceBindingRevision, len(bindings))
 	for i, binding := range bindings {
-		expected[i] = SkillRuntimeMaintenanceBindingRevision{DeploymentID: binding.DeploymentID, BindingID: binding.ID, Revision: binding.Revision}
+		expected[i] = models.SkillRuntimeMaintenanceBindingRevision{DeploymentID: binding.DeploymentID, BindingID: binding.ID, Revision: binding.Revision}
 	}
-	return SkillRuntimeMaintenanceRequest{
+	return models.SkillRuntimeMaintenanceRequest{
 		Scope: fixture.proposal.Call.Scope, SkillID: fixture.binding.SkillID, SourceIdentity: fixture.binding.SourceIdentity,
 		RuntimeIdentity: "native-release-server", OperationID: uuid.NewString(), FromVersion: "1.0.0", ToVersion: "1.1.0",
 		TargetSourceDigest: "sha256:" + strings.Repeat("c", 64),
@@ -432,34 +433,34 @@ func actionRuntimeMaintenanceBinding(t *testing.T, fixture *actionBindingFenceFi
 	return binding
 }
 
-func actionRuntimeMaintenanceProposal(original ActionProposalRecord, binding *skill.Binding) ActionProposalRecord {
+func actionRuntimeMaintenanceProposal(original models.ActionProposalRecord, binding *skill.Binding) models.ActionProposalRecord {
 	proposal := original
-	proposal.Call = cloneActionCall(original.Call)
+	proposal.Call = models.CloneActionCall(original.Call)
 	proposal.Call.BindingID, proposal.Call.BindingRevision = binding.ID, binding.Revision
 	proposal.Call.SkillID, proposal.Call.SkillVersion = binding.SkillID, binding.SkillVersion
-	proposal.Call.InvocationDigest = ComputeActionInvocationDigest(proposal.Call)
-	proposal.Call.SemanticDigest = ComputeActionSemanticDigest(proposal.Call)
+	proposal.Call.InvocationDigest = models.ComputeActionInvocationDigest(proposal.Call)
+	proposal.Call.SemanticDigest = models.ComputeActionSemanticDigest(proposal.Call)
 	return proposal
 }
 
-func assertActionRuntimeMaintenanceError(t *testing.T, err error, scope Scope, skillID string) {
+func assertActionRuntimeMaintenanceError(t *testing.T, err error, scope models.Scope, skillID string) {
 	t.Helper()
-	var typed *SkillRuntimeMaintenanceError
-	if !errors.Is(err, ErrSkillRuntimeMaintenance) || !errors.As(err, &typed) || typed.Maintenance.Scope != scope || typed.Maintenance.SkillID != skillID || !typed.Maintenance.Active {
+	var typed *models.SkillRuntimeMaintenanceError
+	if !errors.Is(err, models.ErrSkillRuntimeMaintenance) || !errors.As(err, &typed) || typed.Maintenance.Scope != scope || typed.Maintenance.SkillID != skillID || !typed.Maintenance.Active {
 		t.Fatalf("missing typed maintenance authority: %v", err)
 	}
 }
 
-func assertActionRuntimeMaintenanceNoSubmission(t *testing.T, kernel KernelStore, call *ActionCall, before *AgentRun) {
+func assertActionRuntimeMaintenanceNoSubmission(t *testing.T, kernel models.KernelStore, call *models.ActionCall, before *models.AgentRun) {
 	t.Helper()
 	if after := actiontest.ParentRun(t, kernel, call); !reflect.DeepEqual(before, after) {
 		t.Fatalf("gated submission changed its parent: before=%#v after=%#v", before, after)
 	}
-	calls, err := kernel.ListActionCalls(t.Context(), ActionFilter{Scope: call.Scope, RunID: call.RunID})
+	calls, err := kernel.ListActionCalls(t.Context(), models.ActionFilter{Scope: call.Scope, RunID: call.RunID})
 	if err != nil || len(calls) != 0 {
 		t.Fatalf("gated submission inserted an action: %#v, %v", calls, err)
 	}
-	events, err := kernel.ListActivity(t.Context(), ActivityFilter{Scope: call.Scope, RunID: call.RunID})
+	events, err := kernel.ListActivity(t.Context(), models.ActivityFilter{Scope: call.Scope, RunID: call.RunID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +471,7 @@ func assertActionRuntimeMaintenanceNoSubmission(t *testing.T, kernel KernelStore
 	}
 }
 
-func actionRuntimeMaintenanceWorker(kernel KernelStore, fixture *actionBindingFenceFixture, catalogCalls, credentialCalls, dispatches *int) *action.ActionWorker {
+func actionRuntimeMaintenanceWorker(kernel models.KernelStore, fixture *actionBindingFenceFixture, catalogCalls, credentialCalls, dispatches *int) *action.ActionWorker {
 	worker := action.NewActionWorker(kernel, &actiontest.CountingCatalog{ActionExecutionCatalog: fixture.catalog, Calls: catalogCalls}, action.CredentialResolverFunc(func(context.Context, action.CredentialResolutionRequest) (map[string]string, error) {
 		(*credentialCalls)++
 		return map[string]string{"token": "secret"}, nil
@@ -492,7 +493,7 @@ func seedActionRuntimeMaintenanceLegacyCall(t *testing.T, backend actiontest.Bac
 		t.Fatal(err)
 	}
 	args := []interface{}{call.ID, call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, call.Status, call.IdempotencyKey,
-		externalOperationClaimDigest(call), call.ApprovalID, call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload),
+		models.ExternalOperationClaimDigest(call), call.ApprovalID, call.AvailableAt, call.LeaseOwner, call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(payload),
 		call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion}
 	columns := `(id,scope_kind,scope_id,run_id,turn_id,status,idempotency_key,external_operation_digest,approval_id,available_at,lease_owner,lease_expires_at,revision,created_at,payload,deployment_id,binding_id,binding_revision,skill_id,skill_version)`
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(args)), ",")
@@ -527,13 +528,13 @@ func seedActionRuntimeMaintenanceLegacyCall(t *testing.T, backend actiontest.Bac
 }
 
 type actionRuntimeMaintenanceObservationStore struct {
-	KernelStore
-	maintenance SkillRuntimeMaintenanceStore
-	gate        *SkillRuntimeMaintenance
+	models.KernelStore
+	maintenance models.SkillRuntimeMaintenanceStore
+	gate        *models.SkillRuntimeMaintenance
 	active      bool
 }
 
-func (s *actionRuntimeMaintenanceObservationStore) GetSkillRuntimeMaintenance(ctx context.Context, scope Scope, skillID string) (*SkillRuntimeMaintenance, error) {
+func (s *actionRuntimeMaintenanceObservationStore) GetSkillRuntimeMaintenance(ctx context.Context, scope models.Scope, skillID string) (*models.SkillRuntimeMaintenance, error) {
 	if s.active && scope == s.gate.Scope && skillID == s.gate.SkillID {
 		gate := *s.gate
 		return &gate, nil

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -12,15 +13,15 @@ import (
 )
 
 type modelProducerTestHost struct {
-	requests []ModelStepRequest
-	result   func(req ModelStepRequest) ModelStepResult
+	requests []models.ModelStepRequest
+	result   func(req models.ModelStepRequest) models.ModelStepResult
 	err      error
 }
 
-func (h *modelProducerTestHost) ExecuteModelStep(_ context.Context, req ModelStepRequest) (ModelStepResult, error) {
+func (h *modelProducerTestHost) ExecuteModelStep(_ context.Context, req models.ModelStepRequest) (models.ModelStepResult, error) {
 	h.requests = append(h.requests, req)
 	if h.err != nil {
-		return ModelStepResult{}, h.err
+		return models.ModelStepResult{}, h.err
 	}
 	if h.result != nil {
 		return h.result(req), nil
@@ -28,49 +29,49 @@ func (h *modelProducerTestHost) ExecuteModelStep(_ context.Context, req ModelSte
 	return modelProducerTestResult(req), nil
 }
 
-func (h *modelProducerTestHost) ExecuteHostTool(context.Context, HostToolRequest) (HostToolResult, error) {
-	return HostToolResult{}, ErrHostToolUnsupported
+func (h *modelProducerTestHost) ExecuteHostTool(context.Context, models.HostToolRequest) (models.HostToolResult, error) {
+	return models.HostToolResult{}, models.ErrHostToolUnsupported
 }
 
-func modelProducerTestResult(req ModelStepRequest) ModelStepResult {
+func modelProducerTestResult(req models.ModelStepRequest) models.ModelStepResult {
 	a := *modelStepTestAssistant()
 	a.Text = "Done."
-	a.Usage = ModelStepUsage{InputTokens: 1500, OutputTokens: 40, Cost: 0.01, DurationMS: 900, ProviderDurationMS: 800, Attempts: 1}
-	return ModelStepResult{
-		APIVersion: ModelStepAPIVersion, StepID: req.StepID, Assistant: a,
-		Model:  ModelStepModelInfo{Provider: a.Provider, Model: a.Model, ContextTokens: 200000, InputLimitTokens: 180000},
-		Render: ModelStepRenderInfo{EstimatedInputTokens: 1400},
+	a.Usage = models.ModelStepUsage{InputTokens: 1500, OutputTokens: 40, Cost: 0.01, DurationMS: 900, ProviderDurationMS: 800, Attempts: 1}
+	return models.ModelStepResult{
+		APIVersion: models.ModelStepAPIVersion, StepID: req.StepID, Assistant: a,
+		Model:  models.ModelStepModelInfo{Provider: a.Provider, Model: a.Model, ContextTokens: 200000, InputLimitTokens: 180000},
+		Render: models.ModelStepRenderInfo{EstimatedInputTokens: 1400},
 	}
 }
 
 type modelProducerTestPreparer struct {
 	calls int
-	req   ModelStepRequest
+	req   models.ModelStepRequest
 }
 
-func (p *modelProducerTestPreparer) PrepareModelStep(context.Context, agentrun.StepInput) (ModelStepRequest, error) {
+func (p *modelProducerTestPreparer) PrepareModelStep(context.Context, agentrun.StepInput) (models.ModelStepRequest, error) {
 	p.calls++
 	return p.req, nil
 }
 
 type modelProducerTestStore struct {
-	path  *AgentSessionPath
+	path  *models.AgentSessionPath
 	loads int
 }
 
-func (s *modelProducerTestStore) LoadAgentSessionPath(_ context.Context, _ Scope, sessionID string) (*AgentSessionPath, error) {
+func (s *modelProducerTestStore) LoadAgentSessionPath(_ context.Context, _ models.Scope, sessionID string) (*models.AgentSessionPath, error) {
 	s.loads++
 	if s.path == nil || s.path.Session == nil || s.path.Session.ID != sessionID {
-		return nil, ErrAgentSessionNotFound
+		return nil, models.ErrAgentSessionNotFound
 	}
 	return s.path, nil
 }
 
-func (s *modelProducerTestStore) GetActionCall(context.Context, Scope, string) (*ActionCall, error) {
-	return nil, ErrActionNotFound
+func (s *modelProducerTestStore) GetActionCall(context.Context, models.Scope, string) (*models.ActionCall, error) {
+	return nil, models.ErrActionNotFound
 }
 
-func (s *modelProducerTestStore) AppendAgentSessionEntries(context.Context, AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
+func (s *modelProducerTestStore) AppendAgentSessionEntries(context.Context, models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
 	return nil, errors.New("the test preparer writes no capabilities note")
 }
 
@@ -98,7 +99,7 @@ func newModelProducerFixture(t *testing.T) *modelProducerFixture {
 
 	f.render.User("run-1", "old request")
 	f.render.Assistant("run-1", "step-0", "c0")
-	f.render.Tool("run-1", "step-0", "c0", ToolEntryCompleted)
+	f.render.Tool("run-1", "step-0", "c0", models.ToolEntryCompleted)
 	kept := f.render.User("run-1", "recent request")
 	f.render.Compaction("run-1", kept.ID)
 	f.render.Note("run-1", "Run context")
@@ -109,22 +110,22 @@ func newModelProducerFixture(t *testing.T) *modelProducerFixture {
 		t.Fatalf("NewModelStepProducer: %v", err)
 	}
 	f.producer = producer
-	run := &AgentRun{ID: "run-1", Scope: testSessionScope, AssignedAgentID: "agent-1", SessionID: "lane", Status: AgentRunStatusRunning}
+	run := &models.AgentRun{ID: "run-1", Scope: testSessionScope, AssignedAgentID: "agent-1", SessionID: "lane", Status: models.AgentRunStatusRunning}
 	f.in = agentrun.StepInput{
-		Run: run, Step: &AgentTurn{ID: "step-1", Sequence: 1}, Session: f.store.path.Session,
+		Run: run, Step: &models.AgentTurn{ID: "step-1", Sequence: 1}, Session: f.store.path.Session,
 		Path: f.store.path, Binding: &agentrun.TurnRunnerBinding{DefinitionID: "def-1", DefinitionVersion: "1"},
 		Mode: agentrun.StepModeNormal, WorkerID: "worker-1",
 	}
 	return f
 }
 
-func (f *modelProducerFixture) produce(t *testing.T, ctx context.Context, in agentrun.StepInput) (ModelStepRequest, agentrun.StepOutput) {
+func (f *modelProducerFixture) produce(t *testing.T, ctx context.Context, in agentrun.StepInput) (models.ModelStepRequest, agentrun.StepOutput) {
 	t.Helper()
 	out, err := f.producer.Produce(ctx, in)
 	if err != nil {
 		t.Fatalf("Produce: %v", err)
 	}
-	if err := modelstep.ValidateStepOutput(StepProducerModel, out); err != nil {
+	if err := modelstep.ValidateStepOutput(models.StepProducerModel, out); err != nil {
 		t.Fatalf("validateStepOutput: %v", err)
 	}
 	return f.host.requests[len(f.host.requests)-1], out
@@ -132,12 +133,12 @@ func (f *modelProducerFixture) produce(t *testing.T, ctx context.Context, in age
 
 func TestModelStepProducerRequestShape(t *testing.T) {
 	f := newModelProducerFixture(t)
-	if f.producer.Kind() != StepProducerModel {
+	if f.producer.Kind() != models.StepProducerModel {
 		t.Fatalf("Kind = %q", f.producer.Kind())
 	}
 
 	req, out := f.produce(t, context.Background(), f.in)
-	if req.APIVersion != ModelStepAPIVersion || req.Purpose != ModelStepPurposeStep {
+	if req.APIVersion != models.ModelStepAPIVersion || req.Purpose != models.ModelStepPurposeStep {
 		t.Fatalf("apiVersion/purpose = %q/%q", req.APIVersion, req.Purpose)
 	}
 	if req.Scope != testSessionScope || req.RunID != "run-1" || req.StepID != "step-1" || req.Attempt != 0 || req.SessionID != "lane" {
@@ -152,28 +153,28 @@ func TestModelStepProducerRequestShape(t *testing.T) {
 		t.Fatalf("tools = %d, stream = %+v", len(req.Tools), req.Stream)
 	}
 	// Entries are the path rendered from the latest compaction.
-	if len(req.Entries) != 3 || req.Entries[0].Type != SessionEntryCompaction ||
-		req.Entries[1].Type != SessionEntryUser || req.Entries[2].Type != SessionEntryNote {
+	if len(req.Entries) != 3 || req.Entries[0].Type != models.SessionEntryCompaction ||
+		req.Entries[1].Type != models.SessionEntryUser || req.Entries[2].Type != models.SessionEntryNote {
 		t.Fatalf("entries = %v", modelsteptest.RenderIDs(req.Entries))
 	}
 	// Unbounded: the preparer's (catalog) cap stays, 0 here; no preview observer.
 	if req.MaxOutputTokens != 0 || req.Stream.AnswerPreview {
 		t.Fatalf("maxOutputTokens = %d, answerPreview = %v", req.MaxOutputTokens, req.Stream.AnswerPreview)
 	}
-	if out.ModelProvider != string(ModelStepProviderAnthropic) || out.Model != "claude-test" || out.Assistant.Text != "Done." {
+	if out.ModelProvider != string(models.ModelStepProviderAnthropic) || out.Model != "claude-test" || out.Assistant.Text != "Done." {
 		t.Fatalf("output = %+v", out)
 	}
 	if lim := out.Assistant.Limits; lim == nil || lim.ContextTokens != 200000 || lim.InputLimitTokens != 180000 || lim.PromptTokens != 1500 {
 		t.Fatalf("limits = %+v", out.Assistant.Limits)
 	}
-	if out.Usage != (TurnUsage{InputTokens: 1500, OutputTokens: 40, Cost: 0.01, DurationMS: 900, ProviderDurationMS: 800}) {
+	if out.Usage != (models.TurnUsage{InputTokens: 1500, OutputTokens: 40, Cost: 0.01, DurationMS: 900, ProviderDurationMS: 800}) {
 		t.Fatalf("usage = %+v", out.Usage)
 	}
 
 	// The forced-compaction retry is Attempt 1; a preview observer turns the preview on.
 	retry := f.in
 	retry.Attempt = 1
-	ctx := WithTurnAnswerPreview(context.Background(), func(context.Context, TurnAnswerPreview) error { return nil })
+	ctx := models.WithTurnAnswerPreview(context.Background(), func(context.Context, models.TurnAnswerPreview) error { return nil })
 	req, _ = f.produce(t, ctx, retry)
 	if req.Attempt != 1 || !req.Stream.AnswerPreview {
 		t.Fatalf("retry attempt = %d, answerPreview = %v", req.Attempt, req.Stream.AnswerPreview)
@@ -184,7 +185,7 @@ func TestModelStepProducerRequestShape(t *testing.T) {
 	f.preparer.calls = 0
 	bounded := f.in
 	run := *f.in.Run
-	run.Budget = &BudgetPolicy{MaxTotalTokens: 400000}
+	run.Budget = &models.BudgetPolicy{MaxTotalTokens: 400000}
 	bounded.Run = &run
 	planned, err := f.producer.PlanStepBudget(context.Background(), bounded)
 	if err != nil {
@@ -193,7 +194,7 @@ func TestModelStepProducerRequestShape(t *testing.T) {
 	if planned.InputTokens <= 0 || planned.OutputTokens <= 0 || planned.InputTokens+planned.OutputTokens != 400000 {
 		t.Fatalf("planned = %+v", planned)
 	}
-	run.BudgetReservations = map[string]BudgetReservation{"step-1": {ID: "step-1", Usage: BudgetUsage{Turns: 1, InputTokens: planned.InputTokens, OutputTokens: 900}}}
+	run.BudgetReservations = map[string]models.BudgetReservation{"step-1": {ID: "step-1", Usage: models.BudgetUsage{Turns: 1, InputTokens: planned.InputTokens, OutputTokens: 900}}}
 	req, _ = f.produce(t, context.Background(), bounded)
 	if f.preparer.calls != 1 {
 		t.Fatalf("preparer calls = %d, want 1 (plan and produce share the request)", f.preparer.calls)
@@ -210,7 +211,7 @@ func TestModelStepProducerRequestShape(t *testing.T) {
 
 	// An unbounded Run plans nothing and prepares nothing.
 	f.preparer.calls = 0
-	if planned, err := f.producer.PlanStepBudget(context.Background(), f.in); err != nil || planned != (BudgetUsage{}) || f.preparer.calls != 0 {
+	if planned, err := f.producer.PlanStepBudget(context.Background(), f.in); err != nil || planned != (models.BudgetUsage{}) || f.preparer.calls != 0 {
 		t.Fatalf("unbounded plan = %+v, %v, preparer calls %d", planned, err, f.preparer.calls)
 	}
 
@@ -227,7 +228,7 @@ func TestModelStepProducerExplainPurposeHasNoTools(t *testing.T) {
 	in := f.in
 	in.Mode = agentrun.StepModeExplainFailure
 	req, out := f.produce(t, context.Background(), in)
-	if req.Purpose != ModelStepPurposeExplanation {
+	if req.Purpose != models.ModelStepPurposeExplanation {
 		t.Fatalf("purpose = %q", req.Purpose)
 	}
 	if len(req.Tools) != 0 || req.Stream.FinalAnswerTool != "" {
@@ -241,7 +242,7 @@ func TestModelStepProducerExplainPurposeHasNoTools(t *testing.T) {
 	}
 
 	// A host that answers an explanation with tool calls is misconfigured.
-	f.host.result = func(req ModelStepRequest) ModelStepResult {
+	f.host.result = func(req models.ModelStepRequest) models.ModelStepResult {
 		res := modelProducerTestResult(req)
 		res.Assistant = *modelStepTestAssistant("c9")
 		res.Model.Provider = res.Assistant.Provider
@@ -254,7 +255,7 @@ func TestModelStepProducerExplainPurposeHasNoTools(t *testing.T) {
 
 func TestModelStepProducerStepIdentityMismatchIsConfigurationError(t *testing.T) {
 	f := newModelProducerFixture(t)
-	f.host.result = func(req ModelStepRequest) ModelStepResult {
+	f.host.result = func(req models.ModelStepRequest) models.ModelStepResult {
 		res := modelProducerTestResult(req)
 		res.StepID = "step-other"
 		return res
@@ -268,9 +269,9 @@ func TestModelStepProducerStepIdentityMismatchIsConfigurationError(t *testing.T)
 	}
 
 	// A host that fills the kernel-only limits is misconfigured too.
-	f.host.result = func(req ModelStepRequest) ModelStepResult {
+	f.host.result = func(req models.ModelStepRequest) models.ModelStepResult {
 		res := modelProducerTestResult(req)
-		res.Assistant.Limits = &AssistantModelLimits{ContextTokens: 1}
+		res.Assistant.Limits = &models.AssistantModelLimits{ContextTokens: 1}
 		return res
 	}
 	if _, err := f.producer.Produce(context.Background(), f.in); !errors.Is(err, modelstep.ErrTurnHostConfiguration) {

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine/routinetest"
@@ -14,43 +15,43 @@ import (
 // countingRoutineEventStore fails the test on any store call: an offer for
 // a source no routine listens to must not reach the store.
 type countingRoutineEventStore struct {
-	RoutineEventStore
+	models.RoutineEventStore
 	calls int
 }
 
-func (s *countingRoutineEventStore) GetRunbookActivation(context.Context, Scope, string) (*RunbookActivation, error) {
+func (s *countingRoutineEventStore) GetRunbookActivation(context.Context, models.Scope, string) (*models.RunbookActivation, error) {
 	s.calls++
 	return nil, nil
 }
 
-func (s *countingRoutineEventStore) ListRoutineEventActivations(context.Context, Scope, RoutineEventKind, string) ([]*RunbookActivation, error) {
+func (s *countingRoutineEventStore) ListRoutineEventActivations(context.Context, models.Scope, models.RoutineEventKind, string) ([]*models.RunbookActivation, error) {
 	s.calls++
 	return nil, nil
 }
 
-func (s *countingRoutineEventStore) InsertRoutineEvent(context.Context, *RoutineEventRecord) (bool, error) {
+func (s *countingRoutineEventStore) InsertRoutineEvent(context.Context, *models.RoutineEventRecord) (bool, error) {
 	s.calls++
 	return false, nil
 }
 
-func (s *countingRoutineEventStore) CountPendingRoutineEvents(context.Context, Scope, string) (int, error) {
+func (s *countingRoutineEventStore) CountPendingRoutineEvents(context.Context, models.Scope, string) (int, error) {
 	s.calls++
 	return 0, nil
 }
 
-func (s *countingRoutineEventStore) CountPendingRoutineEventsInScope(context.Context, Scope) (int, error) {
+func (s *countingRoutineEventStore) CountPendingRoutineEventsInScope(context.Context, models.Scope) (int, error) {
 	s.calls++
 	return 0, nil
 }
 
-func (s *countingRoutineEventStore) ListRoutineEventSourceKeysInScope(_ context.Context, scope Scope) ([]RoutineEventSourceKey, error) {
-	return []RoutineEventSourceKey{{Scope: scope, Kind: RoutineEventSlackMessage, SourceRef: RoutineConversationSourceRef("deployment", "bound", "slack", "listening")}}, nil
+func (s *countingRoutineEventStore) ListRoutineEventSourceKeysInScope(_ context.Context, scope models.Scope) ([]models.RoutineEventSourceKey, error) {
+	return []models.RoutineEventSourceKey{{Scope: scope, Kind: models.RoutineEventSlackMessage, SourceRef: models.RoutineConversationSourceRef("deployment", "bound", "slack", "listening")}}, nil
 }
 
-func unboundRoutineEvent() *RoutineEvent {
-	return &RoutineEvent{
-		Scope: Scope{Kind: "tenant", ID: "busy"}, ID: "slack:message:T1:C1:1.0", Kind: RoutineEventSlackMessage,
-		SourceRef: RoutineConversationSourceRef("deployment", "binding", "slack", "installation"), OccurredAt: time.Unix(1, 0).UTC(),
+func unboundRoutineEvent() *models.RoutineEvent {
+	return &models.RoutineEvent{
+		Scope: models.Scope{Kind: "tenant", ID: "busy"}, ID: "slack:message:T1:C1:1.0", Kind: models.RoutineEventSlackMessage,
+		SourceRef: models.RoutineConversationSourceRef("deployment", "binding", "slack", "installation"), OccurredAt: time.Unix(1, 0).UTC(),
 		Summary: "Message in #general", Fields: map[string][]string{"channel": {"C1"}, "text": {"hello"}},
 	}
 }
@@ -61,7 +62,7 @@ func newUnboundRoutineEventMatcher(tb testing.TB) (*routine.RoutineEventMatcher,
 	matcher := routine.NewRoutineEventMatcher(store)
 	tb.Cleanup(matcher.Close)
 	// The scope has a routine, but on another connection.
-	if err := matcher.RefreshRoutineIndex(context.Background(), Scope{Kind: "tenant", ID: "busy"}); err != nil {
+	if err := matcher.RefreshRoutineIndex(context.Background(), models.Scope{Kind: "tenant", ID: "busy"}); err != nil {
 		tb.Fatal(err)
 	}
 	return matcher, store
@@ -87,8 +88,8 @@ func TestRoutineEventOfferUnboundAllocFree(t *testing.T) {
 		t.Fatalf("unbound offer made %d store calls", store.calls)
 	}
 	stats := matcher.RoutineEventStats()
-	if stats.In[RoutineEventSlackMessage] == 0 || stats.Matched[RoutineEventSlackMessage] != 0 || stats.MatchLatencyCounts[len(stats.MatchLatencyCounts)-1] != 0 {
-		t.Fatalf("stats after unbound offers: in=%d matched=%d latency=%v", stats.In[RoutineEventSlackMessage], stats.Matched[RoutineEventSlackMessage], stats.MatchLatencyCounts)
+	if stats.In[models.RoutineEventSlackMessage] == 0 || stats.Matched[models.RoutineEventSlackMessage] != 0 || stats.MatchLatencyCounts[len(stats.MatchLatencyCounts)-1] != 0 {
+		t.Fatalf("stats after unbound offers: in=%d matched=%d latency=%v", stats.In[models.RoutineEventSlackMessage], stats.Matched[models.RoutineEventSlackMessage], stats.MatchLatencyCounts)
 	}
 }
 
@@ -107,7 +108,7 @@ func BenchmarkRoutineEventOfferUnbound(b *testing.B) {
 
 func TestRoutineEventTenantRunCap(t *testing.T) {
 	h := routinetest.NewEventHarness(t)
-	routines := make([]*RunbookActivation, 0, 12)
+	routines := make([]*models.RunbookActivation, 0, 12)
 	for i := 0; i < 12; i++ {
 		activation := h.Routine(fmt.Sprintf("r%02d", i), nil)
 		h.Offer(activation, 1)
@@ -124,7 +125,7 @@ func TestRoutineEventTenantRunCap(t *testing.T) {
 	finished := 0
 	for _, activation := range routines {
 		for _, run := range h.EventRuns(activation) {
-			if finished < 3 && !isTerminalAgentRunStatus(run.Status) {
+			if finished < 3 && !models.IsTerminalAgentRunStatus(run.Status) {
 				h.FinishRun(run)
 				finished++
 			}
@@ -152,9 +153,9 @@ func TestRoutineEventTenantRunCap(t *testing.T) {
 func TestRoutineEventBurstRespectsCaps(t *testing.T) {
 	h, db := routinetest.NewEventRowsHarness(t)
 	const maxPerHour = 3
-	routines := make([]*RunbookActivation, 0, 20)
+	routines := make([]*models.RunbookActivation, 0, 20)
 	for i := 0; i < 20; i++ {
-		routines = append(routines, h.Routine(fmt.Sprintf("burst%02d", i), func(trigger *RoutineEventTrigger) { trigger.MaxPerHour = maxPerHour }))
+		routines = append(routines, h.Routine(fmt.Sprintf("burst%02d", i), func(trigger *models.RoutineEventTrigger) { trigger.MaxPerHour = maxPerHour }))
 	}
 	for i := 0; i < 520; i++ {
 		h.Offer(routines[0], 1)
@@ -176,7 +177,7 @@ func TestRoutineEventBurstRespectsCaps(t *testing.T) {
 					starts[activation.ID] = append(starts[activation.ID], h.Now)
 				}
 				// Each Run takes three minutes.
-				if !isTerminalAgentRunStatus(run.Status) && h.Now.Sub(runStartedAt[run.ID]) >= 3*time.Minute {
+				if !models.IsTerminalAgentRunStatus(run.Status) && h.Now.Sub(runStartedAt[run.ID]) >= 3*time.Minute {
 					h.FinishRun(run)
 				}
 			}
@@ -200,7 +201,7 @@ func TestRoutineEventBurstRespectsCaps(t *testing.T) {
 	for _, activation := range routines {
 		for _, run := range h.EventRuns(activation) {
 			batch, _ := h.BatchOf(run)
-			if len(batch.EventIDs) > RoutineEventMaxBatchEvents {
+			if len(batch.EventIDs) > models.RoutineEventMaxBatchEvents {
 				t.Fatalf("batch %s holds %d events", batch.ID, len(batch.EventIDs))
 			}
 			for _, id := range batch.EventIDs {
@@ -214,7 +215,7 @@ func TestRoutineEventBurstRespectsCaps(t *testing.T) {
 	}
 	overflow := 0
 	for _, record := range routinetest.ListEventRows(t, db, h.Scope) {
-		if record.State == RoutineEventDropped && record.DroppedReason == RoutineEventDroppedOverflow {
+		if record.State == models.RoutineEventDropped && record.DroppedReason == models.RoutineEventDroppedOverflow {
 			overflow++
 			if record.KeepsData {
 				t.Fatalf("overflow row keeps event data: %#v", record)

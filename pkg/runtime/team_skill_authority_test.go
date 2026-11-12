@@ -6,6 +6,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
@@ -37,9 +38,9 @@ func (s teamSkillAuthorityCatalogStub) GetTeamDefinition(context.Context, string
 }
 
 func TestTeamSkillAuthorityGivesEveryMemberEveryTeamBinding(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	catalog := teamSkillAuthorityFixture(scope)
-	run := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, AssignedAgentID: "analyst"}
+	run := &models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, AssignedAgentID: "analyst"}
 	snapshot := &skill.ActivationSnapshot{
 		SnapshotID: "base", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research",
 		Skills: []skill.ActivatedSkill{{
@@ -82,15 +83,15 @@ func TestTeamSkillAuthorityGivesEveryMemberEveryTeamBinding(t *testing.T) {
 }
 
 func TestTeamSkillActionValidatorKeepsMemberConnectionsOutOfTeamRuns(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	catalog := teamSkillAuthorityFixture(scope)
 	validator, err := skillbinding.NewTeamSkillActionValidator(catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
-	run := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, AssignedAgentID: "analyst"}
-	validate := func(run *AgentRun, binding *skill.Binding, action capability.Action) error {
+	run := &models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, AssignedAgentID: "analyst"}
+	validate := func(run *models.AgentRun, binding *skill.Binding, action capability.Action) error {
 		_, err := validator.ValidateActionProposal(t.Context(), agentrun.ActionProposalValidationInput{Run: run, Bound: &skill.BoundAction{Binding: binding, Action: action}})
 		return err
 	}
@@ -127,7 +128,7 @@ func TestTeamSkillActionValidatorKeepsMemberConnectionsOutOfTeamRuns(t *testing.
 	}
 
 	// A 1:1 run never uses a Team binding, and keeps its own connections.
-	agentRun := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "analyst"}, AssignedAgentID: "analyst"}
+	agentRun := &models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "analyst"}, AssignedAgentID: "analyst"}
 	if err := validate(agentRun, teamForum, capability.Action{Name: "search", Risk: capability.RiskLevelRead}); err == nil {
 		t.Fatal("a Team connection must not be usable in the member's 1:1 run")
 	}
@@ -137,9 +138,9 @@ func TestTeamSkillActionValidatorKeepsMemberConnectionsOutOfTeamRuns(t *testing.
 }
 
 func TestTeamSkillActionDispatcherStopsRevokedRosterAuthority(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	catalog := teamSkillAuthorityFixture(scope)
-	run := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, AssignedAgentID: "analyst"}
+	run := &models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}, AssignedAgentID: "analyst"}
 	bound := &skill.BoundAction{
 		Binding: &skill.Binding{Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research", SkillID: "forum", SkillVersion: "1"},
 		Action:  capability.Action{Name: "search", Risk: capability.RiskLevelRead},
@@ -170,7 +171,7 @@ func TestTeamSkillActionDispatcherStopsRevokedRosterAuthority(t *testing.T) {
 	}
 }
 
-func teamSkillAuthorityFixture(scope Scope) teamSkillAuthorityCatalogStub {
+func teamSkillAuthorityFixture(scope models.Scope) teamSkillAuthorityCatalogStub {
 	return teamSkillAuthorityCatalogStub{
 		agent:           &kernelagent.AgentDeployment{ID: "analyst", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive},
 		agentDefinition: &kernelagent.AgentDefinition{ID: "analyst", Version: "1", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelExternal, AllowedSkillIDs: []string{"forum"}}},

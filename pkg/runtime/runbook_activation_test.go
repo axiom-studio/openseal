@@ -9,8 +9,10 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -18,23 +20,23 @@ import (
 func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "3"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Hourly research", Goal: "Research once per hour", Status: ObjectiveStatusActive,
+	scope := models.Scope{Kind: "tenant", ID: "3"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
+	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Hourly research", Goal: "Research once per hour", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
-		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "hourly", Status: RunbookActivationActive,
+		DefinitionID: "community-review", DefinitionVersion: "1", TriggerID: "hourly", Status: models.RunbookActivationActive,
 		Trigger:        runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC", MaximumOccurrences: 5}},
 		IdempotencyKey: "replacement-for-retired-generation",
 	}
 	const callers = 16
 	start := make(chan struct{})
-	results := make(chan *RunbookActivation, callers)
+	results := make(chan *models.RunbookActivation, callers)
 	errs := make(chan error, callers)
 	var wg sync.WaitGroup
 	for range callers {
@@ -67,7 +69,7 @@ func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
 			t.Fatalf("concurrent idempotent creates produced %q and %q", id, activation.ID)
 		}
 	}
-	activations, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, Owner: &owner})
+	activations, err := store.ListRunbookActivations(ctx, models.RunbookActivationFilter{Scope: scope, Owner: &owner})
 	if err != nil || len(activations) != 1 {
 		t.Fatalf("concurrent idempotent creates persisted %#v err=%v", activations, err)
 	}
@@ -76,8 +78,8 @@ func TestRunbookActivationIdempotentCreatesConvergeAcrossRace(t *testing.T) {
 func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "3"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
+	scope := models.Scope{Kind: "tenant", ID: "3"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
 	registry := kernelagent.NewRegistryWithStore(kernelagent.NewMemoryStore())
 	for _, version := range []string{"1", "2"} {
 		_, err := registry.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
@@ -99,8 +101,8 @@ func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
 	}, "user", "admin", "test"); err != nil {
 		t.Fatal(err)
 	}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful advice", Status: ObjectiveStatusActive,
+	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful advice", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -129,8 +131,8 @@ func TestResolvedVerificationBlocksManualAndScheduledActivation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	scope := Scope{Kind: "tenant", ID: "verification"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"}
+	scope := models.Scope{Kind: "tenant", ID: "verification"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}
 	definition := sqliteAgentDefinition("1.0.0")
 	definition.SkillRequirements = []kernelagent.SkillRequirement{{SkillID: "missing", VersionConstraint: "1.0.0", RequiredActions: []string{"execute"}}}
 	definition.Authority.AllowedSkillIDs = []string{"missing"}
@@ -156,8 +158,8 @@ func TestResolvedVerificationBlocksManualAndScheduledActivation(t *testing.T) {
 	}, "user", "admin", "verification test"); err != nil {
 		t.Fatal(err)
 	}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: ObjectiveStatusActive,
+	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +179,7 @@ func TestResolvedVerificationBlocksManualAndScheduledActivation(t *testing.T) {
 		t.Fatalf("schedule verification = %#v, %v", result, err)
 	}
 	paused, err := store.GetRunbookActivation(ctx, scope, activation.ID)
-	if err != nil || paused.Status != RunbookActivationPaused {
+	if err != nil || paused.Status != models.RunbookActivationPaused {
 		t.Fatalf("paused activation = %#v, %v", paused, err)
 	}
 }
@@ -185,11 +187,11 @@ func TestResolvedVerificationBlocksManualAndScheduledActivation(t *testing.T) {
 func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "3"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
-	portfolio := NewPortfolioService(store)
-	objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful woodworking advice", Status: ObjectiveStatusActive,
+	scope := models.Scope{Kind: "tenant", ID: "3"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
+	portfolio := runtimeportfolio.NewPortfolioService(store)
+	objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful woodworking advice", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -209,11 +211,11 @@ func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 	if activation.ObjectiveID != objective.ID || activation.Trigger.Schedule.JitterSeconds != 86399 {
 		t.Fatalf("objective=%#v activation=%#v", objective, activation)
 	}
-	listed, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, ObjectiveID: objective.ID})
+	listed, err := store.ListRunbookActivations(ctx, models.RunbookActivationFilter{Scope: scope, ObjectiveID: objective.ID})
 	if err != nil || len(listed) != 1 || listed[0].ID != activation.ID {
 		t.Fatalf("listed=%#v err=%v", listed, err)
 	}
-	page, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 1, Offset: 1})
+	page, err := store.ListRunbookActivations(ctx, models.RunbookActivationFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 1, Offset: 1})
 	if err != nil || len(page) != 0 {
 		t.Fatalf("offset page=%#v err=%v", page, err)
 	}
@@ -222,10 +224,10 @@ func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 func TestActiveRunbookActivationMaterializesReportingChannel(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "3"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful advice", Status: ObjectiveStatusActive,
+	scope := models.Scope{Kind: "tenant", ID: "3"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
+	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful advice", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -248,7 +250,7 @@ func TestActiveRunbookActivationMaterializesReportingChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	channels, err := store.ListConversations(ctx, ConversationFilter{Scope: scope, Owner: &owner})
+	channels, err := store.ListConversations(ctx, models.ConversationFilter{Scope: scope, Owner: &owner})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +262,7 @@ func TestActiveRunbookActivationMaterializesReportingChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	channels, err = store.ListConversations(ctx, ConversationFilter{Scope: scope, Owner: &owner})
+	channels, err = store.ListConversations(ctx, models.ConversationFilter{Scope: scope, Owner: &owner})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,11 +274,11 @@ func TestActiveRunbookActivationMaterializesReportingChannel(t *testing.T) {
 func TestPausedRunbookActivationDefersReportingChannelUntilResumed(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "3"}
+	scope := models.Scope{Kind: "tenant", ID: "3"}
 	seedTestSpace(t, store, scope)
-	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Publish research", Goal: "Publish a cited brief", Status: ObjectiveStatusActive,
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"}
+	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Publish research", Goal: "Publish a cited brief", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +286,7 @@ func TestPausedRunbookActivationDefersReportingChannelUntilResumed(t *testing.T)
 	service := routine.NewRunbookActivationService(store)
 	activation, err := service.Create(ctx, routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: "researcher",
-		DefinitionID: "weekly-brief", DefinitionVersion: "1", TriggerID: "weekly", Status: RunbookActivationPaused,
+		DefinitionID: "weekly-brief", DefinitionVersion: "1", TriggerID: "weekly", Status: models.RunbookActivationPaused,
 		Trigger: runbook.Trigger{
 			Kind: runbook.TriggerSchedule, Entrypoint: "publish",
 			Schedule: &runbook.Schedule{Cron: "0 0 9 * * 1", Timezone: "UTC"},
@@ -297,17 +299,17 @@ func TestPausedRunbookActivationDefersReportingChannelUntilResumed(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	channels, err := store.ListConversations(ctx, ConversationFilter{Scope: scope, Owner: &owner})
+	channels, err := store.ListConversations(ctx, models.ConversationFilter{Scope: scope, Owner: &owner})
 	if err != nil || len(channels) != 0 {
 		t.Fatalf("paused channels=%#v err=%v", channels, err)
 	}
 	activation, err = service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{
-		ExpectedRevision: activation.Revision, Status: RunbookActivationActive,
+		ExpectedRevision: activation.Revision, Status: models.RunbookActivationActive,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	channels, err = store.ListConversations(ctx, ConversationFilter{Scope: scope, Owner: &owner})
+	channels, err = store.ListConversations(ctx, models.ConversationFilter{Scope: scope, Owner: &owner})
 	if err != nil || len(channels) != 1 || channels[0].Title != "Research work" {
 		t.Fatalf("resumed channels=%#v err=%v", channels, err)
 	}
@@ -320,10 +322,10 @@ func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := Scope{Kind: "tenant", ID: "3"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful advice", Status: ObjectiveStatusActive,
+	scope := models.Scope{Kind: "tenant", ID: "3"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
+	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Build useful participation", Goal: "Contribute useful advice", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -338,7 +340,7 @@ func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) 
 	}
 	base, _ := activation.Trigger.Schedule.NextBase(activation.CreatedAt)
 	due, _ := activation.Trigger.Schedule.DueAt(activation.ID+":"+activation.TriggerID, base)
-	updated := cloneRunbookActivation(activation)
+	updated := models.CloneRunbookActivation(activation)
 	updated.NextOccurrenceBase, updated.NextRunAt = &base, &due
 	updated.Revision++
 	updated.UpdatedAt = updated.UpdatedAt.Add(1)
@@ -370,15 +372,15 @@ func TestSQLiteRunbookActivationSurvivesRestartWithScheduleCursor(t *testing.T) 
 func TestRunbookActivationCannotCrossObjectiveOwner(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "3"}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}, Title: "Outcome", Goal: "Do useful work", Status: ObjectiveStatusActive,
+	scope := models.Scope{Kind: "tenant", ID: "3"}
+	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}, Title: "Outcome", Goal: "Do useful work", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"}, ObjectiveID: objective.ID, AssignedAgentID: "other",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other"}, ObjectiveID: objective.ID, AssignedAgentID: "other",
 		DefinitionID: "work", DefinitionVersion: "1", TriggerID: "daily",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "run", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}},
 	})
@@ -390,10 +392,10 @@ func TestRunbookActivationCannotCrossObjectiveOwner(t *testing.T) {
 func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "3"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Do useful work", Status: ObjectiveStatusActive,
+	scope := models.Scope{Kind: "tenant", ID: "3"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
+	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Do useful work", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -414,21 +416,21 @@ func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testin
 	if pin, ok := started.Run.Plan["runbook"].(map[string]interface{}); !ok || pin["id"] != "work" || pin["version"] != "1" || pin["trigger"] != "daily" {
 		t.Fatalf("manual Run pin=%#v", started.Run.Plan)
 	}
-	paused, err := service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused})
-	if err != nil || paused.Status != RunbookActivationPaused || paused.Revision != 2 {
+	paused, err := service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: models.RunbookActivationPaused})
+	if err != nil || paused.Status != models.RunbookActivationPaused || paused.Revision != 2 {
 		t.Fatalf("paused=%#v err=%v", paused, err)
 	}
 	if _, err = routine.StartRunbookActivation(ctx, store, scope, activation.ID, routine.StartRunbookActivationRequest{IdempotencyKey: "paused-run"}); !errors.Is(err, routine.ErrRunbookActivationInactive) {
 		t.Fatalf("paused start error=%v", err)
 	}
-	if _, err = service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: 1, Status: RunbookActivationActive}); !errors.Is(err, ErrRunbookActivationRevision) {
+	if _, err = service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: 1, Status: models.RunbookActivationActive}); !errors.Is(err, models.ErrRunbookActivationRevision) {
 		t.Fatalf("stale update error=%v", err)
 	}
-	retired, err := service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: paused.Revision, Status: RunbookActivationRetired})
-	if err != nil || retired.Status != RunbookActivationRetired {
+	retired, err := service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: paused.Revision, Status: models.RunbookActivationRetired})
+	if err != nil || retired.Status != models.RunbookActivationRetired {
 		t.Fatalf("retired=%#v err=%v", retired, err)
 	}
-	if _, err = service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: retired.Revision, Status: RunbookActivationActive}); err == nil {
+	if _, err = service.Update(ctx, scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: retired.Revision, Status: models.RunbookActivationActive}); err == nil {
 		t.Fatal("retired Runbook resumed")
 	}
 }
@@ -436,10 +438,10 @@ func TestRunbookActivationLifecycleIsRevisionBoundAndRetirementIsFinal(t *testin
 func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "3"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Do useful work", Status: ObjectiveStatusActive,
+	scope := models.Scope{Kind: "tenant", ID: "3"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
+	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Do useful work", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -454,7 +456,7 @@ func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation.Status = RunbookActivationRetired
+	activation.Status = models.RunbookActivationRetired
 	activation.OccurrencesProcessed = 2
 	expectedRevision := activation.Revision
 	activation.Revision++
@@ -462,20 +464,20 @@ func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 		t.Fatal(err)
 	}
 	started, err := routine.StartRunbookActivation(ctx, store, scope, activation.ID, routine.StartRunbookActivationRequest{IdempotencyKey: "off-cycle"})
-	if err != nil || started.Run == nil || started.Run.Source != RunSourceManual {
+	if err != nil || started.Run == nil || started.Run.Source != models.RunSourceManual {
 		t.Fatalf("off-cycle exhausted start=%#v err=%v", started, err)
 	}
 }
 
 // eventTaskFixture creates an Objective and a chat with a user request that an
 // event Task can report to, and returns a create request for a webhook routine.
-func eventTaskFixture(t *testing.T, store *sqlite.Store) (Scope, routine.CreateRunbookActivationRequest) {
+func eventTaskFixture(t *testing.T, store *sqlite.Store) (models.Scope, routine.CreateRunbookActivationRequest) {
 	t.Helper()
 	ctx := t.Context()
-	scope := Scope{Kind: "tenant", ID: "event-task"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Order alerts", Goal: "Summarize new orders", Status: ObjectiveStatusActive,
+	scope := models.Scope{Kind: "tenant", ID: "event-task"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}
+	objective, err := runtimeportfolio.NewPortfolioService(store).CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Order alerts", Goal: "Summarize new orders", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -486,20 +488,20 @@ func eventTaskFixture(t *testing.T, store *sqlite.Store) (Scope, routine.CreateR
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := conversations.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{Scope: scope, ConversationID: c.ID, ExpectedRevision: c.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion, Content: "Tell me when an order comes in", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "user-request"})
+	posted, err := conversations.PostChannelMessage(ctx, conversation.PostChannelMessageRequest{Scope: scope, ConversationID: c.ID, ExpectedRevision: c.Revision, Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "user-1"}, Intent: models.MessageIntentQuestion, Content: "Tell me when an order comes in", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "user-request"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	key := "create-task:orders"
-	hookID := HookID(scope, routine.RunbookActivationIDForKey(scope, key))
+	hookID := models.HookID(scope, routine.RunbookActivationIDForKey(scope, key))
 	return scope, routine.CreateRunbookActivationRequest{
 		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, TriggerID: "event", MaximumConcurrent: 1,
 		Trigger: runbook.Trigger{Kind: runbook.TriggerEvent}, IdempotencyKey: key,
-		Task: &ScheduledAgentTask{
+		Task: &models.ScheduledAgentTask{
 			Goal: "Summarize the new order.", ConversationID: c.ID, SourceMessageID: posted.Message.ID, CreatedBy: "user-1",
-			Event: &RoutineEventTrigger{
-				Kind: RoutineEventWebhook, SourceRef: HookSourceRef(hookID), SourceLabel: "your shop", MaxPerHour: 20,
-				Webhook: &RoutineWebhook{HookID: hookID},
+			Event: &models.RoutineEventTrigger{
+				Kind: models.RoutineEventWebhook, SourceRef: models.HookSourceRef(hookID), SourceLabel: "your shop", MaxPerHour: 20,
+				Webhook: &models.RoutineWebhook{HookID: hookID},
 			},
 		},
 	}
@@ -522,7 +524,7 @@ func TestRunbookActivationCreateEventTaskNoCursor(t *testing.T) {
 		t.Fatalf("event trigger was not kept: %#v", activation.Task)
 	}
 	stored, err := store.GetRunbookActivation(t.Context(), scope, activation.ID)
-	if err != nil || stored == nil || stored.Task.Event == nil || stored.Task.Event.Kind != RoutineEventWebhook {
+	if err != nil || stored == nil || stored.Task.Event == nil || stored.Task.Event.Kind != models.RoutineEventWebhook {
 		t.Fatalf("stored=%#v err=%v", stored, err)
 	}
 	replayed, err := routine.NewRunbookActivationService(store).Create(t.Context(), request)
@@ -546,22 +548,22 @@ func TestRunbookActivationPausedReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationActive, PausedReason: RoutinePausedNeedsSignIn}); err == nil {
+	if _, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: models.RunbookActivationActive, PausedReason: models.RoutinePausedNeedsSignIn}); err == nil {
 		t.Fatal("paused reason accepted without a pause")
 	}
-	if _, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused, PausedReason: "tired"}); err == nil {
+	if _, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: models.RunbookActivationPaused, PausedReason: "tired"}); err == nil {
 		t.Fatal("unknown paused reason accepted")
 	}
-	paused, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedNeedsSignIn})
-	if err != nil || paused.Status != RunbookActivationPaused || paused.PausedReason != RoutinePausedNeedsSignIn || paused.Revision != activation.Revision+1 {
+	paused, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: models.RunbookActivationPaused, PausedReason: models.RoutinePausedNeedsSignIn})
+	if err != nil || paused.Status != models.RunbookActivationPaused || paused.PausedReason != models.RoutinePausedNeedsSignIn || paused.Revision != activation.Revision+1 {
 		t.Fatalf("paused=%#v err=%v", paused, err)
 	}
 	stored, err := store.GetRunbookActivation(t.Context(), scope, activation.ID)
-	if err != nil || stored.PausedReason != RoutinePausedNeedsSignIn {
+	if err != nil || stored.PausedReason != models.RoutinePausedNeedsSignIn {
 		t.Fatalf("stored=%#v err=%v", stored, err)
 	}
-	resumed, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: paused.Revision, Status: RunbookActivationActive})
-	if err != nil || resumed.Status != RunbookActivationActive || resumed.PausedReason != "" {
+	resumed, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: paused.Revision, Status: models.RunbookActivationActive})
+	if err != nil || resumed.Status != models.RunbookActivationActive || resumed.PausedReason != "" {
 		t.Fatalf("resumed=%#v err=%v", resumed, err)
 	}
 	if resumed.Task.CreatedBy != "user-1" {
@@ -577,20 +579,20 @@ func TestRunbookActivationPausedReasonOnPausedRoutine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byPerson, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused})
+	byPerson, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: models.RunbookActivationPaused})
 	if err != nil || byPerson.PausedReason != "" {
 		t.Fatalf("person pause=%#v err=%v", byPerson, err)
 	}
-	bySystem, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: byPerson.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedSourceRemoved})
-	if err != nil || bySystem.PausedReason != RoutinePausedSourceRemoved || bySystem.Revision != byPerson.Revision+1 {
+	bySystem, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: byPerson.Revision, Status: models.RunbookActivationPaused, PausedReason: models.RoutinePausedSourceRemoved})
+	if err != nil || bySystem.PausedReason != models.RoutinePausedSourceRemoved || bySystem.Revision != byPerson.Revision+1 {
 		t.Fatalf("system pause of a paused routine=%#v err=%v", bySystem, err)
 	}
-	again, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: bySystem.Revision, Status: RunbookActivationPaused, PausedReason: RoutinePausedSourceRemoved})
+	again, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: bySystem.Revision, Status: models.RunbookActivationPaused, PausedReason: models.RoutinePausedSourceRemoved})
 	if err != nil || again.Revision != bySystem.Revision {
 		t.Fatalf("same reason wrote a revision: %#v err=%v", again, err)
 	}
-	repaused, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: bySystem.Revision, Status: RunbookActivationPaused})
-	if err != nil || repaused.PausedReason != RoutinePausedSourceRemoved || repaused.Revision != bySystem.Revision {
+	repaused, err := service.Update(t.Context(), scope, activation.ID, routine.UpdateRunbookActivationRequest{ExpectedRevision: bySystem.Revision, Status: models.RunbookActivationPaused})
+	if err != nil || repaused.PausedReason != models.RoutinePausedSourceRemoved || repaused.Revision != bySystem.Revision {
 		t.Fatalf("a person pausing a paused routine dropped its reason: %#v err=%v", repaused, err)
 	}
 }

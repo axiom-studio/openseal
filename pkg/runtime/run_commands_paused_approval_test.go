@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -24,22 +25,22 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 			name = "cancel_expired"
 		}
 		t.Run(name, func(t *testing.T) {
-			looptest.EachStore(t, "loop_paused_approval_"+name, func(t *testing.T, store KernelStore) {
+			looptest.EachStore(t, "loop_paused_approval_"+name, func(t *testing.T, store models.KernelStore) {
 				f := newApprovalScenario(t, store)
 				_, run := f.ParkedApproval()
 				approval, call := assertParkedOnApproval(t, f, run)
 				paused := f.CommandRun(run.ID, agentrun.AgentRunCommandPause)
-				if paused.Status != AgentRunStatusPaused || paused.PausedFrom != AgentRunStatusWaitingForApproval || paused.PausedWakeCondition == nil {
+				if paused.Status != models.AgentRunStatusPaused || paused.PausedFrom != models.AgentRunStatusWaitingForApproval || paused.PausedWakeCondition == nil {
 					t.Fatalf("paused = %#v", paused)
 				}
 				if expired {
 					result := f.ExpireApproval(run.ID)
-					if result.Run == nil || result.Run.Status != AgentRunStatusPaused || result.Run.PausedFrom != AgentRunStatusQueued || result.Run.PausedWakeCondition != nil {
+					if result.Run == nil || result.Run.Status != models.AgentRunStatusPaused || result.Run.PausedFrom != models.AgentRunStatusQueued || result.Run.PausedWakeCondition != nil {
 						t.Fatalf("expiry while paused = %#v", result.Run)
 					}
 				}
 				canceled := f.CommandRun(run.ID, agentrun.AgentRunCommandCancel)
-				if canceled.Status != AgentRunStatusCanceled || canceled.PausedWakeCondition != nil || canceled.PausedFrom != "" || len(canceled.BudgetReservations) != 0 {
+				if canceled.Status != models.AgentRunStatusCanceled || canceled.PausedWakeCondition != nil || canceled.PausedFrom != "" || len(canceled.BudgetReservations) != 0 {
 					t.Fatalf("canceled = %#v", canceled)
 				}
 				gotApproval, err := f.Raw.GetApproval(f.Ctx, f.Scope, approval.ID)
@@ -50,26 +51,26 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !expired && (gotApproval.Status != ApprovalStatusCanceled || gotCall.Status != ActionCallStatusCanceled || gotCall.CompletedAt == nil) {
+				if !expired && (gotApproval.Status != models.ApprovalStatusCanceled || gotCall.Status != models.ActionCallStatusCanceled || gotCall.CompletedAt == nil) {
 					t.Fatalf("pending approval/call did not close together: %s / %s", gotApproval.Status, gotCall.Status)
 				}
-				if expired && (gotApproval.Status != ApprovalStatusExpired || gotCall.Status != ActionCallStatusDenied) {
+				if expired && (gotApproval.Status != models.ApprovalStatusExpired || gotCall.Status != models.ActionCallStatusDenied) {
 					t.Fatalf("cancel rewrote the expired approval: %s / %s", gotApproval.Status, gotCall.Status)
 				}
 				// The tool entry is closed: no later Run of the chat sees an
 				// unanswered call.
 				tools := f.ToolEntries(run.ID)
-				if len(tools) != 1 || !tools[0].State.Terminal() || tools[0].State == ToolEntryCompleted {
+				if len(tools) != 1 || !tools[0].State.Terminal() || tools[0].State == models.ToolEntryCompleted {
 					t.Fatalf("tool entry after cancel = %v", f.EntryTypes(run.ID))
 				}
 				if _, err := f.Approve.Resolve(f.Ctx, action.ResolveApprovalRequest{
 					Scope: f.Scope, ApprovalID: approval.ID, ExpectedRevision: gotApproval.Revision, DecisionID: "late-approval",
-					Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: looptest.FixtureUser},
-				}); !errors.Is(err, ErrApprovalResolved) {
+					Decision: models.ApprovalDecisionApprove, Principal: models.ApprovalPrincipal{Type: "user", ID: looptest.FixtureUser},
+				}); !errors.Is(err, models.ErrApprovalResolved) {
 					t.Fatalf("closed approval accepted a late decision: %v", err)
 				}
 				actiontest.AssertUnclaimable(t, f.Raw, gotCall, f.Clock.Now().Add(2*time.Hour))
-				if busy, err := f.Raw.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(f.Ctx, SkillRuntimeUsageFilter{
+				if busy, err := f.Raw.(models.SkillRuntimeUsageStore).HasSkillRuntimeUsage(f.Ctx, models.SkillRuntimeUsageFilter{
 					Scope: f.Scope, DeploymentID: gotCall.DeploymentID, BindingID: gotCall.BindingID, SkillID: gotCall.SkillID, SkillVersion: gotCall.SkillVersion,
 				}); err != nil || busy {
 					t.Fatalf("closed approval kept runtime usage: %v %v", busy, err)
@@ -82,28 +83,28 @@ func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 	}
 
 	t.Run("expiry_resumes_with_outcome", func(t *testing.T) {
-		looptest.EachStore(t, "loop_paused_approval_expiry", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "loop_paused_approval_expiry", func(t *testing.T, store models.KernelStore) {
 			f := newApprovalScenario(t, store)
 			conversation, run := f.ParkedApproval()
 			f.CommandRun(run.ID, agentrun.AgentRunCommandPause)
 			result := f.ExpireApproval(run.ID)
-			if result.Approval.Status != ApprovalStatusExpired || result.Call.Status != ActionCallStatusDenied ||
-				result.Run.Status != AgentRunStatusPaused || result.Run.PausedFrom != AgentRunStatusQueued ||
+			if result.Approval.Status != models.ApprovalStatusExpired || result.Call.Status != models.ActionCallStatusDenied ||
+				result.Run.Status != models.AgentRunStatusPaused || result.Run.PausedFrom != models.AgentRunStatusQueued ||
 				result.Run.PausedWakeCondition != nil || result.Run.WakeCondition != nil || len(result.Run.BudgetReservations) != 0 {
 				t.Fatalf("expiry did not close the paused wait: %#v", result)
 			}
 			// Paused: nothing claims it.
-			if claimed, err := f.Store.ClaimNextAgentRun(f.Ctx, AgentRunClaim{Scope: f.Scope, WorkerID: f.WorkerID, Now: f.Clock.Now(), LeaseDuration: looptest.FixtureLease, AgingInterval: time.Minute}); err != nil || claimed != nil {
+			if claimed, err := f.Store.ClaimNextAgentRun(f.Ctx, models.AgentRunClaim{Scope: f.Scope, WorkerID: f.WorkerID, Now: f.Clock.Now(), LeaseDuration: looptest.FixtureLease, AgingInterval: time.Minute}); err != nil || claimed != nil {
 				t.Fatalf("claimed a paused Run: %#v, %v", claimed, err)
 			}
 			resumed := f.CommandRun(run.ID, agentrun.AgentRunCommandResume)
-			if resumed.Status != AgentRunStatusQueued || resumed.WakeCondition != nil || resumed.PausedWakeCondition != nil {
+			if resumed.Status != models.AgentRunStatusQueued || resumed.WakeCondition != nil || resumed.PausedWakeCondition != nil {
 				t.Fatalf("resume restored the expired wait: %#v", resumed)
 			}
 			done := f.DriveToRest(run.ID, 3)
-			f.MustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
 			tool := f.ToolEntries(run.ID)[0]
-			if tool.State != ToolEntryError || !strings.Contains(toolEntryText(tool), string(ToolResultExpired)) {
+			if tool.State != models.ToolEntryError || !strings.Contains(toolEntryText(tool), string(models.ToolResultExpired)) {
 				t.Fatalf("tool entry = %s %q", tool.State, toolEntryText(tool))
 			}
 			if replies := f.AgentReplies(conversation.ID); len(replies) != 1 || !strings.HasPrefix(replies[0], "Not closed: ") {

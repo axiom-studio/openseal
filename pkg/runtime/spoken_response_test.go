@@ -4,16 +4,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 )
 
 // startSpokenChat posts text as the fixture user with the given response mode
 // and schedules the reply Run through the production scheduler.
-func startSpokenChat(f *looptest.Fixture, text, mode string) (*Conversation, *AgentRun) {
+func startSpokenChat(f *looptest.Fixture, text, mode string) (*models.Conversation, *models.AgentRun) {
 	f.T.Helper()
 	conversation, _, err := f.Convs.CreateConversation(f.Ctx, runtimeconversation.CreateConversationRequest{
-		Scope: f.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: looptest.FixtureAgent},
+		Scope: f.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: looptest.FixtureAgent},
 		Title: "Spoken chat", IdempotencyKey: "spoken-chat",
 	})
 	if err != nil {
@@ -21,9 +22,9 @@ func startSpokenChat(f *looptest.Fixture, text, mode string) (*Conversation, *Ag
 	}
 	posted, err := f.Convs.PostChannelMessage(f.Ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: looptest.FixtureUser},
-		Intent: MessageIntentQuestion, Content: text, ResponseMode: mode,
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: looptest.FixtureUser},
+		Intent: models.MessageIntentQuestion, Content: text, ResponseMode: mode,
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, RequiresResponse: true,
 		IdempotencyKey: "spoken-trigger",
 	})
 	if err != nil {
@@ -38,12 +39,12 @@ func startSpokenChat(f *looptest.Fixture, text, mode string) (*Conversation, *Ag
 func TestSilentConversationCompletionRequiresSpokenChannel(t *testing.T) {
 	for _, mode := range []string{"spoken", ""} {
 		t.Run("mode="+mode, func(t *testing.T) {
-			looptest.EachStore(t, "spoken_silent", func(t *testing.T, store KernelStore) {
+			looptest.EachStore(t, "spoken_silent", func(t *testing.T, store models.KernelStore) {
 				f := looptest.NewFixture(t, store, looptest.WithRules(
-					&looptest.ModelRule{Name: "silent", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+					&looptest.ModelRule{Name: "silent", Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
 						return looptest.FinalAnswer(map[string]any{"answer": "", "silent": true})
 					}},
-					&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) ModelStepResult {
+					&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
 						return looptest.FinalAnswer(map[string]any{"answer": "I heard you."})
 					}},
 				))
@@ -52,9 +53,9 @@ func TestSilentConversationCompletionRequiresSpokenChannel(t *testing.T) {
 					t.Fatal("spoken presentation was lost when scheduling the reply")
 				}
 				done := f.DriveToRest(run.ID, 3)
-				f.MustStatus(done, AgentRunStatusCompleted)
+				f.MustStatus(done, models.AgentRunStatusCompleted)
 
-				steps := f.Model.Calls(ModelStepPurposeStep)
+				steps := f.Model.Calls(models.ModelStepPurposeStep)
 				replies := f.AgentReplies(conversation.ID)
 				if mode == "spoken" {
 					if len(steps) != 1 || len(replies) != 0 || done.Output["silent"] != true {
@@ -67,7 +68,7 @@ func TestSilentConversationCompletionRequiresSpokenChannel(t *testing.T) {
 				}
 				var refused bool
 				for _, entry := range f.ToolEntries(run.ID) {
-					if entry.State == ToolEntryError && strings.Contains(toolEntryText(entry), "silent") {
+					if entry.State == models.ToolEntryError && strings.Contains(toolEntryText(entry), "silent") {
 						refused = true
 					}
 				}

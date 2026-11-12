@@ -6,13 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 type groupUpgradeStore interface {
-	SkillReferenceUpgradeStore
+	models.SkillReferenceUpgradeStore
 	SaveSkillBinding(context.Context, *skill.Binding, int64) error
 }
 
@@ -56,15 +57,15 @@ func runGroupUpgradeScenario(t *testing.T, store groupUpgradeStore) {
 
 	service := skillbinding.NewSkillReferenceUpgradeService(store, catalog)
 	plan, err := service.Plan(ctx, skillbinding.PlanSkillReferenceUpgradeRequest{
-		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent", BindingID: "bundled:builtin", ToVersion: "1.1.0",
+		Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent", BindingID: "bundled:builtin", ToVersion: "1.1.0",
 	})
 	if err != nil {
 		t.Fatalf("a Skill split across bindings must be upgradable: %v", err)
 	}
-	if len(plan.Siblings) != 1 || plan.Siblings[0] != (SkillReferenceBindingRevision{ID: "bundled:documents", ExpectedRevision: 1}) || plan.ApprovalRequired {
+	if len(plan.Siblings) != 1 || plan.Siblings[0] != (models.SkillReferenceBindingRevision{ID: "bundled:documents", ExpectedRevision: 1}) || plan.ApprovalRequired {
 		t.Fatalf("plan siblings = %#v approval=%v findings=%#v", plan.Siblings, plan.ApprovalRequired, plan.Findings)
 	}
-	receipt, err := service.Apply(ctx, skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "reconciler"}, Reason: "Adopt tools 1.1.0"})
+	receipt, err := service.Apply(ctx, skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: models.ActivityActor{Type: "system", ID: "reconciler"}, Reason: "Adopt tools 1.1.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,8 +99,8 @@ func runGroupUpgradeScenario(t *testing.T, store groupUpgradeStore) {
 	}
 	// A sibling moved by the group reports that it is current, so a
 	// reconciler working from an earlier snapshot treats it as done.
-	if _, err := service.Plan(ctx, skillbinding.PlanSkillReferenceUpgradeRequest{Scope: Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent",
-		BindingID: "bundled:documents", ToVersion: "1.1.0"}); !errors.Is(err, skillbinding.ErrSkillReferenceUpgradeCurrent) || !errors.Is(err, ErrSkillReferenceUpgradeInvalid) {
+	if _, err := service.Plan(ctx, skillbinding.PlanSkillReferenceUpgradeRequest{Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent",
+		BindingID: "bundled:documents", ToVersion: "1.1.0"}); !errors.Is(err, skillbinding.ErrSkillReferenceUpgradeCurrent) || !errors.Is(err, models.ErrSkillReferenceUpgradeInvalid) {
 		t.Fatalf("plan for a moved sibling = %v", err)
 	}
 }
@@ -117,7 +118,7 @@ func TestSkillReferenceGroupUpgradeRejectsStaleSiblings(t *testing.T) {
 		}
 	}
 	service := skillbinding.NewSkillReferenceUpgradeService(store, catalog)
-	plan, err := service.Plan(ctx, skillbinding.PlanSkillReferenceUpgradeRequest{Scope: Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent", BindingID: "bundled:builtin", ToVersion: "1.1.0"})
+	plan, err := service.Plan(ctx, skillbinding.PlanSkillReferenceUpgradeRequest{Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent", BindingID: "bundled:builtin", ToVersion: "1.1.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +127,7 @@ func TestSkillReferenceGroupUpgradeRejectsStaleSiblings(t *testing.T) {
 		AllowedActions: []string{"read", "write"}, MaximumRisk: skill.RiskLevelWrite, Revision: 2}, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Apply(ctx, skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "reconciler"}, Reason: "Adopt tools 1.1.0"}); !errors.Is(err, ErrSkillReferenceUpgradeConflict) {
+	if _, err := service.Apply(ctx, skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: models.ActivityActor{Type: "system", ID: "reconciler"}, Reason: "Adopt tools 1.1.0"}); !errors.Is(err, models.ErrSkillReferenceUpgradeConflict) {
 		t.Fatalf("stale sibling apply = %v", err)
 	}
 	bindings, _ := catalog.ListBindings(ctx, scope, "agent")
@@ -137,13 +138,13 @@ func TestSkillReferenceGroupUpgradeRejectsStaleSiblings(t *testing.T) {
 	}
 
 	// A store refuses a mutation whose siblings do not match the plan.
-	fresh, err := service.Plan(ctx, skillbinding.PlanSkillReferenceUpgradeRequest{Scope: Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent", BindingID: "bundled:builtin", ToVersion: "1.1.0"})
+	fresh, err := service.Plan(ctx, skillbinding.PlanSkillReferenceUpgradeRequest{Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent", BindingID: "bundled:builtin", ToVersion: "1.1.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	primary := &skill.Binding{ID: "bundled:builtin", Scope: scope, DeploymentID: "agent", SkillID: "tools", SkillVersion: "1.1.0", Revision: 2}
-	if err := store.ApplySkillReferenceUpgrade(ctx, &SkillReferenceUpgradeMutation{Plan: fresh, Binding: primary,
-		Receipt: &SkillReferenceUpgradeReceipt{PlanDigest: fresh.Digest}}); !errors.Is(err, ErrSkillReferenceUpgradeInvalid) {
+	if err := store.ApplySkillReferenceUpgrade(ctx, &models.SkillReferenceUpgradeMutation{Plan: fresh, Binding: primary,
+		Receipt: &models.SkillReferenceUpgradeReceipt{PlanDigest: fresh.Digest}}); !errors.Is(err, models.ErrSkillReferenceUpgradeInvalid) {
 		t.Fatalf("mutation without its siblings = %v", err)
 	}
 }

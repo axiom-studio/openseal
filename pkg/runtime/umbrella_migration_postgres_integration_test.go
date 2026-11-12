@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -52,7 +53,7 @@ func TestPostgresUmbrellaMigrationsRewriteStoredRecords(t *testing.T) {
 	insert("pending-gone", "gone", "pending")
 	insert("history", "member", "resolved")
 	if _, err := externalconversation.NewExternalConversationGatewayService(store, nil).Create(ctx, externalconversation.CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
-		Gateway: storetest.IngressGateway(Scope{Kind: "tenant", ID: "one"}), Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
+		Gateway: storetest.IngressGateway(models.Scope{Kind: "tenant", ID: "one"}), Actor: models.ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
 		t.Fatal(err)
 	}
 	exec(`UPDATE ` + pgSchema.Table("external_conversation_gateways") + ` SET payload = payload #- '{gateway,owner}'`)
@@ -84,8 +85,8 @@ func TestPostgresUmbrellaMigrationsRewriteStoredRecords(t *testing.T) {
 		rows[id] = [3]string{deployment + "/" + owner, status, agent}
 	}
 	result.Close()
-	gateway, err := store.GetExternalConversationGateway(ctx, Scope{Kind: "tenant", ID: "one"}, "legacy")
-	if err != nil || gateway.Gateway.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: gateway.Gateway.DeploymentID}) {
+	gateway, err := store.GetExternalConversationGateway(ctx, models.Scope{Kind: "tenant", ID: "one"}, "legacy")
+	if err != nil || gateway.Gateway.Owner != (models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: gateway.Gateway.DeploymentID}) {
 		t.Fatalf("backfilled gateway = %#v, %v", gateway, err)
 	}
 	if len(rows) != 2 || rows["pending-member"] != [3]string{"crew/crew", "pending", "member"} || rows["pending-gone"] != [3]string{"crew/crew", "dismissed", "gone"} {

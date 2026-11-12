@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control/controltest"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
@@ -17,20 +19,20 @@ type conversationTaskClarificationFixture struct {
 	store        controltest.Store
 	service      *runtimeconversation.ConversationService
 	scheduler    *conversationrun.ConversationRunScheduler
-	conversation *Conversation
-	trigger      *ChannelMessage
-	task         *ConversationTask
-	source, work *AgentRun
-	questionTurn *AgentTurn
+	conversation *models.Conversation
+	trigger      *models.ChannelMessage
+	task         *models.ConversationTask
+	source, work *models.AgentRun
+	questionTurn *models.AgentTurn
 	asked        string
 }
 
 func newConversationTaskClarificationFixture(t *testing.T, store controltest.Store, threaded bool) *conversationTaskClarificationFixture {
 	t.Helper()
 	service := runtimeconversation.NewConversationService(store)
-	seedTestSpace(t, store.(SpaceStore), Scope{Kind: "organization", ID: "task-clarification"})
+	seedTestSpace(t, store.(models.SpaceStore), models.Scope{Kind: "organization", ID: "task-clarification"})
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
-		Scope: Scope{Kind: "organization", ID: "task-clarification"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"},
+		Scope: models.Scope{Kind: "organization", ID: "task-clarification"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "writer"},
 		Title: "Independent writing task", IdempotencyKey: "task-clarification",
 	})
 	if err != nil {
@@ -39,7 +41,7 @@ func newConversationTaskClarificationFixture(t *testing.T, store controltest.Sto
 	f := &conversationTaskClarificationFixture{store: store, service: service, conversation: conversation}
 	f.resetScheduler(t)
 	f.trigger = f.post(t, runtimeconversation.PostChannelMessageRequest{
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, Intent: MessageIntentQuestion,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "requester"}, Intent: models.MessageIntentQuestion,
 		Content:          "Write a 1000-character introduction to black holes for the requested audience.",
 		RequiresResponse: true, StartThread: threaded, IdempotencyKey: "original-request",
 	})
@@ -47,8 +49,8 @@ func newConversationTaskClarificationFixture(t *testing.T, store controltest.Sto
 	if err != nil || scheduled == nil || scheduled.Run == nil || scheduled.Run.ActingUser != "requester" {
 		t.Fatalf("schedule source: %#v, %v", scheduled, err)
 	}
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
-		Scope: conversation.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(),
+	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{
+		Scope: conversation.Scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now(),
 		LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != scheduled.Run.ID {
@@ -61,8 +63,8 @@ func newConversationTaskClarificationFixture(t *testing.T, store controltest.Sto
 		t.Fatalf("admit independent task: %#v, %v", accepted, err)
 	}
 	f.task, f.source, f.work = accepted.Task, accepted.SourceRun, accepted.WorkRun
-	if f.source.Status != AgentRunStatusCompleted || f.source.Output["summary"] != proposal.Acknowledgment ||
-		f.work.Kind != RunKindAgentWork || f.work.ParentRunID != "" || f.work.RootRunID != f.work.ID || !ConversationTaskMatchesWorkRun(f.task, f.work) ||
+	if f.source.Status != models.AgentRunStatusCompleted || f.source.Output["summary"] != proposal.Acknowledgment ||
+		f.work.Kind != models.RunKindAgentWork || f.work.ParentRunID != "" || f.work.RootRunID != f.work.ID || !models.ConversationTaskMatchesWorkRun(f.task, f.work) ||
 		f.work.ActingUser != "requester" {
 		t.Fatalf("admission lost independent execution identity: %#v", accepted)
 	}
@@ -75,7 +77,7 @@ func (f *conversationTaskClarificationFixture) ask(t *testing.T, question string
 	t.Helper()
 	claimed := controltest.ClaimRun(t, f.store, f.work, "task-worker")
 	parked, call := controltest.AskUserParked(t, f.store, claimed, "task-worker", question)
-	if parked.Status != AgentRunStatusWaitingForEvent || parked.LastAppliedTurn != call.Step.Sequence {
+	if parked.Status != models.AgentRunStatusWaitingForEvent || parked.LastAppliedTurn != call.Step.Sequence {
 		t.Fatalf("park independent task clarification: %#v", parked)
 	}
 	f.work, f.questionTurn, f.asked = parked, call.Step, question
@@ -90,14 +92,14 @@ func (f *conversationTaskClarificationFixture) resetScheduler(t *testing.T) {
 	}
 }
 
-func (f *conversationTaskClarificationFixture) post(t *testing.T, req runtimeconversation.PostChannelMessageRequest) *ChannelMessage {
+func (f *conversationTaskClarificationFixture) post(t *testing.T, req runtimeconversation.PostChannelMessageRequest) *models.ChannelMessage {
 	t.Helper()
 	current, err := f.service.GetConversation(t.Context(), f.conversation.Scope, f.conversation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Scope, req.ConversationID, req.ExpectedRevision = current.Scope, current.ID, current.Revision
-	req.Audience = ConversationAudience{Kind: ConversationAudienceChannel}
+	req.Audience = models.ConversationAudience{Kind: models.ConversationAudienceChannel}
 	posted, err := f.service.PostChannelMessage(t.Context(), req)
 	if err != nil {
 		t.Fatal(err)
@@ -105,17 +107,17 @@ func (f *conversationTaskClarificationFixture) post(t *testing.T, req runtimecon
 	return posted.Message
 }
 
-func (f *conversationTaskClarificationFixture) transition(t *testing.T, req RunTransitionRequest) {
+func (f *conversationTaskClarificationFixture) transition(t *testing.T, req activity.RunTransitionRequest) {
 	t.Helper()
 	req.ExpectedRevision = f.work.Revision
 	var err error
-	f.work, _, err = NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), f.work.Scope, f.work.ID, req)
+	f.work, _, err = activity.NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), f.work.Scope, f.work.ID, req)
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (f *conversationTaskClarificationFixture) question(t *testing.T) *ChannelMessage {
+func (f *conversationTaskClarificationFixture) question(t *testing.T) *models.ChannelMessage {
 	t.Helper()
 	if _, err := f.scheduler.ReconcileScope(t.Context(), f.task.Scope); err != nil {
 		t.Fatal(err)
@@ -124,12 +126,12 @@ func (f *conversationTaskClarificationFixture) question(t *testing.T) *ChannelMe
 	if err != nil || question == nil {
 		t.Fatalf("independent task did not project its question: %#v, %v", question, err)
 	}
-	if question.Content != f.asked || question.Intent != MessageIntentQuestion ||
-		!question.RequiresResponse || question.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: f.task.TargetAgentID}) ||
+	if question.Content != f.asked || question.Intent != models.MessageIntentQuestion ||
+		!question.RequiresResponse || question.Sender != (models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: f.task.TargetAgentID}) ||
 		question.ReplyToMessageID != f.trigger.ID || question.ThreadRootID != f.task.ThreadRootID {
 		t.Fatalf("question lost content or canonical delivery: %#v", question)
 	}
-	for _, want := range []ConversationReference{{Kind: ConversationReferenceRun, ID: f.work.ID}, {Kind: ConversationReferenceTask, ID: f.task.ID}} {
+	for _, want := range []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: f.work.ID}, {Kind: models.ConversationReferenceTask, ID: f.task.ID}} {
 		found := false
 		for _, reference := range question.References {
 			if reference.Kind == want.Kind && reference.ID == want.ID {
@@ -145,13 +147,13 @@ func (f *conversationTaskClarificationFixture) question(t *testing.T) *ChannelMe
 
 func (f *conversationTaskClarificationFixture) assertSingleForeground(t *testing.T) {
 	t.Helper()
-	runs, err := f.store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: f.task.Scope, Kind: RunKindConversation, Limit: 100})
-	if err != nil || len(runs) != 1 || runs[0].ID != f.source.ID || runs[0].Status != AgentRunStatusCompleted {
+	runs, err := f.store.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: f.task.Scope, Kind: models.RunKindConversation, Limit: 100})
+	if err != nil || len(runs) != 1 || runs[0].ID != f.source.ID || runs[0].Status != models.AgentRunStatusCompleted {
 		t.Fatalf("clarification created or reopened foreground work: %#v, %v", runs, err)
 	}
 }
 
-func (f *conversationTaskClarificationFixture) assertAnswerReceipt(t *testing.T, question, answer *ChannelMessage, count int) {
+func (f *conversationTaskClarificationFixture) assertAnswerReceipt(t *testing.T, question, answer *models.ChannelMessage, count int) {
 	t.Helper()
 	current, err := f.store.GetAgentRun(t.Context(), f.task.Scope, f.work.ID)
 	if err != nil || current == nil || len(current.PendingInterventions) != count {
@@ -159,10 +161,10 @@ func (f *conversationTaskClarificationFixture) assertAnswerReceipt(t *testing.T,
 	}
 	if count == 1 {
 		intervention := current.PendingInterventions[0]
-		if intervention.Actor != (ActivityActor{Type: "user", ID: f.task.AuthenticatedActor.ID}) || intervention.Instruction != "Answer to your clarification:\n"+answer.Content {
+		if intervention.Actor != (models.ActivityActor{Type: "user", ID: f.task.AuthenticatedActor.ID}) || intervention.Instruction != "Answer to your clarification:\n"+answer.Content {
 			t.Fatalf("answer was not delivered to the same task: %#v", intervention)
 		}
-		want := &ConversationAnswerReceipt{
+		want := &models.ConversationAnswerReceipt{
 			Scope: f.task.Scope, RunID: f.work.ID, AgentID: f.task.TargetAgentID, ConversationTaskID: f.task.ID,
 			ConversationID: f.conversation.ID, SourceRunID: f.source.ID, SourceMessageID: f.trigger.ID,
 			ThreadRootMessageID: f.task.ThreadRootID, QuestionMessageID: question.ID, QuestionContent: question.Content,
@@ -173,7 +175,7 @@ func (f *conversationTaskClarificationFixture) assertAnswerReceipt(t *testing.T,
 			t.Fatalf("answer receipt lost canonical authority: got %#v, want %#v", intervention.ConversationAnswer, want)
 		}
 	}
-	events, err := f.store.ListActivity(t.Context(), ActivityFilter{Scope: f.task.Scope, RunID: f.work.ID, Limit: 100})
+	events, err := f.store.ListActivity(t.Context(), models.ActivityFilter{Scope: f.task.Scope, RunID: f.work.ID, Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +186,7 @@ func (f *conversationTaskClarificationFixture) assertAnswerReceipt(t *testing.T,
 		}
 		eventCount++
 		if event.RunID != f.work.ID || event.Scope != f.task.Scope || event.CorrelationID != answer.ID || event.CausationID != question.ID ||
-			event.Actor != (ActivityActor{Type: "user", ID: f.task.AuthenticatedActor.ID}) {
+			event.Actor != (models.ActivityActor{Type: "user", ID: f.task.AuthenticatedActor.ID}) {
 			t.Fatalf("answer event lost execution authority: %#v", event)
 		}
 		for key, want := range map[string]string{
@@ -200,7 +202,7 @@ func (f *conversationTaskClarificationFixture) assertAnswerReceipt(t *testing.T,
 	if eventCount != count {
 		t.Fatalf("answer transition count = %d, want %d", eventCount, count)
 	}
-	messages, err := f.store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: f.task.Scope, ConversationID: f.conversation.ID, Limit: 100})
+	messages, err := f.store.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: f.task.Scope, ConversationID: f.conversation.ID, Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +215,7 @@ func (f *conversationTaskClarificationFixture) assertAnswerReceipt(t *testing.T,
 			continue
 		}
 		acknowledgmentCount++
-		if message.Intent != MessageIntentAcknowledgment || message.ReplyToMessageID != answer.ID || message.ResolvesMessageID != answer.ID {
+		if message.Intent != models.MessageIntentAcknowledgment || message.ReplyToMessageID != answer.ID || message.ResolvesMessageID != answer.ID {
 			t.Fatalf("answer acknowledgment lost its target: %#v", message)
 		}
 	}
@@ -227,11 +229,11 @@ func TestConversationTaskClarificationRoundTrip(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		threaded bool
-		status   AgentRunStatus
+		status   models.AgentRunStatus
 	}{
-		{name: "implicit answer", status: AgentRunStatusQueued},
-		{name: "explicit answer after completion", threaded: true, status: AgentRunStatusCompleted},
-		{name: "explicit answer after cancellation", threaded: true, status: AgentRunStatusCanceled},
+		{name: "implicit answer", status: models.AgentRunStatusQueued},
+		{name: "explicit answer after completion", threaded: true, status: models.AgentRunStatusCompleted},
+		{name: "explicit answer after cancellation", threaded: true, status: models.AgentRunStatusCanceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			controltest.ForEachStore(t, func(t *testing.T, store controltest.Store) {
@@ -242,7 +244,7 @@ func TestConversationTaskClarificationRoundTrip(t *testing.T) {
 					t.Fatal("reconciliation duplicated the clarification question")
 				}
 				request := runtimeconversation.PostChannelMessageRequest{
-					Sender: f.task.AuthenticatedActor, Intent: MessageIntentAnswer, RequiresResponse: true,
+					Sender: f.task.AuthenticatedActor, Intent: models.MessageIntentAnswer, RequiresResponse: true,
 					Content: "Adult general readers. Keep the introduction within 1000 characters.", IdempotencyKey: "clarification-answer",
 				}
 				if tc.threaded {
@@ -251,21 +253,21 @@ func TestConversationTaskClarificationRoundTrip(t *testing.T) {
 				answer := f.post(t, request)
 				resumed, replayed, err := f.scheduler.ScheduleMessage(t.Context(), f.task.Scope, f.conversation.ID, answer.ID)
 				if err != nil || replayed || resumed == nil || resumed.Run == nil || resumed.Run.ID != f.work.ID ||
-					resumed.Run.Status != AgentRunStatusQueued || resumed.Run.WakeCondition != nil || !ConversationTaskMatchesWorkRun(f.task, resumed.Run) {
+					resumed.Run.Status != models.AgentRunStatusQueued || resumed.Run.WakeCondition != nil || !models.ConversationTaskMatchesWorkRun(f.task, resumed.Run) {
 					t.Fatalf("answer did not queue the original independent task: %#v, replay=%v, err=%v", resumed, replayed, err)
 				}
 				f.work = resumed.Run
 				f.assertAnswerReceipt(t, question, answer, 1)
-				cloned := cloneAgentRun(resumed.Run)
+				cloned := models.CloneAgentRun(resumed.Run)
 				cloned.PendingInterventions[0].ConversationAnswer.AnswerContent = "altered clone"
 				if resumed.Run.PendingInterventions[0].ConversationAnswer.AnswerContent != answer.Content ||
 					f.readWork(t).PendingInterventions[0].ConversationAnswer.AnswerContent != answer.Content {
 					t.Fatal("cloning a run aliased its trusted answer receipt")
 				}
-				if tc.status == AgentRunStatusCompleted {
-					f.transition(t, RunTransitionRequest{Status: AgentRunStatusRunning})
-					f.transition(t, RunTransitionRequest{Status: AgentRunStatusCompleted, Output: map[string]interface{}{"summary": "A black hole is a region whose gravity prevents light from escaping."}})
-				} else if tc.status == AgentRunStatusCanceled {
+				if tc.status == models.AgentRunStatusCompleted {
+					f.transition(t, activity.RunTransitionRequest{Status: models.AgentRunStatusRunning})
+					f.transition(t, activity.RunTransitionRequest{Status: models.AgentRunStatusCompleted, Output: map[string]interface{}{"summary": "A black hole is a region whose gravity prevents light from escaping."}})
+				} else if tc.status == models.AgentRunStatusCanceled {
 					f.cancel(t)
 				}
 				before := f.readWork(t)
@@ -295,13 +297,13 @@ func (f *conversationTaskClarificationFixture) cancel(t *testing.T) {
 		},
 		Actor: f.task.AuthenticatedActor, ExpectedWorkRunRevision: f.work.Revision, Summary: "Cancel the writing task",
 	})
-	if err != nil || result == nil || result.WorkRun == nil || result.WorkRun.Status != AgentRunStatusCanceled {
+	if err != nil || result == nil || result.WorkRun == nil || result.WorkRun.Status != models.AgentRunStatusCanceled {
 		t.Fatalf("cancel task: %#v, %v", result, err)
 	}
 	f.work = result.WorkRun
 }
 
-func (f *conversationTaskClarificationFixture) readWork(t *testing.T) *AgentRun {
+func (f *conversationTaskClarificationFixture) readWork(t *testing.T) *models.AgentRun {
 	t.Helper()
 	run, err := f.store.GetAgentRun(t.Context(), f.task.Scope, f.work.ID)
 	if err != nil || run == nil {
@@ -310,7 +312,7 @@ func (f *conversationTaskClarificationFixture) readWork(t *testing.T) *AgentRun 
 	return run
 }
 
-func (f *conversationTaskClarificationFixture) assertWorkUnchanged(t *testing.T, before *AgentRun) {
+func (f *conversationTaskClarificationFixture) assertWorkUnchanged(t *testing.T, before *models.AgentRun) {
 	t.Helper()
 	// A SQL read may decode JSON numbers differently, so compare JSON.
 	want, err := json.Marshal(before)
@@ -333,7 +335,7 @@ func TestConversationTaskClarificationRejectsExplicitAnswersOutsideAuthority(t *
 				f := newConversationTaskClarificationFixture(t, store, true)
 				question := f.question(t)
 				request := runtimeconversation.PostChannelMessageRequest{
-					Sender: f.task.AuthenticatedActor, Intent: MessageIntentAnswer, RequiresResponse: true,
+					Sender: f.task.AuthenticatedActor, Intent: models.MessageIntentAnswer, RequiresResponse: true,
 					ReplyToMessageID: question.ID, ResolvesMessageID: question.ID,
 					Content: "Use the finance team as the audience.", IdempotencyKey: "rejected-answer",
 				}
@@ -342,7 +344,7 @@ func TestConversationTaskClarificationRejectsExplicitAnswersOutsideAuthority(t *
 					request.Sender.ID = "other-member"
 				case "other thread":
 					other := f.post(t, runtimeconversation.PostChannelMessageRequest{
-						Sender: f.task.AuthenticatedActor, Intent: MessageIntentUpdate, Content: "Another discussion", StartThread: true, IdempotencyKey: "other-thread",
+						Sender: f.task.AuthenticatedActor, Intent: models.MessageIntentUpdate, Content: "Another discussion", StartThread: true, IdempotencyKey: "other-thread",
 					})
 					request.ReplyToMessageID = other.ID
 				case "canceled task":
@@ -368,25 +370,27 @@ func TestConversationTaskClarificationOriginRequiresCanonicalProvenance(t *testi
 	controltest.ForEachStore(t, func(t *testing.T, store controltest.Store) {
 		f := newConversationTaskClarificationFixture(t, store, false)
 		source, conversation, trigger, err := runtimeconversation.ConversationWorkOrigin(t.Context(), store, store, f.work)
-		if err != nil || source == nil || source.ID != f.source.ID || source.Status != AgentRunStatusCompleted ||
+		if err != nil || source == nil || source.ID != f.source.ID || source.Status != models.AgentRunStatusCompleted ||
 			conversation == nil || conversation.ID != f.conversation.ID || trigger == nil || trigger.ID != f.trigger.ID {
 			t.Fatalf("canonical independent task lost its completed source: %#v, %#v, %#v, %v", source, conversation, trigger, err)
 		}
 		for _, tc := range []struct {
 			name   string
-			mutate func(*AgentRun)
+			mutate func(*models.AgentRun)
 		}{
-			{name: "foreign scope", mutate: func(run *AgentRun) { run.Scope.ID = "another-organization" }},
-			{name: "foreign assigned agent", mutate: func(run *AgentRun) { run.AssignedAgentID = "another-agent" }},
-			{name: "foreign owner", mutate: func(run *AgentRun) { run.Owner.ID = "another-agent" }},
-			{name: "forged task marker", mutate: func(run *AgentRun) { run.Context[ConversationTaskContextKey] = "fabricated-task" }},
-			{name: "missing task marker", mutate: func(run *AgentRun) { delete(run.Context, ConversationTaskContextKey) }},
-			{name: "copied task marker", mutate: func(run *AgentRun) { run.ID, run.RootRunID = "unrelated-work", "unrelated-work" }},
-			{name: "forged conversation", mutate: func(run *AgentRun) { run.Context[conversationRunContextConversationID] = "another-conversation" }},
-			{name: "forged source message", mutate: func(run *AgentRun) { run.Context[conversationRunContextTriggerID] = "another-message" }},
+			{name: "foreign scope", mutate: func(run *models.AgentRun) { run.Scope.ID = "another-organization" }},
+			{name: "foreign assigned agent", mutate: func(run *models.AgentRun) { run.AssignedAgentID = "another-agent" }},
+			{name: "foreign owner", mutate: func(run *models.AgentRun) { run.Owner.ID = "another-agent" }},
+			{name: "forged task marker", mutate: func(run *models.AgentRun) { run.Context[models.ConversationTaskContextKey] = "fabricated-task" }},
+			{name: "missing task marker", mutate: func(run *models.AgentRun) { delete(run.Context, models.ConversationTaskContextKey) }},
+			{name: "copied task marker", mutate: func(run *models.AgentRun) { run.ID, run.RootRunID = "unrelated-work", "unrelated-work" }},
+			{name: "forged conversation", mutate: func(run *models.AgentRun) {
+				run.Context[models.ConversationRunConversationIDContextKey] = "another-conversation"
+			}},
+			{name: "forged source message", mutate: func(run *models.AgentRun) { run.Context[models.ConversationRunTriggerIDContextKey] = "another-message" }},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				forged := cloneAgentRun(f.work)
+				forged := models.CloneAgentRun(f.work)
 				tc.mutate(forged)
 				for _, replay := range []bool{false, true} {
 					source, conversation, trigger, err := runtimeconversation.ConversationWorkOriginForState(t.Context(), store, store, forged, replay)
@@ -405,12 +409,12 @@ func TestConversationTaskClarificationReplayDoesNotAnswerLaterQuestion(t *testin
 		f := newConversationTaskClarificationFixture(t, store, true)
 		firstQuestion := f.question(t)
 		firstAnswer := f.post(t, runtimeconversation.PostChannelMessageRequest{
-			Sender: f.task.AuthenticatedActor, Intent: MessageIntentAnswer, RequiresResponse: true,
+			Sender: f.task.AuthenticatedActor, Intent: models.MessageIntentAnswer, RequiresResponse: true,
 			ReplyToMessageID: firstQuestion.ID, ResolvesMessageID: firstQuestion.ID,
 			Content: "Adult general readers.", IdempotencyKey: "first-answer",
 		})
 		accepted, replayed, err := f.scheduler.ScheduleMessage(t.Context(), f.task.Scope, f.conversation.ID, firstAnswer.ID)
-		if err != nil || replayed || accepted == nil || accepted.Run == nil || accepted.Run.ID != f.work.ID || accepted.Run.Status != AgentRunStatusQueued {
+		if err != nil || replayed || accepted == nil || accepted.Run == nil || accepted.Run.ID != f.work.ID || accepted.Run.Status != models.AgentRunStatusQueued {
 			t.Fatalf("accept first answer: %#v, %v, %v", accepted, replayed, err)
 		}
 		f.work = accepted.Run
@@ -424,24 +428,24 @@ func TestConversationTaskClarificationReplayDoesNotAnswerLaterQuestion(t *testin
 		before := f.readWork(t)
 		f.resetScheduler(t)
 		old, replayed, err := f.scheduler.ScheduleMessage(t.Context(), f.task.Scope, f.conversation.ID, firstAnswer.ID)
-		if err != nil || !replayed || old == nil || old.Run == nil || old.Run.ID != f.work.ID || old.Run.Status != AgentRunStatusWaitingForEvent {
+		if err != nil || !replayed || old == nil || old.Run == nil || old.Run.ID != f.work.ID || old.Run.Status != models.AgentRunStatusWaitingForEvent {
 			t.Fatalf("old answer resumed later clarification: %#v, %v, %v", old, replayed, err)
 		}
 		f.assertWorkUnchanged(t, before)
 		secondAnswer := f.post(t, runtimeconversation.PostChannelMessageRequest{
-			Sender: f.task.AuthenticatedActor, Intent: MessageIntentAnswer, RequiresResponse: true,
+			Sender: f.task.AuthenticatedActor, Intent: models.MessageIntentAnswer, RequiresResponse: true,
 			ReplyToMessageID: secondQuestion.ID, ResolvesMessageID: secondQuestion.ID,
 			Content: "Yes, include one short numerical example.", IdempotencyKey: "second-answer",
 		})
 		accepted, replayed, err = f.scheduler.ScheduleMessage(t.Context(), f.task.Scope, f.conversation.ID, secondAnswer.ID)
-		if err != nil || replayed || accepted == nil || accepted.Run == nil || accepted.Run.ID != f.work.ID || accepted.Run.Status != AgentRunStatusQueued {
+		if err != nil || replayed || accepted == nil || accepted.Run == nil || accepted.Run.ID != f.work.ID || accepted.Run.Status != models.AgentRunStatusQueued {
 			t.Fatalf("accept second answer: %#v, %v, %v", accepted, replayed, err)
 		}
 		current := f.readWork(t)
 		if len(current.PendingInterventions) != 2 || !reflect.DeepEqual(current.PendingInterventions[0].ConversationAnswer, &firstReceipt) {
 			t.Fatalf("later answer replaced the first durable receipt: %#v", current.PendingInterventions)
 		}
-		want := &ConversationAnswerReceipt{
+		want := &models.ConversationAnswerReceipt{
 			Scope: f.task.Scope, RunID: f.work.ID, AgentID: f.task.TargetAgentID, ConversationTaskID: f.task.ID,
 			ConversationID: f.conversation.ID, SourceRunID: f.source.ID, SourceMessageID: f.trigger.ID,
 			ThreadRootMessageID: f.task.ThreadRootID, QuestionMessageID: secondQuestion.ID, QuestionContent: secondQuestion.Content,
@@ -451,7 +455,7 @@ func TestConversationTaskClarificationReplayDoesNotAnswerLaterQuestion(t *testin
 		if !reflect.DeepEqual(current.PendingInterventions[1].ConversationAnswer, want) {
 			t.Fatalf("later answer not bound to its own question: got %#v, want %#v", current.PendingInterventions[1].ConversationAnswer, want)
 		}
-		for _, answer := range []*ChannelMessage{firstAnswer, secondAnswer} {
+		for _, answer := range []*models.ChannelMessage{firstAnswer, secondAnswer} {
 			ack, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), f.task.Scope, f.conversation.ID, "conversation-answer-received:"+answer.ID)
 			if err != nil || ack == nil || ack.ResolvesMessageID != answer.ID {
 				t.Fatalf("missing answer acknowledgment: %#v, %v", ack, err)
@@ -466,7 +470,7 @@ func TestConversationTaskGenericInterventionDoesNotMintAnswerReceipt(t *testing.
 		f := newConversationTaskClarificationFixture(t, store, true)
 		result, err := agentrun.NewRunCommandService(store).CommandAgentRun(t.Context(), agentrun.AgentRunCommandRequest{
 			Scope: f.task.Scope, RunID: f.work.ID, ExpectedRevision: f.work.Revision, Kind: agentrun.AgentRunCommandIntervene,
-			Actor: ActivityActor{Type: "user", ID: f.task.AuthenticatedActor.ID}, InterventionID: stableConversationID(f.task.Scope, "generic-guidance", "intervention"),
+			Actor: models.ActivityActor{Type: "user", ID: f.task.AuthenticatedActor.ID}, InterventionID: models.StableConversationID(f.task.Scope, "generic-guidance", "intervention"),
 			Instruction: "Answer to your clarification:\nYes, proceed.",
 		})
 		if err != nil || result == nil || result.Run == nil {
@@ -476,7 +480,7 @@ func TestConversationTaskGenericInterventionDoesNotMintAnswerReceipt(t *testing.
 		if len(current.PendingInterventions) != 1 || current.PendingInterventions[0].ConversationAnswer != nil {
 			t.Fatalf("generic command minted clarification authority: %#v", current.PendingInterventions)
 		}
-		events, err := store.ListActivity(t.Context(), ActivityFilter{Scope: f.task.Scope, RunID: f.work.ID, Limit: 100})
+		events, err := store.ListActivity(t.Context(), models.ActivityFilter{Scope: f.task.Scope, RunID: f.work.ID, Limit: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -497,7 +501,7 @@ const answerReceivedEvent = "run.conversation_answer_received"
 // waiting on an ask_user entry posted: the ask_user settle and the question
 // reconciler post under it, so either replays the other. The tests spell it
 // out to pin that key.
-func clarificationQuestionKeyOf(run *AgentRun) string {
+func clarificationQuestionKeyOf(run *models.AgentRun) string {
 	if run == nil || run.WakeCondition == nil {
 		return ""
 	}

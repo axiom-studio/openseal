@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -57,7 +58,7 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 		switch {
 		case err == nil:
 			succeeded++
-		case errors.Is(err, ErrActionCredentialLeaseReplay):
+		case errors.Is(err, models.ErrActionCredentialLeaseReplay):
 			replayed++
 		default:
 			t.Fatalf("redemption error = %v", err)
@@ -93,17 +94,17 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 		t.Fatal(err)
 	}
 	defer restarted.Close()
-	if err := restarted.RedeemActionCredentialLease(ctx, request); !errors.Is(err, ErrActionCredentialLeaseReplay) {
-		t.Fatalf("restart replay error = %v, want %v", err, ErrActionCredentialLeaseReplay)
+	if err := restarted.RedeemActionCredentialLease(ctx, request); !errors.Is(err, models.ErrActionCredentialLeaseReplay) {
+		t.Fatalf("restart replay error = %v, want %v", err, models.ErrActionCredentialLeaseReplay)
 	}
 }
 
 func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing.T) {
 	for _, test := range []struct {
 		name  string
-		drift func(*testing.T, context.Context, *sqlite.Store, *sql.DB, *skill.Binding, ActionCredentialLeaseRedemptionRequest)
+		drift func(*testing.T, context.Context, *sqlite.Store, *sql.DB, *skill.Binding, models.ActionCredentialLeaseRedemptionRequest)
 	}{
-		{"action lease owner", func(t *testing.T, ctx context.Context, _ *sqlite.Store, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
+		{"action lease owner", func(t *testing.T, ctx context.Context, _ *sqlite.Store, db *sql.DB, _ *skill.Binding, request models.ActionCredentialLeaseRedemptionRequest) {
 			var payload string
 			if err := db.QueryRowContext(ctx, `SELECT payload FROM action_calls WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.ActionCallID).Scan(&payload); err != nil {
 				t.Fatal(err)
@@ -118,7 +119,7 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 				t.Fatal(err)
 			}
 		}},
-		{"assigned agent", func(t *testing.T, ctx context.Context, _ *sqlite.Store, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
+		{"assigned agent", func(t *testing.T, ctx context.Context, _ *sqlite.Store, db *sql.DB, _ *skill.Binding, request models.ActionCredentialLeaseRedemptionRequest) {
 			var payload string
 			if err := db.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.RunID).Scan(&payload); err != nil {
 				t.Fatal(err)
@@ -133,7 +134,7 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 				t.Fatal(err)
 			}
 		}},
-		{"binding revision", func(t *testing.T, ctx context.Context, store *sqlite.Store, _ *sql.DB, binding *skill.Binding, _ ActionCredentialLeaseRedemptionRequest) {
+		{"binding revision", func(t *testing.T, ctx context.Context, store *sqlite.Store, _ *sql.DB, binding *skill.Binding, _ models.ActionCredentialLeaseRedemptionRequest) {
 			catalog := skill.NewCatalogWithStore(store)
 			if _, err := catalog.DisableBinding(ctx, skill.DisableBindingRequest{
 				Scope: binding.Scope, DeploymentID: binding.DeploymentID, BindingID: binding.ID, ExpectedRevision: binding.Revision,
@@ -154,8 +155,8 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 			db := openTestSQLiteDB(t, path)
 			request, binding := storetest.ActionCredentialLeaseFixture(t, ctx, store, "nonce-sqlite-drift-"+uuid.NewString())
 			test.drift(t, ctx, store, db, binding, request)
-			if err := store.RedeemActionCredentialLease(ctx, request); !errors.Is(err, ErrActionCredentialLeaseMismatch) {
-				t.Fatalf("authority drift error = %v, want %v", err, ErrActionCredentialLeaseMismatch)
+			if err := store.RedeemActionCredentialLease(ctx, request); !errors.Is(err, models.ErrActionCredentialLeaseMismatch) {
+				t.Fatalf("authority drift error = %v, want %v", err, models.ErrActionCredentialLeaseMismatch)
 			}
 			var consumed int
 			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_credential_lease_redemptions WHERE issuer=? AND audience=?`, request.Lease.Issuer, request.Lease.Audience).Scan(&consumed); err != nil {
@@ -168,4 +169,4 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 	}
 }
 
-var _ ActionCredentialLeaseRedeemer = (*sqlite.Store)(nil)
+var _ models.ActionCredentialLeaseRedeemer = (*sqlite.Store)(nil)

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -23,27 +24,27 @@ func TestChannelTimelineStoresPaginateRootsAndBroadcastsBeforeLimiting(t *testin
 
 // A busy thread must not consume a channel page. Broadcasts still require
 // visibility of their own audience, root and immediate reply target.
-func testChannelTimelineStore(t *testing.T, store ConversationStore) {
+func testChannelTimelineStore(t *testing.T, store models.ConversationStore) {
 	t.Helper()
 	service := runtimeconversation.NewConversationService(store)
-	scope := Scope{Kind: "tenant", ID: "channel-timeline"}
-	seedTestSpace(t, store.(SpaceStore), scope)
+	scope := models.Scope{Kind: "tenant", ID: "channel-timeline"}
+	seedTestSpace(t, store.(models.SpaceStore), scope)
 	conversation, _, err := service.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"},
 		Title: "Channel timeline", IdempotencyKey: "timeline",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "viewer"}}
-	sender := ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent"}
-	channelAudience := ConversationAudience{Kind: ConversationAudienceChannel}
-	privateAudience := ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantUser, ID: "someone-else"}}}
-	post := func(content, reply string, broadcast bool, audience ConversationAudience) *ChannelMessage {
+	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "viewer"}}
+	sender := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "agent"}
+	channelAudience := models.ConversationAudience{Kind: models.ConversationAudienceChannel}
+	privateAudience := models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{{Type: models.ConversationParticipantUser, ID: "someone-else"}}}
+	post := func(content, reply string, broadcast bool, audience models.ConversationAudience) *models.ChannelMessage {
 		t.Helper()
 		result, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 			Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-			Sender: sender, Intent: MessageIntentUpdate, Content: content,
+			Sender: sender, Intent: models.MessageIntentUpdate, Content: content,
 			ReplyToMessageID: reply, BroadcastToChannel: broadcast, Audience: audience,
 			IdempotencyKey: fmt.Sprintf("timeline-%d", conversation.Revision),
 		})
@@ -65,8 +66,8 @@ func testChannelTimelineStore(t *testing.T, store ConversationStore) {
 	privateReply := post("Private reply target", root.ID, false, privateAudience)
 	post("Channel-looking broadcast with a private reply target", privateReply.ID, true, channelAudience)
 
-	filter := ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, ChannelTimeline: true, Descending: true, Limit: 2, Viewer: &viewer}
-	assertMessages := func(got []*ChannelMessage, err error, want ...*ChannelMessage) {
+	filter := models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, ChannelTimeline: true, Descending: true, Limit: 2, Viewer: &viewer}
+	assertMessages := func(got []*models.ChannelMessage, err error, want ...*models.ChannelMessage) {
 		t.Helper()
 		if err != nil || len(got) != len(want) {
 			t.Fatalf("messages count = %d, want %d, err = %v", len(got), len(want), err)
@@ -87,22 +88,22 @@ func testChannelTimelineStore(t *testing.T, store ConversationStore) {
 	assertMessages(page, err, broadcast, newRoot)
 
 	// Without the opt-in, existing chronological conversation reads stay intact.
-	all, err := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Limit: 100})
+	all, err := service.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Limit: 100})
 	if err != nil || len(all) != int(conversation.LastSequence) {
 		t.Fatalf("ordinary history count = %d, last sequence = %d, err = %v", len(all), conversation.LastSequence, err)
 	}
 	// Thread reads keep the root plus replies, including the broadcast.
-	thread, err := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, ThreadRootID: root.ID, Limit: 2})
+	thread, err := service.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, ThreadRootID: root.ID, Limit: 2})
 	assertMessages(thread, err, root, broadcast)
 	filter.ThreadRootID = root.ID
-	if _, err := service.ListChannelMessages(t.Context(), filter); !errors.Is(err, ErrInvalidConversation) {
+	if _, err := service.ListChannelMessages(t.Context(), filter); !errors.Is(err, models.ErrInvalidConversation) {
 		t.Fatalf("combined service filter error = %v", err)
 	}
-	if _, err := store.ListChannelMessages(t.Context(), filter); !errors.Is(err, ErrInvalidConversation) {
+	if _, err := store.ListChannelMessages(t.Context(), filter); !errors.Is(err, models.ErrInvalidConversation) {
 		t.Fatalf("combined store filter error = %v", err)
 	}
 	filter.ThreadRootID, filter.Scope.ID = "", "foreign-tenant"
-	if _, err := service.ListChannelMessages(t.Context(), filter); !errors.Is(err, ErrConversationNotFound) {
+	if _, err := service.ListChannelMessages(t.Context(), filter); !errors.Is(err, models.ErrConversationNotFound) {
 		t.Fatalf("foreign tenant filter error = %v", err)
 	}
 }

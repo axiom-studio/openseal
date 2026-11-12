@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -17,7 +18,7 @@ import (
 
 // proposePersonAction proposes send as the governed tool call of run loop
 // step stepID, as the loop does for the Run's lease owner.
-func proposePersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catalog, scope Scope, run *AgentRun, now time.Time, stepID, key string, policy action.ActionPolicyEvaluator) *ActionProposalResult {
+func proposePersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catalog, scope models.Scope, run *models.AgentRun, now time.Time, stepID, key string, policy action.ActionPolicyEvaluator) *models.ActionProposalResult {
 	t.Helper()
 	if policy == nil {
 		policy = action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
@@ -27,9 +28,9 @@ func proposePersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catal
 	coordinator := action.NewActionCoordinator(store, store, catalog, policy, nil, models.WithClock(func() time.Time { return now }))
 	proposal, err := coordinator.Propose(context.Background(), action.ProposeActionRequest{
 		Scope: scope, RunID: run.ID, TurnID: stepID, WorkerID: "agent-worker", DeploymentID: "release-agent",
-		Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Send a message to ana@example.com",
+		Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, Summary: "Send a message to ana@example.com",
 		SkillID: "mail", SkillVersion: "1.0.0", Action: "send", Arguments: map[string]interface{}{"to": "ana@example.com"}, IdempotencyKey: key,
-		ExternalOperation: &ExternalOperationIdentity{Resource: "mailbox-ana", Operation: "send"},
+		ExternalOperation: &activity.ExternalOperationIdentity{Resource: "mailbox-ana", Operation: "send"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +40,7 @@ func proposePersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catal
 
 // executePersonAction executes the loop call inline for the Run's lease
 // owner, as the governed executor does.
-func executePersonAction(t *testing.T, worker *action.ActionWorker, scope Scope, proposal *ActionProposalResult) *ActionExecutionResult {
+func executePersonAction(t *testing.T, worker *action.ActionWorker, scope models.Scope, proposal *models.ActionProposalResult) *models.ActionExecutionResult {
 	t.Helper()
 	result, err := worker.ExecuteOwnLoopCall(context.Background(), scope, proposal.Call.ID, "agent-worker")
 	if err != nil {
@@ -66,7 +67,7 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 		return action.CredentialAvailability{}, nil
 	}))
 	result := executePersonAction(t, worker, scope, proposal)
-	if dispatched || result.Call.Status != ActionCallStatusFailed || result.Call.ErrorCode != skillbinding.CredentialErrorPersonUnavailable ||
+	if dispatched || result.Call.Status != models.ActionCallStatusFailed || result.Call.ErrorCode != skillbinding.CredentialErrorPersonUnavailable ||
 		!strings.Contains(result.Call.Error, "uses each person's own account, and no person asked for this run") {
 		t.Fatalf("call = %#v dispatched=%v", result.Call, dispatched)
 	}
@@ -75,7 +76,7 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 		t.Fatalf("no person must not create a card: %#v %v", requests, err)
 	}
 	stored, _ := store.GetAgentRun(context.Background(), scope, proposal.Call.RunID)
-	if stored.WakeCondition != nil && stored.WakeCondition.Type == ConnectAccountWakeType {
+	if stored.WakeCondition != nil && stored.WakeCondition.Type == models.ConnectAccountWakeType {
 		t.Fatalf("run parked without a card: %#v", stored.WakeCondition)
 	}
 }
@@ -158,18 +159,18 @@ func TestPersonActionApprovalOnlyByActingUser(t *testing.T) {
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
 	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
+		return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
 	}))
-	if proposal.Approval == nil || len(proposal.Approval.EligibleApprovers) != 1 || proposal.Approval.EligibleApprovers[0] != (ApprovalPrincipal{Type: "user", ID: actiontest.ActingUser}) {
+	if proposal.Approval == nil || len(proposal.Approval.EligibleApprovers) != 1 || proposal.Approval.EligibleApprovers[0] != (models.ApprovalPrincipal{Type: "user", ID: actiontest.ActingUser}) {
 		t.Fatalf("approval = %#v", proposal.Approval)
 	}
 }
 
 func TestConnectAppKeyMatchesHostKey(t *testing.T) {
-	if key := skillbinding.ConnectAppKey(ConnectAppTarget{CatalogSlug: "linear"}); key != "linear" {
+	if key := skillbinding.ConnectAppKey(models.ConnectAppTarget{CatalogSlug: "linear"}); key != "linear" {
 		t.Fatalf("catalog key = %q", key)
 	}
-	key := skillbinding.ConnectAppKey(ConnectAppTarget{Address: "https://mcp.example.com/sse"})
+	key := skillbinding.ConnectAppKey(models.ConnectAppTarget{Address: "https://mcp.example.com/sse"})
 	if !strings.HasPrefix(key, "custom:") || len(key) != len("custom:")+24 {
 		t.Fatalf("custom key = %q", key)
 	}
@@ -178,8 +179,8 @@ func TestConnectAppKeyMatchesHostKey(t *testing.T) {
 // A request_setup receipt of the previous bundled version still verifies a
 // parked setup task.
 func TestTaskSetupActionMatchesPreviousBundledVersion(t *testing.T) {
-	run := &AgentRun{Scope: Scope{Kind: "tenant", ID: "one"}, ID: "run"}
-	call := &ActionCall{Scope: run.Scope, RunID: run.ID, DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: "1.6.0", Action: agentrun.SkillActionRequestSetup}
+	run := &models.AgentRun{Scope: models.Scope{Kind: "tenant", ID: "one"}, ID: "run"}
+	call := &models.ActionCall{Scope: run.Scope, RunID: run.ID, DeploymentID: "agent", SkillID: models.SkillManagementSkillID, SkillVersion: "1.6.0", Action: agentrun.SkillActionRequestSetup}
 	if !skillbinding.TaskSetupActionMatches(call, run, "agent") {
 		t.Fatal("a 1.6.0 request_setup receipt no longer verifies")
 	}

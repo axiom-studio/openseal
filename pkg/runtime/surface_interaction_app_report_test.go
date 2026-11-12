@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -22,9 +23,9 @@ func TestAppReportsAreRepeatableInteractionsOnTheAppArtifact(t *testing.T) {
 			}
 			posted, err := f.conversations.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: f.scope, ConversationID: f.conversation.ID, ExpectedRevision: conversation.Revision,
-				Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "finn"}, Intent: MessageIntentUpdate,
-				Content: "Here's your times tables app.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "app-message",
-				References: []ConversationReference{{Kind: ConversationReferenceArtifact, ID: app, Version: 3}},
+				Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "finn"}, Intent: models.MessageIntentUpdate,
+				Content: "Here's your times tables app.", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "app-message",
+				References: []models.ConversationReference{{Kind: models.ConversationReferenceArtifact, ID: app, Version: 3}},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -54,7 +55,7 @@ func TestAppReportsAreRepeatableInteractionsOnTheAppArtifact(t *testing.T) {
 			if replay, replayed, err := f.record(t, report("r1", `{"values":{"score":7,"of":10},"summary":"Scored 7 out of 10"}`)); err != nil || !replayed || replay.Sequence != 1 {
 				t.Fatalf("replay = %#v, %t, %v", replay, replayed, err)
 			}
-			all, err := f.conversations.ListSurfaceInteractions(f.ctx, SurfaceInteractionFilter{Scope: f.scope, ConversationID: f.conversation.ID, SurfaceID: app})
+			all, err := f.conversations.ListSurfaceInteractions(f.ctx, models.SurfaceInteractionFilter{Scope: f.scope, ConversationID: f.conversation.ID, SurfaceID: app})
 			if err != nil || !reflect.DeepEqual(surfaceInteractionKeys(all), []string{"r1", "r2"}) {
 				t.Fatalf("reports = %v, %v", surfaceInteractionKeys(all), err)
 			}

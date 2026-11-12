@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
@@ -12,10 +13,10 @@ func TestAgentRunReplayActingUser(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
 	service := agentrun.NewRunCommandService(store)
-	scope := Scope{Kind: "tenant", ID: "1"}
-	request := func(key, actingUser string) CreateAgentRunRequest {
-		return CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-			Goal: "work", Source: RunSourceManual, IdempotencyKey: key, ActingUser: actingUser}
+	scope := models.Scope{Kind: "tenant", ID: "1"}
+	request := func(key, actingUser string) models.CreateAgentRunRequest {
+		return models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+			Goal: "work", Source: models.RunSourceManual, IdempotencyKey: key, ActingUser: actingUser}
 	}
 	created, err := service.CreateAgentRun(ctx, request("stamped", "7"))
 	if err != nil {
@@ -27,10 +28,10 @@ func TestAgentRunReplayActingUser(t *testing.T) {
 	if replayed, err := service.CreateAgentRun(ctx, request("stamped", "7")); err != nil || replayed.Run.ID != created.Run.ID {
 		t.Fatalf("exact replay = %#v, %v", replayed, err)
 	}
-	if _, err := service.CreateAgentRun(ctx, request("stamped", "8")); !errors.Is(err, ErrRunIdempotency) {
+	if _, err := service.CreateAgentRun(ctx, request("stamped", "8")); !errors.Is(err, models.ErrRunIdempotency) {
 		t.Fatalf("other acting user replay error = %v", err)
 	}
-	if _, err := service.CreateAgentRun(ctx, request("stamped", "")); !errors.Is(err, ErrRunIdempotency) {
+	if _, err := service.CreateAgentRun(ctx, request("stamped", "")); !errors.Is(err, models.ErrRunIdempotency) {
 		t.Fatalf("missing acting user replay error = %v", err)
 	}
 	// A run stored before ActingUser existed replays for any caller.

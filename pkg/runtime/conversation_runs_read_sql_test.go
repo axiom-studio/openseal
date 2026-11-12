@@ -7,14 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func seedConversationReadSQLHistory(t *testing.T, store conversationTaskSQLTestStore, scope Scope, owner ObjectiveOwner, conversationID string) {
+func seedConversationReadSQLHistory(t *testing.T, store conversationTaskSQLTestStore, scope models.Scope, owner models.ObjectiveOwner, conversationID string) {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	run := storetest.ConversationReadRun("history", scope, owner, RunKindConversation, AgentRunStatusCompleted, now)
-	run.Context = map[string]interface{}{conversationRunContextConversationID: conversationID}
+	run := storetest.ConversationReadRun("history", scope, owner, models.RunKindConversation, models.AgentRunStatusCompleted, now)
+	run.Context = map[string]interface{}{models.ConversationRunConversationIDContextKey: conversationID}
 	if err := run.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -24,9 +25,9 @@ func seedConversationReadSQLHistory(t *testing.T, store conversationTaskSQLTestS
 		run.ID = fmt.Sprintf("unrelated-root-%05d", i)
 		run.RootRunID = run.ID
 		if i%2 == 0 {
-			run.Context[conversationRunContextConversationID] = conversationID
+			run.Context[models.ConversationRunConversationIDContextKey] = conversationID
 		} else {
-			run.Context[conversationRunContextConversationID] = "unrelated-conversation"
+			run.Context[models.ConversationRunConversationIDContextKey] = "unrelated-conversation"
 		}
 		if err := store.CreateAgentRun(t.Context(), run); err != nil {
 			t.Fatal(err)
@@ -36,18 +37,18 @@ func seedConversationReadSQLHistory(t *testing.T, store conversationTaskSQLTestS
 
 func TestConversationActiveRunsSQLFindsOldRootAndTracksCanonicalMembership(t *testing.T) {
 	forConversationTaskSQLStores(t, func(t *testing.T, fixture conversationTaskSQLTestFixture) {
-		reader := fixture.store.(ConversationActiveRunsReadStore)
-		scope := Scope{Kind: "tenant", ID: "legacy-read"}
-		owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "legacy-agent"}
+		reader := fixture.store.(models.ConversationActiveRunsReadStore)
+		scope := models.Scope{Kind: "tenant", ID: "legacy-read"}
+		owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "legacy-agent"}
 		old := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
-		root := storetest.ConversationReadRun("old-root", scope, owner, RunKindConversation, AgentRunStatusCompleted, old)
-		root.Context = map[string]interface{}{conversationRunContextConversationID: "legacy-conversation"}
+		root := storetest.ConversationReadRun("old-root", scope, owner, models.RunKindConversation, models.AgentRunStatusCompleted, old)
+		root.Context = map[string]interface{}{models.ConversationRunConversationIDContextKey: "legacy-conversation"}
 		if err := fixture.store.CreateAgentRun(t.Context(), root); err != nil {
 			t.Fatal(err)
 		}
-		children := make([]*AgentRun, 0, 2)
+		children := make([]*models.AgentRun, 0, 2)
 		for _, id := range []string{"old-child-a", "old-child-b"} {
-			child := storetest.ConversationReadRun(id, scope, owner, RunKindAgentWork, AgentRunStatusQueued, old)
+			child := storetest.ConversationReadRun(id, scope, owner, models.RunKindAgentWork, models.AgentRunStatusQueued, old)
 			child.RootRunID, child.ParentRunID = root.ID, root.ID
 			if err := fixture.store.CreateAgentRun(t.Context(), child); err != nil {
 				t.Fatal(err)
@@ -74,13 +75,13 @@ func TestConversationActiveRunsSQLFindsOldRootAndTracksCanonicalMembership(t *te
 		if err != nil || len(page) != 1 || page[0].ID != "old-child-b" {
 			t.Fatalf("bounded active page = %#v, %v", page, err)
 		}
-		for _, unrelated := range []*AgentRun{
-			storetest.ConversationReadRun("independent-task", scope, owner, RunKindAgentWork, AgentRunStatusQueued, old),
-			storetest.ConversationReadRun("foreign-owner-child", scope, ObjectiveOwner{Type: OwnerTypeAgent, ID: "other-agent"}, RunKindAgentWork, AgentRunStatusQueued, old),
-			storetest.ConversationReadRun("foreign-scope-child", Scope{Kind: scope.Kind, ID: "other-tenant"}, owner, RunKindAgentWork, AgentRunStatusQueued, old),
-			storetest.ConversationReadRun("conversation-child", scope, owner, RunKindConversation, AgentRunStatusQueued, old),
+		for _, unrelated := range []*models.AgentRun{
+			storetest.ConversationReadRun("independent-task", scope, owner, models.RunKindAgentWork, models.AgentRunStatusQueued, old),
+			storetest.ConversationReadRun("foreign-owner-child", scope, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other-agent"}, models.RunKindAgentWork, models.AgentRunStatusQueued, old),
+			storetest.ConversationReadRun("foreign-scope-child", models.Scope{Kind: scope.Kind, ID: "other-tenant"}, owner, models.RunKindAgentWork, models.AgentRunStatusQueued, old),
+			storetest.ConversationReadRun("conversation-child", scope, owner, models.RunKindConversation, models.AgentRunStatusQueued, old),
 		} {
-			unrelated.Context = map[string]interface{}{conversationRunContextConversationID: "legacy-conversation"}
+			unrelated.Context = map[string]interface{}{models.ConversationRunConversationIDContextKey: "legacy-conversation"}
 			if unrelated.ID != "independent-task" {
 				unrelated.RootRunID, unrelated.ParentRunID = root.ID, root.ID
 			}
@@ -90,15 +91,15 @@ func TestConversationActiveRunsSQLFindsOldRootAndTracksCanonicalMembership(t *te
 		}
 		assertIDs("legacy-conversation", "old-child-b", "old-child-a")
 		for _, query := range []struct {
-			scope Scope
-			owner ObjectiveOwner
-		}{{Scope{Kind: scope.Kind, ID: "other-tenant"}, owner}, {scope, ObjectiveOwner{Type: OwnerTypeAgent, ID: "other-agent"}}} {
+			scope models.Scope
+			owner models.ObjectiveOwner
+		}{{models.Scope{Kind: scope.Kind, ID: "other-tenant"}, owner}, {scope, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other-agent"}}} {
 			runs, err := reader.ListConversationActiveRuns(t.Context(), query.scope, query.owner, "legacy-conversation", 100)
 			if err != nil || len(runs) != 0 {
 				t.Fatalf("active child lookup crossed scope or owner: %#v, %v", runs, err)
 			}
 		}
-		root.Context[conversationRunContextConversationID] = "moved-conversation"
+		root.Context[models.ConversationRunConversationIDContextKey] = "moved-conversation"
 		root.Revision++
 		updateConversationTaskSQLRun(t, fixture.store, root, root.Revision-1)
 		assertIDs("legacy-conversation")
@@ -107,12 +108,12 @@ func TestConversationActiveRunsSQLFindsOldRootAndTracksCanonicalMembership(t *te
 		root.Revision++
 		updateConversationTaskSQLRun(t, fixture.store, root, root.Revision-1)
 		assertIDs("moved-conversation", "old-child-b", "old-child-a")
-		children[1].Status = AgentRunStatusPaused
+		children[1].Status = models.AgentRunStatusPaused
 		children[1].Revision++
 		updateConversationTaskSQLRun(t, fixture.store, children[1], children[1].Revision-1)
 		assertIDs("moved-conversation", "old-child-b", "old-child-a")
 		completedAt := time.Now().UTC()
-		children[1].Status, children[1].CompletedAt, children[1].Revision = AgentRunStatusCompleted, &completedAt, children[1].Revision+1
+		children[1].Status, children[1].CompletedAt, children[1].Revision = models.AgentRunStatusCompleted, &completedAt, children[1].Revision+1
 		updateConversationTaskSQLRun(t, fixture.store, children[1], children[1].Revision-1)
 		assertIDs("moved-conversation", "old-child-a")
 		root.Owner.ID = "other-agent"
@@ -131,29 +132,29 @@ func TestConversationActiveRunsSQLFindsOldRootAndTracksCanonicalMembership(t *te
 
 func TestConversationForegroundRunsSQLIncludesExactLegacyAndThreadRoots(t *testing.T) {
 	forConversationTaskSQLStores(t, func(t *testing.T, fixture conversationTaskSQLTestFixture) {
-		reader := fixture.store.(ConversationForegroundRunsReadStore)
-		scope := Scope{Kind: "tenant", ID: "foreground-read"}
-		owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "foreground-agent"}
+		reader := fixture.store.(models.ConversationForegroundRunsReadStore)
+		scope := models.Scope{Kind: "tenant", ID: "foreground-read"}
+		owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "foreground-agent"}
 		at := time.Now().UTC().Truncate(time.Microsecond)
 		for _, testCase := range []struct {
 			id           string
 			key          string
 			conversation string
 			thread       string
-			kind         RunKind
+			kind         models.RunKind
 		}{
-			{"legacy-root", "conversation", "", "", RunKindConversation},
-			{"thread-root", "conversation:thread:thread-message:agent:foreground-agent", "conversation", "thread-message", RunKindConversation},
-			{"agent-root", "conversation:agent:foreground-agent", "conversation", "", RunKindConversation},
-			{"bad-thread", "conversation:thread:other-message:agent:foreground-agent", "conversation", "thread-message", RunKindConversation},
-			{"bare-thread", "conversation:thread:thread-message", "conversation", "thread-message", RunKindConversation},
-			{"context-only", "unrelated", "conversation", "thread-message", RunKindConversation},
-			{"missing-thread", "conversation:thread:thread-message:agent:foreground-agent", "conversation", "", RunKindConversation},
-			{"work-root", "conversation", "conversation", "", RunKindAgentWork},
+			{"legacy-root", "conversation", "", "", models.RunKindConversation},
+			{"thread-root", "conversation:thread:thread-message:agent:foreground-agent", "conversation", "thread-message", models.RunKindConversation},
+			{"agent-root", "conversation:agent:foreground-agent", "conversation", "", models.RunKindConversation},
+			{"bad-thread", "conversation:thread:other-message:agent:foreground-agent", "conversation", "thread-message", models.RunKindConversation},
+			{"bare-thread", "conversation:thread:thread-message", "conversation", "thread-message", models.RunKindConversation},
+			{"context-only", "unrelated", "conversation", "thread-message", models.RunKindConversation},
+			{"missing-thread", "conversation:thread:thread-message:agent:foreground-agent", "conversation", "", models.RunKindConversation},
+			{"work-root", "conversation", "conversation", "", models.RunKindAgentWork},
 		} {
-			run := storetest.ConversationReadRun(testCase.id, scope, owner, testCase.kind, AgentRunStatusCompleted, at)
+			run := storetest.ConversationReadRun(testCase.id, scope, owner, testCase.kind, models.AgentRunStatusCompleted, at)
 			run.ConcurrencyKey = testCase.key
-			run.Context = map[string]interface{}{conversationRunContextConversationID: testCase.conversation, "threadRootMessageId": testCase.thread}
+			run.Context = map[string]interface{}{models.ConversationRunConversationIDContextKey: testCase.conversation, "threadRootMessageId": testCase.thread}
 			if err := fixture.store.CreateAgentRun(t.Context(), run); err != nil {
 				t.Fatal(err)
 			}
@@ -175,9 +176,9 @@ func TestConversationForegroundRunsSQLIncludesExactLegacyAndThreadRoots(t *testi
 			t.Fatalf("foreground roots admitted a false concurrency match: %#v, %v", runs, err)
 		}
 		for _, query := range []struct {
-			scope Scope
-			owner ObjectiveOwner
-		}{{Scope{Kind: scope.Kind, ID: "other-tenant"}, owner}, {scope, ObjectiveOwner{Type: OwnerTypeAgent, ID: "other-agent"}}} {
+			scope models.Scope
+			owner models.ObjectiveOwner
+		}{{models.Scope{Kind: scope.Kind, ID: "other-tenant"}, owner}, {scope, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other-agent"}}} {
 			runs, err := reader.ListConversationForegroundRuns(context.Background(), query.scope, query.owner, "conversation", 100, 0)
 			if err != nil || len(runs) != 0 {
 				t.Fatalf("foreground query crossed scope or owner: %#v, %v", runs, err)

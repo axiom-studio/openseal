@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
@@ -17,27 +18,27 @@ import (
 // final reply is posted to.
 type replyGuardFixture struct {
 	*actiontest.LoopStore
-	conversations ConversationStore
-	conversation  *Conversation
+	conversations models.ConversationStore
+	conversation  *models.Conversation
 }
 
 // replyGuardScenario runs scenario on SQLite and (with a DSN) Postgres,
 // both of which hold Runs and conversations in one store.
 func replyGuardScenario(t *testing.T, scenario func(*testing.T, *replyGuardFixture)) {
 	t.Helper()
-	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) { scenario(t, newReplyGuardFixture(t, store)) })
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) { scenario(t, newReplyGuardFixture(t, store)) })
 }
 
-func newReplyGuardFixture(t *testing.T, store KernelStore) *replyGuardFixture {
+func newReplyGuardFixture(t *testing.T, store models.KernelStore) *replyGuardFixture {
 	t.Helper()
-	conversations, ok := store.(ConversationStore)
+	conversations, ok := store.(models.ConversationStore)
 	if !ok {
 		t.Fatalf("%T is not a ConversationStore", store)
 	}
 	f := &replyGuardFixture{LoopStore: actiontest.NewLoopStore(t, store), conversations: conversations}
-	seedTestSpace(t, store.(SpaceStore), f.Scope)
+	seedTestSpace(t, store.(models.SpaceStore), f.Scope)
 	conversation, _, err := conversation.NewConversationService(conversations).CreateConversation(f.Ctx, conversation.CreateConversationRequest{
-		ID: "chat-" + uuid.NewString()[:8], Scope: f.Scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
+		ID: "chat-" + uuid.NewString()[:8], Scope: f.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"},
 		Title: "Reply guard", IdempotencyKey: "reply-guard-" + uuid.NewString()[:8],
 	})
 	if err != nil {
@@ -47,35 +48,35 @@ func newReplyGuardFixture(t *testing.T, store KernelStore) *replyGuardFixture {
 	return f
 }
 
-func (f *replyGuardFixture) guard() *ReplyRunGuard {
-	return &ReplyRunGuard{Scope: f.Scope, RunID: f.Run.ID, WorkerID: actiontest.LoopStoreWorker, ConcurrencyKey: f.Run.ConcurrencyKey,
+func (f *replyGuardFixture) guard() *models.ReplyRunGuard {
+	return &models.ReplyRunGuard{Scope: f.Scope, RunID: f.Run.ID, WorkerID: actiontest.LoopStoreWorker, ConcurrencyKey: f.Run.ConcurrencyKey,
 		InterventionCount: len(f.Run.PendingInterventions)}
 }
 
 // reply is the final reply commit for the current conversation revision.
-func (f *replyGuardFixture) reply(key string, guard *ReplyRunGuard) ChannelMessageCommitRecord {
+func (f *replyGuardFixture) reply(key string, guard *models.ReplyRunGuard) models.ChannelMessageCommitRecord {
 	f.T.Helper()
 	current, err := f.conversations.GetConversation(f.Ctx, f.Scope, f.conversation.ID)
 	if err != nil {
 		f.T.Fatal(err)
 	}
 	now := time.Now().UTC()
-	message := &ChannelMessage{
+	message := &models.ChannelMessage{
 		ID: "message-" + key, Scope: f.Scope, ConversationID: current.ID, Sequence: current.LastSequence + 1,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent"}, Intent: MessageIntentAnswer,
-		Content: "Here is the answer", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "agent"}, Intent: models.MessageIntentAnswer,
+		Content: "Here is the answer", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		IdempotencyKey: key, CreatedAt: now,
 	}
-	next := cloneConversation(current)
+	next := models.CloneConversation(current)
 	next.Revision, next.LastSequence, next.UpdatedAt = current.Revision+1, message.Sequence, now
-	return ChannelMessageCommitRecord{Conversation: next, ExpectedRevision: current.Revision, Message: message, RunGuard: guard}
+	return models.ChannelMessageCommitRecord{Conversation: next, ExpectedRevision: current.Revision, Message: message, RunGuard: guard}
 }
 
 // mutateRun rewrites the Run outside its lease.
-func (f *replyGuardFixture) mutateRun(mutate func(*AgentRun)) {
+func (f *replyGuardFixture) mutateRun(mutate func(*models.AgentRun)) {
 	f.T.Helper()
 	current := f.CurrentRun()
-	updated := cloneAgentRun(current)
+	updated := models.CloneAgentRun(current)
 	mutate(updated)
 	updated.Revision++
 	updated.UpdatedAt = f.Now
@@ -85,7 +86,7 @@ func (f *replyGuardFixture) mutateRun(mutate func(*AgentRun)) {
 	f.Run = f.CurrentRun()
 }
 
-func (f *replyGuardFixture) requireNotCommitted(key string, before *Conversation) {
+func (f *replyGuardFixture) requireNotCommitted(key string, before *models.Conversation) {
 	f.T.Helper()
 	message, err := f.conversations.FindChannelMessageByIdempotencyKey(f.Ctx, f.Scope, f.conversation.ID, key)
 	if err != nil || message != nil {
@@ -110,27 +111,29 @@ func TestReplyRunGuardCommitsWhileRunHolds(t *testing.T) {
 func TestReplyRunGuardRefusesWithoutCommit(t *testing.T) {
 	cases := []struct {
 		name  string
-		setup func(*replyGuardFixture, *ReplyRunGuard)
+		setup func(*replyGuardFixture, *models.ReplyRunGuard)
 	}{
-		{"intervention arrived", func(f *replyGuardFixture, _ *ReplyRunGuard) {
-			f.mutateRun(func(run *AgentRun) {
-				run.PendingInterventions = append(run.PendingInterventions, AgentRunIntervention{
-					ID: "steer-1", Actor: ActivityActor{Type: "user", ID: "user"}, Instruction: "Use the other file", CreatedAt: f.Now,
+		{"intervention arrived", func(f *replyGuardFixture, _ *models.ReplyRunGuard) {
+			f.mutateRun(func(run *models.AgentRun) {
+				run.PendingInterventions = append(run.PendingInterventions, models.AgentRunIntervention{
+					ID: "steer-1", Actor: models.ActivityActor{Type: "user", ID: "user"}, Instruction: "Use the other file", CreatedAt: f.Now,
 				})
 			})
 		}},
-		{"other worker", func(_ *replyGuardFixture, guard *ReplyRunGuard) { guard.WorkerID = "other-worker" }},
-		{"lease expired", func(f *replyGuardFixture, _ *ReplyRunGuard) {
-			f.mutateRun(func(run *AgentRun) {
+		{"other worker", func(_ *replyGuardFixture, guard *models.ReplyRunGuard) { guard.WorkerID = "other-worker" }},
+		{"lease expired", func(f *replyGuardFixture, _ *models.ReplyRunGuard) {
+			f.mutateRun(func(run *models.AgentRun) {
 				expired := time.Now().UTC().Add(-time.Minute)
 				run.LeaseExpiresAt = &expired
 			})
 		}},
-		{"lane moved", func(f *replyGuardFixture, _ *ReplyRunGuard) {
-			f.mutateRun(func(run *AgentRun) { run.ConcurrencyKey = "conversation-task:promoted" })
+		{"lane moved", func(f *replyGuardFixture, _ *models.ReplyRunGuard) {
+			f.mutateRun(func(run *models.AgentRun) { run.ConcurrencyKey = "conversation-task:promoted" })
 		}},
-		{"run parked", func(f *replyGuardFixture, _ *ReplyRunGuard) { f.SetRunStatus(AgentRunStatusWaitingForEvent) }},
-		{"run canceled", func(f *replyGuardFixture, _ *ReplyRunGuard) { f.SetRunStatus(AgentRunStatusCanceled) }},
+		{"run parked", func(f *replyGuardFixture, _ *models.ReplyRunGuard) {
+			f.SetRunStatus(models.AgentRunStatusWaitingForEvent)
+		}},
+		{"run canceled", func(f *replyGuardFixture, _ *models.ReplyRunGuard) { f.SetRunStatus(models.AgentRunStatusCanceled) }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -142,7 +145,7 @@ func TestReplyRunGuardRefusesWithoutCommit(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := store.CommitChannelMessage(f.Ctx, f.reply("final", guard)); !errors.Is(err, ErrSteeringArrived) {
+				if _, err := store.CommitChannelMessage(f.Ctx, f.reply("final", guard)); !errors.Is(err, models.ErrSteeringArrived) {
 					t.Fatalf("guarded reply error = %v, want ErrSteeringArrived", err)
 				}
 				f.requireNotCommitted("final", before)
@@ -161,7 +164,7 @@ func TestReplyRunGuardReplayReturnsStoredMessageWithoutGuard(t *testing.T) {
 		}
 		// The Run has since moved on: the guard would now fail, but the
 		// reply is already posted, so the replay returns it.
-		f.SetRunStatus(AgentRunStatusCompleted)
+		f.SetRunStatus(models.AgentRunStatusCompleted)
 		replayed, err := store.CommitChannelMessage(f.Ctx, record)
 		if err != nil || !replayed.Replayed || replayed.Message.ID != first.Message.ID {
 			t.Fatalf("replay = %#v, %v", replayed, err)
@@ -174,14 +177,14 @@ func TestReplyRunGuardMissingRunAndNilGuard(t *testing.T) {
 		store := f.conversations
 		missing := f.guard()
 		missing.RunID = "no-such-run"
-		if _, err := store.CommitChannelMessage(f.Ctx, f.reply("missing", missing)); !errors.Is(err, ErrRunNotFound) {
+		if _, err := store.CommitChannelMessage(f.Ctx, f.reply("missing", missing)); !errors.Is(err, models.ErrRunNotFound) {
 			t.Fatalf("missing Run error = %v", err)
 		}
-		if _, err := store.CommitChannelMessage(f.Ctx, f.reply("invalid", &ReplyRunGuard{Scope: f.Scope, RunID: f.Run.ID})); !errors.Is(err, ErrInvalidConversation) {
+		if _, err := store.CommitChannelMessage(f.Ctx, f.reply("invalid", &models.ReplyRunGuard{Scope: f.Scope, RunID: f.Run.ID})); !errors.Is(err, models.ErrInvalidConversation) {
 			t.Fatalf("guard without worker error = %v", err)
 		}
 		// Without a guard the Run is not consulted at all.
-		f.SetRunStatus(AgentRunStatusCanceled)
+		f.SetRunStatus(models.AgentRunStatusCanceled)
 		if result, err := store.CommitChannelMessage(f.Ctx, f.reply("unguarded", nil)); err != nil || result.Replayed {
 			t.Fatalf("unguarded commit = %#v, %v", result, err)
 		}

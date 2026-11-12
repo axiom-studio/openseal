@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -14,9 +15,9 @@ import (
 func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing.T) {
 	for _, fixture := range []struct {
 		name  string
-		store func(*testing.T) KernelStore
+		store func(*testing.T) models.KernelStore
 	}{
-		{name: "sqlite", store: func(t *testing.T) KernelStore {
+		{name: "sqlite", store: func(t *testing.T) models.KernelStore {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "conversation-archive.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -27,27 +28,27 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
-			service := conversation.NewConversationService(store.(ConversationStore))
+			service := conversation.NewConversationService(store.(models.ConversationStore))
 			ctx := context.Background()
-			scope := Scope{Kind: "tenant", ID: "archive"}
-			seedTestSpace(t, store.(SpaceStore), scope)
+			scope := models.Scope{Kind: "tenant", ID: "archive"}
+			seedTestSpace(t, store.(models.SpaceStore), scope)
 			start := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
 			request := conversation.ImportConversationArchiveRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
+				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"},
 				Title:          "Imported launch history",
 				Source:         conversation.ConversationArchiveSource{System: "legacy-system", ResourceType: "team-chat", ResourceID: "conversation-42"},
 				IdempotencyKey: "legacy-system-team-chat-conversation-42",
 				Messages: []conversation.ConversationArchiveMessage{
 					{
-						RecordID: "message-1", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "23"},
-						Intent: MessageIntentQuestion, Content: "Is the launch ready?",
-						Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true, CreatedAt: start,
+						RecordID: "message-1", Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "23"},
+						Intent: models.MessageIntentQuestion, Content: "Is the launch ready?",
+						Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, RequiresResponse: true, CreatedAt: start,
 					},
 					{
-						RecordID: "message-2", Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "37"},
+						RecordID: "message-2", Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "37"},
 						SenderDisplayName: "Release accountant",
-						Intent:            MessageIntentAnswer, Content: "The signed evidence is attached.",
-						Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToRecordID: "message-1", CreatedAt: start.Add(time.Minute),
+						Intent:            models.MessageIntentAnswer, Content: "The signed evidence is attached.",
+						Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToRecordID: "message-1", CreatedAt: start.Add(time.Minute),
 					},
 				},
 			}
@@ -69,7 +70,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 			if !answer.Historical || answer.SenderDisplayName != "Release accountant" || !answer.CreatedAt.Equal(start.Add(time.Minute)) ||
 				answer.ReplyToMessageID != resumed.Messages[0].ID ||
 				answer.ThreadRootID != resumed.Messages[0].ID || len(answer.References) != 1 ||
-				answer.References[0].Kind != ConversationReferenceExternalSource ||
+				answer.References[0].Kind != models.ConversationReferenceExternalSource ||
 				answer.References[0].ID != "legacy-system:team-chat:conversation-42:message-2" {
 				t.Fatalf("imported answer = %#v", answer)
 			}
@@ -79,7 +80,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 				len(replayed.Messages) != 2 {
 				t.Fatalf("replayed import = %#v, %v", replayed, err)
 			}
-			scheduler, err := conversationrun.NewConversationRunScheduler(store.(ConversationStore), store, conversationrun.ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewConversationRunScheduler(store.(models.ConversationStore), store, conversationrun.ConversationRunSchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,7 +88,7 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 			if err != nil || reconciled.Scheduled != 0 || reconciled.Skipped != 2 {
 				t.Fatalf("historical reconciliation = %#v, %v", reconciled, err)
 			}
-			runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation})
+			runs, err := store.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, Kind: models.RunKindConversation})
 			if err != nil || len(runs) != 0 {
 				t.Fatalf("historical Runs = %#v, %v", runs, err)
 			}
@@ -97,14 +98,14 @@ func TestConversationArchiveImportIsProvenanceLinkedAndCrashResumable(t *testing
 
 func TestConversationArchiveImportRejectsUnknownReplyAndDuplicateRecords(t *testing.T) {
 	store := newTestKernelStore(t)
-	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "archive"})
+	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "archive"})
 	service := conversation.NewConversationService(store)
 	base := conversation.ImportConversationArchiveRequest{
-		Scope: Scope{Kind: "tenant", ID: "archive"}, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"},
+		Scope: models.Scope{Kind: "tenant", ID: "archive"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"},
 		Title: "Imported history", Source: conversation.ConversationArchiveSource{System: "source", ResourceType: "chat", ResourceID: "1"},
 		IdempotencyKey: "archive-1", Messages: []conversation.ConversationArchiveMessage{{
-			RecordID: "message-1", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "23"},
-			Intent: MessageIntentUpdate, Content: "Status", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			RecordID: "message-1", Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "23"},
+			Intent: models.MessageIntentUpdate, Content: "Status", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 			CreatedAt: time.Now().UTC(), ReplyToRecordID: "missing",
 		}},
 	}

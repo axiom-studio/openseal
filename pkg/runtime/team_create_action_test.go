@@ -18,6 +18,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/validation"
@@ -33,7 +34,7 @@ type teamCreateTestProvisioner struct {
 }
 
 func (p *teamCreateTestProvisioner) CreateTeamDeploymentInSpace(ctx context.Context, spaceID string, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
-	scope := Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
+	scope := models.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
 	agents := make([]string, 0, len(deployment.Roster))
 	for _, assignment := range deployment.Roster {
 		agents = append(agents, assignment.AgentDeploymentID)
@@ -46,7 +47,7 @@ func (p *teamCreateTestProvisioner) CreateTeamDeploymentInSpace(ctx context.Cont
 		return nil, nil, err
 	}
 	p.teamCreates++
-	if _, _, err := p.Spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: SpaceMemberTeam, MemberID: created.ID}); err != nil {
+	if _, _, err := p.Spaces.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: models.SpaceMemberTeam, MemberID: created.ID}); err != nil {
 		return nil, nil, err
 	}
 	return created, activation, nil
@@ -69,12 +70,12 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 	for _, binding := range []*skill.Binding{
 		{
 			ID: "bundled:teams", Revision: 1, Scope: skillScope, DeploymentID: "finn",
-			SkillID: TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion,
+			SkillID: models.TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion,
 			AllowedActions: []string{action.TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
 		},
 		{
 			ID: "bundled:teams", Revision: 1, Scope: skillScope, DeploymentID: "researcher",
-			SkillID: TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion,
+			SkillID: models.TeamManagementSkillID, SkillVersion: action.TeamManagementSkillVersion,
 			AllowedActions: []string{action.TeamActionCreateTeam}, MaximumRisk: skill.RiskLevelWrite,
 		},
 	} {
@@ -84,7 +85,7 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 	}
 	for _, spaceID := range []string{base.HomeID, base.SalesID} {
 		for _, agentID := range []string{"researcher", "platform"} {
-			if _, _, err := base.Spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: base.Scope, SpaceID: spaceID, Type: SpaceMemberAgent, MemberID: agentID}); err != nil {
+			if _, _, err := base.Spaces.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: base.Scope, SpaceID: spaceID, Type: models.SpaceMemberAgent, MemberID: agentID}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -105,7 +106,7 @@ func newTeamCreateFixture(t *testing.T) *teamCreateFixture {
 func (f *teamCreateFixture) teamBound(t *testing.T, deploymentID string) *skill.BoundAction {
 	t.Helper()
 	bound, err := f.Catalog.Resolve(context.Background(), skill.ScopeReference{Kind: f.Scope.Kind, ID: f.Scope.ID}, deploymentID,
-		TeamManagementSkillID, action.TeamManagementSkillVersion, action.TeamActionCreateTeam)
+		models.TeamManagementSkillID, action.TeamManagementSkillVersion, action.TeamActionCreateTeam)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,17 +133,17 @@ func (f *teamCreateFixture) proposeTeam(t *testing.T, arguments map[string]inter
 	return preview, input.Arguments, err
 }
 
-func (f *teamCreateFixture) executeTeam(t *testing.T, callID string, arguments map[string]interface{}, approver ApprovalPrincipal) (map[string]interface{}, error) {
+func (f *teamCreateFixture) executeTeam(t *testing.T, callID string, arguments map[string]interface{}, approver models.ApprovalPrincipal) (map[string]interface{}, error) {
 	t.Helper()
-	call := &ActionCall{
-		ID: callID, Scope: f.Scope, RunID: f.Run.ID, DeploymentID: "finn", SkillID: TeamManagementSkillID,
+	call := &models.ActionCall{
+		ID: callID, Scope: f.Scope, RunID: f.Run.ID, DeploymentID: "finn", SkillID: models.TeamManagementSkillID,
 		SkillVersion: action.TeamManagementSkillVersion, Action: action.TeamActionCreateTeam, Arguments: arguments,
 		ApprovalID: "approval-" + callID,
 	}
 	decider := approver
-	f.Store.Approvals[call.ApprovalID] = &ApprovalCheckpoint{
+	f.Store.Approvals[call.ApprovalID] = &models.ApprovalCheckpoint{
 		ID: call.ApprovalID, Scope: f.Scope, RunID: f.Run.ID, ActionCallID: callID,
-		Status: ApprovalStatusApproved, DecisionBy: &decider,
+		Status: models.ApprovalStatusApproved, DecisionBy: &decider,
 	}
 	return f.Dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{
 		Call: call, Run: f.Run, Bound: f.teamBound(t, "finn"), Arguments: arguments,
@@ -156,7 +157,7 @@ func (f *teamCreateFixture) teamInSpace(t *testing.T, spaceID, teamID string) bo
 		t.Fatal(err)
 	}
 	for _, member := range members {
-		if member.Type == SpaceMemberTeam && member.ID == teamID {
+		if member.Type == models.SpaceMemberTeam && member.ID == teamID {
 			return true
 		}
 	}
@@ -195,7 +196,7 @@ func TestTeamCreatePreview(t *testing.T) {
 		"rationale": "The person wants a launch team."
 	}`, f.SalesID))
 	// The preview is what the D11 approval rule and the drafts rail key on.
-	if !models.IsAgentBuilderApproval(&ApprovalCheckpoint{ProposedAction: preview}) {
+	if !models.IsAgentBuilderApproval(&models.ApprovalCheckpoint{ProposedAction: preview}) {
 		t.Fatal("create_team preview is not recognised as an agent-builder card")
 	}
 }
@@ -374,7 +375,7 @@ func TestTeamCreateRefusesNonUserApprover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.executeTeam(t, "call-role", arguments, ApprovalPrincipal{Type: "role", ID: "admins"}); err == nil ||
+	if _, err := f.executeTeam(t, "call-role", arguments, models.ApprovalPrincipal{Type: "role", ID: "admins"}); err == nil ||
 		!strings.Contains(err.Error(), "only by a person") {
 		t.Fatalf("role approver err = %v", err)
 	}
@@ -407,16 +408,16 @@ func TestTeamCreateFailsWhenNameTakenWhileWaiting(t *testing.T) {
 func TestTeamCreateRefusesAgentsOutsideTheSpace(t *testing.T) {
 	ctx := context.Background()
 	f := newTeamCreateFixture(t)
-	ops, err := f.Spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: f.Scope, Name: "Ops", Look: DefaultSpaceLook, OwnerID: "operator"})
+	ops, err := f.Spaces.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: f.Scope, Name: "Ops", Look: models.DefaultSpaceLook, OwnerID: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := f.Spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: f.Scope, SpaceID: ops.ID, Type: SpaceMemberAgent, MemberID: "researcher"}); err != nil {
+	if _, _, err := f.Spaces.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: f.Scope, SpaceID: ops.ID, Type: models.SpaceMemberAgent, MemberID: "researcher"}); err != nil {
 		t.Fatal(err)
 	}
 	// The card is refused before review, and so is a Team approved while
 	// one of its Agents left the space.
-	if _, _, err := f.proposeTeam(t, teamCreateArgumentsFor(ops.ID)); !errors.Is(err, ErrTeamAgentOutsideSpace) ||
+	if _, _, err := f.proposeTeam(t, teamCreateArgumentsFor(ops.ID)); !errors.Is(err, models.ErrTeamAgentOutsideSpace) ||
 		!strings.Contains(err.Error(), `agent "platform" is not in space "Ops"`) {
 		t.Fatalf("propose err = %v", err)
 	}
@@ -424,10 +425,10 @@ func TestTeamCreateRefusesAgentsOutsideTheSpace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Spaces.DeleteSpaceMember(ctx, DeleteSpaceMemberRequest{Scope: f.Scope, SpaceID: f.SalesID, Type: SpaceMemberAgent, MemberID: "platform"}); err != nil {
+	if err := f.Spaces.DeleteSpaceMember(ctx, portfolio.DeleteSpaceMemberRequest{Scope: f.Scope, SpaceID: f.SalesID, Type: models.SpaceMemberAgent, MemberID: "platform"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.executeTeam(t, "call-outside", arguments, agentbuildertest.Approver); !errors.Is(err, ErrTeamAgentOutsideSpace) {
+	if _, err := f.executeTeam(t, "call-outside", arguments, agentbuildertest.Approver); !errors.Is(err, models.ErrTeamAgentOutsideSpace) {
 		t.Fatalf("execute err = %v", err)
 	}
 	if f.teamProvision.teamCreates != 0 {
@@ -439,7 +440,7 @@ func TestTeamCreateRefusesAgentsOutsideTheSpace(t *testing.T) {
 // builds: the name's slug and a digest of the scope and the call, so a
 // replay of the call converges on the same Team. The tests spell it out to
 // pin that id.
-func builtTeamDefinitionID(scope Scope, displayName, callID string) string {
+func builtTeamDefinitionID(scope models.Scope, displayName, callID string) string {
 	digest := sha256.Sum256([]byte(scope.Kind + ":" + scope.ID + ":" + callID))
 	return "team-" + kernelteam.MemberSlug(displayName) + "-" + hex.EncodeToString(digest[:])[:8]
 }

@@ -40,11 +40,11 @@ type mediaContent struct {
 	byRef map[string][]byte
 }
 
-func (c *mediaContent) Put(context.Context, ArtifactContentWrite) (ArtifactStoredContent, error) {
-	return ArtifactStoredContent{}, fmt.Errorf("media content is read-only")
+func (c *mediaContent) Put(context.Context, models.ArtifactContentWrite) (models.ArtifactStoredContent, error) {
+	return models.ArtifactStoredContent{}, fmt.Errorf("media content is read-only")
 }
 
-func (c *mediaContent) Open(_ context.Context, _ Scope, ref string) (io.ReadCloser, error) {
+func (c *mediaContent) Open(_ context.Context, _ models.Scope, ref string) (io.ReadCloser, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	data, ok := c.byRef[ref]
@@ -82,7 +82,7 @@ type mediaFixture struct {
 	vision  bool
 }
 
-func newMediaFixture(t *testing.T, store KernelStore, vision bool, rules ...*looptest.ModelRule) *mediaFixture {
+func newMediaFixture(t *testing.T, store models.KernelStore, vision bool, rules ...*looptest.ModelRule) *mediaFixture {
 	t.Helper()
 	f := &mediaFixture{Fixture: looptest.NewFixture(t, store, looptest.WithRules(rules...)), content: &mediaContent{byRef: map[string][]byte{}}, vision: vision}
 	// The kit's conversation turn runner, reading attachments from content.
@@ -98,30 +98,30 @@ func newMediaFixture(t *testing.T, store KernelStore, vision bool, rules ...*loo
 
 // putArtifact stores version 1 of an artifact whose record says mediaType and
 // digest, served with data.
-func (f *mediaFixture) putArtifact(id, mediaType string, data []byte, recordDigest string) ConversationReference {
+func (f *mediaFixture) putArtifact(id, mediaType string, data []byte, recordDigest string) models.ConversationReference {
 	f.T.Helper()
-	artifacts, ok := f.Raw.(ArtifactStore)
+	artifacts, ok := f.Raw.(models.ArtifactStore)
 	if !ok {
 		f.T.Fatalf("%T is not an artifact store", f.Raw)
 	}
 	ref := "object-store:" + id
 	f.content.set(ref, data)
-	artifact := &Artifact{
+	artifact := &models.Artifact{
 		ID: id, Version: 1, Scope: f.Scope, Name: id + ".png", MediaType: mediaType, ContentRef: ref,
-		SizeBytes: int64(len(data)), Digest: recordDigest, Classification: ArtifactClassificationInternal,
-		Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "user", ID: looptest.FixtureUser}}, CreatedAt: f.Clock.Now(),
+		SizeBytes: int64(len(data)), Digest: recordDigest, Classification: models.ArtifactClassificationInternal,
+		Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "user", ID: looptest.FixtureUser}}, CreatedAt: f.Clock.Now(),
 	}
 	if err := artifacts.CreateArtifactVersion(f.Ctx, artifact, 0); err != nil {
 		f.T.Fatalf("store artifact %s: %v", id, err)
 	}
-	return ConversationReference{Kind: ConversationReferenceArtifact, ID: id, Version: 1}
+	return models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: id, Version: 1}
 }
 
 // startChatWithAttachments posts text with references as ana and schedules it.
-func (f *mediaFixture) startChatWithAttachments(text string, refs ...ConversationReference) (*Conversation, *AgentRun) {
+func (f *mediaFixture) startChatWithAttachments(text string, refs ...models.ConversationReference) (*models.Conversation, *models.AgentRun) {
 	f.T.Helper()
 	conversation, _, err := f.Convs.CreateConversation(f.Ctx, runtimeconversation.CreateConversationRequest{
-		Scope: f.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: looptest.FixtureAgent}, Title: "Media chat",
+		Scope: f.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: looptest.FixtureAgent}, Title: "Media chat",
 		IdempotencyKey: "media-chat-" + fmt.Sprint(f.Clock.Now().UnixNano()),
 	})
 	if err != nil {
@@ -129,8 +129,8 @@ func (f *mediaFixture) startChatWithAttachments(text string, refs ...Conversatio
 	}
 	posted, err := f.Convs.PostChannelMessage(f.Ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: looptest.FixtureUser}, Intent: MessageIntentQuestion,
-		Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, References: refs,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: looptest.FixtureUser}, Intent: models.MessageIntentQuestion,
+		Content: text, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, References: refs,
 		IdempotencyKey: "media-post-" + conversation.ID,
 	})
 	if err != nil {
@@ -148,20 +148,20 @@ func (f *mediaFixture) bind(binding *agentrun.TurnRunnerBinding) {
 	}
 	vision := f.vision
 	producer.Media = modelstep.ModelStepMedia{
-		Artifacts: f.Raw.(ArtifactStore), Content: f.content,
-		ImageInput: func(context.Context, agentrun.StepInput, ModelStepRequest) bool { return vision },
+		Artifacts: f.Raw.(models.ArtifactStore), Content: f.content,
+		ImageInput: func(context.Context, agentrun.StepInput, models.ModelStepRequest) bool { return vision },
 	}
 }
 
 // drive claims until the Run is terminal or waiting.
-func (f *mediaFixture) drive(runID string, maxClaims int) *AgentRun {
+func (f *mediaFixture) drive(runID string, maxClaims int) *models.AgentRun {
 	f.T.Helper()
 	for i := 0; i < maxClaims; i++ {
 		exit, run := f.RunClaimWith(f.Ctx, runID, f.bind)
 		if exit.Err != nil && exit.Reason != runloop.RunLoopExitRequeued {
 			f.T.Fatalf("claim %d exited %s: %v", i+1, exit.Reason, exit.Err)
 		}
-		if run.Status != AgentRunStatusQueued {
+		if run.Status != models.AgentRunStatusQueued {
 			return run
 		}
 		f.Clock.Advance(time.Second)
@@ -171,18 +171,18 @@ func (f *mediaFixture) drive(runID string, maxClaims int) *AgentRun {
 }
 
 // imageParts is every image part of the view's user and tool entries.
-func viewImageParts(v looptest.StepView) (user, tool []ContentPart) {
+func viewImageParts(v looptest.StepView) (user, tool []models.ContentPart) {
 	for _, e := range v.Request().Entries {
 		switch {
-		case e.Type == SessionEntryUser && e.User != nil:
+		case e.Type == models.SessionEntryUser && e.User != nil:
 			for _, p := range e.User.Content {
-				if p.Type == ContentPartImage {
+				if p.Type == models.ContentPartImage {
 					user = append(user, p)
 				}
 			}
-		case e.Type == SessionEntryTool && e.Tool != nil:
+		case e.Type == models.SessionEntryTool && e.Tool != nil:
 			for _, p := range e.Tool.Result.Content {
-				if p.Type == ContentPartImage {
+				if p.Type == models.ContentPartImage {
 					tool = append(tool, p)
 				}
 			}
@@ -196,9 +196,9 @@ func viewText(v looptest.StepView) string {
 	var b strings.Builder
 	for _, e := range v.Request().Entries {
 		switch {
-		case e.Type == SessionEntryUser && e.User != nil:
+		case e.Type == models.SessionEntryUser && e.User != nil:
 			b.WriteString(looptest.PartsText(e.User.Content) + "\n")
-		case e.Type == SessionEntryTool && e.Tool != nil:
+		case e.Type == models.SessionEntryTool && e.Tool != nil:
 			b.WriteString(looptest.PartsText(e.Tool.Result.Content) + "\n")
 		}
 	}
@@ -206,19 +206,19 @@ func viewText(v looptest.StepView) string {
 }
 
 // storedImageParts is every image part of the Run's stored entries.
-func storedImageParts(f *looptest.Fixture, runID string) (user, tool []ContentPart) {
+func storedImageParts(f *looptest.Fixture, runID string) (user, tool []models.ContentPart) {
 	f.T.Helper()
 	for _, entry := range f.Entries(runID) {
 		switch {
-		case entry.Type == SessionEntryUser && entry.User != nil:
+		case entry.Type == models.SessionEntryUser && entry.User != nil:
 			for _, p := range entry.User.Content {
-				if p.Type == ContentPartImage {
+				if p.Type == models.ContentPartImage {
 					user = append(user, p)
 				}
 			}
-		case entry.Type == SessionEntryTool && entry.Tool != nil && entry.Tool.Result != nil:
+		case entry.Type == models.SessionEntryTool && entry.Tool != nil && entry.Tool.Result != nil:
 			for _, p := range entry.Tool.Result.Content {
-				if p.Type == ContentPartImage {
+				if p.Type == models.ContentPartImage {
 					tool = append(tool, p)
 				}
 			}
@@ -261,10 +261,10 @@ func screenshotOutput(data []byte) func(agentrun.ActionDispatchInput) (map[strin
 // "[image omitted]" placeholder. The session never stores the bytes.
 func TestLoopMediaProvenanceOnEntries(t *testing.T) {
 	t.Run("attachment", func(t *testing.T) {
-		looptest.EachStore(t, "media_attachment", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "media_attachment", func(t *testing.T, store models.KernelStore) {
 			chart := mediaPNG(t, 3, 2)
 			encoded := base64.StdEncoding.EncodeToString(chart)
-			f := newMediaFixture(t, store, true, &looptest.ModelRule{Name: "look", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
+			f := newMediaFixture(t, store, true, &looptest.ModelRule{Name: "look", When: stepPurpose, Reply: func(v looptest.StepView) models.ModelStepResult {
 				user, _ := viewImageParts(v)
 				if len(user) != 1 || user[0].DataBase64 != encoded || user[0].ArtifactID != "chart" || user[0].ArtifactVersion != "1" || user[0].SHA256 != mediaDigest(chart) {
 					t.Errorf("step image parts = %#v", user)
@@ -274,7 +274,7 @@ func TestLoopMediaProvenanceOnEntries(t *testing.T) {
 			ref := f.putArtifact("chart", "image/png", chart, "sha256:"+mediaDigest(chart))
 			conversation, run := f.startChatWithAttachments("What is in this chart?", ref)
 			done := f.drive(run.ID, 3)
-			f.MustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
 
 			user, _ := storedImageParts(f.Fixture, run.ID)
 			if len(user) != 1 {
@@ -291,14 +291,14 @@ func TestLoopMediaProvenanceOnEntries(t *testing.T) {
 	})
 
 	t.Run("governed_screenshot", func(t *testing.T) {
-		looptest.EachStore(t, "media_screenshot", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "media_screenshot", func(t *testing.T, store models.KernelStore) {
 			shot := mediaPNG(t, 4, 4)
 			encoded := base64.StdEncoding.EncodeToString(shot)
 			f := newMediaFixture(t, store, true,
 				&looptest.ModelRule{Name: "answer", When: func(v looptest.StepView) bool {
 					_, _, ok := v.ToolResult(looptest.GovernedTool(v, "lookup"))
 					return ok
-				}, Reply: func(v looptest.StepView) ModelStepResult {
+				}, Reply: func(v looptest.StepView) models.ModelStepResult {
 					_, tool := viewImageParts(v)
 					if len(tool) != 1 || tool[0].DataBase64 != encoded || tool[0].ActionCallID == "" || tool[0].ArtifactID != "" || tool[0].SHA256 != mediaDigest(shot) {
 						t.Errorf("step tool image parts = %#v", tool)
@@ -308,17 +308,17 @@ func TestLoopMediaProvenanceOnEntries(t *testing.T) {
 					}
 					return looptest.Say("The page shows issue 9.")
 				}},
-				&looptest.ModelRule{Name: "lookup", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
+				&looptest.ModelRule{Name: "lookup", When: stepPurpose, Reply: func(v looptest.StepView) models.ModelStepResult {
 					return looptest.Act("Looking.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "9"}))
 				}},
 			)
 			f.Dispatch.On("lookup", screenshotOutput(shot))
 			conversation, run := f.startChatWithAttachments("Show me issue 9")
 			done := f.drive(run.ID, 3)
-			f.MustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
 
 			calls := f.Calls(run.ID)
-			if len(calls) != 1 || calls[0].Status != ActionCallStatusSucceeded {
+			if len(calls) != 1 || calls[0].Status != models.ActionCallStatusSucceeded {
 				t.Fatalf("calls = %#v", calls)
 			}
 			_, tool := storedImageParts(f.Fixture, run.ID)
@@ -333,14 +333,14 @@ func TestLoopMediaProvenanceOnEntries(t *testing.T) {
 	})
 
 	t.Run("text_only_model", func(t *testing.T) {
-		looptest.EachStore(t, "media_text_only", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "media_text_only", func(t *testing.T, store models.KernelStore) {
 			chart, shot := mediaPNG(t, 3, 2), mediaPNG(t, 4, 4)
 			omitted := "[image omitted: image/png]"
 			f := newMediaFixture(t, store, false,
 				&looptest.ModelRule{Name: "answer", When: func(v looptest.StepView) bool {
 					_, _, ok := v.ToolResult(looptest.GovernedTool(v, "lookup"))
 					return ok
-				}, Reply: func(v looptest.StepView) ModelStepResult {
+				}, Reply: func(v looptest.StepView) models.ModelStepResult {
 					if user, tool := viewImageParts(v); len(user)+len(tool) != 0 {
 						t.Errorf("a text-only step got image parts: %#v %#v", user, tool)
 					}
@@ -349,7 +349,7 @@ func TestLoopMediaProvenanceOnEntries(t *testing.T) {
 					}
 					return looptest.Say("I can't see images here.")
 				}},
-				&looptest.ModelRule{Name: "lookup", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
+				&looptest.ModelRule{Name: "lookup", When: stepPurpose, Reply: func(v looptest.StepView) models.ModelStepResult {
 					if user, _ := viewImageParts(v); len(user) != 0 || !strings.Contains(viewText(v), omitted) {
 						t.Errorf("a text-only step saw the attachment: %#v / %s", user, viewText(v))
 					}
@@ -360,7 +360,7 @@ func TestLoopMediaProvenanceOnEntries(t *testing.T) {
 			ref := f.putArtifact("chart", "image/png", chart, "sha256:"+mediaDigest(chart))
 			_, run := f.startChatWithAttachments("What is in this chart?", ref)
 			done := f.drive(run.ID, 3)
-			f.MustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
 			// The references are stored either way; only the render differs.
 			user, tool := storedImageParts(f.Fixture, run.ID)
 			if len(user) != 1 || len(tool) != 1 {
@@ -379,7 +379,7 @@ func TestLoopMediaProvenanceOnEntries(t *testing.T) {
 // exactly one source and never carry bytes.
 func TestLoopArtifactMediaRequiresUnambiguousProvenance(t *testing.T) {
 	t.Run("attachments", func(t *testing.T) {
-		looptest.EachStore(t, "media_provenance", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "media_provenance", func(t *testing.T, store models.KernelStore) {
 			good, other := mediaPNG(t, 3, 2), mediaPNG(t, 5, 5)
 			encoded := base64.StdEncoding.EncodeToString(good)
 			unavailable := "[image unavailable: image/png]"
@@ -388,7 +388,7 @@ func TestLoopArtifactMediaRequiresUnambiguousProvenance(t *testing.T) {
 				&looptest.ModelRule{Name: "after_swap", When: func(v looptest.StepView) bool {
 					_, _, ok := v.ToolResult(looptest.GovernedTool(v, "lookup"))
 					return ok
-				}, Reply: func(v looptest.StepView) ModelStepResult {
+				}, Reply: func(v looptest.StepView) models.ModelStepResult {
 					if user, _ := viewImageParts(v); len(user) != 0 {
 						t.Errorf("changed bytes rendered as the pinned image: %#v", user)
 					}
@@ -397,7 +397,7 @@ func TestLoopArtifactMediaRequiresUnambiguousProvenance(t *testing.T) {
 					}
 					return looptest.Say("The chart is no longer available.")
 				}},
-				&looptest.ModelRule{Name: "first", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
+				&looptest.ModelRule{Name: "first", When: stepPurpose, Reply: func(v looptest.StepView) models.ModelStepResult {
 					user, _ := viewImageParts(v)
 					if len(user) != 1 || user[0].ArtifactID != "good" || user[0].DataBase64 != encoded {
 						t.Errorf("first step image parts = %#v", user)
@@ -413,14 +413,14 @@ func TestLoopArtifactMediaRequiresUnambiguousProvenance(t *testing.T) {
 					return looptest.Act("Checking.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "1"}))
 				}},
 			)
-			refs := []ConversationReference{
+			refs := []models.ConversationReference{
 				f.putArtifact("good", "image/png", good, "sha256:"+mediaDigest(good)),
 				f.putArtifact("tampered", "image/png", good, "sha256:"+mediaDigest(other)),
 				f.putArtifact("fake", "image/png", []byte("not an image"), "sha256:"+mediaDigest([]byte("not an image"))),
 			}
 			_, run := f.startChatWithAttachments("Compare these", refs...)
 			done := f.drive(run.ID, 3)
-			f.MustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
 
 			user, _ := storedImageParts(f.Fixture, run.ID)
 			if len(user) != 1 || user[0].ArtifactID != "good" || user[0].ArtifactVersion != "1" || user[0].SHA256 != mediaDigest(good) {
@@ -432,24 +432,24 @@ func TestLoopArtifactMediaRequiresUnambiguousProvenance(t *testing.T) {
 
 	t.Run("stored_parts", func(t *testing.T) {
 		data := mediaPNG(t, 2, 2)
-		entry := func(part ContentPart) *SessionEntry {
-			return &SessionEntry{
-				ID: "entry", Scope: Scope{Kind: "tenant", ID: "loop"}, SessionID: "session", RunID: "run", Type: SessionEntryUser,
-				User: &UserEntry{Origin: UserEntryGoal, Author: SessionAuthor{Type: "user", ID: looptest.FixtureUser},
-					Content: []ContentPart{{Type: ContentPartText, Text: "look"}, part}},
+		entry := func(part models.ContentPart) *models.SessionEntry {
+			return &models.SessionEntry{
+				ID: "entry", Scope: models.Scope{Kind: "tenant", ID: "loop"}, SessionID: "session", RunID: "run", Type: models.SessionEntryUser,
+				User: &models.UserEntry{Origin: models.UserEntryGoal, Author: models.SessionAuthor{Type: "user", ID: looptest.FixtureUser},
+					Content: []models.ContentPart{{Type: models.ContentPartText, Text: "look"}, part}},
 				Tokens: 1, CreatedAt: time.Now(),
 			}
 		}
-		image := ContentPart{Type: ContentPartImage, MediaType: "image/png", SHA256: mediaDigest(data)}
+		image := models.ContentPart{Type: models.ContentPartImage, MediaType: "image/png", SHA256: mediaDigest(data)}
 		ok := image
 		ok.ArtifactID, ok.ArtifactVersion = "chart", "1"
 		if err := entry(ok).Validate(); err != nil {
 			t.Fatalf("an artifact reference was refused: %v", err)
 		}
-		for name, change := range map[string]func(*ContentPart){
-			"no_source":   func(p *ContentPart) {},
-			"two_sources": func(p *ContentPart) { p.ArtifactID, p.ArtifactVersion, p.ActionCallID = "chart", "1", "call-1" },
-			"inline_bytes": func(p *ContentPart) {
+		for name, change := range map[string]func(*models.ContentPart){
+			"no_source":   func(p *models.ContentPart) {},
+			"two_sources": func(p *models.ContentPart) { p.ArtifactID, p.ArtifactVersion, p.ActionCallID = "chart", "1", "call-1" },
+			"inline_bytes": func(p *models.ContentPart) {
 				p.ArtifactID, p.ArtifactVersion, p.DataBase64 = "chart", "1", base64.StdEncoding.EncodeToString(data)
 			},
 		} {

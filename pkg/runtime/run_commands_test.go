@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -14,9 +16,9 @@ import (
 func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 	for _, fixture := range []struct {
 		name  string
-		store func(*testing.T) RunCommandStore
+		store func(*testing.T) models.RunCommandStore
 	}{
-		{name: "sqlite", store: func(t *testing.T) RunCommandStore {
+		{name: "sqlite", store: func(t *testing.T) models.RunCommandStore {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "commands.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -27,12 +29,12 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			ctx := context.Background()
-			scope := Scope{Kind: "tenant", ID: "one"}
-			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-1"}
+			scope := models.Scope{Kind: "tenant", ID: "one"}
+			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-1"}
 			service := agentrun.NewRunCommandService(fixture.store(t))
-			create := CreateAgentRunRequest{
+			create := models.CreateAgentRunRequest{
 				Scope: scope, Owner: owner, AssignedAgentID: owner.ID, ConcurrencyKey: "agent-1:operations", Goal: "Operate the service",
-				Source: RunSourceManual, IdempotencyKey: "run-one", Actor: ActivityActor{Type: "user", ID: "7"},
+				Source: models.RunSourceManual, IdempotencyKey: "run-one", Actor: models.ActivityActor{Type: "user", ID: "7"},
 			}
 			created, err := service.CreateAgentRun(ctx, create)
 			if err != nil {
@@ -41,7 +43,7 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			if created.Event == nil || created.Event.EventType != "run.created" || created.Event.Sequence != 1 {
 				t.Fatalf("creation event = %#v", created.Event)
 			}
-			if created.Run.Kind != RunKindAgentWork || created.Run.ConcurrencyKey != "agent-1:operations" {
+			if created.Run.Kind != models.RunKindAgentWork || created.Run.ConcurrencyKey != "agent-1:operations" {
 				t.Fatalf("created run = %#v", created.Run)
 			}
 			recovered, err := service.FindCreatedAgentRun(ctx, create)
@@ -62,47 +64,47 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			}
 			changed := create
 			changed.Goal = "Do different work"
-			if _, err := service.FindCreatedAgentRun(ctx, changed); !errors.Is(err, ErrRunIdempotency) {
+			if _, err := service.FindCreatedAgentRun(ctx, changed); !errors.Is(err, models.ErrRunIdempotency) {
 				t.Fatalf("recovery accepted changed work: %v", err)
 			}
-			if _, err := service.CreateAgentRun(ctx, changed); !errors.Is(err, ErrRunIdempotency) {
+			if _, err := service.CreateAgentRun(ctx, changed); !errors.Is(err, models.ErrRunIdempotency) {
 				t.Fatalf("conflicting replay error = %v", err)
 			}
 			changed = create
-			changed.Kind = RunKindConversation
-			if _, err := service.CreateAgentRun(ctx, changed); !errors.Is(err, ErrRunIdempotency) {
+			changed.Kind = models.RunKindConversation
+			if _, err := service.CreateAgentRun(ctx, changed); !errors.Is(err, models.ErrRunIdempotency) {
 				t.Fatalf("run kind replay conflict = %v", err)
 			}
 			changed = create
 			changed.ConcurrencyKey = "agent-1:other"
-			if _, err := service.CreateAgentRun(ctx, changed); !errors.Is(err, ErrRunIdempotency) {
+			if _, err := service.CreateAgentRun(ctx, changed); !errors.Is(err, models.ErrRunIdempotency) {
 				t.Fatalf("concurrency key replay conflict = %v", err)
 			}
 
 			paused, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 				Scope: scope, RunID: created.Run.ID, ExpectedRevision: created.Run.Revision, Kind: agentrun.AgentRunCommandPause,
-				Actor: ActivityActor{Type: "user", ID: "7"},
+				Actor: models.ActivityActor{Type: "user", ID: "7"},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if paused.Run.Status != AgentRunStatusPaused || paused.Run.PausedFrom != AgentRunStatusQueued || paused.Event.EventType != "run.paused" {
+			if paused.Run.Status != models.AgentRunStatusPaused || paused.Run.PausedFrom != models.AgentRunStatusQueued || paused.Event.EventType != "run.paused" {
 				t.Fatalf("paused result = %#v", paused)
 			}
 			if _, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 				Scope: scope, RunID: created.Run.ID, ExpectedRevision: created.Run.Revision, Kind: agentrun.AgentRunCommandResume,
-			}); !errors.Is(err, ErrRevisionConflict) {
+			}); !errors.Is(err, models.ErrRevisionConflict) {
 				t.Fatalf("stale command error = %v", err)
 			}
 
 			intervened, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 				Scope: scope, RunID: paused.Run.ID, ExpectedRevision: paused.Run.Revision, Kind: agentrun.AgentRunCommandIntervene,
-				Actor: ActivityActor{Type: "user", ID: "7"}, Instruction: "Prioritize the database check",
+				Actor: models.ActivityActor{Type: "user", ID: "7"}, Instruction: "Prioritize the database check",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if intervened.Run.Status != AgentRunStatusPaused || intervened.Run.PausedFrom != AgentRunStatusQueued || len(intervened.Run.PendingInterventions) != 1 {
+			if intervened.Run.Status != models.AgentRunStatusPaused || intervened.Run.PausedFrom != models.AgentRunStatusQueued || len(intervened.Run.PendingInterventions) != 1 {
 				t.Fatalf("intervened result = %#v", intervened)
 			}
 
@@ -112,7 +114,7 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if resumed.Run.Status != AgentRunStatusQueued || resumed.Run.PausedFrom != "" || resumed.Event.EventType != "run.resumed" {
+			if resumed.Run.Status != models.AgentRunStatusQueued || resumed.Run.PausedFrom != "" || resumed.Event.EventType != "run.resumed" {
 				t.Fatalf("resumed result = %#v", resumed)
 			}
 
@@ -122,7 +124,7 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if canceled.Run.Status != AgentRunStatusCanceled || canceled.Run.CompletedAt == nil || canceled.Event.EventType != "run.canceled" {
+			if canceled.Run.Status != models.AgentRunStatusCanceled || canceled.Run.CompletedAt == nil || canceled.Event.EventType != "run.canceled" {
 				t.Fatalf("canceled result = %#v", canceled)
 			}
 		})
@@ -132,9 +134,9 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 	for _, fixture := range []struct {
 		name  string
-		store func(*testing.T) RunCommandStore
+		store func(*testing.T) models.RunCommandStore
 	}{
-		{name: "sqlite", store: func(t *testing.T) RunCommandStore {
+		{name: "sqlite", store: func(t *testing.T) models.RunCommandStore {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "cascade.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -147,12 +149,12 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 			ctx := t.Context()
 			store := fixture.store(t)
 			service := agentrun.NewRunCommandService(store)
-			scope := Scope{Kind: "tenant", ID: "cascade"}
-			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
-			create := func(goal, parentID string) *AgentRun {
-				result, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
+			scope := models.Scope{Kind: "tenant", ID: "cascade"}
+			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
+			create := func(goal, parentID string) *models.AgentRun {
+				result, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
 					Scope: scope, ParentRunID: parentID, Owner: owner, AssignedAgentID: owner.ID,
-					Goal: goal, Source: RunSourceHandoff,
+					Goal: goal, Source: models.RunSourceHandoff,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -163,25 +165,25 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 			child := create("delegated work", root.ID)
 			grandchild := create("nested work", child.ID)
 			completed := create("already complete", root.ID)
-			activity := NewRunActivityService(store, store)
-			running, _, err := activity.TransitionRun(ctx, scope, completed.ID, RunTransitionRequest{
-				ExpectedRevision: completed.Revision, Status: AgentRunStatusRunning,
+			activity := runtimeactivity.NewRunActivityService(store, store)
+			running, _, err := activity.TransitionRun(ctx, scope, completed.ID, runtimeactivity.RunTransitionRequest{
+				ExpectedRevision: completed.Revision, Status: models.AgentRunStatusRunning,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			completed, _, err = activity.TransitionRun(ctx, scope, completed.ID, RunTransitionRequest{
-				ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted,
+			completed, _, err = activity.TransitionRun(ctx, scope, completed.ID, runtimeactivity.RunTransitionRequest{
+				ExpectedRevision: running.Revision, Status: models.AgentRunStatusCompleted,
 			})
 
 			result, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 				Scope: scope, RunID: root.ID, ExpectedRevision: root.Revision, Kind: agentrun.AgentRunCommandCancel,
-				Actor: ActivityActor{Type: "user", ID: "operator"},
+				Actor: models.ActivityActor{Type: "user", ID: "operator"},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Run.Status != AgentRunStatusCanceled {
+			if result.Run.Status != models.AgentRunStatusCanceled {
 				t.Fatalf("root status = %s", result.Run.Status)
 			}
 			for _, id := range []string{child.ID, grandchild.ID} {
@@ -189,10 +191,10 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if run.Status != AgentRunStatusCanceled || run.CompletedAt == nil || run.LeaseOwner != "" || run.LeaseExpiresAt != nil {
+				if run.Status != models.AgentRunStatusCanceled || run.CompletedAt == nil || run.LeaseOwner != "" || run.LeaseExpiresAt != nil {
 					t.Fatalf("descendant %s was not fully canceled: %#v", id, run)
 				}
-				events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: id})
+				events, err := store.ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: id})
 				cancellations := 0
 				for _, event := range events {
 					if event.EventType == "run.canceled" {
@@ -207,7 +209,7 @@ func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if unchanged.Status != AgentRunStatusCompleted || unchanged.Revision != completed.Revision {
+			if unchanged.Status != models.AgentRunStatusCompleted || unchanged.Revision != completed.Revision {
 				t.Fatalf("completed descendant changed: %#v", unchanged)
 			}
 			if err := service.CascadeTerminalRun(ctx, result.Run); err != nil {
@@ -221,32 +223,32 @@ func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
 	service := agentrun.NewRunCommandService(store)
-	scope := Scope{Kind: "tenant", ID: "human"}
-	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
-		Goal: "Continue only after a human completes the challenge", Source: RunSourceSchedule,
+	scope := models.Scope{Kind: "tenant", ID: "human"}
+	created, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
+		Goal: "Continue only after a human completes the challenge", Source: models.RunSourceSchedule,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	activity := NewRunActivityService(store, store)
-	running, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, RunTransitionRequest{ExpectedRevision: created.Run.Revision, Status: AgentRunStatusRunning})
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: created.Run.Revision, Status: models.AgentRunStatusRunning})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 27, 7, 15, 0, 0, time.UTC)
-	request := HumanInterventionRequest{
-		ID: "human-request", Kind: "capability_challenge", Status: HumanInterventionStatusPending,
+	request := models.HumanInterventionRequest{
+		ID: "human-request", Kind: "capability_challenge", Status: models.HumanInterventionStatusPending,
 		ActionCallID: "browser-click", Summary: "Human intervention required", Challenge: []string{"captcha"}, CreatedAt: now,
 	}
-	waiting, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, RunTransitionRequest{
-		ExpectedRevision: running.Revision, Status: AgentRunStatusWaitingForEvent,
-		WakeCondition: &WakeCondition{Type: "human_intervention", Reference: request.ID}, HumanInterventions: []HumanInterventionRequest{request},
+	waiting, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: models.AgentRunStatusWaitingForEvent,
+		WakeCondition: &models.WakeCondition{Type: "human_intervention", Reference: request.ID}, HumanInterventions: []models.HumanInterventionRequest{request},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := ActivityActor{Type: "user", ID: "operator"}
+	actor := models.ActivityActor{Type: "user", ID: "operator"}
 	resolved, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 		Scope: scope, RunID: waiting.ID, ExpectedRevision: waiting.Revision, Kind: agentrun.AgentRunCommandResolveHumanIntervention,
 		HumanInterventionID: request.ID, Instruction: "CAPTCHA completed in the retained Browser session", Actor: actor,
@@ -254,10 +256,10 @@ func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.Run.Status != AgentRunStatusQueued || resolved.Run.WakeCondition != nil || resolved.Event.EventType != "run.human_intervention_resolved" {
+	if resolved.Run.Status != models.AgentRunStatusQueued || resolved.Run.WakeCondition != nil || resolved.Event.EventType != "run.human_intervention_resolved" {
 		t.Fatalf("resolved run = %#v", resolved)
 	}
-	if len(resolved.Run.HumanInterventions) != 1 || resolved.Run.HumanInterventions[0].Status != HumanInterventionStatusResolved || resolved.Run.HumanInterventions[0].ResolvedBy == nil || resolved.Run.HumanInterventions[0].ResolvedBy.ID != actor.ID {
+	if len(resolved.Run.HumanInterventions) != 1 || resolved.Run.HumanInterventions[0].Status != models.HumanInterventionStatusResolved || resolved.Run.HumanInterventions[0].ResolvedBy == nil || resolved.Run.HumanInterventions[0].ResolvedBy.ID != actor.ID {
 		t.Fatalf("resolved intervention = %#v", resolved.Run.HumanInterventions)
 	}
 	if len(resolved.Run.PendingInterventions) != 1 || resolved.Run.PendingInterventions[0].Instruction == "" {
@@ -275,38 +277,38 @@ func TestResolveHumanInterventionCarriesActionCallID(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
 	service := agentrun.NewRunCommandService(store)
-	activity := NewRunActivityService(store, store)
-	scope := Scope{Kind: "tenant", ID: "human"}
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	scope := models.Scope{Kind: "tenant", ID: "human"}
 	now := time.Date(2026, 7, 27, 7, 15, 0, 0, time.UTC)
-	actor := ActivityActor{Type: "user", ID: "operator"}
+	actor := models.ActivityActor{Type: "user", ID: "operator"}
 	// held: the step that asked is still running; parked: the Run waits on it.
 	for _, parked := range []bool{false, true} {
-		created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
-			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
-			Goal: "Continue only after a human completes the challenge", Source: RunSourceSchedule,
+		created, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+			Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
+			Goal: "Continue only after a human completes the challenge", Source: models.RunSourceSchedule,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		request := HumanInterventionRequest{
-			ID: "human-request", Kind: "capability_challenge", Status: HumanInterventionStatusPending,
+		request := models.HumanInterventionRequest{
+			ID: "human-request", Kind: "capability_challenge", Status: models.HumanInterventionStatusPending,
 			ActionCallID: "browser-click", Summary: "Human intervention required", CreatedAt: now,
 		}
-		transition := RunTransitionRequest{ExpectedRevision: created.Run.Revision, Status: AgentRunStatusRunning, HumanInterventions: []HumanInterventionRequest{request}}
+		transition := runtimeactivity.RunTransitionRequest{ExpectedRevision: created.Run.Revision, Status: models.AgentRunStatusRunning, HumanInterventions: []models.HumanInterventionRequest{request}}
 		run, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, transition)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := AgentRunStatusRunning
+		want := models.AgentRunStatusRunning
 		if parked {
-			run, _, err = activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
-				ExpectedRevision: run.Revision, Status: AgentRunStatusWaitingForEvent,
-				WakeCondition: &WakeCondition{Type: "human_intervention", Reference: request.ID},
+			run, _, err = activity.TransitionRun(ctx, scope, run.ID, runtimeactivity.RunTransitionRequest{
+				ExpectedRevision: run.Revision, Status: models.AgentRunStatusWaitingForEvent,
+				WakeCondition: &models.WakeCondition{Type: "human_intervention", Reference: request.ID},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			want = AgentRunStatusQueued
+			want = models.AgentRunStatusQueued
 		}
 		resolved, err := service.CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 			Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: agentrun.AgentRunCommandResolveHumanIntervention,
@@ -322,7 +324,7 @@ func TestResolveHumanInterventionCarriesActionCallID(t *testing.T) {
 			resolved.Run.PendingInterventions[0].Instruction != "CAPTCHA completed" {
 			t.Fatalf("parked=%v: intervention %#v", parked, resolved.Run.PendingInterventions)
 		}
-		if resolved.Run.HumanInterventions[0].Status != HumanInterventionStatusResolved {
+		if resolved.Run.HumanInterventions[0].Status != models.HumanInterventionStatusResolved {
 			t.Fatalf("parked=%v: request %#v", parked, resolved.Run.HumanInterventions[0])
 		}
 	}
@@ -332,21 +334,21 @@ func TestRunPausePreservesWaitingCondition(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
 	service := agentrun.NewRunCommandService(store)
-	scope := Scope{Kind: "local", ID: "wait"}
-	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "ops"}, Goal: "Wait safely", Source: RunSourceEvent,
+	scope := models.Scope{Kind: "local", ID: "wait"}
+	created, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "ops"}, Goal: "Wait safely", Source: models.RunSourceEvent,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	activity := NewRunActivityService(store, store)
-	running, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, RunTransitionRequest{ExpectedRevision: 1, Status: AgentRunStatusRunning})
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: 1, Status: models.AgentRunStatusRunning})
 	if err != nil {
 		t.Fatal(err)
 	}
-	waiting, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, RunTransitionRequest{
-		ExpectedRevision: running.Revision, Status: AgentRunStatusWaitingForEvent,
-		WakeCondition: &WakeCondition{Type: "event", Reference: "cluster.changed"},
+	waiting, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: models.AgentRunStatusWaitingForEvent,
+		WakeCondition: &models.WakeCondition{Type: "event", Reference: "cluster.changed"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -359,7 +361,7 @@ func TestRunPausePreservesWaitingCondition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resumed.Run.Status != AgentRunStatusWaitingForEvent || resumed.Run.WakeCondition == nil || resumed.Run.WakeCondition.Reference != "cluster.changed" {
+	if resumed.Run.Status != models.AgentRunStatusWaitingForEvent || resumed.Run.WakeCondition == nil || resumed.Run.WakeCondition.Reference != "cluster.changed" {
 		t.Fatalf("resumed waiting run = %#v", resumed.Run)
 	}
 }
@@ -367,9 +369,9 @@ func TestRunPausePreservesWaitingCondition(t *testing.T) {
 func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "restart.db")
-	request := CreateAgentRunRequest{
-		Scope: Scope{Kind: "tenant", ID: "restart"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
-		AssignedAgentID: "agent", Goal: "Survive restart", Source: RunSourceManual, IdempotencyKey: "stable-request",
+	request := models.CreateAgentRunRequest{
+		Scope: models.Scope{Kind: "tenant", ID: "restart"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
+		AssignedAgentID: "agent", Goal: "Survive restart", Source: models.RunSourceManual, IdempotencyKey: "stable-request",
 	}
 	store, err := sqlite.NewSQLiteStore(path)
 	if err != nil {
@@ -395,7 +397,7 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 	if replayed.Run.ID != created.Run.ID || replayed.Event != nil {
 		t.Fatalf("restart replay = %#v, created = %#v", replayed, created)
 	}
-	events, err := reopened.ListActivity(ctx, ActivityFilter{Scope: request.Scope, RunID: created.Run.ID})
+	events, err := reopened.ListActivity(ctx, models.ActivityFilter{Scope: request.Scope, RunID: created.Run.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,13 +408,13 @@ func TestRunCreationReplaySurvivesSQLiteRestart(t *testing.T) {
 
 func TestRunCreationRejectsCredentialStateButAllowsTokenBudgets(t *testing.T) {
 	service := agentrun.NewRunCommandService(newTestKernelStore(t))
-	base := CreateAgentRunRequest{
-		Scope: Scope{Kind: "tenant", ID: "safe"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
-		Goal: "Operate safely", Source: RunSourceManual,
+	base := models.CreateAgentRunRequest{
+		Scope: models.Scope{Kind: "tenant", ID: "safe"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
+		Goal: "Operate safely", Source: models.RunSourceManual,
 	}
 	unsafe := base
 	unsafe.Context = map[string]interface{}{"api_token": "resolved-secret"}
-	if _, err := service.CreateAgentRun(context.Background(), unsafe); !errors.Is(err, ErrUnsafeSharedContext) || !errors.Is(err, ErrInvalidAgentRun) {
+	if _, err := service.CreateAgentRun(context.Background(), unsafe); !errors.Is(err, models.ErrUnsafeSharedContext) || !errors.Is(err, models.ErrInvalidAgentRun) {
 		t.Fatalf("credential context error = %v", err)
 	}
 	safe := base

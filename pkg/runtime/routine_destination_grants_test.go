@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -84,7 +85,7 @@ func TestRoutineRunsPostOnlyToPinnedDestinationsWithoutAsking(t *testing.T) {
 	f.withChatSkill(t)
 	activation, _ := f.createRoutine(t, map[string]interface{}{"action": "chat.post", "label": "Post to #ai-news", "toDestinations": []interface{}{"#ai-news", "C08AINEWS"}})
 	stored, err := f.store.GetRunbookActivation(t.Context(), f.run.Scope, activation.ID)
-	if err != nil || len(stored.Task.Grants) != 1 || !reflect.DeepEqual(stored.Task.Grants[0], RoutineGrant{Action: "chat.post", Label: "Post to #ai-news (C08AINEWS)", ToDestinations: []string{"ai-news", "C08AINEWS"}}) {
+	if err != nil || len(stored.Task.Grants) != 1 || !reflect.DeepEqual(stored.Task.Grants[0], models.RoutineGrant{Action: "chat.post", Label: "Post to #ai-news (C08AINEWS)", ToDestinations: []string{"ai-news", "C08AINEWS"}}) {
 		t.Fatalf("persisted grants = %#v, %v", stored.Task, err)
 	}
 	f.reviewEverything(t, activation)
@@ -102,7 +103,7 @@ func TestRoutineRunsPostOnlyToPinnedDestinationsWithoutAsking(t *testing.T) {
 		{"default destination", map[string]interface{}{"message": "Digest"}, true},
 	} {
 		run := f.routineOccurrence(t, activation, "post-"+tc.name)
-		result, err := coordinator.Propose(t.Context(), action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, SkillID: "chat", SkillVersion: "1.0.0", Action: "post", Arguments: tc.arguments, IdempotencyKey: "post-" + string(rune('a'+index))})
+		result, err := coordinator.Propose(t.Context(), action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, SkillID: "chat", SkillVersion: "1.0.0", Action: "post", Arguments: tc.arguments, IdempotencyKey: "post-" + string(rune('a'+index))})
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
@@ -112,15 +113,15 @@ func TestRoutineRunsPostOnlyToPinnedDestinationsWithoutAsking(t *testing.T) {
 	}
 
 	// A posting grant stored without destinations never covers a post.
-	unpinned := cloneRunbookActivation(stored)
-	unpinned.Task.Grants = []RoutineGrant{{Action: "chat.post", Label: "Post the digest"}}
+	unpinned := models.CloneRunbookActivation(stored)
+	unpinned.Task.Grants = []models.RoutineGrant{{Action: "chat.post", Label: "Post the digest"}}
 	unpinned.Revision++
 	if err := f.store.UpdateRunbookActivation(t.Context(), unpinned, stored.Revision); err != nil {
 		t.Fatal(err)
 	}
 	post := &skill.BoundAction{Definition: &skill.Definition{ID: "chat"}, Action: skill.Action{Name: "post", SideEffect: skill.SideEffectExternal,
 		InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"channel": map[string]interface{}{"type": "string"}}}}}
-	if grant, err := resolveRoutineGrant(t.Context(), f.store, f.store, nil, f.routineOccurrence(t, unpinned, "unpinned"), post, map[string]interface{}{"channel": "ai-news"}); err != nil || grant != nil {
+	if grant, err := models.ResolveRoutineGrant(t.Context(), f.store, f.store, nil, f.routineOccurrence(t, unpinned, "unpinned"), post, map[string]interface{}{"channel": "ai-news"}); err != nil || grant != nil {
 		t.Fatalf("unpinned posting grant applied: %#v %v", grant, err)
 	}
 }

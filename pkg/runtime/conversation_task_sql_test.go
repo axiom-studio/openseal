@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -64,14 +65,14 @@ func forConversationTaskSQLStores(t *testing.T, test func(*testing.T, conversati
 
 // conversationTaskSQLRecord is storetest.ConversationTaskRecord for the
 // runtime tests that call it by this name.
-func conversationTaskSQLRecord(t *testing.T, store conversationTaskSQLTestStore, suffix string) ConversationTaskCreateRecord {
+func conversationTaskSQLRecord(t *testing.T, store conversationTaskSQLTestStore, suffix string) models.ConversationTaskCreateRecord {
 	t.Helper()
 	return storetest.ConversationTaskRecord(t, store, suffix)
 }
 
 // updateConversationTaskSQLRun is storetest.UpdateRun for the runtime tests
 // that call it by this name.
-func updateConversationTaskSQLRun(t *testing.T, store conversationTaskSQLTestStore, run *AgentRun, expectedRevision int64) {
+func updateConversationTaskSQLRun(t *testing.T, store conversationTaskSQLTestStore, run *models.AgentRun, expectedRevision int64) {
 	t.Helper()
 	storetest.UpdateRun(t, store, run, expectedRevision)
 }
@@ -81,7 +82,7 @@ func TestConversationTaskSQLConcurrentReplayAndRestart(t *testing.T) {
 		record := conversationTaskSQLRecord(t, fixture.store, "replay")
 		second := fixture.reopen(t)
 		var wg sync.WaitGroup
-		results := make(chan *ConversationTaskResult, 8)
+		results := make(chan *models.ConversationTaskResult, 8)
 		errorsFound := make(chan error, 8)
 		for i := 0; i < 8; i++ {
 			wg.Add(1)
@@ -107,7 +108,7 @@ func TestConversationTaskSQLConcurrentReplayAndRestart(t *testing.T) {
 		}
 		created := 0
 		for result := range results {
-			if result.Task.ID != record.Task.ID || result.WorkRun.ID != record.WorkRun.ID || result.SourceRun.Status != AgentRunStatusCompleted {
+			if result.Task.ID != record.Task.ID || result.WorkRun.ID != record.WorkRun.ID || result.SourceRun.Status != models.AgentRunStatusCompleted {
 				t.Fatalf("concurrent result lost task identity: %#v", result)
 			}
 			if !result.Replayed {
@@ -128,20 +129,20 @@ func TestConversationTaskSQLConcurrentReplayAndRestart(t *testing.T) {
 		if replay.WorkRun.ParentRunID != "" || replay.WorkRun.RootRunID != replay.WorkRun.ID || replay.SourceRun.BudgetAllocations[replay.WorkRun.ID].MaxTurns != 5 {
 			t.Fatalf("independent work or budget allocation lost: %#v", replay)
 		}
-		events, err := restarted.ListActivity(t.Context(), ActivityFilter{Scope: record.Task.Scope, RunID: record.Task.SourceRunID, Limit: 100})
+		events, err := restarted.ListActivity(t.Context(), models.ActivityFilter{Scope: record.Task.Scope, RunID: record.Task.SourceRunID, Limit: 100})
 		if err != nil || len(events) != 1 {
 			t.Fatalf("audit duplicated across retries: events=%#v err=%v", events, err)
 		}
 		conflicting := record
-		conflicting.Task = cloneConversationTask(record.Task)
+		conflicting.Task = models.CloneConversationTask(record.Task)
 		conflicting.Task.Goal = "Different requested result"
-		conflicting.Task.RequestDigest, _ = conversationTaskDigest(conflicting.Task)
-		conflicting.WorkRun = cloneAgentRun(record.WorkRun)
+		conflicting.Task.RequestDigest, _ = models.ConversationTaskDigest(conflicting.Task)
+		conflicting.WorkRun = models.CloneAgentRun(record.WorkRun)
 		conflicting.WorkRun.Goal = conflicting.Task.Goal
-		if _, err := restarted.CreateConversationTask(t.Context(), conflicting); !errors.Is(err, ErrConversationTaskConflict) {
+		if _, err := restarted.CreateConversationTask(t.Context(), conflicting); !errors.Is(err, models.ErrConversationTaskConflict) {
 			t.Fatalf("changed accepted request error = %v", err)
 		}
-		foreign := Scope{Kind: record.Task.Scope.Kind, ID: "other-tenant"}
+		foreign := models.Scope{Kind: record.Task.Scope.Kind, ID: "other-tenant"}
 		if task, err := restarted.GetConversationTask(t.Context(), foreign, record.Task.ID); err != nil || task != nil {
 			t.Fatalf("cross-scope task lookup = %#v, %v", task, err)
 		}
@@ -160,13 +161,13 @@ func TestConversationTaskSQLRejectsSourceMutationAndRollsBackAuditFailure(t *tes
 				if err != nil {
 					t.Fatal(err)
 				}
-				want := ErrConversationTaskConflict
+				want := models.ErrConversationTaskConflict
 				switch scenario {
 				case "worker":
 					record.WorkerID = "foreign-worker"
-					want = ErrLeaseLost
+					want = models.ErrLeaseLost
 				case "expiry", "prepared-expiry", "revision":
-					changed := cloneAgentRun(current)
+					changed := models.CloneAgentRun(current)
 					changed.Revision++
 					if scenario == "expiry" || scenario == "prepared-expiry" {
 						changed.LeaseExpiresAt = &record.Task.CreatedAt
@@ -178,9 +179,9 @@ func TestConversationTaskSQLRejectsSourceMutationAndRollsBackAuditFailure(t *tes
 						}
 						record.ExpectedSourceRevision++
 						record.SourceRun.Revision++
-						want = ErrLeaseLost
+						want = models.ErrLeaseLost
 					} else {
-						want = ErrRevisionConflict
+						want = models.ErrRevisionConflict
 					}
 					updateConversationTaskSQLRun(t, fixture.store, changed, current.Revision)
 					current = changed
@@ -219,19 +220,19 @@ func TestConversationTaskSQLRejectsSourceMutationAndRollsBackAuditFailure(t *tes
 
 func TestConversationTaskSQLScopedPaginationAndCurrentWorkStatus(t *testing.T) {
 	forConversationTaskSQLStores(t, func(t *testing.T, fixture conversationTaskSQLTestFixture) {
-		records := make([]ConversationTaskCreateRecord, 0, 3)
+		records := make([]models.ConversationTaskCreateRecord, 0, 3)
 		for _, suffix := range []string{"page-a", "page-b", "page-c"} {
 			record := conversationTaskSQLRecord(t, fixture.store, suffix)
 			if suffix == "page-c" {
 				record.Task.ThreadRootID = "other-thread"
-				record.Task.RequestDigest, _ = conversationTaskDigest(record.Task)
+				record.Task.RequestDigest, _ = models.ConversationTaskDigest(record.Task)
 			}
 			if _, err := fixture.store.CreateConversationTask(t.Context(), record); err != nil {
 				t.Fatal(err)
 			}
 			records = append(records, record)
 		}
-		filter := ConversationTaskFilter{Scope: records[0].Task.Scope, Owner: records[0].Task.Owner, ConversationID: "conversation",
+		filter := models.ConversationTaskFilter{Scope: records[0].Task.Scope, Owner: records[0].Task.Owner, ConversationID: "conversation",
 			AuthenticatedActor: records[0].Task.AuthenticatedActor, Limit: 2}
 		page, err := fixture.store.ListConversationTasks(t.Context(), filter)
 		if err != nil || len(page) != 2 {
@@ -260,19 +261,19 @@ func TestConversationTaskSQLScopedPaginationAndCurrentWorkStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 		now := work.CreatedAt.Add(time.Second)
-		work.Status, work.CompletedAt, work.Revision = AgentRunStatusCompleted, &now, work.Revision+1
+		work.Status, work.CompletedAt, work.Revision = models.AgentRunStatusCompleted, &now, work.Revision+1
 		updateConversationTaskSQLRun(t, fixture.store, work, work.Revision-1)
 		filter.ActiveOnly = true
 		page, err = fixture.store.ListConversationTasks(t.Context(), filter)
 		if err != nil || len(page) != 1 || page[0].WorkRun.ID != records[1].WorkRun.ID {
 			t.Fatalf("active selector ignored current independent run: %#v, %v", page, err)
 		}
-		for _, mutate := range []func(*ConversationTaskFilter){
-			func(f *ConversationTaskFilter) { f.Scope.ID = "other-tenant" },
-			func(f *ConversationTaskFilter) { f.Owner.ID = "other-agent" },
-			func(f *ConversationTaskFilter) { f.ConversationID = "other-conversation" },
-			func(f *ConversationTaskFilter) {
-				f.AuthenticatedActor = ConversationParticipant{Type: ConversationParticipantUser, ID: "other-requester"}
+		for _, mutate := range []func(*models.ConversationTaskFilter){
+			func(f *models.ConversationTaskFilter) { f.Scope.ID = "other-tenant" },
+			func(f *models.ConversationTaskFilter) { f.Owner.ID = "other-agent" },
+			func(f *models.ConversationTaskFilter) { f.ConversationID = "other-conversation" },
+			func(f *models.ConversationTaskFilter) {
+				f.AuthenticatedActor = models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "other-requester"}
 			},
 		} {
 			other := filter
@@ -283,7 +284,7 @@ func TestConversationTaskSQLScopedPaginationAndCurrentWorkStatus(t *testing.T) {
 			}
 		}
 		filter.Limit = 101
-		if _, err := fixture.store.ListConversationTasks(t.Context(), filter); !errors.Is(err, ErrInvalidConversationTask) {
+		if _, err := fixture.store.ListConversationTasks(t.Context(), filter); !errors.Is(err, models.ErrInvalidConversationTask) {
 			t.Fatalf("unbounded list error = %v", err)
 		}
 	})

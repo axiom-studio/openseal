@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
@@ -15,7 +17,7 @@ import (
 // create's session half (CTL-5a).
 type dependencySessionStore interface {
 	storetest.AgentSessionContractStore
-	RunDependencyStore
+	models.RunDependencyStore
 }
 
 // forEachDependencySessionStore runs fn against SQLite and, when
@@ -35,7 +37,7 @@ func forEachDependencySessionStore(t *testing.T, fn func(f *storetest.SessionFix
 			store := backend.open(t)
 			f := &storetest.SessionFixture{
 				T: t, Ctx: context.Background(), Store: store,
-				Scope: Scope{Kind: "tenant", ID: "fork-tx-" + uuid.NewString()[:8]},
+				Scope: models.Scope{Kind: "tenant", ID: "fork-tx-" + uuid.NewString()[:8]},
 				Now:   time.Now().UTC().Truncate(time.Millisecond),
 			}
 			fn(f, store)
@@ -62,9 +64,9 @@ func openDependencySessionPostgres(t *testing.T) dependencySessionStore {
 // control tool (entry "t1", still pending), plus the record that forks it
 // into two same-Agent children.
 type forkTxFixture struct {
-	source    *AgentRun
-	session   *AgentSession
-	assistant *SessionEntry
+	source    *models.AgentRun
+	session   *models.AgentSession
+	assistant *models.SessionEntry
 	groupID   string
 	childIDs  []string
 }
@@ -75,7 +77,7 @@ func newForkTxFixture(f *storetest.SessionFixture) *forkTxFixture {
 	f.MustAppend(session.ID, source.ID, storetest.UserSessionEntry("u1", "compare the two vendors"))
 	appended := f.MustAppend(session.ID, source.ID,
 		storetest.AssistantSessionEntry("a1", "s1", "c1"),
-		storetest.ToolSessionEntry("t1", "s1", "c1", ToolEntryPending))
+		storetest.ToolSessionEntry("t1", "s1", "c1", models.ToolEntryPending))
 	return &forkTxFixture{
 		source:    f.Run(source.ID),
 		session:   session,
@@ -86,55 +88,55 @@ func newForkTxFixture(f *storetest.SessionFixture) *forkTxFixture {
 }
 
 // record builds the create record from the source as read at plan time.
-func (x *forkTxFixture) record(f *storetest.SessionFixture) RunDependencyGroupCreateRecord {
+func (x *forkTxFixture) record(f *storetest.SessionFixture) models.RunDependencyGroupCreateRecord {
 	f.T.Helper()
 	source := x.source
-	children := make([]*AgentRun, 0, len(x.childIDs))
-	edges := make([]*RunDependency, 0, len(x.childIDs))
-	sessions := make([]CreateRunAgentSessionTxRequest, 0, len(x.childIDs))
+	children := make([]*models.AgentRun, 0, len(x.childIDs))
+	edges := make([]*models.RunDependency, 0, len(x.childIDs))
+	sessions := make([]models.CreateRunAgentSessionTxRequest, 0, len(x.childIDs))
 	for i, childID := range x.childIDs {
-		child, err := buildAgentRun(f.Ctx, f.Store, CreateAgentRunRequest{
-			Kind: RunKindAgentWork, Scope: f.Scope, ParentRunID: source.ID, Owner: source.Owner,
-			AssignedAgentID: source.AssignedAgentID, Goal: "branch goal", Source: RunSourceFork,
-			ConcurrencyKey: "fork:" + x.groupID + ":" + childID, SessionID: RunAgentSessionID(f.Scope, childID),
+		child, err := portfolio.BuildAgentRun(f.Ctx, f.Store, models.CreateAgentRunRequest{
+			Kind: models.RunKindAgentWork, Scope: f.Scope, ParentRunID: source.ID, Owner: source.Owner,
+			AssignedAgentID: source.AssignedAgentID, Goal: "branch goal", Source: models.RunSourceFork,
+			ConcurrencyKey: "fork:" + x.groupID + ":" + childID, SessionID: models.RunAgentSessionID(f.Scope, childID),
 		}, childID, f.Now)
 		if err != nil {
 			f.T.Fatalf("build child: %v", err)
 		}
 		children = append(children, child)
-		edges = append(edges, &RunDependency{
+		edges = append(edges, &models.RunDependency{
 			ID: "branch-" + string(rune('1'+i)), Scope: f.Scope, GroupID: x.groupID, SourceRunID: source.ID, TargetRunID: childID,
-			Kind: RunDependencyKindRun, State: RunDependencyStateRunning, Required: true, Revision: 1, CreatedAt: f.Now, UpdatedAt: f.Now,
+			Kind: models.RunDependencyKindRun, State: models.RunDependencyStateRunning, Required: true, Revision: 1, CreatedAt: f.Now, UpdatedAt: f.Now,
 		})
-		sessions = append(sessions, CreateRunAgentSessionTxRequest{
+		sessions = append(sessions, models.CreateRunAgentSessionTxRequest{
 			Scope: f.Scope, OwnerRunID: childID, AgentID: source.AssignedAgentID, ConversationID: "c1",
 			ParentSessionID: x.session.ID, ForkSequence: x.assistant.Sequence - 1,
-			InitialEntries: []*SessionEntry{storetest.GoalSessionEntry("goal-"+childID, childID)}, Now: f.Now,
+			InitialEntries: []*models.SessionEntry{storetest.GoalSessionEntry("goal-"+childID, childID)}, Now: f.Now,
 		})
 	}
 	sealed := f.Now
-	group := &RunDependencyGroup{
-		ID: x.groupID, Scope: f.Scope, SourceRunID: source.ID, Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		ExpectedCount: len(edges), Status: RunDependencyGroupWaiting, Revision: 1, CreatedAt: f.Now, UpdatedAt: f.Now, SealedAt: &sealed,
+	group := &models.RunDependencyGroup{
+		ID: x.groupID, Scope: f.Scope, SourceRunID: source.ID, Policy: models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast},
+		ExpectedCount: len(edges), Status: models.RunDependencyGroupWaiting, Revision: 1, CreatedAt: f.Now, UpdatedAt: f.Now, SealedAt: &sealed,
 		IdempotencyKey: "fork:" + x.groupID,
 	}
-	updated := cloneAgentRun(source)
-	updated.Status = AgentRunStatusWaitingForDependency
-	updated.WakeCondition = &WakeCondition{Type: "run_dependencies", Reference: x.groupID}
+	updated := models.CloneAgentRun(source)
+	updated.Status = models.AgentRunStatusWaitingForDependency
+	updated.WakeCondition = &models.WakeCondition{Type: "run_dependencies", Reference: x.groupID}
 	updated.Revision++
 	updated.UpdatedAt = f.Now
 	updated.LeaseOwner, updated.LeaseExpiresAt = "", nil
 	count := len(source.PendingInterventions)
-	return RunDependencyGroupCreateRecord{
+	return models.RunDependencyGroupCreateRecord{
 		Group: group, Dependencies: edges, TargetRuns: children, SourceRun: updated, ExpectedSourceRevision: source.Revision,
-		Event: &ActivityEvent{
+		Event: &models.ActivityEvent{
 			ID: uuid.NewString(), Scope: f.Scope, RunID: source.ID, AgentID: source.AssignedAgentID, EventType: "run.forked",
-			Severity: ActivitySeverityInfo, Summary: "Forked 2 concurrent child Runs", Actor: ActivityActor{Type: "worker", ID: storetest.SessionWorker},
-			Visibility: ActivityVisibilityScope, CorrelationID: x.groupID, CreatedAt: f.Now,
+			Severity: models.ActivitySeverityInfo, Summary: "Forked 2 concurrent child Runs", Actor: models.ActivityActor{Type: "worker", ID: storetest.SessionWorker},
+			Visibility: models.ActivityVisibilityScope, CorrelationID: x.groupID, CreatedAt: f.Now,
 		},
-		ToolTransition: &ToolEntryTransitionRequest{
-			Scope: f.Scope, EntryID: "t1", RunID: source.ID, Lease: f.Lease(), From: ToolEntryPending, To: ToolEntryAwaitingChild,
-			Wait: &ToolEntryWait{GroupID: x.groupID, ChildRunIDs: append([]string(nil), x.childIDs...)}, Now: f.Now,
+		ToolTransition: &models.ToolEntryTransitionRequest{
+			Scope: f.Scope, EntryID: "t1", RunID: source.ID, Lease: f.Lease(), From: models.ToolEntryPending, To: models.ToolEntryAwaitingChild,
+			Wait: &models.ToolEntryWait{GroupID: x.groupID, ChildRunIDs: append([]string(nil), x.childIDs...)}, Now: f.Now,
 		},
 		ChildSessions:            sessions,
 		RequireInterventionCount: &count,
@@ -148,17 +150,17 @@ func (x *forkTxFixture) assertNothingWritten(f *storetest.SessionFixture, store 
 		f.T.Fatalf("group after refusal = %+v, %v", group, err)
 	}
 	for _, childID := range x.childIDs {
-		if child, err := store.GetAgentRun(f.Ctx, f.Scope, childID); child != nil || (err != nil && !errors.Is(err, ErrRunNotFound)) {
+		if child, err := store.GetAgentRun(f.Ctx, f.Scope, childID); child != nil || (err != nil && !errors.Is(err, models.ErrRunNotFound)) {
 			f.T.Fatalf("child %s after refusal = %+v, %v", childID, child, err)
 		}
-		if _, err := store.GetAgentSession(f.Ctx, f.Scope, RunAgentSessionID(f.Scope, childID)); !errors.Is(err, ErrAgentSessionNotFound) {
+		if _, err := store.GetAgentSession(f.Ctx, f.Scope, models.RunAgentSessionID(f.Scope, childID)); !errors.Is(err, models.ErrAgentSessionNotFound) {
 			f.T.Fatalf("child session %s after refusal: %v", childID, err)
 		}
 	}
-	if entry := f.Entry("t1"); entry.State != ToolEntryPending || entry.Tool.Wait != nil {
+	if entry := f.Entry("t1"); entry.State != models.ToolEntryPending || entry.Tool.Wait != nil {
 		f.T.Fatalf("tool entry after refusal = %s %+v", entry.State, entry.Tool.Wait)
 	}
-	if run := f.Run(x.source.ID); run.Status != AgentRunStatusRunning || run.LeaseOwner != storetest.SessionWorker {
+	if run := f.Run(x.source.ID); run.Status != models.AgentRunStatusRunning || run.LeaseOwner != storetest.SessionWorker {
 		f.T.Fatalf("source after refusal = %s lease %q", run.Status, run.LeaseOwner)
 	}
 	if got := f.ActivityCount(x.source.ID); got != activityBefore {
@@ -173,57 +175,57 @@ func TestForkCreateTransitionsEntryAndCreatesSessionsAtomically(t *testing.T) {
 
 		// A failing tool transition (wrong From) rolls back the whole create.
 		bad := x.record(f)
-		bad.ToolTransition.From = ToolEntryRunning
+		bad.ToolTransition.From = models.ToolEntryRunning
 		_, err := store.CreateRunDependencyGroup(f.Ctx, bad)
-		storetest.ExpectErr(f.T, "stale tool state", err, ErrToolEntryStateConflict)
+		storetest.ExpectErr(f.T, "stale tool state", err, models.ErrToolEntryStateConflict)
 		x.assertNothingWritten(f, store, before)
 
 		// A failing child session (fork point past the parent leaf) too.
 		bad = x.record(f)
 		bad.ChildSessions[1].ForkSequence = f.Session(x.session.ID).NextSequence + 5
 		_, err = store.CreateRunDependencyGroup(f.Ctx, bad)
-		storetest.ExpectErr(f.T, "fork past leaf", err, ErrInvalidAgentSession)
+		storetest.ExpectErr(f.T, "fork past leaf", err, models.ErrInvalidAgentSession)
 		x.assertNothingWritten(f, store, before)
 
 		// Another worker's lease is refused before anything is written.
 		bad = x.record(f)
-		bad.ToolTransition.Lease = AgentRunLeaseGuard{WorkerID: "other-worker", Now: f.Now}
+		bad.ToolTransition.Lease = models.AgentRunLeaseGuard{WorkerID: "other-worker", Now: f.Now}
 		_, err = store.CreateRunDependencyGroup(f.Ctx, bad)
-		storetest.ExpectErr(f.T, "foreign lease", err, ErrLeaseLost)
+		storetest.ExpectErr(f.T, "foreign lease", err, models.ErrLeaseLost)
 		x.assertNothingWritten(f, store, before)
 
 		// A cross-Agent child cannot fork the source session.
 		bad = x.record(f)
 		bad.ChildSessions[0].AgentID = "agent-b"
 		_, err = store.CreateRunDependencyGroup(f.Ctx, bad)
-		storetest.ExpectErr(f.T, "cross-Agent child session", err, ErrInvalidRunDependency)
+		storetest.ExpectErr(f.T, "cross-Agent child session", err, models.ErrInvalidRunDependency)
 
 		record := x.record(f)
 		result, err := store.CreateRunDependencyGroup(f.Ctx, record)
 		if err != nil {
 			f.T.Fatalf("create: %v", err)
 		}
-		if result.Replayed || result.ToolEntry == nil || result.ToolEntry.State != ToolEntryAwaitingChild ||
+		if result.Replayed || result.ToolEntry == nil || result.ToolEntry.State != models.ToolEntryAwaitingChild ||
 			result.ToolEntry.Tool.Wait == nil || result.ToolEntry.Tool.Wait.GroupID != x.groupID || len(result.ToolEntry.Tool.Wait.ChildRunIDs) != 2 {
 			f.T.Fatalf("create result entry = %+v", result.ToolEntry)
 		}
 		if len(result.ChildSessions) != 2 {
 			f.T.Fatalf("child sessions = %d", len(result.ChildSessions))
 		}
-		if entry := f.Entry("t1"); entry.State != ToolEntryAwaitingChild || entry.Tool.Wait.GroupID != x.groupID {
+		if entry := f.Entry("t1"); entry.State != models.ToolEntryAwaitingChild || entry.Tool.Wait.GroupID != x.groupID {
 			f.T.Fatalf("stored tool entry = %s %+v", entry.State, entry.Tool.Wait)
 		}
 		source := f.Run(x.source.ID)
-		if source.Status != AgentRunStatusWaitingForDependency || source.LeaseOwner != "" || source.SessionID != x.session.ID {
+		if source.Status != models.AgentRunStatusWaitingForDependency || source.LeaseOwner != "" || source.SessionID != x.session.ID {
 			f.T.Fatalf("source = %s lease %q session %q", source.Status, source.LeaseOwner, source.SessionID)
 		}
 		for i, childID := range x.childIDs {
 			session := result.ChildSessions[i]
-			if session.ID != RunAgentSessionID(f.Scope, childID) || session.ParentSessionID != x.session.ID ||
+			if session.ID != models.RunAgentSessionID(f.Scope, childID) || session.ParentSessionID != x.session.ID ||
 				session.ForkEntryID != "u1" || session.ForkSequence != x.assistant.Sequence-1 || session.Depth != 1 || session.OwnerRunID != childID {
 				f.T.Fatalf("child session %d = %+v", i, session)
 			}
-			if child := f.Run(childID); child.SessionID != session.ID || child.Status != AgentRunStatusQueued || child.ParentRunID != x.source.ID {
+			if child := f.Run(childID); child.SessionID != session.ID || child.Status != models.AgentRunStatusQueued || child.ParentRunID != x.source.ID {
 				f.T.Fatalf("child run %s = session %q status %s", childID, child.SessionID, child.Status)
 			}
 			// The child sees the conversation up to, not including, the
@@ -241,7 +243,7 @@ func TestForkCreateTransitionsEntryAndCreatesSessionsAtomically(t *testing.T) {
 		if err != nil || !replay.Replayed {
 			f.T.Fatalf("replay = %+v, %v", replay, err)
 		}
-		if replay.ToolEntry == nil || replay.ToolEntry.State != ToolEntryAwaitingChild || len(replay.ChildSessions) != 2 {
+		if replay.ToolEntry == nil || replay.ToolEntry.State != models.ToolEntryAwaitingChild || len(replay.ChildSessions) != 2 {
 			f.T.Fatalf("replay state = %+v sessions %d", replay.ToolEntry, len(replay.ChildSessions))
 		}
 		if got := f.ActivityCount(x.source.ID); got != before+1 {
@@ -255,14 +257,14 @@ func TestForkCreateRefusedOnNewIntervention(t *testing.T) {
 		x := newForkTxFixture(f)
 		record := x.record(f) // planned with zero interventions
 		// A message arrives between the plan and the create; the lease is kept.
-		steered := f.UpdateRun(x.source.ID, func(run *AgentRun) {
-			run.PendingInterventions = append(run.PendingInterventions, AgentRunIntervention{
-				ID: "steer-1", Actor: ActivityActor{Type: "user", ID: "u1"}, Instruction: "only the cheaper one", CreatedAt: f.Now,
+		steered := f.UpdateRun(x.source.ID, func(run *models.AgentRun) {
+			run.PendingInterventions = append(run.PendingInterventions, models.AgentRunIntervention{
+				ID: "steer-1", Actor: models.ActivityActor{Type: "user", ID: "u1"}, Instruction: "only the cheaper one", CreatedAt: f.Now,
 			})
 		})
 		before := f.ActivityCount(x.source.ID)
 		_, err := store.CreateRunDependencyGroup(f.Ctx, record)
-		storetest.ExpectErr(f.T, "steered create", err, ErrSteeringArrived)
+		storetest.ExpectErr(f.T, "steered create", err, models.ErrSteeringArrived)
 		x.source = steered
 		x.assertNothingWritten(f, store, before)
 
@@ -271,7 +273,7 @@ func TestForkCreateRefusedOnNewIntervention(t *testing.T) {
 		if _, err := store.CreateRunDependencyGroup(f.Ctx, replanned); err != nil {
 			f.T.Fatalf("replanned create: %v", err)
 		}
-		if entry := f.Entry("t1"); entry.State != ToolEntryAwaitingChild {
+		if entry := f.Entry("t1"); entry.State != models.ToolEntryAwaitingChild {
 			f.T.Fatalf("tool entry after replanned create = %s", entry.State)
 		}
 	})

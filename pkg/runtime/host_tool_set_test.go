@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
@@ -104,13 +105,13 @@ type fakeChatWorkspaces struct {
 	calls          int
 }
 
-func (f *fakeChatWorkspaces) PrepareChatWorkspace(context.Context, *AgentRun) (string, error) {
+func (f *fakeChatWorkspaces) PrepareChatWorkspace(context.Context, *models.AgentRun) (string, error) {
 	f.calls++
 	return f.conversationID, f.err
 }
 
 func TestNoChatWorkspacesResolverOffersNoHostTools(t *testing.T) {
-	run := &AgentRun{ID: "run_1", Context: map[string]interface{}{"conversationId": "conv_1"}}
+	run := &models.AgentRun{ID: "run_1", Context: map[string]interface{}{"conversationId": "conv_1"}}
 	authority, err := modelstep.PrepareChatWorkspace(context.Background(), nil, run)
 	if err != nil || authority != nil || modelstep.HostToolSpecs(authority) != nil {
 		t.Fatalf("no resolver gave authority %+v, err %v", authority, err)
@@ -138,9 +139,9 @@ func TestNoChatWorkspacesResolverOffersNoHostTools(t *testing.T) {
 	}
 }
 
-func validHostToolRequest(operation string) HostToolRequest {
-	return HostToolRequest{
-		APIVersion: HostToolAPIVersion, InvocationID: "ent_1", Scope: Scope{Kind: "tenant", ID: "42"},
+func validHostToolRequest(operation string) models.HostToolRequest {
+	return models.HostToolRequest{
+		APIVersion: models.HostToolAPIVersion, InvocationID: "ent_1", Scope: models.Scope{Kind: "tenant", ID: "42"},
 		RunID: "run_1", StepID: "turn_1", SessionID: "ses_1", AgentID: "dep_1",
 		DefinitionID: "def_1", DefinitionVersion: "7", ToolEntryID: "ent_1", ToolCallID: "toolu_1",
 		Operation: operation, Arguments: map[string]interface{}{"path": "a.txt"},
@@ -153,8 +154,8 @@ func TestHostToolRequestValidate(t *testing.T) {
 		t.Fatalf("valid read: %v", err)
 	}
 	command := validHostToolRequest(workspace.OperationRunCommand)
-	command.CommandRef = HostToolCommandRef(command.ToolEntryID)
-	command.VMTools = []HostVMTool{{Name: "gmail.send", Risk: capability.RiskLevelExternal, InputSchema: map[string]interface{}{"type": "object"}}}
+	command.CommandRef = models.HostToolCommandRef(command.ToolEntryID)
+	command.VMTools = []models.HostVMTool{{Name: "gmail.send", Risk: capability.RiskLevelExternal, InputSchema: map[string]interface{}{"type": "object"}}}
 	if err := command.Validate(); err != nil {
 		t.Fatalf("valid run_command: %v", err)
 	}
@@ -162,33 +163,36 @@ func TestHostToolRequestValidate(t *testing.T) {
 		t.Fatalf("command ref %q", command.CommandRef)
 	}
 
-	cases := map[string]func(*HostToolRequest){
-		"api version":      func(r *HostToolRequest) { r.APIVersion = "openseal.host-tool/v0" },
-		"identity":         func(r *HostToolRequest) { r.InvocationID = "ent_2" },
-		"run":              func(r *HostToolRequest) { r.RunID = "" },
-		"step":             func(r *HostToolRequest) { r.StepID = " " },
-		"agent":            func(r *HostToolRequest) { r.AgentID = "" },
-		"operation":        func(r *HostToolRequest) { r.Operation = "" },
-		"scope":            func(r *HostToolRequest) { r.Scope = Scope{} },
-		"workspace":        func(r *HostToolRequest) { r.Workspace = workspace.Authority{} },
-		"ref on read":      func(r *HostToolRequest) { r.CommandRef = "command:ent_1" },
-		"vm tools on read": func(r *HostToolRequest) { r.VMTools = []HostVMTool{{Name: "gmail.send"}} },
-		"long command ref": func(r *HostToolRequest) {
+	cases := map[string]func(*models.HostToolRequest){
+		"api version":      func(r *models.HostToolRequest) { r.APIVersion = "openseal.host-tool/v0" },
+		"identity":         func(r *models.HostToolRequest) { r.InvocationID = "ent_2" },
+		"run":              func(r *models.HostToolRequest) { r.RunID = "" },
+		"step":             func(r *models.HostToolRequest) { r.StepID = " " },
+		"agent":            func(r *models.HostToolRequest) { r.AgentID = "" },
+		"operation":        func(r *models.HostToolRequest) { r.Operation = "" },
+		"scope":            func(r *models.HostToolRequest) { r.Scope = models.Scope{} },
+		"workspace":        func(r *models.HostToolRequest) { r.Workspace = workspace.Authority{} },
+		"ref on read":      func(r *models.HostToolRequest) { r.CommandRef = "command:ent_1" },
+		"vm tools on read": func(r *models.HostToolRequest) { r.VMTools = []models.HostVMTool{{Name: "gmail.send"}} },
+		"long command ref": func(r *models.HostToolRequest) {
 			r.Operation = workspace.OperationRunCommand
 			r.CommandRef = strings.Repeat("x", 129)
 		},
-		"unnamed vm tool": func(r *HostToolRequest) { r.Operation = workspace.OperationRunCommand; r.VMTools = []HostVMTool{{}} },
-		"duplicate vm tool": func(r *HostToolRequest) {
+		"unnamed vm tool": func(r *models.HostToolRequest) {
 			r.Operation = workspace.OperationRunCommand
-			r.VMTools = []HostVMTool{{Name: "a"}, {Name: "a"}}
+			r.VMTools = []models.HostVMTool{{}}
+		},
+		"duplicate vm tool": func(r *models.HostToolRequest) {
+			r.Operation = workspace.OperationRunCommand
+			r.VMTools = []models.HostVMTool{{Name: "a"}, {Name: "a"}}
 		},
 	}
 	for name, mutate := range cases {
 		request := validHostToolRequest(workspace.OperationReadFile)
 		mutate(&request)
 		err := request.Validate()
-		var failure *HostToolFailure
-		if !errors.As(err, &failure) || failure.Code != HostToolFailureInvalidRequest || !failure.NotStarted {
+		var failure *models.HostToolFailure
+		if !errors.As(err, &failure) || failure.Code != models.HostToolFailureInvalidRequest || !failure.NotStarted {
 			t.Fatalf("%s: err %v, want invalid request not started", name, err)
 		}
 	}
@@ -196,9 +200,9 @@ func TestHostToolRequestValidate(t *testing.T) {
 
 func TestHostToolResultValidate(t *testing.T) {
 	request := validHostToolRequest(workspace.OperationReadFile)
-	result := HostToolResult{
-		APIVersion: HostToolAPIVersion, InvocationID: "ent_1",
-		Content: []ContentPart{{Type: ContentPartJSON, Value: json.RawMessage(`{"content":"hi"}`)}},
+	result := models.HostToolResult{
+		APIVersion: models.HostToolAPIVersion, InvocationID: "ent_1",
+		Content: []models.ContentPart{{Type: models.ContentPartJSON, Value: json.RawMessage(`{"content":"hi"}`)}},
 	}
 	if err := result.Validate(request); err != nil {
 		t.Fatalf("valid result: %v", err)
@@ -224,26 +228,26 @@ func TestHostToolResultValidate(t *testing.T) {
 		t.Fatal("result without content accepted")
 	}
 	oversized := result
-	oversized.Content = []ContentPart{{Type: ContentPartText, Text: strings.Repeat("x", MaxToolResultContentBytes+1)}}
-	if err := oversized.Validate(request); !errors.Is(err, ErrSessionEntryTooLarge) {
+	oversized.Content = []models.ContentPart{{Type: models.ContentPartText, Text: strings.Repeat("x", models.MaxToolResultContentBytes+1)}}
+	if err := oversized.Validate(request); !errors.Is(err, models.ErrSessionEntryTooLarge) {
 		t.Fatalf("oversized result: %v", err)
 	}
 	inline := result
-	inline.Content = []ContentPart{{Type: ContentPartImage, MediaType: "image/png", DataBase64: "AAAA"}}
-	if err := inline.Validate(request); !errors.Is(err, ErrInvalidSessionEntry) {
+	inline.Content = []models.ContentPart{{Type: models.ContentPartImage, MediaType: "image/png", DataBase64: "AAAA"}}
+	if err := inline.Validate(request); !errors.Is(err, models.ErrInvalidSessionEntry) {
 		t.Fatalf("inline image result: %v", err)
 	}
 }
 
 func TestHostToolFailureError(t *testing.T) {
-	failure := &HostToolFailure{Code: HostToolFailureUnavailable, Message: "draining", NotStarted: true}
+	failure := &models.HostToolFailure{Code: models.HostToolFailureUnavailable, Message: "draining", NotStarted: true}
 	if failure.Error() != "host_tool_unavailable: draining" {
 		t.Fatalf("error %q", failure.Error())
 	}
-	if (&HostToolFailure{Code: HostToolFailureFailed}).Error() != HostToolFailureFailed {
+	if (&models.HostToolFailure{Code: models.HostToolFailureFailed}).Error() != models.HostToolFailureFailed {
 		t.Fatal("code-only error")
 	}
-	var nilFailure *HostToolFailure
+	var nilFailure *models.HostToolFailure
 	if nilFailure.Error() == "" {
 		t.Fatal("nil failure has no text")
 	}

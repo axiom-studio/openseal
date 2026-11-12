@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
@@ -21,9 +22,9 @@ import (
 )
 
 // toolErrorEntries is the Run's tool entries named name, in log order.
-func toolErrorEntries(f *looptest.Fixture, runID, name string) []*SessionEntry {
+func toolErrorEntries(f *looptest.Fixture, runID, name string) []*models.SessionEntry {
 	f.T.Helper()
-	var out []*SessionEntry
+	var out []*models.SessionEntry
 	for _, entry := range f.ToolEntries(runID) {
 		if entry.Tool != nil && entry.Tool.Name == name {
 			out = append(out, entry)
@@ -34,9 +35,9 @@ func toolErrorEntries(f *looptest.Fixture, runID, name string) []*SessionEntry {
 
 // requireToolError checks that entry ended in error with an error result
 // whose text contains every want.
-func requireToolError(t *testing.T, entry *SessionEntry, want ...string) {
+func requireToolError(t *testing.T, entry *models.SessionEntry, want ...string) {
 	t.Helper()
-	if entry == nil || entry.State != ToolEntryError || entry.Tool == nil || entry.Tool.Result == nil || !entry.Tool.Result.IsError {
+	if entry == nil || entry.State != models.ToolEntryError || entry.Tool == nil || entry.Tool.Result == nil || !entry.Tool.Result.IsError {
 		t.Fatalf("tool entry = %#v, want an error result", entry)
 	}
 	text := toolEntryText(entry)
@@ -50,7 +51,7 @@ func requireToolError(t *testing.T, entry *SessionEntry, want ...string) {
 // sawToolError matches a step whose newest tool result for name is an error.
 func sawToolError(name string) func(looptest.StepView) bool {
 	return func(v looptest.StepView) bool {
-		if v.Purpose() != ModelStepPurposeStep {
+		if v.Purpose() != models.ModelStepPurposeStep {
 			return false
 		}
 		_, isError, ok := v.ToolResult(name)
@@ -69,12 +70,12 @@ func TestLoopUnofferedToolIsAToolError(t *testing.T) {
 		modelstep.HostToolName("read_file"),
 	} {
 		t.Run(name, func(t *testing.T) {
-			looptest.EachStore(t, "unoffered_tool", func(t *testing.T, store KernelStore) {
+			looptest.EachStore(t, "unoffered_tool", func(t *testing.T, store models.KernelStore) {
 				f := looptest.NewFixture(t, store, looptest.WithRules(
-					&looptest.ModelRule{Name: "answer", When: sawToolError(name), Reply: func(v looptest.StepView) ModelStepResult {
+					&looptest.ModelRule{Name: "answer", When: sawToolError(name), Reply: func(v looptest.StepView) models.ModelStepResult {
 						return looptest.Say("I can't do that here.")
 					}},
-					&looptest.ModelRule{Name: "call", When: stepPurpose, Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+					&looptest.ModelRule{Name: "call", When: stepPurpose, Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
 						if v.HasTool(name) {
 							t.Errorf("the step offered %s", name)
 						}
@@ -83,7 +84,7 @@ func TestLoopUnofferedToolIsAToolError(t *testing.T) {
 				))
 				conversation, run := f.StartChat("clean everything up")
 				done := f.DriveToRest(run.ID, 3)
-				f.MustStatus(done, AgentRunStatusCompleted)
+				f.MustStatus(done, models.AgentRunStatusCompleted)
 
 				entries := toolErrorEntries(f, run.ID, name)
 				if len(entries) != 1 {
@@ -94,14 +95,14 @@ func TestLoopUnofferedToolIsAToolError(t *testing.T) {
 					t.Fatalf("%d actions dispatched for an unoffered tool", got)
 				}
 				for _, call := range f.Calls(run.ID) {
-					if call.Status == ActionCallStatusSucceeded || call.Status == ActionCallStatusRunning {
+					if call.Status == models.ActionCallStatusSucceeded || call.Status == models.ActionCallStatusRunning {
 						t.Fatalf("unoffered tool produced a live action call %#v", call)
 					}
 				}
 				if replies := f.AgentReplies(conversation.ID); !slices.Equal(replies, []string{"I can't do that here."}) {
 					t.Fatalf("replies = %q", replies)
 				}
-				if got := len(f.Model.Calls(ModelStepPurposeStep)); got != 2 {
+				if got := len(f.Model.Calls(models.ModelStepPurposeStep)); got != 2 {
 					t.Fatalf("model steps = %d, want 2", got)
 				}
 			})
@@ -116,36 +117,36 @@ func TestLoopUnofferedToolIsAToolError(t *testing.T) {
 func TestLoopInvalidArgumentsAreAToolError(t *testing.T) {
 	type badCall struct {
 		name   string
-		result func(v looptest.StepView) ModelStepResult
+		result func(v looptest.StepView) models.ModelStepResult
 		want   []string
 	}
-	lookup := func(v looptest.StepView, args string) ModelStepResult {
+	lookup := func(v looptest.StepView, args string) models.ModelStepResult {
 		return rawCall("Looking it up.", looptest.GovernedTool(v, "lookup"), args)
 	}
 	cases := []badCall{
-		{name: "wrong_type", result: func(v looptest.StepView) ModelStepResult { return lookup(v, `{"id":7}`) }},
-		{name: "unknown_field", result: func(v looptest.StepView) ModelStepResult { return lookup(v, `{"id":"7","extra":true}`) }},
-		{name: "missing_required", result: func(v looptest.StepView) ModelStepResult { return lookup(v, `{}`) }},
-		{name: "not_an_object", want: []string{"not a JSON object"}, result: func(v looptest.StepView) ModelStepResult {
-			return ModelStepResult{Narration: "Looking it up.", Assistant: AssistantEntry{
-				Text: "Looking it up.", StopReason: ModelStopToolCalls,
-				ToolCalls: []ModelToolCall{{Name: looptest.GovernedTool(v, "lookup"), Arguments: json.RawMessage(`{}`), ArgumentsError: "The arguments were not a JSON object."}},
+		{name: "wrong_type", result: func(v looptest.StepView) models.ModelStepResult { return lookup(v, `{"id":7}`) }},
+		{name: "unknown_field", result: func(v looptest.StepView) models.ModelStepResult { return lookup(v, `{"id":"7","extra":true}`) }},
+		{name: "missing_required", result: func(v looptest.StepView) models.ModelStepResult { return lookup(v, `{}`) }},
+		{name: "not_an_object", want: []string{"not a JSON object"}, result: func(v looptest.StepView) models.ModelStepResult {
+			return models.ModelStepResult{Narration: "Looking it up.", Assistant: models.AssistantEntry{
+				Text: "Looking it up.", StopReason: models.ModelStopToolCalls,
+				ToolCalls: []models.ModelToolCall{{Name: looptest.GovernedTool(v, "lookup"), Arguments: json.RawMessage(`{}`), ArgumentsError: "The arguments were not a JSON object."}},
 			}}
 		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			looptest.EachStore(t, "invalid_arguments", func(t *testing.T, store KernelStore) {
+			looptest.EachStore(t, "invalid_arguments", func(t *testing.T, store models.KernelStore) {
 				var tool string
 				f := looptest.NewFixture(t, store, looptest.WithRules(
-					&looptest.ModelRule{Name: "bad", When: stepPurpose, Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+					&looptest.ModelRule{Name: "bad", When: stepPurpose, Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
 						tool = looptest.GovernedTool(v, "lookup")
 						return tc.result(v)
 					}},
-					&looptest.ModelRule{Name: "fix", When: func(v looptest.StepView) bool { return sawToolError(tool)(v) }, Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+					&looptest.ModelRule{Name: "fix", When: func(v looptest.StepView) bool { return sawToolError(tool)(v) }, Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
 						return looptest.Act("Fixing the call.", looptest.Call(tool, map[string]any{"id": "7"}))
 					}},
-					&looptest.ModelRule{Name: "answer", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
+					&looptest.ModelRule{Name: "answer", When: stepPurpose, Reply: func(v looptest.StepView) models.ModelStepResult {
 						if content, isError, ok := v.ToolResult(tool); !ok || isError || !strings.Contains(content, "Issue 7") {
 							t.Errorf("fixed lookup result = %q error=%v ok=%v", content, isError, ok)
 						}
@@ -154,14 +155,14 @@ func TestLoopInvalidArgumentsAreAToolError(t *testing.T) {
 				))
 				conversation, run := f.StartChat("what is the status of 7?")
 				done := f.DriveToRest(run.ID, 3)
-				f.MustStatus(done, AgentRunStatusCompleted)
+				f.MustStatus(done, models.AgentRunStatusCompleted)
 
 				entries := toolErrorEntries(f, run.ID, tool)
 				if len(entries) != 2 {
 					t.Fatalf("lookup entries = %d, want 2 (log %v)", len(entries), f.EntryTypes(run.ID))
 				}
 				requireToolError(t, entries[0], tc.want...)
-				if entries[1].State != ToolEntryCompleted {
+				if entries[1].State != models.ToolEntryCompleted {
 					t.Fatalf("fixed lookup = %s: %q", entries[1].State, toolEntryText(entries[1]))
 				}
 				if got := f.Dispatch.Count("lookup"); got != 1 {
@@ -175,25 +176,25 @@ func TestLoopInvalidArgumentsAreAToolError(t *testing.T) {
 	}
 
 	t.Run("control_tool", func(t *testing.T) {
-		looptest.EachStore(t, "invalid_control_arguments", func(t *testing.T, store KernelStore) {
-			final := string(ControlToolFinalAnswer)
+		looptest.EachStore(t, "invalid_control_arguments", func(t *testing.T, store models.KernelStore) {
+			final := string(models.ControlToolFinalAnswer)
 			f := looptest.NewFixture(t, store, looptest.WithRules(
-				&looptest.ModelRule{Name: "fixed", When: sawToolError(final), Reply: func(looptest.StepView) ModelStepResult {
+				&looptest.ModelRule{Name: "fixed", When: sawToolError(final), Reply: func(looptest.StepView) models.ModelStepResult {
 					return looptest.FinalAnswer(map[string]any{"answer": "All good."})
 				}},
-				&looptest.ModelRule{Name: "bad", When: stepPurpose, Times: 1, Reply: func(looptest.StepView) ModelStepResult {
+				&looptest.ModelRule{Name: "bad", When: stepPurpose, Times: 1, Reply: func(looptest.StepView) models.ModelStepResult {
 					return looptest.FinalAnswer(map[string]any{"answer": 5})
 				}},
 			))
 			conversation, run := f.StartChat("how is it going?")
 			done := f.DriveToRest(run.ID, 3)
-			f.MustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
 			entries := toolErrorEntries(f, run.ID, final)
 			if len(entries) != 2 {
 				t.Fatalf("final entries = %d, want 2 (log %v)", len(entries), f.EntryTypes(run.ID))
 			}
 			requireToolError(t, entries[0])
-			if entries[1].State != ToolEntryCompleted {
+			if entries[1].State != models.ToolEntryCompleted {
 				t.Fatalf("fixed final = %s: %q", entries[1].State, toolEntryText(entries[1]))
 			}
 			if replies := f.AgentReplies(conversation.ID); !slices.Equal(replies, []string{"All good."}) {
@@ -227,10 +228,10 @@ func toolErrorConnectorDefinition() *skill.Definition {
 // under distinct names (no name twice), and a call of either name runs on
 // exactly that binding with that binding's fixed arguments.
 func TestLoopToolNamesAreUniqueAcrossBindings(t *testing.T) {
-	looptest.EachStore(t, "binding_tool_names", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "binding_tool_names", func(t *testing.T, store models.KernelStore) {
 		names := map[string]string{} // slug -> offered tool name
 		f := looptest.NewFixture(t, store, looptest.WithRules(
-			&looptest.ModelRule{Name: "linear", When: stepPurpose, Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+			&looptest.ModelRule{Name: "linear", When: stepPurpose, Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
 				seen := map[string]bool{}
 				for _, tool := range v.Request().Tools {
 					if seen[tool.Name] {
@@ -245,10 +246,10 @@ func TestLoopToolNamesAreUniqueAcrossBindings(t *testing.T) {
 				}
 				return looptest.Act("Searching Linear.", looptest.Call(names["linear"], map[string]any{"query": "open issues"}))
 			}},
-			&looptest.ModelRule{Name: "github", When: stepPurpose, Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+			&looptest.ModelRule{Name: "github", When: stepPurpose, Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
 				return looptest.Act("Searching GitHub.", looptest.Call(names["github"], map[string]any{"query": "open pulls"}))
 			}},
-			&looptest.ModelRule{Name: "answer", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
+			&looptest.ModelRule{Name: "answer", When: stepPurpose, Reply: func(v looptest.StepView) models.ModelStepResult {
 				for slug, want := range map[string]string{"linear": "linear results", "github": "github results"} {
 					if content, isError, ok := v.ToolResult(names[slug]); !ok || isError || !strings.Contains(content, want) {
 						t.Errorf("%s search result = %q error=%v ok=%v", slug, content, isError, ok)
@@ -306,7 +307,7 @@ func TestLoopToolNamesAreUniqueAcrossBindings(t *testing.T) {
 
 		conversation, run := f.StartChat("search both trackers")
 		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, AgentRunStatusCompleted)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
 
 		calls := f.Calls(run.ID)
 		if len(calls) != 2 {
@@ -314,11 +315,11 @@ func TestLoopToolNamesAreUniqueAcrossBindings(t *testing.T) {
 		}
 		got := []string{calls[0].BindingID, calls[1].BindingID}
 		slices.Sort(got)
-		if !slices.Equal(got, []string{"github-binding", "linear-binding"}) || calls[0].Status != ActionCallStatusSucceeded || calls[1].Status != ActionCallStatusSucceeded {
+		if !slices.Equal(got, []string{"github-binding", "linear-binding"}) || calls[0].Status != models.ActionCallStatusSucceeded || calls[1].Status != models.ActionCallStatusSucceeded {
 			t.Fatalf("calls ran on %v (%s, %s)", got, calls[0].Status, calls[1].Status)
 		}
 		for _, call := range calls {
-			if call.Origin != ActionOriginLoop {
+			if call.Origin != models.ActionOriginLoop {
 				t.Fatalf("call %s origin = %s", call.ID, call.Origin)
 			}
 		}

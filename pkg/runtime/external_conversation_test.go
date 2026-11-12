@@ -52,17 +52,17 @@ func TestExternalConversationEndpointFollowsItsSingularSkillBinding(t *testing.T
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	service := externalconversation.NewExternalConversationEndpointService(store, catalog)
 	endpoint, err := service.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
-		ID: "slack-channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Customer channel", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, InstallationID: "workspace:T0123", ApplicationID: "app:A0123", Address: "C012345",
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
-		Policy: ExternalConversationPolicy{
-			MessageSelection: ExternalConversationSelectDirectOrMention,
-			ReplyMode:        ExternalConversationReplyThread,
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy: models.ExternalConversationPolicy{
+			MessageSelection: models.ExternalConversationSelectDirectOrMention,
+			ReplyMode:        models.ExternalConversationReplyThread,
 			IgnoreBots:       true,
 		},
 		Configuration: map[string]interface{}{"locale": "en-US"},
-		Status:        ExternalConversationEndpointActive,
+		Status:        models.ExternalConversationEndpointActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -109,15 +109,15 @@ func TestExternalConversationEndpointFollowsItsSingularSkillBinding(t *testing.T
 	}
 
 	following, err := service.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
-		ID: "stale", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
-		DeploymentID: "slack-agent", Name: "Stale", Adapter: ExternalConversationAdapterReference{
+		ID: "stale", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
+		DeploymentID: "slack-agent", Name: "Stale", Adapter: models.ExternalConversationAdapterReference{
 			SkillID: "slack", SkillVersion: "1.0.0", BindingID: "slack", BindingRevision: 2, AdapterID: "conversations",
 		},
 		Mode:    capability.ConversationEndpointChannel,
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
-		Policy: ExternalConversationPolicy{
-			MessageSelection: ExternalConversationSelectAllMessages,
-			ReplyMode:        ExternalConversationReplyThread,
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy: models.ExternalConversationPolicy{
+			MessageSelection: models.ExternalConversationSelectAllMessages,
+			ReplyMode:        models.ExternalConversationReplyThread,
 			IgnoreBots:       true,
 		},
 	})
@@ -126,18 +126,18 @@ func TestExternalConversationEndpointFollowsItsSingularSkillBinding(t *testing.T
 	}
 
 	_, err = service.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
-		ID: "secret", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		ID: "secret", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Secret", Adapter: adapter,
 		Mode:    capability.ConversationEndpointChannel,
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
-		Policy: ExternalConversationPolicy{
-			MessageSelection: ExternalConversationSelectAllMessages,
-			ReplyMode:        ExternalConversationReplyThread,
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy: models.ExternalConversationPolicy{
+			MessageSelection: models.ExternalConversationSelectAllMessages,
+			ReplyMode:        models.ExternalConversationReplyThread,
 			IgnoreBots:       true,
 		},
 		Configuration: map[string]interface{}{"access_token": "forbidden"},
 	})
-	if !errors.Is(err, ErrInvalidExternalConversation) {
+	if !errors.Is(err, models.ErrInvalidExternalConversation) {
 		t.Fatalf("secret configuration error = %v", err)
 	}
 }
@@ -148,25 +148,25 @@ func TestExternalConversationEndpointCanRetireWhenAdapterIsUnavailable(t *testin
 	resolver := &switchableConversationAdapterResolver{ExternalConversationAdapterResolver: catalog}
 	service := externalconversation.NewExternalConversationEndpointService(store, resolver)
 	endpoint, err := service.Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
-		ID: "slack-retire", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		ID: "slack-retire", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Retirable endpoint", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Address: "C012345",
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
-		Policy: ExternalConversationPolicy{
-			MessageSelection: ExternalConversationSelectDirectOrMention,
-			ReplyMode:        ExternalConversationReplyThread, IgnoreBots: true,
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy: models.ExternalConversationPolicy{
+			MessageSelection: models.ExternalConversationSelectDirectOrMention,
+			ReplyMode:        models.ExternalConversationReplyThread, IgnoreBots: true,
 		},
-		Status: ExternalConversationEndpointActive,
+		Status: models.ExternalConversationEndpointActive,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	resolver.unavailable = true
-	retired := ExternalConversationEndpointRetired
+	retired := models.ExternalConversationEndpointRetired
 	endpoint, err = service.Update(ctx, scope, endpoint.ID, externalconversation.UpdateExternalConversationEndpointRequest{
 		ExpectedRevision: endpoint.Revision, Status: &retired,
 	})
-	if err != nil || endpoint.Status != ExternalConversationEndpointRetired || endpoint.RetiredAt == nil {
+	if err != nil || endpoint.Status != models.ExternalConversationEndpointRetired || endpoint.RetiredAt == nil {
 		t.Fatalf("retired endpoint = %#v, %v", endpoint, err)
 	}
 }
@@ -175,22 +175,22 @@ func TestExternalConversationInboxIsIdempotentAndLeaseRecoverable(t *testing.T) 
 	ctx := context.Background()
 	store, endpoint := activeExternalConversationTestEndpoint(t, ctx)
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	item := &ExternalConversationInboxItem{
+	item := &models.ExternalConversationInboxItem{
 		ID: "inbox-1", Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-		Event: NormalizedExternalConversationEvent{
+		Event: models.NormalizedExternalConversationEvent{
 			ID: "Ev/+=1", Type: capability.ConversationEventMessageReceived,
 			ExternalConversationID: "workspace/channel", ExternalThreadID: "171.001",
 			ExternalMessageID: "wamid.HBg/+=1", ExternalParticipantID: "user@example.com",
 			ParticipantDisplayName: "External User", Text: "Can you help?", MentionsEndpoint: true,
 			OrderingKey: "workspace/channel:171.001", OccurredAt: now,
 		},
-		Status: ExternalConversationInboxPending, MaximumAttempts: 8, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Status: models.ExternalConversationInboxPending, MaximumAttempts: 8, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	first, replayed, err := store.ReceiveExternalConversationEvent(ctx, item)
 	if err != nil || replayed {
 		t.Fatalf("receive = %#v, replayed=%v, %v", first, replayed, err)
 	}
-	replay := cloneExternalConversationInboxItem(item)
+	replay := models.CloneExternalConversationInboxItem(item)
 	replay.ID = "different-local-id"
 	existing, replayed, err := store.ReceiveExternalConversationEvent(ctx, replay)
 	if err != nil || !replayed || existing.ID != item.ID {
@@ -198,7 +198,7 @@ func TestExternalConversationInboxIsIdempotentAndLeaseRecoverable(t *testing.T) 
 	}
 
 	leased, err := store.ClaimExternalConversationInbox(ctx, endpoint.Scope, "worker-one", now, time.Minute)
-	if err != nil || leased == nil || leased.Status != ExternalConversationInboxLeased || leased.Attempt != 1 {
+	if err != nil || leased == nil || leased.Status != models.ExternalConversationInboxLeased || leased.Attempt != 1 {
 		t.Fatalf("first lease = %#v, %v", leased, err)
 	}
 	if next, err := store.ClaimExternalConversationInbox(ctx, endpoint.Scope, "worker-two", now.Add(30*time.Second), time.Minute); err != nil || next != nil {
@@ -209,16 +209,16 @@ func TestExternalConversationInboxIsIdempotentAndLeaseRecoverable(t *testing.T) 
 		t.Fatalf("expired lease recovery = %#v, %v", reclaimed, err)
 	}
 
-	stale := cloneExternalConversationInboxItem(leased)
-	stale.Status, stale.LeaseOwner, stale.LeaseExpiresAt = ExternalConversationInboxApplied, "", time.Time{}
+	stale := models.CloneExternalConversationInboxItem(leased)
+	stale.Status, stale.LeaseOwner, stale.LeaseExpiresAt = models.ExternalConversationInboxApplied, "", time.Time{}
 	stale.ConversationID, stale.ChannelMessageID, stale.Revision = "conversation-1", "message-1", leased.Revision+1
 	stale.AppliedAt, stale.UpdatedAt = now.Add(10*time.Second), now.Add(10*time.Second)
-	if err := store.SaveExternalConversationInbox(ctx, stale, leased.Revision, "worker-one"); !errors.Is(err, ErrExternalConversationLeaseLost) {
+	if err := store.SaveExternalConversationInbox(ctx, stale, leased.Revision, "worker-one"); !errors.Is(err, models.ErrExternalConversationLeaseLost) {
 		t.Fatalf("stale worker save error = %v", err)
 	}
 
-	applied := cloneExternalConversationInboxItem(reclaimed)
-	applied.Status, applied.LeaseOwner, applied.LeaseExpiresAt = ExternalConversationInboxApplied, "", time.Time{}
+	applied := models.CloneExternalConversationInboxItem(reclaimed)
+	applied.Status, applied.LeaseOwner, applied.LeaseExpiresAt = models.ExternalConversationInboxApplied, "", time.Time{}
 	applied.ConversationID, applied.ChannelMessageID, applied.RunID = "conversation-1", "message-1", "run-1"
 	applied.AppliedAt, applied.UpdatedAt = now.Add(61*time.Second), now.Add(61*time.Second)
 	applied.Revision++
@@ -226,7 +226,7 @@ func TestExternalConversationInboxIsIdempotentAndLeaseRecoverable(t *testing.T) 
 		t.Fatal(err)
 	}
 	stored, err := store.GetExternalConversationInboxItem(ctx, endpoint.Scope, item.ID)
-	if err != nil || stored.Status != ExternalConversationInboxApplied || stored.Attempt != 2 {
+	if err != nil || stored.Status != models.ExternalConversationInboxApplied || stored.Attempt != 2 {
 		t.Fatalf("applied inbox = %#v, %v", stored, err)
 	}
 }
@@ -235,18 +235,18 @@ func TestExternalConversationDeliveryRebindsOnlyUnconfirmedWorkAfterEndpointUpgr
 	ctx := context.Background()
 	store, endpoint := activeExternalConversationTestEndpoint(t, ctx)
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	delivery := &ExternalConversationDelivery{
+	delivery := &models.ExternalConversationDelivery{
 		ID: "delivery-rebind", Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-1",
 		OrderingKey: "order-1", Parameters: map[string]interface{}{"text": "approve this"}, IdempotencyKey: "approval:one",
-		Status: ExternalConversationDeliveryFailed, Attempt: 8, MaximumAttempts: 8, AvailableAt: now.Add(time.Minute),
+		Status: models.ExternalConversationDeliveryFailed, Attempt: 8, MaximumAttempts: 8, AvailableAt: now.Add(time.Minute),
 		ErrorCode: "adapter_delivery_unconfirmed", Summary: "The adapter could not confirm delivery.",
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, replayed, err := store.EnqueueExternalConversationDelivery(ctx, delivery); err != nil || replayed {
 		t.Fatalf("enqueue = replayed %v, %v", replayed, err)
 	}
-	upgraded := cloneExternalConversationEndpoint(endpoint)
+	upgraded := models.CloneExternalConversationEndpoint(endpoint)
 	upgraded.Adapter.SkillVersion = "1.0.1"
 	upgraded.Adapter.BindingRevision = 2
 	upgraded.Revision++
@@ -254,11 +254,11 @@ func TestExternalConversationDeliveryRebindsOnlyUnconfirmedWorkAfterEndpointUpgr
 	if err := store.UpdateExternalConversationEndpoint(ctx, upgraded, endpoint.Revision); err != nil {
 		t.Fatal(err)
 	}
-	replay := cloneExternalConversationDelivery(delivery)
+	replay := models.CloneExternalConversationDelivery(delivery)
 	replay.ID = "ignored-replay-id"
 	replay.EndpointRevision = upgraded.Revision
 	replay.Adapter = upgraded.Adapter
-	replay.Status = ExternalConversationDeliveryPending
+	replay.Status = models.ExternalConversationDeliveryPending
 	replay.Attempt = 0
 	replay.AvailableAt = now.Add(2 * time.Second)
 	replay.ErrorCode, replay.Summary = "", ""
@@ -268,7 +268,7 @@ func TestExternalConversationDeliveryRebindsOnlyUnconfirmedWorkAfterEndpointUpgr
 		t.Fatalf("rebind = %#v, replayed %v, %v", rebound, replayed, err)
 	}
 	if rebound.ID != delivery.ID || rebound.EndpointRevision != upgraded.Revision || rebound.Adapter != upgraded.Adapter ||
-		rebound.Status != ExternalConversationDeliveryPending || rebound.Attempt != delivery.Attempt || rebound.Revision != 2 ||
+		rebound.Status != models.ExternalConversationDeliveryPending || rebound.Attempt != delivery.Attempt || rebound.Revision != 2 ||
 		rebound.ErrorCode != "" || rebound.Summary != "" {
 		t.Fatalf("rebound delivery = %#v", rebound)
 	}
@@ -277,8 +277,8 @@ func TestExternalConversationDeliveryRebindsOnlyUnconfirmedWorkAfterEndpointUpgr
 	if err != nil || leasedForDelivery == nil || leasedForDelivery.ID != delivery.ID {
 		t.Fatalf("claim rebound delivery = %#v, %v", leasedForDelivery, err)
 	}
-	delivered := cloneExternalConversationDelivery(leasedForDelivery)
-	delivered.Status = ExternalConversationDeliveryDelivered
+	delivered := models.CloneExternalConversationDelivery(leasedForDelivery)
+	delivered.Status = models.ExternalConversationDeliveryDelivered
 	delivered.ProviderMessageID = "provider-message-1"
 	delivered.DeliveredAt, delivered.UpdatedAt = now.Add(4*time.Second), now.Add(4*time.Second)
 	delivered.LeaseOwner, delivered.LeaseExpiresAt = "", time.Time{}
@@ -286,10 +286,10 @@ func TestExternalConversationDeliveryRebindsOnlyUnconfirmedWorkAfterEndpointUpgr
 	if err := store.SaveExternalConversationDelivery(ctx, delivered, leasedForDelivery.Revision, "delivery-worker"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := rebindExternalConversationDelivery(delivered, replay); ok {
+	if _, ok := models.RebindExternalConversationDelivery(delivered, replay); ok {
 		t.Fatal("provider-confirmed delivery was rebound")
 	}
-	upgradedAgain := cloneExternalConversationEndpoint(upgraded)
+	upgradedAgain := models.CloneExternalConversationEndpoint(upgraded)
 	upgradedAgain.Adapter.SkillVersion = "1.0.2"
 	upgradedAgain.Adapter.BindingRevision = 3
 	upgradedAgain.Revision++
@@ -297,21 +297,21 @@ func TestExternalConversationDeliveryRebindsOnlyUnconfirmedWorkAfterEndpointUpgr
 	if err := store.UpdateExternalConversationEndpoint(ctx, upgradedAgain, upgraded.Revision); err != nil {
 		t.Fatal(err)
 	}
-	deliveredReplay := cloneExternalConversationDelivery(replay)
+	deliveredReplay := models.CloneExternalConversationDelivery(replay)
 	deliveredReplay.EndpointRevision = upgradedAgain.Revision
 	deliveredReplay.Adapter = upgradedAgain.Adapter
 	deliveredReplay.AvailableAt, deliveredReplay.UpdatedAt = now.Add(6*time.Second), now.Add(6*time.Second)
 	receipt, replayed, err := store.EnqueueExternalConversationDelivery(ctx, deliveredReplay)
-	if err != nil || !replayed || receipt.Status != ExternalConversationDeliveryDelivered ||
+	if err != nil || !replayed || receipt.Status != models.ExternalConversationDeliveryDelivered ||
 		receipt.ProviderMessageID != delivered.ProviderMessageID || receipt.EndpointRevision != delivered.EndpointRevision ||
 		receipt.Revision != delivered.Revision {
 		t.Fatalf("delivered replay after endpoint upgrade = %#v, replayed %v, %v", receipt, replayed, err)
 	}
-	leased := cloneExternalConversationDelivery(rebound)
-	leased.Status = ExternalConversationDeliveryLeased
+	leased := models.CloneExternalConversationDelivery(rebound)
+	leased.Status = models.ExternalConversationDeliveryLeased
 	leased.LeaseOwner = "worker-one"
 	leased.LeaseExpiresAt = now.Add(time.Minute)
-	if _, ok := rebindExternalConversationDelivery(leased, replay); ok {
+	if _, ok := models.RebindExternalConversationDelivery(leased, replay); ok {
 		t.Fatal("leased delivery was rebound")
 	}
 }
@@ -320,18 +320,18 @@ func TestExternalConversationMappingsAndOutboxSurviveRetry(t *testing.T) {
 	ctx := context.Background()
 	store, endpoint := activeExternalConversationTestEndpoint(t, ctx)
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	conversationMapping := &ExternalConversationMapping{
+	conversationMapping := &models.ExternalConversationMapping{
 		Scope: endpoint.Scope, EndpointID: endpoint.ID, ExternalConversationID: "C/one", ExternalThreadID: "171.001",
 		ConversationID: "conversation-1", ThreadRootMessageID: "message-root",
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	participantMapping := &ExternalParticipantMapping{
+	participantMapping := &models.ExternalParticipantMapping{
 		Scope: endpoint.Scope, EndpointID: endpoint.ID, ExternalParticipantID: "U/one",
-		Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "external-user-1"}, DisplayName: "External User",
+		Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "external-user-1"}, DisplayName: "External User",
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	messageMapping := &ExternalMessageMapping{
-		Scope: endpoint.Scope, EndpointID: endpoint.ID, Direction: ExternalMessageInbound, ExternalMessageID: "M/one",
+	messageMapping := &models.ExternalMessageMapping{
+		Scope: endpoint.Scope, EndpointID: endpoint.ID, Direction: models.ExternalMessageInbound, ExternalMessageID: "M/one",
 		ConversationID: "conversation-1", ChannelMessageID: "message-in",
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -348,17 +348,17 @@ func TestExternalConversationMappingsAndOutboxSurviveRetry(t *testing.T) {
 		t.Fatalf("conversation mapping = %#v", mapping)
 	}
 
-	delivery := &ExternalConversationDelivery{
+	delivery := &models.ExternalConversationDelivery{
 		ID: "delivery-1", Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 		Operation: capability.ConversationDeliveryMessageSend, ConversationID: "conversation-1", ChannelMessageID: "message-out",
 		ExternalThreadID: "171.001", OrderingKey: "order-1", IdempotencyKey: "reply:message-out",
-		Status: ExternalConversationDeliveryPending, MaximumAttempts: 5, AvailableAt: now,
+		Status: models.ExternalConversationDeliveryPending, MaximumAttempts: 5, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, replayed, err := store.EnqueueExternalConversationDelivery(ctx, delivery); err != nil || replayed {
 		t.Fatalf("enqueue replayed=%v, %v", replayed, err)
 	}
-	replay := cloneExternalConversationDelivery(delivery)
+	replay := models.CloneExternalConversationDelivery(delivery)
 	replay.ID = "another-delivery-id"
 	if existing, replayed, err := store.EnqueueExternalConversationDelivery(ctx, replay); err != nil || !replayed || existing.ID != delivery.ID {
 		t.Fatalf("delivery replay = %#v, replayed=%v, %v", existing, replayed, err)
@@ -367,8 +367,8 @@ func TestExternalConversationMappingsAndOutboxSurviveRetry(t *testing.T) {
 	if err != nil || leased == nil || leased.Attempt != 1 {
 		t.Fatalf("delivery lease = %#v, %v", leased, err)
 	}
-	retry := cloneExternalConversationDelivery(leased)
-	retry.Status, retry.LeaseOwner, retry.LeaseExpiresAt = ExternalConversationDeliveryRetry, "", time.Time{}
+	retry := models.CloneExternalConversationDelivery(leased)
+	retry.Status, retry.LeaseOwner, retry.LeaseExpiresAt = models.ExternalConversationDeliveryRetry, "", time.Time{}
 	retry.AvailableAt, retry.UpdatedAt, retry.ErrorCode, retry.Summary = now.Add(2*time.Minute), now.Add(10*time.Second), "rate_limited", "Provider requested retry."
 	retry.Revision++
 	if err := store.SaveExternalConversationDelivery(ctx, retry, leased.Revision, "delivery-worker"); err != nil {
@@ -381,8 +381,8 @@ func TestExternalConversationMappingsAndOutboxSurviveRetry(t *testing.T) {
 	if err != nil || retried == nil || retried.Attempt != 2 {
 		t.Fatalf("delivery retry = %#v, %v", retried, err)
 	}
-	delivered := cloneExternalConversationDelivery(retried)
-	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = ExternalConversationDeliveryDelivered, "", time.Time{}
+	delivered := models.CloneExternalConversationDelivery(retried)
+	delivered.Status, delivered.LeaseOwner, delivered.LeaseExpiresAt = models.ExternalConversationDeliveryDelivered, "", time.Time{}
 	delivered.ProviderMessageID, delivered.DeliveredAt, delivered.UpdatedAt = "provider/message/1", now.Add(121*time.Second), now.Add(121*time.Second)
 	delivered.ErrorCode, delivered.Summary = "", ""
 	delivered.Revision++
@@ -390,7 +390,7 @@ func TestExternalConversationMappingsAndOutboxSurviveRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	stored, err := store.GetExternalConversationDelivery(ctx, endpoint.Scope, delivery.ID)
-	if err != nil || stored.Status != ExternalConversationDeliveryDelivered || stored.Attempt != 2 {
+	if err != nil || stored.Status != models.ExternalConversationDeliveryDelivered || stored.Attempt != 2 {
 		t.Fatalf("delivered outbox = %#v, %v", stored, err)
 	}
 }
@@ -401,15 +401,15 @@ func TestExternalConversationClaimsSerializeOrderingKeysAndParallelizeIndependen
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	for index, orderingKey := range []string{"thread-one", "thread-one", "thread-two"} {
 		eventID := fmt.Sprintf("event-%d", index+1)
-		item := &ExternalConversationInboxItem{
+		item := &models.ExternalConversationInboxItem{
 			ID: eventID, Scope: endpoint.Scope, EndpointID: endpoint.ID,
 			EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-			Event: NormalizedExternalConversationEvent{
+			Event: models.NormalizedExternalConversationEvent{
 				ID: eventID, Type: capability.ConversationEventMessageReceived,
 				ExternalConversationID: "channel", ExternalMessageID: "message-" + eventID,
 				ExternalParticipantID: "user", Text: "hello", OrderingKey: orderingKey, OccurredAt: now,
 			},
-			Status: ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now,
+			Status: models.ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now,
 			Revision: 1, CreatedAt: now.Add(time.Duration(index) * time.Millisecond),
 			UpdatedAt: now.Add(time.Duration(index) * time.Millisecond),
 		}
@@ -431,13 +431,13 @@ func TestExternalConversationClaimsSerializeOrderingKeysAndParallelizeIndependen
 
 	for index, orderingKey := range []string{"delivery-thread-one", "delivery-thread-one", "delivery-thread-two"} {
 		id := fmt.Sprintf("delivery-order-%d", index+1)
-		delivery := &ExternalConversationDelivery{
+		delivery := &models.ExternalConversationDelivery{
 			ID: id, Scope: endpoint.Scope, EndpointID: endpoint.ID,
 			EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 			Operation:      capability.ConversationDeliveryMessageSend,
 			ConversationID: "conversation", ChannelMessageID: "message-" + id,
 			OrderingKey: orderingKey, IdempotencyKey: "idempotency-" + id,
-			Status: ExternalConversationDeliveryPending, MaximumAttempts: 3, AvailableAt: now,
+			Status: models.ExternalConversationDeliveryPending, MaximumAttempts: 3, AvailableAt: now,
 			Revision: 1, CreatedAt: now.Add(time.Duration(index) * time.Millisecond),
 			UpdatedAt: now.Add(time.Duration(index) * time.Millisecond),
 		}
@@ -462,16 +462,16 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	ctx := context.Background()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	endpoint, err := externalconversation.NewExternalConversationEndpointService(store, catalog).Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
-		ID: "slack-channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Slack channel", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Address: "C012345",
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
-		Policy: ExternalConversationPolicy{
-			MessageSelection: ExternalConversationSelectMentions,
-			ReplyMode:        ExternalConversationReplyThread,
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy: models.ExternalConversationPolicy{
+			MessageSelection: models.ExternalConversationSelectMentions,
+			ReplyMode:        models.ExternalConversationReplyThread,
 			IgnoreBots:       true,
 		},
-		Status: ExternalConversationEndpointActive,
+		Status: models.ExternalConversationEndpointActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -493,7 +493,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	if endpoint.Adapter.BindingRevision != 1 {
 		t.Fatalf("endpoint binding revision changed without an endpoint amendment: %#v", endpoint.Adapter)
 	}
-	if endpoint.Status != ExternalConversationEndpointActive {
+	if endpoint.Status != models.ExternalConversationEndpointActive {
 		t.Fatalf("endpoint status = %q", endpoint.Status)
 	}
 	resolvedAfterAmendment, resolveErr := catalog.ResolveConversationAdapterBinding(
@@ -508,7 +508,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	transport := externalconversation.NewExternalConversationTransportService(store, catalog, models.WithClock(func() time.Time { return now }))
-	event := NormalizedExternalConversationEvent{
+	event := models.NormalizedExternalConversationEvent{
 		ID: "event/non-mention", Type: capability.ConversationEventMessageReceived,
 		ExternalConversationID: "C/one", ExternalThreadID: "171.001",
 		ExternalMessageID: "M/one", ExternalParticipantID: "U/one", Text: "hello",
@@ -517,7 +517,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	ignored, err := transport.Receive(ctx, externalconversation.ReceiveExternalConversationEventRequest{
 		Scope: scope, EndpointID: endpoint.ID, Event: event,
 	})
-	if err != nil || ignored.Accepted || ignored.Item.Status != ExternalConversationInboxIgnored || ignored.Item.AppliedAt.IsZero() {
+	if err != nil || ignored.Accepted || ignored.Item.Status != models.ExternalConversationInboxIgnored || ignored.Item.AppliedAt.IsZero() {
 		t.Fatalf("ignored ingress = %#v, %v", ignored, err)
 	}
 	replayed, err := transport.Receive(ctx, externalconversation.ReceiveExternalConversationEventRequest{
@@ -530,7 +530,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	accepted, err := transport.Receive(ctx, externalconversation.ReceiveExternalConversationEventRequest{
 		Scope: scope, EndpointID: endpoint.ID, Event: event,
 	})
-	if err != nil || !accepted.Accepted || accepted.Item.Status != ExternalConversationInboxPending {
+	if err != nil || !accepted.Accepted || accepted.Item.Status != models.ExternalConversationInboxPending {
 		t.Fatalf("accepted ingress = %#v, %v", accepted, err)
 	}
 	if accepted.Item.Adapter.BindingRevision != 2 {
@@ -540,14 +540,14 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	reaction.ID, reaction.Type, reaction.Text = "event/reaction", capability.ConversationEventReactionAdded, ""
 	if _, err := transport.Receive(ctx, externalconversation.ReceiveExternalConversationEventRequest{
 		Scope: scope, EndpointID: endpoint.ID, Event: reaction,
-	}); !errors.Is(err, ErrInvalidExternalConversation) {
+	}); !errors.Is(err, models.ErrInvalidExternalConversation) {
 		t.Fatalf("undeclared event error = %v", err)
 	}
 
 	conversations := runtimeconversation.NewConversationService(store, models.WithClock(func() time.Time { return now }))
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		Title: "Slack C012345", IdempotencyKey: "external:" + endpoint.ID + ":C/one",
 	})
 	if err != nil {
@@ -555,9 +555,9 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	}
 	reply, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "slack-agent"},
-		Intent: MessageIntentAnswer, Content: "How can I help?",
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "reply-one",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "slack-agent"},
+		Intent: models.MessageIntentAnswer, Content: "How can I help?",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "reply-one",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -565,9 +565,9 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	enqueued, err := transport.Enqueue(ctx, externalconversation.EnqueueExternalConversationDeliveryRequest{
 		Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 		ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID, ExternalThreadID: "171.001",
-		Correlation: &ExternalConversationDeliveryCorrelation{Kind: "run", ID: "run-one", Phase: "reply"},
+		Correlation: &models.ExternalConversationDeliveryCorrelation{Kind: "run", ID: "run-one", Phase: "reply"},
 	})
-	if err != nil || enqueued.Replayed || enqueued.Delivery.Status != ExternalConversationDeliveryPending {
+	if err != nil || enqueued.Replayed || enqueued.Delivery.Status != models.ExternalConversationDeliveryPending {
 		t.Fatalf("enqueued reply = %#v, %v", enqueued, err)
 	}
 	if enqueued.Delivery.Adapter.BindingRevision != 2 {
@@ -576,12 +576,12 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	replayedDelivery, err := transport.Enqueue(ctx, externalconversation.EnqueueExternalConversationDeliveryRequest{
 		Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 		ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID, ExternalThreadID: "171.001",
-		Correlation: &ExternalConversationDeliveryCorrelation{Kind: "run", ID: "run-one", Phase: "reply"},
+		Correlation: &models.ExternalConversationDeliveryCorrelation{Kind: "run", ID: "run-one", Phase: "reply"},
 	})
 	if err != nil || !replayedDelivery.Replayed || replayedDelivery.Delivery.ID != enqueued.Delivery.ID {
 		t.Fatalf("replayed delivery = %#v, %v", replayedDelivery, err)
 	}
-	correlated, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+	correlated, err := store.ListExternalConversationDeliveries(ctx, models.ExternalConversationDeliveryFilter{
 		Scope: scope, CorrelationKind: "run", CorrelationID: "run-one", Limit: 10,
 	})
 	if err != nil || len(correlated) != 1 || correlated[0].Correlation == nil || correlated[0].Correlation.Phase != "reply" {
@@ -591,12 +591,12 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 		Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageUpdate,
 		ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID, ExternalThreadID: "171.001",
 		Parameters: map[string]interface{}{"text": "updated"},
-	}); !errors.Is(err, ErrInvalidExternalConversation) {
+	}); !errors.Is(err, models.ErrInvalidExternalConversation) {
 		t.Fatalf("undeclared delivery operation error = %v", err)
 	}
 }
 
-func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*sqlite.Store, *skill.Catalog, Scope, ExternalConversationAdapterReference) {
+func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*sqlite.Store, *skill.Catalog, models.Scope, models.ExternalConversationAdapterReference) {
 	t.Helper()
 	store := newTestKernelStore(t)
 	catalog := skill.NewCatalog()
@@ -604,7 +604,7 @@ func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*sqlite
 	if err := catalog.Register(ctx, definition); err != nil {
 		t.Fatal(err)
 	}
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	binding := &skill.Binding{
 		ID: "slack", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "slack-agent",
 		SkillID: definition.ID, SkillVersion: definition.Version,
@@ -617,26 +617,26 @@ func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*sqlite
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	return store, catalog, scope, ExternalConversationAdapterReference{
+	return store, catalog, scope, models.ExternalConversationAdapterReference{
 		SkillID: definition.ID, SkillVersion: definition.Version,
 		BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
 	}
 }
 
-func activeExternalConversationTestEndpoint(t *testing.T, ctx context.Context) (*sqlite.Store, *ExternalConversationEndpoint) {
+func activeExternalConversationTestEndpoint(t *testing.T, ctx context.Context) (*sqlite.Store, *models.ExternalConversationEndpoint) {
 	t.Helper()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	endpoint, err := externalconversation.NewExternalConversationEndpointService(store, catalog).Create(ctx, externalconversation.CreateExternalConversationEndpointRequest{
-		ID: "slack-channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		ID: "slack-channel", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Slack channel", Adapter: adapter,
 		Mode: capability.ConversationEndpointChannel, Address: "C012345",
-		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
-		Policy: ExternalConversationPolicy{
-			MessageSelection: ExternalConversationSelectAllMessages,
-			ReplyMode:        ExternalConversationReplyThread,
+		Handler: models.ExternalConversationHandler{Kind: models.ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy: models.ExternalConversationPolicy{
+			MessageSelection: models.ExternalConversationSelectAllMessages,
+			ReplyMode:        models.ExternalConversationReplyThread,
 			IgnoreBots:       true,
 		},
-		Status: ExternalConversationEndpointActive,
+		Status: models.ExternalConversationEndpointActive,
 	})
 	if err != nil {
 		t.Fatal(err)

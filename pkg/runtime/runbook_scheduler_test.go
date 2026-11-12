@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -16,9 +17,9 @@ import (
 func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(t *testing.T) {
 	for _, testCase := range []struct {
 		name string
-		open func(*testing.T) (KernelStore, func())
+		open func(*testing.T) (models.KernelStore, func())
 	}{
-		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "bounded-schedule.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -30,10 +31,10 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 			ctx := t.Context()
 			store, cleanup := testCase.open(t)
 			defer cleanup()
-			scope := Scope{Kind: "tenant", ID: "bounded"}
-			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
-			objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-				Scope: scope, Owner: owner, Title: "Five useful comments", Goal: "Publish one useful comment per hour for five hours", Status: ObjectiveStatusActive,
+			scope := models.Scope{Kind: "tenant", ID: "bounded"}
+			owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
+			objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Five useful comments", Goal: "Publish one useful comment per hour for five hours", Status: models.ObjectiveStatusActive,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -64,7 +65,7 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 			// advancement. Reconciliation must replay the same occurrence, count it
 			// once, and never create another Run.
 			advanced, _ := store.GetRunbookActivation(ctx, scope, activation.ID)
-			replay := cloneRunbookActivation(advanced)
+			replay := models.CloneRunbookActivation(advanced)
 			replay.NextOccurrenceBase, replay.NextRunAt = cursor.NextOccurrenceBase, cursor.NextRunAt
 			replay.OccurrencesProcessed = 0
 			replay.Revision++
@@ -85,13 +86,13 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 				}
 			}
 			terminal, _ := store.GetRunbookActivation(ctx, scope, activation.ID)
-			if terminal.Status != RunbookActivationRetired || terminal.OccurrencesProcessed != 5 || terminal.NextRunAt != nil || terminal.NextOccurrenceBase != nil {
+			if terminal.Status != models.RunbookActivationRetired || terminal.OccurrencesProcessed != 5 || terminal.NextRunAt != nil || terminal.NextOccurrenceBase != nil {
 				t.Fatalf("terminal activation = %#v", terminal)
 			}
 			if result, err := scheduler.ReconcileScope(ctx, scope, 10); err != nil || result.Examined != 0 || result.Scheduled != 0 {
 				t.Fatalf("post-retirement reconciliation = %#v, %v", result, err)
 			}
-			runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 10})
+			runs, err := store.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 10})
 			if err != nil || len(runs) != 5 {
 				t.Fatalf("scheduled runs = %d, %v", len(runs), err)
 			}
@@ -102,10 +103,10 @@ func TestRunbookSchedulerRetiresAfterExactMaximumOccurrencesAcrossRestartStores(
 func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "3"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Useful participation", Goal: "Contribute useful advice", Status: ObjectiveStatusActive, Priority: 4,
+	scope := models.Scope{Kind: "tenant", ID: "3"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
+	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Useful participation", Goal: "Contribute useful advice", Status: models.ObjectiveStatusActive, Priority: 4,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +141,7 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 	if err != nil || result.Scheduled != 1 {
 		t.Fatalf("schedule=%#v err=%v", result, err)
 	}
-	runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 10})
+	runs, err := store.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 10})
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("runs=%#v err=%v", runs, err)
 	}
@@ -154,18 +155,18 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 	if communities, ok := created.Context["communities"].([]interface{}); !ok || len(communities) != 1 {
 		t.Fatalf("Runbook input=%#v", created.Context)
 	}
-	conversations, err := store.ListConversations(ctx, ConversationFilter{Scope: scope, Owner: &owner, Limit: 10})
+	conversations, err := store.ListConversations(ctx, models.ConversationFilter{Scope: scope, Owner: &owner, Limit: 10})
 	if err != nil || len(conversations) != 1 || conversations[0].Title != "Community work" {
 		t.Fatalf("reporting conversations=%#v err=%v", conversations, err)
 	}
-	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversations[0].ID, Limit: 10})
+	messages, err := store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversations[0].ID, Limit: 10})
 	if err != nil || len(messages) != 1 || messages[0].Content != "Started: Contribute useful advice" || len(messages[0].References) != 1 || messages[0].References[0].ID != created.ID {
 		t.Fatalf("reporting messages=%#v err=%v", messages, err)
 	}
 	if err := conversationrun.ProjectRunReportingStartForRun(ctx, store, created); err != nil {
 		t.Fatal(err)
 	}
-	messages, _ = store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversations[0].ID, Limit: 10})
+	messages, _ = store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversations[0].ID, Limit: 10})
 	if len(messages) != 1 {
 		t.Fatalf("replayed start duplicated reporting messages=%#v", messages)
 	}
@@ -173,7 +174,7 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 	if err != nil || replayed.Scheduled != 0 {
 		t.Fatalf("reconcile replay=%#v err=%v", replayed, err)
 	}
-	runs, _ = store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 10})
+	runs, _ = store.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, ObjectiveID: objective.ID, Limit: 10})
 	if len(runs) != 1 {
 		t.Fatalf("duplicate Runs=%#v", runs)
 	}
@@ -182,11 +183,11 @@ func TestRunbookSchedulerCreatesExactlyOneAttributedRunPerCronOccurrence(t *test
 func TestRunReportingProjectsTerminalMilestoneOnce(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "reporting"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-one"}
-	run := &AgentRun{
+	scope := models.Scope{Kind: "tenant", ID: "reporting"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-one"}
+	run := &models.AgentRun{
 		ID: "run-one", Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "Publish the weekly brief",
-		Status: AgentRunStatusCompleted, Context: map[string]interface{}{},
+		Status: models.AgentRunStatusCompleted, Context: map[string]interface{}{},
 	}
 	policy := &runbook.ReportingPolicy{
 		Channel: "work", Title: "Work",
@@ -206,7 +207,7 @@ func TestRunReportingProjectsTerminalMilestoneOnce(t *testing.T) {
 	if err := conversationrun.ProjectTerminalRunReporting(ctx, store, run); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: channel.ID, Limit: 10})
+	messages, err := store.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: channel.ID, Limit: 10})
 	if err != nil || len(messages) != 2 {
 		t.Fatalf("messages=%#v err=%v", messages, err)
 	}
@@ -218,10 +219,10 @@ func TestRunReportingProjectsTerminalMilestoneOnce(t *testing.T) {
 func TestRunbookSchedulerKeepsSiblingRunbooksIndependent(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "3"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
-	objective, _ := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Pursue several methods", Status: ObjectiveStatusActive,
+	scope := models.Scope{Kind: "tenant", ID: "3"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
+	objective, _ := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Outcome", Goal: "Pursue several methods", Status: models.ObjectiveStatusActive,
 	})
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 	service := routine.NewRunbookActivationService(store, models.WithClock(func() time.Time { return now }))
@@ -239,7 +240,7 @@ func TestRunbookSchedulerKeepsSiblingRunbooksIndependent(t *testing.T) {
 	if result, err := scheduler.ReconcileScope(ctx, scope, 50); err != nil || result.Initialized != 2 {
 		t.Fatalf("initialize=%#v err=%v", result, err)
 	}
-	values, _ := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, ObjectiveID: objective.ID})
+	values, _ := store.ListRunbookActivations(ctx, models.RunbookActivationFilter{Scope: scope, ObjectiveID: objective.ID})
 	now = values[0].NextRunAt.Add(time.Second)
 	if result, err := scheduler.ReconcileScope(ctx, scope, 50); err != nil || result.Scheduled != 2 {
 		t.Fatalf("schedule siblings=%#v err=%v", result, err)

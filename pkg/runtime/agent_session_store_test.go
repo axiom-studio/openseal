@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/google/uuid"
@@ -18,25 +19,25 @@ import (
 
 var testSessionNow = time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 
-func testSessionLease() AgentRunLeaseGuard {
-	return AgentRunLeaseGuard{WorkerID: "w1", Now: testSessionNow}
+func testSessionLease() models.AgentRunLeaseGuard {
+	return models.AgentRunLeaseGuard{WorkerID: "w1", Now: testSessionNow}
 }
 
-func testSessionLeasePtr() *AgentRunLeaseGuard {
+func testSessionLeasePtr() *models.AgentRunLeaseGuard {
 	lease := testSessionLease()
 	return &lease
 }
 
-func putTestSessionRun(t *testing.T, store *sqlite.Store, runID, sessionID string, status AgentRunStatus, interventions int) *AgentRun {
+func putTestSessionRun(t *testing.T, store *sqlite.Store, runID, sessionID string, status models.AgentRunStatus, interventions int) *models.AgentRun {
 	t.Helper()
 	expires := testSessionNow.Add(time.Minute)
-	run := &AgentRun{
-		ID: runID, Scope: testSessionScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, Goal: "session test",
+	run := &models.AgentRun{
+		ID: runID, Scope: testSessionScope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-a"}, Goal: "session test",
 		Status: status, Revision: 1, SessionID: sessionID,
 		LeaseOwner: "w1", LeaseExpiresAt: &expires, CreatedAt: testSessionNow, UpdatedAt: testSessionNow,
 	}
 	for i := 0; i < interventions; i++ {
-		run.PendingInterventions = append(run.PendingInterventions, AgentRunIntervention{ID: "iv" + string(rune('a'+i)), Instruction: "steer"})
+		run.PendingInterventions = append(run.PendingInterventions, models.AgentRunIntervention{ID: "iv" + string(rune('a'+i)), Instruction: "steer"})
 	}
 	return putTestRun(t, store, run)
 }
@@ -45,7 +46,7 @@ func putTestSessionRun(t *testing.T, store *sqlite.Store, runID, sessionID strin
 // can rebind or relabel a Run mid-scenario. A new Run is created; an existing
 // one is rewritten through the store's update outside any lease, which moves
 // its revision on by one (returned in the written Run).
-func putTestRun(t testing.TB, store *sqlite.Store, run *AgentRun) *AgentRun {
+func putTestRun(t testing.TB, store *sqlite.Store, run *models.AgentRun) *models.AgentRun {
 	t.Helper()
 	ctx := context.Background()
 	current, err := store.GetAgentRun(ctx, run.Scope, run.ID)
@@ -58,12 +59,12 @@ func putTestRun(t testing.TB, store *sqlite.Store, run *AgentRun) *AgentRun {
 		}
 		return run
 	}
-	next := cloneAgentRun(run)
+	next := models.CloneAgentRun(run)
 	next.Revision = current.Revision + 1
-	event := &ActivityEvent{
-		ID: uuid.NewString(), Scope: run.Scope, EventType: "run.status_changed", Severity: ActivitySeverityInfo,
-		AgentID: run.AssignedAgentID, RunID: run.ID, Actor: ActivityActor{Type: "system", ID: "test"},
-		Summary: "Test rewrote the Run", Visibility: ActivityVisibilityScope, CreatedAt: run.UpdatedAt,
+	event := &models.ActivityEvent{
+		ID: uuid.NewString(), Scope: run.Scope, EventType: "run.status_changed", Severity: models.ActivitySeverityInfo,
+		AgentID: run.AssignedAgentID, RunID: run.ID, Actor: models.ActivityActor{Type: "system", ID: "test"},
+		Summary: "Test rewrote the Run", Visibility: models.ActivityVisibilityScope, CreatedAt: run.UpdatedAt,
 	}
 	if _, err := store.UpdateAgentRunWithEvent(ctx, next, current.Revision, event, nil); err != nil {
 		t.Fatalf("rewrite run %s: %v", run.ID, err)
@@ -71,7 +72,7 @@ func putTestRun(t testing.TB, store *sqlite.Store, run *AgentRun) *AgentRun {
 	return next
 }
 
-func testStoredSessionRun(t *testing.T, store *sqlite.Store, runID string) *AgentRun {
+func testStoredSessionRun(t *testing.T, store *sqlite.Store, runID string) *models.AgentRun {
 	t.Helper()
 	run, err := store.GetAgentRun(context.Background(), testSessionScope, runID)
 	if err != nil {
@@ -80,11 +81,11 @@ func testStoredSessionRun(t *testing.T, store *sqlite.Store, runID string) *Agen
 	return run
 }
 
-func openTestConversationSession(t *testing.T, store *sqlite.Store, runID string) *AgentSession {
+func openTestConversationSession(t *testing.T, store *sqlite.Store, runID string) *models.AgentSession {
 	t.Helper()
-	sessionID := ConversationAgentSessionID(testSessionScope, ConversationRunLane("c1", "", "agent-a"))
-	putTestSessionRun(t, store, runID, sessionID, AgentRunStatusRunning, 0)
-	opened, err := store.OpenConversationAgentSession(context.Background(), OpenConversationAgentSessionRequest{
+	sessionID := models.ConversationAgentSessionID(testSessionScope, models.ConversationRunLane("c1", "", "agent-a"))
+	putTestSessionRun(t, store, runID, sessionID, models.AgentRunStatusRunning, 0)
+	opened, err := store.OpenConversationAgentSession(context.Background(), models.OpenConversationAgentSessionRequest{
 		Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: runID, Lease: testSessionLease(), Now: testSessionNow,
 	})
 	if err != nil {
@@ -93,8 +94,8 @@ func openTestConversationSession(t *testing.T, store *sqlite.Store, runID string
 	return opened.Session
 }
 
-func testAppend(store *sqlite.Store, sessionID, runID string, entries ...*SessionEntry) (*AppendAgentSessionEntriesResult, error) {
-	return store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
+func testAppend(store *sqlite.Store, sessionID, runID string, entries ...*models.SessionEntry) (*models.AppendAgentSessionEntriesResult, error) {
+	return store.AppendAgentSessionEntries(context.Background(), models.AppendAgentSessionEntriesRequest{
 		Scope: testSessionScope, SessionID: sessionID, RunID: runID, Lease: testSessionLeasePtr(), Entries: entries, Now: testSessionNow,
 	})
 }
@@ -105,39 +106,39 @@ func testAppend(store *sqlite.Store, sessionID, runID string, entries ...*Sessio
 // session.ParentSessionID. The new Run is the one putTestSessionRun writes,
 // with the source as its parent. Only same-Agent children fork a session,
 // so both Runs are recorded as assigned to session.AgentID.
-func forkTestSession(t *testing.T, store *sqlite.Store, sourceRunID string, session CreateRunAgentSessionTxRequest) (*AgentSession, error) {
+func forkTestSession(t *testing.T, store *sqlite.Store, sourceRunID string, session models.CreateRunAgentSessionTxRequest) (*models.AgentSession, error) {
 	t.Helper()
 	source := testStoredSessionRun(t, store, sourceRunID)
 	expires := testSessionNow.Add(time.Minute)
-	child := &AgentRun{
+	child := &models.AgentRun{
 		ID: session.OwnerRunID, Scope: testSessionScope, ParentRunID: source.ID, RootRunID: source.RootRunID,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: session.AgentID, Goal: "session test", Status: AgentRunStatusQueued, Revision: 1,
+		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-a"}, AssignedAgentID: session.AgentID, Goal: "session test", Status: models.AgentRunStatusQueued, Revision: 1,
 		LeaseOwner: "w1", LeaseExpiresAt: &expires, CreatedAt: testSessionNow, UpdatedAt: testSessionNow,
 	}
 	groupID := "fork-" + child.ID
-	waiting := cloneAgentRun(source)
+	waiting := models.CloneAgentRun(source)
 	waiting.AssignedAgentID = session.AgentID
-	waiting.Status = AgentRunStatusWaitingForDependency
-	waiting.WakeCondition = &WakeCondition{Type: "run_dependencies", Reference: groupID}
+	waiting.Status = models.AgentRunStatusWaitingForDependency
+	waiting.WakeCondition = &models.WakeCondition{Type: "run_dependencies", Reference: groupID}
 	waiting.Revision++
 	waiting.UpdatedAt = testSessionNow
 	sealed := testSessionNow
-	result, err := store.CreateRunDependencyGroup(context.Background(), RunDependencyGroupCreateRecord{
-		Group: &RunDependencyGroup{
-			ID: groupID, Scope: testSessionScope, SourceRunID: source.ID, Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-			ExpectedCount: 1, Status: RunDependencyGroupWaiting, Revision: 1, CreatedAt: testSessionNow, UpdatedAt: testSessionNow, SealedAt: &sealed,
+	result, err := store.CreateRunDependencyGroup(context.Background(), models.RunDependencyGroupCreateRecord{
+		Group: &models.RunDependencyGroup{
+			ID: groupID, Scope: testSessionScope, SourceRunID: source.ID, Policy: models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast},
+			ExpectedCount: 1, Status: models.RunDependencyGroupWaiting, Revision: 1, CreatedAt: testSessionNow, UpdatedAt: testSessionNow, SealedAt: &sealed,
 		},
-		Dependencies: []*RunDependency{{
+		Dependencies: []*models.RunDependency{{
 			ID: "branch-" + child.ID, Scope: testSessionScope, GroupID: groupID, SourceRunID: source.ID, TargetRunID: child.ID,
-			Kind: RunDependencyKindRun, State: RunDependencyStateRunning, Required: true, Revision: 1, CreatedAt: testSessionNow, UpdatedAt: testSessionNow,
+			Kind: models.RunDependencyKindRun, State: models.RunDependencyStateRunning, Required: true, Revision: 1, CreatedAt: testSessionNow, UpdatedAt: testSessionNow,
 		}},
-		TargetRuns: []*AgentRun{child}, SourceRun: waiting, ExpectedSourceRevision: source.Revision,
-		Event: &ActivityEvent{
-			ID: uuid.NewString(), Scope: testSessionScope, RunID: source.ID, EventType: "run.forked", Severity: ActivitySeverityInfo,
-			Summary: "Forked a child Run", Actor: ActivityActor{Type: "worker", ID: "w1"}, Visibility: ActivityVisibilityScope,
+		TargetRuns: []*models.AgentRun{child}, SourceRun: waiting, ExpectedSourceRevision: source.Revision,
+		Event: &models.ActivityEvent{
+			ID: uuid.NewString(), Scope: testSessionScope, RunID: source.ID, EventType: "run.forked", Severity: models.ActivitySeverityInfo,
+			Summary: "Forked a child Run", Actor: models.ActivityActor{Type: "worker", ID: "w1"}, Visibility: models.ActivityVisibilityScope,
 			CorrelationID: groupID, CreatedAt: testSessionNow,
 		},
-		ChildSessions: []CreateRunAgentSessionTxRequest{session},
+		ChildSessions: []models.CreateRunAgentSessionTxRequest{session},
 	})
 	if err != nil {
 		return nil, err
@@ -147,14 +148,14 @@ func forkTestSession(t *testing.T, store *sqlite.Store, sourceRunID string, sess
 
 func TestOpenConversationSessionChecksRunBinding(t *testing.T) {
 	store, db := newTestSQLiteStore(t)
-	putTestSessionRun(t, store, "r1", "other-session", AgentRunStatusRunning, 0)
-	req := OpenConversationAgentSessionRequest{Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: "r1", Lease: testSessionLease()}
-	if _, err := store.OpenConversationAgentSession(context.Background(), req); !errors.Is(err, ErrSessionMoved) {
+	putTestSessionRun(t, store, "r1", "other-session", models.AgentRunStatusRunning, 0)
+	req := models.OpenConversationAgentSessionRequest{Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: "r1", Lease: testSessionLease()}
+	if _, err := store.OpenConversationAgentSession(context.Background(), req); !errors.Is(err, models.ErrSessionMoved) {
 		t.Fatalf("open with another binding = %v, want ErrSessionMoved", err)
 	}
 	bad := req
 	bad.Lease.WorkerID = "w2"
-	if _, err := store.OpenConversationAgentSession(context.Background(), bad); !errors.Is(err, ErrLeaseLost) {
+	if _, err := store.OpenConversationAgentSession(context.Background(), bad); !errors.Is(err, models.ErrLeaseLost) {
 		t.Fatalf("open with a foreign lease = %v, want ErrLeaseLost", err)
 	}
 	if storetest.CountRows(t, db, "agent_sessions") != 0 {
@@ -162,12 +163,12 @@ func TestOpenConversationSessionChecksRunBinding(t *testing.T) {
 	}
 
 	session := openTestConversationSession(t, newTestKernelStore(t), "r2")
-	if session.Kind != AgentSessionKindConversation || session.NextSequence != 1 || session.RootSessionID != session.ID || session.Revision != 1 {
+	if session.Kind != models.AgentSessionKindConversation || session.NextSequence != 1 || session.RootSessionID != session.ID || session.Revision != 1 {
 		t.Fatalf("new session = %+v", session)
 	}
 	store = newTestKernelStore(t)
 	first := openTestConversationSession(t, store, "r2")
-	again, err := store.OpenConversationAgentSession(context.Background(), OpenConversationAgentSessionRequest{
+	again, err := store.OpenConversationAgentSession(context.Background(), models.OpenConversationAgentSessionRequest{
 		Scope: testSessionScope, ConversationID: "c1", AgentID: "agent-a", RunID: "r2", Lease: testSessionLease(),
 	})
 	if err != nil || again.Created || again.Session.ID != first.ID {
@@ -187,21 +188,21 @@ func TestAppendFencedBySessionBindingAndLease(t *testing.T) {
 	}
 
 	// A Run bound to another session is fenced, even under a valid lease.
-	putTestSessionRun(t, store, "r2", "elsewhere", AgentRunStatusRunning, 0)
-	if _, err := testAppend(store, session.ID, "r2", storetest.UserSessionEntry("u3", "x")); !errors.Is(err, ErrSessionMoved) {
+	putTestSessionRun(t, store, "r2", "elsewhere", models.AgentRunStatusRunning, 0)
+	if _, err := testAppend(store, session.ID, "r2", storetest.UserSessionEntry("u3", "x")); !errors.Is(err, models.ErrSessionMoved) {
 		t.Fatalf("append from an unbound run = %v, want ErrSessionMoved", err)
 	}
 	// Lane interleaving: another Run bound to the same session appends.
-	putTestSessionRun(t, store, "r3", session.ID, AgentRunStatusRunning, 0)
+	putTestSessionRun(t, store, "r3", session.ID, models.AgentRunStatusRunning, 0)
 	if _, err := testAppend(store, session.ID, "r3", storetest.UserSessionEntry("u4", "x")); err != nil {
 		t.Fatalf("append from a second lane run: %v", err)
 	}
 	expired := testSessionLeasePtr()
 	expired.Now = testSessionNow.Add(time.Hour)
-	_, err = store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
-		Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Lease: expired, Entries: []*SessionEntry{storetest.UserSessionEntry("u5", "x")},
+	_, err = store.AppendAgentSessionEntries(context.Background(), models.AppendAgentSessionEntriesRequest{
+		Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Lease: expired, Entries: []*models.SessionEntry{storetest.UserSessionEntry("u5", "x")},
 	})
-	if !errors.Is(err, ErrLeaseLost) {
+	if !errors.Is(err, models.ErrLeaseLost) {
 		t.Fatalf("expired lease = %v, want ErrLeaseLost", err)
 	}
 	stored, _ := store.GetAgentSession(context.Background(), testSessionScope, session.ID)
@@ -216,31 +217,31 @@ func TestAppendWatermarkCAS(t *testing.T) {
 	zero := int64(0)
 	ten := int64(10)
 	entry := storetest.UserSessionEntry("u1", "hi")
-	entry.SourceKey = ChannelMessageSourceKey("m1")
-	result, err := store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
+	entry.SourceKey = models.ChannelMessageSourceKey("m1")
+	result, err := store.AppendAgentSessionEntries(context.Background(), models.AppendAgentSessionEntriesRequest{
 		Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Lease: testSessionLeasePtr(),
-		Entries: []*SessionEntry{entry}, ExpectedChannelWatermark: &zero, ChannelWatermark: 10,
+		Entries: []*models.SessionEntry{entry}, ExpectedChannelWatermark: &zero, ChannelWatermark: 10,
 	})
 	if err != nil || result.Session.ChannelWatermark != 10 {
 		t.Fatalf("CAS append = %+v, %v", result, err)
 	}
 	// A stale expectation fails and writes nothing.
-	_, err = store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
+	_, err = store.AppendAgentSessionEntries(context.Background(), models.AppendAgentSessionEntriesRequest{
 		Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Lease: testSessionLeasePtr(),
-		Entries: []*SessionEntry{storetest.UserSessionEntry("u2", "x")}, ExpectedChannelWatermark: &zero, ChannelWatermark: 12,
+		Entries: []*models.SessionEntry{storetest.UserSessionEntry("u2", "x")}, ExpectedChannelWatermark: &zero, ChannelWatermark: 12,
 	})
-	if !errors.Is(err, ErrChannelWatermarkMoved) {
+	if !errors.Is(err, models.ErrChannelWatermarkMoved) {
 		t.Fatalf("stale CAS = %v, want ErrChannelWatermarkMoved", err)
 	}
-	if _, err := store.GetSessionEntry(context.Background(), testSessionScope, "u2"); !errors.Is(err, ErrSessionEntryNotFound) {
+	if _, err := store.GetSessionEntry(context.Background(), testSessionScope, "u2"); !errors.Is(err, models.ErrSessionEntryNotFound) {
 		t.Fatalf("stale CAS stored an entry: %v", err)
 	}
 	// A watermark-only append with every entry skipped still advances.
 	again := storetest.UserSessionEntry("u3", "hi")
-	again.SourceKey = ChannelMessageSourceKey("m1")
-	result, err = store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
+	again.SourceKey = models.ChannelMessageSourceKey("m1")
+	result, err = store.AppendAgentSessionEntries(context.Background(), models.AppendAgentSessionEntriesRequest{
 		Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Lease: testSessionLeasePtr(),
-		Entries: []*SessionEntry{again}, ExpectedChannelWatermark: &ten, ChannelWatermark: 14,
+		Entries: []*models.SessionEntry{again}, ExpectedChannelWatermark: &ten, ChannelWatermark: 14,
 	})
 	if err != nil || len(result.Entries) != 0 || len(result.Skipped) != 1 || result.Session.ChannelWatermark != 14 || result.Session.NextSequence != 2 {
 		t.Fatalf("skipped append = %+v, %v", result, err)
@@ -250,15 +251,15 @@ func TestAppendWatermarkCAS(t *testing.T) {
 func TestAppendConsumesInterventionsWithEntries(t *testing.T) {
 	store := newTestKernelStore(t)
 	session := openTestConversationSession(t, store, "r1")
-	putTestSessionRun(t, store, "r1", session.ID, AgentRunStatusRunning, 2)
+	putTestSessionRun(t, store, "r1", session.ID, models.AgentRunStatusRunning, 2)
 	before := testStoredSessionRun(t, store, "r1")
 	through := 2
-	steer := &SessionEntry{ID: "s1", Type: SessionEntryUser, SourceKey: InterventionSourceKey("iva"), User: &UserEntry{
-		Origin: UserEntryIntervention, InterventionID: "iva", Author: SessionAuthor{Type: "user", ID: "u1"}, Content: []ContentPart{storetest.TextPart("steer")},
+	steer := &models.SessionEntry{ID: "s1", Type: models.SessionEntryUser, SourceKey: models.InterventionSourceKey("iva"), User: &models.UserEntry{
+		Origin: models.UserEntryIntervention, InterventionID: "iva", Author: models.SessionAuthor{Type: "user", ID: "u1"}, Content: []models.ContentPart{storetest.TextPart("steer")},
 	}}
-	_, err := store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
+	_, err := store.AppendAgentSessionEntries(context.Background(), models.AppendAgentSessionEntriesRequest{
 		Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Lease: testSessionLeasePtr(),
-		Entries: []*SessionEntry{steer}, ConsumeInterventionsThrough: &through, Now: testSessionNow,
+		Entries: []*models.SessionEntry{steer}, ConsumeInterventionsThrough: &through, Now: testSessionNow,
 	})
 	if err != nil {
 		t.Fatalf("append: %v", err)
@@ -270,20 +271,20 @@ func TestAppendConsumesInterventionsWithEntries(t *testing.T) {
 	// Moving the cursor backwards or past the end fails with nothing written.
 	for _, bad := range []int{1, 3} {
 		bad := bad
-		_, err := store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
+		_, err := store.AppendAgentSessionEntries(context.Background(), models.AppendAgentSessionEntriesRequest{
 			Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Lease: testSessionLeasePtr(),
-			Entries: []*SessionEntry{storetest.UserSessionEntry("bad", "x")}, ConsumeInterventionsThrough: &bad,
+			Entries: []*models.SessionEntry{storetest.UserSessionEntry("bad", "x")}, ConsumeInterventionsThrough: &bad,
 		})
-		if !errors.Is(err, ErrInvalidSessionEntry) {
+		if !errors.Is(err, models.ErrInvalidSessionEntry) {
 			t.Fatalf("cursor %d = %v, want ErrInvalidSessionEntry", bad, err)
 		}
 	}
-	if _, err := store.GetSessionEntry(context.Background(), testSessionScope, "bad"); !errors.Is(err, ErrSessionEntryNotFound) {
+	if _, err := store.GetSessionEntry(context.Background(), testSessionScope, "bad"); !errors.Is(err, models.ErrSessionEntryNotFound) {
 		t.Fatalf("a rejected cursor stored its entry")
 	}
 	// A cursor-only append at the current value is a no-op on the Run row.
 	same := 2
-	if _, err := store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
+	if _, err := store.AppendAgentSessionEntries(context.Background(), models.AppendAgentSessionEntriesRequest{
 		Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Lease: testSessionLeasePtr(), ConsumeInterventionsThrough: &same,
 	}); err != nil {
 		t.Fatalf("cursor-only append: %v", err)
@@ -296,18 +297,18 @@ func TestAppendConsumesInterventionsWithEntries(t *testing.T) {
 func TestLeaselessNoteNeedsTerminalRun(t *testing.T) {
 	store := newTestKernelStore(t)
 	session := openTestConversationSession(t, store, "r1")
-	note := &SessionEntry{ID: "n1", Type: SessionEntryNote, SourceKey: FailureNoteSourceKey("r1", "t1"), Note: &NoteEntry{Kind: NoteRunFailed, Text: "the run failed"}}
-	req := AppendAgentSessionEntriesRequest{Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Entries: []*SessionEntry{note}}
-	if _, err := store.AppendAgentSessionEntries(context.Background(), req); !errors.Is(err, ErrLeaseLost) {
+	note := &models.SessionEntry{ID: "n1", Type: models.SessionEntryNote, SourceKey: models.FailureNoteSourceKey("r1", "t1"), Note: &models.NoteEntry{Kind: models.NoteRunFailed, Text: "the run failed"}}
+	req := models.AppendAgentSessionEntriesRequest{Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Entries: []*models.SessionEntry{note}}
+	if _, err := store.AppendAgentSessionEntries(context.Background(), req); !errors.Is(err, models.ErrLeaseLost) {
 		t.Fatalf("lease-less append on a running run = %v, want ErrLeaseLost", err)
 	}
-	putTestSessionRun(t, store, "r1", session.ID, AgentRunStatusFailed, 0)
+	putTestSessionRun(t, store, "r1", session.ID, models.AgentRunStatusFailed, 0)
 	result, err := store.AppendAgentSessionEntries(context.Background(), req)
 	if err != nil || len(result.Entries) != 1 {
 		t.Fatalf("lease-less note on a failed run = %+v, %v", result, err)
 	}
-	req.Entries = []*SessionEntry{storetest.UserSessionEntry("u1", "x")}
-	if _, err := store.AppendAgentSessionEntries(context.Background(), req); !errors.Is(err, ErrInvalidSessionEntry) {
+	req.Entries = []*models.SessionEntry{storetest.UserSessionEntry("u1", "x")}
+	if _, err := store.AppendAgentSessionEntries(context.Background(), req); !errors.Is(err, models.ErrInvalidSessionEntry) {
 		t.Fatalf("lease-less non-note = %v, want ErrInvalidSessionEntry", err)
 	}
 }
@@ -315,10 +316,10 @@ func TestLeaselessNoteNeedsTerminalRun(t *testing.T) {
 func TestAppendReplayAndEvents(t *testing.T) {
 	store := newTestKernelStore(t)
 	session := openTestConversationSession(t, store, "r1")
-	batch := []*SessionEntry{storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", ToolEntryPending)}
-	event := &ActivityEvent{Scope: testSessionScope, RunID: "r1", EventType: "turn.narration", Summary: "Checking"}
-	result, err := store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
-		Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Lease: testSessionLeasePtr(), Entries: batch, Events: []*ActivityEvent{event},
+	batch := []*models.SessionEntry{storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", models.ToolEntryPending)}
+	event := &models.ActivityEvent{Scope: testSessionScope, RunID: "r1", EventType: "turn.narration", Summary: "Checking"}
+	result, err := store.AppendAgentSessionEntries(context.Background(), models.AppendAgentSessionEntriesRequest{
+		Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Lease: testSessionLeasePtr(), Entries: batch, Events: []*models.ActivityEvent{event},
 	})
 	if err != nil || len(result.Events) != 1 || result.Events[0].Sequence != 1 {
 		t.Fatalf("append with event = %+v, %v", result, err)
@@ -327,18 +328,18 @@ func TestAppendReplayAndEvents(t *testing.T) {
 	if err != nil || !replay.Replayed || len(replay.Entries) != 2 || replay.Session.NextSequence != 3 {
 		t.Fatalf("replay = %+v, %v", replay, err)
 	}
-	if _, err := testAppend(store, session.ID, "r1", storetest.UserSessionEntry("a1", "x"), storetest.UserSessionEntry("new", "y")); !errors.Is(err, ErrAgentSessionConflict) {
+	if _, err := testAppend(store, session.ID, "r1", storetest.UserSessionEntry("a1", "x"), storetest.UserSessionEntry("new", "y")); !errors.Is(err, models.ErrAgentSessionConflict) {
 		t.Fatalf("partial batch = %v, want ErrAgentSessionConflict", err)
 	}
-	bad := &ActivityEvent{Scope: testSessionScope, RunID: "r1"}
-	_, err = store.AppendAgentSessionEntries(context.Background(), AppendAgentSessionEntriesRequest{
+	bad := &models.ActivityEvent{Scope: testSessionScope, RunID: "r1"}
+	_, err = store.AppendAgentSessionEntries(context.Background(), models.AppendAgentSessionEntriesRequest{
 		Scope: testSessionScope, SessionID: session.ID, RunID: "r1", Lease: testSessionLeasePtr(),
-		Entries: []*SessionEntry{storetest.UserSessionEntry("u9", "x")}, Events: []*ActivityEvent{bad},
+		Entries: []*models.SessionEntry{storetest.UserSessionEntry("u9", "x")}, Events: []*models.ActivityEvent{bad},
 	})
-	if !errors.Is(err, ErrInvalidSessionEntry) {
+	if !errors.Is(err, models.ErrInvalidSessionEntry) {
 		t.Fatalf("invalid event = %v", err)
 	}
-	if _, err := store.GetSessionEntry(context.Background(), testSessionScope, "u9"); !errors.Is(err, ErrSessionEntryNotFound) {
+	if _, err := store.GetSessionEntry(context.Background(), testSessionScope, "u9"); !errors.Is(err, models.ErrSessionEntryNotFound) {
 		t.Fatalf("invalid event still stored the entry")
 	}
 }
@@ -351,39 +352,39 @@ func TestCreateRunSessionBindsRunAndForks(t *testing.T) {
 	}
 
 	// Parentless create at first claim sets run.SessionID and is idempotent.
-	putTestSessionRun(t, store, "bg", "", AgentRunStatusRunning, 0)
-	goal := &SessionEntry{ID: "g1", Type: SessionEntryUser, SourceKey: GoalSourceKey("bg"), User: &UserEntry{
-		Origin: UserEntryGoal, GoalKind: "routine", Author: SessionAuthor{Type: "service", ID: "kernel"}, Content: []ContentPart{storetest.TextPart("do it")},
+	putTestSessionRun(t, store, "bg", "", models.AgentRunStatusRunning, 0)
+	goal := &models.SessionEntry{ID: "g1", Type: models.SessionEntryUser, SourceKey: models.GoalSourceKey("bg"), User: &models.UserEntry{
+		Origin: models.UserEntryGoal, GoalKind: "routine", Author: models.SessionAuthor{Type: "service", ID: "kernel"}, Content: []models.ContentPart{storetest.TextPart("do it")},
 	}}
-	created, err := store.CreateRunAgentSession(context.Background(), CreateRunAgentSessionRequest{
-		Scope: testSessionScope, OwnerRunID: "bg", AgentID: "agent-a", Lease: testSessionLease(), InitialEntries: []*SessionEntry{goal},
+	created, err := store.CreateRunAgentSession(context.Background(), models.CreateRunAgentSessionRequest{
+		Scope: testSessionScope, OwnerRunID: "bg", AgentID: "agent-a", Lease: testSessionLease(), InitialEntries: []*models.SessionEntry{goal},
 	})
-	if err != nil || !created.Created || created.Session.NextSequence != 2 || created.Session.ID != RunAgentSessionID(testSessionScope, "bg") {
+	if err != nil || !created.Created || created.Session.NextSequence != 2 || created.Session.ID != models.RunAgentSessionID(testSessionScope, "bg") {
 		t.Fatalf("create = %+v, %v", created, err)
 	}
 	if run := testStoredSessionRun(t, store, "bg"); run.SessionID != created.Session.ID || run.Revision != 2 {
 		t.Fatalf("run binding = %q rev %d", run.SessionID, run.Revision)
 	}
-	again, err := store.CreateRunAgentSession(context.Background(), CreateRunAgentSessionRequest{
-		Scope: testSessionScope, OwnerRunID: "bg", AgentID: "agent-a", Lease: testSessionLease(), InitialEntries: []*SessionEntry{goal},
+	again, err := store.CreateRunAgentSession(context.Background(), models.CreateRunAgentSessionRequest{
+		Scope: testSessionScope, OwnerRunID: "bg", AgentID: "agent-a", Lease: testSessionLease(), InitialEntries: []*models.SessionEntry{goal},
 	})
 	if err != nil || again.Created || again.Session.NextSequence != 2 {
 		t.Fatalf("create replay = %+v, %v", again, err)
 	}
-	if _, err := store.CreateRunAgentSession(context.Background(), CreateRunAgentSessionRequest{
+	if _, err := store.CreateRunAgentSession(context.Background(), models.CreateRunAgentSessionRequest{
 		Scope: testSessionScope, OwnerRunID: "r1", AgentID: "agent-a", Lease: testSessionLease(),
-	}); !errors.Is(err, ErrSessionMoved) {
+	}); !errors.Is(err, models.ErrSessionMoved) {
 		t.Fatalf("create for a run bound elsewhere = %v, want ErrSessionMoved", err)
 	}
 
 	// Same-Agent fork in the child-creating transaction, before p3.
-	_, err = forkTestSession(t, store, "r1", CreateRunAgentSessionTxRequest{
+	_, err = forkTestSession(t, store, "r1", models.CreateRunAgentSessionTxRequest{
 		Scope: testSessionScope, OwnerRunID: "child", AgentID: "agent-a", ParentSessionID: parent.ID, ForkSequence: 5,
 	})
-	if !errors.Is(err, ErrInvalidAgentSession) {
+	if !errors.Is(err, models.ErrInvalidAgentSession) {
 		t.Fatalf("fork past the leaf = %v, want ErrInvalidAgentSession", err)
 	}
-	fork, err := forkTestSession(t, store, "r1", CreateRunAgentSessionTxRequest{
+	fork, err := forkTestSession(t, store, "r1", models.CreateRunAgentSessionTxRequest{
 		Scope: testSessionScope, OwnerRunID: "child", AgentID: "agent-a", ParentSessionID: parent.ID, ForkSequence: 2, Now: testSessionNow,
 	})
 	if err != nil {
@@ -413,13 +414,13 @@ func TestForkDepthLimit(t *testing.T) {
 	store := newTestKernelStore(t)
 	parent := openTestConversationSession(t, store, "r0")
 	sourceRunID := "r0"
-	for depth := 1; depth <= MaxAgentSessionDepth+1; depth++ {
+	for depth := 1; depth <= models.MaxAgentSessionDepth+1; depth++ {
 		runID := "d" + string(rune('0'+depth))
-		session, err := forkTestSession(t, store, sourceRunID, CreateRunAgentSessionTxRequest{
+		session, err := forkTestSession(t, store, sourceRunID, models.CreateRunAgentSessionTxRequest{
 			Scope: testSessionScope, OwnerRunID: runID, AgentID: "agent-a", ParentSessionID: parent.ID,
 		})
-		if depth > MaxAgentSessionDepth {
-			if !errors.Is(err, ErrAgentSessionForkTooDeep) {
+		if depth > models.MaxAgentSessionDepth {
+			if !errors.Is(err, models.ErrAgentSessionForkTooDeep) {
 				t.Fatalf("depth %d = %v, want ErrAgentSessionForkTooDeep", depth, err)
 			}
 			return
@@ -434,42 +435,42 @@ func TestForkDepthLimit(t *testing.T) {
 func TestTransitionToolEntry(t *testing.T) {
 	store := newTestKernelStore(t)
 	session := openTestConversationSession(t, store, "r1")
-	if _, err := testAppend(store, session.ID, "r1", storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", ToolEntryPending)); err != nil {
+	if _, err := testAppend(store, session.ID, "r1", storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", models.ToolEntryPending)); err != nil {
 		t.Fatal(err)
 	}
-	transition := func(from, to ToolEntryState, result *ToolResult, wait *ToolEntryWait) (*ToolEntryTransitionResult, error) {
-		return store.TransitionToolEntry(context.Background(), ToolEntryTransitionRequest{
+	transition := func(from, to models.ToolEntryState, result *models.ToolResult, wait *models.ToolEntryWait) (*models.ToolEntryTransitionResult, error) {
+		return store.TransitionToolEntry(context.Background(), models.ToolEntryTransitionRequest{
 			Scope: testSessionScope, EntryID: "e1", RunID: "r1", Lease: testSessionLease(), From: from, To: to, Result: result, Wait: wait,
-			Kernel: &ToolEntryKernelPatch{OriginRef: "command:x"}, Now: testSessionNow,
+			Kernel: &models.ToolEntryKernelPatch{OriginRef: "command:x"}, Now: testSessionNow,
 		})
 	}
-	if _, err := transition(ToolEntryPending, ToolEntryRunning, nil, nil); err != nil {
+	if _, err := transition(models.ToolEntryPending, models.ToolEntryRunning, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	// New edge: running -> awaiting_approval -> running.
-	if _, err := transition(ToolEntryRunning, ToolEntryAwaitingApproval, nil, &ToolEntryWait{ApprovalID: "ap1"}); err != nil {
+	if _, err := transition(models.ToolEntryRunning, models.ToolEntryAwaitingApproval, nil, &models.ToolEntryWait{ApprovalID: "ap1"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := transition(ToolEntryAwaitingApproval, ToolEntryRunning, nil, nil); err != nil {
+	if _, err := transition(models.ToolEntryAwaitingApproval, models.ToolEntryRunning, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Another Run with a valid lease does not own the entry.
-	putTestSessionRun(t, store, "r2", session.ID, AgentRunStatusRunning, 0)
-	if _, err := store.TransitionToolEntry(context.Background(), ToolEntryTransitionRequest{
-		Scope: testSessionScope, EntryID: "e1", RunID: "r2", Lease: testSessionLease(), From: ToolEntryRunning, To: ToolEntryInterrupted,
-		Result: &ToolResult{Status: ToolResultInterrupted, IsError: true, Content: []ContentPart{storetest.TextPart("x")}},
-	}); !errors.Is(err, ErrToolEntryNotOwned) {
+	putTestSessionRun(t, store, "r2", session.ID, models.AgentRunStatusRunning, 0)
+	if _, err := store.TransitionToolEntry(context.Background(), models.ToolEntryTransitionRequest{
+		Scope: testSessionScope, EntryID: "e1", RunID: "r2", Lease: testSessionLease(), From: models.ToolEntryRunning, To: models.ToolEntryInterrupted,
+		Result: &models.ToolResult{Status: models.ToolResultInterrupted, IsError: true, Content: []models.ContentPart{storetest.TextPart("x")}},
+	}); !errors.Is(err, models.ErrToolEntryNotOwned) {
 		t.Fatalf("foreign run = %v, want ErrToolEntryNotOwned", err)
 	}
 
-	done := &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{storetest.TextPart("ok")}}
+	done := &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{storetest.TextPart("ok")}}
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
 	for i := range errs {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = transition(ToolEntryRunning, ToolEntryCompleted, done, nil)
+			_, errs[i] = transition(models.ToolEntryRunning, models.ToolEntryCompleted, done, nil)
 		}(i)
 	}
 	wg.Wait()
@@ -478,7 +479,7 @@ func TestTransitionToolEntry(t *testing.T) {
 		switch {
 		case err == nil:
 			wins++
-		case errors.Is(err, ErrToolEntryStateConflict):
+		case errors.Is(err, models.ErrToolEntryStateConflict):
 			conflicts++
 		}
 	}
@@ -486,11 +487,11 @@ func TestTransitionToolEntry(t *testing.T) {
 		t.Fatalf("concurrent completes: %v", errs)
 	}
 	entry, err := store.GetSessionEntry(context.Background(), testSessionScope, "e1")
-	if err != nil || entry.State != ToolEntryCompleted || entry.Revision != 5 || entry.Tool.StartedAt == nil ||
+	if err != nil || entry.State != models.ToolEntryCompleted || entry.Revision != 5 || entry.Tool.StartedAt == nil ||
 		entry.Tool.CompletedAt == nil || entry.Tool.OriginRef != "command:x" || entry.Tool.Wait != nil {
 		t.Fatalf("completed entry = %+v, %v", entry, err)
 	}
-	open, err := store.ListAgentSessionEntries(context.Background(), SessionEntryFilter{Scope: testSessionScope, RunID: "r1", States: OpenToolEntryStates})
+	open, err := store.ListAgentSessionEntries(context.Background(), models.SessionEntryFilter{Scope: testSessionScope, RunID: "r1", States: OpenToolEntryStates})
 	if err != nil || len(open) != 0 {
 		t.Fatalf("open entries after completion = %d, %v", len(open), err)
 	}
@@ -502,21 +503,21 @@ func TestCompactionCannotDropAssistantWithOpenToolEntry(t *testing.T) {
 	if _, err := testAppend(store, session.ID, "r1", storetest.UserSessionEntry("u1", "a")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testAppend(store, session.ID, "r1", storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", ToolEntryPending)); err != nil {
+	if _, err := testAppend(store, session.ID, "r1", storetest.AssistantSessionEntry("a1", "t1", "c1"), storetest.ToolSessionEntry("e1", "t1", "c1", models.ToolEntryPending)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := testAppend(store, session.ID, "r1", storetest.UserSessionEntry("u2", "b")); err != nil {
 		t.Fatal(err)
 	}
-	compaction := func(id, kept string) *SessionEntry {
-		return &SessionEntry{ID: id, Type: SessionEntryCompaction, Compaction: &CompactionEntry{
-			Summary: "summary", FirstKeptEntryID: kept, Trigger: CompactionTriggerThreshold, Provider: "openai", Model: "gpt-x",
+	compaction := func(id, kept string) *models.SessionEntry {
+		return &models.SessionEntry{ID: id, Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntry{
+			Summary: "summary", FirstKeptEntryID: kept, Trigger: models.CompactionTriggerThreshold, Provider: "openai", Model: "gpt-x",
 		}}
 	}
-	if _, err := testAppend(store, session.ID, "r1", compaction("k1", "u2")); !errors.Is(err, ErrInvalidSessionEntry) {
+	if _, err := testAppend(store, session.ID, "r1", compaction("k1", "u2")); !errors.Is(err, models.ErrInvalidSessionEntry) {
 		t.Fatalf("cut past an open call = %v, want ErrInvalidSessionEntry", err)
 	}
-	if _, err := testAppend(store, session.ID, "r1", compaction("k2", "e1")); !errors.Is(err, ErrInvalidSessionEntry) {
+	if _, err := testAppend(store, session.ID, "r1", compaction("k2", "e1")); !errors.Is(err, models.ErrInvalidSessionEntry) {
 		t.Fatalf("cut at a tool entry = %v, want ErrInvalidSessionEntry", err)
 	}
 	if _, err := testAppend(store, session.ID, "r1", compaction("k3", "a1")); err != nil {
@@ -526,7 +527,7 @@ func TestCompactionCannotDropAssistantWithOpenToolEntry(t *testing.T) {
 	if err != nil || path.Compaction == nil || path.Compaction.ID != "k3" || storetest.PathEntryIDs(path) != "a1,e1,u2" {
 		t.Fatalf("path after compaction = %v, %v", path, err)
 	}
-	after, err := store.ListAgentSessionEntries(context.Background(), SessionEntryFilter{Scope: testSessionScope, SessionID: session.ID, AfterCompaction: true})
+	after, err := store.ListAgentSessionEntries(context.Background(), models.SessionEntryFilter{Scope: testSessionScope, SessionID: session.ID, AfterCompaction: true})
 	if err != nil || len(after) != 0 {
 		t.Fatalf("entries after compaction = %d, %v", len(after), err)
 	}

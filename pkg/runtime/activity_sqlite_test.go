@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
+	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -20,14 +23,14 @@ func TestSQLiteActivityIsOrderedAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	scope := Scope{Kind: "local", ID: "test"}
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "work", Source: RunSourceManual,
+	scope := models.Scope{Kind: "local", ID: "test"}
+	run, err := runtimeportfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "work", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	activity := NewRunActivityService(store, store)
+	activity := runtimeactivity.NewRunActivityService(store, store)
 	const count = 25
 	errs := make(chan error, count)
 	var wg sync.WaitGroup
@@ -35,7 +38,7 @@ func TestSQLiteActivityIsOrderedAndDurable(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, appendErr := activity.AppendActivity(ctx, &ActivityEvent{
+			_, appendErr := activity.AppendActivity(ctx, &models.ActivityEvent{
 				Scope: scope, RunID: run.ID, EventType: "work.progress", Summary: fmt.Sprintf("step %d", i),
 			})
 			errs <- appendErr
@@ -57,7 +60,7 @@ func TestSQLiteActivityIsOrderedAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	events, err := NewRunActivityService(reopened, reopened).ListActivity(ctx, ActivityFilter{
+	events, err := runtimeactivity.NewRunActivityService(reopened, reopened).ListActivity(ctx, models.ActivityFilter{
 		Scope: scope, RunID: run.ID, Limit: count,
 	})
 	if err != nil {
@@ -71,8 +74,8 @@ func TestSQLiteActivityIsOrderedAndDurable(t *testing.T) {
 			t.Fatalf("event sequence[%d] = %d", i, event.Sequence)
 		}
 	}
-	other, err := NewRunActivityService(reopened, reopened).ListActivity(ctx, ActivityFilter{
-		Scope: Scope{Kind: "local", ID: "other"}, RunID: run.ID,
+	other, err := runtimeactivity.NewRunActivityService(reopened, reopened).ListActivity(ctx, models.ActivityFilter{
+		Scope: models.Scope{Kind: "local", ID: "other"}, RunID: run.ID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -98,10 +101,10 @@ func TestSQLiteMigratesAgentRunRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	run := &AgentRun{
-		ID: "legacy-run", Scope: Scope{Kind: "local", ID: "test"}, RootRunID: "legacy-run",
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "continue work",
-		Source: RunSourceManual, Status: AgentRunStatusQueued, CreatedAt: now, UpdatedAt: now,
+	run := &models.AgentRun{
+		ID: "legacy-run", Scope: models.Scope{Kind: "local", ID: "test"}, RootRunID: "legacy-run",
+		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "continue work",
+		Source: models.RunSourceManual, Status: models.AgentRunStatusQueued, CreatedAt: now, UpdatedAt: now,
 	}
 	payload, err := json.Marshal(run)
 	if err != nil {
@@ -122,16 +125,16 @@ func TestSQLiteMigratesAgentRunRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	loaded, err := NewPortfolioService(store).GetAgentRun(context.Background(), run.Scope, run.ID)
+	loaded, err := runtimeportfolio.NewPortfolioService(store).GetAgentRun(context.Background(), run.Scope, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if loaded.Revision != 1 {
 		t.Fatalf("migrated revision = %d, want 1", loaded.Revision)
 	}
-	transitioned, event, err := NewRunActivityService(store, store).TransitionRun(
+	transitioned, event, err := runtimeactivity.NewRunActivityService(store, store).TransitionRun(
 		context.Background(), run.Scope, run.ID,
-		RunTransitionRequest{ExpectedRevision: 1, Status: AgentRunStatusRunning},
+		runtimeactivity.RunTransitionRequest{ExpectedRevision: 1, Status: models.AgentRunStatusRunning},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -148,17 +151,17 @@ func TestSQLiteRunTransitionIsAtomicAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	scope := Scope{Kind: "local", ID: "test"}
-	portfolio := NewPortfolioService(store)
-	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "work", Source: RunSourceManual,
+	scope := models.Scope{Kind: "local", ID: "test"}
+	portfolio := runtimeportfolio.NewPortfolioService(store)
+	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "work", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	activity := NewRunActivityService(store, store)
-	run, event, err := activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusRunning, Summary: "Started work",
+	activity := runtimeactivity.NewRunActivityService(store, store)
+	run, event, err := activity.TransitionRun(ctx, scope, run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusRunning, Summary: "Started work",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -166,9 +169,9 @@ func TestSQLiteRunTransitionIsAtomicAndDurable(t *testing.T) {
 	if run.Revision != 2 || event.Sequence != 1 {
 		t.Fatalf("transition = run revision %d, event sequence %d", run.Revision, event.Sequence)
 	}
-	wake := &WakeCondition{Type: "event", Reference: "dependency.ready"}
-	run, event, err = activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusWaitingForDependency, WakeCondition: wake,
+	wake := &models.WakeCondition{Type: "event", Reference: "dependency.ready"}
+	run, event, err = activity.TransitionRun(ctx, scope, run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusWaitingForDependency, WakeCondition: wake,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -185,15 +188,15 @@ func TestSQLiteRunTransitionIsAtomicAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	loaded, err := NewPortfolioService(reopened).GetAgentRun(ctx, scope, run.ID)
+	loaded, err := runtimeportfolio.NewPortfolioService(reopened).GetAgentRun(ctx, scope, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Revision != 3 || loaded.Status != AgentRunStatusWaitingForDependency ||
+	if loaded.Revision != 3 || loaded.Status != models.AgentRunStatusWaitingForDependency ||
 		loaded.WakeCondition == nil || loaded.WakeCondition.Reference != wake.Reference {
 		t.Fatalf("run transition did not survive restart: %#v", loaded)
 	}
-	events, err := NewRunActivityService(reopened, reopened).ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID})
+	events, err := runtimeactivity.NewRunActivityService(reopened, reopened).ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: run.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

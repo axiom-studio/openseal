@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -20,8 +22,8 @@ func BenchmarkSkillRuntimeUsageTerminalHistory(b *testing.B) {
 			}
 			sqlDB := openTestSQLiteDB(b, path)
 			defer store.Close()
-			scope := Scope{Kind: "tenant", ID: "benchmark"}
-			run, err := NewPortfolioService(store).CreateAgentRun(context.Background(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Historical finished task", Source: RunSourceManual})
+			scope := models.Scope{Kind: "tenant", ID: "benchmark"}
+			run, err := portfolio.NewPortfolioService(store).CreateAgentRun(context.Background(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Historical finished task", Source: models.RunSourceManual})
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -49,7 +51,7 @@ func BenchmarkSkillRuntimeUsageTerminalHistory(b *testing.B) {
 				b.Fatal(err)
 			}
 			b.Run("usage", func(b *testing.B) {
-				filter := SkillRuntimeUsageFilter{Scope: scope, SkillID: "skill", SkillVersion: "1", DeploymentID: "agent", BindingID: "account"}
+				filter := models.SkillRuntimeUsageFilter{Scope: scope, SkillID: "skill", SkillVersion: "1", DeploymentID: "agent", BindingID: "account"}
 				b.ReportAllocs()
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {

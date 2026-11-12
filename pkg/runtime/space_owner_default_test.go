@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -37,13 +38,13 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 	ctx := context.Background()
 	clock := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
 	tick := models.WithClock(func() time.Time { clock = clock.Add(time.Second); return clock })
-	spaces := NewSpaceService(store, tick)
+	spaces := portfolio.NewSpaceService(store, tick)
 	conversations := conversation.NewConversationService(store, tick)
-	scope := Scope{Kind: "tenant", ID: "owner-default-" + strings.ReplaceAll(t.Name(), "/", "-")}
+	scope := models.Scope{Kind: "tenant", ID: "owner-default-" + strings.ReplaceAll(t.Name(), "/", "-")}
 	const ana, ben, solo, stranger = "7", "8", "", "404"
-	drifter := ObjectiveOwner{Type: OwnerTypeAgent, ID: "drifter"}
+	drifter := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "drifter"}
 
-	create := func(key string, owner ObjectiveOwner, spaceID, createdBy string) (*Conversation, error) {
+	create := func(key string, owner models.ObjectiveOwner, spaceID, createdBy string) (*models.Conversation, error) {
 		conversation, _, err := conversations.CreateConversation(ctx, conversation.CreateConversationRequest{
 			Scope: scope, Owner: owner, Title: "Chat " + key, SpaceID: spaceID, CreatedBy: createdBy, IdempotencyKey: key,
 		})
@@ -51,7 +52,7 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 	}
 	noDefault := func(ownerID string) {
 		t.Helper()
-		if space, err := spaces.DefaultSpace(ctx, scope, ownerID); !errors.Is(err, ErrNoDefaultSpace) || space != nil {
+		if space, err := spaces.DefaultSpace(ctx, scope, ownerID); !errors.Is(err, models.ErrNoDefaultSpace) || space != nil {
 			t.Fatalf("DefaultSpace(%q) = %+v, err = %v; want ErrNoDefaultSpace", ownerID, space, err)
 		}
 	}
@@ -62,7 +63,7 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 			t.Fatalf("DefaultSpace(%q) = %+v, err = %v; want %s", ownerID, space, err, want)
 		}
 	}
-	listed := func(want ...string) []*Space {
+	listed := func(want ...string) []*models.Space {
 		t.Helper()
 		got, err := spaces.ListSpaces(ctx, scope)
 		if err != nil || len(got) != len(want) {
@@ -95,10 +96,10 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 			t.Fatalf("scope memberships = %+v, err = %v; want %d", got, err, want)
 		}
 	}
-	space := func(name, ownerID string, wantDefault bool) *Space {
+	space := func(name, ownerID string, wantDefault bool) *models.Space {
 		t.Helper()
-		created, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: name, Look: DefaultSpaceLook, OwnerID: ownerID})
-		if err != nil || created.IsDefault != wantDefault || created.OwnerID != ownerID || created.Access != SpaceAccessOwner {
+		created, err := spaces.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: name, Look: models.DefaultSpaceLook, OwnerID: ownerID})
+		if err != nil || created.IsDefault != wantDefault || created.OwnerID != ownerID || created.Access != models.SpaceAccessOwner {
 			t.Fatalf("space %s of %q = %+v, err = %v; want default %v", name, ownerID, created, err, wantDefault)
 		}
 		return created
@@ -109,11 +110,11 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 	listed()
 	noDefault(ana)
 	noDefault(solo)
-	if placed, err := spaces.EnsureMemberHasSpace(ctx, scope, ana, SpaceMemberAgent, "early"); !errors.Is(err, ErrNoDefaultSpace) || placed != nil {
+	if placed, err := spaces.EnsureMemberHasSpace(ctx, scope, ana, models.SpaceMemberAgent, "early"); !errors.Is(err, models.ErrNoDefaultSpace) || placed != nil {
 		t.Fatalf("placement in an empty scope = %+v, err = %v", placed, err)
 	}
 	for _, createdBy := range []string{ana, solo} {
-		if conversation, err := create("empty-"+createdBy, drifter, "", createdBy); !errors.Is(err, ErrNoDefaultSpace) || conversation != nil {
+		if conversation, err := create("empty-"+createdBy, drifter, "", createdBy); !errors.Is(err, models.ErrNoDefaultSpace) || conversation != nil {
 			t.Fatalf("conversation in an empty scope by %q = %+v, err = %v", createdBy, conversation, err)
 		}
 	}
@@ -121,7 +122,7 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 	noDefault(ana)
 	noDefault(solo)
 	memberships(0)
-	if all, err := conversations.ListConversations(ctx, ConversationFilter{Scope: scope}); err != nil || len(all) != 0 {
+	if all, err := conversations.ListConversations(ctx, models.ConversationFilter{Scope: scope}); err != nil || len(all) != 0 {
 		t.Fatalf("conversations in an empty scope = %+v, err = %v", all, err)
 	}
 
@@ -150,7 +151,7 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 
 	// A default space cannot be deleted.
 	for _, id := range []string{anaHome.ID, benHome.ID, soloHome.ID} {
-		if err := spaces.DeleteSpace(ctx, scope, id); !errors.Is(err, ErrDefaultSpaceProtected) {
+		if err := spaces.DeleteSpace(ctx, scope, id); !errors.Is(err, models.ErrDefaultSpaceProtected) {
 			t.Fatalf("delete default space %s: %v", id, err)
 		}
 	}
@@ -166,23 +167,23 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 		}
 		drifted[createdBy] = conversation.ID
 	}
-	if conversation, err := create("drifter-stranger", drifter, "", stranger); !errors.Is(err, ErrNoDefaultSpace) || conversation != nil {
+	if conversation, err := create("drifter-stranger", drifter, "", stranger); !errors.Is(err, models.ErrNoDefaultSpace) || conversation != nil {
 		t.Fatalf("conversation by a person without a default space = %+v, err = %v", conversation, err)
 	}
 	assertSpaceConversations(t, conversations, scope, anaHome.ID, drifted[ana])
 
-	put := func(spaceID string, memberType SpaceMemberType, id string) {
+	put := func(spaceID string, memberType models.SpaceMemberType, id string) {
 		t.Helper()
-		if _, _, err := spaces.PutSpaceMember(ctx, PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: memberType, MemberID: id}); err != nil {
+		if _, _, err := spaces.PutSpaceMember(ctx, portfolio.PutSpaceMemberRequest{Scope: scope, SpaceID: spaceID, Type: memberType, MemberID: id}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	put(benWork.ID, SpaceMemberAgent, "sole")
-	put(benWork.ID, SpaceMemberAgent, "shared")
-	put(benWork.ID, SpaceMemberTeam, "crew")
-	put(anaWork.ID, SpaceMemberAgent, "shared")
+	put(benWork.ID, models.SpaceMemberAgent, "sole")
+	put(benWork.ID, models.SpaceMemberAgent, "shared")
+	put(benWork.ID, models.SpaceMemberTeam, "crew")
+	put(anaWork.ID, models.SpaceMemberAgent, "shared")
 	// The owner deployment's own space wins over the creator's default space.
-	placed, err := create("sole-by-ana", ObjectiveOwner{Type: OwnerTypeAgent, ID: "sole"}, "", ana)
+	placed, err := create("sole-by-ana", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "sole"}, "", ana)
 	if err != nil || placed.SpaceID != benWork.ID {
 		t.Fatalf("conversation of a placed owner = %+v, err = %v", placed, err)
 	}
@@ -211,15 +212,15 @@ func exerciseOwnerDefaultSpaces(t *testing.T, store storetest.SpaceConversationS
 
 	// A deployment joins the default space of the person who created it, and
 	// stays in no space when that person has none.
-	if placed, err := spaces.EnsureMemberHasSpace(ctx, scope, stranger, SpaceMemberAgent, "newbie"); !errors.Is(err, ErrNoDefaultSpace) || placed != nil {
+	if placed, err := spaces.EnsureMemberHasSpace(ctx, scope, stranger, models.SpaceMemberAgent, "newbie"); !errors.Is(err, models.ErrNoDefaultSpace) || placed != nil {
 		t.Fatalf("placement for a person without a default space = %+v, err = %v", placed, err)
 	}
 	memberships(3)
 	noDefault(stranger)
-	if placed, err := spaces.EnsureMemberHasSpace(ctx, scope, solo, SpaceMemberAgent, "newbie"); err != nil || placed == nil || placed.SpaceID != soloHome.ID {
+	if placed, err := spaces.EnsureMemberHasSpace(ctx, scope, solo, models.SpaceMemberAgent, "newbie"); err != nil || placed == nil || placed.SpaceID != soloHome.ID {
 		t.Fatalf("placement for the empty owner = %+v, err = %v", placed, err)
 	}
-	if again, err := spaces.EnsureMemberHasSpace(ctx, scope, ana, SpaceMemberAgent, "newbie"); err != nil || again != nil {
+	if again, err := spaces.EnsureMemberHasSpace(ctx, scope, ana, models.SpaceMemberAgent, "newbie"); err != nil || again != nil {
 		t.Fatalf("placed again = %+v, err = %v", again, err)
 	}
 	members(soloHome.ID, "agent:newbie")
@@ -246,12 +247,12 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	sqlDB := openTestSQLiteDB(t, path)
-	scope := Scope{Kind: "tenant", ID: "legacy"}
-	other := Scope{Kind: "tenant", ID: "legacy-other"}
+	scope := models.Scope{Kind: "tenant", ID: "legacy"}
+	other := models.Scope{Kind: "tenant", ID: "legacy-other"}
 	base := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	hour := func(n int) time.Time { return base.Add(time.Duration(n) * time.Hour) }
 	rows := []struct {
-		scope     Scope
+		scope     models.Scope
 		id, owner string
 		isDefault bool
 		createdAt time.Time
@@ -282,9 +283,9 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 		}
 	}
 	for position, row := range rows {
-		access := SpaceAccessOwner
+		access := models.SpaceAccessOwner
 		if row.owner == storetest.LegacyDefaultSpaceOwner {
-			access = SpaceAccessEveryone
+			access = models.SpaceAccessEveryone
 		}
 		if _, err := sqlDB.Exec(`INSERT INTO spaces (`+sqlstore.SpaceColumns+`) VALUES (?, ?, ?, ?, 'tidepool', ?, ?, ?, ?, ?, ?)`,
 			row.id, row.scope.Kind, row.scope.ID, "Space "+row.id, position, row.isDefault, access, row.owner, row.createdAt, row.createdAt); err != nil {
@@ -344,11 +345,11 @@ func TestSQLiteOwnerDefaultSpaceMigration(t *testing.T) {
 	assertSQLiteOwnerDefaults(t, sqlDB, len(rows), wantDefaults)
 	// The migrated database follows the store contract: a new owner's first
 	// space is their default space, and an owner who has one gets no second.
-	spaces := NewSpaceService(again)
-	if first, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Cy home", Look: DefaultSpaceLook, OwnerID: "9"}); err != nil || !first.IsDefault {
+	spaces := portfolio.NewSpaceService(again)
+	if first, err := spaces.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: "Cy home", Look: models.DefaultSpaceLook, OwnerID: "9"}); err != nil || !first.IsDefault {
 		t.Fatalf("new owner's first space = %+v, err = %v", first, err)
 	}
-	if next, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Ana more", Look: DefaultSpaceLook, OwnerID: "7"}); err != nil || next.IsDefault {
+	if next, err := spaces.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: "Ana more", Look: models.DefaultSpaceLook, OwnerID: "7"}); err != nil || next.IsDefault {
 		t.Fatalf("space of an owner with a default space = %+v, err = %v", next, err)
 	}
 }
@@ -436,18 +437,18 @@ func TestSQLiteSetSpaceOwnerKeepsDefaults(t *testing.T) {
 	exerciseSetSpaceOwnerDefaults(t, store)
 }
 
-func exerciseSetSpaceOwnerDefaults(t *testing.T, store SpaceStore) {
+func exerciseSetSpaceOwnerDefaults(t *testing.T, store models.SpaceStore) {
 	t.Helper()
-	ctx, scope := context.Background(), Scope{Kind: "tenant", ID: "owner-change-" + strings.ReplaceAll(t.Name(), "/", "-")}
+	ctx, scope := context.Background(), models.Scope{Kind: "tenant", ID: "owner-change-" + strings.ReplaceAll(t.Name(), "/", "-")}
 	clock := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
-	spaces := NewSpaceService(store, models.WithClock(func() time.Time { clock = clock.Add(time.Minute); return clock }))
-	create := func(name, owner string, access SpaceAccess) *Space {
+	spaces := portfolio.NewSpaceService(store, models.WithClock(func() time.Time { clock = clock.Add(time.Minute); return clock }))
+	create := func(name, owner string, access models.SpaceAccess) *models.Space {
 		t.Helper()
-		space, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: name, Look: DefaultSpaceLook, OwnerID: owner})
+		space, err := spaces.CreateSpace(ctx, portfolio.CreateSpaceRequest{Scope: scope, Name: name, Look: models.DefaultSpaceLook, OwnerID: owner})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if access != SpaceAccessOwner {
+		if access != models.SpaceAccessOwner {
 			if space, err = spaces.SetSpaceAccess(ctx, scope, space.ID, access); err != nil {
 				t.Fatal(err)
 			}
@@ -458,7 +459,7 @@ func exerciseSetSpaceOwnerDefaults(t *testing.T, store SpaceStore) {
 		t.Helper()
 		space, err := spaces.DefaultSpace(ctx, scope, owner)
 		if want == "" {
-			if !errors.Is(err, ErrNoDefaultSpace) {
+			if !errors.Is(err, models.ErrNoDefaultSpace) {
 				t.Fatalf("default of %q = %+v, %v; want none", owner, space, err)
 			}
 			return
@@ -467,7 +468,7 @@ func exerciseSetSpaceOwnerDefaults(t *testing.T, store SpaceStore) {
 			t.Fatalf("default of %q = %+v, %v; want %s", owner, space, err, want)
 		}
 	}
-	hand := func(space *Space, owner string, wantDefault bool) {
+	hand := func(space *models.Space, owner string, wantDefault bool) {
 		t.Helper()
 		moved, err := spaces.SetSpaceOwner(ctx, scope, space.ID, owner)
 		if err != nil || moved.OwnerID != owner || moved.IsDefault != wantDefault {
@@ -476,9 +477,9 @@ func exerciseSetSpaceOwnerDefaults(t *testing.T, store SpaceStore) {
 	}
 
 	// The org-wide space is the tenant's oldest and its former owner's default.
-	shared := create("Shared", "nobody", SpaceAccessEveryone)
-	other := create("Other", "nobody", SpaceAccessOwner)
-	mine := create("Mine", "7", SpaceAccessOwner)
+	shared := create("Shared", "nobody", models.SpaceAccessEveryone)
+	other := create("Other", "nobody", models.SpaceAccessOwner)
+	mine := create("Mine", "7", models.SpaceAccessOwner)
 	defaultOf("nobody", shared.ID)
 	hand(shared, "7", false)
 	defaultOf("7", mine.ID)
@@ -492,9 +493,9 @@ func exerciseSetSpaceOwnerDefaults(t *testing.T, store SpaceStore) {
 
 	// Losing a default re-marks the oldest space not shared with everyone,
 	// and only an owner of nothing else gets an everyone space.
-	first := create("First", "5", SpaceAccessOwner)
-	open := create("Open", "5", SpaceAccessEveryone)
-	private := create("Private", "5", SpaceAccessOwner)
+	first := create("First", "5", models.SpaceAccessOwner)
+	open := create("Open", "5", models.SpaceAccessEveryone)
+	private := create("Private", "5", models.SpaceAccessOwner)
 	defaultOf("5", first.ID)
 	hand(first, "9", false)
 	defaultOf("5", private.ID)
@@ -503,11 +504,11 @@ func exerciseSetSpaceOwnerDefaults(t *testing.T, store SpaceStore) {
 	defaultOf("5", open.ID)
 
 	// Handing over a space with a new access re-marks by that access.
-	if moved, err := spaces.SetSpaceAccessState(ctx, SetSpaceAccessStateRequest{Scope: scope, SpaceID: open.ID, OwnerID: "4", Access: SpaceAccessEveryone}); err != nil || !moved.IsDefault {
+	if moved, err := spaces.SetSpaceAccessState(ctx, portfolio.SetSpaceAccessStateRequest{Scope: scope, SpaceID: open.ID, OwnerID: "4", Access: models.SpaceAccessEveryone}); err != nil || !moved.IsDefault {
 		t.Fatalf("open to an owner of nothing = %+v, %v; want their default", moved, err)
 	}
 	defaultOf("5", "")
-	if _, err := spaces.SetSpaceOwner(ctx, scope, "missing", "7"); !errors.Is(err, ErrSpaceNotFound) {
+	if _, err := spaces.SetSpaceOwner(ctx, scope, "missing", "7"); !errors.Is(err, models.ErrSpaceNotFound) {
 		t.Fatalf("missing space = %v; want not found", err)
 	}
 }

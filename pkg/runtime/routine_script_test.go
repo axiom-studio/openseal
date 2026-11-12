@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
@@ -40,7 +41,7 @@ func (f *routineScriptFiles) write(conversationID, path, digest string) {
 	f.snapshots[conversationID] = append(versions, next)
 }
 
-func (f *routineScriptFiles) ResolveChatFile(_ context.Context, _ Scope, _ ObjectiveOwner, conversationID, path string, version int64) (*routine.ChatFile, error) {
+func (f *routineScriptFiles) ResolveChatFile(_ context.Context, _ models.Scope, _ models.ObjectiveOwner, conversationID, path string, version int64) (*routine.ChatFile, error) {
 	versions := f.snapshots[conversationID]
 	if version == 0 {
 		version = int64(len(versions))
@@ -103,11 +104,11 @@ func TestRoutineScriptChangesAlwaysNeedApproval(t *testing.T) {
 	definition := routine.RunbookManagementSkill()
 	for _, action := range []string{runtimeaction.RunbookActionCreateTask, runtimeaction.RunbookActionSetScript} {
 		decision, err := runtimeaction.NewDefaultActionPolicy().EvaluateAction(t.Context(), runtimeaction.ActionPolicyInput{
-			Run:   &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}},
-			Bound: &skill.BoundAction{Definition: definition, Binding: &skill.Binding{ID: "routines"}, Action: definition.Actions[action]}, ApprovalMode: ConversationApprovalSkip,
-			RoutineGrant: &RoutineGrant{Action: RunbookManagementSkillID + "." + action, Label: "anything"},
+			Run:   &models.AgentRun{ID: "run", Scope: models.Scope{Kind: "tenant", ID: "one"}},
+			Bound: &skill.BoundAction{Definition: definition, Binding: &skill.Binding{ID: "routines"}, Action: definition.Actions[action]}, ApprovalMode: models.ConversationApprovalSkip,
+			RoutineGrant: &models.RoutineGrant{Action: models.RunbookManagementSkillID + "." + action, Label: "anything"},
 		})
-		if err != nil || decision.Disposition != runtimeaction.ActionDispositionRequireApproval || decision.ApprovalTimeout == ApprovalTimeoutApprove {
+		if err != nil || decision.Disposition != runtimeaction.ActionDispositionRequireApproval || decision.ApprovalTimeout == models.ApprovalTimeoutApprove {
 			t.Fatalf("%s: %#v %v", action, decision, err)
 		}
 	}

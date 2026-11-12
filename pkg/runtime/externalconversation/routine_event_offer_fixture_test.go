@@ -10,7 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 )
 
 // slackRoutineMessage is a Slack channel message event from participant.
@@ -25,10 +25,10 @@ func slackRoutineMessage(id, participant, name, text string, bot bool) models.No
 
 // newUnboundRoutineEventMatcher is a routine event matcher whose scope has a
 // routine on another connection only.
-func newUnboundRoutineEventMatcher(tb testing.TB) (*runtime.RoutineEventMatcher, *countingRoutineEventStore) {
+func newUnboundRoutineEventMatcher(tb testing.TB) (*routine.RoutineEventMatcher, *countingRoutineEventStore) {
 	tb.Helper()
 	store := &countingRoutineEventStore{}
-	matcher := runtime.NewRoutineEventMatcher(store)
+	matcher := routine.NewRoutineEventMatcher(store)
 	tb.Cleanup(matcher.Close)
 	// The scope has a routine, but on another connection.
 	if err := matcher.RefreshRoutineIndex(context.Background(), models.Scope{Kind: "tenant", ID: "busy"}); err != nil {

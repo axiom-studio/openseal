@@ -33,24 +33,24 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	fixed := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	primaryService := runtimeconversation.NewConversationService(primary, models.WithClock(func() time.Time { return fixed }))
 	replicaService := runtimeconversation.NewConversationService(replica, models.WithClock(func() time.Time { return fixed }))
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, primary, scope)
 	conversation, _, err := primaryService.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "engineering"}, Title: "Release channel", IdempotencyKey: "release-v1",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "engineering"}, Title: "Release channel", IdempotencyKey: "release-v1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	question, err := primaryService.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
-		Content: "Is production ready?", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,
-		References: []ConversationReference{{Kind: ConversationReferenceRun, ID: "release-run"}}, IdempotencyKey: "question-v1",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}, Intent: models.MessageIntentQuestion,
+		Content: "Is production ready?", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, RequiresResponse: true,
+		References: []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: "release-run"}}, IdempotencyKey: "question-v1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: "developer"}
+	agent := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "developer"}
 	cursor, _, err := replicaService.AdvanceCursor(ctx, runtimeconversation.AdvanceConversationCursorRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: agent,
 		DeliveredSequence: question.Message.Sequence, ReadSequence: question.Message.Sequence,
@@ -59,7 +59,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 		t.Fatal(err)
 	}
 	presence, err := primaryService.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
-		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: ConversationPresenceWorking,
+		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: models.ConversationPresenceWorking,
 		Summary: "Validating production", RunID: "release-run", TTL: 30 * time.Second,
 	})
 	if err != nil {
@@ -68,9 +68,9 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	roundRequest := runtimeconversation.CommitConversationRoutingRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: question.Conversation.Revision,
 		TriggerMessageID: question.Message.ID, IdempotencyKey: "round-v1",
-		Responders: []ConversationResponder{
-			{Participant: agent, Addressed: ConversationAddressedRouted, Reason: "owns production"},
-			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "observer"}, Addressed: ConversationAddressedEveryone},
+		Responders: []models.ConversationResponder{
+			{Participant: agent, Addressed: models.ConversationAddressedRouted, Reason: "owns production"},
+			{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "observer"}, Addressed: models.ConversationAddressedEveryone},
 		},
 	}
 	services := []*runtimeconversation.ConversationService{primaryService, replicaService}
@@ -108,7 +108,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	if err != nil || restored.Revision != 3 || restored.LastSequence != 1 {
 		t.Fatalf("restored conversation = %#v, err = %v", restored, err)
 	}
-	messages, err := restartedService.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	messages, err := restartedService.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(messages) != 1 {
 		t.Fatalf("restored messages = %#v, err = %v", messages, err)
 	}
@@ -128,7 +128,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	if err != nil || len(loadedRound.Round.Responders) != 2 || loadedRound.Round.Responders[0].Reason != "owns production" {
 		t.Fatalf("loaded round = %#v, err = %v", loadedRound, err)
 	}
-	rounds, err := restartedService.ListParticipationRounds(ctx, ParticipationRoundFilter{Scope: scope, ConversationID: conversation.ID})
+	rounds, err := restartedService.ListParticipationRounds(ctx, models.ParticipationRoundFilter{Scope: scope, ConversationID: conversation.ID})
 	if err != nil || len(rounds) != 1 || rounds[0].Round.ID != replay.Round.ID || rounds[0].Round.ConversationRevision != 3 {
 		t.Fatalf("rounds = %#v, err = %v", rounds, err)
 	}
@@ -160,15 +160,15 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 		t.Fatalf("replica presence expiry = %#v, err = %v", expiredChanges, err)
 	}
 	recoveryConversation, _, err := primaryService.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"}, Title: "Recovery channel", IdempotencyKey: "recovery-channel",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"}, Title: "Recovery channel", IdempotencyKey: "recovery-channel",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	recoveryMessage, err := primaryService.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: recoveryConversation.ID, ExpectedRevision: recoveryConversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
-		Content: "Which replica owns this wake?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}, Intent: models.MessageIntentQuestion,
+		Content: "Which replica owns this wake?", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		RequiresResponse: true, IdempotencyKey: "recovery-question",
 	})
 	if err != nil {
@@ -200,9 +200,9 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 			t.Fatal(reconcileErr)
 		}
 	}
-	conversationRuns, err := restarted.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation})
+	conversationRuns, err := restarted.ListAgentRuns(ctx, models.AgentRunFilter{Scope: scope, Kind: models.RunKindConversation})
 	if err != nil || len(conversationRuns) != 1 || conversationRuns[0].ConcurrencyKey != recoveryConversation.ID ||
-		conversationRuns[0].Context[conversationRunContextTriggerID] != recoveryMessage.Message.ID {
+		conversationRuns[0].Context[models.ConversationRunTriggerIDContextKey] != recoveryMessage.Message.ID {
 		t.Fatalf("cross-replica reconciled Runs = %#v, err = %v", conversationRuns, err)
 	}
 	restartedChanges, err := runtimeconversation.NewConversationChangeService(restarted, restarted)
@@ -218,7 +218,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 		recoveryChanges.Activity[0].EventType != "run.created" {
 		t.Fatalf("restart-safe Run activity projection = %#v, err = %v", recoveryChanges, err)
 	}
-	if foreign, err := restartedService.GetConversation(ctx, Scope{Kind: "tenant", ID: "other"}, conversation.ID); err == nil || foreign != nil {
+	if foreign, err := restartedService.GetConversation(ctx, models.Scope{Kind: "tenant", ID: "other"}, conversation.ID); err == nil || foreign != nil {
 		t.Fatalf("foreign conversation = %#v, err = %v", foreign, err)
 	}
 	restartedServiceClock = func() time.Time { return fixed.Add(31 * time.Second) }
@@ -228,21 +228,21 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	}
 	private, err := restartedService.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: restored.Revision,
-		Sender: agent, Intent: MessageIntentUpdate, Content: "Private deployment detail",
-		Audience:       ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantUser, ID: "reviewer"}}},
+		Sender: agent, Intent: models.MessageIntentUpdate, Content: "Private deployment detail",
+		Audience:       models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{{Type: models.ConversationParticipantUser, ID: "reviewer"}}},
 		IdempotencyKey: "private-deployment-detail",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	operator := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}}
-	descendingVisible, err := replicaService.ListChannelMessages(ctx, ChannelMessageFilter{
+	operator := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}}
+	descendingVisible, err := replicaService.ListChannelMessages(ctx, models.ChannelMessageFilter{
 		Scope: scope, ConversationID: conversation.ID, Descending: true, Limit: 1, Viewer: &operator,
 	})
 	if err != nil || len(descendingVisible) != 1 || descendingVisible[0].Sequence != private.Message.Sequence-1 {
 		t.Fatalf("PostgreSQL descending audience page = %#v, err = %v", descendingVisible, err)
 	}
-	olderVisible, err := replicaService.ListChannelMessages(ctx, ChannelMessageFilter{
+	olderVisible, err := replicaService.ListChannelMessages(ctx, models.ChannelMessageFilter{
 		Scope: scope, ConversationID: conversation.ID, Descending: true, BeforeSequence: descendingVisible[0].Sequence, Limit: 1, Viewer: &operator,
 	})
 	if err != nil || len(olderVisible) != 1 || olderVisible[0].Sequence != 1 {

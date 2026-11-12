@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -18,12 +19,12 @@ import (
 // answered it, dropping the report while an earlier one is unread.
 type mutableActionWorkerScopeSource struct {
 	mu     sync.Mutex
-	scopes []Scope
+	scopes []models.Scope
 	err    error
 	listed chan struct{}
 }
 
-func (s *mutableActionWorkerScopeSource) ListWorkerScopes(context.Context) ([]Scope, error) {
+func (s *mutableActionWorkerScopeSource) ListWorkerScopes(context.Context) ([]models.Scope, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer func() {
@@ -32,19 +33,19 @@ func (s *mutableActionWorkerScopeSource) ListWorkerScopes(context.Context) ([]Sc
 		default:
 		}
 	}()
-	return append([]Scope(nil), s.scopes...), s.err
+	return append([]models.Scope(nil), s.scopes...), s.err
 }
 
-func (s *mutableActionWorkerScopeSource) set(scopes []Scope, err error) {
+func (s *mutableActionWorkerScopeSource) set(scopes []models.Scope, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.scopes = append([]Scope(nil), scopes...)
+	s.scopes = append([]models.Scope(nil), scopes...)
 	s.err = err
 }
 
 func TestActionWorkerSupervisorReconcilesIsolatedScopes(t *testing.T) {
 	store := newTestKernelStore(t)
-	source := &mutableActionWorkerScopeSource{scopes: []Scope{
+	source := &mutableActionWorkerScopeSource{scopes: []models.Scope{
 		{Kind: "tenant", ID: "2"}, {Kind: "tenant", ID: "1"}, {Kind: "tenant", ID: "1"},
 	}, listed: make(chan struct{}, 1)}
 	supervisor, err := action.NewActionWorkerSupervisor(
@@ -65,7 +66,7 @@ func TestActionWorkerSupervisorReconcilesIsolatedScopes(t *testing.T) {
 		t.Fatalf("expected two deduplicated scope pools, got %d", got)
 	}
 
-	source.set([]Scope{{Kind: "tenant", ID: "2"}, {Kind: "", ID: "invalid"}}, nil)
+	source.set([]models.Scope{{Kind: "tenant", ID: "2"}, {Kind: "", ID: "invalid"}}, nil)
 	supervisor.RefreshScopes()
 	<-source.listed
 	if got := waitActionWorkerScopeCount(supervisor, 1); got != 1 {
@@ -95,7 +96,7 @@ func TestActionWorkerSupervisorStartStopIsIdempotent(t *testing.T) {
 	supervisor, err := action.NewActionWorkerSupervisor(
 		newTestKernelStore(t), skill.NewCatalog(), nil,
 		action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) { return nil, nil }),
-		workqueue.WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{{Kind: "tenant", ID: "1"}}, nil }),
+		workqueue.WorkerScopeSourceFunc(func(context.Context) ([]models.Scope, error) { return []models.Scope{{Kind: "tenant", ID: "1"}}, nil }),
 		zap.NewNop().Sugar(), action.DynamicActionWorkerConfig{ReconcileInterval: 5 * time.Millisecond},
 	)
 	if err != nil {

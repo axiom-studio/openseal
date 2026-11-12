@@ -6,13 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-func conversationTaskChangeStore(t *testing.T, backend string) KernelStore {
+func conversationTaskChangeStore(t *testing.T, backend string) models.KernelStore {
 	t.Helper()
 	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "task-changes.db"))
 	if err != nil {
@@ -22,9 +24,9 @@ func conversationTaskChangeStore(t *testing.T, backend string) KernelStore {
 	return store
 }
 
-func settleConversationTaskForChanges(t *testing.T, store KernelStore, conversation *Conversation, message *ChannelMessage) (*AgentRun, *AgentTurn) {
+func settleConversationTaskForChanges(t *testing.T, store models.KernelStore, conversation *models.Conversation, message *models.ChannelMessage) (*models.AgentRun, *models.AgentTurn) {
 	t.Helper()
-	scheduler, err := conversationrun.NewConversationRunScheduler(store.(ConversationStore), store, conversationrun.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store.(models.ConversationStore), store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,8 +34,8 @@ func settleConversationTaskForChanges(t *testing.T, store KernelStore, conversat
 	if err != nil || scheduled == nil || scheduled.Run == nil {
 		t.Fatalf("schedule task source: %#v %v", scheduled, err)
 	}
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
-		Scope: conversation.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{
+		Scope: conversation.Scope, Kind: models.RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
 	if err != nil || claimed == nil || claimed.ID != scheduled.Run.ID {
 		t.Fatalf("claim task source: %#v %v", claimed, err)
@@ -42,7 +44,7 @@ func settleConversationTaskForChanges(t *testing.T, store KernelStore, conversat
 	return result.Run, result.Turn
 }
 
-func changeRunByID(runs []*AgentRun, id string) *AgentRun {
+func changeRunByID(runs []*models.AgentRun, id string) *models.AgentRun {
 	for _, run := range runs {
 		if run.ID == id {
 			return run
@@ -55,27 +57,27 @@ func TestConversationChangesProjectIndependentTaskBeforeAndWithTerminalReport(t 
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			store := conversationTaskChangeStore(t, backend)
-			conversations := runtimeconversation.NewConversationService(store.(ConversationStore))
-			scope := Scope{Kind: "tenant", ID: "task-stream"}
-			seedTestSpace(t, store.(SpaceStore), scope)
+			conversations := runtimeconversation.NewConversationService(store.(models.ConversationStore))
+			scope := models.Scope{Kind: "tenant", ID: "task-stream"}
+			seedTestSpace(t, store.(models.SpaceStore), scope)
 			conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Task stream", IdempotencyKey: "task-stream",
+				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Task stream", IdempotencyKey: "task-stream",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			message := conversationruntest.PostMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion, "Review the release in the background", "task-question")
+			message := conversationruntest.PostMessage(t, conversations, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion, "Review the release in the background", "task-question")
 			source, turn := settleConversationTaskForChanges(t, store, conversation, message)
-			changes, err := runtimeconversation.NewConversationChangeService(store.(ConversationStore), store)
+			changes, err := runtimeconversation.NewConversationChangeService(store.(models.ConversationStore), store)
 			if err != nil {
 				t.Fatal(err)
 			}
-			viewer := &ConversationViewer{Participant: message.Sender}
+			viewer := &models.ConversationViewer{Participant: message.Sender}
 			initial, err := changes.ListChanges(t.Context(), runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Viewer: viewer})
 			if err != nil || changeRunByID(initial.Runs, source.ID) == nil {
 				t.Fatalf("foreground projection missing: %#v %v", initial, err)
 			}
-			admitted, err := conversationrun.NewConversationTaskService(store.(ConversationTaskKernelStore)).Start(t.Context(), conversationruntest.TaskStartRequest(t, store.(ConversationTaskKernelStore), source, turn))
+			admitted, err := conversationrun.NewConversationTaskService(store.(models.ConversationTaskKernelStore)).Start(t.Context(), conversationruntest.TaskStartRequest(t, store.(models.ConversationTaskKernelStore), source, turn))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,31 +89,31 @@ func TestConversationChangesProjectIndependentTaskBeforeAndWithTerminalReport(t 
 			}
 			work := changeRunByID(started.Runs, admitted.WorkRun.ID)
 			proof := changeRunByID(started.Runs, source.ID)
-			if work == nil || work.Status != AgentRunStatusQueued || work.ParentRunID != "" || work.RootRunID != work.ID ||
-				proof == nil || proof.Status != AgentRunStatusCompleted || proof.Output["conversationTaskWorkRunId"] != work.ID {
+			if work == nil || work.Status != models.AgentRunStatusQueued || work.ParentRunID != "" || work.RootRunID != work.ID ||
+				proof == nil || proof.Status != models.AgentRunStatusCompleted || proof.Output["conversationTaskWorkRunId"] != work.ID {
 				t.Fatalf("task/source proof missing: %#v", started.Runs)
 			}
-			other := &ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "another-user"}}
+			other := &models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "another-user"}}
 			foreign, err := changes.ListChanges(t.Context(), runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Viewer: other})
 			if err != nil || changeRunByID(foreign.Runs, work.ID) != nil {
 				t.Fatalf("task crossed authenticated actor: %#v %v", foreign, err)
 			}
-			running, _, err := NewRunActivityService(store, store).TransitionRun(t.Context(), scope, work.ID, RunTransitionRequest{ExpectedRevision: work.Revision, Status: AgentRunStatusRunning})
+			running, _, err := activity.NewRunActivityService(store, store).TransitionRun(t.Context(), scope, work.ID, activity.RunTransitionRequest{ExpectedRevision: work.Revision, Status: models.AgentRunStatusRunning})
 			if err != nil {
 				t.Fatal(err)
 			}
-			terminal, _, err := NewRunActivityService(store, store).TransitionRun(t.Context(), scope, work.ID, RunTransitionRequest{
-				ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted, Output: map[string]interface{}{"summary": "The release review found two fixes."},
+			terminal, _, err := activity.NewRunActivityService(store, store).TransitionRun(t.Context(), scope, work.ID, activity.RunTransitionRequest{
+				ExpectedRevision: running.Revision, Status: models.AgentRunStatusCompleted, Output: map[string]interface{}{"summary": "The release review found two fixes."},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store.(ConversationStore), terminal); err != nil {
+			if err := conversationrun.ProjectTerminalRunReporting(t.Context(), store.(models.ConversationStore), terminal); err != nil {
 				t.Fatal(err)
 			}
 			finished, err := changes.ListChanges(t.Context(), runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: started.Cursor, Viewer: viewer})
 			if err != nil || !finished.RunsChanged || len(finished.Messages) < 1 || len(finished.Messages) > 2 ||
-				changeRunByID(finished.Runs, work.ID) == nil || changeRunByID(finished.Runs, work.ID).Status != AgentRunStatusCompleted || changeRunByID(finished.Runs, source.ID) == nil {
+				changeRunByID(finished.Runs, work.ID) == nil || changeRunByID(finished.Runs, work.ID).Status != models.AgentRunStatusCompleted || changeRunByID(finished.Runs, source.ID) == nil {
 				t.Fatalf("terminal report lacked current work proof: %#v %v", finished, err)
 			}
 			acknowledgments, finalReports := 0, 0
@@ -132,9 +134,9 @@ func TestConversationChangesProjectIndependentTaskBeforeAndWithTerminalReport(t 
 			if err != nil || stable.HasChanges || stable.Cursor != finished.Cursor {
 				t.Fatalf("unchanged task projection resent: %#v %v", stable, err)
 			}
-			forged := cloneAgentRun(terminal)
+			forged := models.CloneAgentRun(terminal)
 			forged.ID, forged.RootRunID, forged.ParentRunID = "context-only-work", "context-only-work", ""
-			forged.Status, forged.Revision, forged.Output = AgentRunStatusRunning, 1, nil
+			forged.Status, forged.Revision, forged.Output = models.AgentRunStatusRunning, 1, nil
 			forged.ConcurrencyKey = "task:invented"
 			if err := store.CreateAgentRun(t.Context(), forged); err != nil {
 				t.Fatal(err)
@@ -150,26 +152,26 @@ func TestConversationChangesProjectIndependentTaskBeforeAndWithTerminalReport(t 
 func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
 	store := newTestKernelStore(t)
 	conversations := runtimeconversation.NewConversationService(store)
-	scope := Scope{Kind: "tenant", ID: "task-thread-privacy"}
+	scope := models.Scope{Kind: "tenant", ID: "task-thread-privacy"}
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Private task", IdempotencyKey: "private-task",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Private task", IdempotencyKey: "private-task",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	root, err := conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "private-root"}, Intent: MessageIntentSystem, Content: "Private thread",
-		Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantAgent, ID: "agent"}}}, IdempotencyKey: "private-root",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "private-root"}, Intent: models.MessageIntentSystem, Content: "Private thread",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{{Type: models.ConversationParticipantAgent, ID: "agent"}}}, IdempotencyKey: "private-root",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	question, err := conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: root.Conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentQuestion, Content: "Review the release",
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: root.Message.ID, RequiresResponse: true, IdempotencyKey: "private-question",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "user"}, Intent: models.MessageIntentQuestion, Content: "Review the release",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: root.Message.ID, RequiresResponse: true, IdempotencyKey: "private-question",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -179,8 +181,8 @@ func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	viewer := &ConversationViewer{Participant: question.Message.Sender}
-	if !CanViewChannelMessage(question.Message, *viewer) {
+	viewer := &models.ConversationViewer{Participant: question.Message.Sender}
+	if !models.CanViewChannelMessage(question.Message, *viewer) {
 		t.Fatal("fixture source itself should be visible to its sender")
 	}
 	changes, err := runtimeconversation.NewConversationChangeService(store, store)
@@ -191,8 +193,8 @@ func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
 	if err != nil || len(initial.Runs) != 0 || len(initial.Activity) != 0 || len(initial.Messages) != 0 {
 		t.Fatalf("source thread privacy did not protect detached work: %#v %v", initial, err)
 	}
-	if _, _, err := NewRunActivityService(store, store).TransitionRun(t.Context(), scope, admitted.WorkRun.ID, RunTransitionRequest{
-		ExpectedRevision: admitted.WorkRun.Revision, Status: AgentRunStatusRunning, Summary: "Private task started",
+	if _, _, err := activity.NewRunActivityService(store, store).TransitionRun(t.Context(), scope, admitted.WorkRun.ID, activity.RunTransitionRequest{
+		ExpectedRevision: admitted.WorkRun.Revision, Status: models.AgentRunStatusRunning, Summary: "Private task started",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -209,11 +211,11 @@ func TestConversationTaskTerminalWindowCountsVisibleRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, _, err := NewRunActivityService(store, store).TransitionRun(t.Context(), source.Scope, admitted.WorkRun.ID, RunTransitionRequest{ExpectedRevision: admitted.WorkRun.Revision, Status: AgentRunStatusRunning})
+	running, _, err := activity.NewRunActivityService(store, store).TransitionRun(t.Context(), source.Scope, admitted.WorkRun.ID, activity.RunTransitionRequest{ExpectedRevision: admitted.WorkRun.Revision, Status: models.AgentRunStatusRunning})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := NewRunActivityService(store, store).TransitionRun(t.Context(), source.Scope, running.ID, RunTransitionRequest{ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted}); err != nil {
+	if _, _, err := activity.NewRunActivityService(store, store).TransitionRun(t.Context(), source.Scope, running.ID, activity.RunTransitionRequest{ExpectedRevision: running.Revision, Status: models.AgentRunStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	conversations := runtimeconversation.NewConversationService(store)
@@ -223,8 +225,8 @@ func TestConversationTaskTerminalWindowCountsVisibleRuns(t *testing.T) {
 	}
 	hidden, err := conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: source.Scope, ConversationID: conversation.ID, ExpectedRevision: latest.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "private"}, Intent: MessageIntentSystem, Content: "Private work",
-		Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{{Type: ConversationParticipantAgent, ID: "agent"}}}, IdempotencyKey: "hidden-window",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "private"}, Intent: models.MessageIntentSystem, Content: "Private work",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{{Type: models.ConversationParticipantAgent, ID: "agent"}}}, IdempotencyKey: "hidden-window",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -233,14 +235,14 @@ func TestConversationTaskTerminalWindowCountsVisibleRuns(t *testing.T) {
 	// One more private root than the change projection's limit of 100 Runs.
 	for i := 0; i <= 100; i++ {
 		id := fmt.Sprintf("private-root-%03d", i)
-		status := AgentRunStatusCompleted
+		status := models.AgentRunStatusCompleted
 		if i == 0 {
-			status = AgentRunStatusRunning
+			status = models.AgentRunStatusRunning
 		}
-		if err := store.CreateAgentRun(t.Context(), &AgentRun{
-			ID: id, Scope: source.Scope, Owner: conversation.Owner, Kind: RunKindConversation, AssignedAgentID: "agent", Goal: "Private work", Source: RunSourceChat,
+		if err := store.CreateAgentRun(t.Context(), &models.AgentRun{
+			ID: id, Scope: source.Scope, Owner: conversation.Owner, Kind: models.RunKindConversation, AssignedAgentID: "agent", Goal: "Private work", Source: models.RunSourceChat,
 			RootRunID: id, ConcurrencyKey: conversation.ID, Status: status, Revision: 1, CreatedAt: now, UpdatedAt: now, AvailableAt: now, QueueEnteredAt: now,
-			Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: hidden.Message.ID},
+			Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID, models.ConversationRunTriggerIDContextKey: hidden.Message.ID},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -249,12 +251,12 @@ func TestConversationTaskTerminalWindowCountsVisibleRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	viewer := &ConversationViewer{Participant: message.Sender}
+	viewer := &models.ConversationViewer{Participant: message.Sender}
 	initial, err := changes.ListChanges(t.Context(), runtimeconversation.ConversationChangeRequest{Scope: source.Scope, ConversationID: conversation.ID, Viewer: viewer})
 	if err != nil || changeRunByID(initial.Runs, admitted.WorkRun.ID) == nil || len(initial.Runs) != 2 {
 		t.Fatalf("hidden terminal history displaced visible task: %#v %v", initial, err)
 	}
-	if _, _, err := NewRunActivityService(store, store).TransitionRun(t.Context(), source.Scope, "private-root-000", RunTransitionRequest{ExpectedRevision: 1, Status: AgentRunStatusCompleted}); err != nil {
+	if _, _, err := activity.NewRunActivityService(store, store).TransitionRun(t.Context(), source.Scope, "private-root-000", activity.RunTransitionRequest{ExpectedRevision: 1, Status: models.AgentRunStatusCompleted}); err != nil {
 		t.Fatal(err)
 	}
 	after, err := changes.ListChanges(t.Context(), runtimeconversation.ConversationChangeRequest{Scope: source.Scope, ConversationID: conversation.ID, Cursor: initial.Cursor, Viewer: viewer})
@@ -267,29 +269,29 @@ func TestConversationChangesIncludeCanonicalLocalRootedForeground(t *testing.T) 
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			store := conversationTaskChangeStore(t, backend)
-			conversations := runtimeconversation.NewConversationService(store.(ConversationStore))
-			scope := Scope{Kind: "tenant", ID: "rooted-stream"}
-			seedTestSpace(t, store.(SpaceStore), scope)
+			conversations := runtimeconversation.NewConversationService(store.(models.ConversationStore))
+			scope := models.Scope{Kind: "tenant", ID: "rooted-stream"}
+			seedTestSpace(t, store.(models.SpaceStore), scope)
 			conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Rooted stream", IdempotencyKey: "rooted-stream",
+				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Title: "Rooted stream", IdempotencyKey: "rooted-stream",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			root := conversationruntest.PostMessage(t, conversations, conversation, ConversationParticipantService, MessageIntentSystem, "Call root", "call-root")
+			root := conversationruntest.PostMessage(t, conversations, conversation, models.ConversationParticipantService, models.MessageIntentSystem, "Call root", "call-root")
 			latest, err := conversations.GetConversation(t.Context(), scope, conversation.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			question, err := conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: latest.Revision,
-				Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentQuestion, Content: "Review the release",
-				Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: root.ID, RequiresResponse: true, IdempotencyKey: "rooted-question",
+				Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "user"}, Intent: models.MessageIntentQuestion, Content: "Review the release",
+				Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: root.ID, RequiresResponse: true, IdempotencyKey: "rooted-question",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			scheduler, err := conversationrun.NewConversationRunScheduler(store.(ConversationStore), store, conversationrun.ConversationRunSchedulerConfig{})
+			scheduler, err := conversationrun.NewConversationRunScheduler(store.(models.ConversationStore), store, conversationrun.ConversationRunSchedulerConfig{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -297,18 +299,18 @@ func TestConversationChangesIncludeCanonicalLocalRootedForeground(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			forged := cloneAgentRun(scheduled.Run)
+			forged := models.CloneAgentRun(scheduled.Run)
 			forged.ID, forged.RootRunID = "forged-rooted-run", "forged-rooted-run"
 			forged.Context["threadRootMessageId"] = "forged-thread"
 			forged.ConcurrencyKey = conversation.ID + ":thread:forged-thread"
 			if err := store.CreateAgentRun(t.Context(), forged); err != nil {
 				t.Fatal(err)
 			}
-			changes, err := runtimeconversation.NewConversationChangeService(store.(ConversationStore), store)
+			changes, err := runtimeconversation.NewConversationChangeService(store.(models.ConversationStore), store)
 			if err != nil {
 				t.Fatal(err)
 			}
-			projected, err := changes.ListChanges(t.Context(), runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Viewer: &ConversationViewer{Participant: question.Message.Sender}})
+			projected, err := changes.ListChanges(t.Context(), runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Viewer: &models.ConversationViewer{Participant: question.Message.Sender}})
 			if err != nil || changeRunByID(projected.Runs, scheduled.Run.ID) == nil || changeRunByID(projected.Runs, forged.ID) != nil {
 				t.Fatalf("canonical rooted foreground projection: %#v %v", projected, err)
 			}

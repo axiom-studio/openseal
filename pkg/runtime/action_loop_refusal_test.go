@@ -10,7 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 )
 
-func refusedLoopCallRequest(f *actiontest.LoopStore, prior *ActionCall, code string) action.RefusedLoopCallRequest {
+func refusedLoopCallRequest(f *actiontest.LoopStore, prior *models.ActionCall, code string) action.RefusedLoopCallRequest {
 	return action.RefusedLoopCallRequest{
 		Scope: f.Scope, Run: f.Run, StepID: "step-5", DeploymentID: prior.DeploymentID,
 		SkillID: prior.SkillID, SkillVersion: prior.SkillVersion, Action: prior.Action,
@@ -19,12 +19,12 @@ func refusedLoopCallRequest(f *actiontest.LoopStore, prior *ActionCall, code str
 		Arguments:   map[string]interface{}{"path": prior.ID, "apiKey": "secret"},
 		Code:        code, Message: "Not run: this exact call was already made twice in this run with the same result (last at step 2).",
 		DuplicateOfActionCallID: prior.ID, PriorStep: 2, Count: 3,
-		Lease: &AgentRunLeaseGuard{WorkerID: actiontest.LoopStoreWorker, Now: f.Now},
+		Lease: &models.AgentRunLeaseGuard{WorkerID: actiontest.LoopStoreWorker, Now: f.Now},
 	}
 }
 
 func TestNewRefusedLoopCallRow(t *testing.T) {
-	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := actiontest.NewLoopStore(t, store)
 		prior := f.Propose(f.LoopCall("prior"))
 		coordinator := action.NewActionCoordinator(store, store, nil, nil, nil, models.WithClock(func() time.Time { return f.Now }))
@@ -37,7 +37,7 @@ func TestNewRefusedLoopCallRow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if call.Status != ActionCallStatusRefused || call.Origin != ActionOriginLoop || call.Execution != ActionExecutionLoop ||
+		if call.Status != models.ActionCallStatusRefused || call.Origin != models.ActionOriginLoop || call.Execution != models.ActionExecutionLoop ||
 			call.TurnID != "step-5" || call.ErrorCode != action.RefusedLoopCallRepeat || call.DuplicateOfActionCallID != prior.ID ||
 			call.MaxAttempts != 1 || call.CompletedAt == nil || call.ExternalOperationDigest != "" || call.IdempotencyKey != "" {
 			t.Fatalf("refused row = %#v", call)
@@ -48,7 +48,7 @@ func TestNewRefusedLoopCallRow(t *testing.T) {
 		if _, ok := call.Arguments["apiKey"]; ok || call.Arguments["path"] != prior.ID {
 			t.Fatalf("arguments = %#v", call.Arguments)
 		}
-		if call.InvocationDigest == "" || call.SemanticDigest != ComputeActionSemanticDigest(call) {
+		if call.InvocationDigest == "" || call.SemanticDigest != models.ComputeActionSemanticDigest(call) {
 			t.Fatalf("digests = %q %q", call.InvocationDigest, call.SemanticDigest)
 		}
 		event := result.Event
@@ -92,8 +92,8 @@ func TestRefusedLoopCallRequiresLiveLease(t *testing.T) {
 	prior := f.Propose(f.LoopCall("prior"))
 	coordinator := action.NewActionCoordinator(f.Store, f.Store, nil, nil, nil)
 	req := refusedLoopCallRequest(f, prior, action.RefusedLoopCallRepeat)
-	req.Lease = &AgentRunLeaseGuard{WorkerID: "other-worker", Now: f.Now}
-	if _, err := coordinator.RecordRefusedLoopCall(f.Ctx, req); !errors.Is(err, ErrLeaseLost) {
+	req.Lease = &models.AgentRunLeaseGuard{WorkerID: "other-worker", Now: f.Now}
+	if _, err := coordinator.RecordRefusedLoopCall(f.Ctx, req); !errors.Is(err, models.ErrLeaseLost) {
 		t.Fatalf("foreign lease err = %v", err)
 	}
 	req.Lease = nil
@@ -103,17 +103,17 @@ func TestRefusedLoopCallRequiresLiveLease(t *testing.T) {
 }
 
 func TestRefusedDoesNotProtectExternalOperation(t *testing.T) {
-	if externalOperationProtects(ActionCallStatusRefused) {
+	if models.ExternalOperationProtects(models.ActionCallStatusRefused) {
 		t.Fatal("refused protects an external operation")
 	}
-	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := actiontest.NewLoopStore(t, store)
 		digest := "sha256:0000000000000000000000000000000000000000000000000000000000000abc"
 		refused := f.LoopCall("refused")
-		refused.Status, refused.ExternalOperationDigest, refused.CompletedAt = ActionCallStatusRefused, digest, &f.Now
+		refused.Status, refused.ExternalOperationDigest, refused.CompletedAt = models.ActionCallStatusRefused, digest, &f.Now
 		refused.ErrorCode = action.RefusedLoopCallRepeat
 		f.Propose(refused)
-		if _, err := store.GetActionCallByExternalOperation(f.Ctx, f.Scope, digest); !errors.Is(err, ErrActionNotFound) {
+		if _, err := store.GetActionCallByExternalOperation(f.Ctx, f.Scope, digest); !errors.Is(err, models.ErrActionNotFound) {
 			t.Fatalf("refused row protects external operation: %v", err)
 		}
 		// The operation stays free: a real call may still claim it.

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -22,12 +23,12 @@ type gatewayVerificationStore struct {
 	routeLookups, received int
 }
 
-func (s *gatewayVerificationStore) ListExternalConversationEndpointsByVerifiedRoute(ctx context.Context, route ExternalConversationVerifiedRoute) ([]*ExternalConversationEndpoint, error) {
+func (s *gatewayVerificationStore) ListExternalConversationEndpointsByVerifiedRoute(ctx context.Context, route models.ExternalConversationVerifiedRoute) ([]*models.ExternalConversationEndpoint, error) {
 	s.routeLookups++
 	return s.Store.ListExternalConversationEndpointsByVerifiedRoute(ctx, route)
 }
 
-func (s *gatewayVerificationStore) ReceiveExternalConversationEvent(ctx context.Context, item *ExternalConversationInboxItem) (*ExternalConversationInboxItem, bool, error) {
+func (s *gatewayVerificationStore) ReceiveExternalConversationEvent(ctx context.Context, item *models.ExternalConversationInboxItem) (*models.ExternalConversationInboxItem, bool, error) {
 	s.received++
 	return s.Store.ReceiveExternalConversationEvent(ctx, item)
 }
@@ -50,7 +51,7 @@ func (h *gatewayVerificationHost) VerifyExternalConversationGateway(_ context.Co
 	return h.result, nil
 }
 
-func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *skill.Catalog, *externalconversation.ExternalConversationTransportService, *ExternalConversationGatewayRegistration, *ExternalConversationEndpoint) {
+func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *skill.Catalog, *externalconversation.ExternalConversationTransportService, *models.ExternalConversationGatewayRegistration, *models.ExternalConversationEndpoint) {
 	t.Helper()
 	base, catalog, endpoint := externalconversationtest.EndpointFixture(t, t.Context(), "slack")
 	previousRevision := endpoint.Revision
@@ -63,8 +64,8 @@ func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *sk
 	store := &gatewayVerificationStore{Store: base}
 	registration, err := externalconversation.NewExternalConversationGatewayService(store, catalog).Create(t.Context(), externalconversation.CreateExternalConversationGatewayRequest{
 		ID: "verification-gateway", Name: "Paused setup verification",
-		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider, InstallationID: "T123", ApplicationID: "A123"},
-		Actor:   ActivityActor{Type: "user", ID: "operator"}, Reason: "Prepare provider setup",
+		Gateway: models.ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider, InstallationID: "T123", ApplicationID: "A123"},
+		Actor:   models.ActivityActor{Type: "user", ID: "operator"}, Reason: "Prepare provider setup",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +77,7 @@ func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *sk
 func gatewayVerificationMessage() externalconversation.ExternalConversationGatewayEvent {
 	return externalconversation.ExternalConversationGatewayEvent{
 		InstallationID: "T123", ApplicationID: "A123", Address: "C123",
-		Event: NormalizedExternalConversationEvent{
+		Event: models.NormalizedExternalConversationEvent{
 			ID: "Ev-verification", Type: capability.ConversationEventMessageReceived,
 			ExternalConversationID: "C123", ExternalMessageID: "171.003", ExternalParticipantID: "U123",
 			Text: "Ordinary message", OrderingKey: "C123:171.003", OccurredAt: time.Now().UTC(),
@@ -98,11 +99,11 @@ func TestPausedGatewayVerificationRequiresOptInAndNeverAcceptsEvents(t *testing.
 				Route: registration.IngressRoute, Method: http.MethodPost, Headers: map[string][]string{"X-Slack-Signature": {"v0=provider-verifier-input"}}, Body: []byte(`{"type":"url_verification"}`),
 			}, host)
 			if name == "malicious event" {
-				if !errors.Is(err, ErrExternalConversationConflict) || response != nil {
+				if !errors.Is(err, models.ErrExternalConversationConflict) || response != nil {
 					t.Fatalf("verification accepted event: %#v, %v", response, err)
 				}
 			} else if name == "invalid result" {
-				if !errors.Is(err, ErrInvalidExternalConversation) || response != nil {
+				if !errors.Is(err, models.ErrInvalidExternalConversation) || response != nil {
 					t.Fatalf("verification accepted malformed response: %#v, %v", response, err)
 				}
 			} else if err != nil || response == nil || response.Response != result || response.Received != nil {
@@ -125,7 +126,7 @@ func TestPausedGatewayVerificationRequiresOptInAndNeverAcceptsEvents(t *testing.
 		_, _, service, registration, _ := newGatewayVerificationFixture(t)
 		host := &externalconversationtest.GatewayHostStub{Result: &externalconversation.ExternalConversationGatewayHostResult{StatusCode: http.StatusOK}}
 		_, err := service.NormalizeExternalConversationRegisteredGatewayIngress(t.Context(), externalconversation.ExternalConversationPublicIngressRequest{Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`)}, host)
-		if !errors.Is(err, ErrExternalConversationConflict) || host.Request.Request != nil {
+		if !errors.Is(err, models.ErrExternalConversationConflict) || host.Request.Request != nil {
 			t.Fatalf("paused route invoked non-opt-in host: %#v, %v", host.Request, err)
 		}
 	})
@@ -136,13 +137,13 @@ func TestGatewayVerificationPreservesActiveIngressAndRejectsUnavailableAuthority
 		t.Run(state, func(t *testing.T) {
 			store, catalog, service, registration, endpoint := newGatewayVerificationFixture(t)
 			if state == "active" || state == "retired" {
-				status := ExternalConversationGatewayActive
+				status := models.ExternalConversationGatewayActive
 				if state == "retired" {
-					status = ExternalConversationGatewayRetired
+					status = models.ExternalConversationGatewayRetired
 				}
 				var err error
 				registration, err = externalconversation.NewExternalConversationGatewayService(store, catalog).Update(t.Context(), registration.Gateway.Scope, registration.ID, externalconversation.UpdateExternalConversationGatewayRequest{
-					ExpectedRevision: registration.Revision, Status: &status, Actor: ActivityActor{Type: "user", ID: "operator"}, Reason: "Change gateway state",
+					ExpectedRevision: registration.Revision, Status: &status, Actor: models.ActivityActor{Type: "user", ID: "operator"}, Reason: "Change gateway state",
 				})
 				if err != nil {
 					t.Fatal(err)

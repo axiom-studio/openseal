@@ -9,10 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -20,14 +23,14 @@ import (
 
 func TestSkillReferenceUpgradeDrainsQueuedCallsAndLiveReceiptsAcrossStores(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-		store := fixture.store.(KernelStore)
+		store := fixture.store.(models.KernelStore)
 		catalog, proposal, plan := skillUpgradeDrainFixture(t, store)
-		service := skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
+		service := skillbinding.NewSkillReferenceUpgradeService(store.(models.SkillReferenceUpgradeStore), catalog)
 		apply := func() error {
-			_, err := service.Apply(t.Context(), skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "upgrader"}, Reason: "Adopt compatible Skill version"})
+			_, err := service.Apply(t.Context(), skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: models.ActivityActor{Type: "system", ID: "upgrader"}, Reason: "Adopt compatible Skill version"})
 			return err
 		}
-		if err := apply(); !errors.Is(err, ErrSkillReferenceUpgradeBusy) {
+		if err := apply(); !errors.Is(err, models.ErrSkillReferenceUpgradeBusy) {
 			t.Fatalf("queued call was not drained: %v", err)
 		}
 		assertSkillUpgradePin(t, catalog, proposal.Call, "1.0.0", 1)
@@ -35,17 +38,17 @@ func TestSkillReferenceUpgradeDrainsQueuedCallsAndLiveReceiptsAcrossStores(t *te
 			return map[string]interface{}{"channel": "provider-conversation"}, nil
 		}))
 		result, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "chat-worker")
-		if err != nil || result == nil || result.Call.Status != ActionCallStatusSucceeded {
+		if err != nil || result == nil || result.Call.Status != models.ActionCallStatusSucceeded {
 			t.Fatalf("execute original version: %#v %v", result, err)
 		}
-		if err := apply(); !errors.Is(err, ErrSkillReferenceUpgradeBusy) {
+		if err := apply(); !errors.Is(err, models.ErrSkillReferenceUpgradeBusy) {
 			t.Fatalf("live receipt was invalidated: %v", err)
 		}
 		if fixture.reopen != nil {
-			store = fixture.reopen().(KernelStore)
+			store = fixture.reopen().(models.KernelStore)
 			catalog = skill.NewCatalogWithStore(store.(skill.CatalogStore))
-			service = skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
-			if err := apply(); !errors.Is(err, ErrSkillReferenceUpgradeBusy) {
+			service = skillbinding.NewSkillReferenceUpgradeService(store.(models.SkillReferenceUpgradeStore), catalog)
+			if err := apply(); !errors.Is(err, models.ErrSkillReferenceUpgradeBusy) {
 				t.Fatalf("restart lost live receipt fence: %v", err)
 			}
 		}
@@ -53,12 +56,12 @@ func TestSkillReferenceUpgradeDrainsQueuedCallsAndLiveReceiptsAcrossStores(t *te
 		if err != nil {
 			t.Fatal(err)
 		}
-		activity := NewRunActivityService(store, store)
-		run, _, err = activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning, Summary: "Finish task"})
+		activity := runtimeactivity.NewRunActivityService(store, store)
+		run, _, err = activity.TransitionRun(t.Context(), run.Scope, run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: run.Revision, Status: models.AgentRunStatusRunning, Summary: "Finish task"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err = activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusCompleted, Summary: "Task finished"}); err != nil {
+		if _, _, err = activity.TransitionRun(t.Context(), run.Scope, run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: run.Revision, Status: models.AgentRunStatusCompleted, Summary: "Task finished"}); err != nil {
 			t.Fatal(err)
 		}
 		if err := apply(); err != nil {
@@ -66,13 +69,13 @@ func TestSkillReferenceUpgradeDrainsQueuedCallsAndLiveReceiptsAcrossStores(t *te
 		}
 		assertSkillUpgradePin(t, catalog, proposal.Call, "1.1.0", 2)
 		call, err := store.GetActionCall(t.Context(), proposal.Call.Scope, proposal.Call.ID)
-		if err != nil || call.SkillVersion != "1.0.0" || call.BindingRevision != 1 || call.Status != ActionCallStatusSucceeded {
+		if err != nil || call.SkillVersion != "1.0.0" || call.BindingRevision != 1 || call.Status != models.ActionCallStatusSucceeded {
 			t.Fatalf("historical receipt mutated: %#v %v", call, err)
 		}
 	})
 }
 
-func skillUpgradeDrainFixture(t *testing.T, store KernelStore) (*skill.Catalog, *ActionProposalResult, *SkillReferenceUpgradePlan) {
+func skillUpgradeDrainFixture(t *testing.T, store models.KernelStore) (*skill.Catalog, *models.ActionProposalResult, *models.SkillReferenceUpgradePlan) {
 	t.Helper()
 	catalog := skill.NewCatalogWithStore(store.(skill.CatalogStore))
 	for _, version := range []string{"1.0.0", "1.1.0"} {
@@ -80,16 +83,16 @@ func skillUpgradeDrainFixture(t *testing.T, store KernelStore) (*skill.Catalog, 
 			t.Fatal(err)
 		}
 	}
-	scope := Scope{Kind: "tenant", ID: "drain"}
+	scope := models.Scope{Kind: "tenant", ID: "drain"}
 	if err := catalog.Bind(t.Context(), &skill.Binding{ID: "account", Scope: skill.ScopeReference(scope), DeploymentID: "agent", SkillID: "follow-up", SkillVersion: "1.0.0", AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead, Revision: 1}); err != nil {
 		t.Fatal(err)
 	}
-	portfolio := NewPortfolioService(store)
-	run, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Read and follow up", Source: RunSourceManual})
+	portfolio := portfolio.NewPortfolioService(store)
+	run, err := portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Read and follow up", Source: models.RunSourceManual})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err = store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: scope, WorkerID: "chat-worker", Now: time.Now().UTC().Add(time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	run, err = store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: scope, WorkerID: "chat-worker", Now: time.Now().UTC().Add(time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || run == nil {
 		t.Fatalf("claim run: %#v %v", run, err)
 	}
@@ -100,14 +103,14 @@ func skillUpgradeDrainFixture(t *testing.T, store KernelStore) (*skill.Catalog, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog).Plan(t.Context(), skillbinding.PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0"})
+	plan, err := skillbinding.NewSkillReferenceUpgradeService(store.(models.SkillReferenceUpgradeStore), catalog).Plan(t.Context(), skillbinding.PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0"})
 	if err != nil || plan.ApprovalRequired {
 		t.Fatalf("compatible plan: %#v %v", plan, err)
 	}
 	return catalog, proposal, plan
 }
 
-func assertSkillUpgradePin(t *testing.T, catalog *skill.Catalog, call *ActionCall, version string, revision int64) {
+func assertSkillUpgradePin(t *testing.T, catalog *skill.Catalog, call *models.ActionCall, version string, revision int64) {
 	t.Helper()
 	binding, err := catalog.GetBinding(t.Context(), skill.ScopeReference(call.Scope), call.DeploymentID, call.BindingID)
 	if err != nil || binding == nil || binding.SkillVersion != version || binding.Revision != revision {
@@ -117,16 +120,16 @@ func assertSkillUpgradePin(t *testing.T, catalog *skill.Catalog, call *ActionCal
 
 func TestSkillRuntimeUsageScopesAndRetentionAcrossStores(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-		store := fixture.store.(KernelStore)
+		store := fixture.store.(models.KernelStore)
 		catalog, proposal, _ := skillUpgradeDrainFixture(t, store)
-		usage := store.(SkillRuntimeUsageStore)
-		filter := SkillRuntimeUsageFilter{Scope: proposal.Call.Scope, SkillID: proposal.Call.SkillID, SkillVersion: proposal.Call.SkillVersion}
+		usage := store.(models.SkillRuntimeUsageStore)
+		filter := models.SkillRuntimeUsageFilter{Scope: proposal.Call.Scope, SkillID: proposal.Call.SkillID, SkillVersion: proposal.Call.SkillVersion}
 		busy, err := usage.HasSkillRuntimeUsage(t.Context(), filter)
 		if err != nil || !busy {
 			t.Fatalf("runtime usage: %v %v", busy, err)
 		}
-		for _, other := range []SkillRuntimeUsageFilter{
-			{Scope: Scope{Kind: "tenant", ID: "other"}, SkillID: filter.SkillID, SkillVersion: filter.SkillVersion},
+		for _, other := range []models.SkillRuntimeUsageFilter{
+			{Scope: models.Scope{Kind: "tenant", ID: "other"}, SkillID: filter.SkillID, SkillVersion: filter.SkillVersion},
 			{Scope: filter.Scope, SkillID: filter.SkillID, SkillVersion: "1.1.0"},
 			{Scope: filter.Scope, SkillID: filter.SkillID, SkillVersion: filter.SkillVersion, DeploymentID: "agent", BindingID: "other-account"},
 		} {
@@ -152,7 +155,7 @@ func TestSkillRuntimeUsageScopesAndRetentionAcrossStores(t *testing.T) {
 			t.Fatal("revoked call dispatched")
 			return nil, nil
 		}))
-		if result, err := worker.ExecuteOwnLoopCall(t.Context(), filter.Scope, proposal.Call.ID, "chat-worker"); err != nil || result == nil || result.Call.Status != ActionCallStatusFailed {
+		if result, err := worker.ExecuteOwnLoopCall(t.Context(), filter.Scope, proposal.Call.ID, "chat-worker"); err != nil || result == nil || result.Call.Status != models.ActionCallStatusFailed {
 			t.Fatalf("revoked loop call: %#v %v", result, err)
 		}
 		refs, err = usage.ListReferencedSkillRuntimeVersions(t.Context(), filter.Scope)
@@ -164,15 +167,15 @@ func TestSkillRuntimeUsageScopesAndRetentionAcrossStores(t *testing.T) {
 
 func TestSkillUpgradeDrainProjectsRollingVersionWritesAcrossStores(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-		store := fixture.store.(KernelStore)
+		store := fixture.store.(models.KernelStore)
 		db, actions := fixture.db, fixture.table("action_calls")
 		_, postgres := store.(*postgres.Store)
-		scope := Scope{Kind: "tenant", ID: "rolling"}
-		run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Rolling-version write", Source: RunSourceManual})
+		scope := models.Scope{Kind: "tenant", ID: "rolling"}
+		run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Rolling-version write", Source: models.RunSourceManual})
 		if err != nil {
 			t.Fatal(err)
 		}
-		call := ActionCall{ID: "old-writer", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "account", BindingRevision: 7, SkillID: "skill", SkillVersion: "1", Status: ActionCallStatusReady}
+		call := models.ActionCall{ID: "old-writer", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "account", BindingRevision: 7, SkillID: "skill", SkillVersion: "1", Status: models.ActionCallStatusReady}
 		payload, _ := json.Marshal(call)
 		placeholder := func(n int) string {
 			if postgres {
@@ -189,8 +192,8 @@ func TestSkillUpgradeDrainProjectsRollingVersionWritesAcrossStores(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		filter := SkillRuntimeUsageFilter{Scope: scope, SkillID: call.SkillID, SkillVersion: call.SkillVersion, DeploymentID: call.DeploymentID, BindingID: call.BindingID}
-		if busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
+		filter := models.SkillRuntimeUsageFilter{Scope: scope, SkillID: call.SkillID, SkillVersion: call.SkillVersion, DeploymentID: call.DeploymentID, BindingID: call.BindingID}
+		if busy, err := store.(models.SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
 			t.Fatalf("rolling writer escaped drain: %v %v", busy, err)
 		}
 		// The conditional update projection covers restored legacy rows as well.
@@ -198,7 +201,7 @@ func TestSkillUpgradeDrainProjectsRollingVersionWritesAcrossStores(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
+		if busy, err := store.(models.SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
 			t.Fatalf("rolling update escaped drain: %v %v", busy, err)
 		}
 	})
@@ -208,11 +211,11 @@ func TestSkillUpgradeDrainFencesLegacyWritersAgainstExistingAuthority(t *testing
 	for _, invalid := range []string{"stale_revision", "stale_version", "disabled", "different_skill"} {
 		t.Run(invalid, func(t *testing.T) {
 			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-				store := fixture.store.(KernelStore)
+				store := fixture.store.(models.KernelStore)
 				db, actions := fixture.db, fixture.table("action_calls")
 				_, postgres := store.(*postgres.Store)
-				scope := Scope{Kind: "tenant", ID: "legacy-fence"}
-				run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Fence old writer", Source: RunSourceManual})
+				scope := models.Scope{Kind: "tenant", ID: "legacy-fence"}
+				run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Fence old writer", Source: models.RunSourceManual})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -220,7 +223,7 @@ func TestSkillUpgradeDrainFencesLegacyWritersAgainstExistingAuthority(t *testing
 				if err = store.(skill.CatalogStore).SaveSkillBinding(t.Context(), binding, 0); err != nil {
 					t.Fatal(err)
 				}
-				call := ActionCall{ID: "old-writer", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "skill", SkillVersion: "1", Status: ActionCallStatusReady}
+				call := models.ActionCall{ID: "old-writer", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "skill", SkillVersion: "1", Status: models.ActionCallStatusReady}
 				switch invalid {
 				case "stale_revision":
 					call.BindingRevision++
@@ -274,7 +277,7 @@ func cloneUpgradeTestDefinition(t *testing.T, value *skill.Definition) *skill.De
 }
 
 func TestSkillUpgradePostgresUsageSQLIsMetadataOnlyAndScoped(t *testing.T) {
-	filter := SkillRuntimeUsageFilter{Scope: Scope{Kind: "tenant", ID: "one"}, SkillID: "skill", SkillVersion: "1", DeploymentID: "agent", BindingID: "account"}
+	filter := models.SkillRuntimeUsageFilter{Scope: models.Scope{Kind: "tenant", ID: "one"}, SkillID: "skill", SkillVersion: "1", DeploymentID: "agent", BindingID: "account"}
 	query, args := sqlstore.SkillRuntimeUsageQuery(filter, `"kernel"."action_calls"`, `"kernel"."agent_runs"`, true)
 	if len(args) != 6 || strings.Contains(query, "payload") || strings.Contains(query, "?") {
 		t.Fatalf("invalid PostgreSQL scoped probe: %s %#v", query, args)
@@ -291,42 +294,42 @@ func TestSkillUpgradePostgresUsageSQLIsMetadataOnlyAndScoped(t *testing.T) {
 
 func TestSkillRuntimeUsageStatusesAcrossStores(t *testing.T) {
 	runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-		store := fixture.store.(KernelStore)
-		scope := Scope{Kind: "tenant", ID: "statuses"}
-		run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Check status metadata", Source: RunSourceManual})
+		store := fixture.store.(models.KernelStore)
+		scope := models.Scope{Kind: "tenant", ID: "statuses"}
+		run, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Check status metadata", Source: models.RunSourceManual})
 		if err != nil {
 			t.Fatal(err)
 		}
-		call := &ActionCall{ID: "call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "skill", SkillVersion: "1"}
-		filter := SkillRuntimeUsageFilter{Scope: scope, SkillID: call.SkillID, SkillVersion: call.SkillVersion, DeploymentID: call.DeploymentID, BindingID: call.BindingID}
-		statuses := []ActionCallStatus{ActionCallStatusReady, ActionCallStatusWaitingApproval, ActionCallStatusRunning, ActionCallStatusCompensating, ActionCallStatusSucceeded, ActionCallStatusDenied, ActionCallStatusFailed, ActionCallStatusCanceled, ActionCallStatusCompensated}
-		for _, runStatus := range []AgentRunStatus{AgentRunStatusRunning, AgentRunStatusPaused, AgentRunStatusWaitingForEvent, AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled} {
+		call := &models.ActionCall{ID: "call", Scope: scope, RunID: run.ID, DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "skill", SkillVersion: "1"}
+		filter := models.SkillRuntimeUsageFilter{Scope: scope, SkillID: call.SkillID, SkillVersion: call.SkillVersion, DeploymentID: call.DeploymentID, BindingID: call.BindingID}
+		statuses := []models.ActionCallStatus{models.ActionCallStatusReady, models.ActionCallStatusWaitingApproval, models.ActionCallStatusRunning, models.ActionCallStatusCompensating, models.ActionCallStatusSucceeded, models.ActionCallStatusDenied, models.ActionCallStatusFailed, models.ActionCallStatusCanceled, models.ActionCallStatusCompensated}
+		for _, runStatus := range []models.AgentRunStatus{models.AgentRunStatusRunning, models.AgentRunStatusPaused, models.AgentRunStatusWaitingForEvent, models.AgentRunStatusCompleted, models.AgentRunStatusFailed, models.AgentRunStatusCanceled} {
 			run.Status = runStatus
 			for _, status := range statuses {
 				call.Status = status
 				seedSkillUsageMetadata(t, fixture, run, call)
-				unfinished := status == ActionCallStatusReady || status == ActionCallStatusWaitingApproval || status == ActionCallStatusRunning || status == ActionCallStatusCompensating
-				want := unfinished || (status == ActionCallStatusSucceeded && !isTerminalAgentRunStatus(runStatus))
-				busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter)
+				unfinished := status == models.ActionCallStatusReady || status == models.ActionCallStatusWaitingApproval || status == models.ActionCallStatusRunning || status == models.ActionCallStatusCompensating
+				want := unfinished || (status == models.ActionCallStatusSucceeded && !models.IsTerminalAgentRunStatus(runStatus))
+				busy, err := store.(models.SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter)
 				if err != nil || busy != want {
 					t.Fatalf("%s action / %s run: busy=%v want=%v error=%v", status, runStatus, busy, want, err)
 				}
 			}
 		}
 		call.BindingID, call.BindingRevision = "", 0
-		call.Status, run.Status = ActionCallStatusReady, AgentRunStatusRunning
+		call.Status, run.Status = models.ActionCallStatusReady, models.AgentRunStatusRunning
 		seedSkillUsageMetadata(t, fixture, run, call)
-		if busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
+		if busy, err := store.(models.SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
 			t.Fatalf("unbound legacy call escaped exact binding drain: %v %v", busy, err)
 		}
-		call.Status = ActionCallStatusSucceeded
+		call.Status = models.ActionCallStatusSucceeded
 		seedSkillUsageMetadata(t, fixture, run, call)
-		if busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
+		if busy, err := store.(models.SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || !busy {
 			t.Fatalf("live unbound legacy receipt escaped binding drain: %v %v", busy, err)
 		}
-		run.Status = AgentRunStatusCompleted
+		run.Status = models.AgentRunStatusCompleted
 		seedSkillUsageMetadata(t, fixture, run, call)
-		if busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || busy {
+		if busy, err := store.(models.SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter); err != nil || busy {
 			t.Fatalf("completed unbound legacy receipt retained binding drain: %v %v", busy, err)
 		}
 	})
@@ -335,7 +338,7 @@ func TestSkillRuntimeUsageStatusesAcrossStores(t *testing.T) {
 // Status-table coverage uses the store's metadata commit boundaries without
 // decoding deliberately absent action outputs. Lifecycle behavior itself is
 // exercised through Coordinator/Worker in the drain regression above.
-func seedSkillUsageMetadata(t *testing.T, fixture runStoreContractFixture, run *AgentRun, call *ActionCall) {
+func seedSkillUsageMetadata(t *testing.T, fixture runStoreContractFixture, run *models.AgentRun, call *models.ActionCall) {
 	t.Helper()
 	db := fixture.db
 	_, postgres := fixture.store.(*postgres.Store)

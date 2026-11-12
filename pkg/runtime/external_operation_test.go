@@ -1,16 +1,18 @@
 package runtime
 
 import (
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"strings"
 	"testing"
 )
 
 func TestExternalOperationCanonicalizesProviderChannelHandle(t *testing.T) {
-	identity := ExternalOperationIdentity{Resource: " #Agents ", Operation: "message:send"}
+	identity := activity.ExternalOperationIdentity{Resource: " #Agents ", Operation: "message:send"}
 	if err := identity.Validate(); err != nil {
 		t.Fatalf("validate provider channel handle: %v", err)
 	}
-	resource, err := canonicalExternalOperationResource(identity.Resource)
+	resource, err := activity.CanonicalExternalOperationResource(identity.Resource)
 	if err != nil {
 		t.Fatalf("canonicalize provider channel handle: %v", err)
 	}
@@ -27,11 +29,11 @@ func TestExternalOperationCanonicalizesSingleMailbox(t *testing.T) {
 		" Alice+alerts@example.com ",
 	} {
 		t.Run(input, func(t *testing.T) {
-			resource, err := canonicalExternalOperationResource(input)
+			resource, err := activity.CanonicalExternalOperationResource(input)
 			if err != nil || resource != "mailto:Alice+alerts@example.com" {
 				t.Fatalf("canonical mailbox = %q, err = %v", resource, err)
 			}
-			if canonical, err := canonicalExternalOperationResource(resource); err != nil || canonical != resource {
+			if canonical, err := activity.CanonicalExternalOperationResource(resource); err != nil || canonical != resource {
 				t.Fatalf("canonical mailbox is not stable: %q, err = %v", canonical, err)
 			}
 		})
@@ -39,10 +41,10 @@ func TestExternalOperationCanonicalizesSingleMailbox(t *testing.T) {
 }
 
 func TestExternalOperationMailboxDigestDeduplicatesEquivalentForms(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "1"}
+	scope := models.Scope{Kind: "tenant", ID: "1"}
 	digest := func(resource, occurrence string) string {
 		t.Helper()
-		result, err := computeExternalOperationDigest(scope, ObjectiveOwner{}, "objective", &ExternalOperationIdentity{
+		result, err := activity.ComputeExternalOperationDigest(scope, models.ObjectiveOwner{}, "objective", &activity.ExternalOperationIdentity{
 			Resource: resource, Operation: "email:send",
 		}, occurrence)
 		if err != nil {
@@ -82,7 +84,7 @@ func TestExternalOperationRejectsMalformedOrAnnotatedMailbox(t *testing.T) {
 		strings.Repeat("a", 2036) + "@example.com",
 	} {
 		t.Run(input, func(t *testing.T) {
-			identity := ExternalOperationIdentity{Resource: input, Operation: "email:send"}
+			identity := activity.ExternalOperationIdentity{Resource: input, Operation: "email:send"}
 			if err := identity.Validate(); err == nil {
 				t.Fatal("unsafe or malformed mailbox was accepted")
 			}
@@ -97,7 +99,7 @@ func TestExternalOperationMailboxSupportPreservesOtherResourceValidation(t *test
 		{" #Agents ", "channel-handle:agents"},
 		{"https://EXAMPLE.COM/users/alice@example.com?b=2&a=1#section", "https://example.com/users/alice@example.com?a=1&b=2"},
 	} {
-		resource, err := canonicalExternalOperationResource(tc.input)
+		resource, err := activity.CanonicalExternalOperationResource(tc.input)
 		if err != nil || resource != tc.want {
 			t.Fatalf("resource %q canonicalized to %q, err = %v", tc.input, resource, err)
 		}
@@ -106,7 +108,7 @@ func TestExternalOperationMailboxSupportPreservesOtherResourceValidation(t *test
 		"https://alice:password@example.com/mail", "https://example.com/mail?access_token=secret",
 		"opaque/identifier", "mailto:alice@example.com/other",
 	} {
-		if _, err := canonicalExternalOperationResource(input); err == nil {
+		if _, err := activity.CanonicalExternalOperationResource(input); err == nil {
 			t.Fatalf("invalid resource %q was accepted", input)
 		}
 	}

@@ -21,9 +21,9 @@ import (
 func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 	factories := []struct {
 		name string
-		open func(*testing.T) (ArtifactStore, func())
+		open func(*testing.T) (models.ArtifactStore, func())
 	}{
-		{name: "sqlite", open: func(t *testing.T) (ArtifactStore, func()) {
+		{name: "sqlite", open: func(t *testing.T) (models.ArtifactStore, func()) {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "artifacts.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -43,7 +43,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if created.Replayed || created.Artifact.Classification != ArtifactClassificationInternal || created.Artifact.Fingerprint == "" {
+			if created.Replayed || created.Artifact.Classification != models.ArtifactClassificationInternal || created.Artifact.Fingerprint == "" {
 				t.Fatalf("created = %#v", created)
 			}
 			replayed, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact, ExpectedLatestVersion: 0})
@@ -56,15 +56,15 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 
 			changed := validCatalogArtifact("research-report", 1)
 			changed.Name = "silently replaced.pdf"
-			if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: changed, ExpectedLatestVersion: 0}); !errors.Is(err, ErrArtifactImmutable) {
+			if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: changed, ExpectedLatestVersion: 0}); !errors.Is(err, models.ErrArtifactImmutable) {
 				t.Fatalf("immutable replacement error = %v", err)
 			}
 
 			second := validCatalogArtifact("research-report", 2)
 			second.ContentRef = "object-store:research-report-v2"
 			second.Digest = digestFor("version two")
-			second.Evidence = append(second.Evidence, EvidenceLink{
-				Relation: EvidenceRelationDerivedFrom, TargetKind: EvidenceTargetArtifact,
+			second.Evidence = append(second.Evidence, models.EvidenceLink{
+				Relation: models.EvidenceRelationDerivedFrom, TargetKind: models.EvidenceTargetArtifact,
 				TargetRef: "research-report:1", Summary: "Editorial revision",
 			})
 			if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: second, ExpectedLatestVersion: 1}); err != nil {
@@ -78,7 +78,7 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 				t.Fatalf("latest = %#v", latest)
 			}
 
-			listed, err := catalog.List(ctx, ArtifactFilter{
+			listed, err := catalog.List(ctx, models.ArtifactFilter{
 				Scope: artifact.Scope, Owner: artifact.Provenance.Owner, LatestOnly: true, ProducerRunID: "run-research",
 				EvidenceTarget: "research-report:1",
 			})
@@ -88,18 +88,18 @@ func TestArtifactCatalogIsImmutableVersionedScopedAndQueryable(t *testing.T) {
 			if len(listed) != 1 || listed[0].Version != 2 {
 				t.Fatalf("listed = %#v", listed)
 			}
-			otherOwner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "another-agent"}
-			listed, err = catalog.List(ctx, ArtifactFilter{Scope: artifact.Scope, Owner: &otherOwner, LatestOnly: true})
+			otherOwner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "another-agent"}
+			listed, err = catalog.List(ctx, models.ArtifactFilter{Scope: artifact.Scope, Owner: &otherOwner, LatestOnly: true})
 			if err != nil || len(listed) != 0 {
 				t.Fatalf("other owner artifacts = %#v, err = %v", listed, err)
 			}
 
-			otherScope := Scope{Kind: "tenant", ID: "other"}
+			otherScope := models.Scope{Kind: "tenant", ID: "other"}
 			if _, err := catalog.Get(ctx, otherScope, artifact.ID, 0); !errors.Is(err, artifactcatalog.ErrArtifactNotFound) {
 				t.Fatalf("cross-scope lookup error = %v", err)
 			}
 			gap := validCatalogArtifact("research-report", 4)
-			if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: gap, ExpectedLatestVersion: 2}); !errors.Is(err, ErrArtifactVersionConflict) {
+			if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: gap, ExpectedLatestVersion: 2}); !errors.Is(err, models.ErrArtifactVersionConflict) {
 				t.Fatalf("version gap error = %v", err)
 			}
 		})
@@ -141,24 +141,24 @@ func TestArtifactCatalogRejectsSecretsSignedURLsAndInvalidEvidence(t *testing.T)
 	catalog := artifactcatalog.NewArtifactCatalog(newTestKernelStore(t))
 	tests := []struct {
 		name   string
-		mutate func(*Artifact)
+		mutate func(*models.Artifact)
 	}{
-		{name: "secret metadata", mutate: func(a *Artifact) { a.Metadata["apiKey"] = "resolved-secret" }},
-		{name: "signed content URL", mutate: func(a *Artifact) { a.ContentRef = "https://objects.test/report?signature=secret" }},
-		{name: "signed evidence URL", mutate: func(a *Artifact) {
+		{name: "secret metadata", mutate: func(a *models.Artifact) { a.Metadata["apiKey"] = "resolved-secret" }},
+		{name: "signed content URL", mutate: func(a *models.Artifact) { a.ContentRef = "https://objects.test/report?signature=secret" }},
+		{name: "signed evidence URL", mutate: func(a *models.Artifact) {
 			a.Evidence[0].TargetRef = "https://forum.test/thread?X-Amz-Signature=secret"
 		}},
-		{name: "invalid confidence", mutate: func(a *Artifact) {
+		{name: "invalid confidence", mutate: func(a *models.Artifact) {
 			confidence := 1.2
 			a.Evidence[0].Confidence = &confidence
 		}},
-		{name: "invalid content availability", mutate: func(a *Artifact) { a.ContentAvailability = "maybe" }},
+		{name: "invalid content availability", mutate: func(a *models.Artifact) { a.ContentAvailability = "maybe" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			artifact := validCatalogArtifact("unsafe-"+test.name, 1)
 			test.mutate(artifact)
-			if _, err := catalog.Register(context.Background(), artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); !errors.Is(err, ErrInvalidArtifactRecord) {
+			if _, err := catalog.Register(context.Background(), artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); !errors.Is(err, models.ErrInvalidArtifactRecord) {
 				t.Fatalf("error = %v", err)
 			}
 		})
@@ -209,7 +209,7 @@ func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 	for i := 0; i < 125; i++ {
 		artifact := validCatalogArtifact(fmt.Sprintf("artifact-%03d", i), 1)
 		if i%2 == 0 {
-			artifact.Provenance.Owner = &ObjectiveOwner{Type: OwnerTypeAgent, ID: "alice"}
+			artifact.Provenance.Owner = &models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "alice"}
 		}
 		if i%3 == 0 {
 			artifact.Type = "slides"
@@ -227,7 +227,7 @@ func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 	if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: latest, ExpectedLatestVersion: 1}); err != nil {
 		t.Fatal(err)
 	}
-	owner := &ObjectiveOwner{Type: OwnerTypeAgent, ID: "alice"}
+	owner := &models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "alice"}
 	// ids lists artifact-<from>..artifact-<to> (stepping by step) at version 1.
 	ids := func(from, to, step int) []string {
 		listed := []string{}
@@ -238,32 +238,32 @@ func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 	}
 	cases := []struct {
 		name   string
-		filter ArtifactFilter
+		filter models.ArtifactFilter
 		want   []string
 	}{{
 		// Alice owns the even artifacts except artifact-000, whose latest
 		// version moved to the Team: 002..124, so the second page of 25
 		// starts at 052.
 		name:   "latest owner",
-		filter: ArtifactFilter{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: owner, LatestOnly: true, Limit: 25, Offset: 25},
+		filter: models.ArtifactFilter{Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: owner, LatestOnly: true, Limit: 25, Offset: 25},
 		want:   ids(52, 100, 2),
 	}, {
 		// Slides are every third artifact except artifact-000, whose latest
 		// version is a report: 003..123, so offset 20 starts at 063.
 		name:   "latest type and media type",
-		filter: ArtifactFilter{Scope: Scope{Kind: "tenant", ID: "one"}, Types: []string{" slides "}, MediaTypes: []string{"text/html"}, LatestOnly: true, Limit: 20, Offset: 20},
+		filter: models.ArtifactFilter{Scope: models.Scope{Kind: "tenant", ID: "one"}, Types: []string{" slides "}, MediaTypes: []string{"text/html"}, LatestOnly: true, Limit: 20, Offset: 20},
 		want:   ids(63, 120, 3),
 	}, {
 		// Every version matches: artifact-000 v2 and v1 come first, so
 		// offset 100 starts at artifact-099 and runs to the end.
 		name:   "every version by producer",
-		filter: ArtifactFilter{Scope: Scope{Kind: "tenant", ID: "one"}, ProducerRunID: "run-research", ProducerRequestID: "request-research", Classifications: []ArtifactClassification{ArtifactClassificationInternal}, Limit: 100, Offset: 100},
+		filter: models.ArtifactFilter{Scope: models.Scope{Kind: "tenant", ID: "one"}, ProducerRunID: "run-research", ProducerRequestID: "request-research", Classifications: []models.ArtifactClassification{models.ArtifactClassificationInternal}, Limit: 100, Offset: 100},
 		want:   ids(99, 124, 1),
 	}, {
 		// Without latest-only, artifact-000 v1 is still Alice's: 000..124,
 		// so offset 40 starts at 080.
 		name:   "every version by owner and evidence",
-		filter: ArtifactFilter{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: owner, EvidenceTarget: "https://forum.example/research/thread-7", Limit: 20, Offset: 40},
+		filter: models.ArtifactFilter{Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: owner, EvidenceTarget: "https://forum.example/research/thread-7", Limit: 20, Offset: 40},
 		want:   ids(80, 118, 2),
 	}}
 	for _, tc := range cases {
@@ -281,26 +281,26 @@ func TestSQLiteArtifactCatalogPagesMatchUnpagedFilters(t *testing.T) {
 	}
 }
 
-func validCatalogArtifact(id string, version int64) *Artifact {
+func validCatalogArtifact(id string, version int64) *models.Artifact {
 	confidence := 0.91
-	return &Artifact{
-		ID: id, Version: version, Scope: Scope{Kind: "tenant", ID: "one"}, Name: "market-research.pdf",
+	return &models.Artifact{
+		ID: id, Version: version, Scope: models.Scope{Kind: "tenant", ID: "one"}, Name: "market-research.pdf",
 		Type: "report", MediaType: "application/pdf", ContentRef: "object-store:" + id,
-		Digest: digestFor(id), SizeBytes: 4_096, Classification: ArtifactClassificationInternal,
-		Retention: ArtifactRetention{ExpiresAt: artifactTimePointer(time.Date(2027, 7, 10, 0, 0, 0, 0, time.UTC))},
+		Digest: digestFor(id), SizeBytes: 4_096, Classification: models.ArtifactClassificationInternal,
+		Retention: models.ArtifactRetention{ExpiresAt: artifactTimePointer(time.Date(2027, 7, 10, 0, 0, 0, 0, time.UTC))},
 		MetadataSchema: map[string]interface{}{
 			"type": "object", "required": []interface{}{"pages"},
 			"properties":           map[string]interface{}{"pages": map[string]interface{}{"type": "integer", "minimum": float64(1)}},
 			"additionalProperties": false,
 		},
 		Metadata: map[string]interface{}{"pages": 12},
-		Provenance: ArtifactProvenance{
-			Producer: ActivityActor{Type: "agent", ID: "analyst"},
-			Owner:    &ObjectiveOwner{Type: OwnerTypeTeam, ID: "market-research"}, RunID: "run-research",
+		Provenance: models.ArtifactProvenance{
+			Producer: models.ActivityActor{Type: "agent", ID: "analyst"},
+			Owner:    &models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "market-research"}, RunID: "run-research",
 			ObjectiveID: "objective-research", RequestID: "request-research",
 		},
-		Evidence: []EvidenceLink{{
-			Relation: EvidenceRelationCites, TargetKind: EvidenceTargetExternalSource,
+		Evidence: []models.EvidenceLink{{
+			Relation: models.EvidenceRelationCites, TargetKind: models.EvidenceTargetExternalSource,
 			TargetRef: "https://forum.example/research/thread-7", Summary: "Public product feedback",
 			Confidence: &confidence, ObservedAt: artifactTimePointer(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)),
 		}},

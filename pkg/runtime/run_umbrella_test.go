@@ -8,6 +8,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -30,9 +31,9 @@ func umbrellaTestAction(name string, risk capability.RiskLevel, credentials ...c
 		InputSchema: map[string]interface{}{"type": "object"}, Credentials: credentials}
 }
 
-func newUmbrellaFixture(t *testing.T) (*umbrellaCatalog, Scope) {
+func newUmbrellaFixture(t *testing.T) (*umbrellaCatalog, models.Scope) {
 	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	catalog := skill.NewCatalog()
 	access := capability.CredentialRequirement{Name: "access", Kind: "oauth2"}
@@ -80,7 +81,7 @@ func newUmbrellaFixture(t *testing.T) (*umbrellaCatalog, Scope) {
 	}}, scope
 }
 
-func umbrellaRunActions(t *testing.T, catalog *umbrellaCatalog, run *AgentRun) []string {
+func umbrellaRunActions(t *testing.T, catalog *umbrellaCatalog, run *models.AgentRun) []string {
 	t.Helper()
 	binding, err := runworker.ResolveLoopBinding(t.Context(), catalog, run, bindingTestConfig(t, newTestKernelStore(t), &modelsteptest.RecordingStepHost{}))
 	if err != nil {
@@ -96,14 +97,14 @@ func umbrellaRunActions(t *testing.T, catalog *umbrellaCatalog, run *AgentRun) [
 
 func TestTeamRunUsesTeamConnectionsAndNeverTheMembers(t *testing.T) {
 	catalog, scope := newUmbrellaFixture(t)
-	teamRun := &AgentRun{ID: "team-run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member", Context: map[string]interface{}{}}
+	teamRun := &models.AgentRun{ID: "team-run", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member", Context: map[string]interface{}{}}
 	got := umbrellaRunActions(t, catalog, teamRun)
 	want := []string{"crew:drive", "crew:forum", "member:notes"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("Team run actions = %v, want %v (member Gmail and member Drive must not appear)", got, want)
 	}
 
-	agentRun := &AgentRun{ID: "agent-run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "member"}, AssignedAgentID: "member", Context: map[string]interface{}{}}
+	agentRun := &models.AgentRun{ID: "agent-run", Scope: scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "member"}, AssignedAgentID: "member", Context: map[string]interface{}{}}
 	got = umbrellaRunActions(t, catalog, agentRun)
 	want = []string{"member:drive", "member:gmail", "member:notes"}
 	if !slices.Equal(got, want) {
@@ -114,18 +115,18 @@ func TestTeamRunUsesTeamConnectionsAndNeverTheMembers(t *testing.T) {
 func TestTeamAndMemberActivationsNeverShareASnapshot(t *testing.T) {
 	catalog, scope := newUmbrellaFixture(t)
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
-	agentRun := &AgentRun{ID: "run", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "member"}, AssignedAgentID: "member"}
-	teamRun := &AgentRun{ID: "run", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member"}
+	agentRun := &models.AgentRun{ID: "run", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "member"}, AssignedAgentID: "member"}
+	teamRun := &models.AgentRun{ID: "run", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member"}
 	ctx := t.Context()
-	oneToOne, err := catalog.skills.Activate(skill.WithRunActor(ctx, RunSkillActor(agentRun)), skillScope, "member", skill.HostCapabilityState{})
+	oneToOne, err := catalog.skills.Activate(skill.WithRunActor(ctx, models.RunSkillActor(agentRun)), skillScope, "member", skill.HostCapabilityState{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	inTeam, err := catalog.skills.Activate(skill.WithoutConnections(skill.WithRunActor(ctx, RunSkillActor(teamRun))), skillScope, "member", skill.HostCapabilityState{})
+	inTeam, err := catalog.skills.Activate(skill.WithoutConnections(skill.WithRunActor(ctx, models.RunSkillActor(teamRun))), skillScope, "member", skill.HostCapabilityState{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := catalog.skills.Activate(skill.WithRunActor(ctx, RunSkillActor(agentRun)), skillScope, "member", skill.HostCapabilityState{})
+	again, err := catalog.skills.Activate(skill.WithRunActor(ctx, models.RunSkillActor(agentRun)), skillScope, "member", skill.HostCapabilityState{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,28 +139,28 @@ func TestTeamAndMemberActivationsNeverShareASnapshot(t *testing.T) {
 func TestRunUmbrellaFailsClosed(t *testing.T) {
 	catalog, scope := newUmbrellaFixture(t)
 	ctx := context.Background()
-	if owner, err := RunUmbrella(ctx, catalog, &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "member"}, AssignedAgentID: "member"}); err != nil || owner.ID != "member" {
+	if owner, err := models.RunUmbrella(ctx, catalog, &models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "member"}, AssignedAgentID: "member"}); err != nil || owner.ID != "member" {
 		t.Fatalf("1:1 umbrella = %#v, %v", owner, err)
 	}
-	if owner, err := RunUmbrella(ctx, catalog, &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member"}); err != nil || owner.ID != "crew" {
+	if owner, err := models.RunUmbrella(ctx, catalog, &models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member"}); err != nil || owner.ID != "crew" {
 		t.Fatalf("Team umbrella = %#v, %v", owner, err)
 	}
-	for name, run := range map[string]*AgentRun{
-		"Agent run for another Agent": {Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"}, AssignedAgentID: "member"},
-		"non-member":                  {Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "outsider"},
-		"no acting Agent":             {Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}},
+	for name, run := range map[string]*models.AgentRun{
+		"Agent run for another Agent": {Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "other"}, AssignedAgentID: "member"},
+		"non-member":                  {Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "outsider"},
+		"no acting Agent":             {Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}},
 	} {
-		if _, err := RunUmbrella(ctx, catalog, run); !errors.Is(err, ErrRunUmbrellaUnavailable) {
+		if _, err := models.RunUmbrella(ctx, catalog, run); !errors.Is(err, models.ErrRunUmbrellaUnavailable) {
 			t.Fatalf("%s: err = %v", name, err)
 		}
 	}
 	catalog.deployment.RolloutStatus = kernelagent.RolloutPaused
-	if _, err := RunUmbrella(ctx, catalog, &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member"}); !errors.Is(err, ErrRunUmbrellaUnavailable) {
+	if _, err := models.RunUmbrella(ctx, catalog, &models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member"}); !errors.Is(err, models.ErrRunUmbrellaUnavailable) {
 		t.Fatalf("inactive member: err = %v", err)
 	}
 	catalog.deployment.RolloutStatus = kernelagent.RolloutActive
 	catalog.teamDeployment.Status = kernelteam.DeploymentPaused
-	if _, err := RunUmbrella(ctx, catalog, &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member"}); !errors.Is(err, ErrRunUmbrellaUnavailable) {
+	if _, err := models.RunUmbrella(ctx, catalog, &models.AgentRun{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "crew"}, AssignedAgentID: "member"}); !errors.Is(err, models.ErrRunUmbrellaUnavailable) {
 		t.Fatalf("paused Team: err = %v", err)
 	}
 }

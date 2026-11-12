@@ -19,24 +19,24 @@ import (
 
 type interactionChangeFixture struct {
 	ctx          context.Context
-	store        KernelStore
-	scope        Scope
-	conversation *Conversation
-	trigger      *ChannelMessage
-	run          *AgentRun
+	store        models.KernelStore
+	scope        models.Scope
+	conversation *models.Conversation
+	trigger      *models.ChannelMessage
+	run          *models.AgentRun
 	changes      *runtimeconversation.ConversationChangeService
 	clock        func() time.Time // the change service's clock
 }
 
 func interactionChangeStores() []struct {
 	name  string
-	store func(*testing.T) KernelStore
+	store func(*testing.T) models.KernelStore
 } {
 	return []struct {
 		name  string
-		store func(*testing.T) KernelStore
+		store func(*testing.T) models.KernelStore
 	}{
-		{name: "sqlite", store: func(t *testing.T) KernelStore {
+		{name: "sqlite", store: func(t *testing.T) models.KernelStore {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "interaction-changes.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -47,22 +47,22 @@ func interactionChangeStores() []struct {
 	}
 }
 
-func newInteractionChangeFixture(t *testing.T, store KernelStore) *interactionChangeFixture {
+func newInteractionChangeFixture(t *testing.T, store models.KernelStore) *interactionChangeFixture {
 	t.Helper()
-	f := &interactionChangeFixture{ctx: context.Background(), store: store, scope: Scope{Kind: "tenant", ID: "interactions"}, clock: time.Now}
-	conversationStore := store.(ConversationStore)
+	f := &interactionChangeFixture{ctx: context.Background(), store: store, scope: models.Scope{Kind: "tenant", ID: "interactions"}, clock: time.Now}
+	conversationStore := store.(models.ConversationStore)
 	conversations := runtimeconversation.NewConversationService(conversationStore)
-	seedTestSpace(t, store.(SpaceStore), f.scope)
+	seedTestSpace(t, store.(models.SpaceStore), f.scope)
 	conversation, _, err := conversations.CreateConversation(f.ctx, runtimeconversation.CreateConversationRequest{
-		Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
+		Scope: f.scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	posted, err := conversations.PostChannelMessage(f.ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
-		Content: "Deploy the release", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}, Intent: models.MessageIntentQuestion,
+		Content: "Deploy the release", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 		RequiresResponse: true, IdempotencyKey: "deploy",
 	})
 	if err != nil {
@@ -96,13 +96,13 @@ func (f *interactionChangeFixture) list(t *testing.T, cursor string) *runtimecon
 // loopApprovalProposal records an approval-gated loop call of the fixture's
 // Run, as a run loop step proposes it while it holds the Run lease. It
 // returns the loop holding the Run and the Run as proposed from.
-func (f *interactionChangeFixture) loopApprovalProposal(t *testing.T, callID, idempotencyKey, eventID string) (*actiontest.LoopProposalFixture, *AgentRun) {
+func (f *interactionChangeFixture) loopApprovalProposal(t *testing.T, callID, idempotencyKey, eventID string) (*actiontest.LoopProposalFixture, *models.AgentRun) {
 	t.Helper()
 	loop := actiontest.NewLoopProposalFixture(t, f.store, f.run, "worker", time.Now().UTC())
 	proposal := sqliteApprovalProposal(loop.Run, callID, idempotencyKey, eventID)
 	record := actiontest.LoopProposalRecord(proposal.Call, loop.Run, loop.Worker, loop.Now, proposal.Event)
 	record.Approval = proposal.Approval
-	if _, err := f.store.(ActionStore).CreateActionProposal(f.ctx, record); err != nil {
+	if _, err := f.store.(models.ActionStore).CreateActionProposal(f.ctx, record); err != nil {
 		t.Fatal(err)
 	}
 	return loop, loop.Run
@@ -118,31 +118,31 @@ func TestConversationChangesProjectApprovalsWithConversationContext(t *testing.T
 			}
 			loop, run := f.loopApprovalProposal(t, "deploy-call", "deploy-key", "deploy-event")
 			loop.ParkOnApproval("approval-deploy-call")
-			actions := f.store.(ActionStore)
+			actions := f.store.(models.ActionStore)
 			// Creating an approval advances the cursor, so a subscriber emits it.
 			requested := f.list(t, initial.Cursor)
 			if !requested.HasChanges || !requested.ApprovalsChanged || len(requested.Approvals) != 1 || requested.Cursor == initial.Cursor {
 				t.Fatalf("requested approvals = %#v", requested)
 			}
 			approval := requested.Approvals[0]
-			if approval.Status != ApprovalStatusPending || approval.RunID != run.ID || approval.ConversationContext == nil ||
-				*approval.ConversationContext != (ApprovalConversationContext{ConversationID: f.conversation.ID, TriggerMessageID: f.trigger.ID}) {
+			if approval.Status != models.ApprovalStatusPending || approval.RunID != run.ID || approval.ConversationContext == nil ||
+				*approval.ConversationContext != (models.ApprovalConversationContext{ConversationID: f.conversation.ID, TriggerMessageID: f.trigger.ID}) {
 				t.Fatalf("approval context = %#v", approval)
 			}
 			unchanged := f.list(t, requested.Cursor)
 			if unchanged.ApprovalsChanged || len(unchanged.Approvals) != 0 || unchanged.HasChanges {
 				t.Fatalf("unchanged approvals = %#v", unchanged)
 			}
-			coordinator := action.NewApprovalCoordinator(f.store, actions, action.ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }))
+			coordinator := action.NewApprovalCoordinator(f.store, actions, action.ApprovalAuthorizerFunc(func(context.Context, models.ApprovalPrincipal, *models.ApprovalCheckpoint) error { return nil }))
 			if _, err := coordinator.Resolve(f.ctx, action.ResolveApprovalRequest{
 				Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision, DecisionID: "decision",
-				Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"},
+				Decision: models.ApprovalDecisionApprove, Principal: models.ApprovalPrincipal{Type: "role", ID: "release-manager"},
 			}); err != nil {
 				t.Fatal(err)
 			}
 			// Resolution advances the cursor too; the decided approval stays visible.
 			resolved := f.list(t, unchanged.Cursor)
-			if !resolved.ApprovalsChanged || len(resolved.Approvals) != 1 || resolved.Approvals[0].Status != ApprovalStatusApproved ||
+			if !resolved.ApprovalsChanged || len(resolved.Approvals) != 1 || resolved.Approvals[0].Status != models.ApprovalStatusApproved ||
 				resolved.Approvals[0].ConversationContext.ConversationID != f.conversation.ID {
 				t.Fatalf("resolved approvals = %#v", resolved)
 			}
@@ -160,12 +160,12 @@ func TestConversationChangesRunScopedApprovalFilter(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			f := newInteractionChangeFixture(t, fixture.store(t))
 			_, run := f.loopApprovalProposal(t, "call", "key", "event")
-			actions := f.store.(ActionStore)
+			actions := f.store.(models.ActionStore)
 			for _, test := range []struct {
 				ids  []string
 				want int
 			}{{nil, 1}, {[]string{}, 0}, {[]string{"other"}, 0}, {[]string{"other", run.ID}, 1}} {
-				approvals, err := actions.ListApprovals(f.ctx, ApprovalFilter{Scope: f.scope, RunIDs: test.ids})
+				approvals, err := actions.ListApprovals(f.ctx, models.ApprovalFilter{Scope: f.scope, RunIDs: test.ids})
 				if err != nil || len(approvals) != test.want {
 					t.Fatalf("RunIDs %v: %d approvals, %v", test.ids, len(approvals), err)
 				}
@@ -182,9 +182,9 @@ func TestConversationChangesProjectSkillSetupRequests(t *testing.T) {
 			if !initial.SkillSetupRequestsChanged || initial.SkillSetupRequests == nil || len(initial.SkillSetupRequests) != 0 {
 				t.Fatalf("initial setup requests = %#v", initial)
 			}
-			setups := f.store.(SkillSetupRequestStore)
+			setups := f.store.(models.SkillSetupRequestStore)
 			now := time.Now().UTC()
-			request := &SkillSetupRequest{ID: "setup", Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, DeploymentID: "assistant", AgentID: "assistant", ConversationID: f.conversation.ID,
+			request := &models.SkillSetupRequest{ID: "setup", Scope: f.scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, DeploymentID: "assistant", AgentID: "assistant", ConversationID: f.conversation.ID,
 				TriggerMessageID: f.trigger.ID, RunID: f.run.ID, ActionCallID: "call", Kind: "configure", SkillID: "reddit.reader",
 				SkillVersion: "1.0.0", SkillName: "Reddit", Reason: "Connect Reddit", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 			if err := setups.SaveSkillSetupRequest(f.ctx, request, 0); err != nil {
@@ -195,7 +195,7 @@ func TestConversationChangesProjectSkillSetupRequests(t *testing.T) {
 				pending.SkillSetupRequests[0].ID != "setup" || pending.SkillSetupRequests[0].Status != "pending" {
 				t.Fatalf("pending setup = %#v", pending)
 			}
-			resolved := cloneSkillSetupRequest(request)
+			resolved := models.CloneSkillSetupRequest(request)
 			resolved.Status, resolved.ResolvedBy, resolved.ResolvedBindingID, resolved.ResolvedBindingRevision = "resolved", "user", "binding", 1
 			resolved.Revision, resolved.UpdatedAt = 2, now.Add(time.Second)
 			if err := setups.SaveSkillSetupRequest(f.ctx, resolved, 1); err != nil {
@@ -228,11 +228,11 @@ const settledInteractionLimit = 50
 
 func TestConversationChangesBoundSettledInteractions(t *testing.T) {
 	f := newInteractionChangeFixture(t, newTestKernelStore(t))
-	setups := f.store.(SkillSetupRequestStore)
+	setups := f.store.(models.SkillSetupRequestStore)
 	start := time.Now().UTC()
 	for index := 0; index < settledInteractionLimit+5; index++ {
 		at := start.Add(time.Duration(index) * time.Second)
-		request := &SkillSetupRequest{ID: fmt.Sprintf("setup-%03d", index), Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, DeploymentID: "assistant", AgentID: "assistant", ConversationID: f.conversation.ID,
+		request := &models.SkillSetupRequest{ID: fmt.Sprintf("setup-%03d", index), Scope: f.scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, DeploymentID: "assistant", AgentID: "assistant", ConversationID: f.conversation.ID,
 			TriggerMessageID: f.trigger.ID, RunID: f.run.ID, ActionCallID: fmt.Sprintf("call-%d", index), Kind: "configure", SkillID: "reddit.reader",
 			SkillVersion: "1.0.0", SkillName: "Reddit", Reason: "Connect Reddit", Status: "dismissed", ResolvedBy: "user", Revision: 1, CreatedAt: at, UpdatedAt: at}
 		if index == 0 {
@@ -264,19 +264,19 @@ func (p teamRosterPortfolio) GetTeamDeployment(_ context.Context, scope capabili
 // Requests in a Team chat are saved to the Team, whichever member asked;
 // one saved to a member's own umbrella never shows in the Team chat.
 func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
-	ctx, store, scope := context.Background(), newTestKernelStore(t), Scope{Kind: "tenant", ID: "team-requests"}
+	ctx, store, scope := context.Background(), newTestKernelStore(t), models.Scope{Kind: "tenant", ID: "team-requests"}
 	conversations := runtimeconversation.NewConversationService(store)
 	seedTestSpace(t, store, scope)
 	conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}, Title: "Team", IdempotencyKey: "team",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "gtm"}, Title: "Team", IdempotencyKey: "team",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	posted, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
-		Content: "Connect Vercel", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true, IdempotencyKey: "ask",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}, Intent: models.MessageIntentQuestion,
+		Content: "Connect Vercel", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, RequiresResponse: true, IdempotencyKey: "ask",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -289,18 +289,18 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	for _, deployment := range []string{"member", "outsider"} {
-		owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}
+		owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "gtm"}
 		if deployment == "outsider" {
-			owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment}
+			owner = models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deployment}
 		}
-		if err := store.SaveSkillSetupRequest(ctx, &SkillSetupRequest{ID: "setup-" + deployment, Scope: scope, Owner: owner, DeploymentID: owner.ID, AgentID: deployment,
+		if err := store.SaveSkillSetupRequest(ctx, &models.SkillSetupRequest{ID: "setup-" + deployment, Scope: scope, Owner: owner, DeploymentID: owner.ID, AgentID: deployment,
 			ConversationID: conversation.ID, TriggerMessageID: posted.Message.ID, RunID: "run", ActionCallID: "call-" + deployment, Kind: "configure",
 			SkillID: "vercel.reader", SkillVersion: "1.0.0", SkillName: "Vercel", Reason: "Connect Vercel", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.SaveCredentialRequest(ctx, &CredentialRequest{ID: "credential-" + deployment, Scope: scope, Owner: owner, DeploymentID: owner.ID, AgentID: deployment,
-			ConversationID: conversation.ID, TriggerMessageID: posted.Message.ID, RunID: "run", ActionCallID: "secret-" + deployment, Kind: CredentialRequestKindPaymentCard, Reason: "Pay",
-			Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
+		if err := store.SaveCredentialRequest(ctx, &models.CredentialRequest{ID: "credential-" + deployment, Scope: scope, Owner: owner, DeploymentID: owner.ID, AgentID: deployment,
+			ConversationID: conversation.ID, TriggerMessageID: posted.Message.ID, RunID: "run", ActionCallID: "secret-" + deployment, Kind: models.CredentialRequestKindPaymentCard, Reason: "Pay",
+			Status: models.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -7,17 +7,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/google/uuid"
 )
 
 func TestAcceptedRunInheritanceSameMethodForkRetainsPinAndBranchCheckpoint(t *testing.T) {
 	forAcceptedRunInheritanceStores(t, func(t *testing.T, kernel acceptedRunInheritanceStore) {
 		parent, pin := newAcceptedRunInheritanceParent(t, kernel, true)
-		preparer := &acceptedRunInheritancePreparer{prepare: func(*CreateAgentRunRequest) error {
+		preparer := &acceptedRunInheritancePreparer{prepare: func(*models.CreateAgentRunRequest) error {
 			return errors.New("active deployment has changed and new admission refuses the old method")
 		}}
 		coordinator := agentrun.NewRunForkCoordinator(kernel)
@@ -26,15 +28,15 @@ func TestAcceptedRunInheritanceSameMethodForkRetainsPinAndBranchCheckpoint(t *te
 		spoof.DefinitionVersion, spoof.RunbookVersion = "unaccepted", "unaccepted"
 		request := acceptedRunInheritanceForkRequest(parent)
 		request.Branches = []agentrun.RunForkBranch{
-			{ID: "first", Goal: "Continue first accepted branch", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "read"}}, Budget: &BudgetPolicy{MaxTurns: 2}},
-			{ID: "second", AssignedAgentID: parent.AssignedAgentID, Entrypoint: parent.Entrypoint, Goal: "Continue second accepted branch", Context: map[string]interface{}{AcceptedRunExecutionContextKey: &spoof, "branchInput": "preserved"}, Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "read-new"}}, Budget: &BudgetPolicy{MaxTurns: 3}},
+			{ID: "first", Goal: "Continue first accepted branch", Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "read"}}, Budget: &models.BudgetPolicy{MaxTurns: 2}},
+			{ID: "second", AssignedAgentID: parent.AssignedAgentID, Entrypoint: parent.Entrypoint, Goal: "Continue second accepted branch", Context: map[string]interface{}{models.AcceptedRunExecutionContextKey: &spoof, "branchInput": "preserved"}, Checkpoint: map[string]interface{}{"runbook": map[string]interface{}{"current": "read-new"}}, Budget: &models.BudgetPolicy{MaxTurns: 3}},
 		}
 		created, err := coordinator.Create(t.Context(), request)
 		if err != nil || created == nil || len(created.Children) != 2 || preparer.calls != 0 {
 			t.Fatalf("same-method fork consulted mutable admission: %#v, %v; preparations=%d", created, err, preparer.calls)
 		}
 		for index, child := range created.Children {
-			actual, err := AcceptedRunExecutionForRun(child)
+			actual, err := models.AcceptedRunExecutionForRun(child)
 			if err != nil || !reflect.DeepEqual(pin, actual) || child.Entrypoint != parent.Entrypoint {
 				t.Fatalf("fork child lost immutable execution identity: %#v, %v", actual, err)
 			}
@@ -47,7 +49,7 @@ func TestAcceptedRunInheritanceSameMethodForkRetainsPinAndBranchCheckpoint(t *te
 			t.Fatal("inheritance discarded explicit child input")
 		}
 		mutateAcceptedRunInheritanceDependency(t, created.Children[0].Context, "caller-mutated")
-		secondPin, err := AcceptedRunExecutionForRun(created.Children[1])
+		secondPin, err := models.AcceptedRunExecutionForRun(created.Children[1])
 		if err != nil || !reflect.DeepEqual(pin, secondPin) {
 			t.Fatalf("siblings shared mutable accepted dependencies: %#v, %v", secondPin, err)
 		}
@@ -55,7 +57,7 @@ func TestAcceptedRunInheritanceSameMethodForkRetainsPinAndBranchCheckpoint(t *te
 		if err != nil {
 			t.Fatal(err)
 		}
-		persistedPin, err := AcceptedRunExecutionForRun(persistedParent)
+		persistedPin, err := models.AcceptedRunExecutionForRun(persistedParent)
 		if err != nil || !reflect.DeepEqual(pin, persistedPin) {
 			t.Fatalf("child mutation changed the parent's accepted identity: %#v, %v", persistedPin, err)
 		}
@@ -64,7 +66,7 @@ func TestAcceptedRunInheritanceSameMethodForkRetainsPinAndBranchCheckpoint(t *te
 			t.Fatalf("accepted fork replay consulted current deployment: %#v, %v", replayed, err)
 		}
 		for _, child := range replayed.Children {
-			actual, err := AcceptedRunExecutionForRun(child)
+			actual, err := models.AcceptedRunExecutionForRun(child)
 			if err != nil || !reflect.DeepEqual(pin, actual) {
 				t.Fatalf("replayed child was repinned or shared caller mutation: %#v, %v", actual, err)
 			}
@@ -94,7 +96,7 @@ func TestAcceptedRunInheritanceRejectsUnpreparedOrInvalidForkBeforeAtomicWrite(t
 							request.Branches[0].Entrypoint = "another-method"
 						}
 						result, err := coordinator.Create(t.Context(), request)
-						if result != nil || !errors.Is(err, ErrAcceptedRunExecution) || wrapped.groupWrites != 0 {
+						if result != nil || !errors.Is(err, models.ErrAcceptedRunExecution) || wrapped.groupWrites != 0 {
 							t.Fatalf("unsafe child reached atomic fork acceptance: %#v, %v; writes=%d", result, err, wrapped.groupWrites)
 						}
 						if preparer != nil && preparer.calls != 1 {
@@ -121,17 +123,17 @@ func TestAcceptedRunInheritancePreparesDifferentAgentOrMethodBeforeForkPersisten
 				coordinator := agentrun.NewRunForkCoordinator(wrapped)
 				request := acceptedRunInheritanceForkRequest(parent)
 				request.Branches[0].AssignedAgentID, request.Branches[0].Entrypoint = parent.AssignedAgentID, parent.Entrypoint
-				request.Branches[0].Context = map[string]interface{}{AcceptedRunExecutionContextKey: parentPin, "input": "retained"}
+				request.Branches[0].Context = map[string]interface{}{models.AcceptedRunExecutionContextKey: parentPin, "input": "retained"}
 				if change == "different_agent" {
 					request.Branches[0].AssignedAgentID = "other-agent"
 				} else {
 					request.Branches[0].Entrypoint = "another-method"
 				}
-				preparer := &acceptedRunInheritancePreparer{prepare: func(child *CreateAgentRunRequest) error {
-					if wrapped.groupWrites != 0 || child.Scope != parent.Scope || child.AssignedAgentID != request.Branches[0].AssignedAgentID || child.Entrypoint != request.Branches[0].Entrypoint || child.Context[AcceptedRunExecutionContextKey] != nil {
+				preparer := &acceptedRunInheritancePreparer{prepare: func(child *models.CreateAgentRunRequest) error {
+					if wrapped.groupWrites != 0 || child.Scope != parent.Scope || child.AssignedAgentID != request.Branches[0].AssignedAgentID || child.Entrypoint != request.Branches[0].Entrypoint || child.Context[models.AcceptedRunExecutionContextKey] != nil {
 						t.Fatalf("authoritative preparation saw forged input or occurred after persistence: %#v", child)
 					}
-					children, err := kernel.ListAgentRuns(t.Context(), AgentRunFilter{Scope: parent.Scope, ParentRunID: parent.ID, Limit: 10})
+					children, err := kernel.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: parent.Scope, ParentRunID: parent.ID, Limit: 10})
 					if err != nil || len(children) != 0 {
 						t.Fatalf("child was persisted before authoritative admission: %#v, %v", children, err)
 					}
@@ -143,7 +145,7 @@ func TestAcceptedRunInheritancePreparesDifferentAgentOrMethodBeforeForkPersisten
 				if err != nil || result == nil || len(result.Children) != 1 || preparer.calls != 1 || wrapped.groupWrites != 1 {
 					t.Fatalf("prepared method was not atomically accepted: %#v, %v; preparations=%d writes=%d", result, err, preparer.calls, wrapped.groupWrites)
 				}
-				pin, err := AcceptedRunExecutionForRun(result.Children[0])
+				pin, err := models.AcceptedRunExecutionForRun(result.Children[0])
 				if err != nil || pin == nil || pin.DefinitionVersion != "2" || pin.RunbookVersion != "2" || pin.DeploymentID != request.Branches[0].AssignedAgentID || pin.Entrypoint != request.Branches[0].Entrypoint || result.Children[0].Context["input"] != "retained" {
 					t.Fatalf("child did not retain the newly prepared exact identity: %#v, %v", pin, err)
 				}
@@ -159,7 +161,7 @@ func TestAcceptedRunInheritanceRejectsInvalidDelegationBeforeGroupAcceptance(t *
 				parent, parentPin := newAcceptedRunInheritanceParent(t, kernel, false)
 				wrapped := &acceptedRunInheritanceWriteStore{acceptedRunInheritanceStore: kernel}
 				service := collaboration.NewCollaborationService(wrapped)
-				created := createAcceptedRunInheritanceRequestGroup(t, service, parent, map[string]interface{}{"runbookEntrypoint": "inspect", AcceptedRunExecutionContextKey: parentPin})
+				created := createAcceptedRunInheritanceRequestGroup(t, service, parent, map[string]interface{}{"runbookEntrypoint": "inspect", models.AcceptedRunExecutionContextKey: parentPin})
 				before, err := kernel.GetAgentRun(t.Context(), parent.Scope, parent.ID)
 				if err != nil {
 					t.Fatal(err)
@@ -182,7 +184,7 @@ func TestAcceptedRunInheritanceRejectsInvalidDelegationBeforeGroupAcceptance(t *
 					t.Fatal(err)
 				}
 				result, err := service.RespondAgentRequest(t.Context(), collaboration.RespondAgentRequestRequest{Scope: parent.Scope, RequestID: pending.ID, ExpectedRevision: pending.Revision, Decision: collaboration.AgentRequestDecisionAccept, Principal: pending.Recipient})
-				if result != nil || !errors.Is(err, ErrAcceptedRunExecution) || wrapped.responseWrites != 0 {
+				if result != nil || !errors.Is(err, models.ErrAcceptedRunExecution) || wrapped.responseWrites != 0 {
 					t.Fatalf("invalid delegated method reached atomic acceptance: %#v, %v; writes=%d", result, err, wrapped.responseWrites)
 				}
 				if preparer != nil && preparer.calls != 1 {
@@ -222,7 +224,7 @@ func TestAcceptedRunInheritanceDelegationPreparesRequestedEntrypointAndInboxProp
 				parent, parentPin := newAcceptedRunInheritanceParent(t, kernel, false)
 				wrapped := &acceptedRunInheritanceWriteStore{acceptedRunInheritanceStore: kernel}
 				service := collaboration.NewCollaborationService(wrapped)
-				shared := map[string]interface{}{"input": "retained", AcceptedRunExecutionContextKey: parentPin}
+				shared := map[string]interface{}{"input": "retained", models.AcceptedRunExecutionContextKey: parentPin}
 				if delivery.invocation {
 					shared[agentrun.RunbookInvocationContextKey] = map[string]interface{}{"entrypoint": "inspect", "summary": "Requested target method"}
 				} else {
@@ -230,14 +232,14 @@ func TestAcceptedRunInheritanceDelegationPreparesRequestedEntrypointAndInboxProp
 				}
 				created := createAcceptedRunInheritanceRequestGroup(t, service, parent, shared)
 				pending := created.Requests[0]
-				preparer := &acceptedRunInheritancePreparer{prepare: func(child *CreateAgentRunRequest) error {
-					if wrapped.responseWrites != 0 || child.Scope != parent.Scope || child.AssignedAgentID != pending.Recipient.ID || child.Entrypoint != "inspect" || child.Context[AcceptedRunExecutionContextKey] != nil {
+				preparer := &acceptedRunInheritancePreparer{prepare: func(child *models.CreateAgentRunRequest) error {
+					if wrapped.responseWrites != 0 || child.Scope != parent.Scope || child.AssignedAgentID != pending.Recipient.ID || child.Entrypoint != "inspect" || child.Context[models.AcceptedRunExecutionContextKey] != nil {
 						t.Fatalf("delegation preparation was late or used untrusted method identity: %#v", child)
 					}
 					setAcceptedRunInheritancePin(child)
 					return nil
 				}}
-				var child *AgentRun
+				var child *models.AgentRun
 				if !delivery.inbox {
 					service.SetAcceptedRunExecutionPreparer(preparer)
 					accepted, err := service.RespondAgentRequest(t.Context(), collaboration.RespondAgentRequestRequest{Scope: parent.Scope, RequestID: pending.ID, ExpectedRevision: pending.Revision, Decision: collaboration.AgentRequestDecisionAccept, Principal: pending.Recipient})
@@ -252,7 +254,7 @@ func TestAcceptedRunInheritanceDelegationPreparesRequestedEntrypointAndInboxProp
 					if err != nil {
 						t.Fatal(err)
 					}
-					if stored.AcceptancePolicy != AgentRequestAcceptancePreauthorized {
+					if stored.AcceptancePolicy != models.AgentRequestAcceptancePreauthorized {
 						t.Fatalf("preauthorized fixture policy = %s", stored.AcceptancePolicy)
 					}
 					inbox, err := collaboration.NewAgentRequestInboxReconciler(wrapped)
@@ -273,7 +275,7 @@ func TestAcceptedRunInheritanceDelegationPreparesRequestedEntrypointAndInboxProp
 						t.Fatal(err)
 					}
 				}
-				pin, err := AcceptedRunExecutionForRun(child)
+				pin, err := models.AcceptedRunExecutionForRun(child)
 				if err != nil || pin == nil || pin.Entrypoint != "inspect" || pin.DeploymentID != pending.Recipient.ID || pin.DefinitionVersion != "2" || pin.RunbookVersion != "2" || child.Context["input"] != "retained" || preparer.calls != 1 || wrapped.responseWrites != 1 {
 					t.Fatalf("delegated child lost authoritative requested identity: %#v, %v; preparations=%d writes=%d", pin, err, preparer.calls, wrapped.responseWrites)
 				}
@@ -285,20 +287,20 @@ func TestAcceptedRunInheritanceDelegationPreparesRequestedEntrypointAndInboxProp
 func TestAcceptedRunInheritanceReasonOnlyForkAndGenericDelegationStayUnpinned(t *testing.T) {
 	forAcceptedRunInheritanceStores(t, func(t *testing.T, kernel acceptedRunInheritanceStore) {
 		parent, parentPin := newAcceptedRunInheritanceParent(t, kernel, true)
-		preparer := &acceptedRunInheritancePreparer{prepare: func(*CreateAgentRunRequest) error { return ErrAcceptedRunExecution }}
+		preparer := &acceptedRunInheritancePreparer{prepare: func(*models.CreateAgentRunRequest) error { return models.ErrAcceptedRunExecution }}
 		coordinator := agentrun.NewRunForkCoordinator(kernel)
 		coordinator.SetAcceptedRunExecutionPreparer(preparer)
 		request := acceptedRunInheritanceForkRequest(parent)
 		request.Branches = []agentrun.RunForkBranch{
-			{ID: "reason", Goal: "Reason over evidence", Mode: runbook.DelegateReason, Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 2}},
-			{ID: "generic", AssignedAgentID: "other-agent", Goal: "Generic child work", Context: map[string]interface{}{AcceptedRunExecutionContextKey: parentPin}, Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 2}},
+			{ID: "reason", Goal: "Reason over evidence", Mode: runbook.DelegateReason, Checkpoint: map[string]interface{}{}, Budget: &models.BudgetPolicy{MaxTurns: 2}},
+			{ID: "generic", AssignedAgentID: "other-agent", Goal: "Generic child work", Context: map[string]interface{}{models.AcceptedRunExecutionContextKey: parentPin}, Checkpoint: map[string]interface{}{}, Budget: &models.BudgetPolicy{MaxTurns: 2}},
 		}
 		created, err := coordinator.Create(t.Context(), request)
 		if err != nil || created == nil || len(created.Children) != 2 || preparer.calls != 0 {
 			t.Fatalf("reason-only work required method admission: %#v, %v", created, err)
 		}
 		for _, child := range created.Children {
-			pin, err := AcceptedRunExecutionForRun(child)
+			pin, err := models.AcceptedRunExecutionForRun(child)
 			if err != nil || pin != nil || child.Entrypoint != "" {
 				t.Fatalf("generic work inherited an executable pin: %#v, %v", pin, err)
 			}
@@ -307,15 +309,15 @@ func TestAcceptedRunInheritanceReasonOnlyForkAndGenericDelegationStayUnpinned(t 
 		service := collaboration.NewCollaborationService(kernel)
 		service.SetAcceptedRunExecutionPreparer(preparer)
 		group := createAcceptedRunInheritanceRequestGroup(t, service, otherParent, map[string]interface{}{
-			AcceptedRunExecutionContextKey: parentPin,
-			"triggerInput":                 map[string]interface{}{"runbookDefinitionId": parentPin.RunbookID, "runbookDefinitionVersion": parentPin.RunbookVersion, "runbookEntrypoint": parentPin.Entrypoint, "entrypoint": parentPin.Entrypoint},
+			models.AcceptedRunExecutionContextKey: parentPin,
+			"triggerInput":                        map[string]interface{}{"runbookDefinitionId": parentPin.RunbookID, "runbookDefinitionVersion": parentPin.RunbookVersion, "runbookEntrypoint": parentPin.Entrypoint, "entrypoint": parentPin.Entrypoint},
 		})
 		pending := group.Requests[0]
 		accepted, err := service.RespondAgentRequest(t.Context(), collaboration.RespondAgentRequestRequest{Scope: otherParent.Scope, RequestID: pending.ID, ExpectedRevision: pending.Revision, Decision: collaboration.AgentRequestDecisionAccept, Principal: pending.Recipient})
 		if err != nil || accepted == nil || preparer.calls != 0 {
 			t.Fatalf("generic delegated work invoked current method admission: %#v, %v", accepted, err)
 		}
-		pin, err := AcceptedRunExecutionForRun(accepted.Child)
+		pin, err := models.AcceptedRunExecutionForRun(accepted.Child)
 		if err != nil || pin != nil || accepted.Child.Entrypoint != "" {
 			t.Fatalf("generic delegation retained a supplied accepted pin: %#v, %v", pin, err)
 		}
@@ -325,12 +327,12 @@ func TestAcceptedRunInheritanceReasonOnlyForkAndGenericDelegationStayUnpinned(t 
 func TestAcceptedRunInheritanceHelperClonesCallerContextAndDependencies(t *testing.T) {
 	forAcceptedRunInheritanceStores(t, func(t *testing.T, kernel acceptedRunInheritanceStore) {
 		parent, pin := newAcceptedRunInheritanceParent(t, kernel, false)
-		request := CreateAgentRunRequest{Scope: parent.Scope, AssignedAgentID: parent.AssignedAgentID, Entrypoint: parent.Entrypoint, Context: parent.Context}
+		request := models.CreateAgentRunRequest{Scope: parent.Scope, AssignedAgentID: parent.AssignedAgentID, Entrypoint: parent.Entrypoint, Context: parent.Context}
 		if err := agentrun.PrepareAcceptedChildRun(t.Context(), parent, &request, nil, true); err != nil {
 			t.Fatal(err)
 		}
 		mutateAcceptedRunInheritanceDependency(t, request.Context, "mutated-child")
-		actual, err := AcceptedRunExecutionForRun(parent)
+		actual, err := models.AcceptedRunExecutionForRun(parent)
 		if err != nil || !reflect.DeepEqual(pin, actual) {
 			t.Fatalf("helper aliased or stripped the parent's trusted pin: %#v, %v", actual, err)
 		}
@@ -338,15 +340,15 @@ func TestAcceptedRunInheritanceHelperClonesCallerContextAndDependencies(t *testi
 }
 
 type acceptedRunInheritanceStore interface {
-	KernelStore
-	RunForkStore
-	CollaborationKernelStore
-	AgentRequestInboxStore
+	models.KernelStore
+	models.RunForkStore
+	models.CollaborationKernelStore
+	models.AgentRequestInboxStore
 }
 
 func forAcceptedRunInheritanceStores(t *testing.T, test func(*testing.T, acceptedRunInheritanceStore)) {
 	t.Helper()
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 		store, ok := kernel.(acceptedRunInheritanceStore)
 		if !ok {
 			t.Fatal("accepted-child fixture requires fork, collaboration, and inbox contracts")
@@ -357,10 +359,10 @@ func forAcceptedRunInheritanceStores(t *testing.T, test func(*testing.T, accepte
 
 type acceptedRunInheritancePreparer struct {
 	calls   int
-	prepare func(*CreateAgentRunRequest) error
+	prepare func(*models.CreateAgentRunRequest) error
 }
 
-func (p *acceptedRunInheritancePreparer) PrepareAcceptedRunExecution(_ context.Context, request *CreateAgentRunRequest) error {
+func (p *acceptedRunInheritancePreparer) PrepareAcceptedRunExecution(_ context.Context, request *models.CreateAgentRunRequest) error {
 	p.calls++
 	return p.prepare(request)
 }
@@ -371,12 +373,12 @@ type acceptedRunInheritanceWriteStore struct {
 	responseWrites int
 }
 
-func (s *acceptedRunInheritanceWriteStore) CreateRunDependencyGroup(ctx context.Context, record RunDependencyGroupCreateRecord) (*RunDependencyResult, error) {
+func (s *acceptedRunInheritanceWriteStore) CreateRunDependencyGroup(ctx context.Context, record models.RunDependencyGroupCreateRecord) (*models.RunDependencyResult, error) {
 	s.groupWrites++
 	return s.acceptedRunInheritanceStore.CreateRunDependencyGroup(ctx, record)
 }
 
-func (s *acceptedRunInheritanceWriteStore) RespondAgentRequest(ctx context.Context, record AgentRequestResponseRecord) ([]*ActivityEvent, error) {
+func (s *acceptedRunInheritanceWriteStore) RespondAgentRequest(ctx context.Context, record models.AgentRequestResponseRecord) ([]*models.ActivityEvent, error) {
 	s.responseWrites++
 	return s.acceptedRunInheritanceStore.RespondAgentRequest(ctx, record)
 }
@@ -390,36 +392,38 @@ func acceptedRunInheritanceRejections() []acceptedRunInheritanceRejection {
 	result := []acceptedRunInheritanceRejection{{name: "missing_preparer", preparer: func() *acceptedRunInheritancePreparer { return nil }}}
 	for _, invalid := range []struct {
 		name   string
-		change func(*CreateAgentRunRequest)
+		change func(*models.CreateAgentRunRequest)
 	}{
-		{"missing_pin", func(request *CreateAgentRunRequest) { delete(request.Context, AcceptedRunExecutionContextKey) }},
-		{"foreign_scope", func(request *CreateAgentRunRequest) {
-			request.Context[AcceptedRunExecutionContextKey].(*AcceptedRunExecution).Scope.ID = "foreign-tenant"
+		{"missing_pin", func(request *models.CreateAgentRunRequest) {
+			delete(request.Context, models.AcceptedRunExecutionContextKey)
 		}},
-		{"foreign_deployment", func(request *CreateAgentRunRequest) {
-			request.Context[AcceptedRunExecutionContextKey].(*AcceptedRunExecution).DeploymentID = "foreign-agent"
+		{"foreign_scope", func(request *models.CreateAgentRunRequest) {
+			request.Context[models.AcceptedRunExecutionContextKey].(*models.AcceptedRunExecution).Scope.ID = "foreign-tenant"
 		}},
-		{"foreign_entrypoint", func(request *CreateAgentRunRequest) {
-			request.Context[AcceptedRunExecutionContextKey].(*AcceptedRunExecution).Entrypoint = "foreign-method"
+		{"foreign_deployment", func(request *models.CreateAgentRunRequest) {
+			request.Context[models.AcceptedRunExecutionContextKey].(*models.AcceptedRunExecution).DeploymentID = "foreign-agent"
 		}},
-		{"malformed_method", func(request *CreateAgentRunRequest) {
-			request.Context[AcceptedRunExecutionContextKey].(*AcceptedRunExecution).RunbookVersion = ""
+		{"foreign_entrypoint", func(request *models.CreateAgentRunRequest) {
+			request.Context[models.AcceptedRunExecutionContextKey].(*models.AcceptedRunExecution).Entrypoint = "foreign-method"
 		}},
-		{"mutated_scope", func(request *CreateAgentRunRequest) {
+		{"malformed_method", func(request *models.CreateAgentRunRequest) {
+			request.Context[models.AcceptedRunExecutionContextKey].(*models.AcceptedRunExecution).RunbookVersion = ""
+		}},
+		{"mutated_scope", func(request *models.CreateAgentRunRequest) {
 			request.Scope.ID = "foreign-tenant"
 			setAcceptedRunInheritancePin(request)
 		}},
-		{"mutated_deployment", func(request *CreateAgentRunRequest) {
+		{"mutated_deployment", func(request *models.CreateAgentRunRequest) {
 			request.AssignedAgentID = "foreign-agent"
 			setAcceptedRunInheritancePin(request)
 		}},
-		{"mutated_entrypoint", func(request *CreateAgentRunRequest) {
+		{"mutated_entrypoint", func(request *models.CreateAgentRunRequest) {
 			request.Entrypoint = "foreign-method"
 			setAcceptedRunInheritancePin(request)
 		}},
 	} {
 		result = append(result, acceptedRunInheritanceRejection{name: invalid.name, preparer: func() *acceptedRunInheritancePreparer {
-			return &acceptedRunInheritancePreparer{prepare: func(request *CreateAgentRunRequest) error {
+			return &acceptedRunInheritancePreparer{prepare: func(request *models.CreateAgentRunRequest) error {
 				setAcceptedRunInheritancePin(request)
 				invalid.change(request)
 				return nil
@@ -429,39 +433,39 @@ func acceptedRunInheritanceRejections() []acceptedRunInheritanceRejection {
 	return result
 }
 
-func setAcceptedRunInheritancePin(request *CreateAgentRunRequest) {
+func setAcceptedRunInheritancePin(request *models.CreateAgentRunRequest) {
 	if request.Context == nil {
 		request.Context = map[string]interface{}{}
 	}
-	request.Context[AcceptedRunExecutionContextKey] = &AcceptedRunExecution{
+	request.Context[models.AcceptedRunExecutionContextKey] = &models.AcceptedRunExecution{
 		Scope: request.Scope, DeploymentID: request.AssignedAgentID, DefinitionID: "new-agent-definition", DefinitionVersion: "2",
 		RunbookID: "new-method", RunbookVersion: "2", Entrypoint: request.Entrypoint,
-		SkillDependencies: []SkillRuntimeReference{{SkillID: "reader", SkillVersion: "2.0.0", SourceIdentity: "native::reader"}},
+		SkillDependencies: []models.SkillRuntimeReference{{SkillID: "reader", SkillVersion: "2.0.0", SourceIdentity: "native::reader"}},
 	}
 }
 
-func newAcceptedRunInheritanceParent(t *testing.T, kernel KernelStore, claimed bool) (*AgentRun, *AcceptedRunExecution) {
+func newAcceptedRunInheritanceParent(t *testing.T, kernel models.KernelStore, claimed bool) (*models.AgentRun, *models.AcceptedRunExecution) {
 	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "accepted-inheritance-" + uuid.NewString()}
+	scope := models.Scope{Kind: "tenant", ID: "accepted-inheritance-" + uuid.NewString()}
 	deployment, definition := acceptedMethodFixture(scope)
 	definition.Runbook.Steps["read"] = runbook.Step{Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "reader", SkillVersion: "1.0.0", Action: "read", ResultPath: "/result", Next: "read-new"}}
 	definition.Runbook.Steps["read-new"] = runbook.Step{Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "reader", SkillVersion: "1.1.0", Action: "read", ResultPath: "/new", Next: "done"}}
-	pin, err := NewAcceptedRunExecution(scope, deployment, definition, "manual")
+	pin, err := models.NewAcceptedRunExecution(scope, deployment, definition, "manual")
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err := NewPortfolioService(kernel).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID}, AssignedAgentID: deployment.ID,
-		Entrypoint: pin.Entrypoint, Goal: "Continue accepted work", Source: RunSourceManual,
-		Context:    map[string]interface{}{AcceptedRunExecutionContextKey: pin, "projectId": "accepted-project"},
+	parent, err := portfolio.NewPortfolioService(kernel).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deployment.ID}, AssignedAgentID: deployment.ID,
+		Entrypoint: pin.Entrypoint, Goal: "Continue accepted work", Source: models.RunSourceManual,
+		Context:    map[string]interface{}{models.AcceptedRunExecutionContextKey: pin, "projectId": "accepted-project"},
 		Plan:       map[string]interface{}{"runbook": map[string]interface{}{"id": pin.RunbookID, "version": pin.RunbookVersion}},
-		Checkpoint: map[string]interface{}{"committed": "preserved"}, Budget: &BudgetPolicy{MaxTurns: 10},
+		Checkpoint: map[string]interface{}{"committed": "preserved"}, Budget: &models.BudgetPolicy{MaxTurns: 10},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if claimed {
-		parent, err = kernel.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: scope, WorkerID: "accepted-worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+		parent, err = kernel.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: scope, WorkerID: "accepted-worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
 		if err != nil || parent == nil {
 			t.Fatalf("claim accepted parent = %#v, %v", parent, err)
 		}
@@ -473,21 +477,21 @@ func newAcceptedRunInheritanceParent(t *testing.T, kernel KernelStore, claimed b
 	return parent, pin
 }
 
-func acceptedRunInheritanceForkRequest(parent *AgentRun) agentrun.CreateRunForkRequest {
+func acceptedRunInheritanceForkRequest(parent *models.AgentRun) agentrun.CreateRunForkRequest {
 	return agentrun.CreateRunForkRequest{Scope: parent.Scope, SourceRunID: parent.ID, ExpectedSourceRevision: parent.Revision, WorkerID: "accepted-worker", ForkID: uuid.NewString(),
-		Policy:                 RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Branches:               []agentrun.RunForkBranch{{ID: "branch", Goal: "Execute accepted work", Checkpoint: map[string]interface{}{}, Budget: &BudgetPolicy{MaxTurns: 2}}},
+		Policy:                 models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast},
+		Branches:               []agentrun.RunForkBranch{{ID: "branch", Goal: "Execute accepted work", Checkpoint: map[string]interface{}{}, Budget: &models.BudgetPolicy{MaxTurns: 2}}},
 		ContinuationCheckpoint: map[string]interface{}{"committed": "preserved", "waiting": "fan-in"}}
 }
 
-func createAcceptedRunInheritanceRequestGroup(t *testing.T, service *collaboration.CollaborationService, parent *AgentRun, shared map[string]interface{}) *collaboration.AgentRequestGroupResult {
+func createAcceptedRunInheritanceRequestGroup(t *testing.T, service *collaboration.CollaborationService, parent *models.AgentRun, shared map[string]interface{}) *collaboration.AgentRequestGroupResult {
 	t.Helper()
 	created, err := service.CreateAgentRequestGroup(t.Context(), collaboration.CreateAgentRequestGroupRequest{
 		Scope: parent.Scope, SourceRunID: parent.ID, ExpectedSourceRevision: parent.Revision,
-		Requester:      CollaborationParty{Type: OwnerTypeAgent, ID: parent.AssignedAgentID},
-		Policy:         RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Requests:       []collaboration.AgentRequestGroupSpec{{DependencyID: "accepted-method", Kind: AgentRequestKindRequest, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"}, Goal: "Inspect shared evidence", SharedContext: shared, ChildCheckpoint: map[string]interface{}{"input": "preserved"}, BudgetAllocation: &BudgetPolicy{MaxTurns: 2}, AcceptancePolicy: AgentRequestAcceptancePreauthorized}},
-		IdempotencyKey: uuid.NewString(), Actor: ActivityActor{Type: "agent", ID: parent.AssignedAgentID}, Visibility: ActivityVisibilityScope,
+		Requester:      models.CollaborationParty{Type: models.OwnerTypeAgent, ID: parent.AssignedAgentID},
+		Policy:         models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast},
+		Requests:       []collaboration.AgentRequestGroupSpec{{DependencyID: "accepted-method", Kind: models.AgentRequestKindRequest, Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "recipient"}, Goal: "Inspect shared evidence", SharedContext: shared, ChildCheckpoint: map[string]interface{}{"input": "preserved"}, BudgetAllocation: &models.BudgetPolicy{MaxTurns: 2}, AcceptancePolicy: models.AgentRequestAcceptancePreauthorized}},
+		IdempotencyKey: uuid.NewString(), Actor: models.ActivityActor{Type: "agent", ID: parent.AssignedAgentID}, Visibility: models.ActivityVisibilityScope,
 	})
 	if err != nil || created == nil || len(created.Requests) != 1 {
 		t.Fatalf("create pending delegated method = %#v, %v", created, err)
@@ -495,22 +499,22 @@ func createAcceptedRunInheritanceRequestGroup(t *testing.T, service *collaborati
 	return created
 }
 
-func acceptedRunInheritanceEvents(t *testing.T, kernel KernelStore, parent *AgentRun) []*ActivityEvent {
+func acceptedRunInheritanceEvents(t *testing.T, kernel models.KernelStore, parent *models.AgentRun) []*models.ActivityEvent {
 	t.Helper()
-	events, err := kernel.ListActivity(t.Context(), ActivityFilter{Scope: parent.Scope, RunID: parent.ID})
+	events, err := kernel.ListActivity(t.Context(), models.ActivityFilter{Scope: parent.Scope, RunID: parent.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return events
 }
 
-func assertAcceptedRunInheritanceNoMutation(t *testing.T, kernel KernelStore, parent *AgentRun, events []*ActivityEvent) {
+func assertAcceptedRunInheritanceNoMutation(t *testing.T, kernel models.KernelStore, parent *models.AgentRun, events []*models.ActivityEvent) {
 	t.Helper()
 	actual, err := kernel.GetAgentRun(t.Context(), parent.Scope, parent.ID)
 	if err != nil || !reflect.DeepEqual(parent, actual) {
 		t.Fatalf("failed child preparation changed parent state or budget: before=%#v after=%#v, %v", parent, actual, err)
 	}
-	children, err := kernel.ListAgentRuns(t.Context(), AgentRunFilter{Scope: parent.Scope, ParentRunID: parent.ID, Limit: 10})
+	children, err := kernel.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: parent.Scope, ParentRunID: parent.ID, Limit: 10})
 	if err != nil || len(children) != 0 {
 		t.Fatalf("failed child preparation persisted children: %#v, %v", children, err)
 	}
@@ -521,8 +525,8 @@ func assertAcceptedRunInheritanceNoMutation(t *testing.T, kernel KernelStore, pa
 
 func mutateAcceptedRunInheritanceDependency(t *testing.T, contextValue map[string]interface{}, version string) {
 	t.Helper()
-	switch raw := contextValue[AcceptedRunExecutionContextKey].(type) {
-	case *AcceptedRunExecution:
+	switch raw := contextValue[models.AcceptedRunExecutionContextKey].(type) {
+	case *models.AcceptedRunExecution:
 		raw.SkillDependencies[0].SkillVersion = version
 	case map[string]interface{}:
 		dependencies, ok := raw["skillDependencies"].([]interface{})

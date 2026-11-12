@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
@@ -19,10 +20,10 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	store, pgSchema := openTestPostgresStore(t, "openseal_approval_mode_")
 	schema := pgSchema.Name
 	dsn := pgSchema.DSN
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, store, scope)
 	conversation, _, err := runtimeconversation.NewConversationService(store).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -53,16 +54,16 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	}
 	service := runtimeconversation.NewConversationApprovalModeService(reopened)
 	result, err := service.SetApprovalMode(ctx, runtimeconversation.SetConversationApprovalModeRequest{
-		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalManual, Actor: conversationtest.ApprovalModeActor,
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: models.ConversationApprovalManual, Actor: conversationtest.ApprovalModeActor,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	stored, err := reopened.GetConversation(ctx, scope, conversation.ID)
-	if err != nil || stored.ApprovalMode != ConversationApprovalManual || stored.Revision != conversation.Revision+1 {
+	if err != nil || stored.ApprovalMode != models.ConversationApprovalManual || stored.Revision != conversation.Revision+1 {
 		t.Fatalf("stored conversation = %#v, %v", stored, err)
 	}
-	events, err := reopened.ListActivity(ctx, ActivityFilter{Scope: scope, AgentID: "assistant", EventTypes: []string{runtimeconversation.ConversationApprovalModeChangedEvent}, Descending: true})
+	events, err := reopened.ListActivity(ctx, models.ActivityFilter{Scope: scope, AgentID: "assistant", EventTypes: []string{runtimeconversation.ConversationApprovalModeChangedEvent}, Descending: true})
 	if err != nil || len(events) != 1 || events[0].ID != result.Event.ID || events[0].Payload["from"] != "auto" {
 		t.Fatalf("approval mode events = %#v, %v", events, err)
 	}
@@ -71,12 +72,12 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	set, err := changes.ListChanges(ctx, runtimeconversation.ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
-	if err != nil || len(set.Activity) != 1 || set.Activity[0].Payload["to"] != "manual" || set.Conversation.ApprovalMode != ConversationApprovalManual {
+	if err != nil || len(set.Activity) != 1 || set.Activity[0].Payload["to"] != "manual" || set.Conversation.ApprovalMode != models.ConversationApprovalManual {
 		t.Fatalf("change set = %#v, %v", set, err)
 	}
 	if _, err := service.SetApprovalMode(ctx, runtimeconversation.SetConversationApprovalModeRequest{
-		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalSkip, Actor: conversationtest.ApprovalModeActor,
-	}); !errors.Is(err, ErrRevisionConflict) {
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: models.ConversationApprovalSkip, Actor: conversationtest.ApprovalModeActor,
+	}); !errors.Is(err, models.ErrRevisionConflict) {
 		t.Fatalf("stale revision error = %v", err)
 	}
 }

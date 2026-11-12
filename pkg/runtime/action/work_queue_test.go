@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 )
@@ -275,9 +277,9 @@ func (s *deadlineAgentRunStore) reads() int64 {
 func TestQueueDrivenAgentRunPoolIssuesNoReadsWhileIdleAndWakesOnDeadline(t *testing.T) {
 	store := &deadlineAgentRunStore{Store: actiontest.NewStore(t)}
 	scope := models.Scope{Kind: "tenant", ID: "idle-runs"}
-	pool, err := runtime.NewAgentRunWorkerPool(store, runtime.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+	pool, err := runworker.NewAgentRunWorkerPool(store, conversation.TurnRunnerResolverFunc(func(context.Context, *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
 		return nil, errors.New("unexpected idle turn")
-	}), nil, runtime.AgentRunWorkerConfig{Scope: scope, Concurrency: 4, PollInterval: 5 * time.Millisecond})
+	}), nil, runworker.AgentRunWorkerConfig{Scope: scope, Concurrency: 4, PollInterval: 5 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +456,7 @@ func (s *signalConversationStore) ListConversations(ctx context.Context, filter 
 
 func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) {
 	store := &signalConversationStore{Store: actiontest.NewStore(t)}
-	scheduler, err := runtime.NewConversationRunScheduler(store, store, runtime.ConversationRunSchedulerConfig{})
+	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +464,7 @@ func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) 
 	source := &checkedScopeSource{}
 	source.active.Store(true)
 	source.scopes.Store(&[]models.Scope{scope, other})
-	reconciler, err := runtime.NewConversationRunReconciler(scheduler, source, nil, runtime.ConversationRunReconcilerConfig{Interval: 100 * time.Millisecond})
+	reconciler, err := conversationrun.NewConversationRunReconciler(scheduler, source, nil, conversationrun.ConversationRunReconcilerConfig{Interval: 100 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

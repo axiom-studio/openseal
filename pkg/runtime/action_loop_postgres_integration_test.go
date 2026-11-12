@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -49,9 +50,9 @@ func TestNextActionDeadlineIgnoresLoopCalls(t *testing.T) {
 	// A worker-dispatched vm call still sets the deadline. It is admitted
 	// through its step fence, as in production.
 	worker := f.LoopCall("worker-call")
-	worker.Origin, worker.Execution, worker.AvailableAt = ActionOriginVM, "", f.Now.Add(2*time.Hour)
-	worker.InvocationDigest = ComputeActionInvocationDigest(worker)
-	worker.SemanticDigest = ComputeActionSemanticDigest(worker)
+	worker.Origin, worker.Execution, worker.AvailableAt = models.ActionOriginVM, "", f.Now.Add(2*time.Hour)
+	worker.InvocationDigest = models.ComputeActionInvocationDigest(worker)
+	worker.SemanticDigest = models.ComputeActionSemanticDigest(worker)
 	storetest.SeedActionCall(t, store, worker)
 	deadline, err = store.NextActionDeadline(ctx, f.Scope, f.Now)
 	if err != nil || deadline == nil || !deadline.Equal(worker.AvailableAt) {

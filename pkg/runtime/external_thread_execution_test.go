@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
@@ -23,21 +24,21 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var applied []*ExternalConversationInboxItem
+	var applied []*models.ExternalConversationInboxItem
 	for i, thread := range []string{"one", "two", "one"} {
 		now := time.Now().UTC()
 		id := []string{"root-one", "root-two", "followup-one"}[i]
-		item := &ExternalConversationInboxItem{
+		item := &models.ExternalConversationInboxItem{
 			ID: id, Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-			Event: NormalizedExternalConversationEvent{ID: id, Type: capability.ConversationEventMessageReceived, ExternalConversationID: "same-channel", ExternalThreadID: thread,
+			Event: models.NormalizedExternalConversationEvent{ID: id, Type: capability.ConversationEventMessageReceived, ExternalConversationID: "same-channel", ExternalThreadID: thread,
 				ExternalMessageID: id, ExternalParticipantID: "human", Text: id, MentionsEndpoint: true, OrderingKey: "same-channel:" + thread, OccurredAt: now},
-			Status: ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+			Status: models.ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
 		if _, _, err := store.ReceiveExternalConversationEvent(ctx, item); err != nil {
 			t.Fatal(err)
 		}
 		result, err := worker.ProcessOne(ctx, endpoint.Scope)
-		if err != nil || result == nil || result.Status != ExternalConversationInboxApplied {
+		if err != nil || result == nil || result.Status != models.ExternalConversationInboxApplied {
 			t.Fatalf("import=%#v err=%v", result, err)
 		}
 		applied = append(applied, result)
@@ -47,7 +48,7 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	}
 	first, _ := store.GetAgentRun(ctx, endpoint.Scope, applied[0].RunID)
 	other, _ := store.GetAgentRun(ctx, endpoint.Scope, applied[1].RunID)
-	if first.Status != AgentRunStatusQueued || other.Status != AgentRunStatusQueued {
+	if first.Status != models.AgentRunStatusQueued || other.Status != models.AgentRunStatusQueued {
 		t.Fatal("incoming message canceled previous work")
 	}
 	// A follow-up in an active thread is delivered to that thread's Run
@@ -59,12 +60,12 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	if first.ConcurrencyKey == other.ConcurrencyKey {
 		t.Fatal("thread execution keys do not match canonical roots")
 	}
-	for _, run := range []*AgentRun{first, other} {
-		if err := validateConversationRun(run); err != nil {
+	for _, run := range []*models.AgentRun{first, other} {
+		if err := models.ValidateConversationRun(run); err != nil {
 			t.Fatal(err)
 		}
 	}
-	claim := AgentRunClaim{Scope: endpoint.Scope, Kind: RunKindConversation, WorkerID: "thread-worker", Now: time.Now().UTC().Add(time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForConcurrencyKey: 1}
+	claim := models.AgentRunClaim{Scope: endpoint.Scope, Kind: models.RunKindConversation, WorkerID: "thread-worker", Now: time.Now().UTC().Add(time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForConcurrencyKey: 1}
 	a, err := store.ClaimNextAgentRun(ctx, claim)
 	if err != nil || a == nil {
 		t.Fatalf("first claim=%#v %v", a, err)
@@ -77,7 +78,7 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 		t.Fatalf("thread follow-up created another Run: %#v %v", blocked, err)
 	}
 	conversations := conversation.NewConversationService(store)
-	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID}}
+	viewer := models.ConversationViewer{Participant: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: endpoint.Owner.ID}}
 	root, _ := first.Context["threadRootMessageId"].(string)
 	page, err := conversation.ReadConversationHistory(ctx, conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, conversation.ConversationHistoryReadRequest{}, root)
 	if err != nil || len(page.Messages) != 2 {
@@ -93,7 +94,7 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	}
 	// Explicit cancellation remains available. A later message in the thread
 	// of a terminal Run starts a new Run rather than reviving the old one.
-	if _, err := agentrun.NewRunCommandService(store).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: endpoint.Scope, RunID: a.ID, ExpectedRevision: a.Revision, Kind: agentrun.AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "human"}}); err != nil {
+	if _, err := agentrun.NewRunCommandService(store).CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{Scope: endpoint.Scope, RunID: a.ID, ExpectedRevision: a.Revision, Kind: agentrun.AgentRunCommandCancel, Actor: models.ActivityActor{Type: "user", ID: "human"}}); err != nil {
 		t.Fatal(err)
 	}
 	canceled, _ := store.GetAgentRun(ctx, endpoint.Scope, a.ID)
@@ -102,11 +103,11 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 		thread = "two"
 	}
 	now := time.Now().UTC()
-	item := &ExternalConversationInboxItem{
+	item := &models.ExternalConversationInboxItem{
 		ID: "after-cancel", Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-		Event: NormalizedExternalConversationEvent{ID: "after-cancel", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "same-channel", ExternalThreadID: thread,
+		Event: models.NormalizedExternalConversationEvent{ID: "after-cancel", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "same-channel", ExternalThreadID: thread,
 			ExternalMessageID: "after-cancel", ExternalParticipantID: "human", Text: "start again", MentionsEndpoint: true, OrderingKey: "same-channel:" + thread, OccurredAt: now},
-		Status: ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Status: models.ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, _, err := store.ReceiveExternalConversationEvent(ctx, item); err != nil {
 		t.Fatal(err)

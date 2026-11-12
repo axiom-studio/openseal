@@ -3,18 +3,21 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"sync"
 	"testing"
 )
 
 func TestActivitySequencesConcurrentAppends(t *testing.T) {
 	store := newTestKernelStore(t)
-	portfolio := NewPortfolioService(store)
-	activity := NewRunActivityService(store, store)
+	portfolio := portfolio.NewPortfolioService(store)
+	activity := runtimeactivity.NewRunActivityService(store, store)
 	ctx := context.Background()
-	scope := Scope{Kind: "local", ID: "test"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
-	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: owner, Goal: "work", Source: RunSourceManual})
+	scope := models.Scope{Kind: "local", ID: "test"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
+	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Owner: owner, Goal: "work", Source: models.RunSourceManual})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +28,7 @@ func TestActivitySequencesConcurrentAppends(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, appendErr := activity.AppendActivity(ctx, &ActivityEvent{
+			_, appendErr := activity.AppendActivity(ctx, &models.ActivityEvent{
 				Scope: scope, RunID: run.ID, EventType: "game.move", Summary: fmt.Sprintf("move %d", i),
 			})
 			if appendErr != nil {
@@ -34,7 +37,7 @@ func TestActivitySequencesConcurrentAppends(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	events, err := activity.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, Limit: count})
+	events, err := activity.ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: run.ID, Limit: count})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,22 +53,22 @@ func TestActivitySequencesConcurrentAppends(t *testing.T) {
 
 func TestRunTransitionPersistsWakeAndTerminalState(t *testing.T) {
 	store := newTestKernelStore(t)
-	portfolio := NewPortfolioService(store)
-	activity := NewRunActivityService(store, store)
+	portfolio := portfolio.NewPortfolioService(store)
+	activity := runtimeactivity.NewRunActivityService(store, store)
 	ctx := context.Background()
-	scope := Scope{Kind: "local", ID: "test"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
-	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: owner, Goal: "work", Source: RunSourceManual})
+	scope := models.Scope{Kind: "local", ID: "test"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
+	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Owner: owner, Goal: "work", Source: models.RunSourceManual})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, _, err = activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{ExpectedRevision: 1, Status: AgentRunStatusRunning})
+	run, _, err = activity.TransitionRun(ctx, scope, run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: 1, Status: models.AgentRunStatusRunning})
 	if err != nil {
 		t.Fatal(err)
 	}
-	wake := &WakeCondition{Type: "event", Reference: "game.turn"}
-	run, _, err = activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusWaitingForEvent, WakeCondition: wake,
+	wake := &models.WakeCondition{Type: "event", Reference: "game.turn"}
+	run, _, err = activity.TransitionRun(ctx, scope, run.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: models.AgentRunStatusWaitingForEvent, WakeCondition: wake,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -77,11 +80,11 @@ func TestRunTransitionPersistsWakeAndTerminalState(t *testing.T) {
 	if loaded.WakeCondition == nil || loaded.WakeCondition.Reference != wake.Reference {
 		t.Fatalf("wake condition not persisted: %#v", loaded)
 	}
-	run, _, err = activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning})
+	run, _, err = activity.TransitionRun(ctx, scope, run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: run.Revision, Status: models.AgentRunStatusRunning})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, _, err = activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusCompleted})
+	run, _, err = activity.TransitionRun(ctx, scope, run.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: run.Revision, Status: models.AgentRunStatusCompleted})
 	if err != nil {
 		t.Fatal(err)
 	}

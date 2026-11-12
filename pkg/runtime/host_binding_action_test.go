@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -27,28 +28,28 @@ func (durableCatalog) UsesDurableBindings() bool { return true }
 // supplied to, with no stored binding row; another user's run cannot reach it.
 func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 	store := newTestKernelStore(t)
-	scope := Scope{Kind: "tenant", ID: "one"}
-	claimed := actiontest.ClaimedOwnedRun(t, store, scope, time.Now().UTC(), "worker", ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"})
+	scope := models.Scope{Kind: "tenant", ID: "one"}
+	claimed := actiontest.ClaimedOwnedRun(t, store, scope, time.Now().UTC(), "worker", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"})
 	// Another run in the workspace, e.g. another user's chat.
-	other := actiontest.ClaimedOwnedRun(t, store, scope, time.Now().UTC(), "worker", ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"})
+	other := actiontest.ClaimedOwnedRun(t, store, scope, time.Now().UTC(), "worker", models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "release-agent"})
 	catalog := skillbindingtest.HostConnectorCatalog(t, scope, map[string]bool{claimed.ID: true})
 	allow := action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
 		return action.ActionPolicyDecision{Disposition: action.ActionDispositionAllow, Reason: "read-only"}, nil
 	})
 	coordinator := action.NewActionCoordinator(store, store, durableCatalog{catalog}, allow, nil)
-	propose := func(run *AgentRun, key string) (*ActionProposalResult, error) {
+	propose := func(run *models.AgentRun, key string) (*models.ActionProposalResult, error) {
 		return coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
 			Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", BindingID: "mcp:linear", BindingRevision: 1,
 			SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: "read", Summary: "Search Linear",
 			Arguments: map[string]interface{}{"tool": "search", "hash": "linear-search", "arguments": map[string]interface{}{"title": "mcp bug"}},
-			Actor:     ActivityActor{Type: "worker", ID: "worker"},
+			Actor:     models.ActivityActor{Type: "worker", ID: "worker"},
 		}, key))
 	}
 	result, err := propose(claimed, "search")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Call.BindingID != "mcp:linear" || result.Call.Status != ActionCallStatusReady {
+	if result.Call.BindingID != "mcp:linear" || result.Call.Status != models.ActionCallStatusReady {
 		t.Fatalf("call = %#v", result.Call)
 	}
 
@@ -65,7 +66,7 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dispatched != 1 || executed.Call.Status != ActionCallStatusSucceeded {
+	if dispatched != 1 || executed.Call.Status != models.ActionCallStatusSucceeded {
 		t.Fatalf("executed = %#v (dispatched %d)", executed.Call, dispatched)
 	}
 
@@ -161,25 +162,25 @@ func TestRoutineGrantsCoverHostBindingTools(t *testing.T) {
 	coordinator := action.NewActionCoordinator(f.store, f.store, f.catalog, action.NewDefaultActionPolicy(), nil)
 	occurrence := f.routineOccurrence(t, activation, "host-occurrence")
 	allowed[occurrence.ID] = true
-	proposeCreateIssue := func(run *AgentRun, toolCallID string) (*ActionProposalResult, error) {
+	proposeCreateIssue := func(run *models.AgentRun, toolCallID string) (*models.ActionProposalResult, error) {
 		return coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{
 			Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, BindingID: "mcp:linear", BindingRevision: 1,
 			SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: "call",
 			Arguments: map[string]interface{}{"tool": "create_issue", "hash": "linear-create_issue", "arguments": map[string]interface{}{"title": "Forecast"}},
 		}, toolCallID))
 	}
-	if result, err := proposeCreateIssue(occurrence, "granted"); err != nil || result.Approval != nil || result.Call.Status != ActionCallStatusReady {
+	if result, err := proposeCreateIssue(occurrence, "granted"); err != nil || result.Approval != nil || result.Call.Status != models.ActionCallStatusReady {
 		t.Fatalf("the granted connected tool asked: %#v, %v", result, err)
 	}
 	// The occurrence ends before the routine's next one is admitted.
-	done := cloneAgentRun(occurrence)
+	done := models.CloneAgentRun(occurrence)
 	finished := time.Now().UTC()
-	done.Status, done.LeaseOwner, done.LeaseExpiresAt, done.CompletedAt = AgentRunStatusCompleted, "", nil, &finished
+	done.Status, done.LeaseOwner, done.LeaseExpiresAt, done.CompletedAt = models.AgentRunStatusCompleted, "", nil, &finished
 	done.Revision++
 	done.UpdatedAt = finished
-	if _, err := f.store.UpdateAgentRunWithEvent(t.Context(), done, occurrence.Revision, &ActivityEvent{
+	if _, err := f.store.UpdateAgentRunWithEvent(t.Context(), done, occurrence.Revision, &models.ActivityEvent{
 		ID: "occurrence-done", Scope: done.Scope, RunID: done.ID, EventType: "run.completed", Summary: "Completed", CreatedAt: finished,
-	}, &AgentRunLeaseGuard{WorkerID: "worker", Now: finished}); err != nil {
+	}, &models.AgentRunLeaseGuard{WorkerID: "worker", Now: finished}); err != nil {
 		t.Fatal(err)
 	}
 	// Disconnected for this run: the routine's tool is no longer available.

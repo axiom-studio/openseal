@@ -10,7 +10,9 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -41,9 +43,9 @@ func TestSQLiteAgentDefinitionActivationAdvancesRunbookAtomicallyAndRollsBack(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID}
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: ObjectiveStatusActive,
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deployment.ID}
+	objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+		Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,9 +53,9 @@ func TestSQLiteAgentDefinitionActivationAdvancesRunbookAtomicallyAndRollsBack(t 
 	definitionV1, _ := registry.GetDefinition(ctx, "operator", "1.0.0")
 	trigger := definitionV1.Runbook.Triggers["hourly"]
 	activation, err := routine.NewRunbookActivationService(store).Create(ctx, routine.CreateRunbookActivationRequest{
-		ID: "operator-hourly", Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, ObjectiveID: objective.ID,
+		ID: "operator-hourly", Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, ObjectiveID: objective.ID,
 		AssignedAgentID: deployment.ID, DefinitionID: definitionV1.Runbook.ID, DefinitionVersion: definitionV1.Runbook.Version,
-		TriggerID: "hourly", Trigger: trigger, Budget: runbookBudgetPolicyValue(trigger.Budget), Status: RunbookActivationActive,
+		TriggerID: "hourly", Trigger: trigger, Budget: models.BudgetPolicyFromRunbook(trigger.Budget), Status: models.RunbookActivationActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +65,7 @@ func TestSQLiteAgentDefinitionActivationAdvancesRunbookAtomicallyAndRollsBack(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	advanced, err := store.GetRunbookActivation(ctx, Scope{Kind: scope.Kind, ID: scope.ID}, activation.ID)
+	advanced, err := store.GetRunbookActivation(ctx, models.Scope{Kind: scope.Kind, ID: scope.ID}, activation.ID)
 	if err != nil || advanced.DefinitionVersion != "1.1.0" || advanced.Budget == nil || advanced.Budget.MaxTurns != 7 || advanced.Revision != activation.Revision+1 {
 		t.Fatalf("advanced Runbook activation = %#v, %v", advanced, err)
 	}
@@ -72,7 +74,7 @@ func TestSQLiteAgentDefinitionActivationAdvancesRunbookAtomicallyAndRollsBack(t 
 	if err != nil || rolledBack.ActiveVersion != "1.0.0" {
 		t.Fatalf("rollback = %#v, %v", rolledBack, err)
 	}
-	restored, err := store.GetRunbookActivation(ctx, Scope{Kind: scope.Kind, ID: scope.ID}, activation.ID)
+	restored, err := store.GetRunbookActivation(ctx, models.Scope{Kind: scope.Kind, ID: scope.ID}, activation.ID)
 	if err != nil || restored.DefinitionVersion != "1.0.0" || restored.Budget == nil || restored.Budget.MaxTurns != 2 || restored.Revision != advanced.Revision+1 {
 		t.Fatalf("restored Runbook activation = %#v, %v", restored, err)
 	}
@@ -81,22 +83,22 @@ func TestSQLiteAgentDefinitionActivationAdvancesRunbookAtomicallyAndRollsBack(t 
 func TestAgentRunbookActivationSyncRetiresRemovedTriggersAndRejectsUnplacedOnes(t *testing.T) {
 	now := time.Now().UTC()
 	deployment := &kernelagent.AgentDeployment{ID: "operator", UpdatedAt: now}
-	current := &RunbookActivation{
-		ID: "daily", Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"},
+	current := &models.RunbookActivation{
+		ID: "daily", Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"},
 		ObjectiveID: "objective-one", AssignedAgentID: "operator", DefinitionID: "operator-runbook", DefinitionVersion: "1", TriggerID: "daily",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "operate", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}},
-		Status:  RunbookActivationActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Status:  models.RunbookActivationActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	withoutTrigger := sqliteAgentDefinition("2")
 	withoutTrigger.Runbook = sqliteAgentRunbook("2", 5)
 	delete(withoutTrigger.Runbook.Triggers, "hourly")
-	retired, err := reconcileAgentRunbookActivations([]*RunbookActivation{current}, withoutTrigger, deployment, now.Add(time.Minute))
-	if err != nil || len(retired) != 1 || retired[0].Status != RunbookActivationRetired || retired[0].NextRunAt != nil {
+	retired, err := models.ReconcileAgentRunbookActivations([]*models.RunbookActivation{current}, withoutTrigger, deployment, now.Add(time.Minute))
+	if err != nil || len(retired) != 1 || retired[0].Status != models.RunbookActivationRetired || retired[0].NextRunAt != nil {
 		t.Fatalf("retired activations = %#v, %v", retired, err)
 	}
 	withUnplacedTrigger := sqliteAgentDefinition("3")
 	withUnplacedTrigger.Runbook = sqliteAgentRunbook("3", 7)
-	if _, err := reconcileAgentRunbookActivations(nil, withUnplacedTrigger, deployment, now); err == nil {
+	if _, err := models.ReconcileAgentRunbookActivations(nil, withUnplacedTrigger, deployment, now); err == nil {
 		t.Fatal("an unplaced Runbook trigger should not be created by a definition-only amendment")
 	}
 }
@@ -106,23 +108,23 @@ func TestAgentRunbookActivationSyncUsesActiveScheduleReplacement(t *testing.T) {
 	deployment := &kernelagent.AgentDeployment{ID: "operator", UpdatedAt: now}
 	definition := sqliteAgentDefinition("2")
 	definition.Runbook = sqliteAgentRunbook("2", 5)
-	retired := &RunbookActivation{
-		ID: "hourly-original", Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"},
+	retired := &models.RunbookActivation{
+		ID: "hourly-original", Scope: models.Scope{Kind: "tenant", ID: "one"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"},
 		ObjectiveID: "objective-one", AssignedAgentID: "operator", DefinitionID: definition.Runbook.ID, DefinitionVersion: "1", TriggerID: "hourly",
-		Trigger: definition.Runbook.Triggers["hourly"], Status: RunbookActivationRetired, Revision: 3, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Minute),
+		Trigger: definition.Runbook.Triggers["hourly"], Status: models.RunbookActivationRetired, Revision: 3, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Minute),
 	}
-	replacement := cloneRunbookActivation(retired)
+	replacement := models.CloneRunbookActivation(retired)
 	replacement.ID = "hourly-replacement"
-	replacement.Status = RunbookActivationActive
+	replacement.Status = models.RunbookActivationActive
 	replacement.Revision = 1
 	replacement.CreatedAt = now
 	replacement.UpdatedAt = now
 
-	synchronized, err := reconcileAgentRunbookActivations([]*RunbookActivation{retired, replacement}, definition, deployment, now.Add(time.Minute))
+	synchronized, err := models.ReconcileAgentRunbookActivations([]*models.RunbookActivation{retired, replacement}, definition, deployment, now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(synchronized) != 1 || synchronized[0].ID != replacement.ID || synchronized[0].Status != RunbookActivationActive || synchronized[0].DefinitionVersion != "2" {
+	if len(synchronized) != 1 || synchronized[0].ID != replacement.ID || synchronized[0].Status != models.RunbookActivationActive || synchronized[0].DefinitionVersion != "2" {
 		t.Fatalf("synchronized replacement = %#v", synchronized)
 	}
 }
@@ -306,18 +308,18 @@ func TestSQLiteDefinitionAmendmentSurvivesRestartAndActivatesAtomically(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID}
-	objective, err := NewPortfolioService(store).CreateObjective(context.Background(), CreateObjectiveRequest{
-		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: ObjectiveStatusActive,
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deployment.ID}
+	objective, err := portfolio.NewPortfolioService(store).CreateObjective(context.Background(), portfolio.CreateObjectiveRequest{
+		Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	trigger := registered.Runbook.Triggers["hourly"]
 	runbookActivation, err := routine.NewRunbookActivationService(store).Create(context.Background(), routine.CreateRunbookActivationRequest{
-		ID: "operator-hourly", Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, ObjectiveID: objective.ID,
+		ID: "operator-hourly", Scope: models.Scope{Kind: scope.Kind, ID: scope.ID}, Owner: owner, ObjectiveID: objective.ID,
 		AssignedAgentID: deployment.ID, DefinitionID: registered.Runbook.ID, DefinitionVersion: registered.Runbook.Version,
-		TriggerID: "hourly", Trigger: trigger, Budget: runbookBudgetPolicyValue(trigger.Budget), Status: RunbookActivationActive,
+		TriggerID: "hourly", Trigger: trigger, Budget: models.BudgetPolicyFromRunbook(trigger.Budget), Status: models.RunbookActivationActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -362,7 +364,7 @@ func TestSQLiteDefinitionAmendmentSurvivesRestartAndActivatesAtomically(t *testi
 	if _, err := restarted.GetDefinition(context.Background(), "operator", "2"); err != nil {
 		t.Fatalf("activated candidate was not persisted: %v", err)
 	}
-	advancedRunbook, err := reopened.GetRunbookActivation(context.Background(), Scope{Kind: scope.Kind, ID: scope.ID}, runbookActivation.ID)
+	advancedRunbook, err := reopened.GetRunbookActivation(context.Background(), models.Scope{Kind: scope.Kind, ID: scope.ID}, runbookActivation.ID)
 	if err != nil || advancedRunbook.DefinitionVersion != "2" || advancedRunbook.Budget == nil || advancedRunbook.Budget.MaxTurns != 5 || advancedRunbook.ObjectiveID != objective.ID {
 		t.Fatalf("amendment Runbook activation = %#v, %v", advancedRunbook, err)
 	}

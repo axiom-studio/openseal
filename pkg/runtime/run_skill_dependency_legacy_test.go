@@ -9,52 +9,57 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestLegacyRunSkillDependencyRequiresProvableImmutableMethod(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "legacy-method"}
+	scope := models.Scope{Kind: "tenant", ID: "legacy-method"}
 	deployment, definition := acceptedMethodFixture(scope)
-	original := &AgentRun{ID: "legacy", Scope: scope, Status: AgentRunStatusPaused, AssignedAgentID: "agent", Entrypoint: "manual", Context: map[string]interface{}{"runbookDefinitionId": "reader-method", "runbookDefinitionVersion": "1"}}
+	original := &models.AgentRun{ID: "legacy", Scope: scope, Status: models.AgentRunStatusPaused, AssignedAgentID: "agent", Entrypoint: "manual", Context: map[string]interface{}{"runbookDefinitionId": "reader-method", "runbookDefinitionVersion": "1"}}
 	for _, test := range []struct {
 		name   string
-		mutate func(*AgentRun, *kernelagent.AgentDeployment, *kernelagent.AgentDefinition)
+		mutate func(*models.AgentRun, *kernelagent.AgentDeployment, *kernelagent.AgentDefinition)
 		want   bool
 	}{
 		{name: "exact context", want: true},
-		{name: "exact plan", want: true, mutate: func(r *AgentRun, _ *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) {
+		{name: "exact plan", want: true, mutate: func(r *models.AgentRun, _ *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) {
 			r.Context = nil
 			r.Plan = map[string]interface{}{"runbook": map[string]interface{}{"id": "reader-method", "version": "1"}}
 		}},
-		{name: "unknown historical method", mutate: func(r *AgentRun, _ *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) { r.Context = nil }},
-		{name: "stale context", mutate: func(r *AgentRun, _ *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) {
+		{name: "unknown historical method", mutate: func(r *models.AgentRun, _ *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) {
+			r.Context = nil
+		}},
+		{name: "stale context", mutate: func(r *models.AgentRun, _ *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) {
 			r.Context["runbookDefinitionVersion"] = "0"
 		}},
-		{name: "conflicting plan", mutate: func(r *AgentRun, _ *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) {
+		{name: "conflicting plan", mutate: func(r *models.AgentRun, _ *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) {
 			r.Plan = map[string]interface{}{"runbook": map[string]interface{}{"id": "reader-method", "version": "2"}}
 		}},
-		{name: "foreign tenant", mutate: func(_ *AgentRun, d *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) {
+		{name: "foreign tenant", mutate: func(_ *models.AgentRun, d *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) {
 			d.Scope.ID = "foreign"
 		}},
-		{name: "wrong immutable definition", mutate: func(_ *AgentRun, _ *kernelagent.AgentDeployment, d *kernelagent.AgentDefinition) { d.Version = "2" }},
-		{name: "terminal", mutate: func(r *AgentRun, _ *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) {
-			r.Status = AgentRunStatusCompleted
+		{name: "wrong immutable definition", mutate: func(_ *models.AgentRun, _ *kernelagent.AgentDeployment, d *kernelagent.AgentDefinition) {
+			d.Version = "2"
+		}},
+		{name: "terminal", mutate: func(r *models.AgentRun, _ *kernelagent.AgentDeployment, _ *kernelagent.AgentDefinition) {
+			r.Status = models.AgentRunStatusCompleted
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			run := cloneAgentRun(original)
+			run := models.CloneAgentRun(original)
 			d, f := *deployment, *definition
 			if test.mutate != nil {
 				test.mutate(run, &d, &f)
 			}
-			before := cloneAgentRun(run)
-			pin := legacyAcceptedRunExecution(run, &d, &f)
+			before := models.CloneAgentRun(run)
+			pin := models.LegacyAcceptedRunExecution(run, &d, &f)
 			if (pin != nil) != test.want {
 				t.Fatalf("legacy proof = %#v, wanted valid=%v", pin, test.want)
 			}
-			if pin != nil && !reflect.DeepEqual(pin.SkillDependencies, []SkillRuntimeReference{{SkillID: "reader", SkillVersion: "1.0.0"}}) {
+			if pin != nil && !reflect.DeepEqual(pin.SkillDependencies, []models.SkillRuntimeReference{{SkillID: "reader", SkillVersion: "1.0.0"}}) {
 				t.Fatalf("wrong exact dependency: %#v", pin)
 			}
 			if !reflect.DeepEqual(run, before) {
@@ -69,8 +74,8 @@ func TestLegacyRunSkillDependencyBackfillPagesWithoutRewritingHistoryAcrossStore
 		db := fixture.db
 		runs, deployments, definitions, dependencies := fixture.table("agent_runs"), fixture.table("agent_deployments"), fixture.table("agent_definitions"), fixture.table("run_skill_dependencies")
 		_, postgres := fixture.store.(*postgres.Store)
-		store := fixture.store.(KernelStore)
-		scope := Scope{Kind: "tenant", ID: "legacy-backfill"}
+		store := fixture.store.(models.KernelStore)
+		scope := models.Scope{Kind: "tenant", ID: "legacy-backfill"}
 		deployment, definition := acceptedMethodFixture(scope)
 		if err := store.(kernelagent.Store).CreateDefinition(t.Context(), definition); err != nil {
 			t.Fatal(err)
@@ -89,7 +94,7 @@ func TestLegacyRunSkillDependencyBackfillPagesWithoutRewritingHistoryAcrossStore
 		}
 		count := sqlstore.LegacyRunSkillDependencyBatch + 7
 		for i := 0; i < count; i++ {
-			run := &AgentRun{ID: fmt.Sprintf("legacy-%04d", i), RootRunID: fmt.Sprintf("legacy-%04d", i), Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Status: AgentRunStatusPaused, Entrypoint: "manual", Context: map[string]interface{}{"runbookDefinitionId": "reader-method", "runbookDefinitionVersion": "1"}}
+			run := &models.AgentRun{ID: fmt.Sprintf("legacy-%04d", i), RootRunID: fmt.Sprintf("legacy-%04d", i), Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Status: models.AgentRunStatusPaused, Entrypoint: "manual", Context: map[string]interface{}{"runbookDefinitionId": "reader-method", "runbookDefinitionVersion": "1"}}
 			payload, _ := json.Marshal(run)
 			if _, err := tx.ExecContext(t.Context(), insert, scope.Kind, scope.ID, run.ID, run.ID, run.AssignedAgentID, run.Status, time.Now().UTC(), string(payload)); err != nil {
 				t.Fatal(err)
@@ -97,16 +102,16 @@ func TestLegacyRunSkillDependencyBackfillPagesWithoutRewritingHistoryAcrossStore
 		}
 		for _, test := range []struct {
 			id      string
-			scope   Scope
+			scope   models.Scope
 			version string
-			status  AgentRunStatus
+			status  models.AgentRunStatus
 		}{
-			{id: "unknown", scope: scope, status: AgentRunStatusPaused},
-			{id: "stale", scope: scope, version: "0", status: AgentRunStatusPaused},
-			{id: "terminal", scope: scope, version: "1", status: AgentRunStatusCompleted},
-			{id: "foreign", scope: Scope{Kind: "tenant", ID: "foreign"}, version: "1", status: AgentRunStatusPaused},
+			{id: "unknown", scope: scope, status: models.AgentRunStatusPaused},
+			{id: "stale", scope: scope, version: "0", status: models.AgentRunStatusPaused},
+			{id: "terminal", scope: scope, version: "1", status: models.AgentRunStatusCompleted},
+			{id: "foreign", scope: models.Scope{Kind: "tenant", ID: "foreign"}, version: "1", status: models.AgentRunStatusPaused},
 		} {
-			run := &AgentRun{ID: test.id, RootRunID: test.id, Scope: test.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Status: test.status, Entrypoint: "manual"}
+			run := &models.AgentRun{ID: test.id, RootRunID: test.id, Scope: test.scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Status: test.status, Entrypoint: "manual"}
 			if test.version != "" {
 				run.Context = map[string]interface{}{"runbookDefinitionId": "reader-method", "runbookDefinitionVersion": test.version}
 			}
@@ -152,13 +157,13 @@ func TestLegacyRunSkillDependencyBackfillPagesWithoutRewritingHistoryAcrossStore
 		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
-		if busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), SkillRuntimeUsageFilter{Scope: scope, SkillID: "reader", SkillVersion: "1.0.0"}); err != nil || !busy {
+		if busy, err := store.(models.SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), models.SkillRuntimeUsageFilter{Scope: scope, SkillID: "reader", SkillVersion: "1.0.0"}); err != nil || !busy {
 			t.Fatalf("legacy metadata was not retained: %v %v", busy, err)
 		}
 		if fixture.reopen != nil {
-			store = fixture.reopen().(KernelStore)
+			store = fixture.reopen().(models.KernelStore)
 		}
-		if refs, err := store.(SkillRuntimeUsageStore).ListReferencedSkillRuntimeVersions(t.Context(), scope); err != nil || !reflect.DeepEqual(refs, []SkillRuntimeReference{{SkillID: "reader", SkillVersion: "1.0.0"}}) {
+		if refs, err := store.(models.SkillRuntimeUsageStore).ListReferencedSkillRuntimeVersions(t.Context(), scope); err != nil || !reflect.DeepEqual(refs, []models.SkillRuntimeReference{{SkillID: "reader", SkillVersion: "1.0.0"}}) {
 			t.Fatalf("restart lost legacy executable identity: %#v %v", refs, err)
 		}
 	})

@@ -105,9 +105,9 @@ func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint
 	}
 	reply, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
-		Intent: MessageIntentAnswer, Content: "Canonical answer",
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "answer",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: endpoint.Owner.ID},
+		Intent: models.MessageIntentAnswer, Content: "Canonical answer",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "answer",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -149,9 +149,9 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 	}
 	message, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
-		Intent: MessageIntentAcknowledgment, Content: "Checking now.",
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "typing-status",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: endpoint.Owner.ID},
+		Intent: models.MessageIntentAcknowledgment, Content: "Checking now.",
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "typing-status",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -165,8 +165,8 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 		t.Fatal(err)
 	}
 	// A previous progress acknowledgement already owns this thread timestamp.
-	if err := store.SaveExternalMessageMapping(ctx, &ExternalMessageMapping{
-		Scope: endpoint.Scope, EndpointID: endpoint.ID, Direction: ExternalMessageOutbound,
+	if err := store.SaveExternalMessageMapping(ctx, &models.ExternalMessageMapping{
+		Scope: endpoint.Scope, EndpointID: endpoint.ID, Direction: models.ExternalMessageOutbound,
 		ExternalMessageID: "thread-1", ConversationID: conversation.ID,
 		ChannelMessageID: "earlier-progress", Revision: 1,
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
@@ -183,15 +183,15 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 	}
 	now := time.Now().UTC().Add(time.Second)
 	workerClock = func() time.Time { return now }
-	if retry, processErr := worker.ProcessOne(ctx, endpoint.Scope); processErr == nil || retry == nil || retry.Status != ExternalConversationDeliveryRetry {
+	if retry, processErr := worker.ProcessOne(ctx, endpoint.Scope); processErr == nil || retry == nil || retry.Status != models.ExternalConversationDeliveryRetry {
 		t.Fatalf("first typing attempt = %#v, %v", retry, processErr)
 	}
 	workerClock = func() time.Time { return now.Add(time.Second) }
 	delivered, err := worker.ProcessOne(ctx, endpoint.Scope)
-	if err != nil || delivered == nil || delivered.Status != ExternalConversationDeliveryDelivered {
+	if err != nil || delivered == nil || delivered.Status != models.ExternalConversationDeliveryDelivered {
 		t.Fatalf("retried typing delivery = %#v, %v", delivered, err)
 	}
-	mapping, err := store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, ExternalMessageOutbound, "thread-1")
+	mapping, err := store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, models.ExternalMessageOutbound, "thread-1")
 	if err != nil || mapping == nil || mapping.ChannelMessageID != "earlier-progress" {
 		t.Fatalf("typing changed the existing message mapping: %#v, %v", mapping, err)
 	}
@@ -208,8 +208,8 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 			conversations := runtimeconversation.NewConversationService(store)
 			conversation, _, err := conversations.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 				Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "External support",
-				Origin: &ConversationReference{
-					Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision,
+				Origin: &models.ConversationReference{
+					Kind: models.ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision,
 				},
 				IdempotencyKey: "external-support",
 			})
@@ -218,9 +218,9 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 			}
 			reply, err := conversations.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-				Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
-				Intent: MessageIntentAnswer, Content: "Canonical answer",
-				Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "answer",
+				Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: endpoint.Owner.ID},
+				Intent: models.MessageIntentAnswer, Content: "Canonical answer",
+				Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "answer",
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -255,13 +255,13 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 			now := time.Now().UTC().Add(time.Second)
 			workerClock = func() time.Time { return now }
 			retry, err := worker.ProcessOne(ctx, endpoint.Scope)
-			if err == nil || retry == nil || retry.Status != ExternalConversationDeliveryRetry || retry.Attempt != 1 {
+			if err == nil || retry == nil || retry.Status != models.ExternalConversationDeliveryRetry || retry.Attempt != 1 {
 				t.Fatalf("lost acknowledgement = %#v, %v", retry, err)
 			}
 
 			workerClock = func() time.Time { return now.Add(time.Second) }
 			delivered, err := worker.ProcessOne(ctx, endpoint.Scope)
-			if err != nil || delivered == nil || delivered.Status != ExternalConversationDeliveryDelivered ||
+			if err != nil || delivered == nil || delivered.Status != models.ExternalConversationDeliveryDelivered ||
 				delivered.ProviderMessageID != provider+"/message/1" || delivered.Attempt != 2 {
 				t.Fatalf("recovered delivery = %#v, %v", delivered, err)
 			}
@@ -269,14 +269,14 @@ func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowl
 				t.Fatalf("host calls: deliveries=%d lookups=%d", host.deliveries, host.lookups)
 			}
 			mapping, err := store.GetExternalMessageMapping(
-				ctx, endpoint.Scope, endpoint.ID, ExternalMessageOutbound, delivered.ProviderMessageID,
+				ctx, endpoint.Scope, endpoint.ID, models.ExternalMessageOutbound, delivered.ProviderMessageID,
 			)
 			if err != nil || mapping == nil || mapping.ConversationID != conversation.ID ||
 				mapping.ChannelMessageID != reply.Message.ID {
 				t.Fatalf("outbound mapping = %#v, %v", mapping, err)
 			}
 			stored, err := store.GetExternalConversationDelivery(ctx, endpoint.Scope, enqueued.Delivery.ID)
-			if err != nil || stored.Status != ExternalConversationDeliveryDelivered {
+			if err != nil || stored.Status != models.ExternalConversationDeliveryDelivered {
 				t.Fatalf("stored delivery = %#v, %v", stored, err)
 			}
 		})

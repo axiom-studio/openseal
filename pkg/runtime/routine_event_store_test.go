@@ -5,12 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestSQLiteRoutineEventStore(t *testing.T) {
-	storetest.RunRoutineEventContract(t, func(t *testing.T) (KernelStore, storetest.RoutineEventPayloadProbe) {
+	storetest.RunRoutineEventContract(t, func(t *testing.T) (models.KernelStore, storetest.RoutineEventPayloadProbe) {
 		path := filepath.Join(t.TempDir(), "routine-events.db")
 		store, err := sqlite.NewSQLiteStore(path)
 		if err != nil {
@@ -18,7 +19,7 @@ func TestSQLiteRoutineEventStore(t *testing.T) {
 		}
 		sqlDB := openTestSQLiteDB(t, path)
 		t.Cleanup(func() { _ = store.Close() })
-		return store, func(t *testing.T, scope Scope, activationID, eventID string) bool {
+		return store, func(t *testing.T, scope models.Scope, activationID, eventID string) bool {
 			var hasPayload bool
 			if err := sqlDB.QueryRow(`SELECT payload IS NOT NULL FROM routine_events WHERE scope_kind = ? AND scope_id = ? AND activation_id = ? AND event_id = ?`,
 				scope.Kind, scope.ID, activationID, eventID).Scan(&hasPayload); err != nil {
@@ -38,7 +39,7 @@ func TestSQLiteRoutineEventsMigrationFillsIndexColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	sqlDB := openTestSQLiteDB(t, path)
-	scope := Scope{Kind: "tenant", ID: "migrate"}
+	scope := models.Scope{Kind: "tenant", ID: "migrate"}
 	activation := storetest.RoutineEventActivation(scope, "activation-old", time.Now().UTC())
 	if err := store.CreateRunbookActivation(t.Context(), activation); err != nil {
 		t.Fatal(err)

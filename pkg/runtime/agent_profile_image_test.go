@@ -11,24 +11,25 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
 type profileImageFixture struct {
-	ArtifactStore
-	ArtifactContentStore
-	artifact *Artifact
+	models.ArtifactStore
+	models.ArtifactContentStore
+	artifact *models.Artifact
 	data     []byte
 	opened   bool
 }
 
-func (f *profileImageFixture) GetArtifact(_ context.Context, scope Scope, id string, version int64) (*Artifact, error) {
+func (f *profileImageFixture) GetArtifact(_ context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
 	if scope != f.artifact.Scope || id != f.artifact.ID || version != f.artifact.Version {
 		return nil, artifactcatalog.ErrArtifactNotFound
 	}
 	return f.artifact, nil
 }
-func (f *profileImageFixture) Open(_ context.Context, scope Scope, ref string) (io.ReadCloser, error) {
+func (f *profileImageFixture) Open(_ context.Context, scope models.Scope, ref string) (io.ReadCloser, error) {
 	if scope != f.artifact.Scope || ref != f.artifact.ContentRef {
 		return nil, artifactcatalog.ErrArtifactNotFound
 	}
@@ -43,7 +44,7 @@ func TestProfileImageValidatesScopedContent(t *testing.T) {
 	}
 	data := encoded.Bytes()
 	digest := sha256.Sum256(data)
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	reference := &agent.ProfileImage{ArtifactID: "portrait", Version: 1}
 	for _, test := range []struct {
 		name    string
@@ -61,7 +62,7 @@ func TestProfileImageValidatesScopedContent(t *testing.T) {
 		{name: "wrong digest", mutate: func(f *profileImageFixture) { f.artifact.Digest = "wrong" }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			f := &profileImageFixture{artifact: &Artifact{ID: "portrait", Version: 1, Scope: scope, ContentRef: "content:portrait", MediaType: "image/png", SizeBytes: int64(len(data)), Digest: "sha256:" + hex.EncodeToString(digest[:]), ContentAvailability: ArtifactContentAvailable}, data: data}
+			f := &profileImageFixture{artifact: &models.Artifact{ID: "portrait", Version: 1, Scope: scope, ContentRef: "content:portrait", MediaType: "image/png", SizeBytes: int64(len(data)), Digest: "sha256:" + hex.EncodeToString(digest[:]), ContentAvailability: models.ArtifactContentAvailable}, data: data}
 			if test.mutate != nil {
 				test.mutate(f)
 			}
@@ -69,7 +70,7 @@ func TestProfileImageValidatesScopedContent(t *testing.T) {
 			if test.foreign {
 				requestedScope.ID = "other"
 			}
-			err := ValidateAgentProfileImage(context.Background(), f, f, requestedScope, reference)
+			err := models.ValidateAgentProfileImage(context.Background(), f, f, requestedScope, reference)
 			if (err == nil) != test.valid {
 				t.Fatalf("validation error = %v", err)
 			}

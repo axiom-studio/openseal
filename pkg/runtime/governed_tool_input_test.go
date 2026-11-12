@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -306,8 +307,8 @@ func TestParseDirectiveOverrides(t *testing.T) {
 	reviewed := governedTestAction(capability.SideEffectExternal, capability.RiskLevelExternal, capability.ExternalOperationRequired)
 	directive := &modelstep.GovernedInputDirective{
 		Summary:           "Post the weekly report",
-		ExternalOperation: &ExternalOperationIdentity{Resource: "#reports", Operation: "post_weekly"},
-		ReviewContext:     &ApprovalReviewContext{Summary: "Weekly report"},
+		ExternalOperation: &activity.ExternalOperationIdentity{Resource: "#reports", Operation: "post_weekly"},
+		ReviewContext:     &activity.ApprovalReviewContext{Summary: "Weekly report"},
 	}
 	input, err := modelstep.ParseGovernedToolInput(reviewed, json.RawMessage(`{"text":"report","idempotencyKey":"k"}`), directive)
 	if err != nil {
@@ -333,7 +334,7 @@ func TestParseDirectiveOverrides(t *testing.T) {
 	if err != nil || input.ReviewSummary != "Save it" {
 		t.Fatalf("write directive = %+v, %v", input, err)
 	}
-	_, err = modelstep.ParseGovernedToolInput(write, json.RawMessage(`{"text":"x"}`), &modelstep.GovernedInputDirective{ReviewContext: &ApprovalReviewContext{}})
+	_, err = modelstep.ParseGovernedToolInput(write, json.RawMessage(`{"text":"x"}`), &modelstep.GovernedInputDirective{ReviewContext: &activity.ApprovalReviewContext{}})
 	expectRejection(t, err, runtimeaction.ProposalRejectionReviewInvalid)
 }
 

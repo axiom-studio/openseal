@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
@@ -20,12 +21,12 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 	conversationtest.ForThreadStartStores(t, func(t *testing.T, base conversationtest.ThreadStartStore, _ func(*testing.T) conversationtest.ThreadStartStore) {
 		content := "company,total\nAcme,42"
 		artifacts, ok := base.(interface {
-			CreateArtifactVersion(context.Context, *Artifact, int64) error
+			CreateArtifactVersion(context.Context, *models.Artifact, int64) error
 		})
 		if !ok {
 			t.Fatalf("%T stores no artifacts", base)
 		}
-		ask := func(team bool) (*SessionEntry, *SessionEntry, *agentrun.TurnRunnerBinding, *runlooptest.ChatFixture) {
+		ask := func(team bool) (*models.SessionEntry, *models.SessionEntry, *agentrun.TurnRunnerBinding, *runlooptest.ChatFixture) {
 			t.Helper()
 			f := runlooptest.NewChatFixture(t, base, runlooptest.ChatOptions{Team: team})
 			artifact := conversationtest.CSVArtifact()
@@ -37,9 +38,9 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 			f.Runner = f.NewRunner(conversationrun.ConversationRunTurnRunnerConfig{AttachmentContent: &conversationtest.TextContent{Text: content}})
 			posted, err := f.Service.PostChannelMessage(f.Ctx, conversation.PostChannelMessageRequest{
 				Scope: f.Conversation.Scope, ConversationID: f.Conversation.ID, ExpectedRevision: f.Conversation.Revision,
-				Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,
-				Content: "What does the attached file total?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-				References:     []ConversationReference{{Kind: ConversationReferenceArtifact, ID: artifact.ID, Version: 1}},
+				Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "user-1"}, Intent: models.MessageIntentQuestion,
+				Content: "What does the attached file total?", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
+				References:     []models.ConversationReference{{Kind: models.ConversationReferenceArtifact, ID: artifact.ID, Version: 1}},
 				IdempotencyKey: "question", RequiresResponse: true,
 			})
 			if err != nil {
@@ -49,15 +50,15 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 			run := f.StartRun(posted.Message)
 			producer := &runlooptest.ChatProducer{Answers: []string{"Acme totals 42."}}
 			binding := f.Bind(run, producer)
-			if exit := f.Drive(run, binding); exit.Run.Status != AgentRunStatusCompleted || len(producer.Paths) != 1 {
+			if exit := f.Drive(run, binding); exit.Run.Status != models.AgentRunStatusCompleted || len(producer.Paths) != 1 {
 				t.Fatalf("team=%v: exit %s, run %s, steps %d", team, exit.Reason, exit.Run.Status, len(producer.Paths))
 			}
-			var trigger, note *SessionEntry
+			var trigger, note *models.SessionEntry
 			for _, entry := range producer.Paths[0] {
 				switch {
 				case entry.User != nil && entry.User.MessageID == posted.Message.ID:
 					trigger = entry
-				case entry.Note != nil && entry.Note.Kind == NoteRunContext:
+				case entry.Note != nil && entry.Note.Kind == models.NoteRunContext:
 					note = entry
 				}
 			}
@@ -69,20 +70,20 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 		direct, directNote, directBinding, _ := ask(false)
 		member, memberNote, memberBinding, team := ask(true)
 
-		want := ContentPart{Type: ContentPartText, Text: "<attachment id=\"file\" version=\"1\" name=\"file.csv\" status=\"supplied\">\n" + content + "\n</attachment>"}
+		want := models.ContentPart{Type: models.ContentPartText, Text: "<attachment id=\"file\" version=\"1\" name=\"file.csv\" status=\"supplied\">\n" + content + "\n</attachment>"}
 		if len(direct.User.Content) != 2 || !reflect.DeepEqual(direct.User.Content[1], want) {
 			t.Fatalf("1:1 attachment parts = %#v", direct.User.Content)
 		}
 		if !reflect.DeepEqual(member.User.Content[1:], direct.User.Content[1:]) {
 			t.Fatalf("Team member attachment parts = %#v, 1:1 = %#v", member.User.Content[1:], direct.User.Content[1:])
 		}
-		for name, entry := range map[string]*SessionEntry{"1:1": direct, "member": member} {
+		for name, entry := range map[string]*models.SessionEntry{"1:1": direct, "member": member} {
 			if !strings.HasSuffix(runlooptest.ChatEntryText(entry), "\nAttached: file.csv (artifact file v1)") {
 				t.Fatalf("%s trigger = %q", name, runlooptest.ChatEntryText(entry))
 			}
 		}
-		if strings.Contains(chatStepText(directBinding, []*SessionEntry{directNote}), teamMemberRules) ||
-			!strings.Contains(chatStepText(memberBinding, []*SessionEntry{memberNote}), teamMemberRules) {
+		if strings.Contains(chatStepText(directBinding, []*models.SessionEntry{directNote}), teamMemberRules) ||
+			!strings.Contains(chatStepText(memberBinding, []*models.SessionEntry{memberNote}), teamMemberRules) {
 			t.Fatal("Team rules reached the 1:1 step or missed the member step")
 		}
 		answers := team.AgentMessages()

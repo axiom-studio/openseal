@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -35,7 +36,7 @@ func TestPostgresSkillSetupLifecycleAndMigration(t *testing.T) {
 	if err := store.SaveSkillSetupRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
 	}
-	if found, err := store.GetSkillSetupRequest(ctx, Scope{Kind: "tenant", ID: "foreign"}, request.ID); err != nil || found != nil {
+	if found, err := store.GetSkillSetupRequest(ctx, models.Scope{Kind: "tenant", ID: "foreign"}, request.ID); err != nil || found != nil {
 		t.Fatalf("cross-tenant lookup: %#v %v", found, err)
 	}
 	request.Status = "dismissed"
@@ -45,7 +46,7 @@ func TestPostgresSkillSetupLifecycleAndMigration(t *testing.T) {
 	if err := store.SaveSkillSetupRequest(ctx, request, 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SaveSkillSetupRequest(ctx, request, 1); !errors.Is(err, ErrSkillSetupConflict) {
+	if err := store.SaveSkillSetupRequest(ctx, request, 1); !errors.Is(err, models.ErrSkillSetupConflict) {
 		t.Fatalf("stale resolution accepted: %v", err)
 	}
 	records, err := store.ListSkillSetupRequests(ctx, request.Scope, request.DeploymentID, request.ConversationID)

@@ -5,18 +5,20 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
 func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	t.Parallel()
 	store := newTestKernelStore(t)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	portfolio := NewPortfolioService(store)
-	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
-		Goal: "Ship the release", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	portfolio := portfolio.NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
+		Goal: "Ship the release", Source: models.RunSourceManual,
 		Context: map[string]interface{}{"privateCredentialRef": "binding:source-only", "private": true},
 	})
 	if err != nil {
@@ -24,9 +26,9 @@ func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	}
 	service := collaboration.NewCollaborationService(store)
 	created, err := service.CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 		Goal:      "Create the launch brief", SemanticRole: "launch-editor",
 		SharedContext: map[string]interface{}{"release": "2026.07"}, IdempotencyKey: "launch-brief",
 	})
@@ -34,9 +36,9 @@ func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 		t.Fatal(err)
 	}
 	duplicate, err := service.CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 		Goal:      "Create the launch brief", SemanticRole: "launch-editor",
 		SharedContext: map[string]interface{}{"release": "2026.07"}, IdempotencyKey: "launch-brief",
 	})
@@ -45,7 +47,7 @@ func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 	}
 	accepted, err := service.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: collaboration.AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Decision: collaboration.AgentRequestDecisionAccept, Principal: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -57,10 +59,10 @@ func TestAgentRequestCreatesCredentialIsolatedChildLineage(t *testing.T) {
 		t.Fatalf("child context = %#v", accepted.Child.Context)
 	}
 	persistedSource, err := portfolio.GetAgentRun(ctx, scope, source.ID)
-	if err != nil || persistedSource.Status != AgentRunStatusWaitingForDependency || persistedSource.WakeCondition == nil || persistedSource.WakeCondition.Reference != created.Request.ID {
+	if err != nil || persistedSource.Status != models.AgentRunStatusWaitingForDependency || persistedSource.WakeCondition == nil || persistedSource.WakeCondition.Reference != created.Request.ID {
 		t.Fatalf("source = %#v, %v", persistedSource, err)
 	}
-	activity, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, TeamID: "product", Descending: true, Limit: 10})
+	activity, err := store.ListActivity(ctx, models.ActivityFilter{Scope: scope, TeamID: "product", Descending: true, Limit: 10})
 	if err != nil || len(activity) != 3 {
 		t.Fatalf("team activity = %#v, %v", activity, err)
 	}
@@ -70,24 +72,24 @@ func TestAgentRequestNegotiationAndSafety(t *testing.T) {
 	t.Parallel()
 	store := newTestKernelStore(t)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	portfolio := NewPortfolioService(store)
-	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
-		Goal: "Ship", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	portfolio := portfolio.NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"}, AssignedAgentID: "developer",
+		Goal: "Ship", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	service := collaboration.NewCollaborationService(store)
 	base := collaboration.CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "analyst"}, Goal: "Measure impact",
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "analyst"}, Goal: "Measure impact",
 	}
 	unsafe := base
 	unsafe.SharedContext = map[string]interface{}{"nested": map[string]interface{}{"access_token": "no"}}
-	if _, err := service.CreateAgentRequest(ctx, unsafe); !errors.Is(err, ErrUnsafeSharedContext) {
+	if _, err := service.CreateAgentRequest(ctx, unsafe); !errors.Is(err, models.ErrUnsafeSharedContext) {
 		t.Fatalf("unsafe context error = %v", err)
 	}
 	created, err := service.CreateAgentRequest(ctx, base)
@@ -105,7 +107,7 @@ func TestAgentRequestNegotiationAndSafety(t *testing.T) {
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: question.Request.Revision,
 		Decision: collaboration.AgentRequestDecisionProvideClarification, Principal: base.Requester, Message: "Platform engineers.",
 	})
-	if err != nil || clarified.Request.Status != AgentRequestStatusPending {
+	if err != nil || clarified.Request.Status != models.AgentRequestStatusPending {
 		t.Fatalf("clarification = %#v, %v", clarified, err)
 	}
 }

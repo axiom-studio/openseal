@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
@@ -18,28 +19,28 @@ func (replyAliasDispatcher) DispatchExternalConversation(_ context.Context, req 
 	return &externalconversation.ExternalConversationDispatchResult{RunID: "reply-run-" + req.Message.ID}, nil
 }
 
-func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *externalconversation.ExternalConversationInboxWorker, endpoint *ExternalConversationEndpoint,
+func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *externalconversation.ExternalConversationInboxWorker, endpoint *models.ExternalConversationEndpoint,
 	chatID, messageID, threadID, parentID, text string,
-) *ChannelMessage {
+) *models.ChannelMessage {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	item := &ExternalConversationInboxItem{
+	item := &models.ExternalConversationInboxItem{
 		ID:    "inbox:" + endpoint.Scope.ID + ":" + endpoint.ID + ":" + messageID,
 		Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-		Event: NormalizedExternalConversationEvent{
+		Event: models.NormalizedExternalConversationEvent{
 			ID: "event:" + messageID, Type: capability.ConversationEventMessageReceived,
 			ExternalConversationID: chatID, ExternalMessageID: messageID, ExternalThreadID: threadID, ReplyToExternalMessageID: parentID,
 			ExternalParticipantID: "user:Kev", ParticipantDisplayName: "Kev", Text: text,
 			OrderingKey: chatID + ":" + threadID, OccurredAt: now,
 		},
-		Status: ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now,
+		Status: models.ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, _, err := store.ReceiveExternalConversationEvent(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
 	applied, err := worker.ProcessOne(t.Context(), endpoint.Scope)
-	if err != nil || applied == nil || applied.Status != ExternalConversationInboxApplied {
+	if err != nil || applied == nil || applied.Status != models.ExternalConversationInboxApplied {
 		t.Fatalf("apply reply alias = %#v, %v", applied, err)
 	}
 	message, err := store.GetChannelMessage(t.Context(), endpoint.Scope, applied.ConversationID, applied.ChannelMessageID)
@@ -71,16 +72,16 @@ func TestExternalConversationReplyAliasesKeepUserAndBotRepliesInOriginalThread(t
 	}
 	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
-		Intent: MessageIntentAnswer, Content: "The image now has a hat.", ReplyToMessageID: reply.ID,
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "bot-answer",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: endpoint.Owner.ID},
+		Intent: models.MessageIntentAnswer, Content: "The image now has a hat.", ReplyToMessageID: reply.ID,
+		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "bot-answer",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	if err := store.SaveExternalMessageMapping(ctx, &ExternalMessageMapping{
-		Scope: endpoint.Scope, EndpointID: endpoint.ID, Direction: ExternalMessageOutbound,
+	if err := store.SaveExternalMessageMapping(ctx, &models.ExternalMessageMapping{
+		Scope: endpoint.Scope, EndpointID: endpoint.ID, Direction: models.ExternalMessageOutbound,
 		ExternalMessageID: "chat-A:102", ConversationID: conversation.ID, ChannelMessageID: posted.Message.ID,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}, 0); err != nil {
@@ -105,7 +106,7 @@ func TestExternalConversationReplyAliasesKeepUserAndBotRepliesInOriginalThread(t
 			t.Fatalf("alias %q = %#v, %v", alias, mapping, err)
 		}
 	}
-	history, err := service.ListChannelMessages(ctx, ChannelMessageFilter{
+	history, err := service.ListChannelMessages(ctx, models.ChannelMessageFilter{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ThreadRootID: root.ID, Limit: 10,
 	})
 	if err != nil || len(history) != 4 || history[0].ID != root.ID || history[1].ID != reply.ID ||
@@ -129,7 +130,7 @@ func TestExternalConversationReplyAliasesNeverReuseForeignParents(t *testing.T) 
 				t.Fatal(err)
 			}
 			root := receiveReplyAliasEvent(t, store, worker, endpoint, "chat-A", "chat-A:100", "", "", "Private original topic")
-			target := cloneExternalConversationEndpoint(endpoint)
+			target := models.CloneExternalConversationEndpoint(endpoint)
 			chatID, messageID, threadID, parentID := "chat-A", "chat-A:101", "reply:100", "chat-A:100"
 			switch name {
 			case "another chat":

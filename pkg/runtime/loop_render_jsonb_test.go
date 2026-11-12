@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -39,12 +40,12 @@ func jsonbStyle(t *testing.T, entries int, valueBytes int) (compact, spaced json
 // the model sees it compact.
 func TestAResultReadBackFromJSONBStillFitsItsCap(t *testing.T) {
 	compact, spaced := jsonbStyle(t, 1450, 30)
-	if len(compact) > MaxToolResultContentBytes || len(spaced) <= MaxToolResultContentBytes {
-		t.Fatalf("fixture: compact %d, spaced %d, cap %d", len(compact), len(spaced), MaxToolResultContentBytes)
+	if len(compact) > models.MaxToolResultContentBytes || len(spaced) <= models.MaxToolResultContentBytes {
+		t.Fatalf("fixture: compact %d, spaced %d, cap %d", len(compact), len(spaced), models.MaxToolResultContentBytes)
 	}
-	result := &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartJSON, Value: spaced}}}
-	entry := &SessionEntry{ID: "read-back", Type: SessionEntryTool, State: ToolEntryCompleted, StepID: "step-a", ToolCallID: "c1",
-		Tool: &ToolEntry{Name: "lookup", SideEffect: ToolSideEffectRead, Result: result}}
+	result := &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartJSON, Value: spaced}}}
+	entry := &models.SessionEntry{ID: "read-back", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, StepID: "step-a", ToolCallID: "c1",
+		Tool: &models.ToolEntry{Name: "lookup", SideEffect: models.ToolSideEffectRead, Result: result}}
 	if err := entry.Validate(); err != nil {
 		t.Fatalf("a result that fit when written is refused when read: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestAResultReadBackFromJSONBStillFitsItsCap(t *testing.T) {
 	f := modelsteptest.NewRenderFixture(t, "lane")
 	f.User("run-a", "look it up")
 	f.Assistant("run-a", "step-a", "c1")
-	tool := f.Tool("run-a", "step-a", "c1", ToolEntryCompleted, ContentPart{Type: ContentPartJSON, Value: spaced})
+	tool := f.Tool("run-a", "step-a", "c1", models.ToolEntryCompleted, models.ContentPart{Type: models.ContentPartJSON, Value: spaced})
 	views, err := modelstep.ProjectSessionPath(context.Background(), f.Path(), modelsteptest.NewRenderImageSources().Options(false))
 	if err != nil {
 		t.Fatalf("projectSessionPath: %v", err)
@@ -71,9 +72,9 @@ func TestAStoredResultOverTheCapIsShortenedNotFatal(t *testing.T) {
 	f := modelsteptest.NewRenderFixture(t, "lane")
 	f.User("run-a", "look it up")
 	f.Assistant("run-a", "step-a", "c1")
-	tool := f.Tool("run-a", "step-a", "c1", ToolEntryCompleted,
-		ContentPart{Type: ContentPartText, Text: strings.Repeat("page text ", 4000)},
-		ContentPart{Type: ContentPartJSON, Value: compact})
+	tool := f.Tool("run-a", "step-a", "c1", models.ToolEntryCompleted,
+		models.ContentPart{Type: models.ContentPartText, Text: strings.Repeat("page text ", 4000)},
+		models.ContentPart{Type: models.ContentPartJSON, Value: compact})
 	views, err := modelstep.ProjectSessionPath(context.Background(), f.Path(), modelsteptest.NewRenderImageSources().Options(false))
 	if err != nil {
 		t.Fatalf("projectSessionPath: %v", err)
@@ -81,10 +82,10 @@ func TestAStoredResultOverTheCapIsShortenedNotFatal(t *testing.T) {
 	content := modelsteptest.ViewByID(t, views, tool.ID).Tool.Result.Content
 	total := 0
 	for _, part := range content {
-		total += len(part.Text) + jsonPartBytes(part.Value)
+		total += len(part.Text) + models.JSONPartBytes(part.Value)
 	}
-	if total > MaxToolResultContentBytes {
-		t.Fatalf("the shown result is %d bytes (cap %d)", total, MaxToolResultContentBytes)
+	if total > models.MaxToolResultContentBytes {
+		t.Fatalf("the shown result is %d bytes (cap %d)", total, models.MaxToolResultContentBytes)
 	}
 	if !strings.Contains(fmt.Sprint(content), "truncated") && !strings.Contains(fmt.Sprint(content), "too large to show in full") {
 		t.Fatalf("the shortened result does not say it was shortened: %.300v", content)
@@ -94,8 +95,8 @@ func TestAStoredResultOverTheCapIsShortenedNotFatal(t *testing.T) {
 
 // A model step refused for its content is not reported as a misconfigured host.
 func TestAnInvalidStepRequestIsNotCalledAHostProblem(t *testing.T) {
-	err := fmt.Errorf("%w: %w", modelstep.ErrTurnHostConfiguration, fmt.Errorf("%w: tool entry e1 result text and json are 70000 bytes (max 65536)", ErrInvalidModelStepRequest))
-	if !errors.Is(err, modelstep.ErrTurnHostConfiguration) || !errors.Is(err, ErrInvalidModelStepRequest) {
+	err := fmt.Errorf("%w: %w", modelstep.ErrTurnHostConfiguration, fmt.Errorf("%w: tool entry e1 result text and json are 70000 bytes (max 65536)", models.ErrInvalidModelStepRequest))
+	if !errors.Is(err, modelstep.ErrTurnHostConfiguration) || !errors.Is(err, models.ErrInvalidModelStepRequest) {
 		t.Fatal("the wrapped error lost a cause")
 	}
 }

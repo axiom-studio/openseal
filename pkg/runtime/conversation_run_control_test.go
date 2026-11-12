@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop/runlooptest"
 )
@@ -18,8 +19,8 @@ func TestConversationRunBindingOffersRunControlWithAndWithoutActiveWork(t *testi
 	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
 		definition := agentrun.RunManagementSkill()
 		cancel := capability.ModelAction{
-			Name: "openseal.runs.cancel", SkillID: RunManagementSkillID, Version: agentrun.RunManagementSkillVersion,
-			Action: RunActionCancel, InputSchema: definition.Actions[RunActionCancel].InputSchema,
+			Name: "openseal.runs.cancel", SkillID: models.RunManagementSkillID, Version: agentrun.RunManagementSkillVersion,
+			Action: models.RunActionCancel, InputSchema: definition.Actions[models.RunActionCancel].InputSchema,
 		}
 		other := capability.ModelAction{Name: "openseal.objectives.create", SkillID: "openseal.objectives", Version: "1.0.0", Action: "create"}
 		resolver := &chatRunResolver{store: f.Store, producer: &runlooptest.ChatProducer{}, actions: []capability.ModelAction{cancel, other}}
@@ -29,14 +30,14 @@ func TestConversationRunBindingOffersRunControlWithAndWithoutActiveWork(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(binding.ModelActions) != 2 || binding.ModelActions[0].SkillID != RunManagementSkillID {
+		if len(binding.ModelActions) != 2 || binding.ModelActions[0].SkillID != models.RunManagementSkillID {
 			t.Fatalf("actions without active work = %#v", binding.ModelActions)
 		}
 		now := time.Now().UTC()
-		child := &AgentRun{
-			ID: "review-" + run.ID, Kind: RunKindAgentWork, Scope: run.Scope, Owner: run.Owner, AssignedAgentID: run.AssignedAgentID,
-			ParentRunID: run.ID, RootRunID: run.ID, Goal: "Review the release", Source: RunSourceFork,
-			Status: AgentRunStatusQueued, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		child := &models.AgentRun{
+			ID: "review-" + run.ID, Kind: models.RunKindAgentWork, Scope: run.Scope, Owner: run.Owner, AssignedAgentID: run.AssignedAgentID,
+			ParentRunID: run.ID, RootRunID: run.ID, Goal: "Review the release", Source: models.RunSourceFork,
+			Status: models.AgentRunStatusQueued, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
 		if err := f.Store.CreateAgentRun(f.Ctx, child); err != nil {
 			t.Fatal(err)
@@ -45,7 +46,7 @@ func TestConversationRunBindingOffersRunControlWithAndWithoutActiveWork(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(binding.ModelActions) != 2 || binding.ModelActions[0].SkillID != RunManagementSkillID {
+		if len(binding.ModelActions) != 2 || binding.ModelActions[0].SkillID != models.RunManagementSkillID {
 			t.Fatalf("actions with active work = %#v", binding.ModelActions)
 		}
 		runID := binding.ModelActions[0].InputSchema["properties"].(map[string]interface{})["runId"].(map[string]interface{})

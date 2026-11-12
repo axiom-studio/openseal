@@ -6,12 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 )
 
 func TestSkillRuntimeMaintenanceMutationSerializesTakeoverAndRejectsStaleOwner(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
-		store := kernel.(SkillRuntimeMaintenanceStore)
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
+		store := kernel.(models.SkillRuntimeMaintenanceStore)
 		request := skillRuntimeMaintenanceEmptyRequest()
 		gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)
 		if err != nil {
@@ -21,9 +22,9 @@ func TestSkillRuntimeMaintenanceMutationSerializesTakeoverAndRejectsStaleOwner(t
 		mutationDone := make(chan error, 1)
 		go func() {
 			mutationDone <- store.WithSkillRuntimeMaintenanceMutation(t.Context(), gate, func(ctx context.Context) error {
-				proof, ok := SkillRuntimeMaintenanceFromContext(ctx)
-				if !ok || proof.Revision != gate.Revision || ValidateSkillRuntimeMaintenanceContext(ctx, gate, time.Now().UTC()) != nil {
-					return ErrSkillRuntimeMaintenanceConflict
+				proof, ok := models.SkillRuntimeMaintenanceFromContext(ctx)
+				if !ok || proof.Revision != gate.Revision || models.ValidateSkillRuntimeMaintenanceContext(ctx, gate, time.Now().UTC()) != nil {
+					return models.ErrSkillRuntimeMaintenanceConflict
 				}
 				deadline, ok := ctx.Deadline()
 				if !ok || deadline.After(time.Now().Add(15*time.Second)) || !deadline.Before(gate.LeaseExpiresAt) {
@@ -69,15 +70,15 @@ func TestSkillRuntimeMaintenanceMutationSerializesTakeoverAndRejectsStaleOwner(t
 		}
 		called := false
 		err = store.WithSkillRuntimeMaintenanceMutation(t.Context(), gate, func(context.Context) error { called = true; return nil })
-		if called || !errors.Is(err, ErrSkillRuntimeMaintenance) {
+		if called || !errors.Is(err, models.ErrSkillRuntimeMaintenance) {
 			t.Fatalf("stale owner reached external mutation: called=%v error=%v", called, err)
 		}
 	})
 }
 
 func TestSkillRuntimeMaintenanceMutationRechecksLeaseAfterWaitingForFence(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
-		store := kernel.(SkillRuntimeMaintenanceStore)
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
+		store := kernel.(models.SkillRuntimeMaintenanceStore)
 		request := skillRuntimeMaintenanceEmptyRequest()
 		request.LeaseDuration = 600 * time.Millisecond
 		gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)

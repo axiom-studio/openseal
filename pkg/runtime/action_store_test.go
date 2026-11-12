@@ -7,15 +7,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestActionProposalIsAtomicAndIdempotent(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := context.Background()
-	scope := Scope{Kind: "local", ID: "test"}
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "deploy", Source: RunSourceManual,
+	scope := models.Scope{Kind: "local", ID: "test"}
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "deploy", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -23,7 +25,7 @@ func TestActionProposalIsAtomicAndIdempotent(t *testing.T) {
 	run = claimRunForLoopProposal(t, store, run)
 	now := time.Now()
 	const contenders = 20
-	results := make(chan *ActionProposalResult, contenders)
+	results := make(chan *models.ActionProposalResult, contenders)
 	errs := make(chan error, contenders)
 	var wg sync.WaitGroup
 	for i := 0; i < contenders; i++ {
@@ -31,30 +33,30 @@ func TestActionProposalIsAtomicAndIdempotent(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			callID := fmt.Sprintf("call-%d", i)
-			proposalRun := cloneAgentRun(run)
+			proposalRun := models.CloneAgentRun(run)
 			// A loop call never parks its Run; the Run update stands in for
 			// its budget reservation, which must commit atomically with it.
 			proposalRun.Revision++
 			proposalRun.UpdatedAt = now
-			approval := &ApprovalCheckpoint{
+			approval := &models.ApprovalCheckpoint{
 				ID: "approval-" + callID, Scope: scope, RunID: run.ID, ActionCallID: callID,
-				Status: ApprovalStatusPending, Risk: skill.RiskLevelProduction, Summary: "Deploy",
+				Status: models.ApprovalStatusPending, Risk: skill.RiskLevelProduction, Summary: "Deploy",
 				ProposedAction:    map[string]interface{}{"environment": "production"},
-				EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "release-manager"}},
+				EligibleApprovers: []models.ApprovalPrincipal{{Type: "role", ID: "release-manager"}},
 				ExpiresAt:         now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 			}
-			call := &ActionCall{
+			call := &models.ActionCall{
 				ID: callID, Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: "agent", SkillID: "release", SkillVersion: "1",
-				Action: "deploy", Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
-				Status: ActionCallStatusWaitingApproval, Risk: skill.RiskLevelProduction,
+				Action: "deploy", Origin: models.ActionOriginLoop, Execution: models.ActionExecutionLoop,
+				Status: models.ActionCallStatusWaitingApproval, Risk: skill.RiskLevelProduction,
 				SideEffect: skill.SideEffectExternal, IdempotencyKey: "deploy-production", ApprovalID: approval.ID,
 				MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 			}
-			call.InvocationDigest = ComputeActionInvocationDigest(call)
-			result, proposalErr := store.CreateActionProposal(ctx, ActionProposalRecord{
+			call.InvocationDigest = models.ComputeActionInvocationDigest(call)
+			result, proposalErr := store.CreateActionProposal(ctx, models.ActionProposalRecord{
 				Call: call, Approval: approval, Run: proposalRun, ExpectedRunRevision: run.Revision,
-				Lease: &AgentRunLeaseGuard{WorkerID: "loop-worker", Now: now},
-				Event: &ActivityEvent{ID: "event-" + callID, Scope: scope, RunID: run.ID, EventType: "action.approval_requested", Summary: "Approval requested", CreatedAt: now},
+				Lease: &models.AgentRunLeaseGuard{WorkerID: "loop-worker", Now: now},
+				Event: &models.ActivityEvent{ID: "event-" + callID, Scope: scope, RunID: run.ID, EventType: "action.approval_requested", Summary: "Approval requested", CreatedAt: now},
 			})
 			results <- result
 			errs <- proposalErr
@@ -79,33 +81,33 @@ func TestActionProposalIsAtomicAndIdempotent(t *testing.T) {
 	if created != 1 {
 		t.Fatalf("created proposals = %d, want 1", created)
 	}
-	calls, err := store.ListActionCalls(ctx, ActionFilter{Scope: scope, RunID: run.ID})
+	calls, err := store.ListActionCalls(ctx, models.ActionFilter{Scope: scope, RunID: run.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	approvals, err := store.ListApprovals(ctx, ApprovalFilter{Scope: scope, RunID: run.ID})
+	approvals, err := store.ListApprovals(ctx, models.ApprovalFilter{Scope: scope, RunID: run.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID})
+	events, err := store.ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: run.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(calls) != 1 || len(approvals) != 1 || len(events) != 1 || calls[0].ID != callID {
 		t.Fatalf("proposal was not atomic: calls=%#v approvals=%#v events=%#v", calls, approvals, events)
 	}
-	owned, err := store.ListApprovals(ctx, ApprovalFilter{Scope: scope, Owner: &ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}})
+	owned, err := store.ListApprovals(ctx, models.ApprovalFilter{Scope: scope, Owner: &models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}})
 	if err != nil || len(owned) != 1 {
 		t.Fatalf("owner approvals = %#v, err = %v", owned, err)
 	}
-	other, err := store.ListApprovals(ctx, ApprovalFilter{Scope: scope, Owner: &ObjectiveOwner{Type: OwnerTypeTeam, ID: "other"}})
+	other, err := store.ListApprovals(ctx, models.ApprovalFilter{Scope: scope, Owner: &models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "other"}})
 	if err != nil || len(other) != 0 {
 		t.Fatalf("other owner approvals = %#v, err = %v", other, err)
 	}
-	if _, err := store.GetActionCall(ctx, scope, "missing"); err != ErrActionNotFound {
-		t.Fatalf("missing action error = %v, want %v", err, ErrActionNotFound)
+	if _, err := store.GetActionCall(ctx, scope, "missing"); err != models.ErrActionNotFound {
+		t.Fatalf("missing action error = %v, want %v", err, models.ErrActionNotFound)
 	}
-	if _, err := store.GetApproval(ctx, scope, "missing"); err != ErrApprovalNotFound {
-		t.Fatalf("missing approval error = %v, want %v", err, ErrApprovalNotFound)
+	if _, err := store.GetApproval(ctx, scope, "missing"); err != models.ErrApprovalNotFound {
+		t.Fatalf("missing approval error = %v, want %v", err, models.ErrApprovalNotFound)
 	}
 }

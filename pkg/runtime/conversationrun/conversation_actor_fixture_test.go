@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -30,7 +30,7 @@ func askUserParked(t *testing.T, store askUserTestStore, claimed *models.AgentRu
 	t.Helper()
 	call := newAskUserCall(t, store, claimed, worker, question)
 	result := call.settle(t)
-	if result.Kind != runtime.ControlParked || result.Park == nil {
+	if result.Kind != control.ControlParked || result.Park == nil {
 		t.Fatalf("ask_user did not park: %#v", result)
 	}
 	return call.park(t, result.Park), call
@@ -111,19 +111,19 @@ type askUserCall struct {
 	session *models.AgentSession
 	step    *models.AgentTurn
 	entry   *models.SessionEntry
-	exec    *runtime.ControlExecutor
+	exec    *control.ControlExecutor
 }
 
 // Copied from control_ask_user_test.go
 func (c *askUserCall) context() agentrun.ControlContext {
-	return runtime.NewControlContext(agentrun.StepToolsInput{
+	return control.NewControlContext(agentrun.StepToolsInput{
 		Run: c.run, Step: c.step, Session: c.session, WorkerID: c.worker,
 		Binding: &agentrun.TurnRunnerBinding{Authority: agentrun.ControlAuthority{CanAskUser: true}},
 	}, c.entry)
 }
 
 // Copied from control_ask_user_test.go
-func (c *askUserCall) settle(t *testing.T) runtime.ControlResult {
+func (c *askUserCall) settle(t *testing.T) control.ControlResult {
 	t.Helper()
 	result, err := c.exec.Settle(t.Context(), c.context())
 	if err != nil {
@@ -222,7 +222,7 @@ func newAskUserCallWithArguments(t *testing.T, store askUserTestStore, claimed *
 		store: store, worker: worker, run: run, session: session,
 		step:  &models.AgentTurn{ID: stepID, RunID: run.ID, Sequence: sequence, Status: models.AgentTurnStatusCompleted},
 		entry: appended.Entries[1],
-		exec:  &runtime.ControlExecutor{Portfolio: store, Sessions: sessions, Conversations: runtimeconversation.NewConversationService(store)},
+		exec:  &control.ControlExecutor{Portfolio: store, Sessions: sessions, Conversations: runtimeconversation.NewConversationService(store)},
 	}
 }
 

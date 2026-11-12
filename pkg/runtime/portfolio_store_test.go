@@ -3,30 +3,32 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"testing"
 )
 
 func TestPortfolioSupportsMultipleObjectivesAndRunLineage(t *testing.T) {
 	ctx := context.Background()
 	store := newTestKernelStore(t)
-	service := NewPortfolioService(store)
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "marketing"}
+	service := portfolio.NewPortfolioService(store)
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "marketing"}
 
-	content, err := service.CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Market releases", Goal: "Turn releases into content", Status: ObjectiveStatusActive, Priority: 80,
+	content, err := service.CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Market releases", Goal: "Turn releases into content", Status: models.ObjectiveStatusActive, Priority: 80,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	leads, err := service.CreateObjective(ctx, CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Follow up leads", Goal: "Convert qualified leads", Status: ObjectiveStatusActive, Priority: 90,
+	leads, err := service.CreateObjective(ctx, portfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Follow up leads", Goal: "Convert qualified leads", Status: models.ObjectiveStatusActive, Priority: 90,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	objectives, err := service.ListObjectives(ctx, ObjectiveFilter{Scope: scope, Owner: &owner})
+	objectives, err := service.ListObjectives(ctx, models.ObjectiveFilter{Scope: scope, Owner: &owner})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,14 +36,14 @@ func TestPortfolioSupportsMultipleObjectivesAndRunLineage(t *testing.T) {
 		t.Fatalf("unexpected objective order: %#v", objectives)
 	}
 
-	root, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, ObjectiveID: content.ID, Owner: owner, AssignedAgentID: "marketing", Goal: "Draft launch post", Source: RunSourceObjective,
+	root, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, ObjectiveID: content.ID, Owner: owner, AssignedAgentID: "marketing", Goal: "Draft launch post", Source: models.RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, ObjectiveID: content.ID, ParentRunID: root.ID, Owner: owner, AssignedAgentID: "analyst", Goal: "Collect launch evidence", Source: RunSourceHandoff,
+	child, err := service.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, ObjectiveID: content.ID, ParentRunID: root.ID, Owner: owner, AssignedAgentID: "analyst", Goal: "Collect launch evidence", Source: models.RunSourceHandoff,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -53,22 +55,22 @@ func TestPortfolioSupportsMultipleObjectivesAndRunLineage(t *testing.T) {
 
 func TestPortfolioFailsClosedAcrossScopesAndOnStaleRevision(t *testing.T) {
 	ctx := context.Background()
-	service := NewPortfolioService(newTestKernelStore(t))
-	scopeA := Scope{Kind: "tenant", ID: "a"}
-	scopeB := Scope{Kind: "tenant", ID: "b"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
-	objective, err := service.CreateObjective(ctx, CreateObjectiveRequest{Scope: scopeA, Owner: owner, Title: "A", Goal: "A"})
+	service := portfolio.NewPortfolioService(newTestKernelStore(t))
+	scopeA := models.Scope{Kind: "tenant", ID: "a"}
+	scopeB := models.Scope{Kind: "tenant", ID: "b"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
+	objective, err := service.CreateObjective(ctx, portfolio.CreateObjectiveRequest{Scope: scopeA, Owner: owner, Title: "A", Goal: "A"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.GetObjective(ctx, scopeB, objective.ID); !errors.Is(err, ErrObjectiveNotFound) {
+	if _, err := service.GetObjective(ctx, scopeB, objective.ID); !errors.Is(err, models.ErrObjectiveNotFound) {
 		t.Fatalf("cross-scope read error = %v", err)
 	}
 	updatedTitle := "updated"
-	if _, err := service.UpdateObjective(ctx, scopeA, objective.ID, UpdateObjectiveRequest{ExpectedRevision: 1, Title: &updatedTitle}); err != nil {
+	if _, err := service.UpdateObjective(ctx, scopeA, objective.ID, portfolio.UpdateObjectiveRequest{ExpectedRevision: 1, Title: &updatedTitle}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.UpdateObjective(ctx, scopeA, objective.ID, UpdateObjectiveRequest{ExpectedRevision: 1, Title: &updatedTitle}); !errors.Is(err, ErrRevisionConflict) {
+	if _, err := service.UpdateObjective(ctx, scopeA, objective.ID, portfolio.UpdateObjectiveRequest{ExpectedRevision: 1, Title: &updatedTitle}); !errors.Is(err, models.ErrRevisionConflict) {
 		t.Fatalf("stale update error = %v", err)
 	}
 }

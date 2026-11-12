@@ -14,8 +14,10 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
+	runtimeportfolio "github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -36,11 +38,11 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	}
 
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(primary, models.WithClock(func() time.Time { return now }))
-	scope := Scope{Kind: "tenant", ID: "postgres-e2e"}
-	otherScope := Scope{Kind: "tenant", ID: "other"}
-	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"}
-	objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{Scope: scope, Owner: owner, Title: "Operate", Goal: "Keep services healthy", Status: ObjectiveStatusActive})
+	portfolio := runtimeportfolio.NewPortfolioService(primary, models.WithClock(func() time.Time { return now }))
+	scope := models.Scope{Kind: "tenant", ID: "postgres-e2e"}
+	otherScope := models.Scope{Kind: "tenant", ID: "other"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "operations"}
+	objective, err := portfolio.CreateObjective(ctx, runtimeportfolio.CreateObjectiveRequest{Scope: scope, Owner: owner, Title: "Operate", Goal: "Keep services healthy", Status: models.ObjectiveStatusActive})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,21 +50,21 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("cross-scope objective = %#v, %v", crossScope, err)
 	}
 	summary := "Healthy"
-	updated, err := portfolio.UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{ExpectedRevision: objective.Revision, ProgressSummary: &summary})
+	updated, err := portfolio.UpdateObjective(ctx, scope, objective.ID, runtimeportfolio.UpdateObjectiveRequest{ExpectedRevision: objective.Revision, ProgressSummary: &summary})
 	if err != nil || updated.Revision != 2 {
 		t.Fatalf("updated objective = %#v, %v", updated, err)
 	}
-	if _, err := portfolio.UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{ExpectedRevision: objective.Revision, ProgressSummary: &summary}); !errors.Is(err, ErrRevisionConflict) {
+	if _, err := portfolio.UpdateObjective(ctx, scope, objective.ID, runtimeportfolio.UpdateObjectiveRequest{ExpectedRevision: objective.Revision, ProgressSummary: &summary}); !errors.Is(err, models.ErrRevisionConflict) {
 		t.Fatalf("stale objective update = %v", err)
 	}
-	conversationRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Kind: RunKindConversation, Owner: owner, Goal: "Coordinate channel participation", Source: RunSourceChat,
+	conversationRun, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Kind: models.RunKindConversation, Owner: owner, Goal: "Coordinate channel participation", Source: models.RunSourceChat,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimedConversation, err := primary.ClaimNextAgentRun(ctx, AgentRunClaim{
-		Scope: scope, Kind: RunKindConversation, WorkerID: "conversation-worker", Now: now,
+	claimedConversation, err := primary.ClaimNextAgentRun(ctx, models.AgentRunClaim{
+		Scope: scope, Kind: models.RunKindConversation, WorkerID: "conversation-worker", Now: now,
 		LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
 	if err != nil || claimedConversation == nil || claimedConversation.ID != conversationRun.ID {
@@ -80,7 +82,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	const agentRunCount = 16
 	agentRunIDs := make(map[string]bool, agentRunCount)
 	for index := 0; index < agentRunCount; index++ {
-		run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: "operator", Goal: "Inspect shard", Source: RunSourceObjective, Priority: index % 3})
+		run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: "operator", Goal: "Inspect shard", Source: models.RunSourceObjective, Priority: index % 3})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +97,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 			defer wait.Done()
 			store := stores[worker%len(stores)]
 			for {
-				run, claimErr := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "agent-worker-" + string(rune('a'+worker)), Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+				run, claimErr := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "agent-worker-" + string(rune('a'+worker)), Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 				if claimErr != nil {
 					agentClaimErrors <- claimErr
 					return
@@ -125,18 +127,18 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	}
 
 	for index := 0; index < 2; index++ {
-		if _, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "limited"}, AssignedAgentID: "limited", Goal: "Capacity limited work", Source: RunSourceObjective}); err != nil {
+		if _, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "limited"}, AssignedAgentID: "limited", Goal: "Capacity limited work", Source: models.RunSourceObjective}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	limited := make(chan *AgentRun, 2)
+	limited := make(chan *models.AgentRun, 2)
 	limitedErrors := make(chan error, 2)
 	wait = sync.WaitGroup{}
 	for worker := 0; worker < 2; worker++ {
 		wait.Add(1)
 		go func(worker int) {
 			defer wait.Done()
-			run, claimErr := stores[worker].ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "limited-worker-" + string(rune('a'+worker)), AssignedAgentID: "limited", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 1})
+			run, claimErr := stores[worker].ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "limited-worker-" + string(rune('a'+worker)), AssignedAgentID: "limited", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 1})
 			if claimErr != nil {
 				limitedErrors <- claimErr
 				return
@@ -168,22 +170,22 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		{key: "channel-a", priority: 9},
 		{key: "channel-b", priority: 1},
 	} {
-		if _, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-			Scope: scope, Kind: RunKindConversation, Owner: owner, ConcurrencyKey: candidate.key,
-			Goal: "Coordinate " + candidate.key, Source: RunSourceChat, Priority: candidate.priority,
+		if _, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+			Scope: scope, Kind: models.RunKindConversation, Owner: owner, ConcurrencyKey: candidate.key,
+			Goal: "Coordinate " + candidate.key, Source: models.RunSourceChat, Priority: candidate.priority,
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	keyed := make(chan *AgentRun, 3)
+	keyed := make(chan *models.AgentRun, 3)
 	keyedErrors := make(chan error, 3)
 	wait = sync.WaitGroup{}
 	for worker := 0; worker < 3; worker++ {
 		wait.Add(1)
 		go func(worker int) {
 			defer wait.Done()
-			run, claimErr := stores[worker%len(stores)].ClaimNextAgentRun(ctx, AgentRunClaim{
-				Scope: scope, Kind: RunKindConversation, WorkerID: "keyed-worker-" + string(rune('a'+worker)),
+			run, claimErr := stores[worker%len(stores)].ClaimNextAgentRun(ctx, models.AgentRunClaim{
+				Scope: scope, Kind: models.RunKindConversation, WorkerID: "keyed-worker-" + string(rune('a'+worker)),
 				Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForConcurrencyKey: 1,
 			})
 			if claimErr != nil {
@@ -212,11 +214,11 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("cross-replica keyed claims = %d, counts = %#v", keyedClaims, keyedClaimCounts)
 	}
 
-	auditRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "auditor"}, AssignedAgentID: "auditor", Goal: "Audit activity", Source: RunSourceObjective})
+	auditRun, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "auditor"}, AssignedAgentID: "auditor", Goal: "Audit activity", Source: models.RunSourceObjective})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimedAuditRun, err := primary.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "audit-worker", AssignedAgentID: "auditor", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimedAuditRun, err := primary.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "audit-worker", AssignedAgentID: "auditor", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimedAuditRun == nil || claimedAuditRun.ID != auditRun.ID {
 		t.Fatalf("claimed audit run = %#v, %v", claimedAuditRun, err)
 	}
@@ -227,8 +229,8 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		wait.Add(1)
 		go func(index int) {
 			defer wait.Done()
-			service := NewRunActivityService(stores[index%len(stores)], stores[index%len(stores)])
-			_, appendErr := service.AppendActivity(ctx, &ActivityEvent{ID: uuid.NewString(), Scope: scope, RunID: auditRun.ID, EventType: "audit.observed", Summary: "Observation", Actor: ActivityActor{Type: "agent", ID: "auditor"}, Visibility: ActivityVisibilityTeam, CreatedAt: now})
+			service := runtimeactivity.NewRunActivityService(stores[index%len(stores)], stores[index%len(stores)])
+			_, appendErr := service.AppendActivity(ctx, &models.ActivityEvent{ID: uuid.NewString(), Scope: scope, RunID: auditRun.ID, EventType: "audit.observed", Summary: "Observation", Actor: models.ActivityActor{Type: "agent", ID: "auditor"}, Visibility: models.ActivityVisibilityTeam, CreatedAt: now})
 			activityErrors <- appendErr
 		}(index)
 	}
@@ -239,7 +241,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 			t.Fatal(appendErr)
 		}
 	}
-	activity, err := replica.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: auditRun.ID, Limit: 100})
+	activity, err := replica.ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: auditRun.ID, Limit: 100})
 	if err != nil || len(activity) != activityCount {
 		t.Fatalf("activity count = %d, %v", len(activity), err)
 	}
@@ -250,15 +252,15 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	}
 
 	clock := models.WithClock(func() time.Time { return now })
-	turnServices := []*AgentTurnService{NewAgentTurnService(primary, primary, clock), NewAgentTurnService(replica, replica, clock)}
-	turns := make(chan *AgentTurn, 2)
+	turnServices := []*runtimeactivity.AgentTurnService{runtimeactivity.NewAgentTurnService(primary, primary, clock), runtimeactivity.NewAgentTurnService(replica, replica, clock)}
+	turns := make(chan *models.AgentTurn, 2)
 	turnErrors := make(chan error, 2)
 	wait = sync.WaitGroup{}
 	for index := 0; index < 2; index++ {
 		wait.Add(1)
 		go func(index int) {
 			defer wait.Done()
-			turn, beginErr := turnServices[index].BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: auditRun.ID, WorkerID: "turn-worker-" + string(rune('a'+index)), LeaseDuration: time.Minute})
+			turn, beginErr := turnServices[index].BeginTurn(ctx, runtimeactivity.BeginAgentTurnRequest{Scope: scope, RunID: auditRun.ID, WorkerID: "turn-worker-" + string(rune('a'+index)), LeaseDuration: time.Minute})
 			turns <- turn
 			turnErrors <- beginErr
 		}(index)
@@ -267,7 +269,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	close(turns)
 	close(turnErrors)
 	createdTurns, activeConflicts := 0, 0
-	var activeTurn *AgentTurn
+	var activeTurn *models.AgentTurn
 	for turn := range turns {
 		if turn != nil {
 			createdTurns++
@@ -275,7 +277,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		}
 	}
 	for beginErr := range turnErrors {
-		if errors.Is(beginErr, ErrActiveTurnExists) {
+		if errors.Is(beginErr, models.ErrActiveTurnExists) {
 			activeConflicts++
 		} else if beginErr != nil {
 			t.Fatal(beginErr)
@@ -284,8 +286,8 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	if createdTurns != 1 || activeConflicts != 1 {
 		t.Fatalf("turn race created=%d conflicts=%d", createdTurns, activeConflicts)
 	}
-	finished, err := turnServices[0].FinishTurn(ctx, scope, activeTurn.ID, FinishAgentTurnRequest{ExpectedRevision: activeTurn.Revision, Status: AgentTurnStatusCompleted, WorkerID: activeTurn.LeaseOwner, OutputSummary: "Audit complete"})
-	if err != nil || finished.Status != AgentTurnStatusCompleted {
+	finished, err := turnServices[0].FinishTurn(ctx, scope, activeTurn.ID, runtimeactivity.FinishAgentTurnRequest{ExpectedRevision: activeTurn.Revision, Status: models.AgentTurnStatusCompleted, WorkerID: activeTurn.LeaseOwner, OutputSummary: "Audit complete"})
+	if err != nil || finished.Status != models.AgentTurnStatusCompleted {
 		t.Fatalf("finished turn = %#v, %v", finished, err)
 	}
 	if crossScopeTurn, err := replica.GetAgentTurn(ctx, otherScope, activeTurn.ID); err != nil || crossScopeTurn != nil {
@@ -355,12 +357,12 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("replica skill prompts = %#v, %v", prompts, err)
 	}
 
-	actionRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release"}, Goal: "Deploy safely", Source: RunSourceManual})
+	actionRun, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "release"}, Goal: "Deploy safely", Source: models.RunSourceManual})
 	if err != nil {
 		t.Fatal(err)
 	}
 	const proposalContenders = 20
-	proposalResults := make(chan *ActionProposalResult, proposalContenders)
+	proposalResults := make(chan *models.ActionProposalResult, proposalContenders)
 	proposalErrors := make(chan error, proposalContenders)
 	wait = sync.WaitGroup{}
 	for index := 0; index < proposalContenders; index++ {
@@ -383,7 +385,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		}
 	}
 	createdProposals := 0
-	var proposal *ActionProposalResult
+	var proposal *models.ActionProposalResult
 	for result := range proposalResults {
 		if result.Created {
 			createdProposals++
@@ -394,23 +396,23 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatalf("created proposals = %d, proposal=%#v", createdProposals, proposal)
 	}
 	approvalNow := proposal.Approval.CreatedAt.Add(time.Second)
-	approvals := action.NewApprovalCoordinator(replica, replica, action.ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }), models.WithClock(func() time.Time { return approvalNow }))
-	resolved, err := approvals.Resolve(ctx, action.ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
-	if err != nil || !resolved.Resolved || resolved.Call.Status != ActionCallStatusReady || resolved.Run.Status != AgentRunStatusWaitingForDependency {
+	approvals := action.NewApprovalCoordinator(replica, replica, action.ApprovalAuthorizerFunc(func(context.Context, models.ApprovalPrincipal, *models.ApprovalCheckpoint) error { return nil }), models.WithClock(func() time.Time { return approvalNow }))
+	resolved, err := approvals.Resolve(ctx, action.ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Decision: models.ApprovalDecisionApprove, Principal: models.ApprovalPrincipal{Type: "role", ID: "release-manager"}})
+	if err != nil || !resolved.Resolved || resolved.Call.Status != models.ActionCallStatusReady || resolved.Run.Status != models.AgentRunStatusWaitingForDependency {
 		t.Fatalf("resolved approval = %#v, %v", resolved, err)
 	}
-	replayed, err := approvals.Resolve(ctx, action.ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
+	replayed, err := approvals.Resolve(ctx, action.ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Decision: models.ApprovalDecisionApprove, Principal: models.ApprovalPrincipal{Type: "role", ID: "release-manager"}})
 	if err != nil || replayed.Resolved {
 		t.Fatalf("replayed approval = %#v, %v", replayed, err)
 	}
-	actionClaims := make(chan *ActionCall, 2)
+	actionClaims := make(chan *models.ActionCall, 2)
 	actionClaimErrors := make(chan error, 2)
 	wait = sync.WaitGroup{}
 	for index := 0; index < 2; index++ {
 		wait.Add(1)
 		go func(index int) {
 			defer wait.Done()
-			call, claimErr := stores[index].ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: "action-worker-" + string(rune('a'+index)), Now: approvalNow, LeaseDuration: time.Minute})
+			call, claimErr := stores[index].ClaimNextAction(ctx, models.ActionClaim{Scope: scope, WorkerID: "action-worker-" + string(rune('a'+index)), Now: approvalNow, LeaseDuration: time.Minute})
 			actionClaims <- call
 			actionClaimErrors <- claimErr
 		}(index)
@@ -423,7 +425,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 			t.Fatal(claimErr)
 		}
 	}
-	var claimedAction *ActionCall
+	var claimedAction *models.ActionCall
 	actionClaimCount := 0
 	for call := range actionClaims {
 		if call != nil {
@@ -438,31 +440,31 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completedCall := cloneActionCall(claimedAction)
-	completedCall.Status = ActionCallStatusSucceeded
+	completedCall := models.CloneActionCall(claimedAction)
+	completedCall.Status = models.ActionCallStatusSucceeded
 	completedCall.Output = map[string]interface{}{"deployment": "complete"}
 	completedCall.LeaseOwner, completedCall.LeaseExpiresAt = "", nil
 	completedCall.Revision++
 	completedCall.UpdatedAt = approvalNow.Add(time.Second)
 	completedCall.CompletedAt = &completedCall.UpdatedAt
-	resumedRun := cloneAgentRun(currentRun)
-	resumedRun.Status = AgentRunStatusQueued
+	resumedRun := models.CloneAgentRun(currentRun)
+	resumedRun.Status = models.AgentRunStatusQueued
 	resumedRun.WakeCondition = nil
 	resumedRun.AvailableAt, resumedRun.QueueEnteredAt = completedCall.UpdatedAt, completedCall.UpdatedAt
 	resumedRun.Revision++
 	resumedRun.UpdatedAt = completedCall.UpdatedAt
-	duplicateEvent := &ActivityEvent{ID: proposal.Event.ID, Scope: scope, RunID: actionRun.ID, EventType: "action.succeeded", Summary: "Deployment completed", CreatedAt: completedCall.UpdatedAt}
-	execution := ActionExecutionRecord{Call: completedCall, ExpectedCallRevision: claimedAction.Revision, Run: resumedRun, ExpectedRunRevision: currentRun.Revision, WorkerID: claimedAction.LeaseOwner, Now: approvalNow, Event: duplicateEvent}
+	duplicateEvent := &models.ActivityEvent{ID: proposal.Event.ID, Scope: scope, RunID: actionRun.ID, EventType: "action.succeeded", Summary: "Deployment completed", CreatedAt: completedCall.UpdatedAt}
+	execution := models.ActionExecutionRecord{Call: completedCall, ExpectedCallRevision: claimedAction.Revision, Run: resumedRun, ExpectedRunRevision: currentRun.Revision, WorkerID: claimedAction.LeaseOwner, Now: approvalNow, Event: duplicateEvent}
 	if _, err := replica.PersistActionExecution(ctx, execution); err == nil {
 		t.Fatal("duplicate activity should roll back the action outcome")
 	}
 	rolledBackCall, err := primary.GetActionCall(ctx, scope, claimedAction.ID)
-	if err != nil || rolledBackCall.Status != ActionCallStatusRunning || rolledBackCall.Revision != claimedAction.Revision {
+	if err != nil || rolledBackCall.Status != models.ActionCallStatusRunning || rolledBackCall.Revision != claimedAction.Revision {
 		t.Fatalf("rolled back call = %#v, %v", rolledBackCall, err)
 	}
 	execution.Event.ID = uuid.NewString()
 	persistedExecution, err := primary.PersistActionExecution(ctx, execution)
-	if err != nil || persistedExecution.Call.Status != ActionCallStatusSucceeded || persistedExecution.Run.Status != AgentRunStatusQueued {
+	if err != nil || persistedExecution.Call.Status != models.ActionCallStatusSucceeded || persistedExecution.Run.Status != models.AgentRunStatusQueued {
 		t.Fatalf("persisted execution = %#v, %v", persistedExecution, err)
 	}
 	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != postgresSchemaHead(t) {
@@ -500,59 +502,59 @@ func TestPostgresAgentRequestAcceptanceIsAtomicAndRecoverable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	portfolio := NewPortfolioService(primary)
-	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
-		Goal: "Ship", Source: RunSourceManual,
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	portfolio := runtimeportfolio.NewPortfolioService(primary)
+	source, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "product"}, AssignedAgentID: "developer",
+		Goal: "Ship", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	service := collaboration.NewCollaborationService(primary)
 	created, err := service.CreateAgentRequest(ctx, collaboration.CreateAgentRequestRequest{
-		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
-		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"}, Goal: "Launch",
+		Scope: scope, Kind: models.AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "developer"},
+		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"}, Goal: "Launch",
 		IdempotencyKey: "postgres-launch",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitingSource, err := NewPortfolioService(replica).GetAgentRun(ctx, scope, source.ID)
-	if err != nil || waitingSource.Status != AgentRunStatusWaitingForAgent || waitingSource.WakeCondition == nil ||
+	waitingSource, err := runtimeportfolio.NewPortfolioService(replica).GetAgentRun(ctx, scope, source.ID)
+	if err != nil || waitingSource.Status != models.AgentRunStatusWaitingForAgent || waitingSource.WakeCondition == nil ||
 		waitingSource.WakeCondition.Type != "agent_request_decision" ||
 		waitingSource.WakeCondition.Reference != created.Request.ID {
 		t.Fatalf("atomically waiting source = %#v, %v", waitingSource, err)
 	}
 	accepted, err := service.RespondAgentRequest(ctx, collaboration.RespondAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: collaboration.AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		Decision: collaboration.AgentRequestDecisionAccept, Principal: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	restored, err := collaboration.NewCollaborationService(replica).GetAgentRequest(ctx, scope, created.Request.ID)
-	if err != nil || restored.ChildRunID != accepted.Child.ID || restored.Status != AgentRequestStatusAccepted {
+	if err != nil || restored.ChildRunID != accepted.Child.ID || restored.Status != models.AgentRequestStatusAccepted {
 		t.Fatalf("restored request = %#v, %v", restored, err)
 	}
-	child, err := NewPortfolioService(replica).GetAgentRun(ctx, scope, accepted.Child.ID)
+	child, err := runtimeportfolio.NewPortfolioService(replica).GetAgentRun(ctx, scope, accepted.Child.ID)
 	if err != nil || child.ParentRunID != source.ID || child.AssignedAgentID != "marketing" {
 		t.Fatalf("restored child = %#v, %v", child, err)
 	}
 	completed, err := collaboration.NewCollaborationService(replica).CompleteAgentRequest(ctx, collaboration.CompleteAgentRequestRequest{
 		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: accepted.Request.Revision,
-		ExpectedChildRevision: child.Revision, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "marketing"},
+		ExpectedChildRevision: child.Revision, Principal: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "marketing"},
 		Summary: "Launch completed", CompletionKey: "postgres-launch-complete",
 	})
-	if err != nil || completed.Request.Status != AgentRequestStatusCompleted || completed.Source.Status != AgentRunStatusQueued || completed.Child.Status != AgentRunStatusCompleted {
+	if err != nil || completed.Request.Status != models.AgentRequestStatusCompleted || completed.Source.Status != models.AgentRunStatusQueued || completed.Child.Status != models.AgentRunStatusCompleted {
 		t.Fatalf("complete request = %#v, %v", completed, err)
 	}
 	restored, err = collaboration.NewCollaborationService(primary).GetAgentRequest(ctx, scope, created.Request.ID)
-	if err != nil || restored.Status != AgentRequestStatusCompleted || restored.CompletionKey != "postgres-launch-complete" {
+	if err != nil || restored.Status != models.AgentRequestStatusCompleted || restored.CompletionKey != "postgres-launch-complete" {
 		t.Fatalf("restored completion = %#v, %v", restored, err)
 	}
-	activity, err := replica.ListActivity(ctx, ActivityFilter{Scope: scope, TeamID: "product", Descending: true, Limit: 10})
+	activity, err := replica.ListActivity(ctx, models.ActivityFilter{Scope: scope, TeamID: "product", Descending: true, Limit: 10})
 	if err != nil || len(activity) != 5 || activity[0].EventType != "collaboration.completed" {
 		t.Fatalf("team activity = %#v, %v", activity, err)
 	}
@@ -572,11 +574,11 @@ func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	scope := Scope{Kind: "tenant", ID: "acme"}
-	request := CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator",
-		Goal: "Inspect production health", Source: RunSourceManual, IdempotencyKey: "health-run",
-		Actor: ActivityActor{Type: "user", ID: "7"},
+	scope := models.Scope{Kind: "tenant", ID: "acme"}
+	request := models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator",
+		Goal: "Inspect production health", Source: models.RunSourceManual, IdempotencyKey: "health-run",
+		Actor: models.ActivityActor{Type: "user", ID: "7"},
 	}
 	services := []*agentrun.RunCommandService{agentrun.NewRunCommandService(primary), agentrun.NewRunCommandService(replica)}
 	results := make(chan *agentrun.AgentRunCommandResult, len(services))
@@ -600,7 +602,7 @@ func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 	for createErr := range errorsFound {
 		t.Fatal(createErr)
 	}
-	var run *AgentRun
+	var run *models.AgentRun
 	creationEvents := 0
 	resultCount := 0
 	for result := range results {
@@ -619,50 +621,50 @@ func TestPostgresRunCommandsAreAtomicIdempotentAndRecoverable(t *testing.T) {
 	}
 	conflict := request
 	conflict.Goal = "Do different work"
-	if _, err := services[0].CreateAgentRun(ctx, conflict); !errors.Is(err, ErrRunIdempotency) {
+	if _, err := services[0].CreateAgentRun(ctx, conflict); !errors.Is(err, models.ErrRunIdempotency) {
 		t.Fatalf("conflicting replay error = %v", err)
 	}
-	events, err := replica.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, Limit: 10})
+	events, err := replica.ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: run.ID, Limit: 10})
 	if err != nil || len(events) != 1 || events[0].EventType != "run.created" {
 		t.Fatalf("creation activity = %#v, %v", events, err)
 	}
 
 	paused, err := services[1].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 		Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: agentrun.AgentRunCommandPause,
-		Actor: ActivityActor{Type: "user", ID: "7"},
+		Actor: models.ActivityActor{Type: "user", ID: "7"},
 	})
-	if err != nil || paused.Run.Status != AgentRunStatusPaused {
+	if err != nil || paused.Run.Status != models.AgentRunStatusPaused {
 		t.Fatalf("paused = %#v, %v", paused, err)
 	}
 	intervened, err := services[0].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 		Scope: scope, RunID: run.ID, ExpectedRevision: paused.Run.Revision, Kind: agentrun.AgentRunCommandIntervene,
-		Actor: ActivityActor{Type: "user", ID: "7"}, Instruction: "Check database saturation first",
+		Actor: models.ActivityActor{Type: "user", ID: "7"}, Instruction: "Check database saturation first",
 	})
 	if err != nil || len(intervened.Run.PendingInterventions) != 1 {
 		t.Fatalf("intervened = %#v, %v", intervened, err)
 	}
 	resumed, err := services[1].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 		Scope: scope, RunID: run.ID, ExpectedRevision: intervened.Run.Revision, Kind: agentrun.AgentRunCommandResume,
-		Actor: ActivityActor{Type: "user", ID: "7"},
+		Actor: models.ActivityActor{Type: "user", ID: "7"},
 	})
-	if err != nil || resumed.Run.Status != AgentRunStatusQueued {
+	if err != nil || resumed.Run.Status != models.AgentRunStatusQueued {
 		t.Fatalf("resumed = %#v, %v", resumed, err)
 	}
 	canceled, err := services[0].CommandAgentRun(ctx, agentrun.AgentRunCommandRequest{
 		Scope: scope, RunID: run.ID, ExpectedRevision: resumed.Run.Revision, Kind: agentrun.AgentRunCommandCancel,
-		Actor: ActivityActor{Type: "user", ID: "7"},
+		Actor: models.ActivityActor{Type: "user", ID: "7"},
 	})
-	if err != nil || canceled.Run.Status != AgentRunStatusCanceled || canceled.Run.CompletedAt == nil {
+	if err != nil || canceled.Run.Status != models.AgentRunStatusCanceled || canceled.Run.CompletedAt == nil {
 		t.Fatalf("canceled = %#v, %v", canceled, err)
 	}
-	restored, err := NewPortfolioService(replica).GetAgentRun(ctx, scope, run.ID)
-	if err != nil || restored.Status != AgentRunStatusCanceled || len(restored.PendingInterventions) != 1 {
+	restored, err := runtimeportfolio.NewPortfolioService(replica).GetAgentRun(ctx, scope, run.ID)
+	if err != nil || restored.Status != models.AgentRunStatusCanceled || len(restored.PendingInterventions) != 1 {
 		t.Fatalf("restored = %#v, %v", restored, err)
 	}
-	if _, err := NewPortfolioService(primary).GetAgentRun(ctx, Scope{Kind: "tenant", ID: "other"}, run.ID); !errors.Is(err, ErrRunNotFound) {
+	if _, err := runtimeportfolio.NewPortfolioService(primary).GetAgentRun(ctx, models.Scope{Kind: "tenant", ID: "other"}, run.ID); !errors.Is(err, models.ErrRunNotFound) {
 		t.Fatalf("cross-scope get error = %v", err)
 	}
-	events, err = primary.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, Limit: 10})
+	events, err = primary.ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: run.ID, Limit: 10})
 	if err != nil || len(events) != 5 || events[4].EventType != "run.canceled" {
 		t.Fatalf("command activity = %#v, %v", events, err)
 	}

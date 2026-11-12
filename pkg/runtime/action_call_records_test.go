@@ -15,11 +15,11 @@ import (
 // call under a pending approval). It lists them as the stores do: oldest
 // first, then by ID, filtered by scope, Run and status, one page at a time.
 type actionCallRecords struct {
-	calls []*ActionCall
+	calls []*models.ActionCall
 }
 
 // put stores call as given, replacing the call with the same ID.
-func (r *actionCallRecords) put(call *ActionCall) {
+func (r *actionCallRecords) put(call *models.ActionCall) {
 	for index, current := range r.calls {
 		if current.ID == call.ID {
 			r.calls[index] = models.CloneActionCall(call)
@@ -30,7 +30,7 @@ func (r *actionCallRecords) put(call *ActionCall) {
 }
 
 // get returns a copy of a stored call.
-func (r *actionCallRecords) get(t testing.TB, id string) *ActionCall {
+func (r *actionCallRecords) get(t testing.TB, id string) *models.ActionCall {
 	t.Helper()
 	for _, call := range r.calls {
 		if call.ID == id {
@@ -41,11 +41,11 @@ func (r *actionCallRecords) get(t testing.TB, id string) *ActionCall {
 	return nil
 }
 
-func (r *actionCallRecords) ListActionCalls(_ context.Context, filter ActionFilter) ([]*ActionCall, error) {
+func (r *actionCallRecords) ListActionCalls(_ context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	matched := make([]*ActionCall, 0)
+	matched := make([]*models.ActionCall, 0)
 	for _, call := range r.calls {
 		if call.Scope == filter.Scope && (filter.RunID == "" || call.RunID == filter.RunID) &&
 			(len(filter.Status) == 0 || slices.Contains(filter.Status, call.Status)) {

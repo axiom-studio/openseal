@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -25,7 +26,7 @@ func TestSkillReferenceUpgradeStorageContractChangesRequireReviewAcrossStores(t 
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
 			runStoreContractFixtures(t, func(t *testing.T, fixture runStoreContractFixture) {
-				store := fixture.store.(KernelStore)
+				store := fixture.store.(models.KernelStore)
 				catalog := skill.NewCatalogWithStore(store.(skill.CatalogStore))
 				group := int64(1000)
 				before := skill.StorageRequirement{Name: "profile", MountPath: "/var/lib/profile", Durability: skill.StorageDurabilityPersistent,
@@ -43,17 +44,17 @@ func TestSkillReferenceUpgradeStorageContractChangesRequireReviewAcrossStores(t 
 						t.Fatal(err)
 					}
 				}
-				scope := Scope{Kind: "tenant", ID: "storage-review"}
+				scope := models.Scope{Kind: "tenant", ID: "storage-review"}
 				if err := catalog.Bind(t.Context(), &skill.Binding{ID: "account", Scope: skill.ScopeReference(scope), DeploymentID: "agent", SkillID: "profile-reader",
 					SkillVersion: "1.0.0", AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead, Revision: 1}); err != nil {
 					t.Fatal(err)
 				}
-				service := skillbinding.NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
+				service := skillbinding.NewSkillReferenceUpgradeService(store.(models.SkillReferenceUpgradeStore), catalog)
 				plan, err := service.Plan(t.Context(), skillbinding.PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: "agent", BindingID: "account", ToVersion: "1.1.0"})
 				if err != nil || !plan.ApprovalRequired || len(plan.Findings) != 1 || plan.Findings[0].Code != "storage_contract_changed" {
 					t.Fatalf("storage migration bypassed review with unchanged actions: %#v %v", plan, err)
 				}
-				if _, err := service.Apply(t.Context(), skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "upgrader"}, Reason: "Automatic update"}); !errors.Is(err, skillbinding.ErrSkillReferenceUpgradeApproval) {
+				if _, err := service.Apply(t.Context(), skillbinding.ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: models.ActivityActor{Type: "system", ID: "upgrader"}, Reason: "Automatic update"}); !errors.Is(err, skillbinding.ErrSkillReferenceUpgradeApproval) {
 					t.Fatalf("unattended profile migration was applied: %v", err)
 				}
 				binding, _ := catalog.GetBinding(t.Context(), skill.ScopeReference(scope), "agent", "account")

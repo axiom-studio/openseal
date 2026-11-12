@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -14,8 +15,8 @@ import (
 // These contracts use the same public commands and durable scheduling boundary
 // on the SQLite and PostgreSQL stores.
 type runStoreContractStore interface {
-	RunCommandStore
-	AgentRunScheduleStore
+	models.RunCommandStore
+	models.AgentRunScheduleStore
 }
 
 type runStoreContractFixture struct {

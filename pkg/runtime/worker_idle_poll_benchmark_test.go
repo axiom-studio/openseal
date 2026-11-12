@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -35,7 +36,7 @@ func BenchmarkActionWorkerIdleClaims(b *testing.B) {
 					dispatcher := action.ActionDispatcherFunc(func(context.Context, agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 						return nil, errors.New("idle benchmark cannot dispatch")
 					})
-					scope := Scope{Kind: "tenant", ID: "idle-benchmark"}
+					scope := models.Scope{Kind: "tenant", ID: "idle-benchmark"}
 					ctx, cancel := context.WithCancel(b.Context())
 					var stop func()
 					started := time.Now()

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -18,7 +20,7 @@ import (
 // leaseUmbrellaCase is one redemption of a lease issued for a run.
 type leaseUmbrellaCase struct {
 	name        string
-	owner       ObjectiveOwner
+	owner       models.ObjectiveOwner
 	assigned    string
 	actingUser  string
 	reference   string
@@ -29,31 +31,31 @@ type leaseUmbrellaCase struct {
 
 func leaseUmbrellaCases() []leaseUmbrellaCase {
 	other := "8"
-	agent := ObjectiveOwner{Type: OwnerTypeAgent, ID: "research-agent"}
-	team := ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}
+	agent := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "research-agent"}
+	team := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research-team"}
 	return []leaseUmbrellaCase{
 		{name: "agent stored binding", owner: agent, assigned: agent.ID, reference: "opaque://tenant/reddit"},
 		// O1: a Team run redeems its Team's host binding.
 		{name: "team host binding", owner: team, assigned: "member-agent", actingUser: "7", reference: "opaque://tenant/reddit", host: true},
 		{name: "team stored binding", owner: team, assigned: "member-agent", reference: "opaque://tenant/reddit"},
 		{name: "person ref with acting user", owner: team, assigned: "member-agent", actingUser: "7", reference: skill.PersonCredentialReferenceID, host: true},
-		{name: "acting user mismatch", owner: agent, assigned: agent.ID, actingUser: "7", leaseActing: &other, reference: "opaque://tenant/reddit", want: ErrActionCredentialLeaseMismatch},
-		{name: "person ref without acting user", owner: agent, assigned: agent.ID, reference: skill.PersonCredentialReferenceID, host: true, want: ErrActionCredentialLeaseMismatch},
+		{name: "acting user mismatch", owner: agent, assigned: agent.ID, actingUser: "7", leaseActing: &other, reference: "opaque://tenant/reddit", want: models.ErrActionCredentialLeaseMismatch},
+		{name: "person ref without acting user", owner: agent, assigned: agent.ID, reference: skill.PersonCredentialReferenceID, host: true, want: models.ErrActionCredentialLeaseMismatch},
 		// D7: a run delegated to another Agent redeems nothing, not even the
 		// owner's binding.
-		{name: "delegated run", owner: agent, assigned: "helper-agent", reference: "opaque://tenant/reddit", want: ErrActionCredentialLeaseMismatch},
+		{name: "delegated run", owner: agent, assigned: "helper-agent", reference: "opaque://tenant/reddit", want: models.ErrActionCredentialLeaseMismatch},
 	}
 }
 
-type leaseCallInserter func(*testing.T, context.Context, *ActionCall)
+type leaseCallInserter func(*testing.T, context.Context, *models.ActionCall)
 
-func leaseUmbrellaRequest(t *testing.T, ctx context.Context, store KernelStore, catalogStore skill.CatalogStore, insert leaseCallInserter, test leaseUmbrellaCase) ActionCredentialLeaseRedemptionRequest {
+func leaseUmbrellaRequest(t *testing.T, ctx context.Context, store models.KernelStore, catalogStore skill.CatalogStore, insert leaseCallInserter, test leaseUmbrellaCase) models.ActionCredentialLeaseRedemptionRequest {
 	t.Helper()
 	now := time.Now().UTC().Round(0)
-	scope := Scope{Kind: "tenant", ID: "tenant-lease-" + uuid.NewString()[:8]}
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+	scope := models.Scope{Kind: "tenant", ID: "tenant-lease-" + uuid.NewString()[:8]}
+	run, err := portfolio.NewPortfolioService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
 		Scope: scope, Owner: test.owner, AssignedAgentID: test.assigned, ActingUser: test.actingUser,
-		Goal: "Research safely", Source: RunSourceManual,
+		Goal: "Research safely", Source: models.RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -84,16 +86,16 @@ func leaseUmbrellaRequest(t *testing.T, ctx context.Context, store KernelStore, 
 		}
 	}
 	expires := now.Add(2 * time.Minute)
-	call := &ActionCall{
+	call := &models.ActionCall{
 		ID: uuid.NewString(), Scope: scope, RunID: run.ID, DeploymentID: binding.DeploymentID, BindingID: binding.ID, BindingRevision: binding.Revision,
-		SkillID: definition.ID, SkillVersion: definition.Version, Action: "read", Status: ActionCallStatusRunning,
+		SkillID: definition.ID, SkillVersion: definition.Version, Action: "read", Status: models.ActionCallStatusRunning,
 		Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, CredentialRefs: binding.Credentials,
 		Attempt: 1, MaxAttempts: 3, AvailableAt: now, LeaseOwner: "runtime-worker", LeaseExpiresAt: &expires,
 		Revision: 2, CreatedAt: now, UpdatedAt: now,
 	}
 	insert(t, ctx, call)
 	fields := map[string][]string{"reddit": {"oauth.access_token"}}
-	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+	lease, err := models.NewActionCredentialLease(models.CreateActionCredentialLeaseRequest{
 		TenantID: scope.ID, Call: call, Run: run, CredentialFields: fields, Transport: definition.Transport.Endpoint,
 		Issuer: "credential-authority", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-" + uuid.NewString(),
 	})
@@ -106,7 +108,7 @@ func leaseUmbrellaRequest(t *testing.T, ctx context.Context, store KernelStore, 
 	if test.leaseActing != nil {
 		lease.ActingUser = *test.leaseActing
 	}
-	request := ActionCredentialLeaseRedemptionRequest{Lease: *lease, Transport: definition.Transport.Endpoint, CredentialFields: fields}
+	request := models.ActionCredentialLeaseRedemptionRequest{Lease: *lease, Transport: definition.Transport.Endpoint, CredentialFields: fields}
 	if test.host {
 		request.HostBinding = binding
 	}
@@ -122,7 +124,7 @@ func TestSQLiteActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *tes
 	}
 	sqlDB := openTestSQLiteDB(t, path)
 	defer store.Close()
-	insert := func(t *testing.T, ctx context.Context, call *ActionCall) {
+	insert := func(t *testing.T, ctx context.Context, call *models.ActionCall) {
 		payload, err := json.Marshal(call)
 		if err != nil {
 			t.Fatal(err)
@@ -155,7 +157,7 @@ func TestPostgresActionCredentialLeaseRedeemsOnlyForTheRunUmbrellaAndPerson(t *t
 	t.Cleanup(func() {
 		_ = store.Close()
 	})
-	insert := func(t *testing.T, ctx context.Context, call *ActionCall) {
+	insert := func(t *testing.T, ctx context.Context, call *models.ActionCall) {
 		payload, err := json.Marshal(call)
 		if err != nil {
 			t.Fatal(err)

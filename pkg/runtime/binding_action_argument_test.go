@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -21,7 +22,7 @@ func TestBindingActionArgumentResolverOverridesModelWithTrustedSessionValues(t *
 			},
 		}},
 	}
-	run := &AgentRun{Context: map[string]interface{}{agentrun.RunContextSessionKey: map[string]interface{}{
+	run := &models.AgentRun{Context: map[string]interface{}{agentrun.RunContextSessionKey: map[string]interface{}{
 		skillbinding.SessionContextIDKey:             "session-123",
 		skillbinding.SessionContextVerifiedClaimsKey: map[string]interface{}{"userId": "customer-42"},
 	}}}
@@ -44,7 +45,7 @@ func TestBindingActionArgumentResolverRejectsMissingVerifiedClaim(t *testing.T) 
 		}},
 	}}
 	_, _, err := resolver.ResolveActionProposalArguments(context.Background(), agentrun.ActionProposalValidationInput{
-		Run:   &AgentRun{Context: map[string]interface{}{agentrun.RunContextSessionKey: map[string]interface{}{skillbinding.SessionContextIDKey: "session-123"}}},
+		Run:   &models.AgentRun{Context: map[string]interface{}{agentrun.RunContextSessionKey: map[string]interface{}{skillbinding.SessionContextIDKey: "session-123"}}},
 		Bound: bound,
 	})
 	if err == nil {

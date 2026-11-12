@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 	"github.com/google/uuid"
@@ -25,22 +26,22 @@ const taskMinimumTurns int64 = 8
 // the session before the chat preparer appends the trigger, and an empty lane
 // session cannot be planned (chat Runs are unbounded in production, so only
 // this scenario bounds one).
-func taskBudgetChat(c *childFixture, budget BudgetPolicy) (*Conversation, *AgentRun) {
+func taskBudgetChat(c *childFixture, budget models.BudgetPolicy) (*models.Conversation, *models.AgentRun) {
 	c.T.Helper()
 	conversation, first := c.StartChat("hello finn")
-	if _, done := c.drive(first.ID); done.Status != AgentRunStatusCompleted {
+	if _, done := c.drive(first.ID); done.Status != models.AgentRunStatusCompleted {
 		c.T.Fatalf("first exchange = %s (%#v)", done.Status, done.FailureExplanation)
 	}
 	run := convSchedule(c.Fixture, conversation.ID, convPost(c.Fixture, conversation.ID, "compile the quarterly report please", nil))
 	c.Clock.Advance(time.Second)
 	current := c.MustRun(run.ID)
-	bounded := cloneAgentRun(current)
+	bounded := models.CloneAgentRun(current)
 	bounded.Budget = &budget
 	bounded.Revision++
 	bounded.UpdatedAt = c.Clock.Now()
-	event := &ActivityEvent{
-		ID: uuid.NewString(), Scope: c.Scope, EventType: "run.budget_set", Severity: ActivitySeverityInfo, AgentID: looptest.FixtureAgent,
-		RunID: run.ID, Actor: ActivityActor{Type: "user", ID: looptest.FixtureUser}, Summary: "Budget set", Visibility: ActivityVisibilityScope,
+	event := &models.ActivityEvent{
+		ID: uuid.NewString(), Scope: c.Scope, EventType: "run.budget_set", Severity: models.ActivitySeverityInfo, AgentID: looptest.FixtureAgent,
+		RunID: run.ID, Actor: models.ActivityActor{Type: "user", ID: looptest.FixtureUser}, Summary: "Budget set", Visibility: models.ActivityVisibilityScope,
 		CreatedAt: c.Clock.Now(),
 	}
 	if _, err := c.Raw.UpdateAgentRunWithEvent(c.Ctx, bounded, current.Revision, event, nil); err != nil {
@@ -56,31 +57,31 @@ func taskBudgetChat(c *childFixture, budget BudgetPolicy) (*Conversation, *Agent
 func TestLoopTaskAuthorityRequiresChildBudget(t *testing.T) {
 	const ack = "On it, I will compile the report in the background."
 	const inline = "I can't start background work with the budget left, so here is what I have: revenue grew 4%."
-	newTaskFixture := func(t *testing.T, store KernelStore) *childFixture {
+	newTaskFixture := func(t *testing.T, store models.KernelStore) *childFixture {
 		c := newChildFixture(t, store, looptest.WithRules(
 			&looptest.ModelRule{Name: "task-work", When: func(v looptest.StepView) bool {
 				return strings.Contains(v.LastUserText(), "Compile the quarterly report") && !strings.Contains(v.LastUserText(), "please")
-			}, Reply: func(looptest.StepView) ModelStepResult {
+			}, Reply: func(looptest.StepView) models.ModelStepResult {
 				return looptest.Say("The quarterly report is ready: revenue grew 4%.")
 			}},
 			&looptest.ModelRule{Name: "hello", When: func(v looptest.StepView) bool { return strings.Contains(v.LastUserText(), "hello finn") },
-				Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("Hi Ana.") }},
-			&looptest.ModelRule{Name: "inline", When: portLastToolFailed, Reply: func(looptest.StepView) ModelStepResult { return looptest.Say(inline) }},
-			&looptest.ModelRule{Name: "start", Times: 1, Reply: func(looptest.StepView) ModelStepResult {
-				return looptest.Act("", looptest.Call(string(ControlToolStartTask), map[string]any{"goal": "Compile the quarterly report", "acknowledgment": ack}))
+				Reply: func(looptest.StepView) models.ModelStepResult { return looptest.Say("Hi Ana.") }},
+			&looptest.ModelRule{Name: "inline", When: portLastToolFailed, Reply: func(looptest.StepView) models.ModelStepResult { return looptest.Say(inline) }},
+			&looptest.ModelRule{Name: "start", Times: 1, Reply: func(looptest.StepView) models.ModelStepResult {
+				return looptest.Act("", looptest.Call(string(models.ControlToolStartTask), map[string]any{"goal": "Compile the quarterly report", "acknowledgment": ack}))
 			}},
 		))
-		c.authority = func(run *AgentRun, a *agentrun.ControlAuthority) {
-			if run.Kind == RunKindConversation && run.Context[ConversationTaskContextKey] == nil {
-				conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-				a.TaskStart = &HostedConversationTaskContext{ConversationID: conversationID, CanStart: true}
+		c.authority = func(run *models.AgentRun, a *agentrun.ControlAuthority) {
+			if run.Kind == models.RunKindConversation && run.Context[models.ConversationTaskContextKey] == nil {
+				conversationID, _ := run.Context[models.ConversationRunConversationIDContextKey].(string)
+				a.TaskStart = &models.HostedConversationTaskContext{ConversationID: conversationID, CanStart: true}
 			}
 		}
 		return c
 	}
-	tasksOf := func(c *childFixture, conversation *Conversation, source *AgentRun) []*ConversationTaskResult {
+	tasksOf := func(c *childFixture, conversation *models.Conversation, source *models.AgentRun) []*models.ConversationTaskResult {
 		c.T.Helper()
-		tasks, err := c.Chats.(ConversationTaskKernelStore).ListConversationTasks(c.Ctx, ConversationTaskFilter{
+		tasks, err := c.Chats.(models.ConversationTaskKernelStore).ListConversationTasks(c.Ctx, models.ConversationTaskFilter{
 			Scope: c.Scope, Owner: source.Owner, ConversationID: conversation.ID, Limit: 10,
 		})
 		if err != nil {
@@ -90,17 +91,17 @@ func TestLoopTaskAuthorityRequiresChildBudget(t *testing.T) {
 	}
 
 	t.Run("remaining_capacity_funds_the_task", func(t *testing.T) {
-		looptest.EachStore(t, "task_budget_funded", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "task_budget_funded", func(t *testing.T, store models.KernelStore) {
 			c := newTaskFixture(t, store)
 			// One Turn goes to the step that starts the task; the remaining 8
 			// meet the child minimum exactly.
-			conversation, source := taskBudgetChat(c, BudgetPolicy{MaxTurns: taskMinimumTurns + 1})
+			conversation, source := taskBudgetChat(c, models.BudgetPolicy{MaxTurns: taskMinimumTurns + 1})
 			_, ended := c.drive(source.ID)
-			if ended.Status != AgentRunStatusCompleted {
+			if ended.Status != models.AgentRunStatusCompleted {
 				t.Fatalf("source = %s (%#v), log %v", ended.Status, ended.FailureExplanation, c.EntryTypes(source.ID))
 			}
-			start := c.toolEntry(source.ID, string(ControlToolStartTask))
-			if start.State != ToolEntryCompleted || start.Tool.Result.IsError {
+			start := c.toolEntry(source.ID, string(models.ControlToolStartTask))
+			if start.State != models.ToolEntryCompleted || start.Tool.Result.IsError {
 				t.Fatalf("start entry = %s %q", start.State, childResultText(start))
 			}
 			tasks := tasksOf(c, conversation, source)
@@ -123,15 +124,15 @@ func TestLoopTaskAuthorityRequiresChildBudget(t *testing.T) {
 	})
 
 	t.Run("below_child_minimum_is_a_tool_error", func(t *testing.T) {
-		looptest.EachStore(t, "task_budget_short", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "task_budget_short", func(t *testing.T, store models.KernelStore) {
 			c := newTaskFixture(t, store)
-			conversation, source := taskBudgetChat(c, BudgetPolicy{MaxTurns: taskMinimumTurns})
+			conversation, source := taskBudgetChat(c, models.BudgetPolicy{MaxTurns: taskMinimumTurns})
 			_, ended := c.drive(source.ID)
-			if ended.Status != AgentRunStatusCompleted {
+			if ended.Status != models.AgentRunStatusCompleted {
 				t.Fatalf("source = %s (%#v), log %v", ended.Status, ended.FailureExplanation, c.EntryTypes(source.ID))
 			}
-			start := c.toolEntry(source.ID, string(ControlToolStartTask))
-			if start.State != ToolEntryError || !start.Tool.Result.IsError || !strings.Contains(childResultText(start), "task_rejected") ||
+			start := c.toolEntry(source.ID, string(models.ControlToolStartTask))
+			if start.State != models.ToolEntryError || !start.Tool.Result.IsError || !strings.Contains(childResultText(start), "task_rejected") ||
 				!strings.Contains(childResultText(start), "below the child minimum") {
 				t.Fatalf("start entry = %s %q, want a task_rejected budget error", start.State, childResultText(start))
 			}

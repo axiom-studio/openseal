@@ -7,7 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -15,9 +18,9 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 	t.Parallel()
 	stores := []struct {
 		name string
-		open func(*testing.T) (KernelStore, func())
+		open func(*testing.T) (models.KernelStore, func())
 	}{
-		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+		{name: "sqlite", open: func(t *testing.T) (models.KernelStore, func()) {
 			store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "cross-surface-activity.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -32,31 +35,31 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 			t.Parallel()
 			store, closeStore := fixture.open(t)
 			defer closeStore()
-			conversationStore, ok := store.(ConversationStore)
+			conversationStore, ok := store.(models.ConversationStore)
 			if !ok {
 				t.Fatal("kernel store does not implement ConversationStore")
 			}
 
 			ctx := context.Background()
-			scope := Scope{Kind: "tenant", ID: "cross-surface"}
+			scope := models.Scope{Kind: "tenant", ID: "cross-surface"}
 			now := time.Date(2026, 7, 23, 8, 30, 0, 0, time.UTC)
-			seedTestSpace(t, store.(SpaceStore), scope)
+			seedTestSpace(t, store.(models.SpaceStore), scope)
 			conversation, _, err := runtimeconversation.NewConversationService(conversationStore).CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-gtm"},
+				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-gtm"},
 				Title: "Launch coordination", IdempotencyKey: "launch-coordination",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+			objective, err := portfolio.NewPortfolioService(store).CreateObjective(ctx, portfolio.CreateObjectiveRequest{
 				Scope: scope, Owner: conversation.Owner, Title: "Launch", Goal: "Publish the approved launch",
-				Status: ObjectiveStatusActive, IdempotencyKey: "objective-launch",
+				Status: models.ObjectiveStatusActive, IdempotencyKey: "objective-launch",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			run := crossSurfaceRun("run-launch", scope, "agent-marketing", now)
-			run.Kind = RunKindConversation
+			run.Kind = models.RunKindConversation
 			run.Owner = conversation.Owner
 			run.ObjectiveID = objective.ID
 			run.ConcurrencyKey = conversation.ID
@@ -64,14 +67,14 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 				t.Fatal(err)
 			}
 
-			activity := NewRunActivityService(store, store)
-			appended, err := activity.AppendActivity(ctx, &ActivityEvent{
+			activity := runtimeactivity.NewRunActivityService(store, store)
+			appended, err := activity.AppendActivity(ctx, &models.ActivityEvent{
 				ID: "event-launch-published", Scope: scope, EventType: "action.succeeded",
 				AgentID: "agent-marketing", ObjectiveID: objective.ID,
 				RunID: run.ID, TurnID: "turn-publish", ParentRunID: "run-development", TeamID: "team-gtm",
-				ConversationRefs: []string{conversation.ID}, Actor: ActivityActor{Type: "agent", ID: "agent-marketing"},
-				Summary: "Published the approved launch brief", Visibility: ActivityVisibilityTeam,
-				UsageDelta:    &BudgetUsage{Turns: 1, InputTokens: 800, OutputTokens: 120, CostMicros: 42_000, DurationMS: 1_500, Actions: 1},
+				ConversationRefs: []string{conversation.ID}, Actor: models.ActivityActor{Type: "agent", ID: "agent-marketing"},
+				Summary: "Published the approved launch brief", Visibility: models.ActivityVisibilityTeam,
+				UsageDelta:    &models.BudgetUsage{Turns: 1, InputTokens: 800, OutputTokens: 120, CostMicros: 42_000, DurationMS: 1_500, Actions: 1},
 				Payload:       map[string]interface{}{"artifactRef": "artifact-launch-brief", "secret": "must-not-project"},
 				CorrelationID: "correlation-launch", CausationID: "event-development-completed", CreatedAt: now,
 			})
@@ -79,13 +82,13 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 				t.Fatal(err)
 			}
 
-			selectors := map[string]ActivityFeedRequest{
+			selectors := map[string]runtimeactivity.ActivityFeedRequest{
 				"agent":     {Scope: scope, AgentID: appended.AgentID},
 				"team":      {Scope: scope, TeamID: appended.TeamID},
 				"objective": {Scope: scope, ObjectiveID: appended.ObjectiveID},
 				"run":       {Scope: scope, RunID: appended.RunID},
 			}
-			var canonical *ActivityProjection
+			var canonical *models.ActivityProjection
 			for name, request := range selectors {
 				request.EventTypes = []string{appended.EventType}
 				page, listErr := activity.ListActivityFeed(ctx, request)
@@ -129,10 +132,10 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 // crossSurfaceRun is the queued Run the projection is recorded against. It
 // copies activityFeedRun, which moves with the activity feed tests into the
 // activity package, where this file cannot reach it.
-func crossSurfaceRun(id string, scope Scope, agentID string, now time.Time) *AgentRun {
-	return &AgentRun{
-		ID: id, RootRunID: id, Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: agentID},
-		AssignedAgentID: agentID, Goal: "work", Source: RunSourceManual, Status: AgentRunStatusQueued,
+func crossSurfaceRun(id string, scope models.Scope, agentID string, now time.Time) *models.AgentRun {
+	return &models.AgentRun{
+		ID: id, RootRunID: id, Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: agentID},
+		AssignedAgentID: agentID, Goal: "work", Source: models.RunSourceManual, Status: models.AgentRunStatusQueued,
 		AvailableAt: now, QueueEnteredAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 }

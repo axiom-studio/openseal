@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
@@ -30,13 +31,13 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 		_, _ = pgSchema.DB.ExecContext(ctx, `DROP SCHEMA IF EXISTS `+pgSchema.Quoted()+` CASCADE`)
 		_ = store.Close()
 	})
-	scope := Scope{Kind: "tenant", ID: "9"}
+	scope := models.Scope{Kind: "tenant", ID: "9"}
 	seeded := seedTestSpace(t, store, scope)
-	if _, _, err := store.PutSpaceMember(ctx, scope, &SpaceMember{SpaceID: seeded.ID, Type: SpaceMemberAgent, ID: "helper", AddedAt: time.Now().UTC()}); err != nil {
+	if _, _, err := store.PutSpaceMember(ctx, scope, &models.SpaceMember{SpaceID: seeded.ID, Type: models.SpaceMemberAgent, ID: "helper", AddedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	conversation, _, err := conversation.NewConversationService(store).CreateConversation(ctx, conversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "helper"}, Title: "Old chat", IdempotencyKey: "old",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +72,7 @@ func TestPostgresDefaultSpaceMigration(t *testing.T) {
 	t.Cleanup(func() { _ = reopened.Close() })
 	listed, err := reopened.ListSpaces(ctx, scope)
 	if err != nil || len(listed) != 1 || listed[0].ID != newID || !listed[0].IsDefault || listed[0].Name != "Shared" ||
-		listed[0].Access != SpaceAccessEveryone || listed[0].OwnerID != storetest.LegacyDefaultSpaceOwner {
+		listed[0].Access != models.SpaceAccessEveryone || listed[0].OwnerID != storetest.LegacyDefaultSpaceOwner {
 		t.Fatalf("spaces = %+v, err = %v", listed, err)
 	}
 	members, err := reopened.ListSpaceMembers(ctx, scope, newID)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -19,25 +20,25 @@ func TestSQLiteAgentRunClaimsAreAtomicAndRecoverAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	scope := Scope{Kind: "local", ID: "test"}
+	scope := models.Scope{Kind: "local", ID: "test"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "work", Source: RunSourceObjective,
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "work", Source: models.RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	const contenders = 16
-	results := make(chan *AgentRun, contenders)
+	results := make(chan *models.AgentRun, contenders)
 	errs := make(chan error, contenders)
 	var wg sync.WaitGroup
 	for i := 0; i < contenders; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			claimed, claimErr := store.ClaimNextAgentRun(ctx, AgentRunClaim{
+			claimed, claimErr := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{
 				Scope: scope, WorkerID: fmt.Sprintf("worker-%d", i), Now: now,
 				LeaseDuration: time.Minute, AgingInterval: time.Minute,
 			})
@@ -71,7 +72,7 @@ func TestSQLiteAgentRunClaimsAreAtomicAndRecoverAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	recovered, err := reopened.ClaimNextAgentRun(ctx, AgentRunClaim{
+	recovered, err := reopened.ClaimNextAgentRun(ctx, models.AgentRunClaim{
 		Scope: scope, WorkerID: "recovery-worker", Now: now.Add(time.Minute),
 		LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
@@ -90,17 +91,17 @@ func TestSQLiteAgentRunAttemptBudgetPersistsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	scope := Scope{Kind: "local", ID: "attempt-budget"}
+	scope := models.Scope{Kind: "local", ID: "attempt-budget"}
 	now := time.Now().UTC()
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "restart safely", Source: RunSourceObjective, Budget: &BudgetPolicy{MaxAttempts: 1, MaxTurns: 3},
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "restart safely", Source: models.RunSourceObjective, Budget: &models.BudgetPolicy{MaxAttempts: 1, MaxTurns: 3},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "first", Now: now, LeaseDuration: time.Second, AgingInterval: time.Minute})
+	first, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "first", Now: now, LeaseDuration: time.Second, AgingInterval: time.Minute})
 	if err != nil || first == nil || first.BudgetUsage.Attempts != 1 {
 		t.Fatalf("first claim = %#v, %v", first, err)
 	}
@@ -112,9 +113,9 @@ func TestSQLiteAgentRunAttemptBudgetPersistsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	recovered, err := reopened.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "recovery", Now: now.Add(2 * time.Second), LeaseDuration: time.Second, AgingInterval: time.Minute})
-	if err != nil || recovered == nil || recovered.ID != run.ID || recovered.Status != AgentRunStatusPaused ||
-		recovered.BudgetUsage.Attempts != 1 || !runAttemptBudgetAtLimit(recovered) || runAttemptBudgetExceeded(recovered) {
+	recovered, err := reopened.ClaimNextAgentRun(ctx, models.AgentRunClaim{Scope: scope, WorkerID: "recovery", Now: now.Add(2 * time.Second), LeaseDuration: time.Second, AgingInterval: time.Minute})
+	if err != nil || recovered == nil || recovered.ID != run.ID || recovered.Status != models.AgentRunStatusPaused ||
+		recovered.BudgetUsage.Attempts != 1 || !models.RunAttemptBudgetAtLimit(recovered) || models.RunAttemptBudgetExceeded(recovered) {
 		t.Fatalf("restart recovery = %#v, %v", recovered, err)
 	}
 }
@@ -126,34 +127,34 @@ func TestSQLiteAgentRunClaimHonorsAgingCapacityAndScope(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "one"}
-	otherScope := Scope{Kind: "tenant", ID: "two"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
+	otherScope := models.Scope{Kind: "tenant", ID: "two"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	portfolioClock := func() time.Time { return now.Add(-10 * time.Minute) }
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return portfolioClock() }))
-	old, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "old low priority", Source: RunSourceObjective, Priority: 1,
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return portfolioClock() }))
+	old, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "old low priority", Source: models.RunSourceObjective, Priority: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	portfolioClock = func() time.Time { return now.Add(-time.Minute) }
-	_, err = portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "new high priority", Source: RunSourceObjective, Priority: 5,
+	_, err = portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "new high priority", Source: models.RunSourceObjective, Priority: 5,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: otherScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "other scope", Source: RunSourceObjective, Priority: 100,
+	other, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: otherScope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "other scope", Source: models.RunSourceObjective, Priority: 100,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claim := AgentRunClaim{
+	claim := models.AgentRunClaim{
 		Scope: scope, WorkerID: "worker-1", AssignedAgentID: "agent", Now: now,
 		LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 1,
 	}
@@ -172,7 +173,7 @@ func TestSQLiteAgentRunClaimHonorsAgingCapacityAndScope(t *testing.T) {
 	if second != nil {
 		t.Fatalf("per-agent capacity was exceeded: %#v", second)
 	}
-	otherClaim, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{
+	otherClaim, err := store.ClaimNextAgentRun(ctx, models.AgentRunClaim{
 		Scope: otherScope, WorkerID: "worker-other", Now: now,
 		LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
@@ -191,9 +192,9 @@ func TestSQLiteAgentRunClaimHonorsConcurrencyKeyAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "conversation-capacity"}
+	scope := models.Scope{Kind: "tenant", ID: "conversation-capacity"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
 	for _, candidate := range []struct {
 		key      string
 		priority int
@@ -202,15 +203,15 @@ func TestSQLiteAgentRunClaimHonorsConcurrencyKeyAcrossRestart(t *testing.T) {
 		{key: "channel-a", priority: 9},
 		{key: "channel-b", priority: 1},
 	} {
-		if _, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-			Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
-			ConcurrencyKey: candidate.key, Goal: "Coordinate " + candidate.key, Source: RunSourceChat, Priority: candidate.priority,
+		if _, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+			Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"},
+			ConcurrencyKey: candidate.key, Goal: "Coordinate " + candidate.key, Source: models.RunSourceChat, Priority: candidate.priority,
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	claim := AgentRunClaim{
-		Scope: scope, Kind: RunKindConversation, WorkerID: "worker-1", Now: now,
+	claim := models.AgentRunClaim{
+		Scope: scope, Kind: models.RunKindConversation, WorkerID: "worker-1", Now: now,
 		LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForConcurrencyKey: 1,
 	}
 	first, err := store.ClaimNextAgentRun(ctx, claim)
@@ -253,18 +254,18 @@ func TestSQLiteAgentRunClaimIsolatesKindsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "kinds"}
+	scope := models.Scope{Kind: "tenant", ID: "kinds"}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	portfolio := NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
-	agentRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "ordinary work",
+	portfolio := portfolio.NewPortfolioService(store, models.WithClock(func() time.Time { return now }))
+	agentRun, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "ordinary work",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	conversationRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
-		Goal: "coordinate a channel", Source: RunSourceChat,
+	conversationRun, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"},
+		Goal: "coordinate a channel", Source: models.RunSourceChat,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -277,18 +278,18 @@ func TestSQLiteAgentRunClaimIsolatesKindsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	claimedConversation, err := reopened.ClaimNextAgentRun(ctx, AgentRunClaim{
-		Scope: scope, Kind: RunKindConversation, WorkerID: "conversation-worker", Now: now,
+	claimedConversation, err := reopened.ClaimNextAgentRun(ctx, models.AgentRunClaim{
+		Scope: scope, Kind: models.RunKindConversation, WorkerID: "conversation-worker", Now: now,
 		LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
 	if err != nil || claimedConversation == nil || claimedConversation.ID != conversationRun.ID {
 		t.Fatalf("conversation claim = %#v, %v", claimedConversation, err)
 	}
-	claimedAgent, err := reopened.ClaimNextAgentRun(ctx, AgentRunClaim{
-		Scope: scope, Kind: RunKindAgentWork, WorkerID: "agent-worker", Now: now,
+	claimedAgent, err := reopened.ClaimNextAgentRun(ctx, models.AgentRunClaim{
+		Scope: scope, Kind: models.RunKindAgentWork, WorkerID: "agent-worker", Now: now,
 		LeaseDuration: time.Minute, AgingInterval: time.Minute,
 	})
-	if err != nil || claimedAgent == nil || claimedAgent.ID != agentRun.ID || claimedAgent.Kind != RunKindAgentWork {
+	if err != nil || claimedAgent == nil || claimedAgent.ID != agentRun.ID || claimedAgent.Kind != models.RunKindAgentWork {
 		t.Fatalf("agent claim = %#v, %v", claimedAgent, err)
 	}
 }

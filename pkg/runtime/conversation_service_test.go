@@ -13,13 +13,13 @@ import (
 func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 	t.Parallel()
 	store := newTestKernelStore(t)
-	seedTestSpace(t, store, Scope{Kind: "tenant", ID: "one"})
+	seedTestSpace(t, store, models.Scope{Kind: "tenant", ID: "one"})
 	service := runtimeconversation.NewConversationService(store)
-	origin := &ConversationReference{Kind: ConversationReferenceObjective, ID: "objective-reddit-research"}
+	origin := &models.ConversationReference{Kind: models.ConversationReferenceObjective, ID: "objective-reddit-research"}
 
 	conversation, replayed, err := service.CreateConversation(context.Background(), runtimeconversation.CreateConversationRequest{
-		Scope:          Scope{Kind: "tenant", ID: "one"},
-		Owner:          ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"},
+		Scope:          models.Scope{Kind: "tenant", ID: "one"},
+		Owner:          models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"},
 		Title:          "Monitor Reddit pain points",
 		Origin:         origin,
 		IdempotencyKey: "objective-conversation",
@@ -27,7 +27,7 @@ func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 	if err != nil || replayed {
 		t.Fatalf("create objective conversation: replayed=%v err=%v", replayed, err)
 	}
-	if conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceObjective || conversation.Origin.ID != origin.ID {
+	if conversation.Origin == nil || conversation.Origin.Kind != models.ConversationReferenceObjective || conversation.Origin.ID != origin.ID {
 		t.Fatalf("objective origin = %#v", conversation.Origin)
 	}
 }
@@ -37,10 +37,10 @@ func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 	store := newTestKernelStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, Title: "First title", IdempotencyKey: "chat-one",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}, Title: "First title", IdempotencyKey: "chat-one",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -52,16 +52,16 @@ func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 	if err != nil || renamed.Title != title || renamed.Revision != conversation.Revision+1 {
 		t.Fatalf("renamed = %#v, err = %v", renamed, err)
 	}
-	archivedStatus := ConversationStatusArchived
+	archivedStatus := models.ConversationStatusArchived
 	archived, err := service.UpdateConversation(ctx, runtimeconversation.UpdateConversationRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: renamed.Revision, Status: &archivedStatus,
 	})
-	if err != nil || archived.Status != ConversationStatusArchived || archived.ArchivedAt == nil || archived.Revision != renamed.Revision+1 {
+	if err != nil || archived.Status != models.ConversationStatusArchived || archived.ArchivedAt == nil || archived.Revision != renamed.Revision+1 {
 		t.Fatalf("archived = %#v, err = %v", archived, err)
 	}
 	if _, err := service.UpdateConversation(ctx, runtimeconversation.UpdateConversationRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: renamed.Revision, Title: &title,
-	}); !errors.Is(err, ErrRevisionConflict) {
+	}); !errors.Is(err, models.ErrRevisionConflict) {
 		t.Fatalf("stale update error = %v", err)
 	}
 }
@@ -70,62 +70,62 @@ func TestConversationAudienceVisibilityIsFailClosedAndThreadSafe(t *testing.T) {
 	store := newTestKernelStore(t)
 	service := runtimeconversation.NewConversationService(store)
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "visibility"}
+	scope := models.Scope{Kind: "tenant", ID: "visibility"}
 	seedTestSpace(t, store, scope)
-	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Private coordination", IdempotencyKey: "channel"})
+	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}, Title: "Private coordination", IdempotencyKey: "channel"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sender := ConversationParticipant{Type: ConversationParticipantUser, ID: "sender"}
-	target := ConversationParticipant{Type: ConversationParticipantAgent, ID: "target"}
-	other := ConversationParticipant{Type: ConversationParticipantAgent, ID: "other"}
-	direct, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: sender, Intent: MessageIntentQuestion, Content: "private question", Audience: ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{target}}, IdempotencyKey: "direct"})
+	sender := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "sender"}
+	target := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "target"}
+	other := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "other"}
+	direct, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: sender, Intent: models.MessageIntentQuestion, Content: "private question", Audience: models.ConversationAudience{Kind: models.ConversationAudienceParticipants, Participants: []models.ConversationParticipant{target}}, IdempotencyKey: "direct"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	reply, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: direct.Conversation.Revision, Sender: target, Intent: MessageIntentAnswer, Content: "public-looking reply", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: direct.Message.ID, IdempotencyKey: "reply"})
+	reply, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: direct.Conversation.Revision, Sender: target, Intent: models.MessageIntentAnswer, Content: "public-looking reply", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: direct.Message.ID, IdempotencyKey: "reply"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: reply.Conversation.Revision, Sender: sender, Intent: MessageIntentUpdate, Content: "operators only", Audience: ConversationAudience{Kind: ConversationAudienceRoles, Roles: []string{"operator"}}, IdempotencyKey: "role"})
+	_, err = service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: reply.Conversation.Revision, Sender: sender, Intent: models.MessageIntentUpdate, Content: "operators only", Audience: models.ConversationAudience{Kind: models.ConversationAudienceRoles, Roles: []string{"operator"}}, IdempotencyKey: "role"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, viewer := range map[string]struct {
-		viewer ConversationViewer
+		viewer models.ConversationViewer
 		want   int
 	}{
-		"sender": {ConversationViewer{Participant: sender}, 3},
-		"target": {ConversationViewer{Participant: target}, 2},
-		"other":  {ConversationViewer{Participant: other}, 0},
-		"role":   {ConversationViewer{Participant: other, Roles: []string{"operator"}}, 1},
+		"sender": {models.ConversationViewer{Participant: sender}, 3},
+		"target": {models.ConversationViewer{Participant: target}, 2},
+		"other":  {models.ConversationViewer{Participant: other}, 0},
+		"role":   {models.ConversationViewer{Participant: other, Roles: []string{"operator"}}, 1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Viewer: &viewer.viewer})
+			messages, err := service.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Viewer: &viewer.viewer})
 			if err != nil || len(messages) != viewer.want {
 				t.Fatalf("messages=%#v err=%v", messages, err)
 			}
 		})
 	}
-	if _, err := service.GetVisibleChannelMessage(ctx, scope, conversation.ID, direct.Message.ID, ConversationViewer{Participant: other}); !errors.Is(err, ErrChannelMessageNotFound) {
+	if _, err := service.GetVisibleChannelMessage(ctx, scope, conversation.ID, direct.Message.ID, models.ConversationViewer{Participant: other}); !errors.Is(err, models.ErrChannelMessageNotFound) {
 		t.Fatalf("hidden get error=%v", err)
 	}
-	if _, err := service.GetVisibleChannelMessage(ctx, scope, conversation.ID, direct.Message.ID, ConversationViewer{Participant: target}); err != nil {
+	if _, err := service.GetVisibleChannelMessage(ctx, scope, conversation.ID, direct.Message.ID, models.ConversationViewer{Participant: target}); err != nil {
 		t.Fatalf("target get=%v", err)
 	}
-	paged, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Limit: 1, Viewer: &ConversationViewer{Participant: other, Roles: []string{"operator"}}})
+	paged, err := service.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Limit: 1, Viewer: &models.ConversationViewer{Participant: other, Roles: []string{"operator"}}})
 	if err != nil || len(paged) != 1 || paged[0].Content != "operators only" {
 		t.Fatalf("hidden-page scan=%#v err=%v", paged, err)
 	}
-	descending, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Limit: 1, Descending: true, Viewer: &ConversationViewer{Participant: target}})
+	descending, err := service.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, Limit: 1, Descending: true, Viewer: &models.ConversationViewer{Participant: target}})
 	if err != nil || len(descending) != 1 || descending[0].ID != reply.Message.ID {
 		t.Fatalf("descending hidden-page scan=%#v err=%v", descending, err)
 	}
-	bounded, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, BeforeSequence: reply.Message.Sequence, Viewer: &ConversationViewer{Participant: target}})
+	bounded, err := service.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, BeforeSequence: reply.Message.Sequence, Viewer: &models.ConversationViewer{Participant: target}})
 	if err != nil || len(bounded) != 1 || bounded[0].ID != direct.Message.ID {
 		t.Fatalf("before-sequence page=%#v err=%v", bounded, err)
 	}
-	if _, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, AfterSequence: 2, BeforeSequence: 2}); !errors.Is(err, ErrInvalidConversation) {
+	if _, err := service.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID, AfterSequence: 2, BeforeSequence: 2}); !errors.Is(err, models.ErrInvalidConversation) {
 		t.Fatalf("invalid sequence bounds error=%v", err)
 	}
 }
@@ -136,23 +136,23 @@ func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *test
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	service := runtimeconversation.NewConversationService(store, models.WithClock(func() time.Time { return now }))
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	seedTestSpace(t, store, scope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "product"}, Title: "Operations", IdempotencyKey: "operations-v1",
+		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "product"}, Title: "Operations", IdempotencyKey: "operations-v1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	message, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentUpdate,
-		Content: "Investigate the alert.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "alert-v1",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}, Intent: models.MessageIntentUpdate,
+		Content: "Investigate the alert.", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "alert-v1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent := ConversationParticipant{Type: ConversationParticipantAgent, ID: "sre"}
+	agent := models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "sre"}
 	cursor, replayed, err := service.AdvanceCursor(ctx, runtimeconversation.AdvanceConversationCursorRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: agent, DeliveredSequence: message.Message.Sequence, ReadSequence: 0,
 	})
@@ -169,10 +169,10 @@ func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *test
 	if _, _, err := service.AdvanceCursor(ctx, runtimeconversation.AdvanceConversationCursorRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: agent, ExpectedRevision: cursor.Revision,
 		DeliveredSequence: 0, ReadSequence: 0,
-	}); !errors.Is(err, ErrConversationCursorConflict) {
+	}); !errors.Is(err, models.ErrConversationCursorConflict) {
 		t.Fatalf("cursor regression error = %v", err)
 	}
-	user := ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}
+	user := models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "operator"}
 	if _, _, err := service.AdvanceCursor(ctx, runtimeconversation.AdvanceConversationCursorRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: user,
 		DeliveredSequence: message.Message.Sequence, ReadSequence: 0,
@@ -188,20 +188,20 @@ func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *test
 	}
 
 	presence, err := service.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
-		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: ConversationPresenceWorking,
+		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: models.ConversationPresenceWorking,
 		Summary: "Inspecting alert evidence", RunID: "alert-run", TTL: 30 * time.Second,
 	})
 	if err != nil || presence.LeaseID == "" || presence.Revision != 1 {
 		t.Fatalf("presence = %#v, err = %v", presence, err)
 	}
 	if _, err := service.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
-		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: ConversationPresenceTyping,
+		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: models.ConversationPresenceTyping,
 		LeaseID: "another-lease", ExpectedRevision: presence.Revision, TTL: 30 * time.Second,
-	}); !errors.Is(err, ErrConversationPresenceConflict) {
+	}); !errors.Is(err, models.ErrConversationPresenceConflict) {
 		t.Fatalf("foreign lease error = %v", err)
 	}
 	presence, err = service.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
-		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: ConversationPresenceTyping,
+		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: models.ConversationPresenceTyping,
 		Summary: "Writing update", LeaseID: presence.LeaseID, ExpectedRevision: presence.Revision, TTL: 20 * time.Second,
 	})
 	if err != nil || presence.Revision != 2 {
@@ -217,12 +217,12 @@ func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *test
 		t.Fatalf("expired presence = %#v, err = %v", active, err)
 	}
 	replacement, err := service.SetPresence(ctx, runtimeconversation.SetConversationPresenceRequest{
-		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: ConversationPresenceThinking, TTL: 30 * time.Second,
+		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: models.ConversationPresenceThinking, TTL: 30 * time.Second,
 	})
 	if err != nil || replacement.Revision != 1 || replacement.LeaseID == presence.LeaseID {
 		t.Fatalf("replacement presence = %#v, err = %v", replacement, err)
 	}
-	if err := service.ReleasePresence(ctx, ReleaseConversationPresenceRequest{
+	if err := service.ReleasePresence(ctx, models.ReleaseConversationPresenceRequest{
 		Scope: scope, ConversationID: conversation.ID, Participant: agent, LeaseID: replacement.LeaseID,
 	}); err != nil {
 		t.Fatal(err)

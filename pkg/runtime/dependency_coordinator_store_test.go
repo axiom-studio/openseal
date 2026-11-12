@@ -9,16 +9,17 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-func createDependencySource(t *testing.T, store *sqlite.Store, scope Scope, id string) *AgentRun {
+func createDependencySource(t *testing.T, store *sqlite.Store, scope models.Scope, id string) *models.AgentRun {
 	t.Helper()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	run := &AgentRun{
-		ID: id, Scope: scope, RootRunID: id, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"},
-		AssignedAgentID: "lead", Goal: "Coordinate parallel research", Source: RunSourceManual,
-		Status: AgentRunStatusQueued, Priority: 80, AvailableAt: now, QueueEnteredAt: now,
+	run := &models.AgentRun{
+		ID: id, Scope: scope, RootRunID: id, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "research"},
+		AssignedAgentID: "lead", Goal: "Coordinate parallel research", Source: models.RunSourceManual,
+		Status: models.AgentRunStatusQueued, Priority: 80, AvailableAt: now, QueueEnteredAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := store.CreateAgentRun(context.Background(), run); err != nil {
@@ -29,26 +30,26 @@ func createDependencySource(t *testing.T, store *sqlite.Store, scope Scope, id s
 
 func TestDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "one"}
+	scope := models.Scope{Kind: "tenant", ID: "one"}
 	store := newTestKernelStore(t)
 	createDependencySource(t, store, scope, "source-all")
 	coordinatorClock := func() time.Time { return time.Date(2026, 7, 10, 12, 1, 0, 0, time.UTC) }
-	coordinator := NewDependencyCoordinator(store, models.WithClock(func() time.Time { return coordinatorClock() }))
+	coordinator := portfolio.NewDependencyCoordinator(store, models.WithClock(func() time.Time { return coordinatorClock() }))
 
-	create := CreateRunDependencyGroupRequest{
+	create := models.CreateRunDependencyGroupRequest{
 		ID: "join-all", Scope: scope, SourceRunID: "source-all", ExpectedSourceRevision: 1,
-		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Dependencies: []RunDependencySpec{
-			{ID: "research", Kind: RunDependencyKindAgentRequest, RequestID: "request-research"},
-			{ID: "analysis", Kind: RunDependencyKindAgentRequest, RequestID: "request-analysis"},
+		Policy: models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast},
+		Dependencies: []models.RunDependencySpec{
+			{ID: "research", Kind: models.RunDependencyKindAgentRequest, RequestID: "request-research"},
+			{ID: "analysis", Kind: models.RunDependencyKindAgentRequest, RequestID: "request-analysis"},
 		},
-		IdempotencyKey: "join-all-once", Actor: ActivityActor{Type: "agent", ID: "lead"}, Visibility: ActivityVisibilityTeam,
+		IdempotencyKey: "join-all-once", Actor: models.ActivityActor{Type: "agent", ID: "lead"}, Visibility: models.ActivityVisibilityTeam,
 	}
 	created, err := coordinator.CreateRunDependencyGroup(ctx, create)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Group.Status != RunDependencyGroupWaiting || created.Source.Status != AgentRunStatusWaitingForDependency ||
+	if created.Group.Status != models.RunDependencyGroupWaiting || created.Source.Status != models.AgentRunStatusWaitingForDependency ||
 		created.Source.WakeCondition == nil || created.Source.WakeCondition.Reference != "join-all" || len(created.Events) != 1 {
 		t.Fatalf("created = %#v", created)
 	}
@@ -57,36 +58,36 @@ func TestDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 		t.Fatalf("create replay = %#v, err = %v", replayed, err)
 	}
 	conflict := create
-	conflict.Policy.FailureMode = DependencyFailureWait
-	if _, err := coordinator.CreateRunDependencyGroup(ctx, conflict); !errors.Is(err, ErrDependencyConflict) {
+	conflict.Policy.FailureMode = models.DependencyFailureWait
+	if _, err := coordinator.CreateRunDependencyGroup(ctx, conflict); !errors.Is(err, models.ErrDependencyConflict) {
 		t.Fatalf("conflicting replay error = %v", err)
 	}
 
 	coordinatorClock = func() time.Time { return time.Date(2026, 7, 10, 12, 2, 0, 0, time.UTC) }
-	first, err := coordinator.ResolveRunDependency(ctx, ResolveRunDependencyRequest{
+	first, err := coordinator.ResolveRunDependency(ctx, portfolio.ResolveRunDependencyRequest{
 		Scope: scope, GroupID: "join-all", DependencyID: "analysis", ExpectedDependencyRevision: 1,
-		State: RunDependencyStateSatisfied, Result: map[string]interface{}{"finding": "conversion increased"},
-		Actor: ActivityActor{Type: "agent", ID: "analyst"}, Visibility: ActivityVisibilityTeam,
+		State: models.RunDependencyStateSatisfied, Result: map[string]interface{}{"finding": "conversion increased"},
+		Actor: models.ActivityActor{Type: "agent", ID: "analyst"}, Visibility: models.ActivityVisibilityTeam,
 	})
-	if err != nil || first.Evaluation.Wake || first.Source.Status != AgentRunStatusWaitingForDependency || len(first.Events) != 1 {
+	if err != nil || first.Evaluation.Wake || first.Source.Status != models.AgentRunStatusWaitingForDependency || len(first.Events) != 1 {
 		t.Fatalf("first completion = %#v, err = %v", first, err)
 	}
 	coordinatorClock = func() time.Time { return time.Date(2026, 7, 10, 12, 3, 0, 0, time.UTC) }
-	secondRequest := ResolveRunDependencyRequest{
+	secondRequest := portfolio.ResolveRunDependencyRequest{
 		Scope: scope, GroupID: "join-all", DependencyID: "research", ExpectedDependencyRevision: 1,
-		State: RunDependencyStateSatisfied, Result: map[string]interface{}{"finding": "users need durable retries"},
-		Actor: ActivityActor{Type: "agent", ID: "researcher"}, Visibility: ActivityVisibilityTeam,
+		State: models.RunDependencyStateSatisfied, Result: map[string]interface{}{"finding": "users need durable retries"},
+		Actor: models.ActivityActor{Type: "agent", ID: "researcher"}, Visibility: models.ActivityVisibilityTeam,
 	}
 	second, err := coordinator.ResolveRunDependency(ctx, secondRequest)
-	if err != nil || !second.Evaluation.Wake || second.Group.Status != RunDependencyGroupSatisfied ||
-		second.Source.Status != AgentRunStatusQueued || second.Source.WakeCondition != nil || len(second.Events) != 2 {
+	if err != nil || !second.Evaluation.Wake || second.Group.Status != models.RunDependencyGroupSatisfied ||
+		second.Source.Status != models.AgentRunStatusQueued || second.Source.WakeCondition != nil || len(second.Events) != 2 {
 		t.Fatalf("second completion = %#v, err = %v", second, err)
 	}
 	replay, err := coordinator.ResolveRunDependency(ctx, secondRequest)
 	if err != nil || !replay.Replayed || replay.Source.Revision != second.Source.Revision || len(replay.Events) != 0 {
 		t.Fatalf("completion replay = %#v, err = %v", replay, err)
 	}
-	activity, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: "source-all", Limit: 20})
+	activity, err := store.ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: "source-all", Limit: 20})
 	if err != nil || len(activity) != 4 {
 		t.Fatalf("activity count = %d, err = %v", len(activity), err)
 	}
@@ -99,19 +100,19 @@ func TestDependencyCoordinatorAllFanInWakesExactlyOnce(t *testing.T) {
 
 func TestDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testing.T) {
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "concurrent"}
+	scope := models.Scope{Kind: "tenant", ID: "concurrent"}
 	store := newTestKernelStore(t)
 	createDependencySource(t, store, scope, "source-any")
-	coordinator := NewDependencyCoordinator(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC) }))
-	_, err := coordinator.CreateRunDependencyGroup(ctx, CreateRunDependencyGroupRequest{
+	coordinator := portfolio.NewDependencyCoordinator(store, models.WithClock(func() time.Time { return time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC) }))
+	_, err := coordinator.CreateRunDependencyGroup(ctx, models.CreateRunDependencyGroupRequest{
 		ID: "join-any", Scope: scope, SourceRunID: "source-any", ExpectedSourceRevision: 1,
-		Policy: RunDependencyPolicy{Mode: FanInModeAny, FailureMode: DependencyFailureFailFast},
-		Dependencies: []RunDependencySpec{
-			{ID: "one", Kind: RunDependencyKindAgentRequest, RequestID: "request-one"},
-			{ID: "two", Kind: RunDependencyKindAgentRequest, RequestID: "request-two"},
-			{ID: "three", Kind: RunDependencyKindAgentRequest, RequestID: "request-three"},
+		Policy: models.RunDependencyPolicy{Mode: models.FanInModeAny, FailureMode: models.DependencyFailureFailFast},
+		Dependencies: []models.RunDependencySpec{
+			{ID: "one", Kind: models.RunDependencyKindAgentRequest, RequestID: "request-one"},
+			{ID: "two", Kind: models.RunDependencyKindAgentRequest, RequestID: "request-two"},
+			{ID: "three", Kind: models.RunDependencyKindAgentRequest, RequestID: "request-three"},
 		},
-		Actor: ActivityActor{Type: "agent", ID: "lead"}, Visibility: ActivityVisibilityTeam,
+		Actor: models.ActivityActor{Type: "agent", ID: "lead"}, Visibility: models.ActivityVisibilityTeam,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,10 +125,10 @@ func TestDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			result, resolveErr := coordinator.ResolveRunDependency(ctx, ResolveRunDependencyRequest{
+			result, resolveErr := coordinator.ResolveRunDependency(ctx, portfolio.ResolveRunDependencyRequest{
 				Scope: scope, GroupID: "join-any", DependencyID: id, ExpectedDependencyRevision: 1,
-				State: RunDependencyStateSatisfied, Result: map[string]interface{}{"winner": id},
-				Actor: ActivityActor{Type: "agent", ID: id}, Visibility: ActivityVisibilityTeam,
+				State: models.RunDependencyStateSatisfied, Result: map[string]interface{}{"winner": id},
+				Actor: models.ActivityActor{Type: "agent", ID: id}, Visibility: models.ActivityVisibilityTeam,
 			})
 			if resolveErr != nil {
 				failures.Add(1)
@@ -143,14 +144,14 @@ func TestDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testing.T) {
 		t.Fatalf("failures = %d, wakes = %d", failures.Load(), wakes.Load())
 	}
 	group, err := coordinator.GetRunDependencyGroup(ctx, scope, "join-any")
-	if err != nil || group.Status != RunDependencyGroupSatisfied || group.Revision != 4 || group.WakeSignalID == "" {
+	if err != nil || group.Status != models.RunDependencyGroupSatisfied || group.Revision != 4 || group.WakeSignalID == "" {
 		t.Fatalf("group = %#v, err = %v", group, err)
 	}
 	source, err := store.GetAgentRun(ctx, scope, "source-any")
-	if err != nil || source.Status != AgentRunStatusQueued || source.Revision != 5 || source.LastWakeSignalID != group.WakeSignalID {
+	if err != nil || source.Status != models.AgentRunStatusQueued || source.Revision != 5 || source.LastWakeSignalID != group.WakeSignalID {
 		t.Fatalf("source = %#v, err = %v", source, err)
 	}
-	activity, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: source.ID, Limit: 20})
+	activity, err := store.ListActivity(ctx, models.ActivityFilter{Scope: scope, RunID: source.ID, Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,35 +168,35 @@ func TestDependencyCoordinatorConcurrentAnyFanInNeverDoubleWakes(t *testing.T) {
 
 func TestDependencyCoordinatorOptionalCompletionContinuesAfterWake(t *testing.T) {
 	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "optional"}
+	scope := models.Scope{Kind: "tenant", ID: "optional"}
 	store := newTestKernelStore(t)
 	createDependencySource(t, store, scope, "source-optional")
-	coordinator := NewDependencyCoordinator(store)
+	coordinator := portfolio.NewDependencyCoordinator(store)
 	optional := false
-	_, err := coordinator.CreateRunDependencyGroup(ctx, CreateRunDependencyGroupRequest{
+	_, err := coordinator.CreateRunDependencyGroup(ctx, models.CreateRunDependencyGroupRequest{
 		ID: "join-optional", Scope: scope, SourceRunID: "source-optional", ExpectedSourceRevision: 1,
-		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Dependencies: []RunDependencySpec{
-			{ID: "required", Kind: RunDependencyKindRun, TargetRunID: "child-required"},
-			{ID: "optional", Kind: RunDependencyKindRun, TargetRunID: "child-optional", Required: &optional},
+		Policy: models.RunDependencyPolicy{Mode: models.FanInModeAll, FailureMode: models.DependencyFailureFailFast},
+		Dependencies: []models.RunDependencySpec{
+			{ID: "required", Kind: models.RunDependencyKindRun, TargetRunID: "child-required"},
+			{ID: "optional", Kind: models.RunDependencyKindRun, TargetRunID: "child-optional", Required: &optional},
 		},
-		Actor: ActivityActor{Type: "agent", ID: "lead"}, Visibility: ActivityVisibilityTeam,
+		Actor: models.ActivityActor{Type: "agent", ID: "lead"}, Visibility: models.ActivityVisibilityTeam,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	required, err := coordinator.ResolveRunDependency(ctx, ResolveRunDependencyRequest{
+	required, err := coordinator.ResolveRunDependency(ctx, portfolio.ResolveRunDependencyRequest{
 		Scope: scope, GroupID: "join-optional", DependencyID: "required", ExpectedDependencyRevision: 1,
-		State: RunDependencyStateSatisfied, Actor: ActivityActor{Type: "agent", ID: "required"}, Visibility: ActivityVisibilityTeam,
+		State: models.RunDependencyStateSatisfied, Actor: models.ActivityActor{Type: "agent", ID: "required"}, Visibility: models.ActivityVisibilityTeam,
 	})
 	if err != nil || !required.Evaluation.Wake {
 		t.Fatalf("required completion = %#v, err = %v", required, err)
 	}
-	optionalResult, err := coordinator.ResolveRunDependency(ctx, ResolveRunDependencyRequest{
+	optionalResult, err := coordinator.ResolveRunDependency(ctx, portfolio.ResolveRunDependencyRequest{
 		Scope: scope, GroupID: "join-optional", DependencyID: "optional", ExpectedDependencyRevision: 1,
-		State: RunDependencyStateSatisfied, Actor: ActivityActor{Type: "agent", ID: "optional"}, Visibility: ActivityVisibilityTeam,
+		State: models.RunDependencyStateSatisfied, Actor: models.ActivityActor{Type: "agent", ID: "optional"}, Visibility: models.ActivityVisibilityTeam,
 	})
-	if err != nil || optionalResult.Evaluation.Wake || optionalResult.Source.Status != AgentRunStatusQueued || optionalResult.Group.WakeSignalID != required.Group.WakeSignalID {
+	if err != nil || optionalResult.Evaluation.Wake || optionalResult.Source.Status != models.AgentRunStatusQueued || optionalResult.Group.WakeSignalID != required.Group.WakeSignalID {
 		t.Fatalf("optional completion = %#v, err = %v", optionalResult, err)
 	}
 }

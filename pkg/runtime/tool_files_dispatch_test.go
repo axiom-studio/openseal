@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -28,8 +29,8 @@ func TestToolActionDispatcherCarriesFileReferences(t *testing.T) {
 		Tools: []skill.BindingTool{{Name: "describe", Effect: capability.BindingToolEffectRead, Arguments: map[string]interface{}{"tool": "describe"},
 			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"image": map[string]interface{}{"type": "string", "format": "data-url"}}}}},
 	}}
-	var invocation ToolInvocation
-	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value ToolInvocation) (map[string]interface{}, error) {
+	var invocation models.ToolInvocation
+	dispatcher, err := modelstep.NewToolActionDispatcher(modelstep.ToolInvokerFunc(func(_ context.Context, value models.ToolInvocation) (map[string]interface{}, error) {
 		invocation = value
 		return map[string]interface{}{"content": []interface{}{}}, nil
 	}))
@@ -37,7 +38,7 @@ func TestToolActionDispatcherCarriesFileReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	arguments := map[string]interface{}{"tool": "describe", "arguments": map[string]interface{}{"image": toolfile.FileValue("/uploads/cat.jpg")}}
-	if _, err := dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{Call: &ActionCall{ID: "call", RunID: "run"}, Bound: bound, Arguments: arguments}); err != nil {
+	if _, err := dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "call", RunID: "run"}, Bound: bound, Arguments: arguments}); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(invocation.FileReferences, []toolfile.Reference{{Pointer: "/arguments/image", Path: "uploads/cat.jpg", Encoding: toolfile.DataURL}}) ||
@@ -48,7 +49,7 @@ func TestToolActionDispatcherCarriesFileReferences(t *testing.T) {
 		t.Fatal("the host must receive the reference, not a placeholder")
 	}
 	arguments["arguments"] = map[string]interface{}{"caption": toolfile.FileValue("a.png")}
-	if _, err := dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{Call: &ActionCall{ID: "call2", RunID: "run"}, Bound: bound, Arguments: arguments}); err == nil {
+	if _, err := dispatcher.DispatchAction(context.Background(), agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "call2", RunID: "run"}, Bound: bound, Arguments: arguments}); err == nil {
 		t.Fatal("a file in a field that takes none was dispatched")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -19,17 +20,17 @@ type countedCatalogTaskContextStore struct {
 	runReads, taskReads, taskLists int
 }
 
-func (s *countedCatalogTaskContextStore) GetAgentRun(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
+func (s *countedCatalogTaskContextStore) GetAgentRun(ctx context.Context, scope models.Scope, id string) (*models.AgentRun, error) {
 	s.runReads++
 	return s.Store.GetAgentRun(ctx, scope, id)
 }
 
-func (s *countedCatalogTaskContextStore) FindConversationTaskByWorkRunID(ctx context.Context, scope Scope, id string) (*ConversationTask, error) {
+func (s *countedCatalogTaskContextStore) FindConversationTaskByWorkRunID(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 	s.taskReads++
 	return s.Store.FindConversationTaskByWorkRunID(ctx, scope, id)
 }
 
-func (s *countedCatalogTaskContextStore) ListConversationTasks(ctx context.Context, filter ConversationTaskFilter) ([]*ConversationTaskResult, error) {
+func (s *countedCatalogTaskContextStore) ListConversationTasks(ctx context.Context, filter models.ConversationTaskFilter) ([]*models.ConversationTaskResult, error) {
 	s.taskLists++
 	return s.Store.ListConversationTasks(ctx, filter)
 }
@@ -38,12 +39,12 @@ func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
 	store := &countedCatalogTaskContextStore{Store: newTestKernelStore(t)}
 	for name, input := range map[string]map[string]interface{}{
 		"non-chat":           {},
-		"partial context":    {conversationRunContextConversationID: "chat"},
-		"non-string trigger": {conversationRunContextConversationID: "chat", conversationRunContextTriggerID: true},
-		"empty trigger":      {conversationRunContextConversationID: "chat", conversationRunContextTriggerID: ""},
+		"partial context":    {models.ConversationRunConversationIDContextKey: "chat"},
+		"non-string trigger": {models.ConversationRunConversationIDContextKey: "chat", models.ConversationRunTriggerIDContextKey: true},
+		"empty trigger":      {models.ConversationRunConversationIDContextKey: "chat", models.ConversationRunTriggerIDContextKey: ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			result, err := conversationrun.ResolveCatalogConversationTaskContext(t.Context(), nil, &AgentRun{ID: "ordinary", Kind: RunKindAgentWork, Context: input}, store)
+			result, err := conversationrun.ResolveCatalogConversationTaskContext(t.Context(), nil, &models.AgentRun{ID: "ordinary", Kind: models.RunKindAgentWork, Context: input}, store)
 			if err != nil || result != nil || store.runReads != 0 || store.taskReads != 0 || store.taskLists != 0 {
 				t.Fatalf("ordinary work added task reads: result=%#v err=%v runs=%d tasks=%d lists=%d", result, err, store.runReads, store.taskReads, store.taskLists)
 			}
@@ -54,9 +55,9 @@ func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
 func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *testing.T) {
 	kernel := newTestKernelStore(t)
 	source, _, _, _ := conversationruntest.SettledTaskSource(t, kernel)
-	child, err := NewPortfolioService(kernel).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: source.Scope, Owner: source.Owner, Kind: RunKindAgentWork, ParentRunID: source.ID, AssignedAgentID: source.AssignedAgentID,
-		Goal: "Ordinary delegated operation", Source: RunSourceFork, Context: maps.Clone(source.Context),
+	child, err := portfolio.NewPortfolioService(kernel).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: source.Scope, Owner: source.Owner, Kind: models.RunKindAgentWork, ParentRunID: source.ID, AssignedAgentID: source.AssignedAgentID,
+		Goal: "Ordinary delegated operation", Source: models.RunSourceFork, Context: maps.Clone(source.Context),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -68,13 +69,13 @@ func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *test
 	}
 }
 
-func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *Conversation, []*ConversationTaskResult) {
+func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *models.Conversation, []*models.ConversationTaskResult) {
 	t.Helper()
 	store := newTestKernelStore(t)
 	base := time.Now().UTC().Add(-time.Hour)
-	scope := Scope{Kind: "tenant", ID: "task-sql"}
-	conversation := &Conversation{ID: "conversation", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "task-agent"},
-		Title: "Shared tasks", Status: ConversationStatusActive, Revision: 1, CreatedAt: base, UpdatedAt: base}
+	scope := models.Scope{Kind: "tenant", ID: "task-sql"}
+	conversation := &models.Conversation{ID: "conversation", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "task-agent"},
+		Title: "Shared tasks", Status: models.ConversationStatusActive, Revision: 1, CreatedAt: base, UpdatedAt: base}
 	seedTestSpace(t, store, scope)
 	if _, _, err := store.CreateConversation(t.Context(), conversation, "catalog-task-page"); err != nil {
 		t.Fatal(err)
@@ -82,12 +83,12 @@ func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *Conversati
 	service := runtimeconversation.NewConversationService(store)
 	if _, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		ID: "thread", Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, Intent: MessageIntentQuestion,
-		Content: "Work on these independent requests.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, StartThread: true, IdempotencyKey: "thread",
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "requester"}, Intent: models.MessageIntentQuestion,
+		Content: "Work on these independent requests.", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, StartThread: true, IdempotencyKey: "thread",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	results := make([]*ConversationTaskResult, 0, count+1)
+	results := make([]*models.ConversationTaskResult, 0, count+1)
 	for i := 0; i <= count; i++ {
 		record := taskContextTaskRecord(t, store, fmt.Sprintf("catalog-%02d", i), base.Add(time.Duration(i+1)*time.Second))
 		actor := record.Task.AuthenticatedActor
@@ -100,13 +101,13 @@ func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *Conversati
 		}
 		if _, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 			ID: record.Task.SourceMessageID, Scope: scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-			Sender: actor, Intent: MessageIntentQuestion, Content: record.Task.Goal,
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: "thread", IdempotencyKey: record.Task.SourceMessageID,
+			Sender: actor, Intent: models.MessageIntentQuestion, Content: record.Task.Goal,
+			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: "thread", IdempotencyKey: record.Task.SourceMessageID,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		turn := &AgentTurn{ID: record.Task.SourceTurnID, Scope: scope, RunID: record.Task.SourceRunID, Sequence: 1,
-			Status: AgentTurnStatusCompleted, Revision: 1, CreatedAt: record.Task.CreatedAt, UpdatedAt: record.Task.CreatedAt,
+		turn := &models.AgentTurn{ID: record.Task.SourceTurnID, Scope: scope, RunID: record.Task.SourceRunID, Sequence: 1,
+			Status: models.AgentTurnStatusCompleted, Revision: 1, CreatedAt: record.Task.CreatedAt, UpdatedAt: record.Task.CreatedAt,
 			StartedAt: record.Task.CreatedAt, CompletedAt: &record.Task.CreatedAt}
 		if _, err := store.CreateAgentTurn(t.Context(), turn); err != nil {
 			t.Fatal(err)
@@ -144,7 +145,7 @@ func TestCatalogConversationTaskContextPrioritizesIndependentRootWithoutWidening
 				}
 				seen[snapshot.TaskID] = true
 			}
-			ordinary, err := store.ListConversationTasks(t.Context(), ConversationTaskFilter{
+			ordinary, err := store.ListConversationTasks(t.Context(), models.ConversationTaskFilter{
 				Scope: self.Task.Scope, Owner: self.Task.Owner, ConversationID: conversation.ID, ThreadRootID: "thread",
 				AuthenticatedActor: self.Task.AuthenticatedActor, ActiveOnly: true, Limit: 10,
 			})
@@ -163,7 +164,7 @@ func TestCatalogConversationTaskContextPrioritizesIndependentRootWithoutWidening
 					t.Fatalf("foreground task order changed at %d: %#v", i, foreground.Tasks)
 				}
 			}
-			foreign := cloneAgentRun(self.WorkRun)
+			foreign := models.CloneAgentRun(self.WorkRun)
 			foreign.Scope.ID = "foreign-tenant"
 			if context, err := conversationrun.ResolveCatalogConversationTaskContext(t.Context(), nil, foreign, store); err != nil || context != nil {
 				t.Fatalf("foreign tenant acquired executing-task identity: %#v, %v", context, err)
@@ -175,9 +176,9 @@ func TestCatalogConversationTaskContextPrioritizesIndependentRootWithoutWidening
 func TestCatalogConversationTaskContextDoesNotPrioritizeForkRoot(t *testing.T) {
 	store, _, admitted := catalogTaskPageFixture(t, 13)
 	root := admitted[0].WorkRun
-	child, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: root.Scope, Owner: root.Owner, Kind: RunKindAgentWork, ParentRunID: root.ID, AssignedAgentID: root.AssignedAgentID,
-		Goal: "Complete this fork's partial goal", Source: RunSourceFork, Context: maps.Clone(root.Context),
+	child, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: root.Scope, Owner: root.Owner, Kind: models.RunKindAgentWork, ParentRunID: root.ID, AssignedAgentID: root.AssignedAgentID,
+		Goal: "Complete this fork's partial goal", Source: models.RunSourceFork, Context: maps.Clone(root.Context),
 	})
 	if err != nil {
 		t.Fatal(err)

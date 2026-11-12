@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -60,7 +61,7 @@ func TestProfileImageProposalProceedsWithoutApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Approval != nil || result.Call.Status != ActionCallStatusReady {
+	if result.Approval != nil || result.Call.Status != models.ActionCallStatusReady {
 		t.Fatalf("profile generation created an approval: %#v", result)
 	}
 	// The cosmetic exception does not let the caller choose another Agent.

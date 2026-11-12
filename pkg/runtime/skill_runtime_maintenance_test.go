@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/google/uuid"
 )
 
 func TestSkillRuntimeMaintenanceSameIntentOwnerTakeoverAndStaleCompletion(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
-		store := kernel.(SkillRuntimeMaintenanceStore)
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
+		store := kernel.(models.SkillRuntimeMaintenanceStore)
 		request := skillRuntimeMaintenanceEmptyRequest()
 		original, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)
 		if err != nil || original == nil || !original.Active || original.DesiredVersion != request.ToVersion || original.Phase != "upgrading" {
@@ -22,7 +23,7 @@ func TestSkillRuntimeMaintenanceSameIntentOwnerTakeoverAndStaleCompletion(t *tes
 		contender := request
 		contender.Owner = "replacement-controller"
 		contender.Now = request.Now.Add(time.Second)
-		if gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), contender); gate != nil || !errors.Is(err, ErrSkillRuntimeMaintenanceConflict) {
+		if gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), contender); gate != nil || !errors.Is(err, models.ErrSkillRuntimeMaintenanceConflict) {
 			t.Fatalf("live owner was replaced: %#v, %v", gate, err)
 		}
 		assertSkillRuntimeMaintenanceRecord(t, store, original)
@@ -41,20 +42,20 @@ func TestSkillRuntimeMaintenanceSameIntentOwnerTakeoverAndStaleCompletion(t *tes
 		completion := skillRuntimeMaintenanceCompletion(takenOver, contender.Now.Add(time.Second))
 		for _, stale := range []struct {
 			name   string
-			change func(*SkillRuntimeMaintenanceCompletion)
+			change func(*models.SkillRuntimeMaintenanceCompletion)
 		}{
-			{"old_owner", func(c *SkillRuntimeMaintenanceCompletion) { c.Owner = original.Owner }},
-			{"old_revision", func(c *SkillRuntimeMaintenanceCompletion) { c.ExpectedRevision = renewed.Revision }},
-			{"wrong_operation", func(c *SkillRuntimeMaintenanceCompletion) { c.OperationID = uuid.NewString() }},
-			{"expired_owner", func(c *SkillRuntimeMaintenanceCompletion) { c.Now = takenOver.LeaseExpiresAt }},
+			{"old_owner", func(c *models.SkillRuntimeMaintenanceCompletion) { c.Owner = original.Owner }},
+			{"old_revision", func(c *models.SkillRuntimeMaintenanceCompletion) { c.ExpectedRevision = renewed.Revision }},
+			{"wrong_operation", func(c *models.SkillRuntimeMaintenanceCompletion) { c.OperationID = uuid.NewString() }},
+			{"expired_owner", func(c *models.SkillRuntimeMaintenanceCompletion) { c.Now = takenOver.LeaseExpiresAt }},
 		} {
 			t.Run(stale.name, func(t *testing.T) {
 				invalid := completion
 				stale.change(&invalid)
-				if gate, err := store.CompleteSkillRuntimeMaintenance(t.Context(), invalid); gate != nil || !errors.Is(err, ErrSkillRuntimeMaintenanceConflict) {
+				if gate, err := store.CompleteSkillRuntimeMaintenance(t.Context(), invalid); gate != nil || !errors.Is(err, models.ErrSkillRuntimeMaintenanceConflict) {
 					t.Fatalf("stale completion released the gate: %#v, %v", gate, err)
 				}
-				if gate, err := store.BeginSkillRuntimeMaintenanceRollback(t.Context(), invalid); gate != nil || !errors.Is(err, ErrSkillRuntimeMaintenanceConflict) {
+				if gate, err := store.BeginSkillRuntimeMaintenanceRollback(t.Context(), invalid); gate != nil || !errors.Is(err, models.ErrSkillRuntimeMaintenanceConflict) {
 					t.Fatalf("stale controller changed rollback intent: %#v, %v", gate, err)
 				}
 				assertSkillRuntimeMaintenanceRecord(t, store, takenOver)
@@ -74,8 +75,8 @@ func TestSkillRuntimeMaintenanceSameIntentOwnerTakeoverAndStaleCompletion(t *tes
 }
 
 func TestSkillRuntimeMaintenanceRejectsImmutableIntentDrift(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
-		store := kernel.(SkillRuntimeMaintenanceStore)
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
+		store := kernel.(models.SkillRuntimeMaintenanceStore)
 		request := skillRuntimeMaintenanceEmptyRequest()
 		original, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)
 		if err != nil {
@@ -83,21 +84,25 @@ func TestSkillRuntimeMaintenanceRejectsImmutableIntentDrift(t *testing.T) {
 		}
 		for _, drift := range []struct {
 			name   string
-			change func(*SkillRuntimeMaintenanceRequest)
+			change func(*models.SkillRuntimeMaintenanceRequest)
 		}{
-			{"source", func(r *SkillRuntimeMaintenanceRequest) { r.SourceIdentity = "native::another-publisher" }},
-			{"runtime", func(r *SkillRuntimeMaintenanceRequest) { r.RuntimeIdentity = "another-runtime" }},
-			{"from_version", func(r *SkillRuntimeMaintenanceRequest) { r.FromVersion = "0.9.0" }},
-			{"to_version", func(r *SkillRuntimeMaintenanceRequest) { r.ToVersion = "1.2.0" }},
-			{"target_source", func(r *SkillRuntimeMaintenanceRequest) { r.TargetSourceDigest = "sha256:" + strings.Repeat("e", 64) }},
-			{"previous_source", func(r *SkillRuntimeMaintenanceRequest) { r.FromSourceDigest = "sha256:" + strings.Repeat("e", 64) }},
-			{"from_artifact", func(r *SkillRuntimeMaintenanceRequest) {
+			{"source", func(r *models.SkillRuntimeMaintenanceRequest) { r.SourceIdentity = "native::another-publisher" }},
+			{"runtime", func(r *models.SkillRuntimeMaintenanceRequest) { r.RuntimeIdentity = "another-runtime" }},
+			{"from_version", func(r *models.SkillRuntimeMaintenanceRequest) { r.FromVersion = "0.9.0" }},
+			{"to_version", func(r *models.SkillRuntimeMaintenanceRequest) { r.ToVersion = "1.2.0" }},
+			{"target_source", func(r *models.SkillRuntimeMaintenanceRequest) {
+				r.TargetSourceDigest = "sha256:" + strings.Repeat("e", 64)
+			}},
+			{"previous_source", func(r *models.SkillRuntimeMaintenanceRequest) {
+				r.FromSourceDigest = "sha256:" + strings.Repeat("e", 64)
+			}},
+			{"from_artifact", func(r *models.SkillRuntimeMaintenanceRequest) {
 				r.FromArtifact = "example.invalid/release@sha256:" + strings.Repeat("e", 64)
 			}},
-			{"to_artifact", func(r *SkillRuntimeMaintenanceRequest) {
+			{"to_artifact", func(r *models.SkillRuntimeMaintenanceRequest) {
 				r.ToArtifact = "example.invalid/release@sha256:" + strings.Repeat("e", 64)
 			}},
-			{"different_operation", func(r *SkillRuntimeMaintenanceRequest) { r.OperationID = uuid.NewString() }},
+			{"different_operation", func(r *models.SkillRuntimeMaintenanceRequest) { r.OperationID = uuid.NewString() }},
 		} {
 			t.Run(drift.name, func(t *testing.T) {
 				invalid := request
@@ -106,7 +111,7 @@ func TestSkillRuntimeMaintenanceRejectsImmutableIntentDrift(t *testing.T) {
 				invalid.Now = original.LeaseExpiresAt.Add(time.Second)
 				invalid.Owner = "replacement-controller"
 				drift.change(&invalid)
-				if gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), invalid); gate != nil || !errors.Is(err, ErrSkillRuntimeMaintenanceConflict) {
+				if gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), invalid); gate != nil || !errors.Is(err, models.ErrSkillRuntimeMaintenanceConflict) {
 					t.Fatalf("unfinished intent was overwritten: %#v, %v", gate, err)
 				}
 				assertSkillRuntimeMaintenanceRecord(t, store, original)
@@ -116,8 +121,8 @@ func TestSkillRuntimeMaintenanceRejectsImmutableIntentDrift(t *testing.T) {
 }
 
 func TestSkillRuntimeMaintenanceRollbackIntentSurvivesReopenAndTakeover(t *testing.T) {
-	actiontest.ForEachBackend(t, func(t *testing.T, kernel KernelStore, backend actiontest.Backend) {
-		store := kernel.(SkillRuntimeMaintenanceStore)
+	actiontest.ForEachBackend(t, func(t *testing.T, kernel models.KernelStore, backend actiontest.Backend) {
+		store := kernel.(models.SkillRuntimeMaintenanceStore)
 		request := skillRuntimeMaintenanceEmptyRequest()
 		gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)
 		if err != nil {
@@ -141,7 +146,7 @@ func TestSkillRuntimeMaintenanceRollbackIntentSurvivesReopenAndTakeover(t *testi
 		}
 		completion := skillRuntimeMaintenanceCompletion(recovered, request.Now.Add(time.Second))
 		completion.VerifiedVersion = request.ToVersion
-		if result, err := store.CompleteSkillRuntimeMaintenance(t.Context(), completion); result != nil || !errors.Is(err, ErrSkillRuntimeMaintenanceConflict) {
+		if result, err := store.CompleteSkillRuntimeMaintenance(t.Context(), completion); result != nil || !errors.Is(err, models.ErrSkillRuntimeMaintenanceConflict) {
 			t.Fatalf("upgraded version released a rollback gate: %#v, %v", result, err)
 		}
 		assertSkillRuntimeMaintenanceRecord(t, store, recovered)
@@ -158,19 +163,19 @@ func TestSkillRuntimeMaintenanceRollbackIntentSurvivesReopenAndTakeover(t *testi
 }
 
 func TestSkillRuntimeMaintenanceCompletionRequiresCanonicalBindingsAtVerifiedVersion(t *testing.T) {
-	actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+	actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 		fixture := newActionRuntimeMaintenanceFixture(t, kernel)
-		store := kernel.(SkillRuntimeMaintenanceStore)
+		store := kernel.(models.SkillRuntimeMaintenanceStore)
 		gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), actionRuntimeMaintenanceRequest(t, fixture))
 		if err != nil {
 			t.Fatal(err)
 		}
 		completion := skillRuntimeMaintenanceCompletion(gate, fixture.now.Add(2*time.Second))
-		if result, err := store.CompleteSkillRuntimeMaintenance(t.Context(), completion); result != nil || !errors.Is(err, ErrSkillRuntimeMaintenanceConflict) {
+		if result, err := store.CompleteSkillRuntimeMaintenance(t.Context(), completion); result != nil || !errors.Is(err, models.ErrSkillRuntimeMaintenanceConflict) {
 			t.Fatalf("runtime verification ignored an enabled old binding: %#v, %v", result, err)
 		}
 		assertSkillRuntimeMaintenanceRecord(t, store, gate)
-		if err := fixture.store.ApplySkillReferenceUpgrade(WithSkillRuntimeMaintenance(t.Context(), gate), actionBindingFenceUpgrade(fixture)); err != nil {
+		if err := fixture.store.ApplySkillReferenceUpgrade(models.WithSkillRuntimeMaintenance(t.Context(), gate), actionBindingFenceUpgrade(fixture)); err != nil {
 			t.Fatal(err)
 		}
 		completed, err := store.CompleteSkillRuntimeMaintenance(t.Context(), completion)
@@ -183,7 +188,7 @@ func TestSkillRuntimeMaintenanceCompletionRequiresCanonicalBindingsAtVerifiedVer
 func TestSkillRuntimeMaintenanceBusyIncludesOtherVersionCallsAndLiveReceipts(t *testing.T) {
 	for _, status := range []string{"ready_call", "live_succeeded_receipt"} {
 		t.Run(status, func(t *testing.T) {
-			actiontest.ForEachStore(t, func(t *testing.T, kernel KernelStore) {
+			actiontest.ForEachStore(t, func(t *testing.T, kernel models.KernelStore) {
 				fixture := newActionRuntimeMaintenanceFixture(t, kernel)
 				otherVersion := actionRuntimeMaintenanceBinding(t, fixture, "other-version", fixture.binding.SkillID, "1.1.0", fixture.binding.SourceIdentity)
 				fixture.proposal = actionRuntimeMaintenanceProposal(fixture.proposal, otherVersion)
@@ -193,21 +198,21 @@ func TestSkillRuntimeMaintenanceBusyIncludesOtherVersionCallsAndLiveReceipts(t *
 				if status == "live_succeeded_receipt" {
 					catalogCalls, credentialCalls, dispatches := 0, 0, 0
 					completed, err := actionRuntimeMaintenanceWorker(kernel, fixture, &catalogCalls, &credentialCalls, &dispatches).ExecuteOwnLoopCall(t.Context(), fixture.proposal.Call.Scope, fixture.proposal.Call.ID, "agent-worker")
-					if err != nil || completed == nil || completed.Call.Status != ActionCallStatusSucceeded || dispatches != 1 {
+					if err != nil || completed == nil || completed.Call.Status != models.ActionCallStatusSucceeded || dispatches != 1 {
 						t.Fatalf("other-version receipt fixture = %#v, %v", completed, err)
 					}
 				}
-				store := kernel.(SkillRuntimeMaintenanceStore)
+				store := kernel.(models.SkillRuntimeMaintenanceStore)
 				request := actionRuntimeMaintenanceRequest(t, fixture)
 				request.Now = fixture.now.Add(3 * time.Second)
-				if gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request); gate != nil || !errors.Is(err, ErrSkillReferenceUpgradeBusy) {
+				if gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request); gate != nil || !errors.Is(err, models.ErrSkillReferenceUpgradeBusy) {
 					t.Fatalf("logical Skill gate ignored work retained from another version: %#v, %v", gate, err)
 				}
-				if gate, err := store.GetSkillRuntimeMaintenance(t.Context(), request.Scope, request.SkillID); gate != nil || !errors.Is(err, ErrSkillRuntimeMaintenanceNotFound) {
+				if gate, err := store.GetSkillRuntimeMaintenance(t.Context(), request.Scope, request.SkillID); gate != nil || !errors.Is(err, models.ErrSkillRuntimeMaintenanceNotFound) {
 					t.Fatalf("busy attempt left an active or partial gate: %#v, %v", gate, err)
 				}
 				if status == "live_succeeded_receipt" {
-					actiontest.TransitionParentRun(t, kernel, fixture.proposal.Call, AgentRunStatusCanceled, nil, fixture.now.Add(4*time.Second))
+					actiontest.TransitionParentRun(t, kernel, fixture.proposal.Call, models.AgentRunStatusCanceled, nil, fixture.now.Add(4*time.Second))
 					request.Now = fixture.now.Add(5 * time.Second)
 					gate, err := store.AcquireSkillRuntimeMaintenance(t.Context(), request)
 					if err != nil || gate == nil || !gate.Active {
@@ -219,9 +224,9 @@ func TestSkillRuntimeMaintenanceBusyIncludesOtherVersionCallsAndLiveReceipts(t *
 	}
 }
 
-func skillRuntimeMaintenanceEmptyRequest() SkillRuntimeMaintenanceRequest {
-	return SkillRuntimeMaintenanceRequest{
-		Scope: Scope{Kind: "tenant", ID: "maintenance-contract-" + uuid.NewString()}, SkillID: "release", SourceIdentity: "native::release",
+func skillRuntimeMaintenanceEmptyRequest() models.SkillRuntimeMaintenanceRequest {
+	return models.SkillRuntimeMaintenanceRequest{
+		Scope: models.Scope{Kind: "tenant", ID: "maintenance-contract-" + uuid.NewString()}, SkillID: "release", SourceIdentity: "native::release",
 		RuntimeIdentity: "native-release-server", OperationID: uuid.NewString(), FromVersion: "1.0.0", ToVersion: "1.1.0",
 		TargetSourceDigest: "sha256:" + strings.Repeat("c", 64), FromSourceDigest: "sha256:" + strings.Repeat("d", 64),
 		FromArtifact: "example.invalid/release@sha256:" + strings.Repeat("a", 64), ToArtifact: "example.invalid/release@sha256:" + strings.Repeat("b", 64),
@@ -229,12 +234,12 @@ func skillRuntimeMaintenanceEmptyRequest() SkillRuntimeMaintenanceRequest {
 	}
 }
 
-func skillRuntimeMaintenanceCompletion(gate *SkillRuntimeMaintenance, now time.Time) SkillRuntimeMaintenanceCompletion {
-	return SkillRuntimeMaintenanceCompletion{Scope: gate.Scope, SkillID: gate.SkillID, OperationID: gate.OperationID, Owner: gate.Owner,
+func skillRuntimeMaintenanceCompletion(gate *models.SkillRuntimeMaintenance, now time.Time) models.SkillRuntimeMaintenanceCompletion {
+	return models.SkillRuntimeMaintenanceCompletion{Scope: gate.Scope, SkillID: gate.SkillID, OperationID: gate.OperationID, Owner: gate.Owner,
 		ExpectedRevision: gate.Revision, VerifiedVersion: gate.DesiredVersion, Now: now}
 }
 
-func assertSkillRuntimeMaintenanceRecord(t *testing.T, store SkillRuntimeMaintenanceStore, expected *SkillRuntimeMaintenance) {
+func assertSkillRuntimeMaintenanceRecord(t *testing.T, store models.SkillRuntimeMaintenanceStore, expected *models.SkillRuntimeMaintenance) {
 	t.Helper()
 	actual, err := store.GetSkillRuntimeMaintenance(t.Context(), expected.Scope, expected.SkillID)
 	if err != nil || !reflect.DeepEqual(expected, actual) {
@@ -244,7 +249,7 @@ func assertSkillRuntimeMaintenanceRecord(t *testing.T, store SkillRuntimeMainten
 
 // reopenSkillRuntimeMaintenanceStore opens the store again on backend's data,
 // as a restart would.
-func reopenSkillRuntimeMaintenanceStore(t *testing.T, backend actiontest.Backend) SkillRuntimeMaintenanceStore {
+func reopenSkillRuntimeMaintenanceStore(t *testing.T, backend actiontest.Backend) models.SkillRuntimeMaintenanceStore {
 	t.Helper()
-	return backend.Reopen(t).(SkillRuntimeMaintenanceStore)
+	return backend.Reopen(t).(models.SkillRuntimeMaintenanceStore)
 }

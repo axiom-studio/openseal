@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 
@@ -32,7 +34,7 @@ func runbookRef(pointer string) *runbook.Value {
 	return &value
 }
 
-func newTestRunbookProducer(t *testing.T, definition *runbook.Definition, entrypoint string, calls ActionCallReader, opts ...models.ServiceOption) *routine.RunbookStepProducer {
+func newTestRunbookProducer(t *testing.T, definition *runbook.Definition, entrypoint string, calls models.ActionCallReader, opts ...models.ServiceOption) *routine.RunbookStepProducer {
 	t.Helper()
 	if calls == nil {
 		calls = modelsteptest.FixedActionCalls{}
@@ -46,14 +48,14 @@ func newTestRunbookProducer(t *testing.T, definition *runbook.Definition, entryp
 
 // runbookInput is the StepInput of step sequence of run, with binding and
 // the Run's session path.
-func runbookInput(run *AgentRun, sequence int64, binding *agentrun.TurnRunnerBinding, path *AgentSessionPath) agentrun.StepInput {
+func runbookInput(run *models.AgentRun, sequence int64, binding *agentrun.TurnRunnerBinding, path *models.AgentSessionPath) agentrun.StepInput {
 	if binding == nil {
 		binding = &agentrun.TurnRunnerBinding{}
 	}
 	if path == nil {
-		path = &AgentSessionPath{}
+		path = &models.AgentSessionPath{}
 	}
-	return agentrun.StepInput{Run: run, Step: &AgentTurn{ID: fmt.Sprintf("step-%d", sequence), Sequence: sequence}, Binding: binding, Path: path, Mode: agentrun.StepModeNormal}
+	return agentrun.StepInput{Run: run, Step: &models.AgentTurn{ID: fmt.Sprintf("step-%d", sequence), Sequence: sequence}, Binding: binding, Path: path, Mode: agentrun.StepModeNormal}
 }
 
 // produceRunbook runs one step and checks it is a valid deterministic output.
@@ -72,7 +74,7 @@ func produceRunbook(t *testing.T, producer *routine.RunbookStepProducer, in agen
 
 // appendRunbookToolResult adds the terminal tool entry of a governed call to
 // path, as the inline executor would record it.
-func appendRunbookToolResult(path *AgentSessionPath, runID, toolCallID string, state ToolEntryState, actionCallID string) {
+func appendRunbookToolResult(path *models.AgentSessionPath, runID, toolCallID string, state models.ToolEntryState, actionCallID string) {
 	path.Entries = append(path.Entries, modelsteptest.ProducerToolPath(runID, toolCallID, state, actionCallID).Entries...)
 }
 
@@ -88,21 +90,21 @@ func TestRunbookProducerFailsOnUnsuccessfulOrRefusedAction(t *testing.T) {
 	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{webFetchAction()}}
 	for _, item := range []struct {
 		name   string
-		call   *ActionCall
+		call   *models.ActionCall
 		expect string
 	}{
-		{name: "denied", call: &ActionCall{ID: "call-1", Status: ActionCallStatusDenied}, expect: "runbook action fetch denied"},
+		{name: "denied", call: &models.ActionCall{ID: "call-1", Status: models.ActionCallStatusDenied}, expect: "runbook action fetch denied"},
 		{name: "refused before a row", expect: "was refused before it ran"},
 	} {
 		t.Run(item.name, func(t *testing.T) {
 			calls := modelsteptest.FixedActionCalls{}
 			producer := newTestRunbookProducer(t, definition, "manual", calls)
-			run := &AgentRun{ID: "run-1", Context: map[string]interface{}{}}
-			path := &AgentSessionPath{}
+			run := &models.AgentRun{ID: "run-1", Context: map[string]interface{}{}}
+			path := &models.AgentSessionPath{}
 			first := produceRunbook(t, producer, runbookInput(run, 1, binding, path))
 			run.Checkpoint = first.KernelState
 			actionID := ""
-			state := ToolEntryError
+			state := models.ToolEntryError
 			if item.call != nil {
 				item.call.RunID = run.ID
 				calls[item.call.ID] = item.call
@@ -128,7 +130,7 @@ func TestRunbookProducerFailsActionNodeWithoutAuthorizedBinding(t *testing.T) {
 	}}
 	producer := newTestRunbookProducer(t, definition, "manual", nil)
 	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{webFetchAction()}}
-	out := produceRunbook(t, producer, runbookInput(&AgentRun{ID: "run-1"}, 1, binding, nil))
+	out := produceRunbook(t, producer, runbookInput(&models.AgentRun{ID: "run-1"}, 1, binding, nil))
 	if out.Failure == nil || !strings.Contains(out.Failure.Message, "not authorized") || len(out.ToolCalls) != 0 {
 		t.Fatalf("out=%#v", out)
 	}
@@ -161,16 +163,16 @@ func TestRunbookProducerThreadsActionOutputAcrossBrowserLifecycle(t *testing.T) 
 		{Name: "browser_navigate", SkillID: "browser", Version: "1", Action: "navigate"},
 		{Name: "browser_close", SkillID: "browser", Version: "1", Action: "close"},
 	}}
-	run := &AgentRun{ID: "run-browser", Context: map[string]interface{}{}}
-	path := &AgentSessionPath{}
+	run := &models.AgentRun{ID: "run-browser", Context: map[string]interface{}{}}
+	path := &models.AgentSessionPath{}
 	step := func(sequence int64) agentrun.StepOutput {
 		out := produceRunbook(t, producer, runbookInput(run, sequence, binding, path))
 		run.Checkpoint = out.KernelState
 		return out
 	}
 	complete := func(call agentrun.LoopToolCall, id string, output map[string]interface{}) {
-		calls[id] = &ActionCall{ID: id, RunID: run.ID, Status: ActionCallStatusSucceeded, Output: output}
-		appendRunbookToolResult(path, run.ID, call.ID, ToolEntryCompleted, id)
+		calls[id] = &models.ActionCall{ID: id, RunID: run.ID, Status: models.ActionCallStatusSucceeded, Output: output}
+		appendRunbookToolResult(path, run.ID, call.ID, models.ToolEntryCompleted, id)
 	}
 	arguments := func(call agentrun.LoopToolCall) map[string]interface{} {
 		var value map[string]interface{}
@@ -198,7 +200,7 @@ func TestRunbookProducerThreadsActionOutputAcrossBrowserLifecycle(t *testing.T) 
 	}
 	complete(closeStep.ToolCalls[0], "close-call", map[string]interface{}{"closed": true})
 	completed := step(4)
-	if completed.Final == nil || completed.Final.Status != AgentRunStatusCompleted {
+	if completed.Final == nil || completed.Final.Status != models.AgentRunStatusCompleted {
 		t.Fatalf("completed=%#v", completed)
 	}
 }
@@ -212,7 +214,7 @@ func TestRunbookProducerExposesKernelRunIdentityToActionArguments(t *testing.T) 
 	}}
 	producer := newTestRunbookProducer(t, definition, "start", nil)
 	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{{Name: "browser_start", SkillID: "browser", Version: "1", Action: "start"}}}
-	run := &AgentRun{ID: "run-123", RootRunID: "root-456", ObjectiveID: "objective-789", Checkpoint: map[string]interface{}{
+	run := &models.AgentRun{ID: "run-123", RootRunID: "root-456", ObjectiveID: "objective-789", Checkpoint: map[string]interface{}{
 		"runtime": map[string]interface{}{"runId": "spoofed"},
 	}}
 	out := produceRunbook(t, producer, runbookInput(run, 1, binding, nil))
@@ -244,7 +246,7 @@ func TestRunbookProducerValidatesCallableOutput(t *testing.T) {
 		}},
 	}
 	producer := newTestRunbookProducer(t, definition, "manual", nil)
-	out := produceRunbook(t, producer, runbookInput(&AgentRun{ID: "run", Context: map[string]interface{}{}}, 1, nil, nil))
+	out := produceRunbook(t, producer, runbookInput(&models.AgentRun{ID: "run", Context: map[string]interface{}{}}, 1, nil, nil))
 	if out.Failure == nil || out.Failure.Message == "" {
 		t.Fatalf("output mismatch out=%#v", out)
 	}
@@ -271,10 +273,10 @@ func concurrentRunbookDefinition() *runbook.Definition {
 func TestRunbookProducerFailsKernelCallThatEndedWithoutResult(t *testing.T) {
 	definition := concurrentRunbookDefinition()
 	producer := newTestRunbookProducer(t, definition, "manual", nil)
-	run := &AgentRun{ID: "parallel", Context: map[string]interface{}{"parallel": true}}
+	run := &models.AgentRun{ID: "parallel", Context: map[string]interface{}{"parallel": true}}
 	out := produceRunbook(t, producer, runbookInput(run, 1, nil, nil))
 	run.Checkpoint = out.KernelState
-	path := &AgentSessionPath{}
+	path := &models.AgentSessionPath{}
 	// Never recorded: the same call is asked for again.
 	again := produceRunbook(t, producer, runbookInput(run, 2, nil, path))
 	if len(again.ToolCalls) != 1 || again.ToolCalls[0].ID != out.ToolCalls[0].ID {
@@ -282,10 +284,10 @@ func TestRunbookProducerFailsKernelCallThatEndedWithoutResult(t *testing.T) {
 	}
 	// Refused at settle (no group in Run.Output): the node fails with the
 	// entry's result.
-	path.Entries = []*SessionEntry{{
-		ID: "tool:step-1:" + out.ToolCalls[0].ID, RunID: run.ID, StepID: "step-1", Type: SessionEntryTool, State: ToolEntryError,
+	path.Entries = []*models.SessionEntry{{
+		ID: "tool:step-1:" + out.ToolCalls[0].ID, RunID: run.ID, StepID: "step-1", Type: models.SessionEntryTool, State: models.ToolEntryError,
 		ToolCallID: out.ToolCalls[0].ID,
-		Tool:       &ToolEntry{Name: string(ControlToolRunbookFork), Result: control.ErrorResult(ToolResultRefused, "fork_rejected", "budget exhausted", nil)},
+		Tool:       &models.ToolEntry{Name: string(models.ControlToolRunbookFork), Result: control.ErrorResult(models.ToolResultRefused, "fork_rejected", "budget exhausted", nil)},
 	}}
 	failed := produceRunbook(t, producer, runbookInput(run, 3, nil, path))
 	if failed.Failure == nil || !strings.Contains(failed.Failure.Message, "ended without a durable result") || !strings.Contains(failed.Failure.Message, "budget exhausted") {
@@ -299,16 +301,16 @@ func TestRunbookProducerWaitsOnceAndResumesFromCheckpoint(t *testing.T) {
 	}}
 	now := time.Date(2026, 7, 12, 5, 0, 0, 0, time.UTC)
 	producer := newTestRunbookProducer(t, definition, "event", nil, models.WithClock(func() time.Time { return now }))
-	first := produceRunbook(t, producer, runbookInput(&AgentRun{ID: "run"}, 1, nil, nil))
-	if first.Park == nil || first.Park.Status != AgentRunStatusSleeping || first.Park.Wake == nil || first.Park.Wake.Type != "timer" || !first.Park.Wake.WakeAt.Equal(now.Add(time.Minute)) {
+	first := produceRunbook(t, producer, runbookInput(&models.AgentRun{ID: "run"}, 1, nil, nil))
+	if first.Park == nil || first.Park.Status != models.AgentRunStatusSleeping || first.Park.Wake == nil || first.Park.Wake.Type != "timer" || !first.Park.Wake.WakeAt.Equal(now.Add(time.Minute)) {
 		t.Fatalf("first=%#v", first)
 	}
 	firstTrace, err := routine.RunbookTraceFromCheckpoint(first.KernelState)
 	if err != nil || len(firstTrace.Entries) != 1 || firstTrace.Entries[0].StepID != "wait" || firstTrace.Entries[0].Status != routine.RunbookStepTraceWaiting {
 		t.Fatalf("waiting trace=%#v err=%v", firstTrace, err)
 	}
-	second := produceRunbook(t, producer, runbookInput(&AgentRun{ID: "run", Checkpoint: first.KernelState}, 2, nil, nil))
-	if second.Final == nil || second.Final.Status != AgentRunStatusCompleted {
+	second := produceRunbook(t, producer, runbookInput(&models.AgentRun{ID: "run", Checkpoint: first.KernelState}, 2, nil, nil))
+	if second.Final == nil || second.Final.Status != models.AgentRunStatusCompleted {
 		t.Fatalf("second=%#v", second)
 	}
 	trace, err := routine.RunbookTraceFromCheckpoint(second.KernelState)
@@ -323,11 +325,11 @@ func TestRunbookKernelToolsAreNeverOffered(t *testing.T) {
 		DelegateTargets: []agentrun.HostedAgentTarget{{ID: "a"}}, Operations: []agentrun.HostedRunbookOperation{{Entrypoint: "x"}},
 	}
 	for _, spec := range runloop.ControlToolSpecs(everything) {
-		if spec.Name == ControlToolRunbookFork || spec.Name == ControlToolRunbookDelegate {
+		if spec.Name == models.ControlToolRunbookFork || spec.Name == models.ControlToolRunbookDelegate {
 			t.Fatalf("kernel-only tool %s offered to a model", spec.Name)
 		}
 	}
-	for _, name := range []ControlToolName{ControlToolRunbookFork, ControlToolRunbookDelegate} {
+	for _, name := range []models.ControlToolName{models.ControlToolRunbookFork, models.ControlToolRunbookDelegate} {
 		if phase, ok := control.ControlToolPhase(string(name)); !ok || phase != control.ControlPhaseSettle {
 			t.Fatalf("%s phase=%s ok=%t", name, phase, ok)
 		}
@@ -362,7 +364,7 @@ type runbookLoopFixture struct {
 	t        *testing.T
 	ctx      context.Context
 	store    *sqlite.Store
-	scope    Scope
+	scope    models.Scope
 	control  *control.ControlExecutor
 	tools    *runloop.StepToolDispatcher
 	loop     *runloop.RunLoop
@@ -372,7 +374,7 @@ type runbookLoopFixture struct {
 func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runbookLoopFixture {
 	t.Helper()
 	store := newTestKernelStore(t)
-	f := &runbookLoopFixture{t: t, ctx: context.Background(), store: store, scope: Scope{Kind: "tenant", ID: "runbook-loop"}}
+	f := &runbookLoopFixture{t: t, ctx: context.Background(), store: store, scope: models.Scope{Kind: "tenant", ID: "runbook-loop"}}
 	collaboration := collaboration.NewCollaborationService(store)
 	f.control = &control.ControlExecutor{Portfolio: store, Sessions: store, Forks: agentrun.NewRunForkCoordinator(store), Collaboration: collaboration}
 	tools, err := runloop.NewStepToolDispatcher(runloop.StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store, Control: f.control})
@@ -382,8 +384,8 @@ func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runboo
 	f.tools = tools
 	f.producer = newTestRunbookProducer(t, definition, "manual", store)
 	loop, err := runloop.NewRunLoop(store, nil, nil, runloop.RunLoopConfig{
-		PlanToolEntries: func(binding *agentrun.TurnRunnerBinding, session *AgentSession, step *AgentTurn, _ *SessionEntry, calls []agentrun.LoopToolCall) ([]*SessionEntry, error) {
-			return runloop.PlanToolCallEntries(binding, &AgentRun{ID: step.RunID, Scope: step.Scope}, step, session.ID, calls)
+		PlanToolEntries: func(binding *agentrun.TurnRunnerBinding, session *models.AgentSession, step *models.AgentTurn, _ *models.SessionEntry, calls []agentrun.LoopToolCall) ([]*models.SessionEntry, error) {
+			return runloop.PlanToolCallEntries(binding, &models.AgentRun{ID: step.RunID, Scope: step.Scope}, step, session.ID, calls)
 		},
 		PlainTextFinal: f.control.PlainTextFinal,
 	})
@@ -394,19 +396,19 @@ func newRunbookLoopFixture(t *testing.T, definition *runbook.Definition) *runboo
 	return f
 }
 
-func (f *runbookLoopFixture) create(req CreateAgentRunRequest) *AgentRun {
+func (f *runbookLoopFixture) create(req models.CreateAgentRunRequest) *models.AgentRun {
 	f.t.Helper()
 	req.Scope = f.scope
 	if req.Owner.ID == "" {
-		req.Owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: "manager"}
+		req.Owner = models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "manager"}
 	}
 	if req.AssignedAgentID == "" {
 		req.AssignedAgentID = "manager"
 	}
 	if req.Source == "" {
-		req.Source = RunSourceManual
+		req.Source = models.RunSourceManual
 	}
-	run, err := NewPortfolioService(f.store).CreateAgentRun(f.ctx, req)
+	run, err := portfolio.NewPortfolioService(f.store).CreateAgentRun(f.ctx, req)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -418,7 +420,7 @@ func (f *runbookLoopFixture) create(req CreateAgentRunRequest) *AgentRun {
 func (f *runbookLoopFixture) drive(wantIDs ...string) (string, runloop.RunLoopExit) {
 	f.t.Helper()
 	now := time.Now().UTC()
-	claimed, err := f.store.ClaimNextAgentRun(f.ctx, AgentRunClaim{Scope: f.scope, WorkerID: runbookLoopWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	claimed, err := f.store.ClaimNextAgentRun(f.ctx, models.AgentRunClaim{Scope: f.scope, WorkerID: runbookLoopWorker, Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
 	if err != nil || claimed == nil {
 		f.t.Fatalf("claim = %#v, %v (want one of %v)", claimed, err, wantIDs)
 	}
@@ -429,11 +431,11 @@ func (f *runbookLoopFixture) drive(wantIDs ...string) (string, runloop.RunLoopEx
 	if !wanted {
 		f.t.Fatalf("claimed %s, want one of %v", claimed.ID, wantIDs)
 	}
-	session, err := f.store.GetAgentSession(f.ctx, f.scope, RunAgentSessionID(f.scope, claimed.ID))
+	session, err := f.store.GetAgentSession(f.ctx, f.scope, models.RunAgentSessionID(f.scope, claimed.ID))
 	if err != nil {
-		opened, createErr := f.store.CreateRunAgentSession(f.ctx, CreateRunAgentSessionRequest{
+		opened, createErr := f.store.CreateRunAgentSession(f.ctx, models.CreateRunAgentSessionRequest{
 			Scope: f.scope, OwnerRunID: claimed.ID, AgentID: claimed.AssignedAgentID,
-			Lease: AgentRunLeaseGuard{WorkerID: runbookLoopWorker, Now: now}, Now: now,
+			Lease: models.AgentRunLeaseGuard{WorkerID: runbookLoopWorker, Now: now}, Now: now,
 		})
 		if createErr != nil {
 			f.t.Fatal(createErr)
@@ -445,7 +447,7 @@ func (f *runbookLoopFixture) drive(wantIDs ...string) (string, runloop.RunLoopEx
 	return claimed.ID, f.loop.Drive(f.ctx, runloop.RunLoopClaim{Run: claimed, WorkerID: runbookLoopWorker, Binding: binding})
 }
 
-func (f *runbookLoopFixture) run(id string) *AgentRun {
+func (f *runbookLoopFixture) run(id string) *models.AgentRun {
 	f.t.Helper()
 	run, err := f.store.GetAgentRun(f.ctx, f.scope, id)
 	if err != nil {
@@ -454,15 +456,15 @@ func (f *runbookLoopFixture) run(id string) *AgentRun {
 	return run
 }
 
-func (f *runbookLoopFixture) toolEntries(runID string) []*SessionEntry {
+func (f *runbookLoopFixture) toolEntries(runID string) []*models.SessionEntry {
 	f.t.Helper()
-	path, err := f.store.LoadAgentSessionPath(f.ctx, f.scope, RunAgentSessionID(f.scope, runID))
+	path, err := f.store.LoadAgentSessionPath(f.ctx, f.scope, models.RunAgentSessionID(f.scope, runID))
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	var entries []*SessionEntry
+	var entries []*models.SessionEntry
 	for _, entry := range path.Entries {
-		if entry.Type == SessionEntryTool {
+		if entry.Type == models.SessionEntryTool {
 			entries = append(entries, entry)
 		}
 	}
@@ -471,12 +473,12 @@ func (f *runbookLoopFixture) toolEntries(runID string) []*SessionEntry {
 
 func TestRunbookForkSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T) {
 	f := newRunbookLoopFixture(t, concurrentRunbookDefinition())
-	source := f.create(CreateAgentRunRequest{Goal: "parallel", Context: map[string]interface{}{"parallel": true}})
+	source := f.create(models.CreateAgentRunRequest{Goal: "parallel", Context: map[string]interface{}{"parallel": true}})
 	if _, exit := f.drive(source.ID); exit.Err != nil {
 		t.Fatalf("first claim: %#v", exit)
 	}
 	waiting := f.run(source.ID)
-	if waiting.Status != AgentRunStatusWaitingForDependency || waiting.WakeCondition == nil || waiting.WakeCondition.Type != "run_dependencies" {
+	if waiting.Status != models.AgentRunStatusWaitingForDependency || waiting.WakeCondition == nil || waiting.WakeCondition.Type != "run_dependencies" {
 		t.Fatalf("source=%#v", waiting)
 	}
 	state, err := pendingRunbookCheckpoint(waiting.Checkpoint)
@@ -488,7 +490,7 @@ func TestRunbookForkSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T) {
 		t.Fatalf("source trace=%#v err=%v", trace, err)
 	}
 	entries := f.toolEntries(source.ID)
-	if len(entries) != 1 || entries[0].Tool.Name != string(ControlToolRunbookFork) || entries[0].State != ToolEntryAwaitingChild ||
+	if len(entries) != 1 || entries[0].Tool.Name != string(models.ControlToolRunbookFork) || entries[0].State != models.ToolEntryAwaitingChild ||
 		entries[0].ToolCallID != state.PendingCall || len(entries[0].Tool.Directive) == 0 {
 		t.Fatalf("fork entry=%#v", entries)
 	}
@@ -514,11 +516,11 @@ func TestRunbookForkSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T) {
 			t.Fatalf("child %s claim: %#v", childID, exit)
 		}
 		done := f.run(childID)
-		if done.Status != AgentRunStatusCompleted || done.Output["branchId"] != children[childID] {
+		if done.Status != models.AgentRunStatusCompleted || done.Output["branchId"] != children[childID] {
 			t.Fatalf("child %s=%#v", childID, done)
 		}
 		// The worker resolves a terminal fork child (resolveForkChild).
-		if _, err := f.control.Forks.CompleteChild(f.ctx, done, ActivityActor{Type: "worker", ID: runbookLoopWorker}); err != nil {
+		if _, err := f.control.Forks.CompleteChild(f.ctx, done, models.ActivityActor{Type: "worker", ID: runbookLoopWorker}); err != nil {
 			t.Fatal(err)
 		}
 		for i, id := range pending {
@@ -528,18 +530,18 @@ func TestRunbookForkSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T) {
 			}
 		}
 	}
-	if queued := f.run(source.ID); queued.Status != AgentRunStatusQueued {
+	if queued := f.run(source.ID); queued.Status != models.AgentRunStatusQueued {
 		t.Fatalf("source after join=%#v", queued)
 	}
 	if _, exit := f.drive(source.ID); exit.Err != nil {
 		t.Fatalf("resume claim: %#v", exit)
 	}
 	completed := f.run(source.ID)
-	if completed.Status != AgentRunStatusCompleted || !reflect.DeepEqual(completed.Output["state"], map[string]interface{}{"a": true, "b": true}) {
+	if completed.Status != models.AgentRunStatusCompleted || !reflect.DeepEqual(completed.Output["state"], map[string]interface{}{"a": true, "b": true}) {
 		t.Fatalf("source completed=%#v", completed)
 	}
 	entries = f.toolEntries(source.ID)
-	if len(entries) != 1 || entries[0].State != ToolEntryCompleted {
+	if len(entries) != 1 || entries[0].State != models.ToolEntryCompleted {
 		t.Fatalf("fork entry after resume=%#v", entries)
 	}
 	trace, err = routine.RunbookTraceFromCheckpoint(completed.Checkpoint)
@@ -558,12 +560,12 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 		"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{"answer": {Ref: "/steps/delegate/answer"}}}},
 	}}
 	f := newRunbookLoopFixture(t, definition)
-	source := f.create(CreateAgentRunRequest{Goal: "delegate", Budget: &BudgetPolicy{MaxTurns: 6, MaxDurationMS: 180000}})
+	source := f.create(models.CreateAgentRunRequest{Goal: "delegate", Budget: &models.BudgetPolicy{MaxTurns: 6, MaxDurationMS: 180000}})
 	if _, exit := f.drive(source.ID); exit.Err != nil {
 		t.Fatalf("first claim: %#v", exit)
 	}
 	waiting := f.run(source.ID)
-	if waiting.Status != AgentRunStatusWaitingForAgent {
+	if waiting.Status != models.AgentRunStatusWaitingForAgent {
 		t.Fatalf("source=%#v", waiting)
 	}
 	state, err := pendingRunbookCheckpoint(waiting.Checkpoint)
@@ -577,7 +579,7 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 		t.Fatalf("request=%#v err=%v", request, err)
 	}
 	entries := f.toolEntries(source.ID)
-	if len(entries) != 1 || entries[0].Tool.Name != string(ControlToolRunbookDelegate) || entries[0].State != ToolEntryAwaitingChild ||
+	if len(entries) != 1 || entries[0].Tool.Name != string(models.ControlToolRunbookDelegate) || entries[0].State != models.ToolEntryAwaitingChild ||
 		entries[0].Tool.Wait == nil || entries[0].Tool.Wait.AgentRequestID != requestID {
 		t.Fatalf("delegate entry=%#v", entries)
 	}
@@ -590,16 +592,16 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 	if err != nil || accepted.Child == nil {
 		t.Fatalf("accept=%#v err=%v", accepted, err)
 	}
-	activity := NewRunActivityService(f.store, f.store)
-	actor := ActivityActor{Type: "worker", ID: "child-worker"}
-	running, _, err := activity.TransitionRun(f.ctx, f.scope, accepted.Child.ID, RunTransitionRequest{
-		ExpectedRevision: accepted.Child.Revision, Status: AgentRunStatusRunning, Summary: "started", Actor: actor,
+	activity := runtimeactivity.NewRunActivityService(f.store, f.store)
+	actor := models.ActivityActor{Type: "worker", ID: "child-worker"}
+	running, _, err := activity.TransitionRun(f.ctx, f.scope, accepted.Child.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: accepted.Child.Revision, Status: models.AgentRunStatusRunning, Summary: "started", Actor: actor,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ended, _, err := activity.TransitionRun(f.ctx, f.scope, accepted.Child.ID, RunTransitionRequest{
-		ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted, Output: map[string]interface{}{"answer": "ship"}, Summary: "done", Actor: actor,
+	ended, _, err := activity.TransitionRun(f.ctx, f.scope, accepted.Child.ID, runtimeactivity.RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: models.AgentRunStatusCompleted, Output: map[string]interface{}{"answer": "ship"}, Summary: "done", Actor: actor,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -608,7 +610,7 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 		t.Fatal(err)
 	}
 	queued := f.run(source.ID)
-	if queued.Status != AgentRunStatusQueued {
+	if queued.Status != models.AgentRunStatusQueued {
 		t.Fatalf("source after child=%#v", queued)
 	}
 	if results, _ := queued.Output["collaborationResults"].(map[string]interface{}); results[requestID] == nil {
@@ -618,10 +620,10 @@ func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T
 		t.Fatalf("resume claim: %#v", exit)
 	}
 	completed := f.run(source.ID)
-	if completed.Status != AgentRunStatusCompleted || completed.Output["answer"] != "ship" {
+	if completed.Status != models.AgentRunStatusCompleted || completed.Output["answer"] != "ship" {
 		t.Fatalf("source completed=%#v", completed)
 	}
-	if entries := f.toolEntries(source.ID); len(entries) != 1 || entries[0].State != ToolEntryCompleted {
+	if entries := f.toolEntries(source.ID); len(entries) != 1 || entries[0].State != models.ToolEntryCompleted {
 		t.Fatalf("delegate entry after resume=%#v", entries)
 	}
 }
@@ -635,11 +637,11 @@ func TestRunbookJoinAnyForkJoinsFirstChildThroughTheLoopAndCancelsTheOther(t *te
 		"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{"state": {Ref: "/state"}}}},
 	}}
 	f := newRunbookLoopFixture(t, definition)
-	source := f.create(CreateAgentRunRequest{Goal: "race"})
+	source := f.create(models.CreateAgentRunRequest{Goal: "race"})
 	if _, exit := f.drive(source.ID); exit.Err != nil {
 		t.Fatalf("first claim: %#v", exit)
 	}
-	if waiting := f.run(source.ID); waiting.Status != AgentRunStatusWaitingForDependency {
+	if waiting := f.run(source.ID); waiting.Status != models.AgentRunStatusWaitingForDependency {
 		t.Fatalf("source=%#v", waiting)
 	}
 	fastID := agentrun.StableForkIdentifier(source.ID, "fork", "child:fast")
@@ -652,30 +654,30 @@ func TestRunbookJoinAnyForkJoinsFirstChildThroughTheLoopAndCancelsTheOther(t *te
 			t.Fatalf("child %s claim: %#v", childID, exit)
 		}
 	}
-	if slow := f.run(slowID); slow.Status != AgentRunStatusSleeping {
+	if slow := f.run(slowID); slow.Status != models.AgentRunStatusSleeping {
 		t.Fatalf("slow=%#v", slow)
 	}
 	fast := f.run(fastID)
-	if fast.Status != AgentRunStatusCompleted {
+	if fast.Status != models.AgentRunStatusCompleted {
 		t.Fatalf("fast=%#v", fast)
 	}
-	if _, err := f.control.Forks.CompleteChild(f.ctx, fast, ActivityActor{Type: "worker", ID: runbookLoopWorker}); err != nil {
+	if _, err := f.control.Forks.CompleteChild(f.ctx, fast, models.ActivityActor{Type: "worker", ID: runbookLoopWorker}); err != nil {
 		t.Fatal(err)
 	}
-	if queued := f.run(source.ID); queued.Status != AgentRunStatusQueued {
+	if queued := f.run(source.ID); queued.Status != models.AgentRunStatusQueued {
 		t.Fatalf("source after first child=%#v", queued)
 	}
-	if slow := f.run(slowID); slow.Status != AgentRunStatusCanceled {
+	if slow := f.run(slowID); slow.Status != models.AgentRunStatusCanceled {
 		t.Fatalf("losing child was not canceled: %#v", slow)
 	}
 	if _, exit := f.drive(source.ID); exit.Err != nil {
 		t.Fatalf("resume claim: %#v", exit)
 	}
 	completed := f.run(source.ID)
-	if completed.Status != AgentRunStatusCompleted || !reflect.DeepEqual(completed.Output["state"], map[string]interface{}{"fast": true}) {
+	if completed.Status != models.AgentRunStatusCompleted || !reflect.DeepEqual(completed.Output["state"], map[string]interface{}{"fast": true}) {
 		t.Fatalf("source completed=%#v", completed)
 	}
-	if entries := f.toolEntries(source.ID); len(entries) != 1 || entries[0].State != ToolEntryCompleted {
+	if entries := f.toolEntries(source.ID); len(entries) != 1 || entries[0].State != models.ToolEntryCompleted {
 		t.Fatalf("fork entry after resume=%#v", entries)
 	}
 }

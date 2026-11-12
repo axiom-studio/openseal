@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
@@ -77,5 +78,5 @@ func teamCreateGetsBuilderCard(t *testing.T, definition *skill.Definition) bool 
 	if approval == nil {
 		t.Fatalf("create_team was not held for review: %#v", result)
 	}
-	return approval.ExpiresAt.Equal(now.Add(30*24*time.Hour)) && approval.TimeoutDecision == ApprovalTimeoutExpire && len(approval.Destinations) == 0
+	return approval.ExpiresAt.Equal(now.Add(30*24*time.Hour)) && approval.TimeoutDecision == models.ApprovalTimeoutExpire && len(approval.Destinations) == 0
 }

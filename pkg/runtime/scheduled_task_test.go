@@ -16,6 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
+	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -47,17 +48,17 @@ func withScheduleArgument(args map[string]interface{}, key string, value interfa
 // routineActionStore is the store the routine actions need: they also read
 // and write the chat.
 type routineActionStore interface {
-	KernelStore
-	ConversationStore
+	models.KernelStore
+	models.ConversationStore
 }
 
-func dispatchTaskForTest(t *testing.T, store KernelStore, run *AgentRun, bound *skill.BoundAction, args map[string]interface{}, callID string) map[string]interface{} {
+func dispatchTaskForTest(t *testing.T, store models.KernelStore, run *models.AgentRun, bound *skill.BoundAction, args map[string]interface{}, callID string) map[string]interface{} {
 	t.Helper()
 	d, err := routine.NewRunbookActionDispatcher(store.(routineActionStore), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := d.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: bound, Call: &ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID, IdempotencyKey: callID}, Arguments: args})
+	result, err := d.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: bound, Call: &models.ActionCall{ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID, IdempotencyKey: callID}, Arguments: args})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +75,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 	for _, kind := range []string{"sqlite"} {
 		for _, limit := range []string{"bounded", "omitted", "null"} {
 			t.Run(kind+"/"+limit, func(t *testing.T) {
-				var store KernelStore = newTestKernelStore(t)
+				var store models.KernelStore = newTestKernelStore(t)
 				if kind == "sqlite" {
 					s, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "tasks.db"))
 					if err != nil {
@@ -84,9 +85,9 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 					store = s
 				}
 				run, catalog, bound, args := routinetest.ScheduledTask(t, store)
-				occurrences, maximum, status := 2, int64(2), RunbookActivationRetired
+				occurrences, maximum, status := 2, int64(2), models.RunbookActivationRetired
 				if limit != "bounded" {
-					occurrences, maximum, status = 3, 0, RunbookActivationActive
+					occurrences, maximum, status = 3, 0, models.RunbookActivationActive
 					args = withScheduleArgument(args, "maximumOccurrences", nil, limit == "omitted")
 				}
 				if err := catalog.ValidateInput(t.Context(), bound, args); err != nil {
@@ -97,18 +98,18 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 					t.Fatal(err)
 				}
 				result := dispatchTaskForTest(t, store, run, bound, args, "create-task")
-				a := result["activation"].(*RunbookActivation)
-				if a.Task == nil || a.Task.ConversationID != run.Context[conversationRunContextConversationID] || a.NextRunAt == nil || a.DefinitionID != "" || a.Task.CreatedBy != "user" {
+				a := result["activation"].(*models.RunbookActivation)
+				if a.Task == nil || a.Task.ConversationID != run.Context[models.ConversationRunConversationIDContextKey] || a.NextRunAt == nil || a.DefinitionID != "" || a.Task.CreatedBy != "user" {
 					t.Fatalf("activation=%#v", a)
 				}
 				if a.Trigger.Schedule == nil || a.Trigger.Schedule.MaximumOccurrences != maximum {
 					t.Fatalf("persisted occurrence limit=%#v", a.Trigger.Schedule)
 				}
 				replay := dispatchTaskForTest(t, store, run, bound, args, "create-task")
-				if replay["activation"].(*RunbookActivation).ID != a.ID || replay["replayed"] != true {
+				if replay["activation"].(*models.RunbookActivation).ID != a.ID || replay["replayed"] != true {
 					t.Fatal("duplicate task creation")
 				}
-				reader := store.(ConversationStore)
+				reader := store.(models.ConversationStore)
 				for occurrence := 0; occurrence < occurrences; occurrence++ {
 					current, _ := store.GetRunbookActivation(t.Context(), run.Scope, a.ID)
 					now := current.NextRunAt.Add(time.Second)
@@ -121,33 +122,33 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 					if r, err := routine.NewRunbookScheduler(store).ReconcileScope(t.Context(), run.Scope, 20); err != nil || r.Scheduled != 0 {
 						t.Fatalf("restart replay=%#v,%v", r, err)
 					}
-					work, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: run.Scope, ObjectiveID: a.ObjectiveID, Limit: 10})
+					work, err := store.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: run.Scope, ObjectiveID: a.ObjectiveID, Limit: 10})
 					if err != nil {
 						t.Fatal(err)
 					}
-					var scheduled *AgentRun
+					var scheduled *models.AgentRun
 					for _, w := range work {
-						if w.Status == AgentRunStatusQueued {
+						if w.Status == models.AgentRunStatusQueued {
 							scheduled = w
 							break
 						}
 					}
 					// Every occurrence acts for the person who created the routine.
-					if scheduled == nil || scheduled.Goal != a.Task.Goal || scheduled.Source != RunSourceSchedule || scheduled.Entrypoint != "" || scheduled.Plan["runbook"] != nil || scheduled.ActingUser != "user" {
+					if scheduled == nil || scheduled.Goal != a.Task.Goal || scheduled.Source != models.RunSourceSchedule || scheduled.Entrypoint != "" || scheduled.Plan["runbook"] != nil || scheduled.ActingUser != "user" {
 						t.Fatalf("work=%#v", scheduled)
 					}
 					// Reporting projects the actual result into the original channel exactly once.
-					scheduled.Status = AgentRunStatusCompleted
+					scheduled.Status = models.AgentRunStatusCompleted
 					scheduled.Output = map[string]interface{}{"summary": "Forecast result from the requested source"}
 					scheduled.Revision++
 					scheduled.UpdatedAt = now
 					scheduled.CompletedAt = &now
-					activity := NewRunActivityService(store, store)
-					started, _, err := activity.TransitionRun(t.Context(), scheduled.Scope, scheduled.ID, RunTransitionRequest{ExpectedRevision: scheduled.Revision - 1, Status: AgentRunStatusRunning, Summary: "Execute scheduled task", Actor: ActivityActor{Type: "service", ID: "worker"}, Visibility: ActivityVisibilityScope})
+					activity := runtimeactivity.NewRunActivityService(store, store)
+					started, _, err := activity.TransitionRun(t.Context(), scheduled.Scope, scheduled.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: scheduled.Revision - 1, Status: models.AgentRunStatusRunning, Summary: "Execute scheduled task", Actor: models.ActivityActor{Type: "service", ID: "worker"}, Visibility: models.ActivityVisibilityScope})
 					if err != nil {
 						t.Fatal(err)
 					}
-					scheduled, _, err = activity.TransitionRun(t.Context(), started.Scope, started.ID, RunTransitionRequest{ExpectedRevision: started.Revision, Status: AgentRunStatusCompleted, Summary: "Finished task", Output: scheduled.Output, Actor: ActivityActor{Type: "service", ID: "worker"}, Visibility: ActivityVisibilityScope})
+					scheduled, _, err = activity.TransitionRun(t.Context(), started.Scope, started.ID, runtimeactivity.RunTransitionRequest{ExpectedRevision: started.Revision, Status: models.AgentRunStatusCompleted, Summary: "Finished task", Output: scheduled.Output, Actor: models.ActivityActor{Type: "service", ID: "worker"}, Visibility: models.ActivityVisibilityScope})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -161,7 +162,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 				if terminal.Status != status || terminal.OccurrencesProcessed != int64(occurrences) || (maximum == 0 && terminal.NextRunAt == nil) {
 					t.Fatalf("terminal=%#v", terminal)
 				}
-				messages, err := reader.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: a.Task.ConversationID, Limit: 50})
+				messages, err := reader.ListChannelMessages(t.Context(), models.ChannelMessageFilter{Scope: run.Scope, ConversationID: a.Task.ConversationID, Limit: 50})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -184,7 +185,7 @@ func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion
 	v, _ := routine.NewRunbookActionValidator(store)
 	for _, change := range []string{"scope", "owner", "background", "conversation", "binding", "cron", "timezone", "foreign-input"} {
 		t.Run(change, func(t *testing.T) {
-			candidate := cloneAgentRun(run)
+			candidate := models.CloneAgentRun(run)
 			b := *bound
 			binding := *bound.Binding
 			b.Binding = &binding
@@ -195,9 +196,9 @@ func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion
 			case "owner":
 				candidate.Owner.ID = "foreign"
 			case "background":
-				candidate.Kind = RunKindAgentWork
+				candidate.Kind = models.RunKindAgentWork
 			case "conversation":
-				candidate.Context[conversationRunContextConversationID] = "foreign"
+				candidate.Context[models.ConversationRunConversationIDContextKey] = "foreign"
 			case "binding":
 				binding.DeploymentID = "foreign"
 			case "cron":
@@ -220,7 +221,7 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 			store := routinetest.NewFileStore(t, kind)
 			run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 			now := time.Now().Add(time.Second)
-			claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+			claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 			if err != nil || claimed == nil {
 				t.Fatalf("claim=%#v,%v", claimed, err)
 			}
@@ -263,10 +264,10 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 			if policyCalls != 0 {
 				t.Fatal("invalid limits reached action policy")
 			}
-			if values, err := store.ListRunbookActivations(t.Context(), RunbookActivationFilter{Scope: run.Scope}); err != nil || len(values) != 0 {
+			if values, err := store.ListRunbookActivations(t.Context(), models.RunbookActivationFilter{Scope: run.Scope}); err != nil || len(values) != 0 {
 				t.Fatalf("invalid input created a routine: %#v, %v", values, err)
 			}
-			if values, err := store.ListObjectives(t.Context(), ObjectiveFilter{Scope: run.Scope}); err != nil || len(values) != 0 {
+			if values, err := store.ListObjectives(t.Context(), models.ObjectiveFilter{Scope: run.Scope}); err != nil || len(values) != 0 {
 				t.Fatalf("invalid input created an objective: %#v, %v", values, err)
 			}
 		})
@@ -275,35 +276,35 @@ func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *testing.T) {
 	store := newTestKernelStore(t)
 	run, catalog, bound, args := routinetest.ScheduledTask(t, store)
-	a := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*RunbookActivation)
+	a := dispatchTaskForTest(t, store, run, bound, args, "create")["activation"].(*models.RunbookActivation)
 	statusBound, err := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, action.RunbookActionSetStatus)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pause := map[string]interface{}{"activationId": a.ID, "expectedRevision": a.Revision, "status": "paused", "reason": "User paused"}
 	result := dispatchTaskForTest(t, store, run, statusBound, pause, "pause")
-	paused := result["activation"].(*RunbookActivation)
-	if paused.Status != RunbookActivationPaused {
+	paused := result["activation"].(*models.RunbookActivation)
+	if paused.Status != models.RunbookActivationPaused {
 		t.Fatal("pause failed")
 	}
 	if replay := dispatchTaskForTest(t, store, run, statusBound, pause, "pause"); replay["replayed"] != true {
 		t.Fatal("pause replay failed")
 	}
 	d, _ := routine.NewRunbookActionDispatcher(store, nil)
-	if _, err := d.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: statusBound, Call: &ActionCall{ID: "different", Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID}, Arguments: pause}); !errors.Is(err, ErrRunbookActivationRevision) {
+	if _, err := d.DispatchAction(t.Context(), agentrun.ActionDispatchInput{Run: run, Bound: statusBound, Call: &models.ActionCall{ID: "different", Scope: run.Scope, RunID: run.ID, DeploymentID: run.AssignedAgentID}, Arguments: pause}); !errors.Is(err, models.ErrRunbookActivationRevision) {
 		t.Fatalf("stale different action: %v", err)
 	}
 	resume := map[string]interface{}{"activationId": a.ID, "expectedRevision": paused.Revision, "status": "active", "reason": "User resumed"}
-	active := dispatchTaskForTest(t, store, run, statusBound, resume, "resume")["activation"].(*RunbookActivation)
-	if active.Status != RunbookActivationActive {
+	active := dispatchTaskForTest(t, store, run, statusBound, resume, "resume")["activation"].(*models.RunbookActivation)
+	if active.Status != models.RunbookActivationActive {
 		t.Fatal("resume failed")
 	}
 	listBound, _ := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, action.RunbookActionList)
 	listed := dispatchTaskForTest(t, store, run, listBound, map[string]interface{}{}, "list")
-	if len(listed["activations"].([]*RunbookActivation)) != 1 {
+	if len(listed["activations"].([]*models.RunbookActivation)) != 1 {
 		t.Fatal("list failed")
 	}
-	other := cloneAgentRun(run)
+	other := models.CloneAgentRun(run)
 	other.Owner.ID = "foreign"
 	validator, err := routine.NewRunbookActionValidator(store)
 	if err != nil {
@@ -314,8 +315,8 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 	}
 	// A Team chat with the Agent on its roster passes the roster check and
 	// still does not own the Agent's routine.
-	teamChat := cloneAgentRun(run)
-	teamChat.Owner = ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}
+	teamChat := models.CloneAgentRun(run)
+	teamChat.Owner = models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}
 	validator.SetRoutineTeams(scheduledTaskTeams{team: &kernelteam.Deployment{
 		ID: "team", Scope: capability.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: run.AssignedAgentID, AgentDeploymentID: run.AssignedAgentID}},
@@ -338,22 +339,22 @@ func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) 
 				args = withScheduleArgument(args, "maximumOccurrences", nil, limit == "omitted")
 			}
 			now := time.Now().Add(time.Second)
-			claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+			claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 			if err != nil || claimed == nil {
 				t.Fatalf("claim=%#v,%v", claimed, err)
 			}
 			validator, _ := routine.NewRunbookActionValidator(store)
 			coordinator := action.NewActionCoordinator(store, store, catalog, action.ActionPolicyEvaluatorFunc(func(context.Context, action.ActionPolicyInput) (action.ActionPolicyDecision, error) {
-				return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
+				return action.ActionPolicyDecision{Disposition: action.ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []models.ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
 			}), []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
-			result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: action.RunbookActionCreateTask, Arguments: args, IdempotencyKey: "user-schedule", Summary: "Create recurring research", Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
+			result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: action.RunbookActionCreateTask, Arguments: args, IdempotencyKey: "user-schedule", Summary: "Create recurring research", Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Approval == nil || result.Call.Status != ActionCallStatusWaitingApproval {
+			if result.Approval == nil || result.Call.Status != models.ActionCallStatusWaitingApproval {
 				t.Fatal("creation bypassed approval")
 			}
-			values, err := store.ListRunbookActivations(t.Context(), RunbookActivationFilter{Scope: run.Scope})
+			values, err := store.ListRunbookActivations(t.Context(), models.RunbookActivationFilter{Scope: run.Scope})
 			if err != nil || len(values) != 0 {
 				t.Fatal("schedule executed before approval")
 			}
@@ -377,19 +378,19 @@ func TestRoutineBriefIsDecidedByTheRequester(t *testing.T) {
 	store := newTestKernelStore(t)
 	run, catalog, bound, args := routinetest.ScheduledTask(t, store)
 	now := time.Now().Add(time.Second)
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	claimed, err := store.ClaimNextAgentRun(t.Context(), models.AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 	if err != nil || claimed == nil {
 		t.Fatalf("claim=%#v,%v", claimed, err)
 	}
 	validator, _ := routine.NewRunbookActionValidator(store)
 	policy := action.NewDefaultActionPolicy()
-	policy.Approvers = []ApprovalPrincipal{{Type: "role", ID: "operator"}}
+	policy.Approvers = []models.ApprovalPrincipal{{Type: "role", ID: "operator"}}
 	coordinator := action.NewActionCoordinator(store, store, catalog, policy, []action.ActionProposalValidator{validator}, models.WithClock(func() time.Time { return now }))
-	result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: action.RunbookActionCreateTask, Arguments: args, IdempotencyKey: "requester-routine", Summary: "Create recurring research", Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
+	result, err := coordinator.Propose(t.Context(), actiontest.LoopProposeRequest(action.ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: action.RunbookActionCreateTask, Arguments: args, IdempotencyKey: "requester-routine", Summary: "Create recurring research", Actor: models.ActivityActor{Type: "agent", ID: run.AssignedAgentID}}, "create-task"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []ApprovalPrincipal{{Type: "user", ID: "user"}}
+	want := []models.ApprovalPrincipal{{Type: "user", ID: "user"}}
 	if result.Approval == nil || !reflect.DeepEqual(result.Approval.EligibleApprovers, want) {
 		t.Fatalf("approvers = %#v, want %#v", result.Approval, want)
 	}
@@ -398,12 +399,12 @@ func TestRoutineBriefIsDecidedByTheRequester(t *testing.T) {
 func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 	store := newTestKernelStore(t)
 	source, _, bound, args := routinetest.ScheduledTask(t, store)
-	a := dispatchTaskForTest(t, store, source, bound, args, "create")["activation"].(*RunbookActivation)
+	a := dispatchTaskForTest(t, store, source, bound, args, "create")["activation"].(*models.RunbookActivation)
 	scheduler := routine.NewRunbookScheduler(store, models.WithClock(func() time.Time { return a.NextRunAt.Add(time.Second) }))
 	if _, err := scheduler.ReconcileScope(t.Context(), source.Scope, 10); err != nil {
 		t.Fatal(err)
 	}
-	runs, _ := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: source.Scope, ObjectiveID: a.ObjectiveID, Limit: 10})
+	runs, _ := store.ListAgentRuns(t.Context(), models.AgentRunFilter{Scope: source.Scope, ObjectiveID: a.ObjectiveID, Limit: 10})
 	run := runs[0]
 	c := &bindingCatalog{deployment: &kernelagent.AgentDeployment{ID: run.AssignedAgentID, DefinitionID: "researcher", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}, definition: &kernelagent.AgentDefinition{ID: "researcher", Version: "1", Purpose: "Research", SystemPrompt: "Use current tools"}, activation: &skill.ActivationSnapshot{SnapshotID: "live", Scope: skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, DeploymentID: run.AssignedAgentID, Skills: []skill.ActivatedSkill{{SkillID: "browser", SkillVersion: "1", Actions: []capability.ModelAction{{Name: "browser.read", SkillID: "browser", Version: "1", Action: "read"}}}}}}
 	config := bindingTestConfig(t, store, &modelsteptest.RecordingStepHost{})
@@ -428,11 +429,11 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 func TestScheduledTaskSurvivesAgentDefinitionSynchronization(t *testing.T) {
 	store := newTestKernelStore(t)
 	run, _, bound, args := routinetest.ScheduledTask(t, store)
-	first := dispatchTaskForTest(t, store, run, bound, args, "task-one")["activation"].(*RunbookActivation)
-	second := dispatchTaskForTest(t, store, run, bound, args, "task-two")["activation"].(*RunbookActivation)
+	first := dispatchTaskForTest(t, store, run, bound, args, "task-one")["activation"].(*models.RunbookActivation)
+	second := dispatchTaskForTest(t, store, run, bound, args, "task-two")["activation"].(*models.RunbookActivation)
 	// Both tasks share the portable schedule trigger name. An unrelated Agent
 	// amendment must neither treat them as duplicate embedded triggers nor retire them.
-	updates, err := reconcileAgentRunbookActivations([]*RunbookActivation{first, second}, sqliteAgentDefinition("2.0.0"), &kernelagent.AgentDeployment{ID: run.AssignedAgentID}, time.Now())
+	updates, err := models.ReconcileAgentRunbookActivations([]*models.RunbookActivation{first, second}, sqliteAgentDefinition("2.0.0"), &kernelagent.AgentDeployment{ID: run.AssignedAgentID}, time.Now())
 	if err != nil || len(updates) != 0 {
 		t.Fatalf("amendment changed chat-authored tasks: %#v,%v", updates, err)
 	}

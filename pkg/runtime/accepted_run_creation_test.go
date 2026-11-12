@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -26,7 +27,7 @@ type acceptedCreationTestPreparer struct {
 	err     error
 }
 
-func (p *acceptedCreationTestPreparer) PrepareAcceptedRunExecution(_ context.Context, request *CreateAgentRunRequest) error {
+func (p *acceptedCreationTestPreparer) PrepareAcceptedRunExecution(_ context.Context, request *models.CreateAgentRunRequest) error {
 	p.calls++
 	if p.err != nil {
 		return p.err
@@ -35,28 +36,28 @@ func (p *acceptedCreationTestPreparer) PrepareAcceptedRunExecution(_ context.Con
 	if request.Context == nil {
 		request.Context = map[string]interface{}{}
 	}
-	delete(request.Context, AcceptedRunExecutionContextKey)
+	delete(request.Context, models.AcceptedRunExecutionContextKey)
 	if request.Entrypoint == "" {
 		return nil
 	}
 	if id, exists := request.Context["runbookDefinitionId"]; exists && id != p.id {
-		return ErrAcceptedRunExecution
+		return models.ErrAcceptedRunExecution
 	}
 	if version, exists := request.Context["runbookDefinitionVersion"]; exists && version != p.version {
-		return ErrAcceptedRunExecution
+		return models.ErrAcceptedRunExecution
 	}
 	if method, ok := request.Plan["runbook"].(map[string]interface{}); ok && (method["id"] != p.id || method["version"] != p.version) {
-		return ErrAcceptedRunExecution
+		return models.ErrAcceptedRunExecution
 	}
-	request.Context[AcceptedRunExecutionContextKey] = &AcceptedRunExecution{
+	request.Context[models.AcceptedRunExecutionContextKey] = &models.AcceptedRunExecution{
 		Scope: request.Scope, DeploymentID: request.AssignedAgentID, DefinitionID: "immutable-agent", DefinitionVersion: "1",
 		RunbookID: p.id, RunbookVersion: p.version, Entrypoint: request.Entrypoint,
-		SkillDependencies: []SkillRuntimeReference{{SkillID: "publisher", SkillVersion: "1.0.0", SourceIdentity: "verified::publisher"}},
+		SkillDependencies: []models.SkillRuntimeReference{{SkillID: "publisher", SkillVersion: "1.0.0", SourceIdentity: "verified::publisher"}},
 	}
 	return nil
 }
 
-func acceptedCreationStores(t *testing.T, test func(*testing.T, KernelStore)) {
+func acceptedCreationStores(t *testing.T, test func(*testing.T, models.KernelStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
 		store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "accepted-creation.db"))
@@ -68,12 +69,12 @@ func acceptedCreationStores(t *testing.T, test func(*testing.T, KernelStore)) {
 	})
 }
 
-func acceptedCreationActivation(t *testing.T, store KernelStore, trigger runbook.Trigger) (*RunbookActivation, *acceptedCreationTestPreparer) {
+func acceptedCreationActivation(t *testing.T, store models.KernelStore, trigger runbook.Trigger) (*models.RunbookActivation, *acceptedCreationTestPreparer) {
 	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "accepted-hooks"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "rowan"}
-	objective, err := NewPortfolioService(store).CreateObjective(t.Context(), CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Review", Goal: "Review authorized messages", Status: ObjectiveStatusActive,
+	scope := models.Scope{Kind: "tenant", ID: "accepted-hooks"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "rowan"}
+	objective, err := portfolio.NewPortfolioService(store).CreateObjective(t.Context(), portfolio.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Review", Goal: "Review authorized messages", Status: models.ObjectiveStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -89,16 +90,16 @@ func acceptedCreationActivation(t *testing.T, store KernelStore, trigger runbook
 	return activation, &acceptedCreationTestPreparer{id: "review", version: "1"}
 }
 
-func assertAcceptedCreationPin(t *testing.T, run *AgentRun) {
+func assertAcceptedCreationPin(t *testing.T, run *models.AgentRun) {
 	t.Helper()
-	pin, err := AcceptedRunExecutionForRun(run)
+	pin, err := models.AcceptedRunExecutionForRun(run)
 	if err != nil || pin == nil || pin.DefinitionID != "immutable-agent" || pin.DefinitionVersion != "1" || pin.RunbookID != "review" || pin.RunbookVersion != "1" || pin.DeploymentID != "rowan" || len(pin.SkillDependencies) != 1 || pin.SkillDependencies[0].SkillVersion != "1.0.0" {
 		t.Fatalf("new accepted Run did not pin the immutable method and exact dependency: %#v, %v", pin, err)
 	}
 }
 
 func TestAcceptedRunCreationManualPinsOnceAndReplaysBeforeMutableAdmission(t *testing.T) {
-	acceptedCreationStores(t, func(t *testing.T, store KernelStore) {
+	acceptedCreationStores(t, func(t *testing.T, store models.KernelStore) {
 		activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{
 			Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"},
 		})
@@ -134,11 +135,11 @@ func TestAcceptedRunCreationManualPinsOnceAndReplaysBeforeMutableAdmission(t *te
 }
 
 type acceptedCreationCursorFailure struct {
-	KernelStore
+	models.KernelStore
 	fail bool
 }
 
-func (s *acceptedCreationCursorFailure) UpdateRunbookActivation(ctx context.Context, value *RunbookActivation, revision int64) error {
+func (s *acceptedCreationCursorFailure) UpdateRunbookActivation(ctx context.Context, value *models.RunbookActivation, revision int64) error {
 	if s.fail {
 		return errors.New("simulated crash before occurrence cursor commit")
 	}
@@ -146,7 +147,7 @@ func (s *acceptedCreationCursorFailure) UpdateRunbookActivation(ctx context.Cont
 }
 
 func TestAcceptedRunCreationSchedulerRetainsPinAcrossOccurrenceDeliveryRetry(t *testing.T) {
-	acceptedCreationStores(t, func(t *testing.T, store KernelStore) {
+	acceptedCreationStores(t, func(t *testing.T, store models.KernelStore) {
 		activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{
 			Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"},
 		})
@@ -195,20 +196,20 @@ func TestAcceptedRunCreationSchedulerRetainsPinAcrossOccurrenceDeliveryRetry(t *
 func TestAcceptedRunCreationReplayRejectsChangedWorkBeforePreparation(t *testing.T) {
 	store := newTestKernelStore(t)
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}})
-	request := CreateAgentRunRequest{Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID, Entrypoint: "review", Goal: "Original work", Source: RunSourceManual, IdempotencyKey: "request-conflict", Context: map[string]interface{}{"runbookDefinitionId": "review", "runbookDefinitionVersion": "1"}}
+	request := models.CreateAgentRunRequest{Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID, Entrypoint: "review", Goal: "Original work", Source: models.RunSourceManual, IdempotencyKey: "request-conflict", Context: map[string]interface{}{"runbookDefinitionId": "review", "runbookDefinitionVersion": "1"}}
 	commands := agentrun.NewRunCommandService(store)
 	created, err := agentrun.CreateAgentRunWithAcceptedExecution(t.Context(), commands, request, preparer)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertAcceptedCreationPin(t, created.Run)
-	if _, injected := request.Context[AcceptedRunExecutionContextKey]; injected {
+	if _, injected := request.Context[models.AcceptedRunExecutionContextKey]; injected {
 		t.Fatal("preparation changed the caller's original context")
 	}
 	request.Goal = "Different work"
 	preparer.err = errors.New("mutable admission must not run")
 	conflict, err := agentrun.CreateAgentRunWithAcceptedExecution(t.Context(), commands, request, preparer)
-	if conflict != nil || !errors.Is(err, ErrRunIdempotency) || preparer.calls != 1 {
+	if conflict != nil || !errors.Is(err, models.ErrRunIdempotency) || preparer.calls != 1 {
 		t.Fatalf("changed retry bypassed canonical fingerprint or reached admission: %#v, %v", conflict, err)
 	}
 }
@@ -216,9 +217,9 @@ func TestAcceptedRunCreationReplayRejectsChangedWorkBeforePreparation(t *testing
 func TestAcceptedRunCreationDiscardsUntrustedPinBeforeCanonicalReplay(t *testing.T) {
 	store := newTestKernelStore(t)
 	activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "review", Schedule: &runbook.Schedule{Cron: "0 0 0 * * *", Timezone: "UTC"}})
-	request := CreateAgentRunRequest{
-		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: "rowan", Entrypoint: "review", Goal: "Original work", Source: RunSourceManual, IdempotencyKey: "untrusted-pin",
-		Context: map[string]interface{}{"runbookDefinitionId": "review", "runbookDefinitionVersion": "1", "input": "preserved", AcceptedRunExecutionContextKey: "caller-supplied forged pin"},
+	request := models.CreateAgentRunRequest{
+		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: "rowan", Entrypoint: "review", Goal: "Original work", Source: models.RunSourceManual, IdempotencyKey: "untrusted-pin",
+		Context: map[string]interface{}{"runbookDefinitionId": "review", "runbookDefinitionVersion": "1", "input": "preserved", models.AcceptedRunExecutionContextKey: "caller-supplied forged pin"},
 	}
 	commands := agentrun.NewRunCommandService(store)
 	created, err := agentrun.CreateAgentRunWithAcceptedExecution(t.Context(), commands, request, preparer)
@@ -226,7 +227,7 @@ func TestAcceptedRunCreationDiscardsUntrustedPinBeforeCanonicalReplay(t *testing
 		t.Fatalf("untrusted pin affected authoritative creation: %#v, %v", created, err)
 	}
 	assertAcceptedCreationPin(t, created.Run)
-	if created.Run.Context["input"] != "preserved" || request.Context[AcceptedRunExecutionContextKey] != "caller-supplied forged pin" {
+	if created.Run.Context["input"] != "preserved" || request.Context[models.AcceptedRunExecutionContextKey] != "caller-supplied forged pin" {
 		t.Fatal("server sanitization rewrote ordinary inputs or the caller's request")
 	}
 	preparer.err = errors.New("mutable admission must not run on replay")
@@ -242,14 +243,14 @@ func TestAcceptedRunCreationActionDispatcherPreparesNewWorkAndReplays(t *testing
 	seedTestSpace(t, store, activation.Scope)
 	conversation, _, err := conversation.NewConversationService(store).CreateConversation(t.Context(), conversation.CreateConversationRequest{
 		Scope: activation.Scope, Owner: activation.Owner, Title: "Review",
-		Origin: &ConversationReference{Kind: ConversationReferenceObjective, ID: activation.ObjectiveID, Version: 1}, IdempotencyKey: "review-channel",
+		Origin: &models.ConversationReference{Kind: models.ConversationReferenceObjective, ID: activation.ObjectiveID, Version: 1}, IdempotencyKey: "review-channel",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: activation.Scope, Owner: activation.Owner, AssignedAgentID: "rowan", Kind: RunKindConversation, Goal: "Run reviewed work", Source: RunSourceChat,
-		Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID},
+	parent, err := portfolio.NewPortfolioService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
+		Scope: activation.Scope, Owner: activation.Owner, AssignedAgentID: "rowan", Kind: models.RunKindConversation, Goal: "Run reviewed work", Source: models.RunSourceChat,
+		Context: map[string]interface{}{models.ConversationRunConversationIDContextKey: conversation.ID},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +262,7 @@ func TestAcceptedRunCreationActionDispatcherPreparesNewWorkAndReplays(t *testing
 	dispatcher.SetAcceptedRunExecutionPreparer(preparer)
 	definition := routine.RunbookManagementSkill()
 	input := agentrun.ActionDispatchInput{
-		Run: parent, Call: &ActionCall{ID: "approved-start", Scope: activation.Scope, RunID: parent.ID, DeploymentID: "rowan"},
+		Run: parent, Call: &models.ActionCall{ID: "approved-start", Scope: activation.Scope, RunID: parent.ID, DeploymentID: "rowan"},
 		Bound:     &skill.BoundAction{Definition: definition, Binding: &skill.Binding{DeploymentID: "rowan"}, Action: definition.Actions[routine.RunbookActionStart]},
 		Arguments: map[string]interface{}{"activationId": activation.ID, "reason": "User requested immediate review"},
 	}
@@ -269,7 +270,7 @@ func TestAcceptedRunCreationActionDispatcherPreparesNewWorkAndReplays(t *testing
 	if err != nil || preparer.calls != 1 {
 		t.Fatalf("approved Runbook action did not use accepted preparation: %#v, %v", created, err)
 	}
-	assertAcceptedCreationPin(t, created["run"].(*AgentRun))
+	assertAcceptedCreationPin(t, created["run"].(*models.AgentRun))
 	preparer.err = errors.New("new definition is active")
 	replayed, err := dispatcher.DispatchAction(t.Context(), input)
 	if err != nil || replayed["replayed"] != true || preparer.calls != 1 {

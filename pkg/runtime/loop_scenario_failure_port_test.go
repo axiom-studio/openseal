@@ -37,11 +37,11 @@ func portVisualArtifactID(runID, triggerID string) string {
 // Helpers
 
 // portAgentMessages is the conversation's messages from the fixture Agent.
-func portAgentMessages(f *looptest.Fixture, conversationID string) []*ChannelMessage {
+func portAgentMessages(f *looptest.Fixture, conversationID string) []*models.ChannelMessage {
 	f.T.Helper()
-	var out []*ChannelMessage
+	var out []*models.ChannelMessage
 	for _, message := range f.Messages(conversationID) {
-		if message.Sender.Type == ConversationParticipantAgent && message.Sender.ID == looptest.FixtureAgent {
+		if message.Sender.Type == models.ConversationParticipantAgent && message.Sender.ID == looptest.FixtureAgent {
 			out = append(out, message)
 		}
 	}
@@ -49,18 +49,18 @@ func portAgentMessages(f *looptest.Fixture, conversationID string) []*ChannelMes
 }
 
 // portFinalEntries is the Run's turn_final_answer tool entries in log order.
-func portFinalEntries(f *looptest.Fixture, runID string) []*SessionEntry {
+func portFinalEntries(f *looptest.Fixture, runID string) []*models.SessionEntry {
 	f.T.Helper()
-	var out []*SessionEntry
+	var out []*models.SessionEntry
 	for _, entry := range f.Entries(runID) {
-		if entry.Type == SessionEntryTool && entry.Tool != nil && entry.Tool.Name == string(ControlToolFinalAnswer) && entry.RunID == runID {
+		if entry.Type == models.SessionEntryTool && entry.Tool != nil && entry.Tool.Name == string(models.ControlToolFinalAnswer) && entry.RunID == runID {
 			out = append(out, entry)
 		}
 	}
 	return out
 }
 
-func portEntryText(entry *SessionEntry) string {
+func portEntryText(entry *models.SessionEntry) string {
 	if entry == nil || entry.Tool == nil || entry.Tool.Result == nil {
 		return ""
 	}
@@ -76,7 +76,7 @@ func portLastToolFailed(v looptest.StepView) bool {
 
 // portRequireTypedFailure checks the D4 contract of a terminal failure: a
 // typed code and message on the Run, and no failure state anywhere else.
-func portRequireTypedFailure(t *testing.T, run *AgentRun) {
+func portRequireTypedFailure(t *testing.T, run *models.AgentRun) {
 	t.Helper()
 	if run.FailureExplanation == nil || strings.TrimSpace(run.FailureExplanation.Code) == "" || strings.TrimSpace(run.FailureExplanation.Message) == "" {
 		t.Fatalf("failure = %#v, want a typed code and message", run.FailureExplanation)
@@ -90,7 +90,7 @@ func portRequireTypedFailure(t *testing.T, run *AgentRun) {
 
 // portReportFailure delivers the terminal report of a failed chat Run the way
 // the worker's reporting outbox does, and returns the Agent's last message.
-func portReportFailure(f *looptest.Fixture, conversationID string, failed *AgentRun) *ChannelMessage {
+func portReportFailure(f *looptest.Fixture, conversationID string, failed *models.AgentRun) *models.ChannelMessage {
 	f.T.Helper()
 	if err := conversationrun.ProjectFailedConversationReply(f.Ctx, f.Chats, failed); err != nil {
 		f.T.Fatalf("report failed run: %v", err)
@@ -110,13 +110,13 @@ func portReportFailure(f *looptest.Fixture, conversationID string, failed *Agent
 // and carries no failure (ported intent of TestFailedDispatchReturnsToTheModel
 // and the action_failure_feedback tests).
 func TestLoopToolFailureIsExplainedByTheModelNotTheKernel(t *testing.T) {
-	looptest.EachStore(t, "port_tool_failure", func(t *testing.T, store KernelStore) {
+	looptest.EachStore(t, "port_tool_failure", func(t *testing.T, store models.KernelStore) {
 		var seen string
 		f := looptest.NewFixture(t, store, looptest.WithRules(
-			&looptest.ModelRule{Name: "explode", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+			&looptest.ModelRule{Name: "explode", Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
 				return looptest.Act("Reading the service.", looptest.Call(looptest.GovernedTool(v, "explode"), nil))
 			}},
-			&looptest.ModelRule{Name: "explain", When: portLastToolFailed, Reply: func(v looptest.StepView) ModelStepResult {
+			&looptest.ModelRule{Name: "explain", When: portLastToolFailed, Reply: func(v looptest.StepView) models.ModelStepResult {
 				results := v.ToolResultsSinceUser()
 				seen = looptest.PartsText(results[len(results)-1].Tool.Result.Content)
 				return looptest.Say("I couldn't read it: the fixture service exploded.")
@@ -124,30 +124,30 @@ func TestLoopToolFailureIsExplainedByTheModelNotTheKernel(t *testing.T) {
 		))
 		conversation, run := f.StartChat("read the fixture service")
 		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, AgentRunStatusCompleted)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
 		if done.FailureExplanation != nil || done.Error != "" {
 			t.Fatalf("completed run carries failure %#v / %q", done.FailureExplanation, done.Error)
 		}
-		var failedEntry *SessionEntry
+		var failedEntry *models.SessionEntry
 		for _, entry := range f.Entries(run.ID) {
-			if entry.Type == SessionEntryTool && entry.Tool != nil && strings.HasSuffix(entry.Tool.Name, "explode") {
+			if entry.Type == models.SessionEntryTool && entry.Tool != nil && strings.HasSuffix(entry.Tool.Name, "explode") {
 				failedEntry = entry
 			}
 		}
-		if failedEntry == nil || failedEntry.State != ToolEntryError || !failedEntry.Tool.Result.IsError {
+		if failedEntry == nil || failedEntry.State != models.ToolEntryError || !failedEntry.Tool.Result.IsError {
 			t.Fatalf("explode entry = %#v", failedEntry)
 		}
 		if !strings.Contains(seen, "the fixture service exploded") || seen != portEntryText(failedEntry) {
 			t.Fatalf("the model saw %q, the entry holds %q", seen, portEntryText(failedEntry))
 		}
-		if calls := f.Calls(run.ID); len(calls) != 1 || calls[0].Status != ActionCallStatusFailed {
+		if calls := f.Calls(run.ID); len(calls) != 1 || calls[0].Status != models.ActionCallStatusFailed {
 			t.Fatalf("action calls = %#v", calls)
 		}
 		answers := portAgentMessages(f, conversation.ID)
 		if len(answers) != 1 || answers[0].Content != "I couldn't read it: the fixture service exploded." {
 			t.Fatalf("channel = %s", looptest.DescribeMessages(f.Messages(conversation.ID)))
 		}
-		if len(f.Model.Calls(ModelStepPurposeExplanation)) != 0 {
+		if len(f.Model.Calls(models.ModelStepPurposeExplanation)) != 0 {
 			t.Fatal("a tool failure ran the kernel's explanation step")
 		}
 	})
@@ -159,13 +159,13 @@ func TestLoopToolFailureIsExplainedByTheModelNotTheKernel(t *testing.T) {
 // otherwise the kernel's reply from the terminal report.
 func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 	t.Run("host_unavailable_exhausted", func(t *testing.T) {
-		looptest.EachStore(t, "port_host_exhausted", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "port_host_exhausted", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "down",
 				Err: &modelstep.TurnHostFailure{Code: "host_draining", Message: "The step host is restarting.", Retryable: true}}))
 			conversation, run := f.StartChat("check issue 1")
 			const hostRetries = 3 // the run loop requeues a retryable host failure three times
 			failed := f.DriveToRest(run.ID, hostRetries+2)
-			f.MustStatus(failed, AgentRunStatusFailed)
+			f.MustStatus(failed, models.AgentRunStatusFailed)
 			portRequireTypedFailure(t, failed)
 			if failed.FailureExplanation.Code != runloop.StepFailureHostUnavailable || failed.FailureExplanation.Explained {
 				t.Fatalf("failure = %#v, want an unexplained %s", failed.FailureExplanation, runloop.StepFailureHostUnavailable)
@@ -184,18 +184,18 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 	})
 
 	t.Run("doom_loop", func(t *testing.T) {
-		looptest.EachStore(t, "port_doom_loop", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "port_doom_loop", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store, looptest.WithRules(
-				&looptest.ModelRule{Name: "lookup", When: stepPurpose, Reply: func(v looptest.StepView) ModelStepResult {
+				&looptest.ModelRule{Name: "lookup", When: stepPurpose, Reply: func(v looptest.StepView) models.ModelStepResult {
 					return looptest.Act("Checking.", looptest.Call(looptest.GovernedTool(v, "lookup"), repeatLookupArgs))
 				}},
-				&looptest.ModelRule{Name: "explain", When: purposeIs(ModelStepPurposeExplanation), Reply: func(looptest.StepView) ModelStepResult {
+				&looptest.ModelRule{Name: "explain", When: purposeIs(models.ModelStepPurposeExplanation), Reply: func(looptest.StepView) models.ModelStepResult {
 					return looptest.Say("I kept getting the same answer for issue 6815, so I stopped.")
 				}},
 			))
 			conversation, run := f.StartChat("what is the status of 6815?")
 			failed := f.DriveToRest(run.ID, 4)
-			f.MustStatus(failed, AgentRunStatusFailed)
+			f.MustStatus(failed, models.AgentRunStatusFailed)
 			portRequireTypedFailure(t, failed)
 			if failed.FailureExplanation.Code != action.RunFailureCodeRepeatLimit || !failed.FailureExplanation.Explained {
 				t.Fatalf("failure = %#v, want an explained %s", failed.FailureExplanation, action.RunFailureCodeRepeatLimit)
@@ -208,12 +208,12 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 	})
 
 	t.Run("second_length_rejection", func(t *testing.T) {
-		looptest.EachStore(t, "port_length_twice", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "port_length_twice", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store, looptest.WithRules(
 				lookupRule("lookup", 5, nil, nil),
-				&looptest.ModelRule{Name: "summary", When: purposeIs(ModelStepPurposeSummary),
-					Reply: func(looptest.StepView) ModelStepResult { return looptest.Say("Issues 1 to 5 were looked up.") }},
-				&looptest.ModelRule{Name: "too long", When: purposeIs(ModelStepPurposeStep), Err: contextExceeded()},
+				&looptest.ModelRule{Name: "summary", When: purposeIs(models.ModelStepPurposeSummary),
+					Reply: func(looptest.StepView) models.ModelStepResult { return looptest.Say("Issues 1 to 5 were looked up.") }},
+				&looptest.ModelRule{Name: "too long", When: purposeIs(models.ModelStepPurposeStep), Err: contextExceeded()},
 			))
 			f.Dispatch.On("lookup", bigLookup)
 			conversation, run := f.StartChat("check issues 1 to 5")
@@ -221,12 +221,12 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 			if exit.Reason != runloop.RunLoopExitFailed || exit.Err != nil {
 				t.Fatalf("exit = %s (%v), want failed", exit.Reason, exit.Err)
 			}
-			f.MustStatus(failed, AgentRunStatusFailed)
+			f.MustStatus(failed, models.AgentRunStatusFailed)
 			portRequireTypedFailure(t, failed)
-			if failed.FailureExplanation.Explained || len(f.Model.Calls(ModelStepPurposeExplanation)) != 0 {
+			if failed.FailureExplanation.Explained || len(f.Model.Calls(models.ModelStepPurposeExplanation)) != 0 {
 				t.Fatalf("failure = %#v; a context overflow is not explained by the model", failed.FailureExplanation)
 			}
-			if steps := f.Model.Calls(ModelStepPurposeStep); len(steps) != 7 || steps[6].Attempt != 1 {
+			if steps := f.Model.Calls(models.ModelStepPurposeStep); len(steps) != 7 || steps[6].Attempt != 1 {
 				t.Fatalf("step calls = %d, want 5 lookups and two attempts of the sixth step", len(steps))
 			}
 			if reply := portReportFailure(f, conversation.ID, failed); reply.Content != runtimeconversation.TerminalRunFailureReply(f.Ctx, f.Raw, f.Raw, failed) {
@@ -240,16 +240,16 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 	// but the loop pauses with budget.exhausted (TestRunLoopBudgetExhaustion
 	// PausesAfterStep); this subtest pins that the pause records no failure.
 	t.Run("budget_exhausted_pauses", func(t *testing.T) {
-		looptest.EachStore(t, "port_budget", func(t *testing.T, store KernelStore) {
-			f := looptest.NewFixture(t, store, looptest.WithRules(lookupRule("lookup", 0, purposeIs(ModelStepPurposeStep), nil)))
-			run := f.StartBoundedRun("Check issues 1 to 3", BudgetPolicy{MaxTurns: 2})
+		looptest.EachStore(t, "port_budget", func(t *testing.T, store models.KernelStore) {
+			f := looptest.NewFixture(t, store, looptest.WithRules(lookupRule("lookup", 0, purposeIs(models.ModelStepPurposeStep), nil)))
+			run := f.StartBoundedRun("Check issues 1 to 3", models.BudgetPolicy{MaxTurns: 2})
 			paused := f.DriveToRest(run.ID, 2)
-			f.MustStatus(paused, AgentRunStatusPaused)
-			if paused.BudgetState != BudgetStateExhausted || paused.FailureExplanation != nil {
+			f.MustStatus(paused, models.AgentRunStatusPaused)
+			if paused.BudgetState != models.BudgetStateExhausted || paused.FailureExplanation != nil {
 				t.Fatalf("paused run budget %s failure %#v", paused.BudgetState, paused.FailureExplanation)
 			}
-			if len(f.Events(run.ID, "budget.exhausted")) != 1 || len(f.Model.Calls(ModelStepPurposeStep)) != 2 {
-				t.Fatalf("budget.exhausted = %d, steps = %d", len(f.Events(run.ID, "budget.exhausted")), len(f.Model.Calls(ModelStepPurposeStep)))
+			if len(f.Events(run.ID, "budget.exhausted")) != 1 || len(f.Model.Calls(models.ModelStepPurposeStep)) != 2 {
+				t.Fatalf("budget.exhausted = %d, steps = %d", len(f.Events(run.ID, "budget.exhausted")), len(f.Model.Calls(models.ModelStepPurposeStep)))
 			}
 		})
 	})
@@ -263,22 +263,22 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 // the next step and only the accepted answer is delivered.
 func TestLoopCompletionChecksReturnToolErrors(t *testing.T) {
 	chatCheck := func(t *testing.T, prefix, claim, code string) {
-		looptest.EachStore(t, prefix, func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, prefix, func(t *testing.T, store models.KernelStore) {
 			var rejection string
 			f := looptest.NewFixture(t, store, looptest.WithRules(
-				&looptest.ModelRule{Name: "claim", Times: 1, Reply: func(looptest.StepView) ModelStepResult {
+				&looptest.ModelRule{Name: "claim", Times: 1, Reply: func(looptest.StepView) models.ModelStepResult {
 					return looptest.FinalAnswer(map[string]any{"answer": claim})
 				}},
-				&looptest.ModelRule{Name: "repair", When: portLastToolFailed, Reply: func(v looptest.StepView) ModelStepResult {
-					rejection, _, _ = v.ToolResult(string(ControlToolFinalAnswer))
+				&looptest.ModelRule{Name: "repair", When: portLastToolFailed, Reply: func(v looptest.StepView) models.ModelStepResult {
+					rejection, _, _ = v.ToolResult(string(models.ControlToolFinalAnswer))
 					return looptest.FinalAnswer(map[string]any{"answer": "I have not done that yet; nothing was sent or submitted."})
 				}},
 			))
 			conversation, run := f.StartChat("please email Ana the report")
 			done := f.DriveToRest(run.ID, 3)
-			f.MustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
 			finals := portFinalEntries(f, run.ID)
-			if len(finals) != 2 || finals[0].State != ToolEntryError || !finals[0].Tool.Result.IsError || finals[1].State != ToolEntryCompleted {
+			if len(finals) != 2 || finals[0].State != models.ToolEntryError || !finals[0].Tool.Result.IsError || finals[1].State != models.ToolEntryCompleted {
 				t.Fatalf("final entries = %v", f.EntryTypes(run.ID))
 			}
 			if text := portEntryText(finals[0]); !strings.Contains(text, code) || text != rejection {
@@ -309,8 +309,8 @@ func TestLoopCompletionChecksReturnToolErrors(t *testing.T) {
 // and the spoken and broadcast cases of the old runner).
 func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 	t.Run("visual", func(t *testing.T) {
-		looptest.EachStore(t, "port_visual", func(t *testing.T, store KernelStore) {
-			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) ModelStepResult {
+		looptest.EachStore(t, "port_visual", func(t *testing.T, store models.KernelStore) {
+			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
 				return looptest.FinalAnswer(map[string]any{"answer": "Revenue is up.", "visual": failurePortVisual()})
 			}}))
 			content := &looptest.AnswerVisualContent{}
@@ -318,22 +318,22 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			conversation, run := f.StartChat("how is revenue?")
 			trigger := f.Messages(conversation.ID)[0]
 			done := f.DriveToRest(run.ID, 3)
-			f.MustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
 			id := portVisualArtifactID(run.ID, trigger.ID)
 			answers := portAgentMessages(f, conversation.ID)
-			want := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}, {Kind: ConversationReferenceArtifact, ID: id, Version: 1}}
-			if len(answers) != 1 || answers[0].Content != "Revenue is up." || answers[0].Intent != MessageIntentAnswer ||
+			want := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}, {Kind: models.ConversationReferenceArtifact, ID: id, Version: 1}}
+			if len(answers) != 1 || answers[0].Content != "Revenue is up." || answers[0].Intent != models.MessageIntentAnswer ||
 				len(answers[0].References) != 2 || answers[0].References[0] != want[0] || answers[0].References[1] != want[1] {
 				t.Fatalf("answers = %#v", answers)
 			}
 			for _, message := range f.Messages(conversation.ID) {
-				if message.Sender.Type == ConversationParticipantService {
+				if message.Sender.Type == models.ConversationParticipantService {
 					t.Fatalf("a receipt was posted for the visual: %#v", message)
 				}
 			}
-			artifact, err := f.Raw.(ArtifactStore).GetArtifact(f.Ctx, f.Scope, id, 1)
+			artifact, err := f.Raw.(models.ArtifactStore).GetArtifact(f.Ctx, f.Scope, id, 1)
 			if err != nil || artifact == nil || artifact.Type != presentation.ArtifactType || artifact.MediaType != presentation.MediaType ||
-				artifact.Provenance.RunID != run.ID || artifact.Provenance.Producer != (ActivityActor{Type: "agent", ID: looptest.FixtureAgent}) {
+				artifact.Provenance.RunID != run.ID || artifact.Provenance.Producer != (models.ActivityActor{Type: "agent", ID: looptest.FixtureAgent}) {
 				t.Fatalf("artifact = %#v, %v", artifact, err)
 			}
 			surface, err := presentation.Decode(content.Data)
@@ -347,43 +347,43 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 	})
 
 	t.Run("visual_rejected_by_host", func(t *testing.T) {
-		looptest.EachStore(t, "port_visual_rejected", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "port_visual_rejected", func(t *testing.T, store models.KernelStore) {
 			bound := failurePortVisual()
 			bound.Components = append(bound.Components, presentation.Component{ID: "next", Type: "actions", Actions: []presentation.Action{
 				{ID: "stop", Label: "Stop", Kind: presentation.ActionEntity, Command: "stop", Binding: &presentation.Binding{Kind: presentation.BindingRunbook, ID: "rb-1"}},
 			}})
-			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) ModelStepResult {
+			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
 				return looptest.FinalAnswer(map[string]any{"answer": "Revenue is up.", "visual": bound})
 			}}))
 			content := &looptest.AnswerVisualContent{}
-			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{AttachmentContent: content, VisualChecks: func(*AgentRun) presentation.ValidateOptions {
+			convRunner(f, conversationrun.ConversationRunTurnRunnerConfig{AttachmentContent: content, VisualChecks: func(*models.AgentRun) presentation.ValidateOptions {
 				return presentation.ValidateOptions{Bindings: presentation.BindingResolverFunc(func(context.Context, presentation.Binding) error {
 					return errors.New("not in this chat")
 				})}
 			}})
 			conversation, run := f.StartChat("how is revenue?")
 			done := f.DriveToRest(run.ID, 3)
-			f.MustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
 			finals := portFinalEntries(f, run.ID)
-			if len(finals) != 2 || finals[0].State != ToolEntryError || !strings.HasPrefix(portEntryText(finals[0]), "The visual failed its checks: ") {
+			if len(finals) != 2 || finals[0].State != models.ToolEntryError || !strings.HasPrefix(portEntryText(finals[0]), "The visual failed its checks: ") {
 				t.Fatalf("final entries = %v (%q)", f.EntryTypes(run.ID), portEntryText(finals[0]))
 			}
 			answers := portAgentMessages(f, conversation.ID)
 			if len(answers) != 1 || answers[0].Content != "Revenue is up." || len(answers[0].References) != 1 || content.Puts != 0 {
 				t.Fatalf("answers = %#v (%d visual puts), want the answer without the visual", answers, content.Puts)
 			}
-			if events := f.Events(run.ID, "turn.visual_rejected"); len(events) != 1 || events[0].Severity != ActivitySeverityWarning {
+			if events := f.Events(run.ID, "turn.visual_rejected"); len(events) != 1 || events[0].Severity != models.ActivitySeverityWarning {
 				t.Fatalf("visual rejected events = %#v", events)
 			}
 		})
 	})
 
 	t.Run("silent_spoken", func(t *testing.T) {
-		looptest.EachStore(t, "port_silent", func(t *testing.T, store KernelStore) {
-			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "silent", Reply: func(v looptest.StepView) ModelStepResult {
+		looptest.EachStore(t, "port_silent", func(t *testing.T, store models.KernelStore) {
+			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "silent", Reply: func(v looptest.StepView) models.ModelStepResult {
 				return looptest.FinalAnswer(map[string]any{"answer": "", "silent": true})
 			}}))
-			conversation := convChat(f, ObjectiveOwner{}, nil)
+			conversation := convChat(f, models.ObjectiveOwner{}, nil)
 			spoken := convPost(f, conversation.ID, "mm, nice weather", func(r *runtimeconversation.PostChannelMessageRequest) {
 				r.ResponseMode = "spoken"
 				r.RequiresResponse = true
@@ -395,19 +395,19 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			if answers := portAgentMessages(f, conversation.ID); len(answers) != 0 {
 				t.Fatalf("a silent spoken answer posted %s", looptest.DescribeMessages(answers))
 			}
-			if finals := portFinalEntries(f, run.ID); len(finals) != 1 || finals[0].State != ToolEntryCompleted {
+			if finals := portFinalEntries(f, run.ID); len(finals) != 1 || finals[0].State != models.ToolEntryCompleted {
 				t.Fatalf("final entries = %v", f.EntryTypes(run.ID))
 			}
 		})
 	})
 
 	t.Run("generated_files", func(t *testing.T) {
-		looptest.EachStore(t, "port_files", func(t *testing.T, store KernelStore) {
+		looptest.EachStore(t, "port_files", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store, looptest.WithRules(
-				&looptest.ModelRule{Name: "export", Times: 1, Reply: func(v looptest.StepView) ModelStepResult {
+				&looptest.ModelRule{Name: "export", Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
 					return looptest.Act("Exporting the report.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "report"}))
 				}},
-				&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) ModelStepResult {
+				&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
 					return looptest.FinalAnswer(map[string]any{"answer": "Here is the quarterly report.", "files": []any{"report-pdf", "report-csv"}})
 				}},
 			))
@@ -419,15 +419,15 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			})
 			conversation, run := f.StartChat("export the quarterly report")
 			done := f.DriveToRest(run.ID, 3)
-			f.MustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
 			answers := portAgentMessages(f, conversation.ID)
 			if len(answers) != 1 {
 				t.Fatalf("channel = %s", looptest.DescribeMessages(f.Messages(conversation.ID)))
 			}
-			want := []ConversationReference{
-				{Kind: ConversationReferenceRun, ID: run.ID},
-				{Kind: ConversationReferenceArtifact, ID: "report-pdf", Version: 1},
-				{Kind: ConversationReferenceArtifact, ID: "report-csv", Version: 2},
+			want := []models.ConversationReference{
+				{Kind: models.ConversationReferenceRun, ID: run.ID},
+				{Kind: models.ConversationReferenceArtifact, ID: "report-pdf", Version: 1},
+				{Kind: models.ConversationReferenceArtifact, ID: "report-csv", Version: 2},
 			}
 			got := answers[0].References
 			if len(got) != len(want) {
@@ -442,16 +442,16 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 	})
 
 	t.Run("broadcast", func(t *testing.T) {
-		looptest.EachStore(t, "port_broadcast", func(t *testing.T, store KernelStore) {
-			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) ModelStepResult {
-				if !v.HasTool(string(ControlToolFinalAnswer)) {
+		looptest.EachStore(t, "port_broadcast", func(t *testing.T, store models.KernelStore) {
+			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
+				if !v.HasTool(string(models.ControlToolFinalAnswer)) {
 					t.Errorf("no final answer tool: %s", v.Describe())
 				}
 				return looptest.FinalAnswer(map[string]any{"answer": "Shipped to everyone.", "broadcastToChannel": true})
 			}}))
 			conversation, run := f.StartChat("ship it")
 			done := f.DriveToRest(run.ID, 3)
-			f.MustStatus(done, AgentRunStatusCompleted)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
 			answers := portAgentMessages(f, conversation.ID)
 			if len(answers) != 1 || !answers[0].BroadcastToChannel || done.Output[agentrun.FinalOutputBroadcastKey] != true {
 				t.Fatalf("answers = %#v, output = %#v", answers, done.Output)

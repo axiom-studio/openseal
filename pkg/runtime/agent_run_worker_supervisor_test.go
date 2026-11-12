@@ -7,63 +7,65 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"go.uber.org/zap"
 )
 
 type mutableWorkerScopeSource struct {
 	mu     sync.Mutex
-	scopes []Scope
+	scopes []models.Scope
 	err    error
 }
 
-func (s *mutableWorkerScopeSource) ListWorkerScopes(context.Context) ([]Scope, error) {
+func (s *mutableWorkerScopeSource) ListWorkerScopes(context.Context) ([]models.Scope, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]Scope(nil), s.scopes...), s.err
+	return append([]models.Scope(nil), s.scopes...), s.err
 }
 
-func (s *mutableWorkerScopeSource) set(scopes []Scope, err error) {
+func (s *mutableWorkerScopeSource) set(scopes []models.Scope, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.scopes = append([]Scope(nil), scopes...)
+	s.scopes = append([]models.Scope(nil), scopes...)
 	s.err = err
 }
 
 func TestAgentRunWorkerSupervisorExecutesOnlyConfiguredKindAcrossScopes(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := context.Background()
-	scope1 := Scope{Kind: "tenant", ID: "1"}
-	scope2 := Scope{Kind: "tenant", ID: "2"}
-	portfolio := NewPortfolioService(store)
-	conversationRuns := make([]*AgentRun, 0, 2)
-	for _, scope := range []Scope{scope1, scope2} {
-		run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-			Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-" + scope.ID},
-			Goal: "Coordinate channel", Source: RunSourceChat,
+	scope1 := models.Scope{Kind: "tenant", ID: "1"}
+	scope2 := models.Scope{Kind: "tenant", ID: "2"}
+	portfolio := portfolio.NewPortfolioService(store)
+	conversationRuns := make([]*models.AgentRun, 0, 2)
+	for _, scope := range []models.Scope{scope1, scope2} {
+		run, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+			Scope: scope, Kind: models.RunKindConversation, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team-" + scope.ID},
+			Goal: "Coordinate channel", Source: models.RunSourceChat,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		conversationRuns = append(conversationRuns, run)
 	}
-	agentRun, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope1, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Ordinary work",
+	agentRun, err := portfolio.CreateAgentRun(ctx, models.CreateAgentRunRequest{
+		Scope: scope1, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, Goal: "Ordinary work",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	seen := make(chan *AgentRun, 2)
-	resolver := conversation.TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*agentrun.TurnRunnerBinding, error) {
-		seen <- cloneAgentRun(run)
+	seen := make(chan *models.AgentRun, 2)
+	resolver := conversation.TurnRunnerResolverFunc(func(_ context.Context, run *models.AgentRun) (*agentrun.TurnRunnerBinding, error) {
+		seen <- models.CloneAgentRun(run)
 		return &agentrun.TurnRunnerBinding{Producer: &timerStepProducer{}}, nil
 	})
-	source := &mutableWorkerScopeSource{scopes: []Scope{scope2, scope1, scope1}}
+	source := &mutableWorkerScopeSource{scopes: []models.Scope{scope2, scope1, scope1}}
 	supervisor, err := runworker.NewAgentRunWorkerSupervisor(store, resolver, source, zap.NewNop().Sugar(), runworker.DynamicAgentRunWorkerConfig{
-		Kind: RunKindConversation, Concurrency: 1, PollInterval: 5 * time.Millisecond,
+		Kind: models.RunKindConversation, Concurrency: 1, PollInterval: 5 * time.Millisecond,
 		ReconcileInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
 		WorkerIDPrefix: "conversation",
 	})
@@ -82,7 +84,7 @@ func TestAgentRunWorkerSupervisorExecutesOnlyConfiguredKindAcrossScopes(t *testi
 			if getErr != nil {
 				t.Fatal(getErr)
 			}
-			if current.Status == AgentRunStatusCompleted {
+			if current.Status == models.AgentRunStatusCompleted {
 				completed++
 			}
 		}
@@ -97,7 +99,7 @@ func TestAgentRunWorkerSupervisorExecutesOnlyConfiguredKindAcrossScopes(t *testi
 	for range conversationRuns {
 		select {
 		case run := <-seen:
-			if run.Kind != RunKindConversation {
+			if run.Kind != models.RunKindConversation {
 				t.Fatalf("resolver received run kind %q", run.Kind)
 			}
 		case <-time.After(time.Second):
@@ -105,11 +107,11 @@ func TestAgentRunWorkerSupervisorExecutesOnlyConfiguredKindAcrossScopes(t *testi
 		}
 	}
 	currentAgent, err := portfolio.GetAgentRun(ctx, scope1, agentRun.ID)
-	if err != nil || currentAgent.Status != AgentRunStatusQueued {
+	if err != nil || currentAgent.Status != models.AgentRunStatusQueued {
 		t.Fatalf("agent work was claimed by conversation worker: %#v, %v", currentAgent, err)
 	}
 
-	source.set([]Scope{scope2, Scope{Kind: "", ID: "invalid"}}, nil)
+	source.set([]models.Scope{scope2, models.Scope{Kind: "", ID: "invalid"}}, nil)
 	deadline = time.Now().Add(time.Second)
 	for supervisor.ScopeCount() != 1 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)

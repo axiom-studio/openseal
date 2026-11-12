@@ -4,20 +4,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func TestConversationActiveRunsTracksCanonicalRootChanges(t *testing.T) {
 	store, db := newTestSQLiteStore(t)
-	scope := Scope{Kind: "tenant", ID: "active-root"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
+	scope := models.Scope{Kind: "tenant", ID: "active-root"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}
 	at := time.Now()
-	root := storetest.ConversationReadRun("root", scope, owner, RunKindConversation, AgentRunStatusCompleted, at)
-	root.Context = map[string]interface{}{conversationRunContextConversationID: "original"}
+	root := storetest.ConversationReadRun("root", scope, owner, models.RunKindConversation, models.AgentRunStatusCompleted, at)
+	root.Context = map[string]interface{}{models.ConversationRunConversationIDContextKey: "original"}
 	if err := store.CreateAgentRun(t.Context(), root); err != nil {
 		t.Fatal(err)
 	}
-	child := storetest.ConversationReadRun("child", scope, owner, RunKindAgentWork, AgentRunStatusQueued, at)
+	child := storetest.ConversationReadRun("child", scope, owner, models.RunKindAgentWork, models.AgentRunStatusQueued, at)
 	child.ParentRunID = root.ID
 	child.RootRunID = root.ID
 	if err := store.CreateAgentRun(t.Context(), child); err != nil {
@@ -31,7 +32,7 @@ func TestConversationActiveRunsTracksCanonicalRootChanges(t *testing.T) {
 		}
 	}
 	check("original", 1)
-	root.Context[conversationRunContextConversationID] = "moved"
+	root.Context[models.ConversationRunConversationIDContextKey] = "moved"
 	root.Revision++
 	updateConversationTaskSQLRun(t, store, root, root.Revision-1)
 	check("original", 0)
@@ -44,7 +45,7 @@ func TestConversationActiveRunsTracksCanonicalRootChanges(t *testing.T) {
 	root.Revision++
 	updateConversationTaskSQLRun(t, store, root, root.Revision-1)
 	check("moved", 1)
-	child.Status = AgentRunStatusCompleted
+	child.Status = models.AgentRunStatusCompleted
 	child.CompletedAt = &at
 	child.Revision++
 	updateConversationTaskSQLRun(t, store, child, child.Revision-1)

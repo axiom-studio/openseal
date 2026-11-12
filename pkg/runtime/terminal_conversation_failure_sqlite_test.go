@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation/externalconversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -18,11 +19,11 @@ func TestTerminalFailureSQLite58UpgradePreservesClaimedReceiptAndDeliveredHistor
 	sqlDB := openTestSQLiteDB(t, path)
 	t.Cleanup(func() { store.Close() })
 	now := runStoreContractEpoch
-	first, _, _ := externalconversationtest.TerminalReportingRun(t, store, Scope{Kind: "tenant", ID: "upgrade-pending"}, now)
+	first, _, _ := externalconversationtest.TerminalReportingRun(t, store, models.Scope{Kind: "tenant", ID: "upgrade-pending"}, now)
 	first = externalconversationtest.CompleteTerminalReportingRun(t, store, first, now)
-	second, _, _ := externalconversationtest.TerminalReportingRun(t, store, Scope{Kind: "tenant", ID: "upgrade-delivered"}, now)
+	second, _, _ := externalconversationtest.TerminalReportingRun(t, store, models.Scope{Kind: "tenant", ID: "upgrade-delivered"}, now)
 	second = externalconversationtest.CompleteTerminalReportingRun(t, store, second, now)
-	claims, err := store.ClaimRunTerminalReports(t.Context(), RunTerminalReportingClaim{Scope: &first.Scope, WorkerID: "v58-in-flight", Now: now, LeaseDuration: time.Minute, Limit: 1})
+	claims, err := store.ClaimRunTerminalReports(t.Context(), models.RunTerminalReportingClaim{Scope: &first.Scope, WorkerID: "v58-in-flight", Now: now, LeaseDuration: time.Minute, Limit: 1})
 	if err != nil || len(claims) != 1 {
 		t.Fatalf("legacy claim fixture: %#v %v", claims, err)
 	}

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
@@ -63,7 +64,7 @@ func TestSkillBindingTargetFromBuilderBindsTheTarget(t *testing.T) {
 	}
 	targetAgent, _ := preview["targetAgent"].(map[string]interface{})
 	if targetAgent["id"] != "researcher" || targetAgent["displayName"] != "Researcher" || preview["deploymentId"] != "researcher" ||
-		preview["owner"] != (ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}) {
+		preview["owner"] != (models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}) {
 		t.Fatalf("targeted preview = %#v", preview)
 	}
 	own, err := f.Validator.ValidateActionProposal(f.Ctx, agentrun.ActionProposalValidationInput{
@@ -139,7 +140,7 @@ func TestSkillBindingTargetConnectionRequestIsOwnedByTheTarget(t *testing.T) {
 		return nil, nil
 	})
 	apps := &skillbinding.AppCatalogRef{}
-	apps.Set(skillbindingtest.AppCatalog{Entries: []skillbinding.AppCatalogEntry{{Slug: "linear", Name: "Linear", Official: true, SignIn: AppSignInOAuth}}})
+	apps.Set(skillbindingtest.AppCatalog{Entries: []skillbinding.AppCatalogEntry{{Slug: "linear", Name: "Linear", Official: true, SignIn: models.AppSignInOAuth}}})
 	f.Dispatcher.UseAppCatalog(apps)
 	run := f.ChatRun(t, "finn")
 	result, err := f.Dispatch(t, run, "connect", agentrun.SkillActionRequestConnection, map[string]interface{}{"app": "linear", skillbinding.SkillActionTargetAgentArgument: "researcher"})
@@ -147,8 +148,8 @@ func TestSkillBindingTargetConnectionRequestIsOwnedByTheTarget(t *testing.T) {
 		t.Fatalf("targeted connection = %#v, %v", result, err)
 	}
 	request, err := f.Store.GetSkillSetupRequest(f.Ctx, f.Scope, "connect-app:connect")
-	if err != nil || request == nil || request.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}) || request.DeploymentID != "researcher" ||
-		request.AgentID != "finn" || request.ConversationID != "chat-finn" || request.Kind != SkillSetupKindConnectApp || request.Validate() != nil {
+	if err != nil || request == nil || request.Owner != (models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "researcher"}) || request.DeploymentID != "researcher" ||
+		request.AgentID != "finn" || request.ConversationID != "chat-finn" || request.Kind != models.SkillSetupKindConnectApp || request.Validate() != nil {
 		t.Fatalf("targeted connection request = %#v, %v", request, err)
 	}
 	if len(actors) != 1 || !actors[0].Valid() || actors[0].AgentID != "researcher" || actors[0].Umbrella != (skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "researcher"}) || actors[0].ActingUser != "7" {
@@ -166,7 +167,7 @@ func TestTargetAgentHiddenFromNonBuilders(t *testing.T) {
 	var actions []capability.ModelAction
 	for _, name := range []string{agentrun.SkillActionRequestConnection, skillbinding.SkillActionFindApps, skillbinding.SkillActionUpsertBinding} {
 		action := definition.Actions[name]
-		actions = append(actions, capability.ModelAction{SkillID: SkillManagementSkillID, Action: name, Description: action.Description, InputSchema: action.InputSchema})
+		actions = append(actions, capability.ModelAction{SkillID: models.SkillManagementSkillID, Action: name, Description: action.Description, InputSchema: action.InputSchema})
 	}
 	hidden := skillbinding.WithoutUnusableTargetAgent(&skill.ActivationSnapshot{}, actions)
 	for _, action := range hidden {
@@ -181,8 +182,8 @@ func TestTargetAgentHiddenFromNonBuilders(t *testing.T) {
 		t.Fatal("hiding targetAgentId mutated the shared definition")
 	}
 	builder := &skill.ActivationSnapshot{Skills: []skill.ActivatedSkill{{
-		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion,
-		Actions: []capability.ModelAction{{Action: AgentActionCreateAgent}},
+		SkillID: models.AgentManagementSkillID, SkillVersion: models.AgentManagementSkillVersion,
+		Actions: []capability.ModelAction{{Action: models.AgentActionCreateAgent}},
 	}}}
 	for _, action := range skillbinding.WithoutUnusableTargetAgent(builder, actions) {
 		if action.Action == skillbinding.SkillActionFindApps {

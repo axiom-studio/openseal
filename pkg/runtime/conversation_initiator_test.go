@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -13,7 +14,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 	for _, backend := range []string{"sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
-			var store ConversationStore = newTestKernelStore(t)
+			var store models.ConversationStore = newTestKernelStore(t)
 			var disk *sqlite.Store
 			path := filepath.Join(t.TempDir(), "initiator.db")
 			if backend == "sqlite" {
@@ -26,21 +27,21 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 				store = disk
 			}
 			service := runtimeconversation.NewConversationService(store)
-			scope := Scope{Kind: "tenant", ID: "initiator"}
-			seedTestSpace(t, store.(SpaceStore), scope)
+			scope := models.Scope{Kind: "tenant", ID: "initiator"}
+			seedTestSpace(t, store.(models.SpaceStore), scope)
 			conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
+				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 				Title: "Conversation", IdempotencyKey: "conversation",
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			initiator := &ConversationParticipant{Type: ConversationParticipantUser, ID: "42"}
+			initiator := &models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "42"}
 			request := runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-				Sender:    ConversationParticipant{Type: ConversationParticipantService, ID: "service"},
-				Initiator: initiator, Intent: MessageIntentUpdate, Content: "Service started.",
-				Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "service-event",
+				Sender:    models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "service"},
+				Initiator: initiator, Intent: models.MessageIntentUpdate, Content: "Service started.",
+				Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "service-event",
 			}
 			posted, err := service.PostChannelMessage(ctx, request)
 			if err != nil || posted.Message.Initiator == nil || *posted.Message.Initiator != *initiator {
@@ -59,7 +60,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 				service = runtimeconversation.NewConversationService(disk)
 			}
 			loaded, err := service.GetChannelMessage(ctx, scope, conversation.ID, posted.Message.ID)
-			if err != nil || loaded.Initiator == nil || loaded.Initiator.Type != ConversationParticipantUser || loaded.Initiator.ID != "42" {
+			if err != nil || loaded.Initiator == nil || loaded.Initiator.Type != models.ConversationParticipantUser || loaded.Initiator.ID != "42" {
 				t.Fatalf("canonical initiator changed or was lost after restart: %#v, %v", loaded, err)
 			}
 			loaded.Initiator.ID = "102"
@@ -69,14 +70,14 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 			}
 			// Reusing an event key cannot move its sponsor to another user or
 			// remove the verified identity from the canonical event.
-			if _, err := service.PostChannelMessage(ctx, request); !errors.Is(err, ErrMessageConflict) {
+			if _, err := service.PostChannelMessage(ctx, request); !errors.Is(err, models.ErrMessageConflict) {
 				t.Fatalf("changed initiator replay = %v", err)
 			}
 			request.Initiator = nil
-			if _, err := service.PostChannelMessage(ctx, request); !errors.Is(err, ErrMessageConflict) {
+			if _, err := service.PostChannelMessage(ctx, request); !errors.Is(err, models.ErrMessageConflict) {
 				t.Fatalf("removed initiator replay = %v", err)
 			}
-			request.Initiator = &ConversationParticipant{Type: ConversationParticipantUser, ID: "42"}
+			request.Initiator = &models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "42"}
 			replayed, err := service.PostChannelMessage(ctx, request)
 			if err != nil || !replayed.Replayed || replayed.Message.ID != posted.Message.ID || replayed.Message.Initiator.ID != "42" {
 				t.Fatalf("same verified initiator replay = %#v, %v", replayed, err)
@@ -88,25 +89,25 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 func TestChannelMessagesRejectUntrustedInitiator(t *testing.T) {
 	for _, test := range []struct {
 		name      string
-		sender    ConversationParticipantType
-		initiator ConversationParticipant
+		sender    models.ConversationParticipantType
+		initiator models.ConversationParticipant
 	}{
-		{name: "user message", sender: ConversationParticipantUser, initiator: ConversationParticipant{Type: ConversationParticipantUser, ID: "42"}},
-		{name: "agent message", sender: ConversationParticipantAgent, initiator: ConversationParticipant{Type: ConversationParticipantUser, ID: "42"}},
-		{name: "team message", sender: ConversationParticipantTeam, initiator: ConversationParticipant{Type: ConversationParticipantUser, ID: "42"}},
-		{name: "service initiator", sender: ConversationParticipantService, initiator: ConversationParticipant{Type: ConversationParticipantService, ID: "42"}},
-		{name: "agent initiator", sender: ConversationParticipantService, initiator: ConversationParticipant{Type: ConversationParticipantAgent, ID: "42"}},
-		{name: "missing user identity", sender: ConversationParticipantService, initiator: ConversationParticipant{Type: ConversationParticipantUser}},
-		{name: "invalid user identity", sender: ConversationParticipantService, initiator: ConversationParticipant{Type: ConversationParticipantUser, ID: "user/42"}},
+		{name: "user message", sender: models.ConversationParticipantUser, initiator: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "42"}},
+		{name: "agent message", sender: models.ConversationParticipantAgent, initiator: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "42"}},
+		{name: "team message", sender: models.ConversationParticipantTeam, initiator: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "42"}},
+		{name: "service initiator", sender: models.ConversationParticipantService, initiator: models.ConversationParticipant{Type: models.ConversationParticipantService, ID: "42"}},
+		{name: "agent initiator", sender: models.ConversationParticipantService, initiator: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "42"}},
+		{name: "missing user identity", sender: models.ConversationParticipantService, initiator: models.ConversationParticipant{Type: models.ConversationParticipantUser}},
+		{name: "invalid user identity", sender: models.ConversationParticipantService, initiator: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "user/42"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
 			store := newTestKernelStore(t)
 			service := runtimeconversation.NewConversationService(store)
-			scope := Scope{Kind: "tenant", ID: "initiator"}
+			scope := models.Scope{Kind: "tenant", ID: "initiator"}
 			seedTestSpace(t, store, scope)
 			conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
+				Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"},
 				Title: "Conversation", IdempotencyKey: "conversation",
 			})
 			if err != nil {
@@ -114,14 +115,14 @@ func TestChannelMessagesRejectUntrustedInitiator(t *testing.T) {
 			}
 			_, err = service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-				Sender: ConversationParticipant{Type: test.sender, ID: "sender"}, Initiator: &test.initiator,
-				Intent: MessageIntentUpdate, Content: "An event", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+				Sender: models.ConversationParticipant{Type: test.sender, ID: "sender"}, Initiator: &test.initiator,
+				Intent: models.MessageIntentUpdate, Content: "An event", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 				IdempotencyKey: "event",
 			})
-			if !errors.Is(err, ErrInvalidConversation) {
+			if !errors.Is(err, models.ErrInvalidConversation) {
 				t.Fatalf("accepted invalid initiator: %v", err)
 			}
-			messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+			messages, err := service.ListChannelMessages(ctx, models.ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
 			if err != nil || len(messages) != 0 {
 				t.Fatalf("invalid initiator persisted: %#v, %v", messages, err)
 			}
