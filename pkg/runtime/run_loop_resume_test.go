@@ -16,7 +16,7 @@ import (
 )
 
 // Crash-resume scenarios of the run loop (D14, SPEC §3.7, section 02 §8).
-// Each scenario drives a claim that dies at a chosen write (crashStore armed:
+// Each scenario drives a claim that dies at a chosen write (loopCrashStore armed:
 // every later write fails, nothing is cleaned up), then lets the Run and step
 // leases expire on the fake clock and drives a second claim by another worker.
 
@@ -29,7 +29,7 @@ const (
 // resumeStore is the crash store with hooks on the step-row writes, so a
 // scenario can crash right before RecordStepModel or right after FinishTurn.
 type resumeStore struct {
-	*crashStore
+	*loopCrashStore
 	mu           sync.Mutex
 	beforeRecord func()
 	afterFinish  func(turn *AgentTurn)
@@ -42,11 +42,11 @@ func (s *resumeStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentT
 	if hook != nil {
 		hook()
 	}
-	return s.crashStore.RecordAgentTurnStepModel(ctx, turn, expectedRevision, events)
+	return s.loopCrashStore.RecordAgentTurnStepModel(ctx, turn, expectedRevision, events)
 }
 
 func (s *resumeStore) UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expectedRevision int64, workerID string) error {
-	err := s.crashStore.UpdateAgentTurn(ctx, turn, expectedRevision, workerID)
+	err := s.loopCrashStore.UpdateAgentTurn(ctx, turn, expectedRevision, workerID)
 	s.mu.Lock()
 	hook := s.afterFinish
 	s.mu.Unlock()
@@ -91,11 +91,11 @@ func (p *resumeProducer) calls() []string {
 }
 
 func resumeSay(text string) *AssistantEntry {
-	return &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: kitModelName, Text: text, StopReason: ModelStopEnd}
+	return &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: loopModelName, Text: text, StopReason: ModelStopEnd}
 }
 
 func resumeAct(narration string, calls ...ModelToolCall) *AssistantEntry {
-	return &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: kitModelName, Text: narration, ToolCalls: calls, StopReason: ModelStopToolCalls}
+	return &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: loopModelName, Text: narration, ToolCalls: calls, StopReason: ModelStopToolCalls}
 }
 
 func resumeCall(id, name string, args string) ModelToolCall {
@@ -266,7 +266,7 @@ type resumeHarness struct {
 	t        *testing.T
 	raw      KernelStore
 	store    *resumeStore
-	clock    *fakeClock
+	clock    *loopClock
 	scope    Scope
 	runID    string
 	loop     *RunLoop
@@ -281,8 +281,8 @@ func newResumeHarness(t *testing.T, raw KernelStore, budget *BudgetPolicy, stepL
 	t.Helper()
 	ctx := context.Background()
 	h := &resumeHarness{
-		t: t, raw: raw, store: &resumeStore{crashStore: newCrashStore(t, raw)},
-		clock:    newFakeClock(time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)),
+		t: t, raw: raw, store: &resumeStore{loopCrashStore: newLoopCrashStore(t, raw)},
+		clock:    newLoopClock(time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)),
 		scope:    Scope{Kind: "tenant", ID: "resume-" + strings.ReplaceAll(t.Name(), "/", "-")},
 		producer: &resumeProducer{replies: replies}, final: &resumeFinal{},
 	}
@@ -347,7 +347,7 @@ func (h *resumeHarness) drive(worker string) RunLoopExit {
 // the store and lets every lease expire.
 func (h *resumeHarness) crashed(exit RunLoopExit) {
 	h.t.Helper()
-	if exit.Reason != RunLoopExitFailed || !errors.Is(exit.Err, errSimulatedCrash) {
+	if exit.Reason != RunLoopExitFailed || !errors.Is(exit.Err, errLoopCrash) {
 		h.t.Fatalf("crashed claim exit = %s, %v; want the simulated crash", exit.Reason, exit.Err)
 	}
 	h.store.disarm()
@@ -401,7 +401,7 @@ func (h *resumeHarness) expectCompleted(exit RunLoopExit, answer string) *AgentR
 }
 
 func TestRunLoopResumeRunningStepWithoutAssistant(t *testing.T) {
-	eachStore(t, "resume-no-assistant", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-no-assistant", func(t *testing.T, store KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease, resumeSay("first try"), resumeSay("done"))
 		h.producer.before = func(call int) {
 			if call == 0 {
@@ -426,7 +426,7 @@ func TestRunLoopResumeRunningStepWithoutAssistant(t *testing.T) {
 }
 
 func TestRunLoopRedoModelCallReusesStepRow(t *testing.T) {
-	eachStore(t, "resume-redo", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-redo", func(t *testing.T, store KernelStore) {
 		h := newResumeHarness(t, store, &BudgetPolicy{MaxTurns: 5}, resumeLease, resumeSay("first try"), resumeSay("done"))
 		h.producer.before = func(call int) {
 			if call == 0 {
@@ -455,7 +455,7 @@ func TestRunLoopRedoModelCallReusesStepRow(t *testing.T) {
 }
 
 func TestRunLoopResumeAfterAssistantBeforeRecord(t *testing.T) {
-	eachStore(t, "resume-before-record", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-before-record", func(t *testing.T, store KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease, resumeSay("done"))
 		h.store.beforeRecord = func() { h.store.arm() }
 		h.crashed(h.drive(resumeWorkerA))
@@ -479,12 +479,12 @@ func TestRunLoopResumeAfterAssistantBeforeRecord(t *testing.T) {
 }
 
 func TestRunLoopResumeRunningToolsDelegatesToExecutor(t *testing.T) {
-	eachStore(t, "resume-tools", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-tools", func(t *testing.T, store KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease,
 			resumeAct("Looking it up", resumeCall("c1", "lookup", `{"q":"x"}`)), resumeSay("done"))
 		h.tools.beforeExecute = func() error {
 			h.store.arm()
-			return errSimulatedCrash
+			return errLoopCrash
 		}
 		h.crashed(h.drive(resumeWorkerA))
 		h.tools.beforeExecute = nil
@@ -513,7 +513,7 @@ func TestRunLoopResumeRunningToolsDelegatesToExecutor(t *testing.T) {
 }
 
 func TestRunLoopResumeStaleStepLeaseRequeues(t *testing.T) {
-	eachStore(t, "resume-stale-lease", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-stale-lease", func(t *testing.T, store KernelStore) {
 		stepLease := 10 * time.Minute
 		h := newResumeHarness(t, store, nil, stepLease, resumeSay("first try"), resumeSay("done"))
 		h.producer.before = func(call int) {
@@ -549,7 +549,7 @@ func TestRunLoopResumeStaleStepLeaseRequeues(t *testing.T) {
 }
 
 func TestRunLoopResumeAppliesFinishedUnappliedStep(t *testing.T) {
-	eachStore(t, "resume-unapplied", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-unapplied", func(t *testing.T, store KernelStore) {
 		h := newResumeHarness(t, store, &BudgetPolicy{MaxTurns: 5}, resumeLease,
 			resumeAct("Looking it up", resumeCall("c1", "lookup", `{}`)), resumeSay("done"))
 		h.store.afterFinish = func(turn *AgentTurn) {
@@ -589,11 +589,11 @@ func TestRunLoopResumeAppliesFinishedUnappliedStep(t *testing.T) {
 func TestRunLoopResumeFinalToolStepDeliversOnce(t *testing.T) {
 	finalCall := resumeCall("c1", string(ControlToolFinalAnswer), `{"answer":"all done"}`)
 	t.Run("crash before settle", func(t *testing.T) {
-		eachStore(t, "resume-final-settle", func(t *testing.T, store KernelStore) {
+		eachLoopStore(t, "resume-final-settle", func(t *testing.T, store KernelStore) {
 			h := newResumeHarness(t, store, nil, resumeLease, resumeAct("", finalCall))
 			h.tools.beforeSettle = func() error {
 				h.store.arm()
-				return errSimulatedCrash
+				return errLoopCrash
 			}
 			h.crashed(h.drive(resumeWorkerA))
 			h.tools.beforeSettle = nil
@@ -612,7 +612,7 @@ func TestRunLoopResumeFinalToolStepDeliversOnce(t *testing.T) {
 		})
 	})
 	t.Run("crash after the reply was posted", func(t *testing.T) {
-		eachStore(t, "resume-final-posted", func(t *testing.T, store KernelStore) {
+		eachLoopStore(t, "resume-final-posted", func(t *testing.T, store KernelStore) {
 			h := newResumeHarness(t, store, nil, resumeLease, resumeAct("", finalCall))
 			h.final.afterPost = func() { h.store.arm() }
 			h.crashed(h.drive(resumeWorkerA))
@@ -637,7 +637,7 @@ func TestRunLoopResumeFinalToolStepDeliversOnce(t *testing.T) {
 // its FinishTurn and its terminal transition: the next claim completes it
 // through the final chain (a replayed delivery), not a new model call.
 func TestRunLoopResumePlainFinalAfterFinish(t *testing.T) {
-	eachStore(t, "resume-plain-final", func(t *testing.T, store KernelStore) {
+	eachLoopStore(t, "resume-plain-final", func(t *testing.T, store KernelStore) {
 		h := newResumeHarness(t, store, nil, resumeLease, resumeSay("done"))
 		h.store.afterFinish = func(*AgentTurn) { h.store.arm() }
 		h.crashed(h.drive(resumeWorkerA))

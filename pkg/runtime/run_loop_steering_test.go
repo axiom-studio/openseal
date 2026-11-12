@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -14,20 +15,20 @@ import (
 // interventions and cursor, and returns the stored Run and session.
 func steeringRun(t *testing.T, store *sqlite.Store, consumed int, interventions ...AgentRunIntervention) (*AgentRun, *AgentSession) {
 	t.Helper()
-	session := openTestConversationSession(t, store, "r1")
-	run := getStoredRun(t, store, testSessionScope, "r1")
+	session := openLoopConversationSession(t, store, "r1")
+	run := getLoopRun(t, store, loopSessionScope, "r1")
 	run.PendingInterventions = interventions
 	run.ConsumedInterventions = consumed
-	putTestRun(t, store, run)
-	return testStoredSessionRun(t, store, "r1"), session
+	putLoopRun(t, store, run)
+	return loopStoredSessionRun(t, store, "r1"), session
 }
 
 func addSteeringIntervention(t *testing.T, store *sqlite.Store, intervention AgentRunIntervention) *AgentRun {
 	t.Helper()
-	run := getStoredRun(t, store, testSessionScope, "r1")
+	run := getLoopRun(t, store, loopSessionScope, "r1")
 	run.PendingInterventions = append(run.PendingInterventions, intervention)
-	putTestRun(t, store, run)
-	return testStoredSessionRun(t, store, "r1")
+	putLoopRun(t, store, run)
+	return loopStoredSessionRun(t, store, "r1")
 }
 
 func steeringStep() *AgentTurn { return &AgentTurn{ID: "step-3", Sequence: 3} }
@@ -38,7 +39,7 @@ func steeringInput(run *AgentRun, session *AgentSession) agentrun.StepInput {
 
 func steeringEntries(t *testing.T, store *sqlite.Store, sessionID string) []*SessionEntry {
 	t.Helper()
-	entries, err := store.ListAgentSessionEntries(context.Background(), SessionEntryFilter{Scope: testSessionScope, SessionID: sessionID})
+	entries, err := store.ListAgentSessionEntries(context.Background(), SessionEntryFilter{Scope: loopSessionScope, SessionID: sessionID})
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
 	}
@@ -75,10 +76,10 @@ func mixedSteeringPrefix() []AgentRunIntervention {
 }
 
 func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	run, session := steeringRun(t, store, 1, mixedSteeringPrefix()...)
 	preparer := &steeringPreparer{}
-	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{preparer}, testSessionNow)
+	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{preparer}, loopSessionNow)
 	if err != nil {
 		t.Fatalf("append step context: %v", err)
 	}
@@ -106,13 +107,13 @@ func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
 	if setup.User.Author.Type != "service" || len(setup.User.Content) != 2 || setup.User.Content[1].Type != ContentPartJSON {
 		t.Fatalf("setup entry = %+v", setup.User)
 	}
-	after := testStoredSessionRun(t, store, "r1")
+	after := loopStoredSessionRun(t, store, "r1")
 	if after.ConsumedInterventions != 6 || after.Revision != run.Revision+1 {
 		t.Fatalf("run cursor = %d revision %d, want 6 and %d", after.ConsumedInterventions, after.Revision, run.Revision+1)
 	}
 
 	// The next step sees nothing to consume and writes nothing.
-	result, err = appendStepContext(context.Background(), store, steeringInput(after, session), []agentrun.StepPreparer{preparer}, testSessionNow)
+	result, err = appendStepContext(context.Background(), store, steeringInput(after, session), []agentrun.StepPreparer{preparer}, loopSessionNow)
 	if err != nil || result.Append != nil || result.CursorMoved || len(result.Steering.Prefix) != 0 {
 		t.Fatalf("second step = %+v, %v", result, err)
 	}
@@ -122,7 +123,7 @@ func TestSteeringMixedPrefixConsumesEachKindOnce(t *testing.T) {
 }
 
 func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	run, session := steeringRun(t, store, 0, mixedSteeringPrefix()[3])
 	catchUp := &steeringPreparer{fn: func(in agentrun.StepInput, plan agentrun.SteeringPlan) *agentrun.StepContextAppend {
 		expected := in.Session.ChannelWatermark
@@ -135,7 +136,7 @@ func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
 			ExpectedChannelWatermark: &expected, ChannelWatermark: plan.ThroughMessageSequence,
 		}
 	}}
-	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{catchUp}, testSessionNow)
+	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{catchUp}, loopSessionNow)
 	if err != nil {
 		t.Fatalf("append step context: %v", err)
 	}
@@ -143,26 +144,26 @@ func TestSteeringMessageCoveredByCatchUpIsAppendedOnce(t *testing.T) {
 	if len(entries) != 1 || entries[0].User.Content[0].Text != "[u1] also check the invoice" {
 		t.Fatalf("entries = %+v, want only the catch-up entry", entries)
 	}
-	if result.Session.ChannelWatermark != 7 || testStoredSessionRun(t, store, "r1").ConsumedInterventions != 1 {
-		t.Fatalf("watermark %d cursor %d", result.Session.ChannelWatermark, testStoredSessionRun(t, store, "r1").ConsumedInterventions)
+	if result.Session.ChannelWatermark != 7 || loopStoredSessionRun(t, store, "r1").ConsumedInterventions != 1 {
+		t.Fatalf("watermark %d cursor %d", result.Session.ChannelWatermark, loopStoredSessionRun(t, store, "r1").ConsumedInterventions)
 	}
 }
 
 func TestSteeringCursorCommitsWithEntries(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	run, session := steeringRun(t, store, 0, AgentRunIntervention{ID: "steer", Instruction: "stop after the draft"})
 	stale := int64(99)
 	moving := &steeringPreparer{fn: func(agentrun.StepInput, agentrun.SteeringPlan) *agentrun.StepContextAppend {
 		return &agentrun.StepContextAppend{ExpectedChannelWatermark: &stale, ChannelWatermark: 100}
 	}}
-	_, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{moving}, testSessionNow)
+	_, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{moving}, loopSessionNow)
 	if !errors.Is(err, ErrChannelWatermarkMoved) {
 		t.Fatalf("append with a moving watermark = %v, want ErrChannelWatermarkMoved", err)
 	}
 	if moving.calls != stepContextAttempts {
 		t.Fatalf("preparer ran %d times, want %d", moving.calls, stepContextAttempts)
 	}
-	if got := testStoredSessionRun(t, store, "r1"); got.ConsumedInterventions != 0 || got.Revision != run.Revision {
+	if got := loopStoredSessionRun(t, store, "r1"); got.ConsumedInterventions != 0 || got.Revision != run.Revision {
 		t.Fatalf("failed append moved the cursor: %d (revision %d)", got.ConsumedInterventions, got.Revision)
 	}
 	if got := len(steeringEntries(t, store, session.ID)); got != 0 {
@@ -179,29 +180,29 @@ func TestSteeringCursorCommitsWithEntries(t *testing.T) {
 		expected := in.Session.ChannelWatermark
 		return &agentrun.StepContextAppend{ExpectedChannelWatermark: &expected, ChannelWatermark: 5}
 	}}
-	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{settling}, testSessionNow)
+	result, err := appendStepContext(context.Background(), store, steeringInput(run, session), []agentrun.StepPreparer{settling}, loopSessionNow)
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
 	if tries != 2 || len(result.Append.Entries) != 1 || result.Session.ChannelWatermark != 5 {
 		t.Fatalf("tries %d result %+v", tries, result.Append)
 	}
-	if got := testStoredSessionRun(t, store, "r1"); got.ConsumedInterventions != 1 || got.Revision != run.Revision+1 {
+	if got := loopStoredSessionRun(t, store, "r1"); got.ConsumedInterventions != 1 || got.Revision != run.Revision+1 {
 		t.Fatalf("cursor %d revision %d after commit", got.ConsumedInterventions, got.Revision)
 	}
 }
 
 func TestSteeringReplayAfterCrashAppendsOnce(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	run, session := steeringRun(t, store, 0,
 		AgentRunIntervention{ID: "a", Instruction: "first"},
 		AgentRunIntervention{ID: "b", Instruction: "second"})
 	in := steeringInput(run, session)
-	if _, err := appendStepContext(context.Background(), store, in, nil, testSessionNow); err != nil {
+	if _, err := appendStepContext(context.Background(), store, in, nil, loopSessionNow); err != nil {
 		t.Fatalf("first append: %v", err)
 	}
 	// The worker crashed after the commit and retries with the Run it had read.
-	result, err := appendStepContext(context.Background(), store, in, nil, testSessionNow)
+	result, err := appendStepContext(context.Background(), store, in, nil, loopSessionNow)
 	if err != nil {
 		t.Fatalf("replayed append: %v", err)
 	}
@@ -211,21 +212,21 @@ func TestSteeringReplayAfterCrashAppendsOnce(t *testing.T) {
 	if got := len(steeringEntries(t, store, session.ID)); got != 2 {
 		t.Fatalf("entries after replay = %d, want 2", got)
 	}
-	reloaded := testStoredSessionRun(t, store, "r1")
+	reloaded := loopStoredSessionRun(t, store, "r1")
 	if reloaded.ConsumedInterventions != 2 || reloaded.Revision != run.Revision+1 {
 		t.Fatalf("cursor %d revision %d after replay", reloaded.ConsumedInterventions, reloaded.Revision)
 	}
 
 	// A new intervention after the reload is the only thing the next step adds.
 	reloaded = addSteeringIntervention(t, store, AgentRunIntervention{ID: "c", Instruction: "third"})
-	if _, err := appendStepContext(context.Background(), store, steeringInput(reloaded, session), nil, testSessionNow); err != nil {
+	if _, err := appendStepContext(context.Background(), store, steeringInput(reloaded, session), nil, loopSessionNow); err != nil {
 		t.Fatalf("next step: %v", err)
 	}
 	entries := steeringEntries(t, store, session.ID)
 	if len(entries) != 3 || entries[2].User.InterventionID != "c" {
 		t.Fatalf("entries = %d, last %+v", len(entries), entries[len(entries)-1].User)
 	}
-	if got := testStoredSessionRun(t, store, "r1").ConsumedInterventions; got != 3 {
+	if got := loopStoredSessionRun(t, store, "r1").ConsumedInterventions; got != 3 {
 		t.Fatalf("cursor = %d, want 3", got)
 	}
 }

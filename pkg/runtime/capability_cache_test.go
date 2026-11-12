@@ -134,7 +134,7 @@ func testSkillConnectStable(t *testing.T, small bool) {
 	first := f.prepare("step-2")
 
 	// Between Runs the user connects Slack: two actions and a prompt.
-	f.run = &AgentRun{ID: "run-2", Scope: testSessionScope, AssignedAgentID: "agent-1"}
+	f.run = &AgentRun{ID: "run-2", Scope: loopSessionScope, AssignedAgentID: "agent-1"}
 	f.render.User("run-2", "post the launch notes to slack")
 	f.preparer.config.SkillPrompts = append(f.preparer.config.SkillPrompts,
 		HostedSkillPrompt{SkillID: "skill-slack", Version: "1", Reference: "skill-slack@1", Name: "Slack", Instructions: "Slack rules."})
@@ -304,9 +304,9 @@ func TestLoadFreezesSurfacedToolsOnTheEntry(t *testing.T) {
 
 func TestValidateSurfaces(t *testing.T) {
 	base := func() ModelStepRequest {
-		req := validModelStepRequest()
+		req := modelsteptest.ValidModelStepRequest()
 		req.Tools = req.Tools[:2]
-		assistant := modelStepTestAssistant("c1")
+		assistant := modelsteptest.AssistantEntry("c1")
 		assistant.ToolCalls[0].Name = modelstep.LoadCapabilitiesTool
 		req.Entries = []SessionEntryView{
 			{ID: "u1", Sequence: 1, Type: SessionEntryUser, User: &UserEntryView{Content: []ContentPart{{Type: ContentPartText, Text: "hi"}}}},

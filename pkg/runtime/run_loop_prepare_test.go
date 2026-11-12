@@ -65,7 +65,7 @@ func newPrepareFixture(t *testing.T, authority agentrun.ControlAuthority) *prepa
 				Sections:          []ModelStepSystemSection{{ID: "channel_rules", Title: "Channel", Text: "Keep replies short."}},
 			},
 		},
-		run:    &AgentRun{ID: "run-1", Scope: testSessionScope, AssignedAgentID: "agent-1"},
+		run:    &AgentRun{ID: "run-1", Scope: loopSessionScope, AssignedAgentID: "agent-1"},
 		render: modelsteptest.NewRenderFixture(t, "chat"),
 	}
 	f.render.User("run-1", "find the launch notes")
@@ -121,7 +121,7 @@ func TestPrepareToolOrderStableAcrossSteps(t *testing.T) {
 	}
 	for _, tool := range first.Tools {
 		group := ModelStepToolHarness
-		if strings.HasPrefix(tool.Name, kitGovernedToolPrefix) {
+		if strings.HasPrefix(tool.Name, loopGovernedToolPrefix) {
 			group = ModelStepToolCore
 		}
 		if tool.Group != group {

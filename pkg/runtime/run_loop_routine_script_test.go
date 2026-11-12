@@ -19,7 +19,7 @@ import (
 func routineScriptRun() *AgentRun {
 	return &AgentRun{ID: "occurrence", Scope: Scope{Kind: "tenant", ID: "one"}, AssignedAgentID: "agent", Context: map[string]interface{}{
 		conversationRunContextConversationID: "chat",
-		routine.RoutineScriptContextKey: map[string]interface{}{"path": "scripts/weekly.py", "digest": routineScriptDigestOf("a"), "filesVersion": float64(2),
+		routine.RoutineScriptContextKey: map[string]interface{}{"path": "scripts/weekly.py", "digest": loopScriptDigest("a"), "filesVersion": float64(2),
 			"command": "python3 scripts/weekly.py", "timeoutSeconds": float64(120)},
 	}}
 }
@@ -102,7 +102,7 @@ func TestLoopRoutineScriptPreparesPinsAndSection(t *testing.T) {
 	}
 
 	routine := loopRoutineScriptFixture(t)
-	want := workspace.CommandPin{Path: "scripts/weekly.py", Digest: routineScriptDigestOf("a"), FilesVersion: 2, Command: "python3 scripts/weekly.py", TimeoutSeconds: 120}
+	want := workspace.CommandPin{Path: "scripts/weekly.py", Digest: loopScriptDigest("a"), FilesVersion: 2, Command: "python3 scripts/weekly.py", TimeoutSeconds: 120}
 	if pins := routine.CommandPins(); len(pins) != 1 || pins[0] != want {
 		t.Fatalf("pins = %#v", pins)
 	}

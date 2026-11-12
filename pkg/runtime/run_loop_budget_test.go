@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -51,7 +52,7 @@ type stepBudgetFixture struct {
 func newStepBudgetFixture(t *testing.T, budget *BudgetPolicy) *stepBudgetFixture {
 	t.Helper()
 	ctx := t.Context()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	scope := Scope{Kind: "local", ID: "step-budget-" + strings.ReplaceAll(t.Name(), "/", "-")}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "bounded work", Budget: budget,

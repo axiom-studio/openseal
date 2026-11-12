@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -30,7 +31,7 @@ type repeatExecFixture struct {
 
 func newRepeatExecFixture(t *testing.T) *repeatExecFixture {
 	t.Helper()
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	f := actiontest.NewLoopStore(t, store)
 	lease := AgentRunLeaseGuard{WorkerID: actiontest.LoopStoreWorker, Now: f.Now}
 	if _, err := store.CreateRunAgentSession(f.Ctx, CreateRunAgentSessionRequest{

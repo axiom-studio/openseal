@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/google/uuid"
@@ -44,7 +45,7 @@ func cutoverStores() []struct {
 			name string
 			open func(*testing.T) cutoverTestStore
 		}{name: "postgres", open: func(t *testing.T) cutoverTestStore {
-			store, _ := openTestPostgresStore(t, "openseal_cutover_")
+			store, _ := openLoopPostgresStore(t, "openseal_cutover_")
 			return store
 		}})
 	}
@@ -121,7 +122,7 @@ func cutoverConversationRunFor(t *testing.T, store cutoverTestStore, key string,
 	t.Helper()
 	ctx := context.Background()
 	service := runtimeconversation.NewConversationService(store)
-	seedTestSpace(t, store.(SpaceStore), cutoverScope)
+	conversationtest.SeedSpace(t, store.(SpaceStore), cutoverScope)
 	conversation, _, err := service.CreateConversation(ctx, runtimeconversation.CreateConversationRequest{
 		Scope: cutoverScope, Owner: owner,
 		Title: "Operations " + key, IdempotencyKey: "channel-" + key,

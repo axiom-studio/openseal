@@ -9,16 +9,17 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/action/actiontest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
-	store := newTestKernelStore(t)
+	store := conversationtest.NewStore(t)
 	now := time.Now().UTC()
 	catalog, scope := actiontest.PersonCatalog(t)
 	run := actiontest.ClaimedPersonChatRun(t, store, scope, now, actiontest.ActingUser)
-	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
+	proposal := proposeLoopPersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	if proposal.Call.ExternalOperationDigest == "" {
 		t.Fatal("test needs an external operation")
 	}
@@ -40,7 +41,7 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 		}
 		return action.CredentialAvailability{Gaps: map[string]action.CredentialGap{"google": action.CredentialGapPersonSignIn}}, nil
 	}))
-	result := executePersonAction(t, worker, scope, proposal)
+	result := executeLoopPersonAction(t, worker, scope, proposal)
 	call := result.Call
 	if dispatches != 0 || call.Status != ActionCallStatusFailed || call.FailurePhase != ActionFailureBeforeDispatch ||
 		!strings.HasPrefix(call.Error, "connect_account_required: ") || call.ExternalOperationDigest != "" || !skillbinding.IsParkedConnectAccountCall(call) {
@@ -86,11 +87,11 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 	if wake, _, err := parker.governedCardWait(context.Background(), stored, call); err != nil || wake != nil {
 		t.Fatalf("a resolved card still parks: %#v %v", wake, err)
 	}
-	retry := proposePersonAction(t, store, catalog, scope, stored, now, "step-2", "send-1-retry", nil)
+	retry := proposeLoopPersonAction(t, store, catalog, scope, stored, now, "step-2", "send-1-retry", nil)
 	if !retry.Created || retry.Call.ID == call.ID || retry.Call.Status != ActionCallStatusReady || retry.Call.DuplicateOfActionCallID != "" {
 		t.Fatalf("retry not admitted: %#v", retry.Call)
 	}
-	result = executePersonAction(t, worker, scope, retry)
+	result = executeLoopPersonAction(t, worker, scope, retry)
 	if result.Call.ID != retry.Call.ID || result.Call.Status != ActionCallStatusSucceeded || dispatches != 1 {
 		t.Fatalf("retry = %#v dispatches=%d", result.Call, dispatches)
 	}
