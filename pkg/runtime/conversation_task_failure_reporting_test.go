@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
@@ -244,8 +245,8 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 }
 
 func TestConversationTaskContinuationFailureUsesSanitizedReply(t *testing.T) {
-	store, result, _, _ := promotedContinuationAuthorityFixture(t, "safe-continuation-failure")
-	run := finishContinuationAuthorityRun(t, store, result.WorkRun, AgentRunStatusFailed)
+	store, result, _, _ := promotedContinuationFixture(t, "safe-continuation-failure")
+	run := finishContinuationRun(t, store, result.WorkRun, AgentRunStatusFailed)
 	for range 2 {
 		if err := projectTerminalRunReporting(t.Context(), store, run); err != nil {
 			t.Fatal(err)
@@ -255,4 +256,35 @@ func TestConversationTaskContinuationFailureUsesSanitizedReply(t *testing.T) {
 	if err != nil || message == nil || message.Content != runtimeconversation.TerminalFailureReply("execution_failed") {
 		t.Fatalf("legacy failure lost safe reply: %#v %v", message, err)
 	}
+}
+
+// promotedContinuationFixture is a copy of the conversation run tests' promotedContinuationAuthorityFixture; change them
+// together.
+func promotedContinuationFixture(t *testing.T, id string) (*sqlite.Store, *models.ConversationTaskResult, *models.Conversation, *models.ChannelMessage) {
+	t.Helper()
+	store, db := newTestSQLiteStore(t)
+	run, conversation, message := continuationLifecycleFixture(t, store, id)
+	now := time.Now().UTC()
+	run = backdateContinuationLifecycleRun(t, store, db, run, now.Add(-models.ConversationTaskForegroundTimeout-time.Second))
+	result, err := store.PromoteConversationTask(t.Context(), models.ConversationTaskPromotionRequest{Scope: run.Scope, RunID: run.ID, Now: now})
+	if err != nil || result == nil {
+		t.Fatalf("promote continuation: %#v %v", result, err)
+	}
+	return store, result, conversation, message
+}
+
+// finishContinuationRun is a copy of the conversation run tests' finishContinuationAuthorityRun; change them
+// together.
+func finishContinuationRun(t *testing.T, store *sqlite.Store, run *models.AgentRun, status models.AgentRunStatus) *models.AgentRun {
+	t.Helper()
+	current, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	current.Status, current.LeaseOwner, current.LeaseExpiresAt = status, "", nil
+	current.CompletedAt, current.UpdatedAt = &now, now
+	current.Revision++
+	storetest.UpdateRun(t, store, current, current.Revision-1)
+	return current
 }

@@ -31,7 +31,7 @@ import (
 const chatLoopWorker = "chat-loop-worker"
 
 type chatLoopStore interface {
-	finalDeliveryStore
+	chatLoopFinalStore
 	KernelStore
 	RunCommandStore
 }
@@ -939,4 +939,12 @@ func TestRunPromotedMidFlightCountsAsStartedInChild(t *testing.T) {
 		}
 		chatLoopExpectShape(t, f.path(promoted.Session.ID), "user:"+trigger.ID, "note:run_context:"+run.ID)
 	})
+}
+
+// chatLoopFinalStore is a copy of the conversation run tests' finalDeliveryStore; change them
+// together.
+type chatLoopFinalStore interface {
+	conversationtest.ThreadStartStore
+	models.AgentSessionStore
+	models.ArtifactStore
 }

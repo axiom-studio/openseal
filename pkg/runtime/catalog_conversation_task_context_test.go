@@ -87,7 +87,7 @@ func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *Conversati
 	}
 	results := make([]*ConversationTaskResult, 0, count+1)
 	for i := 0; i <= count; i++ {
-		record := conversationTaskBenchmarkRecord(t, store, fmt.Sprintf("catalog-%02d", i), base.Add(time.Duration(i+1)*time.Second))
+		record := taskContextTaskRecord(t, store, fmt.Sprintf("catalog-%02d", i), base.Add(time.Duration(i+1)*time.Second))
 		actor := record.Task.AuthenticatedActor
 		if i == count {
 			actor.ID = "another-member"
@@ -189,4 +189,63 @@ func TestCatalogConversationTaskContextDoesNotPrioritizeForkRoot(t *testing.T) {
 			t.Fatalf("fork gained forced whole-task identity: %#v", context.Tasks)
 		}
 	}
+}
+
+// taskContextTaskRecord is a copy of the conversation run tests' conversationTaskBenchmarkRecord; change them
+// together.
+func taskContextTaskRecord(t testing.TB, store conversationTaskSQLTestStore, suffix string, at time.Time) models.ConversationTaskCreateRecord {
+	t.Helper()
+	now := at
+	expires := time.Now().UTC().Add(10 * time.Minute)
+	scope := models.Scope{Kind: "tenant", ID: "task-sql"}
+	owner := models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "task-agent"}
+	sourceID := "source-" + suffix
+	source := &models.AgentRun{ID: sourceID, Scope: scope, Kind: models.RunKindConversation, RootRunID: sourceID, Owner: owner,
+		AssignedAgentID: owner.ID, ConcurrencyKey: models.ConversationRunLane("conversation", "thread", owner.ID), Goal: "Accept conversation work", Source: models.RunSourceChat, Status: models.AgentRunStatusRunning,
+		Priority: 90, AvailableAt: now, QueueEnteredAt: now, LeaseOwner: "task-worker", LeaseExpiresAt: &expires,
+		LastAppliedTurn: 1, Budget: &models.BudgetPolicy{MaxTurns: 20}, Policy: map[string]interface{}{"preserve": "source-policy"},
+		Context:  map[string]interface{}{models.ConversationRunConversationIDContextKey: "conversation", models.ConversationRunTriggerIDContextKey: "message-" + suffix, "threadRootMessageId": "thread"},
+		Revision: 1, CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateAgentRun(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
+	taskID := models.ConversationTaskID(scope, sourceID, "task-"+suffix)
+	workID := "work-" + suffix
+	// The task asks for the child minimum of 8 Turns.
+	task := &models.ConversationTask{ID: taskID, Scope: scope, Owner: owner, ConversationID: "conversation", SourceMessageID: "message-" + suffix,
+		ThreadRootID: "thread", SourceRunID: sourceID, SourceTurnID: "turn-" + suffix, SourceTurnNumber: 1,
+		AuthenticatedActor: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "requester"}, TargetAgentID: owner.ID,
+		WorkRunID: workID, TaskKey: "task-" + suffix, Goal: "Prepare the requested result", Acknowledgment: "I have started the work.",
+		RequestedBudget: &models.BudgetPolicy{MaxTurns: 8}, Revision: 1, CreatedAt: now}
+	var err error
+	task.RequestDigest, err = models.ConversationTaskDigest(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := &models.AgentRun{ID: workID, Scope: scope, Kind: models.RunKindAgentWork, RootRunID: workID, Owner: owner, AssignedAgentID: owner.ID,
+		ConcurrencyKey: "task:" + taskID, Goal: task.Goal, Source: models.RunSourceChat, Status: models.AgentRunStatusQueued, Priority: source.Priority,
+		AvailableAt: now, QueueEnteredAt: now, Budget: models.CloneBudgetPolicy(task.RequestedBudget), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Context: map[string]interface{}{models.ConversationTaskContextKey: taskID, models.ConversationRunConversationIDContextKey: task.ConversationID,
+			models.ConversationRunTriggerIDContextKey: task.SourceMessageID, "threadRootMessageId": task.ThreadRootID, models.RunReportingRootRunIDContextKey: workID,
+			models.RunReportingMilestonesContextKey: []interface{}{"completed", "failed"}}}
+	updated := models.CloneAgentRun(source)
+	if err := models.AddRunBudgetAllocation(updated, workID, work.Budget); err != nil {
+		t.Fatal(err)
+	}
+	updated.Status = models.AgentRunStatusCompleted
+	updated.Context[models.RunReportingRootRunIDContextKey] = source.ID
+	updated.Context[models.RunReportingMilestonesContextKey] = []interface{}{"completed", "failed"}
+	updated.Output = map[string]interface{}{"summary": task.Acknowledgment, "conversationTaskIds": []string{taskID}, "conversationTaskWorkRunId": workID}
+	updated.CompletedAt = &now
+	updated.LeaseOwner = ""
+	updated.LeaseExpiresAt = nil
+	updated.Revision++
+	event := &models.ActivityEvent{ID: "task-event-" + suffix, Scope: scope, RunID: sourceID, EventType: "conversation.task_started",
+		Summary: "Started independent work", Actor: models.ActivityActor{Type: "user", ID: "requester"}, CorrelationID: taskID,
+		Visibility: models.ActivityVisibilityScope, CreatedAt: now}
+	record := models.ConversationTaskCreateRecord{Task: task, WorkRun: work, SourceRun: updated, ExpectedSourceRevision: 1, WorkerID: "task-worker", Event: event}
+	if err := models.ValidateConversationTaskCreateRecord(record); err != nil {
+		t.Fatalf("invalid SQL fixture: %v", err)
+	}
+	return record
 }

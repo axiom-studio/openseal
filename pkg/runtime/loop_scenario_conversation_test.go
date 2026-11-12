@@ -192,7 +192,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 			f.model.add(&modelRule{name: "card", reply: func(v stepView) ModelStepResult {
 				if first {
 					first = false
-					return finalAnswer(map[string]any{"answer": "Here is your list.", "visual": cardStateTestVisual()})
+					return finalAnswer(map[string]any{"answer": "Here is your list.", "visual": scenarioChecklistVisual()})
 				}
 				return finalAnswer(map[string]any{"answer": "Noted."})
 			}})
@@ -253,7 +253,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 		f.model.add(&modelRule{name: "card", reply: func(v stepView) ModelStepResult {
 			if first {
 				first = false
-				return finalAnswer(map[string]any{"answer": "Learn and cook.", "visual": cardStateWave2Visual()})
+				return finalAnswer(map[string]any{"answer": "Learn and cook.", "visual": scenarioFlashcardRecipeVisual()})
 			}
 			return finalAnswer(map[string]any{"answer": "Noted."})
 		}})
@@ -1147,4 +1147,39 @@ func TestSpokenTriggerKeepsItsResponseMode(t *testing.T) {
 	if spokenSystem, writtenSystem := convSystem(f, request), convSystem(f, convFirstStep(f, next.ID)); spokenSystem == writtenSystem {
 		t.Fatal("the spoken system section is missing from the spoken Run")
 	}
+}
+
+// scenarioChecklistVisual is a copy of the conversation run tests' cardStateTestVisual; change them
+// together.
+func scenarioChecklistVisual() *presentation.Visual {
+	visual := &presentation.Visual{Title: "Trip"}
+	for index := 0; index < 7; index++ {
+		title := fmt.Sprintf("List %d", index)
+		if index == 0 {
+			title = "Packing list"
+		}
+		visual.Components = append(visual.Components, presentation.Component{
+			ID: fmt.Sprintf("k%d", index), Type: "checklist", Title: title, Summary: "Things to pack.",
+			Checklist: &presentation.Checklist{Items: []presentation.ChecklistItem{{ID: "a", Label: "Passport"}, {ID: "b", Label: "Charger"}, {ID: "c", Label: "Towel"}}},
+		})
+	}
+	visual.Components = append(visual.Components, presentation.Component{ID: "q", Type: "quiz", Summary: "One question.", Quiz: &presentation.Quiz{
+		Question: "Capital of Australia?", Options: []presentation.QuizOption{{ID: "syd", Label: "Sydney"}, {ID: "cbr", Label: "Canberra"}},
+		AnswerKey: &presentation.QuizAnswerKey{Correct: []string{"cbr"}, Explanation: "Canberra."},
+	}})
+	return visual
+}
+
+// scenarioFlashcardRecipeVisual is a copy of the conversation run tests' cardStateWave2Visual; change them
+// together.
+func scenarioFlashcardRecipeVisual() *presentation.Visual {
+	cards := []presentation.Flashcard{{ID: "pain", Front: "le pain", Back: "bread"}, {ID: "eau", Front: "l'eau", Back: "water"}, {ID: "pomme", Front: "la pomme", Back: "apple"}}
+	qty := 2.0
+	return &presentation.Visual{Title: "Learn and cook", Components: []presentation.Component{
+		{ID: "deck", Type: "flashcards", Title: "French food words", Summary: "Three words.", Flashcards: &presentation.Flashcards{Cards: cards}},
+		{ID: "pancakes", Type: "recipe", Title: "Pancakes", Summary: "Pancakes for 2.", Recipe: &presentation.Recipe{
+			Servings: 2, Checkable: true, Steps: []presentation.RecipeStep{{ID: "mix", Text: "Whisk into a batter and fry."}},
+			Ingredients: []presentation.RecipeIngredient{{ID: "flour", Name: "flour"}, {ID: "eggs", Qty: &qty, Name: "eggs"}},
+		}},
+	}}
 }

@@ -326,7 +326,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 	t.Run("visual", func(t *testing.T) {
 		eachStore(t, "port_visual", func(t *testing.T, store KernelStore) {
 			f := newLoopFixture(t, store, withRules(&modelRule{name: "answer", reply: func(stepView) ModelStepResult {
-				return finalAnswer(map[string]any{"answer": "Revenue is up.", "visual": finalDeliveryVisual()})
+				return finalAnswer(map[string]any{"answer": "Revenue is up.", "visual": failurePortVisual()})
 			}}))
 			content := &answerVisualContent{}
 			convRunner(f, ConversationRunTurnRunnerConfig{AttachmentContent: content})
@@ -363,7 +363,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 
 	t.Run("visual_rejected_by_host", func(t *testing.T) {
 		eachStore(t, "port_visual_rejected", func(t *testing.T, store KernelStore) {
-			bound := finalDeliveryVisual()
+			bound := failurePortVisual()
 			bound.Components = append(bound.Components, presentation.Component{ID: "next", Type: "actions", Actions: []presentation.Action{
 				{ID: "stop", Label: "Stop", Kind: presentation.ActionEntity, Command: "stop", Binding: &presentation.Binding{Kind: presentation.BindingRunbook, ID: "rb-1"}},
 			}})
@@ -473,4 +473,14 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			}
 		})
 	})
+}
+
+// failurePortVisual is a copy of the conversation run tests' finalDeliveryVisual; change them
+// together.
+func failurePortVisual() *presentation.Visual {
+	return &presentation.Visual{Title: "Quarterly revenue", Components: []presentation.Component{
+		{ID: "revenue", Type: "stat_row", Summary: "Revenue grew 12%.", StatRow: &presentation.StatRow{Stats: []presentation.Stat{
+			{Label: "Revenue", Value: 1200000, Format: presentation.StatCurrency, Currency: "USD"},
+		}}},
+	}}
 }
