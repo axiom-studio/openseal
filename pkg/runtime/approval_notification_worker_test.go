@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/callback"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -411,8 +412,8 @@ func registerApprovalNotificationCallback(
 	if err := catalog.Bind(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
-	registry := NewCallbackRegistry(store, catalog)
-	created, err := registry.Create(ctx, CreateCallbackRegistrationRequest{
+	registry := callback.NewCallbackRegistry(store, catalog)
+	created, err := registry.Create(ctx, callback.CreateCallbackRegistrationRequest{
 		ID: endpoint.ID + "-approval-callback", Scope: endpoint.Scope, Owner: endpoint.Owner,
 		DeploymentID: endpoint.DeploymentID, Name: endpoint.Name + " approval callback", Provider: endpoint.Provider,
 		Adapter: CallbackAdapterReference{
@@ -428,7 +429,7 @@ func registerApprovalNotificationCallback(
 		t.Fatal(err)
 	}
 	active := CallbackRegistrationActive
-	updated, err := registry.Update(ctx, created.Scope, created.ID, UpdateCallbackRegistrationRequest{
+	updated, err := registry.Update(ctx, created.Scope, created.ID, callback.UpdateCallbackRegistrationRequest{
 		ExpectedRevision: created.Revision, Status: &active,
 		Actor: ActivityActor{Type: "user", ID: "operator"}, Reason: "activate interactive approval decisions",
 	})

@@ -1,4 +1,4 @@
-package runtime
+package callback
 
 import (
 	"context"
@@ -28,7 +28,7 @@ func (h *callbackHostStub) NormalizeCallback(_ context.Context, request Callback
 
 func TestCallbackIngressFollowsCurrentBindingWithoutRegistrationRewrite(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newCallbackTestStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 
@@ -68,13 +68,13 @@ func TestCallbackIngressFollowsCurrentBindingWithoutRegistrationRewrite(t *testi
 
 func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newCallbackTestStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
-	var received EventEnvelope
+	var received models.EventEnvelope
 	service := NewCallbackIngressService(store, catalog, map[string]CallbackEventConsumer{
-		"approvals": CallbackEventConsumerFunc(func(_ context.Context, got *CallbackRegistration, subscription CallbackSubscription, event EventEnvelope) error {
+		"approvals": CallbackEventConsumerFunc(func(_ context.Context, got *models.CallbackRegistration, subscription models.CallbackSubscription, event models.EventEnvelope) error {
 			consumed++
 			received = event
 			if got.ID != registration.ID || subscription.TargetID != "slack-destination" {
@@ -96,7 +96,7 @@ func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if consumed != 1 || len(result.Receipts) != 1 || result.Receipts[0].Status != CallbackEventApplied {
+	if consumed != 1 || len(result.Receipts) != 1 || result.Receipts[0].Status != models.CallbackEventApplied {
 		t.Fatalf("first ingress = consumed %d, result %#v", consumed, result)
 	}
 	if received.Scope != registration.Scope || received.Actor.ID != registration.ID || received.Attributes["decision"] != "approve" {
@@ -113,13 +113,13 @@ func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) 
 
 func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newCallbackTestStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
 	now := time.Date(2026, 8, 20, 20, 19, 36, 0, time.UTC)
 	service := NewCallbackIngressService(store, catalog, map[string]CallbackEventConsumer{
-		"approvals": CallbackEventConsumerFunc(func(context.Context, *CallbackRegistration, CallbackSubscription, EventEnvelope) error {
+		"approvals": CallbackEventConsumerFunc(func(context.Context, *models.CallbackRegistration, models.CallbackSubscription, models.EventEnvelope) error {
 			consumed++
 			time.Sleep(50 * time.Millisecond)
 			return nil
@@ -143,7 +143,7 @@ func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.
 	if elapsed := time.Since(started); elapsed >= 25*time.Millisecond {
 		t.Fatalf("durable acknowledgement waited for consumer: %s", elapsed)
 	}
-	if consumed != 0 || wakes != 1 || len(result.Receipts) != 1 || result.Receipts[0].Status != CallbackEventPending {
+	if consumed != 0 || wakes != 1 || len(result.Receipts) != 1 || result.Receipts[0].Status != models.CallbackEventPending {
 		t.Fatalf("ingress result consumed=%d wakes=%d result=%#v", consumed, wakes, result)
 	}
 	replayed, err := service.Receive(ctx, request, host)
@@ -161,7 +161,7 @@ func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if consumed != 1 || applied == nil || applied.Status != CallbackEventApplied || applied.Attempts != 1 {
+	if consumed != 1 || applied == nil || applied.Status != models.CallbackEventApplied || applied.Attempts != 1 {
 		t.Fatalf("worker result consumed=%d receipt=%#v", consumed, applied)
 	}
 	if next, err := worker.ProcessOne(ctx, registration.Scope); err != nil || next != nil {
@@ -171,13 +171,13 @@ func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.
 
 func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
 	ctx := context.Background()
-	store := newTestKernelStore(t)
+	store := newCallbackTestStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
 	now := time.Date(2026, 8, 20, 20, 19, 36, 0, time.UTC)
 	service := NewCallbackIngressService(store, catalog, map[string]CallbackEventConsumer{
-		"approvals": CallbackEventConsumerFunc(func(context.Context, *CallbackRegistration, CallbackSubscription, EventEnvelope) error {
+		"approvals": CallbackEventConsumerFunc(func(context.Context, *models.CallbackRegistration, models.CallbackSubscription, models.EventEnvelope) error {
 			consumed++
 			return nil
 		}),
@@ -197,19 +197,19 @@ func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovered, err := worker.ProcessOne(ctx, registration.Scope)
-	if err != nil || recovered == nil || recovered.Status != CallbackEventApplied || recovered.Attempts != 2 || consumed != 1 {
+	if err != nil || recovered == nil || recovered.Status != models.CallbackEventApplied || recovered.Attempts != 2 || consumed != 1 {
 		t.Fatalf("recovered callback = %#v consumed=%d err=%v", recovered, consumed, err)
 	}
 }
 
 func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T) {
 	ctx := context.Background()
-	store, db := newTestSQLiteStore(t)
+	store, db := newCallbackTestSQLiteStore(t)
 	catalog := newCallbackCatalog(t, ctx, store)
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
 	service := NewCallbackIngressService(store, catalog, map[string]CallbackEventConsumer{
-		"approvals": CallbackEventConsumerFunc(func(context.Context, *CallbackRegistration, CallbackSubscription, EventEnvelope) error {
+		"approvals": CallbackEventConsumerFunc(func(context.Context, *models.CallbackRegistration, models.CallbackSubscription, models.EventEnvelope) error {
 			consumed++
 			return nil
 		}),
@@ -218,7 +218,7 @@ func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T)
 	_, err := service.Receive(ctx, CallbackPublicRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte("forged"),
 	}, &callbackHostStub{err: verificationErr})
-	if receipts := countRows(t, db, "callback_events"); !errors.Is(err, verificationErr) || consumed != 0 || receipts != 0 {
+	if receipts := countCallbackRows(t, db, "callback_events"); !errors.Is(err, verificationErr) || consumed != 0 || receipts != 0 {
 		t.Fatalf("verification failure = %v, consumed %d, receipts %d", err, consumed, receipts)
 	}
 }
@@ -235,7 +235,7 @@ func TestCallbackRegistryAndReceiptsSurviveSQLiteRestart(t *testing.T) {
 	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
 	consumed := 0
 	service := NewCallbackIngressService(store, catalog, map[string]CallbackEventConsumer{
-		"approvals": CallbackEventConsumerFunc(func(context.Context, *CallbackRegistration, CallbackSubscription, EventEnvelope) error {
+		"approvals": CallbackEventConsumerFunc(func(context.Context, *models.CallbackRegistration, models.CallbackSubscription, models.EventEnvelope) error {
 			consumed++
 			return nil
 		}),
@@ -262,7 +262,7 @@ func TestCallbackRegistryAndReceiptsSurviveSQLiteRestart(t *testing.T) {
 	defer reopened.Close()
 	restartedCatalog := skill.NewCatalogWithStore(reopened)
 	restarted := NewCallbackIngressService(reopened, restartedCatalog, map[string]CallbackEventConsumer{
-		"approvals": CallbackEventConsumerFunc(func(context.Context, *CallbackRegistration, CallbackSubscription, EventEnvelope) error {
+		"approvals": CallbackEventConsumerFunc(func(context.Context, *models.CallbackRegistration, models.CallbackSubscription, models.EventEnvelope) error {
 			consumed++
 			return nil
 		}),
@@ -272,14 +272,14 @@ func TestCallbackRegistryAndReceiptsSurviveSQLiteRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if receipt, err := worker.ProcessOne(ctx, registration.Scope); err != nil || receipt == nil || receipt.Status != CallbackEventApplied {
+	if receipt, err := worker.ProcessOne(ctx, registration.Scope); err != nil || receipt == nil || receipt.Status != models.CallbackEventApplied {
 		t.Fatalf("restart dispatch = %#v, %v", receipt, err)
 	}
 	result, err := restarted.Receive(ctx, request, host)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if consumed != 1 || result.Replayed != 1 || len(result.Receipts) != 1 || result.Receipts[0].Status != CallbackEventApplied {
+	if consumed != 1 || result.Replayed != 1 || len(result.Receipts) != 1 || result.Receipts[0].Status != models.CallbackEventApplied {
 		t.Fatalf("restart replay = consumed %d, result %#v", consumed, result)
 	}
 }
@@ -300,28 +300,28 @@ func newSkillCatalogAdapter(store *sqlite.Store) *skillCatalogAdapter {
 }
 
 func createActiveCallbackRegistration(t *testing.T, ctx context.Context, store interface {
-	CallbackRegistrationStore
-}, catalog CallbackAdapterResolver) *CallbackRegistration {
+	models.CallbackRegistrationStore
+}, catalog CallbackAdapterResolver) *models.CallbackRegistration {
 	t.Helper()
 	registry := NewCallbackRegistry(store, catalog)
 	registry.newID = func() string { return "public-callback-route" }
 	created, err := registry.Create(ctx, CreateCallbackRegistrationRequest{
-		ID: "slack-approval", Scope: Scope{Kind: "tenant", ID: "one"},
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-one"}, DeploymentID: "agent-one",
+		ID: "slack-approval", Scope: models.Scope{Kind: "tenant", ID: "one"},
+		Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent-one"}, DeploymentID: "agent-one",
 		Name: "Slack approval callback", Provider: "slack",
-		Adapter: CallbackAdapterReference{
+		Adapter: models.CallbackAdapterReference{
 			SkillID: "skill-slack", SkillVersion: "2.2.0", BindingID: "slack", BindingRevision: 1, AdapterID: "interactions",
 		},
-		Subscriptions: []CallbackSubscription{{EventType: "approval.decided", Consumer: "approvals", TargetID: "slack-destination"}},
-		Actor:         ActivityActor{Type: "user", ID: "operator"}, Reason: "register Slack approval callback",
+		Subscriptions: []models.CallbackSubscription{{EventType: "approval.decided", Consumer: "approvals", TargetID: "slack-destination"}},
+		Actor:         models.ActivityActor{Type: "user", ID: "operator"}, Reason: "register Slack approval callback",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	active := CallbackRegistrationActive
+	active := models.CallbackRegistrationActive
 	updated, err := registry.Update(ctx, created.Scope, created.ID, UpdateCallbackRegistrationRequest{
 		ExpectedRevision: created.Revision, Status: &active,
-		Actor: ActivityActor{Type: "user", ID: "operator"}, Reason: "activate configured callback",
+		Actor: models.ActivityActor{Type: "user", ID: "operator"}, Reason: "activate configured callback",
 	})
 	if err != nil {
 		t.Fatal(err)

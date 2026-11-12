@@ -1,4 +1,4 @@
-package runtime
+package callback
 
 import (
 	"context"
@@ -25,18 +25,18 @@ type CallbackPublicRequest struct {
 }
 
 func (r *CallbackPublicRequest) Validate() error {
-	if r == nil || !validOpaqueIdentifier(strings.TrimSpace(r.Route), 128) || r.Method != http.MethodPost ||
+	if r == nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(r.Route), 128) || r.Method != http.MethodPost ||
 		len(r.Body) == 0 || len(r.Body) > MaximumCallbackIngressBytes || len(r.Headers) > 64 {
-		return ErrInvalidCallbackRegistration
+		return models.ErrInvalidCallbackRegistration
 	}
 	for name, values := range r.Headers {
 		name = http.CanonicalHeaderKey(strings.TrimSpace(name))
 		if name == "" || name == "Authorization" || name == "Cookie" || len(name) > 128 || len(values) == 0 || len(values) > 16 {
-			return ErrInvalidCallbackRegistration
+			return models.ErrInvalidCallbackRegistration
 		}
 		for _, value := range values {
 			if len(value) > 4096 || strings.ContainsAny(value, "\r\n") {
-				return ErrInvalidCallbackRegistration
+				return models.ErrInvalidCallbackRegistration
 			}
 		}
 	}
@@ -57,28 +57,28 @@ type NormalizedCallbackEvent struct {
 	Payload    map[string]interface{} `json:"payload,omitempty"`
 }
 
-func (e NormalizedCallbackEvent) envelope(registration *CallbackRegistration) EventEnvelope {
-	return EventEnvelope{
+func (e NormalizedCallbackEvent) envelope(registration *models.CallbackRegistration) models.EventEnvelope {
+	return models.EventEnvelope{
 		ID: e.ID, Scope: registration.Scope, Type: e.Type, Source: e.Source,
 		Subject: e.Subject, Severity: e.Severity, OccurredAt: e.OccurredAt,
 		Attributes: maps.Clone(e.Attributes), Payload: maps.Clone(e.Payload),
-		Actor: ActivityActor{Type: "callback", ID: registration.ID},
+		Actor: models.ActivityActor{Type: "callback", ID: registration.ID},
 	}
 }
 
 func (e NormalizedCallbackEvent) Validate() error {
-	probe := EventEnvelope{
-		ID: e.ID, Scope: Scope{Kind: "tenant", ID: "callback-validation"}, Type: e.Type,
+	probe := models.EventEnvelope{
+		ID: e.ID, Scope: models.Scope{Kind: "tenant", ID: "callback-validation"}, Type: e.Type,
 		Source: e.Source, Subject: e.Subject, Severity: e.Severity, OccurredAt: e.OccurredAt,
-		Attributes: e.Attributes, Payload: e.Payload, Actor: ActivityActor{Type: "callback", ID: "callback-validation"},
+		Attributes: e.Attributes, Payload: e.Payload, Actor: models.ActivityActor{Type: "callback", ID: "callback-validation"},
 	}
 	return probe.Validate()
 }
 
 type CallbackHostRequest struct {
-	Registration *CallbackRegistration       `json:"registration"`
-	Adapter      *skill.BoundCallbackAdapter `json:"adapter"`
-	Request      *CallbackPublicRequest      `json:"request"`
+	Registration *models.CallbackRegistration `json:"registration"`
+	Adapter      *skill.BoundCallbackAdapter  `json:"adapter"`
+	Request      *CallbackPublicRequest       `json:"request"`
 }
 
 type CallbackHostResult struct {
@@ -91,14 +91,14 @@ type CallbackHostResult struct {
 func (r *CallbackHostResult) Validate() error {
 	if r == nil || r.StatusCode < 200 || r.StatusCode > 599 || len(r.ContentType) > 256 ||
 		strings.ContainsAny(r.ContentType, "\r\n") || len(r.Body) > MaximumCallbackIngressBytes || len(r.Events) > 100 {
-		return ErrInvalidCallbackRegistration
+		return models.ErrInvalidCallbackRegistration
 	}
 	if r.StatusCode >= 300 && len(r.Events) > 0 {
-		return ErrInvalidCallbackRegistration
+		return models.ErrInvalidCallbackRegistration
 	}
 	for index, event := range r.Events {
 		if err := event.Validate(); err != nil {
-			return fmt.Errorf("%w: normalized event %d: %v", ErrInvalidCallbackRegistration, index, err)
+			return fmt.Errorf("%w: normalized event %d: %v", models.ErrInvalidCallbackRegistration, index, err)
 		}
 	}
 	return nil
@@ -109,25 +109,25 @@ type CallbackAdapterHost interface {
 }
 
 type CallbackEventConsumer interface {
-	ConsumeCallbackEvent(context.Context, *CallbackRegistration, CallbackSubscription, EventEnvelope) error
+	ConsumeCallbackEvent(context.Context, *models.CallbackRegistration, models.CallbackSubscription, models.EventEnvelope) error
 }
 
-type CallbackEventConsumerFunc func(context.Context, *CallbackRegistration, CallbackSubscription, EventEnvelope) error
+type CallbackEventConsumerFunc func(context.Context, *models.CallbackRegistration, models.CallbackSubscription, models.EventEnvelope) error
 
-func (f CallbackEventConsumerFunc) ConsumeCallbackEvent(ctx context.Context, registration *CallbackRegistration, subscription CallbackSubscription, event EventEnvelope) error {
+func (f CallbackEventConsumerFunc) ConsumeCallbackEvent(ctx context.Context, registration *models.CallbackRegistration, subscription models.CallbackSubscription, event models.EventEnvelope) error {
 	return f(ctx, registration, subscription, event)
 }
 
 type CallbackIngressResult struct {
-	Response *CallbackHostResult     `json:"response"`
-	Receipts []*CallbackEventReceipt `json:"receipts,omitempty"`
-	Replayed int                     `json:"replayed,omitempty"`
+	Response *CallbackHostResult            `json:"response"`
+	Receipts []*models.CallbackEventReceipt `json:"receipts,omitempty"`
+	Replayed int                            `json:"replayed,omitempty"`
 }
 
 type CallbackIngressService struct {
 	store interface {
-		CallbackRegistrationStore
-		CallbackEventStore
+		models.CallbackRegistrationStore
+		models.CallbackEventStore
 	}
 	resolver  CallbackAdapterResolver
 	consumers map[string]CallbackEventConsumer
@@ -148,8 +148,8 @@ func (s *CallbackIngressService) SetDurableDispatcher(wake func()) {
 }
 
 func NewCallbackIngressService(store interface {
-	CallbackRegistrationStore
-	CallbackEventStore
+	models.CallbackRegistrationStore
+	models.CallbackEventStore
 }, resolver CallbackAdapterResolver, consumers map[string]CallbackEventConsumer, opts ...models.ServiceOption) *CallbackIngressService {
 	copyConsumers := make(map[string]CallbackEventConsumer, len(consumers))
 	for name, consumer := range consumers {
@@ -170,13 +170,13 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 		return nil, err
 	}
 	if registration == nil {
-		return nil, ErrCallbackRegistrationNotFound
+		return nil, models.ErrCallbackRegistrationNotFound
 	}
 	if err := registration.Validate(); err != nil {
 		return nil, err
 	}
-	if registration.Status != CallbackRegistrationActive {
-		return nil, fmt.Errorf("%w: callback is not active", ErrCallbackRegistrationConflict)
+	if registration.Status != models.CallbackRegistrationActive {
+		return nil, fmt.Errorf("%w: callback is not active", models.ErrCallbackRegistrationConflict)
 	}
 	ref := registration.Adapter
 	adapter, err := s.resolver.ResolveCallbackAdapterBinding(
@@ -187,7 +187,7 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 		adapter.Binding.SkillID != ref.SkillID || adapter.Binding.SourceIdentity != ref.SourceIdentity ||
 		adapter.Binding.Revision < ref.BindingRevision ||
 		adapter.Adapter.Provider != registration.Provider {
-		return nil, fmt.Errorf("%w: exact callback Skill adapter is unavailable or stale", ErrCallbackRegistrationConflict)
+		return nil, fmt.Errorf("%w: exact callback Skill adapter is unavailable or stale", models.ErrCallbackRegistrationConflict)
 	}
 	hostResult, err := host.NormalizeCallback(ctx, CallbackHostRequest{Registration: registration, Adapter: adapter, Request: &request})
 	if err != nil {
@@ -206,23 +206,23 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 	}
 	for _, normalized := range hostResult.Events {
 		if !declared[normalized.Type] || !accepted[normalized.Type] {
-			return nil, fmt.Errorf("%w: callback emitted undeclared event type %q", ErrCallbackRegistrationConflict, normalized.Type)
+			return nil, fmt.Errorf("%w: callback emitted undeclared event type %q", models.ErrCallbackRegistrationConflict, normalized.Type)
 		}
 	}
-	result := &CallbackIngressResult{Response: hostResult, Receipts: make([]*CallbackEventReceipt, 0, len(hostResult.Events))}
+	result := &CallbackIngressResult{Response: hostResult, Receipts: make([]*models.CallbackEventReceipt, 0, len(hostResult.Events))}
 	for _, normalized := range hostResult.Events {
 		event := normalized.envelope(registration)
 		now := s.now().UTC()
-		receipt := &CallbackEventReceipt{
+		receipt := &models.CallbackEventReceipt{
 			ID: stableCallbackReceiptID(registration.ID, event.Source, event.ID), Scope: registration.Scope,
 			RegistrationID: registration.ID, RegistrationRevision: registration.Revision, Event: event,
-			Status: CallbackEventPending, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+			Status: models.CallbackEventPending, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
 		stored, replayed, err := s.store.ReceiveCallbackEvent(ctx, receipt)
 		if err != nil {
 			return nil, err
 		}
-		if replayed && (s.async || stored.Status == CallbackEventApplied) {
+		if replayed && (s.async || stored.Status == models.CallbackEventApplied) {
 			result.Replayed++
 			result.Receipts = append(result.Receipts, stored)
 			continue
@@ -246,7 +246,7 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 		}
 		stored.Attempts++
 		stored.LastError = ""
-		stored.Status = CallbackEventApplied
+		stored.Status = models.CallbackEventApplied
 		stored.Revision++
 		stored.UpdatedAt = now
 		stored.AppliedAt = &now
@@ -258,7 +258,7 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 	return result, nil
 }
 
-func (s *CallbackIngressService) dispatch(ctx context.Context, registration *CallbackRegistration, event EventEnvelope, receivedAt time.Time) error {
+func (s *CallbackIngressService) dispatch(ctx context.Context, registration *models.CallbackRegistration, event models.EventEnvelope, receivedAt time.Time) error {
 	// A durable receipt may outlive its binding. Revalidate acquisition
 	// authority before an asynchronous worker publishes observations or
 	// invokes consumers, rather than treating the original ingress check as
@@ -269,7 +269,7 @@ func (s *CallbackIngressService) dispatch(ctx context.Context, registration *Cal
 	if err != nil || adapter == nil || adapter.Binding == nil || adapter.Binding.Revision < ref.BindingRevision ||
 		adapter.Binding.SkillID != ref.SkillID || adapter.Binding.SourceIdentity != ref.SourceIdentity ||
 		adapter.Adapter.Provider != registration.Provider {
-		return fmt.Errorf("%w: current callback binding authority is unavailable", ErrCallbackRegistrationConflict)
+		return fmt.Errorf("%w: current callback binding authority is unavailable", models.ErrCallbackRegistrationConflict)
 	}
 	matched := 0
 	for _, subscription := range registration.Subscriptions {
