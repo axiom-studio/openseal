@@ -212,7 +212,9 @@ func TestRunLoopNarrationRecordedBeforeTools(t *testing.T) {
 				t.Errorf("turn.narration events before the tool = %d, want 1", len(f.events(run.ID, ActivityEventTurnNarration)))
 			}
 			current := f.mustRun(run.ID)
-			if _, err := f.loop.turns.BeginTurn(f.ctx, BeginAgentTurnRequest{
+			// A second worker's step service, on the same store.
+			turns := NewAgentTurnService(f.store, f.store, models.WithClock(f.clock.Now))
+			if _, err := turns.BeginTurn(f.ctx, BeginAgentTurnRequest{
 				Scope: current.Scope, RunID: current.ID, SessionID: current.SessionID, Producer: StepProducerModel,
 				WorkerID: f.workerID, LeaseDuration: loopFixtureLease,
 			}); !errors.Is(err, ErrActiveTurnExists) {
@@ -486,8 +488,8 @@ func TestRunLoopFinalToolRejectedThreeTimesFails(t *testing.T) {
 			t.Fatalf("exit = %s after %d steps (%v), want failed after 3", exit.Reason, exit.Steps, exit.Err)
 		}
 		f.mustStatus(failed, AgentRunStatusFailed)
-		if failed.FailureExplanation == nil || failed.FailureExplanation.Code != runFailureCodeFinalRejected || failed.FailureExplanation.Explained {
-			t.Fatalf("failure = %#v, want unexplained %s", failed.FailureExplanation, runFailureCodeFinalRejected)
+		if failed.FailureExplanation == nil || failed.FailureExplanation.Code != "final_answer_rejected" || failed.FailureExplanation.Explained {
+			t.Fatalf("failure = %#v, want unexplained final_answer_rejected", failed.FailureExplanation)
 		}
 		if got := strings.Join(f.entryTypes(run.ID), ","); got != "user,assistant,tool:error,assistant,tool:error,assistant,tool:error" {
 			t.Fatalf("log = %s", got)
@@ -516,8 +518,8 @@ func TestRunLoopPlainFinalRejectedThenFails(t *testing.T) {
 		f.mustStatus(failed, AgentRunStatusFailed)
 		// The control executor's own limit for empty replies ends the Run
 		// at the same third rejection as the loop's bound.
-		if failed.FailureExplanation == nil || failed.FailureExplanation.Code != finalEmptyReplyCode {
-			t.Fatalf("failure = %#v, want %s", failed.FailureExplanation, finalEmptyReplyCode)
+		if failed.FailureExplanation == nil || failed.FailureExplanation.Code != "empty_answer" {
+			t.Fatalf("failure = %#v, want empty_answer", failed.FailureExplanation)
 		}
 		if notes := f.entriesOfType(run.ID, "note:"+string(NoteFinalRejection)); len(notes) != 3 {
 			t.Fatalf("final_rejection notes = %d, want one per rejected step", len(notes))
@@ -538,7 +540,8 @@ func TestRunLoopHostUnavailableRetriesThenFails(t *testing.T) {
 		f := newLoopFixture(t, store, withRules(&modelRule{name: "down",
 			err: &TurnHostFailure{Code: "host_draining", Message: "The step host is restarting.", Retryable: true}}))
 		run := f.startRun(RunKindAgentWork, "Check issue 1")
-		for i, delay := range hostRetryDelays {
+		// The step host is retried after 2s, 5s and 15s.
+		for i, delay := range []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second} {
 			exit, requeued := f.runClaim(run.ID)
 			if exit.Reason != RunLoopExitRequeued {
 				t.Fatalf("claim %d = %s (%v), want requeued", i+1, exit.Reason, exit.Err)
