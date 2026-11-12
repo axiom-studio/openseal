@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"errors"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/externalconversation"
@@ -34,7 +35,7 @@ func TestCreateTaskEventTriggerResolves(t *testing.T) {
 		t.Fatal(err)
 	}
 	activation := result["activation"].(*models.RunbookActivation)
-	if activation.ID != RunbookActivationIDForKey(f.run.Scope, "create-slack-routine") || activation.TriggerID != "event" ||
+	if activation.ID != runtime.RunbookActivationIDForKey(f.run.Scope, "create-slack-routine") || activation.TriggerID != "event" ||
 		activation.Trigger.Kind != runbook.TriggerEvent || activation.Trigger.Schedule != nil || activation.NextRunAt != nil || activation.MaximumConcurrent != 1 {
 		t.Fatalf("activation=%#v", activation)
 	}
@@ -44,7 +45,7 @@ func TestCreateTaskEventTriggerResolves(t *testing.T) {
 		t.Fatalf("trigger=%#v", trigger)
 	}
 	// The approved brief card shows exactly the routine that was made.
-	if stored := routineEventPreview(trigger); !reflect.DeepEqual(stored, event) {
+	if stored := runtime.RoutineEventPreview(trigger); !reflect.DeepEqual(stored, event) {
 		t.Fatalf("preview %#v differs from the stored routine %#v", event, stored)
 	}
 	// Replaying the approved call converges on the same routine.
@@ -54,7 +55,7 @@ func TestCreateTaskEventTriggerResolves(t *testing.T) {
 	}
 
 	// replace_schedule never applies to an event routine.
-	if _, _, _, _, err := resolveRunbookScheduleReplacement(t.Context(), f.store, f.run, map[string]interface{}{"activationId": activation.ID, "cron": "0 0 * * * *", "reason": "hourly"}); err == nil || !strings.Contains(err.Error(), "starts on an event") {
+	if _, _, _, _, err := runtime.ResolveRunbookScheduleReplacement(t.Context(), f.store, f.run, map[string]interface{}{"activationId": activation.ID, "cron": "0 0 * * * *", "reason": "hourly"}); err == nil || !strings.Contains(err.Error(), "starts on an event") {
 		t.Fatalf("replace_schedule on an event routine: %v", err)
 	}
 
@@ -152,7 +153,7 @@ func TestCreateTaskWebhookCreatesHook(t *testing.T) {
 	}
 
 	noHooks := newEventRoutineFixture(t, false)
-	if _, err := noHooks.validate(t, noHooks.run, action.RunbookActionCreateTask, noHooks.withEvent(map[string]interface{}{"kind": "webhook", "source": "new"})); !errors.Is(err, ErrHooksUnavailable) {
+	if _, err := noHooks.validate(t, noHooks.run, action.RunbookActionCreateTask, noHooks.withEvent(map[string]interface{}{"kind": "webhook", "source": "new"})); !errors.Is(err, runtime.ErrHooksUnavailable) {
 		t.Fatalf("webhook without hooks: %v", err)
 	}
 }
@@ -199,11 +200,11 @@ func TestSendTestEventOffers(t *testing.T) {
 	}
 	activation := created["activation"].(*models.RunbookActivation)
 	args := map[string]interface{}{"activationId": activation.ID, "payload": map[string]interface{}{"order": "A-1"}}
-	preview, err := f.validate(t, f.run, RunbookActionSendTestEvent, args)
+	preview, err := f.validate(t, f.run, runtime.RunbookActionSendTestEvent, args)
 	if err != nil || preview["activationId"] != activation.ID {
 		t.Fatalf("preview=%#v, %v", preview, err)
 	}
-	result, err := f.dispatch(t, f.run, RunbookActionSendTestEvent, args, "test-event")
+	result, err := f.dispatch(t, f.run, runtime.RunbookActionSendTestEvent, args, "test-event")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,18 +215,18 @@ func TestSendTestEventOffers(t *testing.T) {
 		f.offerer.tests[0].scope != f.run.Scope || string(f.offerer.tests[0].payload) != `{"order":"A-1"}` {
 		t.Fatalf("offered=%#v", f.offerer.tests)
 	}
-	if _, err := f.dispatch(t, f.run, RunbookActionSendTestEvent, map[string]interface{}{"activationId": activation.ID}, "test-event-default"); err != nil || f.offerer.tests[1].payload != nil {
+	if _, err := f.dispatch(t, f.run, runtime.RunbookActionSendTestEvent, map[string]interface{}{"activationId": activation.ID}, "test-event-default"); err != nil || f.offerer.tests[1].payload != nil {
 		t.Fatalf("default payload: %v %#v", err, f.offerer.tests)
 	}
-	large := map[string]interface{}{"activationId": activation.ID, "payload": map[string]interface{}{"text": strings.Repeat("x", maximumRoutineTestEventPayload)}}
-	if _, err := f.validate(t, f.run, RunbookActionSendTestEvent, large); err == nil {
+	large := map[string]interface{}{"activationId": activation.ID, "payload": map[string]interface{}{"text": strings.Repeat("x", runtime.MaximumRoutineTestEventPayload)}}
+	if _, err := f.validate(t, f.run, runtime.RunbookActionSendTestEvent, large); err == nil {
 		t.Fatal("oversized test payload accepted")
 	}
 	schedule, err := f.dispatch(t, f.run, action.RunbookActionCreateTask, f.args, "create-schedule")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.validate(t, f.run, RunbookActionSendTestEvent, map[string]interface{}{"activationId": schedule["activation"].(*models.RunbookActivation).ID}); err == nil {
+	if _, err := f.validate(t, f.run, runtime.RunbookActionSendTestEvent, map[string]interface{}{"activationId": schedule["activation"].(*models.RunbookActivation).ID}); err == nil {
 		t.Fatal("test event sent to a schedule routine")
 	}
 }
@@ -240,7 +241,7 @@ func TestSendTestEventRejectsNonCreator(t *testing.T) {
 	for _, actingUser := range []string{"someone-else", ""} {
 		run := models.CloneAgentRun(f.run)
 		run.ActingUser = actingUser
-		if _, err := f.validate(t, run, RunbookActionSendTestEvent, args); !errors.Is(err, ErrRoutineNotCreator) {
+		if _, err := f.validate(t, run, runtime.RunbookActionSendTestEvent, args); !errors.Is(err, runtime.ErrRoutineNotCreator) {
 			t.Fatalf("acting user %q: %v", actingUser, err)
 		}
 	}
@@ -248,15 +249,15 @@ func TestSendTestEventRejectsNonCreator(t *testing.T) {
 		t.Fatalf("offered=%#v", f.offerer.tests)
 	}
 	f.validator.SetRoutineEvents(nil, nil, true)
-	if _, err := f.validate(t, f.run, RunbookActionSendTestEvent, args); !errors.Is(err, ErrRoutineEventsUnavailable) {
+	if _, err := f.validate(t, f.run, runtime.RunbookActionSendTestEvent, args); !errors.Is(err, runtime.ErrRoutineEventsUnavailable) {
 		t.Fatalf("without an offerer: %v", err)
 	}
 }
 
 func resumeRefusedWith(t *testing.T, err error, reason models.RoutinePausedReason) {
 	t.Helper()
-	var refused *RoutineSourceUnavailableError
-	if !errors.Is(err, ErrRoutineSourceUnavailable) || !errors.As(err, &refused) || refused.Reason != reason ||
+	var refused *runtime.RoutineSourceUnavailableError
+	if !errors.Is(err, runtime.ErrRoutineSourceUnavailable) || !errors.As(err, &refused) || refused.Reason != reason ||
 		!strings.Contains(err.Error(), string(reason)) {
 		t.Fatalf("resume error = %v, want %s", err, reason)
 	}
@@ -279,7 +280,7 @@ func TestResumeEventRoutineRechecksSource(t *testing.T) {
 	resumeRefusedWith(t, err, models.RoutinePausedSourceRemoved)
 	// Every caller of the service gets the same check.
 	current, _ := f.store.GetRunbookActivation(t.Context(), f.run.Scope, slack.ID)
-	_, err = NewRunbookActivationService(f.store).Update(t.Context(), f.run.Scope, slack.ID, UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: models.RunbookActivationActive})
+	_, err = runtime.NewRunbookActivationService(f.store).Update(t.Context(), f.run.Scope, slack.ID, runtime.UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: models.RunbookActivationActive})
 	resumeRefusedWith(t, err, models.RoutinePausedSourceRemoved)
 	if stored, _ := f.store.GetRunbookActivation(t.Context(), f.run.Scope, slack.ID); stored.Status != models.RunbookActivationPaused || stored.Revision != current.Revision {
 		t.Fatalf("refused resume changed the routine: %#v", stored)
@@ -299,13 +300,13 @@ func TestResumeEventRoutineRechecksSource(t *testing.T) {
 	}
 	// The creator's Google sign-in is gone from the host's catalog.
 	f.dispatcher.SetRoutineEvents(f.offerer, routineGoogleSourcesForTest{
-		{Kind: models.RoutineEventGmailMessage, Source: models.RoutineGoogleSourceRef("user", "g-user"), Label: "your Gmail", Available: false, Reason: RoutineEventSourceNeedsSignIn, SkillID: "google"},
+		{Kind: models.RoutineEventGmailMessage, Source: models.RoutineGoogleSourceRef("user", "g-user"), Label: "your Gmail", Available: false, Reason: runtime.RoutineEventSourceNeedsSignIn, SkillID: "google"},
 	}, true)
 	_, err = f.setRoutineStatus(t, gmail.ID, models.RunbookActivationActive, "resume-gmail-signed-out")
 	resumeRefusedWith(t, err, models.RoutinePausedNeedsSignIn)
 	// A host without a Google catalog cannot vouch for the sign-in either.
 	current, _ = f.store.GetRunbookActivation(t.Context(), f.run.Scope, gmail.ID)
-	_, err = NewRunbookActivationService(f.store).Update(t.Context(), f.run.Scope, gmail.ID, UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: models.RunbookActivationActive})
+	_, err = runtime.NewRunbookActivationService(f.store).Update(t.Context(), f.run.Scope, gmail.ID, runtime.UpdateRunbookActivationRequest{ExpectedRevision: current.Revision, Status: models.RunbookActivationActive})
 	resumeRefusedWith(t, err, models.RoutinePausedNeedsSignIn)
 	f.dispatcher.SetRoutineEvents(f.offerer, f.google, true)
 	if resumed, err := f.setRoutineStatus(t, gmail.ID, models.RunbookActivationActive, "resume-gmail"); err != nil || resumed.Status != models.RunbookActivationActive {

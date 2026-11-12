@@ -1,10 +1,11 @@
-package runtime
+package runtime_test
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
 // A routine may keep an app from its own chat up to date; each occurrence is
@@ -40,16 +41,16 @@ func TestScheduledTaskKeepsOnlyItsChatsAppUpToDate(t *testing.T) {
 				copy["appId"] = appID
 				return copy
 			}
-			_, task, _, err := resolveScheduledTaskCreate(t.Context(), store.(runbookActionStore), nil, routineEventActions{}, run, "", withApp(ours))
+			_, task, _, err := runtime.ResolveScheduledTaskCreate(t.Context(), store.(runtime.RunbookActionStore), nil, runtime.RoutineEventActions{}, run, "", withApp(ours))
 			if err != nil || task.AppID != ours {
 				t.Fatalf("own app: task=%#v err=%v", task, err)
 			}
-			goal := activationGoal(&models.RunbookActivation{Task: task}, nil)
+			goal := runtime.ActivationGoal(&models.RunbookActivation{Task: task}, nil)
 			if !strings.Contains(goal, ours) || !strings.Contains(goal, "save_app_data") {
 				t.Fatalf("occurrence goal does not name the app: %q", goal)
 			}
 			for _, foreign := range []string{"app-" + strings.Repeat("2", 64), "app-" + strings.Repeat("3", 64), "app-" + strings.Repeat("4", 64), "app-" + strings.Repeat("5", 64), "site-1"} {
-				if _, _, _, err := resolveScheduledTaskCreate(t.Context(), store.(runbookActionStore), nil, routineEventActions{}, run, "", withApp(foreign)); err == nil {
+				if _, _, _, err := runtime.ResolveScheduledTaskCreate(t.Context(), store.(runtime.RunbookActionStore), nil, runtime.RoutineEventActions{}, run, "", withApp(foreign)); err == nil {
 					t.Fatalf("routine accepted app %s", foreign)
 				}
 			}

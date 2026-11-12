@@ -1,4 +1,4 @@
-package runtime
+package runtime_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 )
@@ -131,7 +132,7 @@ func TestRoutineEventDispatcherBatchReplay(t *testing.T) {
 		t.Fatalf("pass = %#v", result)
 	}
 	runs := h.eventRuns(activation)
-	if len(runs) != 1 || runs[0].ID != agentrun.RunIDForIdempotencyKey(h.scope, routineEventIdempotencyKey(claimed.ID)) {
+	if len(runs) != 1 || runs[0].ID != agentrun.RunIDForIdempotencyKey(h.scope, runtime.RoutineEventIdempotencyKey(claimed.ID)) {
 		t.Fatalf("runs = %#v", runs)
 	}
 	batch, _ := h.batchOf(runs[0])
@@ -149,7 +150,7 @@ func TestRoutineEventDispatcherBatchReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := startActivationOccurrence(h.ctx, h.store, h.store, h.get(activation), objective, models.RunSourceEvent, routineEventIdempotencyKey(open.ID),
+	created, err := runtime.StartActivationOccurrence(h.ctx, h.store, h.store, h.get(activation), objective, models.RunSourceEvent, runtime.RoutineEventIdempotencyKey(open.ID),
 		map[string]interface{}{models.RoutineEventBatchContextKey: open.ID}, models.ActivityActor{Type: "service", ID: "test"}, models.ActivityVisibilityScope, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -319,7 +320,7 @@ func TestRoutineEventOccurrenceCountSurvivesCrash(t *testing.T) {
 	h.pass()
 	h.finishRuns()
 	// A new process: the count comes from the started batch rows.
-	restarted := NewRoutineEventDispatcher(h.store, h.matcher, models.WithClock(h.clock))
+	restarted := runtime.NewRoutineEventDispatcher(h.store, h.matcher, models.WithClock(h.clock))
 	h.dispatcher = restarted
 	h.offer(activation, 1)
 	// It creates the Run and stops before marking the batch.
@@ -331,7 +332,7 @@ func TestRoutineEventOccurrenceCountSurvivesCrash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := startActivationOccurrence(h.ctx, h.store, h.store, h.get(activation), objective, models.RunSourceEvent, routineEventIdempotencyKey(open.ID),
+	if _, err := runtime.StartActivationOccurrence(h.ctx, h.store, h.store, h.get(activation), objective, models.RunSourceEvent, runtime.RoutineEventIdempotencyKey(open.ID),
 		map[string]interface{}{models.RoutineEventBatchContextKey: open.ID}, models.ActivityActor{Type: "service", ID: "test"}, models.ActivityVisibilityScope, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +450,7 @@ func TestRoutineEventCallableOnlyWhenExhausted(t *testing.T) {
 		}
 	}
 	active := h.routine("not-exhausted", nil)
-	if _, err := NewRunbookActivationService(h.store).Update(h.ctx, h.scope, active.ID, UpdateRunbookActivationRequest{
+	if _, err := runtime.NewRunbookActivationService(h.store).Update(h.ctx, h.scope, active.ID, runtime.UpdateRunbookActivationRequest{
 		ExpectedRevision: active.Revision, Status: models.RunbookActivationPaused, Exhausted: true,
 	}); err == nil {
 		t.Fatal("a paused routine was marked exhausted")
