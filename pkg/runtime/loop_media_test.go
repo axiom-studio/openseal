@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
 // mediaContent serves artifact bytes by content ref; set swaps them.
@@ -42,7 +43,7 @@ func (c *mediaContent) Open(_ context.Context, _ Scope, ref string) (io.ReadClos
 	defer c.mu.Unlock()
 	data, ok := c.byRef[ref]
 	if !ok {
-		return nil, ErrArtifactNotFound
+		return nil, artifactcatalog.ErrArtifactNotFound
 	}
 	return io.NopCloser(bytes.NewReader(data)), nil
 }

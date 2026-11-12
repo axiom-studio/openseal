@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
 type profileImageFixture struct {
@@ -23,13 +24,13 @@ type profileImageFixture struct {
 
 func (f *profileImageFixture) GetArtifact(_ context.Context, scope Scope, id string, version int64) (*Artifact, error) {
 	if scope != f.artifact.Scope || id != f.artifact.ID || version != f.artifact.Version {
-		return nil, ErrArtifactNotFound
+		return nil, artifactcatalog.ErrArtifactNotFound
 	}
 	return f.artifact, nil
 }
 func (f *profileImageFixture) Open(_ context.Context, scope Scope, ref string) (io.ReadCloser, error) {
 	if scope != f.artifact.Scope || ref != f.artifact.ContentRef {
-		return nil, ErrArtifactNotFound
+		return nil, artifactcatalog.ErrArtifactNotFound
 	}
 	f.opened = true
 	return io.NopCloser(bytes.NewReader(f.data)), nil

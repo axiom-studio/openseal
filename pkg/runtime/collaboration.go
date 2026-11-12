@@ -15,6 +15,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/google/uuid"
 )
@@ -2008,7 +2009,7 @@ func (s *CollaborationService) resolveArtifactReferences(ctx context.Context, sc
 			return nil, err
 		}
 		if artifact == nil {
-			return nil, fmt.Errorf("%w: %s version %d", ErrArtifactNotFound, reference.ID, reference.Version)
+			return nil, fmt.Errorf("%w: %s version %d", artifactcatalog.ErrArtifactNotFound, reference.ID, reference.Version)
 		}
 		evidenceRefs := make([]string, 0, len(artifact.Evidence))
 		for _, evidence := range artifact.Evidence {

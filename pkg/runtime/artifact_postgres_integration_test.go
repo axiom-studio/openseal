@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 )
 
@@ -32,7 +33,7 @@ func TestPostgresArtifactCatalogIsConcurrentRecoverableAndScoped(t *testing.T) {
 		wait.Add(1)
 		go func(index int) {
 			defer wait.Done()
-			result, registerErr := NewArtifactCatalog(stores[index%2]).Register(ctx, RegisterArtifactRequest{Artifact: artifact})
+			result, registerErr := artifactcatalog.NewArtifactCatalog(stores[index%2]).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact})
 			if registerErr != nil {
 				errorsSeen <- registerErr
 				return
@@ -56,14 +57,14 @@ func TestPostgresArtifactCatalogIsConcurrentRecoverableAndScoped(t *testing.T) {
 	second.Evidence = append(second.Evidence, EvidenceLink{
 		Relation: EvidenceRelationDerivedFrom, TargetKind: EvidenceTargetArtifact, TargetRef: "postgres-report:1",
 	})
-	if _, err := NewArtifactCatalog(replica).Register(ctx, RegisterArtifactRequest{Artifact: second, ExpectedLatestVersion: 1}); err != nil {
+	if _, err := artifactcatalog.NewArtifactCatalog(replica).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: second, ExpectedLatestVersion: 1}); err != nil {
 		t.Fatal(err)
 	}
-	latest, err := NewArtifactCatalog(primary).Get(ctx, artifact.Scope, artifact.ID, 0)
+	latest, err := artifactcatalog.NewArtifactCatalog(primary).Get(ctx, artifact.Scope, artifact.ID, 0)
 	if err != nil || latest.Version != 2 {
 		t.Fatalf("latest = %#v, %v", latest, err)
 	}
-	listed, err := NewArtifactCatalog(primary).List(ctx, ArtifactFilter{
+	listed, err := artifactcatalog.NewArtifactCatalog(primary).List(ctx, ArtifactFilter{
 		Scope: artifact.Scope, LatestOnly: true, EvidenceTarget: "postgres-report:1",
 	})
 	if err != nil || len(listed) != 1 || listed[0].Version != 2 {

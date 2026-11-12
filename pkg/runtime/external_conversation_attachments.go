@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -65,7 +66,7 @@ func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context,
 	if !ok {
 		return nil, nil, errors.New("artifact catalog is unavailable")
 	}
-	catalog := NewArtifactCatalog(store, models.WithClock(w.now))
+	catalog := artifactcatalog.NewArtifactCatalog(store, models.WithClock(w.now))
 	remaining := MaximumExternalConversationAttachmentBytes
 	for _, file := range event.Attachments {
 		id := stableExternalConversationID(endpoint.Scope, endpoint.ID, "file", event.ExternalMessageID+":"+file.ID)
@@ -115,7 +116,7 @@ func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context,
 		if err != nil {
 			return nil, nil, err
 		}
-		_, err = catalog.Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{ID: id, Version: 1, Scope: endpoint.Scope, Name: file.Name, MediaType: mediaType, ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: ArtifactClassificationConfidential, CreatedAt: event.OccurredAt,
+		_, err = catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &Artifact{ID: id, Version: 1, Scope: endpoint.Scope, Name: file.Name, MediaType: mediaType, ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: ArtifactClassificationConfidential, CreatedAt: event.OccurredAt,
 			Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "service", ID: externalConversationActorID}, Owner: &owner, ConversationID: conversation.ID, SpaceID: conversation.SpaceID}, Metadata: map[string]interface{}{"provider": endpoint.Provider, "providerFileId": file.ID, "externalMessageId": event.ExternalMessageID}}})
 		if err != nil {
 			return nil, nil, err

@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
 const (
@@ -59,7 +60,7 @@ func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Contex
 	}
 	reference := ConversationReference{Kind: ConversationReferenceArtifact, ID: id, Version: 1}
 	existing, err := r.artifacts.GetArtifact(ctx, run.Scope, id, 1)
-	if err != nil && !errors.Is(err, ErrArtifactNotFound) {
+	if err != nil && !errors.Is(err, artifactcatalog.ErrArtifactNotFound) {
 		return ConversationReference{}, err
 	}
 	if existing != nil {
@@ -95,11 +96,11 @@ func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Contex
 		componentTypes = append(componentTypes, component.Type)
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	placement := ArtifactPlacement{}
+	placement := artifactcatalog.ArtifactPlacement{}
 	if r.conversations != nil {
 		placement.Conversations = r.conversations
 	}
-	_, err = NewArtifactCatalog(r.artifacts, models.WithClock(r.now)).WithPlacement(placement).Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{
+	_, err = artifactcatalog.NewArtifactCatalog(r.artifacts, models.WithClock(r.now)).WithPlacement(placement).Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: &Artifact{
 		ID: id, Version: 1, Scope: run.Scope, Name: name,
 		Type: presentation.ArtifactType, MediaType: presentation.MediaType,
 		ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: ArtifactClassificationInternal,

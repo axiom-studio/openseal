@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
 type retentionContentStore struct{ available map[string]bool }
@@ -23,7 +24,7 @@ func (s *retentionContentStore) Delete(_ context.Context, _ Scope, ref string) (
 func TestArtifactRetentionSweepDeletesDueBytesAndPreservesLegalHold(t *testing.T) {
 	ctx := t.Context()
 	store := newTestKernelStore(t)
-	catalog := NewArtifactCatalog(store)
+	catalog := artifactcatalog.NewArtifactCatalog(store)
 	now := time.Date(2026, 7, 13, 1, 0, 0, 0, time.UTC)
 	for _, fixture := range []struct {
 		id      string
@@ -38,12 +39,12 @@ func TestArtifactRetentionSweepDeletesDueBytesAndPreservesLegalHold(t *testing.T
 		artifact.ContentRef = "content:" + fixture.id
 		artifact.Digest = digestFor(fixture.id)
 		artifact.Retention = ArtifactRetention{ExpiresAt: &fixture.expires, LegalHold: fixture.hold}
-		if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: artifact}); err != nil {
+		if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	content := &retentionContentStore{available: map[string]bool{"content:due": true, "content:held": true, "content:future": true}}
-	service, err := NewArtifactRetentionService(store, content, content, models.WithClock(func() time.Time { return now }))
+	service, err := artifactcatalog.NewArtifactRetentionService(store, content, content, models.WithClock(func() time.Time { return now }))
 	if err != nil {
 		t.Fatal(err)
 	}

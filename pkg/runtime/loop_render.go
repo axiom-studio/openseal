@@ -12,6 +12,8 @@ import (
 	"mime"
 	"strconv"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 )
 
 // Session path rendering (SPEC §3.6): projectSessionPath turns the stored
@@ -447,7 +449,7 @@ func (r *sessionRenderer) artifactImage(ctx context.Context, part ContentPart) (
 		return nil, nil
 	}
 	artifact, err := r.opts.Artifacts.GetArtifact(ctx, r.scope, part.ArtifactID, version)
-	if errors.Is(err, ErrArtifactNotFound) {
+	if errors.Is(err, artifactcatalog.ErrArtifactNotFound) {
 		return nil, nil
 	}
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/postgres"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -48,12 +49,12 @@ func TestArtifactCatalogRecordsTheChatAndSpaceAnArtifactWasMadeIn(t *testing.T) 
 		"chat-sales":  {ID: "chat-sales", SpaceID: "space-sales"},
 		"chat-design": {ID: "chat-design", SpaceID: "space-design"},
 	}}
-	catalog := NewArtifactCatalog(newTestKernelStore(t)).WithPlacement(ArtifactPlacement{Runs: runs, Conversations: conversations})
+	catalog := artifactcatalog.NewArtifactCatalog(newTestKernelStore(t)).WithPlacement(artifactcatalog.ArtifactPlacement{Runs: runs, Conversations: conversations})
 	register := func(id string, mutate func(*Artifact)) ArtifactProvenance {
 		t.Helper()
 		artifact := validCatalogArtifact(id, 1)
 		mutate(artifact)
-		result, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: artifact})
+		result, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact})
 		if err != nil {
 			t.Fatalf("register %s: %v", id, err)
 		}
@@ -107,20 +108,20 @@ func TestArtifactCatalogRecordsTheChatAndSpaceAnArtifactWasMadeIn(t *testing.T) 
 	// A replay resolves the same placement, so it matches the stored fingerprint.
 	replay := validCatalogArtifact("placed-0", 1)
 	replay.Provenance.RunID = "run-chat"
-	if result, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: replay}); err != nil || !result.Replayed {
+	if result, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: replay}); err != nil || !result.Replayed {
 		t.Fatalf("replay = %#v, %v", result, err)
 	}
 }
 
 func TestArtifactPlacementFailsOnConversationLookupErrors(t *testing.T) {
 	lookupErr := errors.New("conversation store unavailable")
-	catalog := NewArtifactCatalog(newTestKernelStore(t)).WithPlacement(ArtifactPlacement{
+	catalog := artifactcatalog.NewArtifactCatalog(newTestKernelStore(t)).WithPlacement(artifactcatalog.ArtifactPlacement{
 		Runs:          placementRuns{"run-chat": {ID: "run-chat", Context: map[string]interface{}{"conversationId": "chat-sales"}}},
 		Conversations: placementConversations{err: lookupErr},
 	})
 	artifact := validCatalogArtifact("placement-error", 1)
 	artifact.Provenance.RunID = "run-chat"
-	if _, err := catalog.Register(context.Background(), RegisterArtifactRequest{Artifact: artifact}); !errors.Is(err, lookupErr) {
+	if _, err := catalog.Register(context.Background(), artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); !errors.Is(err, lookupErr) {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -134,7 +135,7 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 	defer sqlite.Close()
 	stamp := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
 	clock := models.WithClock(func() time.Time { return stamp })
-	catalogs := []*ArtifactCatalog{NewArtifactCatalog(newTestKernelStore(t), clock), NewArtifactCatalog(sqlite, clock)}
+	catalogs := []*artifactcatalog.ArtifactCatalog{artifactcatalog.NewArtifactCatalog(newTestKernelStore(t), clock), artifactcatalog.NewArtifactCatalog(sqlite, clock)}
 	for _, catalog := range catalogs {
 		for i := 0; i < 90; i++ {
 			artifact := validCatalogArtifact(fmt.Sprintf("asset-%03d", i), 1)
@@ -145,7 +146,7 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 			case 2:
 				artifact.Provenance.ConversationID, artifact.Provenance.SpaceID = "chat-design", "space-design"
 			}
-			if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: artifact}); err != nil {
+			if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -154,12 +155,12 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 		moved := validCatalogArtifact("asset-001", 2)
 		moved.ContentRef, moved.Digest = "object-store:asset-001-v2", digestFor("asset-001-v2")
 		moved.Provenance.ConversationID, moved.Provenance.SpaceID = "chat-design", "space-design"
-		if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: moved, ExpectedLatestVersion: 1}); err != nil {
+		if _, err := catalog.Register(ctx, artifactcatalog.RegisterArtifactRequest{Artifact: moved, ExpectedLatestVersion: 1}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	scope := Scope{Kind: "tenant", ID: "one"}
-	listAll := func(catalog *ArtifactCatalog, filter ArtifactFilter) []string {
+	listAll := func(catalog *artifactcatalog.ArtifactCatalog, filter ArtifactFilter) []string {
 		t.Helper()
 		var ids []string
 		for filter.Offset = 0; ; filter.Offset += filter.Limit {
@@ -201,14 +202,14 @@ func TestArtifactCatalogFiltersBySpaceAndChatWithStablePages(t *testing.T) {
 }
 
 func TestArtifactRejectsInvalidPlacementIdentifiers(t *testing.T) {
-	catalog := NewArtifactCatalog(newTestKernelStore(t))
+	catalog := artifactcatalog.NewArtifactCatalog(newTestKernelStore(t))
 	for name, mutate := range map[string]func(*Artifact){
 		"conversation": func(a *Artifact) { a.Provenance.ConversationID = "chats/sales" },
 		"space":        func(a *Artifact) { a.Provenance.SpaceID = strings.Repeat("s", 129) },
 	} {
 		artifact := validCatalogArtifact("bad-"+name, 1)
 		mutate(artifact)
-		if _, err := catalog.Register(context.Background(), RegisterArtifactRequest{Artifact: artifact}); !errors.Is(err, ErrInvalidArtifactRecord) {
+		if _, err := catalog.Register(context.Background(), artifactcatalog.RegisterArtifactRequest{Artifact: artifact}); !errors.Is(err, ErrInvalidArtifactRecord) {
 			t.Fatalf("%s: error = %v", name, err)
 		}
 	}
@@ -221,7 +222,7 @@ func TestKernelStoresProvideArtifactPlacementLookups(t *testing.T) {
 	}
 	defer sqlite.Close()
 	for name, store := range map[string]any{"sqlite": sqlite, "postgres": &postgres.Store{}} {
-		if placement := NewStoreArtifactPlacement(store); placement.Runs == nil || placement.Conversations == nil {
+		if placement := artifactcatalog.NewStoreArtifactPlacement(store); placement.Runs == nil || placement.Conversations == nil {
 			t.Fatalf("%s store placement = %#v", name, placement)
 		}
 	}
