@@ -35,7 +35,7 @@ func TestAgentRunActingUserIsImmutable(t *testing.T) {
 	})
 }
 
-func actingUserPostgresStore(t *testing.T) *PostgresStore {
+func actingUserPostgresStore(t *testing.T) *Store {
 	t.Helper()
 	pgSchema := storetest.NewPostgresSchema(t, "openseal_acting_user_")
 	dsn := pgSchema.DSN

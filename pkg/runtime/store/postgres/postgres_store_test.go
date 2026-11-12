@@ -54,7 +54,7 @@ func TestPostgresStoreRejectsInvalidMigrationLockBudgetsBeforeConnecting(t *test
 }
 
 func TestPostgresMigrationRollbackRejectsInvalidTarget(t *testing.T) {
-	store := &PostgresStore{}
+	store := &Store{}
 	if err := store.RollbackPostgresMigrations(context.Background(), currentPostgresSchemaVersion+1); err == nil {
 		t.Fatal("invalid migration target was accepted")
 	}

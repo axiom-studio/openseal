@@ -12,7 +12,7 @@ const spaceAccessMigrationVersion int64 = 84
 
 // migrateSpaceAccess is PostgreSQL migration 84. Every existing space becomes
 // "owner": only its owner sees it until they share it.
-func (s *PostgresStore) migrateSpaceAccess(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateSpaceAccess(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, spaceAccessMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -52,7 +52,7 @@ func (s *PostgresStore) migrateSpaceAccess(ctx context.Context, tx *sql.Tx) erro
 
 // rollbackSpaceAccess restores created_by. Each space's access and the
 // people added to it are lost.
-func (s *PostgresStore) rollbackSpaceAccess(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) rollbackSpaceAccess(ctx context.Context, tx *sql.Tx) error {
 	// A rollback may run again after an earlier one already took the spaces
 	// table or this migration's columns away.
 	_, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+s.table("space_people")+`;

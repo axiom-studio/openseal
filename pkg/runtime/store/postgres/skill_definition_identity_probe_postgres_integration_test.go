@@ -27,7 +27,7 @@ func TestPostgresSkillDefinitionIdentityProbeUsesLiveIndexedMetadata(t *testing.
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	open := func(schema string) *PostgresStore {
+	open := func(schema string) *Store {
 		t.Helper()
 		store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 		if err != nil {

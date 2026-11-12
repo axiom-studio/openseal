@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
-func createSQLiteDependencySource(t *testing.T, store *sqlite.SQLiteStore, scope Scope, id string) {
+func createSQLiteDependencySource(t *testing.T, store *sqlite.Store, scope Scope, id string) {
 	t.Helper()
 	now := time.Date(2026, 7, 10, 14, 0, 0, 0, time.UTC)
 	err := store.CreateAgentRun(context.Background(), &AgentRun{

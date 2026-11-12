@@ -21,13 +21,13 @@ import (
 
 // newAgentSessionPostgresStores opens n PostgresStores (replicas) on one fresh
 // schema. The schema is dropped when the test ends.
-func newAgentSessionPostgresStores(t *testing.T, n int) []*PostgresStore {
+func newAgentSessionPostgresStores(t *testing.T, n int) []*Store {
 	t.Helper()
 	pgSchema := storetest.NewPostgresSchema(t, "agent_session_")
 	dsn := pgSchema.DSN
 	schema := pgSchema.Name
 	ctx := context.Background()
-	stores := make([]*PostgresStore, n)
+	stores := make([]*Store, n)
 	for i := range stores {
 		store, err := NewPostgresStore(ctx, dsn, WithPostgresSchema(schema))
 		if err != nil {
@@ -57,7 +57,7 @@ func TestPostgresAgentSessionStore(t *testing.T) {
 
 // createPostgresRunSessionInOwnTx runs the store's in-transaction
 // createRunAgentSessionTx helper in a transaction of its own.
-func createPostgresRunSessionInOwnTx(ctx context.Context, s *PostgresStore, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
+func createPostgresRunSessionInOwnTx(ctx context.Context, s *Store, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -77,7 +77,7 @@ func createPostgresRunSessionInOwnTx(ctx context.Context, s *PostgresStore, req 
 // by two replicas of one database.
 type sessionReplicaFixture struct {
 	*storetest.SessionFixture
-	replicas []*PostgresStore
+	replicas []*Store
 	leased   *models.AgentRun
 	lane     *models.AgentSession
 }

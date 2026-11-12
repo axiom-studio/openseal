@@ -9,18 +9,18 @@ import (
 )
 
 type countingFinalReplyStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	pages int
 }
 
 func (s *countingFinalReplyStore) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
 	s.pages++
-	return s.SQLiteStore.ListChannelMessages(ctx, filter)
+	return s.Store.ListChannelMessages(ctx, filter)
 }
 
 func TestExternalFinalFailureAnswerSurvivesBusyChannel(t *testing.T) {
 	ctx := t.Context()
-	store := &countingFinalReplyStore{SQLiteStore: newTestKernelStore(t)}
+	store := &countingFinalReplyStore{Store: newTestKernelStore(t)}
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "17"}
 	seedTestSpace(t, store, scope)

@@ -13,7 +13,7 @@ import (
 // designation) moves onto the roster members that held it.
 const teamMembersMigrationVersion int64 = 85
 
-func (s *PostgresStore) teamMembersMigration(ctx context.Context, tx *sql.Tx) sqlstore.TeamMembersMigration {
+func (s *Store) teamMembersMigration(ctx context.Context, tx *sql.Tx) sqlstore.TeamMembersMigration {
 	return sqlstore.TeamMembersMigration{
 		Ctx: ctx, DB: tx, Table: s.table, Placeholder: func(n int) string { return fmt.Sprintf("$%d", n) },
 		Exists: func(table string) (bool, error) {
@@ -25,7 +25,7 @@ func (s *PostgresStore) teamMembersMigration(ctx context.Context, tx *sql.Tx) sq
 }
 
 // migrateTeamMembers is PostgreSQL migration 85.
-func (s *PostgresStore) migrateTeamMembers(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateTeamMembers(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, teamMembersMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -39,6 +39,6 @@ func (s *PostgresStore) migrateTeamMembers(ctx context.Context, tx *sql.Tx) erro
 }
 
 // rollbackTeamMembers restores role slots for a kernel that requires them.
-func (s *PostgresStore) rollbackTeamMembers(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) rollbackTeamMembers(ctx context.Context, tx *sql.Tx) error {
 	return s.teamMembersMigration(ctx, tx).Down()
 }

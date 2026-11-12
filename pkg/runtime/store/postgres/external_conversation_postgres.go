@@ -15,7 +15,7 @@ import (
 
 const externalConversationTransportMigrationVersion int64 = 26
 
-func (s *PostgresStore) migrateExternalConversations(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateExternalConversations(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("external_conversation_endpoints")+` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
@@ -84,7 +84,7 @@ func (s *PostgresStore) migrateExternalConversations(ctx context.Context, tx *sq
 	return err
 }
 
-func (s *PostgresStore) CreateExternalConversationEndpoint(ctx context.Context, endpoint *models.ExternalConversationEndpoint) error {
+func (s *Store) CreateExternalConversationEndpoint(ctx context.Context, endpoint *models.ExternalConversationEndpoint) error {
 	if err := endpoint.Validate(); err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func (s *PostgresStore) CreateExternalConversationEndpoint(ctx context.Context, 
 	return err
 }
 
-func (s *PostgresStore) GetExternalConversationEndpointByIngressRoute(ctx context.Context, route string) (*models.ExternalConversationEndpoint, error) {
+func (s *Store) GetExternalConversationEndpointByIngressRoute(ctx context.Context, route string) (*models.ExternalConversationEndpoint, error) {
 	route = strings.TrimSpace(route)
 	if !models.IsValidOpaqueIdentifier(route, 128) {
 		return nil, models.ErrInvalidExternalConversation
@@ -114,7 +114,7 @@ func (s *PostgresStore) GetExternalConversationEndpointByIngressRoute(ctx contex
 		route))
 }
 
-func (s *PostgresStore) GetExternalConversationEndpoint(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationEndpoint, error) {
+func (s *Store) GetExternalConversationEndpoint(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationEndpoint, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (s *PostgresStore) GetExternalConversationEndpoint(ctx context.Context, sco
 		scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *PostgresStore) ListExternalConversationEndpoints(ctx context.Context, filter models.ExternalConversationEndpointFilter) ([]*models.ExternalConversationEndpoint, error) {
+func (s *Store) ListExternalConversationEndpoints(ctx context.Context, filter models.ExternalConversationEndpointFilter) ([]*models.ExternalConversationEndpoint, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func (s *PostgresStore) ListExternalConversationEndpoints(ctx context.Context, f
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) ListExternalConversationEndpointsByVerifiedRoute(
+func (s *Store) ListExternalConversationEndpointsByVerifiedRoute(
 	ctx context.Context,
 	route models.ExternalConversationVerifiedRoute,
 ) ([]*models.ExternalConversationEndpoint, error) {
@@ -199,11 +199,11 @@ func (s *PostgresStore) ListExternalConversationEndpointsByVerifiedRoute(
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) UpdateExternalConversationEndpoint(ctx context.Context, endpoint *models.ExternalConversationEndpoint, expectedRevision int64) error {
+func (s *Store) UpdateExternalConversationEndpoint(ctx context.Context, endpoint *models.ExternalConversationEndpoint, expectedRevision int64) error {
 	return s.updateExternalConversationEndpoint(ctx, s.db, endpoint, expectedRevision)
 }
 
-func (s *PostgresStore) updateExternalConversationEndpoint(ctx context.Context, executor sqlstore.Execer, endpoint *models.ExternalConversationEndpoint, expectedRevision int64) error {
+func (s *Store) updateExternalConversationEndpoint(ctx context.Context, executor sqlstore.Execer, endpoint *models.ExternalConversationEndpoint, expectedRevision int64) error {
 	if err := endpoint.Validate(); err != nil {
 		return err
 	}
@@ -225,7 +225,7 @@ func (s *PostgresStore) updateExternalConversationEndpoint(ctx context.Context, 
 	return nil
 }
 
-func (s *PostgresStore) ReceiveExternalConversationEvent(ctx context.Context, item *models.ExternalConversationInboxItem) (*models.ExternalConversationInboxItem, bool, error) {
+func (s *Store) ReceiveExternalConversationEvent(ctx context.Context, item *models.ExternalConversationInboxItem) (*models.ExternalConversationInboxItem, bool, error) {
 	if err := item.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -283,7 +283,7 @@ func (s *PostgresStore) ReceiveExternalConversationEvent(ctx context.Context, it
 	return models.CloneExternalConversationInboxItem(item), false, nil
 }
 
-func (s *PostgresStore) GetExternalConversationInboxItem(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationInboxItem, error) {
+func (s *Store) GetExternalConversationInboxItem(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationInboxItem, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -292,7 +292,7 @@ func (s *PostgresStore) GetExternalConversationInboxItem(ctx context.Context, sc
 		scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *PostgresStore) ListExternalConversationInbox(ctx context.Context, filter models.ExternalConversationInboxFilter) ([]*models.ExternalConversationInboxItem, error) {
+func (s *Store) ListExternalConversationInbox(ctx context.Context, filter models.ExternalConversationInboxFilter) ([]*models.ExternalConversationInboxItem, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -333,7 +333,7 @@ func (s *PostgresStore) ListExternalConversationInbox(ctx context.Context, filte
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) ClaimExternalConversationInbox(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.ExternalConversationInboxItem, error) {
+func (s *Store) ClaimExternalConversationInbox(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.ExternalConversationInboxItem, error) {
 	if scope.Validate() != nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(worker), 256) || now.IsZero() || leaseDuration <= 0 {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -397,7 +397,7 @@ func (s *PostgresStore) ClaimExternalConversationInbox(ctx context.Context, scop
 	return item, nil
 }
 
-func (s *PostgresStore) SaveExternalConversationInbox(ctx context.Context, item *models.ExternalConversationInboxItem, expectedRevision int64, leaseOwner string) error {
+func (s *Store) SaveExternalConversationInbox(ctx context.Context, item *models.ExternalConversationInboxItem, expectedRevision int64, leaseOwner string) error {
 	if err := item.Validate(); err != nil {
 		return err
 	}
@@ -435,7 +435,7 @@ func (s *PostgresStore) SaveExternalConversationInbox(ctx context.Context, item 
 	return tx.Commit()
 }
 
-func (s *PostgresStore) GetExternalConversationMapping(ctx context.Context, scope models.Scope, endpointID, externalConversationID, externalThreadID string) (*models.ExternalConversationMapping, error) {
+func (s *Store) GetExternalConversationMapping(ctx context.Context, scope models.Scope, endpointID, externalConversationID, externalThreadID string) (*models.ExternalConversationMapping, error) {
 	if scope.Validate() != nil {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -444,7 +444,7 @@ func (s *PostgresStore) GetExternalConversationMapping(ctx context.Context, scop
 		scope.Kind, scope.ID, endpointID, externalConversationID, externalThreadID))
 }
 
-func (s *PostgresStore) SaveExternalConversationMapping(ctx context.Context, mapping *models.ExternalConversationMapping, expectedRevision int64) error {
+func (s *Store) SaveExternalConversationMapping(ctx context.Context, mapping *models.ExternalConversationMapping, expectedRevision int64) error {
 	if err := mapping.Validate(); err != nil {
 		return err
 	}
@@ -477,7 +477,7 @@ func (s *PostgresStore) SaveExternalConversationMapping(ctx context.Context, map
 	return err
 }
 
-func (s *PostgresStore) GetExternalParticipantMapping(ctx context.Context, scope models.Scope, endpointID, externalParticipantID string) (*models.ExternalParticipantMapping, error) {
+func (s *Store) GetExternalParticipantMapping(ctx context.Context, scope models.Scope, endpointID, externalParticipantID string) (*models.ExternalParticipantMapping, error) {
 	if scope.Validate() != nil {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -486,7 +486,7 @@ func (s *PostgresStore) GetExternalParticipantMapping(ctx context.Context, scope
 		scope.Kind, scope.ID, endpointID, externalParticipantID))
 }
 
-func (s *PostgresStore) SaveExternalParticipantMapping(ctx context.Context, mapping *models.ExternalParticipantMapping, expectedRevision int64) error {
+func (s *Store) SaveExternalParticipantMapping(ctx context.Context, mapping *models.ExternalParticipantMapping, expectedRevision int64) error {
 	if err := mapping.Validate(); err != nil {
 		return err
 	}
@@ -519,7 +519,7 @@ func (s *PostgresStore) SaveExternalParticipantMapping(ctx context.Context, mapp
 	return err
 }
 
-func (s *PostgresStore) GetExternalMessageMapping(ctx context.Context, scope models.Scope, endpointID string, direction models.ExternalMessageDirection, externalMessageID string) (*models.ExternalMessageMapping, error) {
+func (s *Store) GetExternalMessageMapping(ctx context.Context, scope models.Scope, endpointID string, direction models.ExternalMessageDirection, externalMessageID string) (*models.ExternalMessageMapping, error) {
 	if scope.Validate() != nil {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -528,7 +528,7 @@ func (s *PostgresStore) GetExternalMessageMapping(ctx context.Context, scope mod
 		scope.Kind, scope.ID, endpointID, direction, externalMessageID))
 }
 
-func (s *PostgresStore) SaveExternalMessageMapping(ctx context.Context, mapping *models.ExternalMessageMapping, expectedRevision int64) error {
+func (s *Store) SaveExternalMessageMapping(ctx context.Context, mapping *models.ExternalMessageMapping, expectedRevision int64) error {
 	if err := mapping.Validate(); err != nil {
 		return err
 	}
@@ -562,7 +562,7 @@ func (s *PostgresStore) SaveExternalMessageMapping(ctx context.Context, mapping 
 	return err
 }
 
-func (s *PostgresStore) EnqueueExternalConversationDelivery(ctx context.Context, delivery *models.ExternalConversationDelivery) (*models.ExternalConversationDelivery, bool, error) {
+func (s *Store) EnqueueExternalConversationDelivery(ctx context.Context, delivery *models.ExternalConversationDelivery) (*models.ExternalConversationDelivery, bool, error) {
 	if err := delivery.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -651,7 +651,7 @@ func (s *PostgresStore) EnqueueExternalConversationDelivery(ctx context.Context,
 	return models.CloneExternalConversationDelivery(delivery), false, nil
 }
 
-func (s *PostgresStore) GetExternalConversationDelivery(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationDelivery, error) {
+func (s *Store) GetExternalConversationDelivery(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationDelivery, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -659,7 +659,7 @@ func (s *PostgresStore) GetExternalConversationDelivery(ctx context.Context, sco
 		WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *PostgresStore) ListExternalConversationDeliveries(ctx context.Context, filter models.ExternalConversationDeliveryFilter) ([]*models.ExternalConversationDelivery, error) {
+func (s *Store) ListExternalConversationDeliveries(ctx context.Context, filter models.ExternalConversationDeliveryFilter) ([]*models.ExternalConversationDelivery, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -710,7 +710,7 @@ func (s *PostgresStore) ListExternalConversationDeliveries(ctx context.Context, 
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) ClaimExternalConversationDelivery(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.ExternalConversationDelivery, error) {
+func (s *Store) ClaimExternalConversationDelivery(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.ExternalConversationDelivery, error) {
 	if scope.Validate() != nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(worker), 256) || now.IsZero() || leaseDuration <= 0 {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -774,7 +774,7 @@ func (s *PostgresStore) ClaimExternalConversationDelivery(ctx context.Context, s
 	return delivery, nil
 }
 
-func (s *PostgresStore) SaveExternalConversationDelivery(ctx context.Context, delivery *models.ExternalConversationDelivery, expectedRevision int64, leaseOwner string) error {
+func (s *Store) SaveExternalConversationDelivery(ctx context.Context, delivery *models.ExternalConversationDelivery, expectedRevision int64, leaseOwner string) error {
 	if err := delivery.Validate(); err != nil {
 		return err
 	}
@@ -821,11 +821,11 @@ func nullablePostgresTime(value time.Time) interface{} {
 }
 
 var (
-	_ models.ExternalConversationEndpointStore  = (*PostgresStore)(nil)
-	_ models.ExternalConversationTransportStore = (*PostgresStore)(nil)
+	_ models.ExternalConversationEndpointStore  = (*Store)(nil)
+	_ models.ExternalConversationTransportStore = (*Store)(nil)
 )
 
-func (s *PostgresStore) SaveExternalConversationReplyProgress(ctx context.Context, scope models.Scope, id string, expectedRevision int64, progress models.ExternalConversationReplyProgress) error {
+func (s *Store) SaveExternalConversationReplyProgress(ctx context.Context, scope models.Scope, id string, expectedRevision int64, progress models.ExternalConversationReplyProgress) error {
 	if scope.Validate() != nil {
 		return models.ErrInvalidExternalConversation
 	}

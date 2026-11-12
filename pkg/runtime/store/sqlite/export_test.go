@@ -10,7 +10,7 @@ import (
 // CreateRunSessionInOwnTx runs the store's in-transaction
 // createRunAgentSessionTx in a write transaction of its own. It is the hook
 // storetest.RunAgentSessionContract forks sessions through.
-func CreateRunSessionInOwnTx(ctx context.Context, s *SQLiteStore, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
+func CreateRunSessionInOwnTx(ctx context.Context, s *Store, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
 	var result *models.OpenAgentSessionResult
 	err := s.withImmediateTx(ctx, func(conn *sql.Conn) error {
 		var err error

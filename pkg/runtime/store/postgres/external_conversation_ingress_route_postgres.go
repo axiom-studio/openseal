@@ -7,7 +7,7 @@ import (
 
 const externalConversationIngressRouteMigrationVersion int64 = 27
 
-func (s *PostgresStore) migrateExternalConversationIngressRoutes(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateExternalConversationIngressRoutes(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		ALTER TABLE `+s.table("external_conversation_endpoints")+`
 			ADD COLUMN IF NOT EXISTS ingress_route TEXT;

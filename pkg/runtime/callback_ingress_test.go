@@ -288,7 +288,7 @@ func TestCallbackRegistryAndReceiptsSurviveSQLiteRestart(t *testing.T) {
 	}
 }
 
-func newCallbackCatalog(t *testing.T, ctx context.Context, store *sqlite.SQLiteStore) *skillCatalogAdapter {
+func newCallbackCatalog(t *testing.T, ctx context.Context, store *sqlite.Store) *skillCatalogAdapter {
 	t.Helper()
 	catalog := newSkillCatalogAdapter(store)
 	registerCallbackFixture(t, ctx, catalog.Catalog)
@@ -299,7 +299,7 @@ func newCallbackCatalog(t *testing.T, ctx context.Context, store *sqlite.SQLiteS
 // the callback resolver/store relationship explicit.
 type skillCatalogAdapter struct{ *skill.Catalog }
 
-func newSkillCatalogAdapter(store *sqlite.SQLiteStore) *skillCatalogAdapter {
+func newSkillCatalogAdapter(store *sqlite.Store) *skillCatalogAdapter {
 	return &skillCatalogAdapter{Catalog: skill.NewCatalogWithStore(store)}
 }
 

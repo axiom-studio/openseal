@@ -282,13 +282,13 @@ func governedActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 	return catalog, scope
 }
 
-func claimedActionRun(t *testing.T, store *sqlite.SQLiteStore, scope Scope, now time.Time, worker string) *AgentRun {
+func claimedActionRun(t *testing.T, store *sqlite.Store, scope Scope, now time.Time, worker string) *AgentRun {
 	t.Helper()
 	return claimedOwnedActionRun(t, store, scope, now, worker, ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"})
 }
 
 // claimedOwnedActionRun claims a run of release-agent under owner.
-func claimedOwnedActionRun(t *testing.T, store *sqlite.SQLiteStore, scope Scope, now time.Time, worker string, owner ObjectiveOwner) *AgentRun {
+func claimedOwnedActionRun(t *testing.T, store *sqlite.Store, scope Scope, now time.Time, worker string, owner ObjectiveOwner) *AgentRun {
 	t.Helper()
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }

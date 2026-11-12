@@ -13,14 +13,14 @@ func migrateCredentialRequests(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) GetCredentialRequest(ctx context.Context, scope models.Scope, id string) (*models.CredentialRequest, error) {
+func (s *Store) GetCredentialRequest(ctx context.Context, scope models.Scope, id string) (*models.CredentialRequest, error) {
 	return sqlstore.GetCredentialRequest(ctx, s.db, "credential_requests", scope, id)
 }
 
-func (s *SQLiteStore) ListCredentialRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.CredentialRequest, error) {
+func (s *Store) ListCredentialRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.CredentialRequest, error) {
 	return sqlstore.ListCredentialRequests(ctx, s.db, "credential_requests", scope, deploymentID, conversationID)
 }
 
-func (s *SQLiteStore) SaveCredentialRequest(ctx context.Context, r *models.CredentialRequest, expected int64) error {
+func (s *Store) SaveCredentialRequest(ctx context.Context, r *models.CredentialRequest, expected int64) error {
 	return sqlstore.SaveCredentialRequest(ctx, s.db, "credential_requests", r, expected)
 }

@@ -8,9 +8,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-var _ models.RunDependencyReconciliationStore = (*PostgresStore)(nil)
+var _ models.RunDependencyReconciliationStore = (*Store)(nil)
 
-func (s *PostgresStore) ListWaitingRunDependencyGroups(ctx context.Context, scope models.Scope, afterID string, limit int) ([]models.RunDependencyGroupWork, error) {
+func (s *Store) ListWaitingRunDependencyGroups(ctx context.Context, scope models.Scope, afterID string, limit int) ([]models.RunDependencyGroupWork, error) {
 	if err := models.ValidateWaitingDependencyGroupPage(scope, afterID, limit); err != nil {
 		return nil, err
 	}
@@ -38,7 +38,7 @@ func (s *PostgresStore) ListWaitingRunDependencyGroups(ctx context.Context, scop
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) ReconcileRunDependencyGroup(ctx context.Context, record models.RunDependencyGroupReconciliationRecord) (*models.RunDependencyResult, error) {
+func (s *Store) ReconcileRunDependencyGroup(ctx context.Context, record models.RunDependencyGroupReconciliationRecord) (*models.RunDependencyResult, error) {
 	if err := models.ValidateDependencyGroupReconciliationRecord(record); err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (s *PostgresStore) ReconcileRunDependencyGroup(ctx context.Context, record 
 	return result, nil
 }
 
-func (s *PostgresStore) persistPostgresDependencyResult(ctx context.Context, tx *sql.Tx, group *models.RunDependencyGroup, edges []*models.RunDependency, source *models.AgentRun, result *models.RunDependencyResult) error {
+func (s *Store) persistPostgresDependencyResult(ctx context.Context, tx *sql.Tx, group *models.RunDependencyGroup, edges []*models.RunDependency, source *models.AgentRun, result *models.RunDependencyResult) error {
 	previous := make(map[string]int64, len(edges))
 	for _, edge := range edges {
 		previous[edge.ID] = edge.Revision

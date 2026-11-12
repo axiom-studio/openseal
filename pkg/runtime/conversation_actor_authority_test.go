@@ -11,7 +11,7 @@ import (
 )
 
 type conversationActorFixture struct {
-	store        *sqlite.SQLiteStore
+	store        *sqlite.Store
 	service      *ConversationService
 	scheduler    *ConversationRunScheduler
 	conversation *Conversation

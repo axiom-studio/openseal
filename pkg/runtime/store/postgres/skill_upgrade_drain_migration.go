@@ -9,7 +9,7 @@ import (
 
 const skillUpgradeDrainMigrationVersion int64 = 52
 
-func (s *PostgresStore) migrateSkillUpgradeDrain(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateSkillUpgradeDrain(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, skillUpgradeDrainMigrationVersion)
 	if err != nil || applied {
 		return err

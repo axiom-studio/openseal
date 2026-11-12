@@ -75,7 +75,7 @@ func TestPostgresMigration79DropsEventSources(t *testing.T) {
 	assertSchemaCurrent(t, ctx, again)
 }
 
-func assertNoEventSourceTables(t *testing.T, ctx context.Context, store *PostgresStore) {
+func assertNoEventSourceTables(t *testing.T, ctx context.Context, store *Store) {
 	t.Helper()
 	for _, table := range sqlstore.LegacyEventSourceTables {
 		var relation sql.NullString
@@ -85,7 +85,7 @@ func assertNoEventSourceTables(t *testing.T, ctx context.Context, store *Postgre
 	}
 }
 
-func assertSchemaCurrent(t *testing.T, ctx context.Context, store *PostgresStore) {
+func assertSchemaCurrent(t *testing.T, ctx context.Context, store *Store) {
 	t.Helper()
 	current, version, err := store.postgresSchemaCurrent(ctx, store.db)
 	if err != nil || !current || version != currentPostgresSchemaVersion {

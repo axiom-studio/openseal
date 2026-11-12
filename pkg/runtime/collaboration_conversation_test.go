@@ -10,19 +10,19 @@ import (
 )
 
 type countingConversationStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	conversationReads int
 }
 
 func (s *countingConversationStore) GetConversation(ctx context.Context, scope Scope, id string) (*Conversation, error) {
 	s.conversationReads++
-	return s.SQLiteStore.GetConversation(ctx, scope, id)
+	return s.Store.GetConversation(ctx, scope, id)
 }
 
 func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t *testing.T) {
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "deleted-conversation-projection"}
-	store := &countingConversationStore{SQLiteStore: newTestKernelStore(t)}
+	store := &countingConversationStore{Store: newTestKernelStore(t)}
 	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "requester"}, AssignedAgentID: "requester",
 		Goal: "Coordinate work", Source: RunSourceManual,
@@ -56,7 +56,7 @@ func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t
 func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "conversation-projection"}
 	store := &agentRequestInboxTeamStore{
-		SQLiteStore: newTestKernelStore(t),
+		Store: newTestKernelStore(t),
 		deployment: &kernelteam.Deployment{
 			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,

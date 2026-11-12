@@ -62,7 +62,7 @@ func TestSkillReferenceUpgradeEstablishesLifecycleForWorkforceBinding(t *testing
 
 // saveSkillBindingAtRevision stores binding through its earlier revisions, as
 // edits would, because a store accepts only the next revision on each save.
-func saveSkillBindingAtRevision(t *testing.T, store *sqlite.SQLiteStore, binding *skill.Binding) {
+func saveSkillBindingAtRevision(t *testing.T, store *sqlite.Store, binding *skill.Binding) {
 	t.Helper()
 	target := binding.Revision
 	for revision := int64(1); revision <= target; revision++ {

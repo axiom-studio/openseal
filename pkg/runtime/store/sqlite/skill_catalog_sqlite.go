@@ -113,7 +113,7 @@ func sqliteTableColumns(queryer tableInfoQueryer, table string) (map[string]bool
 	return columns, rows.Err()
 }
 
-func (s *SQLiteStore) CreateSkillDefinition(ctx context.Context, definition *skill.Definition) error {
+func (s *Store) CreateSkillDefinition(ctx context.Context, definition *skill.Definition) error {
 	payload, err := json.Marshal(definition)
 	if err != nil {
 		return err
@@ -133,7 +133,7 @@ func (s *SQLiteStore) CreateSkillDefinition(ctx context.Context, definition *ski
 	return nil
 }
 
-func (s *SQLiteStore) ListSkillDefinitionVariants(ctx context.Context, id, version string) ([]*skill.Definition, error) {
+func (s *Store) ListSkillDefinitionVariants(ctx context.Context, id, version string) ([]*skill.Definition, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT source_identity, payload FROM skill_definitions WHERE id = ? AND version = ? ORDER BY source_identity`, id, version)
 	if err != nil {
 		return nil, err
@@ -160,7 +160,7 @@ func (s *SQLiteStore) ListSkillDefinitionVariants(ctx context.Context, id, versi
 	return definitions, rows.Err()
 }
 
-func (s *SQLiteStore) ListSkillDefinitionIdentities(ctx context.Context, id, version string) ([]capability.SkillIdentity, error) {
+func (s *Store) ListSkillDefinitionIdentities(ctx context.Context, id, version string) ([]capability.SkillIdentity, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, version, source_identity FROM skill_definitions WHERE id = ? AND version = ? ORDER BY source_identity`, id, version)
 	if err != nil {
 		return nil, err
@@ -177,7 +177,7 @@ func (s *SQLiteStore) ListSkillDefinitionIdentities(ctx context.Context, id, ver
 	return identities, rows.Err()
 }
 
-func (s *SQLiteStore) SaveSkillBinding(ctx context.Context, binding *skill.Binding, expectedRevision int64) error {
+func (s *Store) SaveSkillBinding(ctx context.Context, binding *skill.Binding, expectedRevision int64) error {
 	if err := skill.ValidateBindingShape(binding); err != nil {
 		return err
 	}
@@ -266,7 +266,7 @@ func (s *SQLiteStore) SaveSkillBinding(ctx context.Context, binding *skill.Bindi
 	return err
 }
 
-func (s *SQLiteStore) ListSkillBindings(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]*skill.Binding, error) {
+func (s *Store) ListSkillBindings(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]*skill.Binding, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM skill_bindings WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? ORDER BY id`, scope.Kind, scope.ID, deploymentID)
 	if err != nil {
 		return nil, err
@@ -287,7 +287,7 @@ func (s *SQLiteStore) ListSkillBindings(ctx context.Context, scope skill.ScopeRe
 	return bindings, rows.Err()
 }
 
-func (s *SQLiteStore) ListSkillBindingRevisions(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.BindingRevision, error) {
+func (s *Store) ListSkillBindingRevisions(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.BindingRevision, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, revision, skill_id, skill_version, source_identity FROM skill_bindings WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? ORDER BY id`, scope.Kind, scope.ID, deploymentID)
 	if err != nil {
 		return nil, err
@@ -306,7 +306,7 @@ func (s *SQLiteStore) ListSkillBindingRevisions(ctx context.Context, scope skill
 
 // DeleteSkillBinding removes one binding row at its expected revision under the
 // same Skill maintenance fence as SaveSkillBinding.
-func (s *SQLiteStore) DeleteSkillBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string, expectedRevision int64) error {
+func (s *Store) DeleteSkillBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string, expectedRevision int64) error {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return err
@@ -359,7 +359,7 @@ func (s *SQLiteStore) DeleteSkillBinding(ctx context.Context, scope skill.ScopeR
 	return err
 }
 
-func (s *SQLiteStore) SkillBindingRevisionFloor(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string) (int64, error) {
+func (s *Store) SkillBindingRevisionFloor(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string) (int64, error) {
 	return sqliteSkillBindingRevisionFloor(ctx, s.db, scope, deploymentID, bindingID)
 }
 
@@ -382,6 +382,6 @@ func sqliteRecordSkillBindingTombstone(ctx context.Context, exec sqlstore.Execer
 	return err
 }
 
-var _ skill.CatalogStore = (*SQLiteStore)(nil)
-var _ skill.CatalogDefinitionIdentityStore = (*SQLiteStore)(nil)
-var _ skill.CatalogBindingRevisionStore = (*SQLiteStore)(nil)
+var _ skill.CatalogStore = (*Store)(nil)
+var _ skill.CatalogDefinitionIdentityStore = (*Store)(nil)
+var _ skill.CatalogBindingRevisionStore = (*Store)(nil)

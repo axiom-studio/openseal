@@ -14,12 +14,12 @@ import (
 
 const deploymentIdentityMigrationVersion int64 = 70
 
-var _ workforce.DeploymentIDReserver = (*PostgresStore)(nil)
+var _ workforce.DeploymentIDReserver = (*Store)(nil)
 
 // migrateDeploymentIdentities creates the shared Agent and Team deployment-ID
 // namespace and backfills it from both registries. An ID used by both an
 // Agent and a Team aborts the migration: renaming one is a manual decision.
-func (s *PostgresStore) migrateDeploymentIdentities(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateDeploymentIdentities(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, deploymentIdentityMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -54,7 +54,7 @@ func (s *PostgresStore) migrateDeploymentIdentities(ctx context.Context, tx *sql
 	return err
 }
 
-func (s *PostgresStore) reserveDeploymentID(ctx context.Context, db sqlstore.ExecRowQuerier, scope capability.ScopeReference, id string, kind workforce.DeploymentKind) error {
+func (s *Store) reserveDeploymentID(ctx context.Context, db sqlstore.ExecRowQuerier, scope capability.ScopeReference, id string, kind workforce.DeploymentKind) error {
 	if err := workforce.ValidDeploymentReservation(scope, id, kind); err != nil {
 		return err
 	}
@@ -72,11 +72,11 @@ func (s *PostgresStore) reserveDeploymentID(ctx context.Context, db sqlstore.Exe
 	return nil
 }
 
-func (s *PostgresStore) ReserveDeploymentID(ctx context.Context, scope capability.ScopeReference, id string, kind workforce.DeploymentKind) error {
+func (s *Store) ReserveDeploymentID(ctx context.Context, scope capability.ScopeReference, id string, kind workforce.DeploymentKind) error {
 	return s.reserveDeploymentID(ctx, s.db, scope, id, kind)
 }
 
-func (s *PostgresStore) DeploymentIDKind(ctx context.Context, scope capability.ScopeReference, id string) (workforce.DeploymentKind, error) {
+func (s *Store) DeploymentIDKind(ctx context.Context, scope capability.ScopeReference, id string) (workforce.DeploymentKind, error) {
 	var kind string
 	err := s.db.QueryRowContext(ctx, `SELECT kind FROM `+s.table("deployment_identities")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, id).Scan(&kind)
 	if errors.Is(err, sql.ErrNoRows) {

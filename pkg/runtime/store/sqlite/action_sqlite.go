@@ -79,7 +79,7 @@ func migrateActions(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal models.ActionProposalRecord) (*models.ActionProposalResult, error) {
+func (s *Store) CreateActionProposal(ctx context.Context, proposal models.ActionProposalRecord) (*models.ActionProposalResult, error) {
 	if err := models.ValidateActionProposalRecord(proposal); err != nil {
 		return nil, err
 	}
@@ -269,14 +269,14 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal models.
 	return &models.ActionProposalResult{Call: models.CloneActionCall(call), Approval: models.CloneApprovalCheckpoint(proposal.Approval), Run: models.CloneAgentRun(proposal.Run), Event: event, Created: true}, nil
 }
 
-func (s *SQLiteStore) GetActionCall(ctx context.Context, scope models.Scope, actionID string) (*models.ActionCall, error) {
+func (s *Store) GetActionCall(ctx context.Context, scope models.Scope, actionID string) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return getActionCallFrom(ctx, s.db, scope, `id = ?`, actionID)
 }
 
-func (s *SQLiteStore) ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
+func (s *Store) ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -306,7 +306,7 @@ func (s *SQLiteStore) ListActionCalls(ctx context.Context, filter models.ActionF
 	return pageActionCalls(result, filter.Offset, filter.Limit), nil
 }
 
-func (s *SQLiteStore) GetActionCallByExternalOperation(ctx context.Context, scope models.Scope, digest string) (*models.ActionCall, error) {
+func (s *Store) GetActionCallByExternalOperation(ctx context.Context, scope models.Scope, digest string) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -317,7 +317,7 @@ func (s *SQLiteStore) GetActionCallByExternalOperation(ctx context.Context, scop
 		`external_operation_digest = ? AND status IN ('ready','waiting_for_approval','running','succeeded','compensating','compensated')`, digest)
 }
 
-func (s *SQLiteStore) GetActionCallByIdempotencyKey(ctx context.Context, scope models.Scope, runID, key string) (*models.ActionCall, error) {
+func (s *Store) GetActionCallByIdempotencyKey(ctx context.Context, scope models.Scope, runID, key string) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -327,14 +327,14 @@ func (s *SQLiteStore) GetActionCallByIdempotencyKey(ctx context.Context, scope m
 	return getActionCallFrom(ctx, s.db, scope, `run_id = ? AND idempotency_key = ?`, runID, key)
 }
 
-func (s *SQLiteStore) GetApproval(ctx context.Context, scope models.Scope, approvalID string) (*models.ApprovalCheckpoint, error) {
+func (s *Store) GetApproval(ctx context.Context, scope models.Scope, approvalID string) (*models.ApprovalCheckpoint, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return getApprovalFrom(ctx, s.db, scope, `id = ?`, approvalID)
 }
 
-func (s *SQLiteStore) ListApprovals(ctx context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
+func (s *Store) ListApprovals(ctx context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -427,7 +427,7 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter models.ApprovalF
 	return pageApprovals(result, filter.Offset, filter.Limit), nil
 }
 
-func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution models.ApprovalResolutionRecord) (*models.ApprovalResolutionResult, error) {
+func (s *Store) ResolveApproval(ctx context.Context, resolution models.ApprovalResolutionRecord) (*models.ApprovalResolutionResult, error) {
 	if err := models.ValidateApprovalResolutionRecord(resolution); err != nil {
 		return nil, err
 	}
@@ -553,7 +553,7 @@ func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution models.App
 	return &models.ApprovalResolutionResult{Approval: models.CloneApprovalCheckpoint(resolution.Approval), Call: models.CloneActionCall(resolution.Call), Run: models.CloneAgentRun(resolvedRun), Event: event, Resolved: true}, nil
 }
 
-func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim models.ActionClaim) (*models.ActionCall, error) {
+func (s *Store) ClaimNextAction(ctx context.Context, claim models.ActionClaim) (*models.ActionCall, error) {
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
@@ -637,7 +637,7 @@ func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim models.ActionCl
 	return selected, nil
 }
 
-func (s *SQLiteStore) RenewActionLease(ctx context.Context, scope models.Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*models.ActionCall, error) {
+func (s *Store) RenewActionLease(ctx context.Context, scope models.Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -690,7 +690,7 @@ func (s *SQLiteStore) RenewActionLease(ctx context.Context, scope models.Scope, 
 	return current, nil
 }
 
-func (s *SQLiteStore) PersistActionExecution(ctx context.Context, execution models.ActionExecutionRecord) (*models.ActionExecutionResult, error) {
+func (s *Store) PersistActionExecution(ctx context.Context, execution models.ActionExecutionRecord) (*models.ActionExecutionResult, error) {
 	if err := models.ValidateActionExecutionRecord(execution); err != nil {
 		return nil, err
 	}

@@ -467,7 +467,7 @@ func TestAutomaticallyExhaustedScheduleRemainsCallableOnDemand(t *testing.T) {
 
 // eventTaskFixture creates an Objective and a chat with a user request that an
 // event Task can report to, and returns a create request for a webhook routine.
-func eventTaskFixture(t *testing.T, store *sqlite.SQLiteStore) (Scope, CreateRunbookActivationRequest) {
+func eventTaskFixture(t *testing.T, store *sqlite.Store) (Scope, CreateRunbookActivationRequest) {
 	t.Helper()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "event-task"}

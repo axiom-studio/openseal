@@ -9,7 +9,7 @@ import (
 const currentPostgresSchemaVersion int64 = 86
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
-func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
+func (s *Store) PostgresSchemaVersion(ctx context.Context) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, errors.New("PostgreSQL store is not configured")
 	}
@@ -23,7 +23,7 @@ func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error
 // RollbackPostgresMigrations removes schema objects introduced after target.
 // It is intentionally explicit and primarily intended for controlled release
 // rollback and isolated migration verification.
-func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target int64) error {
+func (s *Store) RollbackPostgresMigrations(ctx context.Context, target int64) error {
 	if target < 0 || target > currentPostgresSchemaVersion {
 		return fmt.Errorf("PostgreSQL migration target must be between 0 and %d", currentPostgresSchemaVersion)
 	}

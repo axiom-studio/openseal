@@ -8,7 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func newSurfaceInteractionPostgresStore(t *testing.T) (context.Context, *PostgresStore) {
+func newSurfaceInteractionPostgresStore(t *testing.T) (context.Context, *Store) {
 	t.Helper()
 	pgSchema := storetest.NewPostgresSchema(t, "openseal_surface_interactions_")
 	dsn := pgSchema.DSN

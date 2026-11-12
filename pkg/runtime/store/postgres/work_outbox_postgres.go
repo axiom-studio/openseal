@@ -25,9 +25,9 @@ const (
 // project into chats: commentary messages and streamed answers.
 const workActivityTrigger = `NEW.event_type IN ('turn.commentary','turn.answer_preview')`
 
-var _ models.ActionDeadlineStore = (*PostgresStore)(nil)
-var _ models.AgentRunDeadlineStore = (*PostgresStore)(nil)
-var _ models.ExternalConversationDeadlineStore = (*PostgresStore)(nil)
+var _ models.ActionDeadlineStore = (*Store)(nil)
+var _ models.AgentRunDeadlineStore = (*Store)(nil)
+var _ models.ExternalConversationDeadlineStore = (*Store)(nil)
 
 // workOutboxTrigger records one family for rows of one table. Updates only
 // record when a claimability column changes, so ordinary payload writes and
@@ -95,7 +95,7 @@ func (t workOutboxTrigger) function() string {
 // workSignalTriggerNames are migration 63's NOTIFY triggers.
 var workSignalTriggerNames = []string{"work_signal_insert", "work_signal_update", "work_signal_unpause"}
 
-func (s *PostgresStore) migrateWorkSignals(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateWorkSignals(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, workSignalMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -110,7 +110,7 @@ func (s *PostgresStore) migrateWorkSignals(ctx context.Context, tx *sql.Tx) erro
 	return err
 }
 
-func (s *PostgresStore) rollbackWorkSignals(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) rollbackWorkSignals(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS `+s.table("external_conversation_inbox_reply_due_idx"))
 	return err
 }
@@ -128,7 +128,7 @@ func workTables() []string {
 	return tables
 }
 
-func (s *PostgresStore) migrateWorkOutbox(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateWorkOutbox(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, workOutboxMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -166,7 +166,7 @@ func (s *PostgresStore) migrateWorkOutbox(ctx context.Context, tx *sql.Tx) error
 	return err
 }
 
-func (s *PostgresStore) workOutboxTriggerStatements(trigger workOutboxTrigger) []string {
+func (s *Store) workOutboxTriggerStatements(trigger workOutboxTrigger) []string {
 	when := ""
 	if trigger.when != "" {
 		when = ` WHEN (` + trigger.when + `)`
@@ -189,7 +189,7 @@ func workActivityOutboxTrigger(when string) workOutboxTrigger {
 	return workOutboxTrigger{table: "run_activity", name: "work_outbox_insert", event: "INSERT", when: when, rows: []string{`('activity', NULL, false)`}}
 }
 
-func (s *PostgresStore) migrateAnswerStreamSignals(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateAnswerStreamSignals(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, answerStreamSignalMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -203,7 +203,7 @@ func (s *PostgresStore) migrateAnswerStreamSignals(ctx context.Context, tx *sql.
 	return err
 }
 
-func (s *PostgresStore) rollbackAnswerStreamSignals(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) rollbackAnswerStreamSignals(ctx context.Context, tx *sql.Tx) error {
 	for _, statement := range s.workOutboxTriggerStatements(workActivityOutboxTrigger(`NEW.event_type = 'turn.commentary'`)) {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return err
@@ -212,7 +212,7 @@ func (s *PostgresStore) rollbackAnswerStreamSignals(ctx context.Context, tx *sql
 	return nil
 }
 
-func (s *PostgresStore) rollbackWorkOutbox(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) rollbackWorkOutbox(ctx context.Context, tx *sql.Tx) error {
 	statements := []string{}
 	for _, trigger := range workOutboxTriggers() {
 		statements = append(statements, `DROP TRIGGER IF EXISTS `+trigger.name+` ON `+s.table(trigger.table),
@@ -232,11 +232,11 @@ func (s *PostgresStore) rollbackWorkOutbox(ctx context.Context, tx *sql.Tx) erro
 }
 
 // WorkCommitted receives after this process commits a write.
-func (s *PostgresStore) WorkCommitted() <-chan struct{} {
+func (s *Store) WorkCommitted() <-chan struct{} {
 	return s.workCommitted
 }
 
-func (s *PostgresStore) noteWorkCommitted() {
+func (s *Store) noteWorkCommitted() {
 	select {
 	case s.workCommitted <- struct{}{}:
 	default:
@@ -245,7 +245,7 @@ func (s *PostgresStore) noteWorkCommitted() {
 
 // RelayWorkOutbox moves outbox rows into publish. SKIP LOCKED lets every
 // replica relay concurrently without waiting on each other's batches.
-func (s *PostgresStore) RelayWorkOutbox(ctx context.Context, limit int, publish func(context.Context, []models.WorkItem) error) (int, error) {
+func (s *Store) RelayWorkOutbox(ctx context.Context, limit int, publish func(context.Context, []models.WorkItem) error) (int, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -299,7 +299,7 @@ func (s *PostgresStore) RelayWorkOutbox(ctx context.Context, limit int, publish 
 // ListPendingWork lists scopes with durable work. Each query reads one small
 // partial index of active rows, so the sweep costs the active work, not the
 // number of scopes or the table sizes.
-func (s *PostgresStore) ListPendingWork(ctx context.Context, rebuild bool) ([]models.WorkItem, error) {
+func (s *Store) ListPendingWork(ctx context.Context, rebuild bool) ([]models.WorkItem, error) {
 	queries := []string{
 		`SELECT 'action', scope_kind, scope_id, MIN(CASE WHEN status='running' THEN COALESCE(lease_expires_at, now()) ELSE available_at END)
 			FROM ` + s.table("action_calls") + ` WHERE status IN ('ready','running') GROUP BY scope_kind, scope_id`,
@@ -365,7 +365,7 @@ func scanDeadline(row *sql.Row) (*time.Time, error) {
 // so they are excluded. Work that is claimable now is excluded too:
 // claims find it, and anything gated on another row is signalled when that
 // row changes.
-func (s *PostgresStore) NextActionDeadline(ctx context.Context, scope models.Scope, now time.Time) (*time.Time, error) {
+func (s *Store) NextActionDeadline(ctx context.Context, scope models.Scope, now time.Time) (*time.Time, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -379,7 +379,7 @@ func (s *PostgresStore) NextActionDeadline(ctx context.Context, scope models.Sco
 
 // NextAgentRunDeadline returns the earliest future availability or lease
 // expiry among queued and running Runs that one pool could claim.
-func (s *PostgresStore) NextAgentRunDeadline(ctx context.Context, scope models.Scope, kind models.RunKind, assignedAgentID string, now time.Time) (*time.Time, error) {
+func (s *Store) NextAgentRunDeadline(ctx context.Context, scope models.Scope, kind models.RunKind, assignedAgentID string, now time.Time) (*time.Time, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -392,7 +392,7 @@ func (s *PostgresStore) NextAgentRunDeadline(ctx context.Context, scope models.S
 
 // NextExternalConversationDeadline returns the earliest future time at which
 // external conversation work in the scope becomes due without another write.
-func (s *PostgresStore) NextExternalConversationDeadline(ctx context.Context, scope models.Scope, now time.Time) (*time.Time, error) {
+func (s *Store) NextExternalConversationDeadline(ctx context.Context, scope models.Scope, now time.Time) (*time.Time, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

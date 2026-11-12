@@ -15,7 +15,7 @@ import (
 // routed to two members, each with its own member Run.
 type teamChannelFixture struct {
 	t            *testing.T
-	store        *sqlite.SQLiteStore
+	store        *sqlite.Store
 	catalog      *skill.Catalog
 	endpoint     *ExternalConversationEndpoint
 	conversation *Conversation
@@ -202,7 +202,7 @@ func TestExternalTeamChannelRejectsUnverifiedMemberRun(t *testing.T) {
 
 // routingOverride serves a routing Run whose output a test changed.
 type routingOverride struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	routing *AgentRun
 }
 
@@ -210,7 +210,7 @@ func (s routingOverride) GetAgentRun(ctx context.Context, scope Scope, id string
 	if id == s.routing.ID {
 		return s.routing, nil
 	}
-	return s.SQLiteStore.GetAgentRun(ctx, scope, id)
+	return s.Store.GetAgentRun(ctx, scope, id)
 }
 
 func TestExternalTeamChannelForwardsMemberProgress(t *testing.T) {

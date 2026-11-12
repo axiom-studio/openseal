@@ -22,7 +22,7 @@ func (r routineOwnerAddressesForTest) RoutineOwnerAddresses(_ context.Context, _
 }
 
 type routineGrantFixtureState struct {
-	store     *sqlite.SQLiteStore
+	store     *sqlite.Store
 	run       *AgentRun
 	catalog   *skill.Catalog
 	bound     *skill.BoundAction

@@ -15,7 +15,7 @@ import (
 const legacyEventWaitsMigrationVersion int64 = 81
 
 // migrateRemoveEventWaits is PostgreSQL migration 81.
-func (s *PostgresStore) migrateRemoveEventWaits(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateRemoveEventWaits(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, legacyEventWaitsMigrationVersion)
 	if err != nil || applied {
 		return err

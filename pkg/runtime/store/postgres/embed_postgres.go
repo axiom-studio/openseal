@@ -14,7 +14,7 @@ import (
 
 const embedInstallationsMigrationVersion int64 = 43
 
-func (s *PostgresStore) migrateEmbedInstallations(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateEmbedInstallations(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("embed_installations")+` (
 			id TEXT NOT NULL, scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, deployment_id TEXT NOT NULL,
@@ -35,7 +35,7 @@ func (s *PostgresStore) migrateEmbedInstallations(ctx context.Context, tx *sql.T
 	return err
 }
 
-func (s *PostgresStore) CreateEmbedInstallation(ctx context.Context, value *models.EmbedInstallation) error {
+func (s *Store) CreateEmbedInstallation(ctx context.Context, value *models.EmbedInstallation) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -50,11 +50,11 @@ func (s *PostgresStore) CreateEmbedInstallation(ctx context.Context, value *mode
 	return err
 }
 
-func (s *PostgresStore) GetEmbedInstallation(ctx context.Context, scope models.Scope, id string) (*models.EmbedInstallation, error) {
+func (s *Store) GetEmbedInstallation(ctx context.Context, scope models.Scope, id string) (*models.EmbedInstallation, error) {
 	return scanPostgresEmbedInstallation(s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("embed_installations")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *PostgresStore) GetEmbedInstallationByRoute(ctx context.Context, route string) (*models.EmbedInstallation, error) {
+func (s *Store) GetEmbedInstallationByRoute(ctx context.Context, route string) (*models.EmbedInstallation, error) {
 	return scanPostgresEmbedInstallation(s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("embed_installations")+` WHERE public_route=$1`, strings.TrimSpace(route)))
 }
 
@@ -72,7 +72,7 @@ func scanPostgresEmbedInstallation(row *sql.Row) (*models.EmbedInstallation, err
 	return &value, value.Validate()
 }
 
-func (s *PostgresStore) ListEmbedInstallations(ctx context.Context, filter models.EmbedInstallationFilter) ([]*models.EmbedInstallation, error) {
+func (s *Store) ListEmbedInstallations(ctx context.Context, filter models.EmbedInstallationFilter) ([]*models.EmbedInstallation, error) {
 	query := `SELECT payload FROM ` + s.table("embed_installations") + ` WHERE scope_kind=$1 AND scope_id=$2`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
 	if filter.DeploymentID != "" {
@@ -100,7 +100,7 @@ func (s *PostgresStore) ListEmbedInstallations(ctx context.Context, filter model
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) UpdateEmbedInstallation(ctx context.Context, value *models.EmbedInstallation, expected int64) error {
+func (s *Store) UpdateEmbedInstallation(ctx context.Context, value *models.EmbedInstallation, expected int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func (s *PostgresStore) UpdateEmbedInstallation(ctx context.Context, value *mode
 	return nil
 }
 
-func (s *PostgresStore) CreateEmbedSession(ctx context.Context, value *models.EmbedSession) error {
+func (s *Store) CreateEmbedSession(ctx context.Context, value *models.EmbedSession) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -135,10 +135,10 @@ func (s *PostgresStore) CreateEmbedSession(ctx context.Context, value *models.Em
 	return err
 }
 
-func (s *PostgresStore) GetEmbedSession(ctx context.Context, scope models.Scope, id string) (*models.EmbedSession, error) {
+func (s *Store) GetEmbedSession(ctx context.Context, scope models.Scope, id string) (*models.EmbedSession, error) {
 	return scanPostgresEmbedSession(s.db.QueryRowContext(ctx, `SELECT payload,capability_hash,verified_claims,message_count,status,updated_at FROM `+s.table("embed_sessions")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
-func (s *PostgresStore) GetEmbedSessionByConversation(ctx context.Context, scope models.Scope, id string) (*models.EmbedSession, error) {
+func (s *Store) GetEmbedSessionByConversation(ctx context.Context, scope models.Scope, id string) (*models.EmbedSession, error) {
 	return scanPostgresEmbedSession(s.db.QueryRowContext(ctx, `SELECT payload,capability_hash,verified_claims,message_count,status,updated_at FROM `+s.table("embed_sessions")+` WHERE scope_kind=$1 AND scope_id=$2 AND conversation_id=$3`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
@@ -164,7 +164,7 @@ func scanPostgresEmbedSession(row *sql.Row) (*models.EmbedSession, error) {
 	return &value, value.Validate()
 }
 
-func (s *PostgresStore) ConsumeEmbedSessionMessage(ctx context.Context, scope models.Scope, id string, maximum int, now time.Time) (*models.EmbedSession, error) {
+func (s *Store) ConsumeEmbedSessionMessage(ctx context.Context, scope models.Scope, id string, maximum int, now time.Time) (*models.EmbedSession, error) {
 	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("embed_sessions")+` SET message_count=message_count+1,updated_at=$1 WHERE scope_kind=$2 AND scope_id=$3 AND id=$4 AND status=$5 AND expires_at>$1 AND message_count<$6`, now, scope.Kind, scope.ID, strings.TrimSpace(id), models.EmbedSessionActive, maximum)
 	if err != nil {
 		return nil, err

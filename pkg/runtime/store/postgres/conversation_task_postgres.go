@@ -15,7 +15,7 @@ import (
 
 const conversationTaskMigrationVersion int64 = 57
 
-func (s *PostgresStore) migrateConversationTasks(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateConversationTasks(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, conversationTaskMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -85,7 +85,7 @@ func (s *PostgresStore) migrateConversationTasks(ctx context.Context, tx *sql.Tx
 	return err
 }
 
-func (s *PostgresStore) CreateConversationTask(ctx context.Context, record models.ConversationTaskCreateRecord) (*models.ConversationTaskResult, error) {
+func (s *Store) CreateConversationTask(ctx context.Context, record models.ConversationTaskCreateRecord) (*models.ConversationTaskResult, error) {
 	if err := models.ValidateConversationTaskCreateRecord(record); err != nil {
 		return nil, err
 	}
@@ -206,7 +206,7 @@ func (s *PostgresStore) CreateConversationTask(ctx context.Context, record model
 	return &models.ConversationTaskResult{Task: models.CloneConversationTask(record.Task), WorkRun: models.CloneAgentRun(record.WorkRun), SourceRun: models.CloneAgentRun(record.SourceRun)}, nil
 }
 
-func (s *PostgresStore) GetConversationTask(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
+func (s *Store) GetConversationTask(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func (s *PostgresStore) GetConversationTask(ctx context.Context, scope models.Sc
 	return s.getPostgresConversationTask(ctx, s.db, scope, strings.TrimSpace(id), "", "", false)
 }
 
-func (s *PostgresStore) FindConversationTaskByWorkRunID(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
+func (s *Store) FindConversationTaskByWorkRunID(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -235,7 +235,7 @@ func (s *PostgresStore) FindConversationTaskByWorkRunID(ctx context.Context, sco
 	return sqlstore.DecodeConversationTask(payload)
 }
 
-func (s *PostgresStore) ListConversationTasks(ctx context.Context, filter models.ConversationTaskFilter) ([]*models.ConversationTaskResult, error) {
+func (s *Store) ListConversationTasks(ctx context.Context, filter models.ConversationTaskFilter) ([]*models.ConversationTaskResult, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
@@ -268,7 +268,7 @@ func (s *PostgresStore) ListConversationTasks(ctx context.Context, filter models
 	return sqlstore.ScanConversationTaskResults(rows)
 }
 
-func (s *PostgresStore) getPostgresConversationTask(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, id, sourceRunID, taskKey string, lock bool) (*models.ConversationTask, error) {
+func (s *Store) getPostgresConversationTask(ctx context.Context, queryer sqlstore.Reader, scope models.Scope, id, sourceRunID, taskKey string, lock bool) (*models.ConversationTask, error) {
 	query := `SELECT payload FROM ` + s.table("conversation_tasks") + ` WHERE scope_kind = $1 AND scope_id = $2`
 	args := []interface{}{scope.Kind, scope.ID}
 	if id != "" {
@@ -292,7 +292,7 @@ func (s *PostgresStore) getPostgresConversationTask(ctx context.Context, queryer
 	return sqlstore.DecodeConversationTask(payload)
 }
 
-func (s *PostgresStore) postgresConversationTaskResult(ctx context.Context, queryer sqlstore.Reader, task *models.ConversationTask) (*models.ConversationTaskResult, error) {
+func (s *Store) postgresConversationTaskResult(ctx context.Context, queryer sqlstore.Reader, task *models.ConversationTask) (*models.ConversationTaskResult, error) {
 	work, err := s.getPostgresAgentRunTx(ctx, queryer, task.Scope, task.WorkRunID, false)
 	if err != nil {
 		return nil, err

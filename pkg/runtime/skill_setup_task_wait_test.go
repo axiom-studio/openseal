@@ -25,7 +25,7 @@ func forSkillSetupTaskStores(t *testing.T, test func(*testing.T, skillSetupTaskT
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "setup-task.db")
-		var current *sqlite.SQLiteStore
+		var current *sqlite.Store
 		open := func() skillSetupTaskTestStore {
 			if current != nil {
 				if err := current.Close(); err != nil {

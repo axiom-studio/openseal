@@ -20,7 +20,7 @@ import (
 // variants for stores that already hold a BEGIN IMMEDIATE connection (child
 // Run, dependency group, AgentRequest and ConversationTask create, promotion).
 
-var _ models.AgentSessionStore = (*SQLiteStore)(nil)
+var _ models.AgentSessionStore = (*Store)(nil)
 
 // migrateAgentSessionLogSQLite mirrors PostgreSQL migration 75 and is safe to
 // replay on every open. It creates tables only.
@@ -306,7 +306,7 @@ func insertSQLiteSessionEvents(ctx context.Context, conn *sql.Conn, events []*mo
 // ---------------------------------------------------------------------------
 // Open / create
 
-func (s *SQLiteStore) OpenConversationAgentSession(ctx context.Context, req models.OpenConversationAgentSessionRequest) (*models.OpenAgentSessionResult, error) {
+func (s *Store) OpenConversationAgentSession(ctx context.Context, req models.OpenConversationAgentSessionRequest) (*models.OpenAgentSessionResult, error) {
 	if err := req.Scope.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", models.ErrInvalidAgentSession, err)
 	}
@@ -367,7 +367,7 @@ func (s *SQLiteStore) OpenConversationAgentSession(ctx context.Context, req mode
 // CreateRunAgentSession creates the parentless run session of OwnerRunID at its
 // first claim, fenced by that Run's lease. The Run must be unbound or already
 // bound to this session; a Run bound elsewhere gets ErrSessionMoved.
-func (s *SQLiteStore) CreateRunAgentSession(ctx context.Context, req models.CreateRunAgentSessionRequest) (*models.OpenAgentSessionResult, error) {
+func (s *Store) CreateRunAgentSession(ctx context.Context, req models.CreateRunAgentSessionRequest) (*models.OpenAgentSessionResult, error) {
 	txReq := models.CreateRunAgentSessionTxRequest{
 		Scope:          req.Scope,
 		OwnerRunID:     req.OwnerRunID,
@@ -406,7 +406,7 @@ func (s *SQLiteStore) CreateRunAgentSession(ctx context.Context, req models.Crea
 // already be stored; its SessionID is set to the new session in the same
 // transaction (Revision+1 when it changes). A replay with the same parent and
 // Agent returns the existing session with Created=false and writes nothing.
-func (s *SQLiteStore) createRunAgentSessionTx(ctx context.Context, conn *sql.Conn, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
+func (s *Store) createRunAgentSessionTx(ctx context.Context, conn *sql.Conn, req models.CreateRunAgentSessionTxRequest) (*models.OpenAgentSessionResult, error) {
 	req.Now = sessionNow(req.Now)
 	if err := models.ValidateCreateRunAgentSessionTxRequest(req); err != nil {
 		return nil, err
@@ -544,14 +544,14 @@ func sqliteForkModel(ctx context.Context, q sqlstore.Reader, parent *models.Agen
 // ---------------------------------------------------------------------------
 // Reads
 
-func (s *SQLiteStore) GetAgentSession(ctx context.Context, scope models.Scope, sessionID string) (*models.AgentSession, error) {
+func (s *Store) GetAgentSession(ctx context.Context, scope models.Scope, sessionID string) (*models.AgentSession, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", models.ErrInvalidAgentSession, err)
 	}
 	return getSQLiteAgentSession(ctx, s.db, scope, sessionID)
 }
 
-func (s *SQLiteStore) GetSessionEntry(ctx context.Context, scope models.Scope, entryID string) (*models.SessionEntry, error) {
+func (s *Store) GetSessionEntry(ctx context.Context, scope models.Scope, entryID string) (*models.SessionEntry, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", models.ErrInvalidSessionEntry, err)
 	}
@@ -561,7 +561,7 @@ func (s *SQLiteStore) GetSessionEntry(ctx context.Context, scope models.Scope, e
 // LoadAgentSessionPath reads the chain, the latest compaction and the
 // segments on one connection inside BEGIN, so a concurrent append or
 // compaction is either wholly visible or not at all.
-func (s *SQLiteStore) LoadAgentSessionPath(ctx context.Context, scope models.Scope, sessionID string) (*models.AgentSessionPath, error) {
+func (s *Store) LoadAgentSessionPath(ctx context.Context, scope models.Scope, sessionID string) (*models.AgentSessionPath, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", models.ErrInvalidAgentSession, err)
 	}
@@ -677,7 +677,7 @@ func loadSQLiteSessionPath(ctx context.Context, q sqlstore.Reader, leaf *models.
 	return models.BuildAgentSessionPath(chain, segments, nil)
 }
 
-func (s *SQLiteStore) ListAgentSessionEntries(ctx context.Context, filter models.SessionEntryFilter) ([]*models.SessionEntry, error) {
+func (s *Store) ListAgentSessionEntries(ctx context.Context, filter models.SessionEntryFilter) ([]*models.SessionEntry, error) {
 	filter, err := models.NormalizeSessionEntryFilter(filter)
 	if err != nil {
 		return nil, err
@@ -765,7 +765,7 @@ func sqlitePlaceholders(n int) string {
 // with Lease nil, by the Run being terminal) and by run.SessionID ==
 // req.SessionID. The watermark CAS, the intervention cursor, the entries and
 // the events commit together.
-func (s *SQLiteStore) AppendAgentSessionEntries(ctx context.Context, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
+func (s *Store) AppendAgentSessionEntries(ctx context.Context, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
 	req.Now = sessionNow(req.Now)
 	if err := models.ValidateAppendAgentSessionEntries(req); err != nil {
 		return nil, err
@@ -804,7 +804,7 @@ func (s *SQLiteStore) AppendAgentSessionEntries(ctx context.Context, req models.
 // IMMEDIATE and the caller owns the fence (lease and session binding are not
 // checked); everything else, including the watermark CAS and the cursor, is
 // as AppendAgentSessionEntries.
-func (s *SQLiteStore) appendAgentSessionEntriesTx(ctx context.Context, conn *sql.Conn, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
+func (s *Store) appendAgentSessionEntriesTx(ctx context.Context, conn *sql.Conn, req models.AppendAgentSessionEntriesRequest) (*models.AppendAgentSessionEntriesResult, error) {
 	req.Now = sessionNow(req.Now)
 	if err := models.ValidateAppendAgentSessionEntries(req); err != nil {
 		return nil, err
@@ -1042,7 +1042,7 @@ func commitSQLiteAppend(ctx context.Context, conn *sql.Conn, plan *sqliteAppendP
 // by the lease of the entry's Run, or, with an empty lease, by that Run being
 // terminal (loop-16 terminal close). The session binding is not checked, so a
 // promoted Run can still settle entries it left in the parent session.
-func (s *SQLiteStore) TransitionToolEntry(ctx context.Context, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error) {
+func (s *Store) TransitionToolEntry(ctx context.Context, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error) {
 	req.Now = sessionNow(req.Now)
 	if err := models.ValidateToolEntryTransitionRequest(req); err != nil {
 		return nil, err
@@ -1075,7 +1075,7 @@ func (s *SQLiteStore) TransitionToolEntry(ctx context.Context, req models.ToolEn
 
 // transitionToolEntryTx is the in-transaction transition. conn holds BEGIN
 // IMMEDIATE and the caller owns the lease check.
-func (s *SQLiteStore) transitionToolEntryTx(ctx context.Context, conn *sql.Conn, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error) {
+func (s *Store) transitionToolEntryTx(ctx context.Context, conn *sql.Conn, req models.ToolEntryTransitionRequest) (*models.ToolEntryTransitionResult, error) {
 	req.Now = sessionNow(req.Now)
 	if err := models.ValidateToolEntryTransitionRequest(req); err != nil {
 		return nil, err

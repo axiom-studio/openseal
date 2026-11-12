@@ -7,7 +7,7 @@ import (
 
 // migrateWorkspaceSearch records the indexed search schema after the four
 // expression indexes have been installed by their owning table migrations.
-func (s *PostgresStore) migrateWorkspaceSearch(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateWorkspaceSearch(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (46, 'indexed workspace search') ON CONFLICT (version) DO NOTHING`)
 	return err
 }

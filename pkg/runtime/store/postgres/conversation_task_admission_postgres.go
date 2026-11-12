@@ -12,7 +12,7 @@ import (
 
 // This predicate only restricts capacity. Canonical execution authority is
 // checked afterward against the selected candidate's stored source and lineage.
-func (s *PostgresStore) conversationTaskLikeSQL(alias string) string {
+func (s *Store) conversationTaskLikeSQL(alias string) string {
 	return `COALESCE(` + alias + `.payload->'context', '{}'::jsonb) ? 'openseal.conversationTaskId'
 		OR COALESCE(` + alias + `.payload->>'concurrencyKey', '') LIKE 'task:%'
 		OR EXISTS (SELECT 1 FROM ` + s.table("conversation_tasks") + ` AS admission_task
@@ -20,7 +20,7 @@ func (s *PostgresStore) conversationTaskLikeSQL(alias string) string {
 			AND admission_task.work_run_id = ` + alias + `.root_run_id OFFSET 0)`
 }
 
-func (s *PostgresStore) preparePostgresConversationTaskAdmission(ctx context.Context, tx *sql.Tx, claim *models.AgentRunClaim, runs []*models.AgentRun) error {
+func (s *Store) preparePostgresConversationTaskAdmission(ctx context.Context, tx *sql.Tx, claim *models.AgentRunClaim, runs []*models.AgentRun) error {
 	return models.PrepareConversationTaskAdmission(ctx, claim, runs, models.ConversationTaskAdmissionLookup{
 		Task: func(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 			var payload string
@@ -61,7 +61,7 @@ func (s *PostgresStore) preparePostgresConversationTaskAdmission(ctx context.Con
 
 // Reserve diagnostics inspect a bounded candidate page and only relevant live
 // claims. Historical and queued portfolio payloads are never loaded wholesale.
-func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Context, tx *sql.Tx, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
+func (s *Store) explainPostgresConversationTaskAdmission(ctx context.Context, tx *sql.Tx, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_runs")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND status IN ($3, $4)
 		AND ($5 = '' OR assigned_agent_id = $5) AND ($6 = '' OR COALESCE(payload->>'kind', 'agent_work') = $6)
@@ -185,7 +185,7 @@ func (s *PostgresStore) explainPostgresConversationTaskAdmission(ctx context.Con
 }
 
 // The original indexed capacity query is shared with the query-plan regression.
-func (s *PostgresStore) agentRunAdmissionSQL(taskAdmissionSQL string) string {
+func (s *Store) agentRunAdmissionSQL(taskAdmissionSQL string) string {
 	return `SELECT candidate.payload FROM ` + s.table("agent_runs") + ` AS candidate
 		LEFT JOIN ` + s.table("objectives") + ` AS objective
 		ON objective.scope_kind = candidate.scope_kind AND objective.scope_id = candidate.scope_id AND objective.id = candidate.objective_id
@@ -248,7 +248,7 @@ func (s *PostgresStore) agentRunAdmissionSQL(taskAdmissionSQL string) string {
 		FOR UPDATE OF candidate SKIP LOCKED LIMIT 1`
 }
 
-func (s *PostgresStore) conversationTaskAdmissionSQL() string {
+func (s *Store) conversationTaskAdmissionSQL() string {
 	return `AND NOT (candidate.id = ANY($14))
 				AND (NOT (` + s.conversationTaskLikeSQL("candidate") + `) OR (
 					SELECT COUNT(*) FROM ` + s.table("agent_runs") + ` AS task_active

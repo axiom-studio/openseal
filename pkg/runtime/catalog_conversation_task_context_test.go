@@ -10,27 +10,27 @@ import (
 )
 
 type countedCatalogTaskContextStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	runReads, taskReads, taskLists int
 }
 
 func (s *countedCatalogTaskContextStore) GetAgentRun(ctx context.Context, scope Scope, id string) (*AgentRun, error) {
 	s.runReads++
-	return s.SQLiteStore.GetAgentRun(ctx, scope, id)
+	return s.Store.GetAgentRun(ctx, scope, id)
 }
 
 func (s *countedCatalogTaskContextStore) FindConversationTaskByWorkRunID(ctx context.Context, scope Scope, id string) (*ConversationTask, error) {
 	s.taskReads++
-	return s.SQLiteStore.FindConversationTaskByWorkRunID(ctx, scope, id)
+	return s.Store.FindConversationTaskByWorkRunID(ctx, scope, id)
 }
 
 func (s *countedCatalogTaskContextStore) ListConversationTasks(ctx context.Context, filter ConversationTaskFilter) ([]*ConversationTaskResult, error) {
 	s.taskLists++
-	return s.SQLiteStore.ListConversationTasks(ctx, filter)
+	return s.Store.ListConversationTasks(ctx, filter)
 }
 
 func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
-	store := &countedCatalogTaskContextStore{SQLiteStore: newTestKernelStore(t)}
+	store := &countedCatalogTaskContextStore{Store: newTestKernelStore(t)}
 	for name, input := range map[string]map[string]interface{}{
 		"non-chat":           {},
 		"partial context":    {conversationRunContextConversationID: "chat"},
@@ -56,14 +56,14 @@ func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &countedCatalogTaskContextStore{SQLiteStore: kernel}
+	store := &countedCatalogTaskContextStore{Store: kernel}
 	result, err := resolveCatalogConversationTaskContext(t.Context(), nil, child, store)
 	if err != nil || result != nil || store.runReads != 1 || store.taskReads != 0 || store.taskLists != 0 {
 		t.Fatalf("ordinary chat child added task lookups: result=%#v err=%v runs=%d tasks=%d lists=%d", result, err, store.runReads, store.taskReads, store.taskLists)
 	}
 }
 
-func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.SQLiteStore, *Conversation, []*ConversationTaskResult) {
+func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *Conversation, []*ConversationTaskResult) {
 	t.Helper()
 	store := newTestKernelStore(t)
 	base := time.Now().UTC().Add(-time.Hour)

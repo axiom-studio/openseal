@@ -39,7 +39,7 @@ func (deterministicBudgetProducer) Produce(context.Context, StepInput) (StepOutp
 
 type stepBudgetFixture struct {
 	t        *testing.T
-	store    *sqlite.SQLiteStore
+	store    *sqlite.Store
 	activity *RunActivityService
 	turns    *AgentTurnService
 	run      *AgentRun

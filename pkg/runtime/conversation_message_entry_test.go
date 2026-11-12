@@ -74,7 +74,7 @@ func TestMessageHeaderExactFormat(t *testing.T) {
 // attachmentFixture stores artifacts whose content is served by ref.
 type attachmentFixture struct {
 	t       *testing.T
-	store   *sqlite.SQLiteStore
+	store   *sqlite.Store
 	content *conversationAppContent
 	scope   Scope
 }

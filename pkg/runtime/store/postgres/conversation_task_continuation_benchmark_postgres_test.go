@@ -35,7 +35,7 @@ func BenchmarkConversationTaskContinuationDuePostgres(b *testing.B) {
 	})
 }
 
-func explainPostgresConversationTaskDue(b *testing.B, store *PostgresStore, filter models.ConversationTaskDueFilter) {
+func explainPostgresConversationTaskDue(b *testing.B, store *Store, filter models.ConversationTaskDueFilter) {
 	b.Helper()
 	ctx := context.Background()
 	if _, err := store.db.ExecContext(ctx, "ANALYZE "+store.table("agent_runs")); err != nil {

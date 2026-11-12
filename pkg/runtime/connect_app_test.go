@@ -41,7 +41,7 @@ var linearLogo = strings.Repeat("ab", 32)
 
 // connectAppFixture is an Agent whose run sees a Linear connection only once
 // connected is set, as the host supplies connected apps per run.
-func connectAppFixture(t *testing.T) (context.Context, *sqlite.SQLiteStore, *skill.Catalog, *SkillBindingActionDispatcher, Scope, *atomic.Bool) {
+func connectAppFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Catalog, *SkillBindingActionDispatcher, Scope, *atomic.Bool) {
 	t.Helper()
 	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
 	if err := catalog.Register(ctx, mcp.SkillDefinition()); err != nil {

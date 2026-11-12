@@ -10,7 +10,7 @@ const agentSessionLogMigrationVersion int64 = 75
 // migrateAgentSessionLog creates the session log: one row per Agent context
 // (agent_sessions) and its append-only entries (agent_session_entries). It
 // creates tables only; nothing existing is altered or backfilled.
-func (s *PostgresStore) migrateAgentSessionLog(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateAgentSessionLog(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, agentSessionLogMigrationVersion)
 	if err != nil || applied {
 		return err

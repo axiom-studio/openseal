@@ -9,7 +9,7 @@ import (
 
 const connectOnceMigrationVersion int64 = 74
 
-func (s *PostgresStore) migrateConnectOnce(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateConnectOnce(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, connectOnceMigrationVersion)
 	if err != nil || applied {
 		return err

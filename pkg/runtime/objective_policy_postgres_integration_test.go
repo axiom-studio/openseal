@@ -40,14 +40,14 @@ func TestPostgresObjectiveExecutionPolicySerializesReplicaClaims(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	stores := []*postgres.PostgresStore{primary, replica}
+	stores := []*postgres.Store{primary, replica}
 	start := make(chan struct{})
 	results := make(chan *AgentRun, len(stores))
 	errs := make(chan error, len(stores))
 	var wait sync.WaitGroup
 	for index, store := range stores {
 		wait.Add(1)
-		go func(index int, store *postgres.PostgresStore) {
+		go func(index int, store *postgres.Store) {
 			defer wait.Done()
 			<-start
 			claimed, claimErr := store.ClaimNextAgentRun(ctx, AgentRunClaim{
@@ -113,7 +113,7 @@ func TestPostgresObjectiveExecutionPolicySerializesReplicaClaims(t *testing.T) {
 	resourceErrors := make(chan error, len(stores))
 	for index, store := range stores {
 		wait.Add(1)
-		go func(index int, store *postgres.PostgresStore) {
+		go func(index int, store *postgres.Store) {
 			defer wait.Done()
 			<-resourceStart
 			claimed, claimErr := store.ClaimNextAgentRun(ctx, AgentRunClaim{

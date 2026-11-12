@@ -10,7 +10,7 @@ import (
 
 const teamSkillGrantRemovalMigrationVersion int64 = 71
 
-func (s *PostgresStore) migrateTeamSkillGrantRemoval(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateTeamSkillGrantRemoval(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, teamSkillGrantRemovalMigrationVersion)
 	if err != nil || applied {
 		return err

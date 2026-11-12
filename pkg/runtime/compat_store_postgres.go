@@ -64,10 +64,10 @@ func WithPostgresMigrationObserver(observer postgres.PostgresMigrationObserver) 
 	return postgres.WithPostgresMigrationObserver(observer)
 }
 
-type PostgresStore = postgres.PostgresStore
+type PostgresStore = postgres.Store
 
 // NewPostgresStore forwards to postgres.NewPostgresStore.
-func NewPostgresStore(ctx context.Context, dsn string, options ...postgres.PostgresStoreOption) (*postgres.PostgresStore, error) {
+func NewPostgresStore(ctx context.Context, dsn string, options ...postgres.PostgresStoreOption) (*postgres.Store, error) {
 	return postgres.NewPostgresStore(ctx, dsn, options...)
 }
 

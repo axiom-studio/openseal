@@ -610,17 +610,17 @@ func TestPauseRoutineLeavesCloseOutToDispatcher(t *testing.T) {
 
 // passCountingStore counts dispatcher passes on the leader.
 type passCountingStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	passes atomic.Int64
 }
 
 func (s *passCountingStore) ListRoutineEventWorkScopes(ctx context.Context) ([]Scope, error) {
 	s.passes.Add(1)
-	return s.SQLiteStore.ListRoutineEventWorkScopes(ctx)
+	return s.Store.ListRoutineEventWorkScopes(ctx)
 }
 
 func TestRoutineEventDispatcherCoalescesNudges(t *testing.T) {
-	store := &passCountingStore{SQLiteStore: newTestKernelStore(t)}
+	store := &passCountingStore{Store: newTestKernelStore(t)}
 	matcher := NewRoutineEventMatcher(store)
 	t.Cleanup(matcher.Close)
 	dispatcher := NewRoutineEventDispatcher(store, matcher)

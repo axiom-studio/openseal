@@ -16,7 +16,7 @@ import (
 // Store test (outbox triggers and migrations). It writes its Runs with the
 // store's CreateAgentRun (storetest.QueuedAgentRun).
 
-func newWorkSignalPostgresStore(t *testing.T, schema string) (context.Context, *PostgresStore) {
+func newWorkSignalPostgresStore(t *testing.T, schema string) (context.Context, *Store) {
 	t.Helper()
 	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -36,7 +36,7 @@ func newWorkSignalPostgresStore(t *testing.T, schema string) (context.Context, *
 }
 
 // relayed drains the outbox and returns what it held, keyed by family.
-func relayed(t *testing.T, ctx context.Context, store *PostgresStore) map[models.WorkFamily][]models.WorkItem {
+func relayed(t *testing.T, ctx context.Context, store *Store) map[models.WorkFamily][]models.WorkItem {
 	t.Helper()
 	result := map[models.WorkFamily][]models.WorkItem{}
 	if _, err := store.RelayWorkOutbox(ctx, 500, func(_ context.Context, items []models.WorkItem) error {

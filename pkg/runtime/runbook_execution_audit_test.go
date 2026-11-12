@@ -23,7 +23,7 @@ import (
 // these records never leave together, such as a succeeded call under a
 // pending approval. Each list matches only the filter fields the audit sets.
 type runbookAuditRecords struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	turns      []*AgentTurn
 	actions    actionCallRecords
 	approvals  []*ApprovalCheckpoint
@@ -130,7 +130,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	}, "user", "operator", "audit"); err != nil {
 		t.Fatal(err)
 	}
-	store := &runbookAuditRecords{SQLiteStore: newTestKernelStore(t)}
+	store := &runbookAuditRecords{Store: newTestKernelStore(t)}
 	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
 		Scope: scope, Owner: owner, Title: "Research", Goal: "Find evidence", Status: ObjectiveStatusActive,
 	})
@@ -171,7 +171,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	persistedRun.Checkpoint = checkpoint
 	persistedRun.Status = AgentRunStatusRunning
 	persistedRun.UpdatedAt = now.Add(2 * time.Minute)
-	putTestRun(t, store.SQLiteStore, persistedRun)
+	putTestRun(t, store.Store, persistedRun)
 	store.turns = append(store.turns, &AgentTurn{ID: "turn-browse", Scope: scope, RunID: run.ID, Sequence: 1, Status: AgentTurnStatusCompleted, OutputSummary: "Requested browser", Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now})
 	store.turns = append(store.turns, &AgentTurn{ID: "turn-review", Scope: scope, RunID: run.ID, Sequence: 2, Status: AgentTurnStatusCompleted, OutputSummary: "Delegated review", Revision: 1, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute), StartedAt: now.Add(2 * time.Minute)})
 	store.actions.put(&ActionCall{
@@ -262,7 +262,7 @@ func TestRunExecutionAuditProjectsConversationalRunAsOneGraph(t *testing.T) {
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "conversation-audit"}
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	store := &runbookAuditRecords{SQLiteStore: newTestKernelStore(t)}
+	store := &runbookAuditRecords{Store: newTestKernelStore(t)}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"},
 		AssignedAgentID: "assistant", Goal: "Respond to an Agent channel message", Source: RunSourceRequest,

@@ -15,7 +15,7 @@ func (replyAliasDispatcher) DispatchExternalConversation(_ context.Context, req 
 	return &ExternalConversationDispatchResult{RunID: "reply-run-" + req.Message.ID}, nil
 }
 
-func receiveReplyAliasEvent(t *testing.T, store *sqlite.SQLiteStore, worker *ExternalConversationInboxWorker, endpoint *ExternalConversationEndpoint,
+func receiveReplyAliasEvent(t *testing.T, store *sqlite.Store, worker *ExternalConversationInboxWorker, endpoint *ExternalConversationEndpoint,
 	chatID, messageID, threadID, parentID, text string,
 ) *ChannelMessage {
 	t.Helper()

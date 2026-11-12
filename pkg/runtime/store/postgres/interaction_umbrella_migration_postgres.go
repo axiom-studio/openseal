@@ -10,7 +10,7 @@ import (
 
 const interactionUmbrellaMigrationVersion int64 = 72
 
-func (s *PostgresStore) migrateInteractionUmbrellas(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateInteractionUmbrellas(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, interactionUmbrellaMigrationVersion)
 	if err != nil || applied {
 		return err

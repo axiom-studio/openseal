@@ -13,7 +13,7 @@ import (
 	"github.com/lib/pq"
 )
 
-func (s *PostgresStore) migrateCollaboration(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateCollaboration(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("agent_requests")+` (
 			scope_kind TEXT NOT NULL,
@@ -51,7 +51,7 @@ func (s *PostgresStore) migrateCollaboration(ctx context.Context, tx *sql.Tx) er
 	return err
 }
 
-func (s *PostgresStore) CreateAgentRequest(ctx context.Context, record models.AgentRequestCreateRecord) (*models.ActivityEvent, error) {
+func (s *Store) CreateAgentRequest(ctx context.Context, record models.AgentRequestCreateRecord) (*models.ActivityEvent, error) {
 	if err := models.ValidateAgentRequestCreateRecord(record); err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func (s *PostgresStore) CreateAgentRequest(ctx context.Context, record models.Ag
 	return persisted, nil
 }
 
-func (s *PostgresStore) GetAgentRequest(ctx context.Context, scope models.Scope, requestID string) (*models.AgentRequest, error) {
+func (s *Store) GetAgentRequest(ctx context.Context, scope models.Scope, requestID string) (*models.AgentRequest, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -157,7 +157,7 @@ func (s *PostgresStore) GetAgentRequest(ctx context.Context, scope models.Scope,
 	return sqlstore.DecodeAgentRequest(payload)
 }
 
-func (s *PostgresStore) FindAgentRequestByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.AgentRequest, error) {
+func (s *Store) FindAgentRequestByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.AgentRequest, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (s *PostgresStore) FindAgentRequestByIdempotencyKey(ctx context.Context, sc
 	return sqlstore.DecodeAgentRequest(payload)
 }
 
-func (s *PostgresStore) ListAgentRequests(ctx context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
+func (s *Store) ListAgentRequests(ctx context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -246,7 +246,7 @@ func (s *PostgresStore) ListAgentRequests(ctx context.Context, filter models.Age
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) CoordinateAgentRequest(ctx context.Context, record models.AgentRequestCoordinationRecord) (*models.ActivityEvent, error) {
+func (s *Store) CoordinateAgentRequest(ctx context.Context, record models.AgentRequestCoordinationRecord) (*models.ActivityEvent, error) {
 	if err := models.ValidateAgentRequestCoordinationRecord(record); err != nil {
 		return nil, err
 	}
@@ -282,7 +282,7 @@ func (s *PostgresStore) CoordinateAgentRequest(ctx context.Context, record model
 	return persisted, nil
 }
 
-func (s *PostgresStore) RespondAgentRequest(ctx context.Context, record models.AgentRequestResponseRecord) ([]*models.ActivityEvent, error) {
+func (s *Store) RespondAgentRequest(ctx context.Context, record models.AgentRequestResponseRecord) ([]*models.ActivityEvent, error) {
 	if err := models.ValidateAgentRequestResponseRecord(record); err != nil {
 		return nil, err
 	}
@@ -359,7 +359,7 @@ func (s *PostgresStore) RespondAgentRequest(ctx context.Context, record models.A
 	return events, nil
 }
 
-func (s *PostgresStore) CompleteAgentRequest(ctx context.Context, record models.AgentRequestCompletionRecord) ([]*models.ActivityEvent, error) {
+func (s *Store) CompleteAgentRequest(ctx context.Context, record models.AgentRequestCompletionRecord) ([]*models.ActivityEvent, error) {
 	if err := models.ValidateAgentRequestCompletionRecord(record); err != nil {
 		return nil, err
 	}
@@ -430,7 +430,7 @@ func (s *PostgresStore) CompleteAgentRequest(ctx context.Context, record models.
 	return events, nil
 }
 
-func (s *PostgresStore) insertPostgresAgentRunTx(ctx context.Context, tx *sql.Tx, run *models.AgentRun) error {
+func (s *Store) insertPostgresAgentRunTx(ctx context.Context, tx *sql.Tx, run *models.AgentRun) error {
 	payload, err := json.Marshal(run)
 	if err != nil {
 		return err
@@ -448,7 +448,7 @@ func (s *PostgresStore) insertPostgresAgentRunTx(ctx context.Context, tx *sql.Tx
 	return nil
 }
 
-func (s *PostgresStore) updatePostgresAgentRunTx(ctx context.Context, tx *sql.Tx, run *models.AgentRun, expectedRevision int64) error {
+func (s *Store) updatePostgresAgentRunTx(ctx context.Context, tx *sql.Tx, run *models.AgentRun, expectedRevision int64) error {
 	payload, err := json.Marshal(run)
 	if err != nil {
 		return err

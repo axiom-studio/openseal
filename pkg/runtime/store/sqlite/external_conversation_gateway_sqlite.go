@@ -11,7 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *SQLiteStore) CreateExternalConversationGateway(
+func (s *Store) CreateExternalConversationGateway(
 	ctx context.Context,
 	value *models.ExternalConversationGatewayRegistration,
 ) error {
@@ -33,7 +33,7 @@ func (s *SQLiteStore) CreateExternalConversationGateway(
 	return err
 }
 
-func (s *SQLiteStore) GetExternalConversationGateway(
+func (s *Store) GetExternalConversationGateway(
 	ctx context.Context,
 	scope models.Scope,
 	id string,
@@ -46,7 +46,7 @@ func (s *SQLiteStore) GetExternalConversationGateway(
 		scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *SQLiteStore) GetExternalConversationGatewayByIngressRoute(
+func (s *Store) GetExternalConversationGatewayByIngressRoute(
 	ctx context.Context,
 	route string,
 ) (*models.ExternalConversationGatewayRegistration, error) {
@@ -57,7 +57,7 @@ func (s *SQLiteStore) GetExternalConversationGatewayByIngressRoute(
 		`SELECT payload FROM external_conversation_gateways WHERE ingress_route=?`, strings.TrimSpace(route)))
 }
 
-func (s *SQLiteStore) ListExternalConversationGateways(
+func (s *Store) ListExternalConversationGateways(
 	ctx context.Context,
 	filter models.ExternalConversationGatewayFilter,
 ) ([]*models.ExternalConversationGatewayRegistration, error) {
@@ -102,7 +102,7 @@ func (s *SQLiteStore) ListExternalConversationGateways(
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateExternalConversationGateway(
+func (s *Store) UpdateExternalConversationGateway(
 	ctx context.Context,
 	value *models.ExternalConversationGatewayRegistration,
 	expectedRevision int64,

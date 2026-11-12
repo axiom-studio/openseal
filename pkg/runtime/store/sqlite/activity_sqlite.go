@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *SQLiteStore) CreateObjectiveWithEvent(ctx context.Context, objective *models.Objective, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+func (s *Store) CreateObjectiveWithEvent(ctx context.Context, objective *models.Objective, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := models.ValidateObjectiveActivity(objective, event); err != nil {
 		return nil, err
 	}
@@ -30,7 +30,7 @@ func (s *SQLiteStore) CreateObjectiveWithEvent(ctx context.Context, objective *m
 	})
 }
 
-func (s *SQLiteStore) UpdateObjectiveWithEvent(ctx context.Context, objective *models.Objective, expectedRevision int64, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+func (s *Store) UpdateObjectiveWithEvent(ctx context.Context, objective *models.Objective, expectedRevision int64, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := models.ValidateObjectiveActivity(objective, event); err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (s *SQLiteStore) UpdateObjectiveWithEvent(ctx context.Context, objective *m
 	})
 }
 
-func (s *SQLiteStore) CreateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+func (s *Store) CreateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err
 	}
@@ -161,7 +161,7 @@ func addMissingActivityColumns(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, expectedRevision int64, event *models.ActivityEvent, lease *models.AgentRunLeaseGuard) (*models.ActivityEvent, error) {
+func (s *Store) UpdateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, expectedRevision int64, event *models.ActivityEvent, lease *models.AgentRunLeaseGuard) (*models.ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err
 	}
@@ -240,7 +240,7 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *models.A
 	})
 }
 
-func (s *SQLiteStore) AppendActivity(ctx context.Context, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+func (s *Store) AppendActivity(ctx context.Context, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := event.Validate(); err != nil {
 		return nil, err
 	}
@@ -262,7 +262,7 @@ func (s *SQLiteStore) AppendActivity(ctx context.Context, event *models.Activity
 	})
 }
 
-func (s *SQLiteStore) withImmediateActivity(ctx context.Context, event *models.ActivityEvent, beforeInsert func(*sql.Conn) error) (*models.ActivityEvent, error) {
+func (s *Store) withImmediateActivity(ctx context.Context, event *models.ActivityEvent, beforeInsert func(*sql.Conn) error) (*models.ActivityEvent, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
@@ -312,7 +312,7 @@ func insertSQLiteActivityConn(ctx context.Context, conn *sql.Conn, event *models
 	return models.CloneActivityEvent(persisted), nil
 }
 
-func (s *SQLiteStore) ListActivity(ctx context.Context, filter models.ActivityFilter) ([]*models.ActivityEvent, error) {
+func (s *Store) ListActivity(ctx context.Context, filter models.ActivityFilter) ([]*models.ActivityEvent, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}

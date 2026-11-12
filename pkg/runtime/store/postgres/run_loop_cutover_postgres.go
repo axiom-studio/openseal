@@ -19,7 +19,7 @@ import (
 // so idle_in_transaction_session_timeout cannot end it; the cutover's writes
 // use other connections. The pass fails when the lock is no longer held at
 // its end.
-func (s *PostgresStore) WithRunLoopCutoverLock(ctx context.Context, fn func(context.Context) error) error {
+func (s *Store) WithRunLoopCutoverLock(ctx context.Context, fn func(context.Context) error) error {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return err
@@ -48,7 +48,7 @@ func (s *PostgresStore) WithRunLoopCutoverLock(ctx context.Context, fn func(cont
 	return runErr
 }
 
-func (s *PostgresStore) acquireRunLoopCutoverLock(ctx context.Context, conn *sql.Conn, key string) error {
+func (s *Store) acquireRunLoopCutoverLock(ctx context.Context, conn *sql.Conn, key string) error {
 	startedAt := time.Now()
 	lockContext, cancel := context.WithTimeout(ctx, s.migrationLockTimeout)
 	defer cancel()
@@ -75,7 +75,7 @@ func (s *PostgresStore) acquireRunLoopCutoverLock(ctx context.Context, conn *sql
 	}
 }
 
-func (s *PostgresStore) ListRunLoopCutoverCandidates(ctx context.Context) ([]models.RunLoopCutoverRef, error) {
+func (s *Store) ListRunLoopCutoverCandidates(ctx context.Context) ([]models.RunLoopCutoverRef, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT scope_kind, scope_id, id FROM `+s.table("agent_runs")+`
 		WHERE status NOT IN ('completed', 'failed', 'canceled') AND COALESCE(payload->>'engine', '') = ''
 		ORDER BY created_at, id`)

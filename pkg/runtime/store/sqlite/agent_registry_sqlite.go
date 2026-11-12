@@ -79,7 +79,7 @@ func migrateAgentRegistry(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateCompilation(ctx context.Context, compilation *kernelagent.DefinitionCompilation) error {
+func (s *Store) CreateCompilation(ctx context.Context, compilation *kernelagent.DefinitionCompilation) error {
 	payload, err := json.Marshal(compilation)
 	if err != nil {
 		return err
@@ -91,7 +91,7 @@ func (s *SQLiteStore) CreateCompilation(ctx context.Context, compilation *kernel
 	return err
 }
 
-func (s *SQLiteStore) GetCompilation(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.DefinitionCompilation, error) {
+func (s *Store) GetCompilation(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.DefinitionCompilation, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM agent_definition_compilations WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -106,7 +106,7 @@ func (s *SQLiteStore) GetCompilation(ctx context.Context, scope capability.Scope
 	return &compilation, nil
 }
 
-func (s *SQLiteStore) ListCompilations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionCompilation, error) {
+func (s *Store) ListCompilations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionCompilation, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM agent_definition_compilations WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? ORDER BY created_at DESC, id DESC`, scope.Kind, scope.ID, deploymentID)
 	if err != nil {
 		return nil, err
@@ -127,7 +127,7 @@ func (s *SQLiteStore) ListCompilations(ctx context.Context, scope capability.Sco
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) CreateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment) error {
+func (s *Store) CreateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment) error {
 	payload, err := json.Marshal(amendment)
 	if err != nil {
 		return err
@@ -136,7 +136,7 @@ func (s *SQLiteStore) CreateAmendment(ctx context.Context, amendment *kernelagen
 	return err
 }
 
-func (s *SQLiteStore) GetAmendment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.DefinitionAmendment, error) {
+func (s *Store) GetAmendment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.DefinitionAmendment, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM agent_definition_amendments WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -151,7 +151,7 @@ func (s *SQLiteStore) GetAmendment(ctx context.Context, scope capability.ScopeRe
 	return &amendment, nil
 }
 
-func (s *SQLiteStore) ListAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionAmendment, error) {
+func (s *Store) ListAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionAmendment, error) {
 	query := `SELECT payload FROM agent_definition_amendments WHERE scope_kind = ? AND scope_id = ?`
 	args := []interface{}{scope.Kind, scope.ID}
 	if deploymentID != "" {
@@ -179,7 +179,7 @@ func (s *SQLiteStore) ListAmendments(ctx context.Context, scope capability.Scope
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedRevision int64) error {
+func (s *Store) UpdateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedRevision int64) error {
 	payload, err := json.Marshal(amendment)
 	if err != nil {
 		return err
@@ -198,11 +198,11 @@ func (s *SQLiteStore) UpdateAmendment(ctx context.Context, amendment *kernelagen
 	return nil
 }
 
-func (s *SQLiteStore) ActivateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, expectedDeploymentRevision int64, activation kernelagent.DefinitionActivation) error {
+func (s *Store) ActivateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, expectedDeploymentRevision int64, activation kernelagent.DefinitionActivation) error {
 	return s.activateAmendment(ctx, amendment, expectedAmendmentRevision, definition, deployment, expectedDeploymentRevision, activation, nil)
 }
 
-func (s *SQLiteStore) activateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, expectedDeploymentRevision int64, activation kernelagent.DefinitionActivation, materialize func(*sql.Tx) error) error {
+func (s *Store) activateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, expectedDeploymentRevision int64, activation kernelagent.DefinitionActivation, materialize func(*sql.Tx) error) error {
 	definitionPayload, err := json.Marshal(definition)
 	if err != nil {
 		return err
@@ -259,7 +259,7 @@ func (s *SQLiteStore) activateAmendment(ctx context.Context, amendment *kernelag
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) CreateDefinition(ctx context.Context, definition *kernelagent.AgentDefinition) error {
+func (s *Store) CreateDefinition(ctx context.Context, definition *kernelagent.AgentDefinition) error {
 	payload, err := json.Marshal(definition)
 	if err != nil {
 		return err
@@ -268,7 +268,7 @@ func (s *SQLiteStore) CreateDefinition(ctx context.Context, definition *kernelag
 	return err
 }
 
-func (s *SQLiteStore) GetDefinition(ctx context.Context, id, version string) (*kernelagent.AgentDefinition, error) {
+func (s *Store) GetDefinition(ctx context.Context, id, version string) (*kernelagent.AgentDefinition, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM agent_definitions WHERE id = ? AND version = ?`, id, version).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -283,7 +283,7 @@ func (s *SQLiteStore) GetDefinition(ctx context.Context, id, version string) (*k
 	return &definition, nil
 }
 
-func (s *SQLiteStore) ListDefinitionVersions(ctx context.Context, id string) ([]*kernelagent.AgentDefinition, error) {
+func (s *Store) ListDefinitionVersions(ctx context.Context, id string) ([]*kernelagent.AgentDefinition, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM agent_definitions WHERE id = ? ORDER BY version`, id)
 	if err != nil {
 		return nil, err
@@ -304,7 +304,7 @@ func (s *SQLiteStore) ListDefinitionVersions(ctx context.Context, id string) ([]
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) CreateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, activation kernelagent.DefinitionActivation) error {
+func (s *Store) CreateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, activation kernelagent.DefinitionActivation) error {
 	deploymentPayload, activationPayload, err := sqlstore.AgentRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
@@ -326,7 +326,7 @@ func (s *SQLiteStore) CreateDeployment(ctx context.Context, deployment *kernelag
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) GetDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.AgentDeployment, error) {
+func (s *Store) GetDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.AgentDeployment, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM agent_deployments WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -341,7 +341,7 @@ func (s *SQLiteStore) GetDeployment(ctx context.Context, scope capability.ScopeR
 	return &deployment, nil
 }
 
-func (s *SQLiteStore) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
+func (s *Store) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM agent_deployments WHERE scope_kind = ? AND scope_id = ? ORDER BY updated_at DESC, id`, scope.Kind, scope.ID)
 	if err != nil {
 		return nil, err
@@ -362,7 +362,7 @@ func (s *SQLiteStore) ListDeployments(ctx context.Context, scope capability.Scop
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, activation kernelagent.DefinitionActivation) error {
+func (s *Store) UpdateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, activation kernelagent.DefinitionActivation) error {
 	deploymentPayload, activationPayload, err := sqlstore.AgentRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
@@ -402,7 +402,7 @@ func (s *SQLiteStore) UpdateDeployment(ctx context.Context, deployment *kernelag
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) synchronizeAgentRunbookActivations(ctx context.Context, tx *sql.Tx, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment) error {
+func (s *Store) synchronizeAgentRunbookActivations(ctx context.Context, tx *sql.Tx, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment) error {
 	rows, err := tx.QueryContext(ctx, `SELECT payload FROM runbook_activations WHERE scope_kind=? AND scope_id=? AND assigned_agent_id=?`, deployment.Scope.Kind, deployment.Scope.ID, deployment.ID)
 	if err != nil {
 		return err
@@ -447,7 +447,7 @@ func (s *SQLiteStore) synchronizeAgentRunbookActivations(ctx context.Context, tx
 	return nil
 }
 
-func (s *SQLiteStore) ListActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]kernelagent.DefinitionActivation, error) {
+func (s *Store) ListActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]kernelagent.DefinitionActivation, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM agent_definition_activations WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? ORDER BY deployment_revision`, scope.Kind, scope.ID, deploymentID)
 	if err != nil {
 		return nil, err
@@ -480,4 +480,4 @@ func insertActivation(ctx context.Context, tx *sql.Tx, activation kernelagent.De
 	return nil
 }
 
-var _ kernelagent.Store = (*SQLiteStore)(nil)
+var _ kernelagent.Store = (*Store)(nil)

@@ -16,7 +16,7 @@ import (
 // them back through the same RunActionHistory Propose builds.
 type runHistoryFixture struct {
 	t     *testing.T
-	store *sqlite.SQLiteStore
+	store *sqlite.Store
 	scope Scope
 	base  time.Time
 	next  int

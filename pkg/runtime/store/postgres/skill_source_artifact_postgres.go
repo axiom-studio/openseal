@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill/sourceartifact"
 )
 
-func (s *PostgresStore) migrateSkillSourceArtifacts(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateSkillSourceArtifacts(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("skill_source_artifacts")+` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, digest TEXT NOT NULL,
@@ -35,7 +35,7 @@ func (s *PostgresStore) migrateSkillSourceArtifacts(ctx context.Context, tx *sql
 	return err
 }
 
-func (s *PostgresStore) ImportSourceArtifact(ctx context.Context, artifact *sourceartifact.Artifact, reference *sourceartifact.Reference) (bool, error) {
+func (s *Store) ImportSourceArtifact(ctx context.Context, artifact *sourceartifact.Artifact, reference *sourceartifact.Reference) (bool, error) {
 	if err := sourceartifact.ValidateArtifact(artifact); err != nil {
 		return false, err
 	}
@@ -110,7 +110,7 @@ func (s *PostgresStore) ImportSourceArtifact(ctx context.Context, artifact *sour
 	return created, nil
 }
 
-func (s *PostgresStore) ListSourceArtifactReferences(ctx context.Context, scope capability.ScopeReference, digest string) ([]sourceartifact.Reference, error) {
+func (s *Store) ListSourceArtifactReferences(ctx context.Context, scope capability.ScopeReference, digest string) ([]sourceartifact.Reference, error) {
 	if err := sourceartifact.ValidateKey(sourceartifact.Key{Scope: scope, Digest: digest}); err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func (s *PostgresStore) ListSourceArtifactReferences(ctx context.Context, scope 
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) GetSourceArtifact(ctx context.Context, scope capability.ScopeReference, digest string) (*sourceartifact.Artifact, error) {
+func (s *Store) GetSourceArtifact(ctx context.Context, scope capability.ScopeReference, digest string) (*sourceartifact.Artifact, error) {
 	if err := sourceartifact.ValidateKey(sourceartifact.Key{Scope: scope, Digest: digest}); err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func (s *PostgresStore) GetSourceArtifact(ctx context.Context, scope capability.
 	return &artifact, nil
 }
 
-func (s *PostgresStore) DeleteSourceArtifactReference(ctx context.Context, scope capability.ScopeReference, digest, referenceID string) error {
+func (s *Store) DeleteSourceArtifactReference(ctx context.Context, scope capability.ScopeReference, digest, referenceID string) error {
 	if err := sourceartifact.ValidateKey(sourceartifact.Key{Scope: scope, Digest: digest}); err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (s *PostgresStore) DeleteSourceArtifactReference(ctx context.Context, scope
 	return err
 }
 
-func (s *PostgresStore) PurgeExpiredSourceArtifactReferences(ctx context.Context, now time.Time, limit int) (int, error) {
+func (s *Store) PurgeExpiredSourceArtifactReferences(ctx context.Context, now time.Time, limit int) (int, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -182,7 +182,7 @@ func (s *PostgresStore) PurgeExpiredSourceArtifactReferences(ctx context.Context
 	return int(rows), err
 }
 
-func (s *PostgresStore) ListUnreferencedSourceArtifacts(ctx context.Context, before time.Time, limit int) ([]sourceartifact.Key, error) {
+func (s *Store) ListUnreferencedSourceArtifacts(ctx context.Context, before time.Time, limit int) ([]sourceartifact.Key, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -202,7 +202,7 @@ func (s *PostgresStore) ListUnreferencedSourceArtifacts(ctx context.Context, bef
 	return keys, rows.Err()
 }
 
-func (s *PostgresStore) DeleteSourceArtifactIfUnreferenced(ctx context.Context, key sourceartifact.Key, before time.Time) (bool, error) {
+func (s *Store) DeleteSourceArtifactIfUnreferenced(ctx context.Context, key sourceartifact.Key, before time.Time) (bool, error) {
 	if err := sourceartifact.ValidateKey(key); err != nil {
 		return false, err
 	}
@@ -214,4 +214,4 @@ func (s *PostgresStore) DeleteSourceArtifactIfUnreferenced(ctx context.Context, 
 	return rows == 1, err
 }
 
-var _ sourceartifact.Store = (*PostgresStore)(nil)
+var _ sourceartifact.Store = (*Store)(nil)

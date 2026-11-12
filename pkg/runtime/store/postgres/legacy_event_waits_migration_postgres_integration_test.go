@@ -84,7 +84,7 @@ func TestPostgresMigration81DropsEventWaits(t *testing.T) {
 	assertSchemaCurrent(t, ctx, again)
 }
 
-func assertNoEventWaitTables(t *testing.T, ctx context.Context, store *PostgresStore) {
+func assertNoEventWaitTables(t *testing.T, ctx context.Context, store *Store) {
 	t.Helper()
 	for _, table := range sqlstore.LegacyEventWaitTables {
 		var relation sql.NullString

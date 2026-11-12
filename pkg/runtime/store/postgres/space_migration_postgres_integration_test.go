@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func openSpacesPostgresStore(t *testing.T, prefix string) (*PostgresStore, string, string) {
+func openSpacesPostgresStore(t *testing.T, prefix string) (*Store, string, string) {
 	t.Helper()
 	store, pgSchema := openTestPostgresStore(t, prefix)
 	schema := pgSchema.Name

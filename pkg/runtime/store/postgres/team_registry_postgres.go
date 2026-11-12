@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-func (s *PostgresStore) migrateTeamControlPlane(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateTeamControlPlane(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("team_definitions")+` (
 			id TEXT NOT NULL, version TEXT NOT NULL, digest TEXT NOT NULL,
@@ -55,7 +55,7 @@ func (s *PostgresStore) migrateTeamControlPlane(ctx context.Context, tx *sql.Tx)
 	return err
 }
 
-func (s *PostgresStore) CreateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment) error {
+func (s *Store) CreateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment) error {
 	payload, err := json.Marshal(amendment)
 	if err != nil {
 		return err
@@ -67,7 +67,7 @@ func (s *PostgresStore) CreateTeamAmendment(ctx context.Context, amendment *kern
 	return err
 }
 
-func (s *PostgresStore) GetTeamAmendment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.DefinitionAmendment, error) {
+func (s *Store) GetTeamAmendment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.DefinitionAmendment, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("team_definition_amendments")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -82,7 +82,7 @@ func (s *PostgresStore) GetTeamAmendment(ctx context.Context, scope capability.S
 	return &amendment, nil
 }
 
-func (s *PostgresStore) ListTeamAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelteam.DefinitionAmendment, error) {
+func (s *Store) ListTeamAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelteam.DefinitionAmendment, error) {
 	query := `SELECT payload FROM ` + s.table("team_definition_amendments") + ` WHERE scope_kind = $1 AND scope_id = $2`
 	args := []interface{}{scope.Kind, scope.ID}
 	if deploymentID != "" {
@@ -110,7 +110,7 @@ func (s *PostgresStore) ListTeamAmendments(ctx context.Context, scope capability
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) UpdateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment, expectedRevision int64) error {
+func (s *Store) UpdateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment, expectedRevision int64) error {
 	payload, err := json.Marshal(amendment)
 	if err != nil {
 		return err
@@ -130,7 +130,7 @@ func (s *PostgresStore) UpdateTeamAmendment(ctx context.Context, amendment *kern
 	return nil
 }
 
-func (s *PostgresStore) ActivateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelteam.Definition, deployment *kernelteam.Deployment, expectedDeploymentRevision int64, activation workforce.DefinitionActivation) error {
+func (s *Store) ActivateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelteam.Definition, deployment *kernelteam.Deployment, expectedDeploymentRevision int64, activation workforce.DefinitionActivation) error {
 	amendmentPayload, err := json.Marshal(amendment)
 	if err != nil {
 		return err
@@ -174,11 +174,11 @@ func (s *PostgresStore) ActivateTeamAmendment(ctx context.Context, amendment *ke
 	return tx.Commit()
 }
 
-func (s *PostgresStore) CreateTeamDefinition(ctx context.Context, definition *kernelteam.Definition) error {
+func (s *Store) CreateTeamDefinition(ctx context.Context, definition *kernelteam.Definition) error {
 	return s.createTeamDefinition(ctx, s.db, definition)
 }
 
-func (s *PostgresStore) createTeamDefinition(ctx context.Context, db sqlstore.ExecRowQuerier, definition *kernelteam.Definition) error {
+func (s *Store) createTeamDefinition(ctx context.Context, db sqlstore.ExecRowQuerier, definition *kernelteam.Definition) error {
 	payload, err := json.Marshal(definition)
 	if err != nil {
 		return err
@@ -198,7 +198,7 @@ func (s *PostgresStore) createTeamDefinition(ctx context.Context, db sqlstore.Ex
 	return nil
 }
 
-func (s *PostgresStore) GetTeamDefinition(ctx context.Context, id, version string) (*kernelteam.Definition, error) {
+func (s *Store) GetTeamDefinition(ctx context.Context, id, version string) (*kernelteam.Definition, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("team_definitions")+` WHERE id = $1 AND version = $2`, id, version).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -213,7 +213,7 @@ func (s *PostgresStore) GetTeamDefinition(ctx context.Context, id, version strin
 	return &definition, nil
 }
 
-func (s *PostgresStore) ListTeamDefinitionVersions(ctx context.Context, id string) ([]*kernelteam.Definition, error) {
+func (s *Store) ListTeamDefinitionVersions(ctx context.Context, id string) ([]*kernelteam.Definition, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("team_definitions")+` WHERE id = $1 ORDER BY version`, id)
 	if err != nil {
 		return nil, err
@@ -234,7 +234,7 @@ func (s *PostgresStore) ListTeamDefinitionVersions(ctx context.Context, id strin
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, activation workforce.DefinitionActivation) error {
+func (s *Store) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, activation workforce.DefinitionActivation) error {
 	deploymentPayload, activationPayload, err := sqlstore.TeamRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
@@ -259,7 +259,7 @@ func (s *PostgresStore) CreateTeamDeployment(ctx context.Context, deployment *ke
 	return tx.Commit()
 }
 
-func (s *PostgresStore) GetTeamDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
+func (s *Store) GetTeamDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("team_deployments")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -274,7 +274,7 @@ func (s *PostgresStore) GetTeamDeployment(ctx context.Context, scope capability.
 	return &deployment, nil
 }
 
-func (s *PostgresStore) ListTeamDeployments(ctx context.Context, scope capability.ScopeReference) ([]*kernelteam.Deployment, error) {
+func (s *Store) ListTeamDeployments(ctx context.Context, scope capability.ScopeReference) ([]*kernelteam.Deployment, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("team_deployments")+` WHERE scope_kind = $1 AND scope_id = $2 ORDER BY updated_at DESC, id`, scope.Kind, scope.ID)
 	if err != nil {
 		return nil, err
@@ -295,7 +295,7 @@ func (s *PostgresStore) ListTeamDeployments(ctx context.Context, scope capabilit
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) UpdateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
+func (s *Store) UpdateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -307,7 +307,7 @@ func (s *PostgresStore) UpdateTeamDeployment(ctx context.Context, deployment *ke
 	return tx.Commit()
 }
 
-func (s *PostgresStore) updateTeamDeploymentTx(ctx context.Context, tx *sql.Tx, deployment *kernelteam.Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
+func (s *Store) updateTeamDeploymentTx(ctx context.Context, tx *sql.Tx, deployment *kernelteam.Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
 	deploymentPayload, activationPayload, err := sqlstore.TeamRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
@@ -327,7 +327,7 @@ func (s *PostgresStore) updateTeamDeploymentTx(ctx context.Context, tx *sql.Tx, 
 	return s.insertTeamActivationPostgres(ctx, tx, activation, activationPayload)
 }
 
-func (s *PostgresStore) ListTeamDefinitionActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
+func (s *Store) ListTeamDefinitionActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("team_definition_activations")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND deployment_id = $3 ORDER BY deployment_revision`, scope.Kind, scope.ID, deploymentID)
 	if err != nil {
@@ -349,7 +349,7 @@ func (s *PostgresStore) ListTeamDefinitionActivations(ctx context.Context, scope
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) insertTeamActivationPostgres(ctx context.Context, tx *sql.Tx, activation workforce.DefinitionActivation, payload string) error {
+func (s *Store) insertTeamActivationPostgres(ctx context.Context, tx *sql.Tx, activation workforce.DefinitionActivation, payload string) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("team_definition_activations")+`
 		(id, scope_kind, scope_id, deployment_id, deployment_revision, created_at, payload)
 		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`, activation.ID, activation.Scope.Kind, activation.Scope.ID,
@@ -357,4 +357,4 @@ func (s *PostgresStore) insertTeamActivationPostgres(ctx context.Context, tx *sq
 	return err
 }
 
-var _ kernelteam.Store = (*PostgresStore)(nil)
+var _ kernelteam.Store = (*Store)(nil)

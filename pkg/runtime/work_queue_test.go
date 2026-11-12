@@ -40,7 +40,7 @@ func (h *queueHarness) onDelivery(deliver func(WorkSignal)) { h.deliver.Store(&d
 // deadlineActionStore reports ActionCall deadlines with the PostgreSQL
 // store's semantics over the SQLite store, and counts every read.
 type deadlineActionStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	claims        atomic.Int64
 	claimsDone    atomic.Int64
 	claimed       atomic.Int64
@@ -49,7 +49,7 @@ type deadlineActionStore struct {
 
 func (s *deadlineActionStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error) {
 	s.claims.Add(1)
-	call, err := s.SQLiteStore.ClaimNextAction(ctx, claim)
+	call, err := s.Store.ClaimNextAction(ctx, claim)
 	s.claimsDone.Add(1)
 	if call != nil {
 		s.claimed.Add(1)
@@ -59,7 +59,7 @@ func (s *deadlineActionStore) ClaimNextAction(ctx context.Context, claim ActionC
 
 func (s *deadlineActionStore) NextActionDeadline(ctx context.Context, scope Scope, now time.Time) (*time.Time, error) {
 	s.deadlineReads.Add(1)
-	calls, err := s.SQLiteStore.ListActionCalls(ctx, ActionFilter{Scope: scope, Status: []ActionCallStatus{ActionCallStatusReady, ActionCallStatusRunning}, Limit: 500})
+	calls, err := s.Store.ListActionCalls(ctx, ActionFilter{Scope: scope, Status: []ActionCallStatus{ActionCallStatusReady, ActionCallStatusRunning}, Limit: 500})
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 }
 
 func TestQueueDrivenActionPoolIssuesNoReadsWhileIdle(t *testing.T) {
-	store := &deadlineActionStore{SQLiteStore: newTestKernelStore(t)}
+	store := &deadlineActionStore{Store: newTestKernelStore(t)}
 	catalog, scope := governedActionCatalog(t)
 	pool := newTestActionPool(t, store, catalog, scope, 5*time.Millisecond, 4, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		return nil, errors.New("unexpected idle dispatch")
@@ -107,7 +107,7 @@ func TestQueueDrivenActionPoolIssuesNoReadsWhileIdle(t *testing.T) {
 }
 
 func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
-	store := &deadlineActionStore{SQLiteStore: newTestKernelStore(t)}
+	store := &deadlineActionStore{Store: newTestKernelStore(t)}
 	catalog, scope := governedActionCatalog(t)
 	dispatched := make(chan struct{}, 1)
 	pool := newTestActionPool(t, store, catalog, scope, time.Hour, 2, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
@@ -120,7 +120,7 @@ func TestQueueDrivenActionPoolClaimsPromptlyOnScopeWake(t *testing.T) {
 	// The start-up claim must finish before work exists, or it claims the
 	// work itself and hides whether the other scope's wake did.
 	waitForCondition(t, time.Second, func() bool { return store.claimsDone.Load() > 0 && store.deadlineReads.Load() > 0 }, "initial probe was not observed")
-	createActionPoolWork(t, store.SQLiteStore, catalog, scope)
+	createActionPoolWork(t, store.Store, catalog, scope)
 	pool.WakeScope(Scope{Kind: scope.Kind, ID: "another"})
 	select {
 	case <-dispatched:
@@ -163,18 +163,18 @@ func scheduleActionRetry(t *testing.T, store KernelStore, call *ActionCall, retr
 func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.T) {
 	for _, scenario := range []string{"retry", "expired_lease"} {
 		t.Run(scenario, func(t *testing.T) {
-			store := &deadlineActionStore{SQLiteStore: newTestKernelStore(t)}
+			store := &deadlineActionStore{Store: newTestKernelStore(t)}
 			catalog, scope := governedActionCatalog(t)
-			proposal := createActionPoolWork(t, store.SQLiteStore, catalog, scope)
+			proposal := createActionPoolWork(t, store.Store, catalog, scope)
 			// The SQLite store compares timestamps as text, so like every
 			// runtime caller the fixture passes UTC times.
 			due := time.Now().UTC().Add(150 * time.Millisecond)
 			if scenario == "retry" {
 				// An earlier attempt failed and scheduled its retry.
-				scheduleActionRetry(t, store.SQLiteStore, proposal.Call, due)
+				scheduleActionRetry(t, store.Store, proposal.Call, due)
 			} else {
 				// A crashed worker holds the lease until it expires.
-				claimed, err := store.SQLiteStore.ClaimNextAction(t.Context(), ActionClaim{Scope: scope, WorkerID: "crashed", Now: time.Now().UTC(), LeaseDuration: time.Until(due)})
+				claimed, err := store.Store.ClaimNextAction(t.Context(), ActionClaim{Scope: scope, WorkerID: "crashed", Now: time.Now().UTC(), LeaseDuration: time.Until(due)})
 				if err != nil || claimed == nil {
 					t.Fatalf("crashed claim = %#v, %v", claimed, err)
 				}
@@ -210,7 +210,7 @@ func TestQueueDrivenActionPoolWakesAtScheduledRetryAndLeaseDeadlines(t *testing.
 }
 
 func TestQueueDrivenActionPoolPollsWhileQueueIsUnhealthy(t *testing.T) {
-	store := &deadlineActionStore{SQLiteStore: newTestKernelStore(t)}
+	store := &deadlineActionStore{Store: newTestKernelStore(t)}
 	catalog, scope := governedActionCatalog(t)
 	status := newQueueHarness(t).status
 	pool := newTestActionPool(t, store, catalog, scope, 10*time.Millisecond, 1, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
@@ -235,7 +235,7 @@ func TestQueueDrivenActionPoolPollsWhileQueueIsUnhealthy(t *testing.T) {
 
 // deadlineAgentRunStore counts every read an AgentRunWorkerPool makes.
 type deadlineAgentRunStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	claims        atomic.Int64
 	lists         atomic.Int64
 	deadlineReads atomic.Int64
@@ -244,17 +244,17 @@ type deadlineAgentRunStore struct {
 
 func (s *deadlineAgentRunStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
 	s.claims.Add(1)
-	return s.SQLiteStore.ClaimNextAgentRunWithDecision(ctx, claim)
+	return s.Store.ClaimNextAgentRunWithDecision(ctx, claim)
 }
 
 func (s *deadlineAgentRunStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error) {
 	s.claims.Add(1)
-	return s.SQLiteStore.ClaimNextAgentRun(ctx, claim)
+	return s.Store.ClaimNextAgentRun(ctx, claim)
 }
 
 func (s *deadlineAgentRunStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) ([]*AgentRun, error) {
 	s.lists.Add(1)
-	return s.SQLiteStore.ListAgentRuns(ctx, filter)
+	return s.Store.ListAgentRuns(ctx, filter)
 }
 
 func (s *deadlineAgentRunStore) NextAgentRunDeadline(context.Context, Scope, RunKind, string, time.Time) (*time.Time, error) {
@@ -267,7 +267,7 @@ func (s *deadlineAgentRunStore) reads() int64 {
 }
 
 func TestQueueDrivenAgentRunPoolIssuesNoReadsWhileIdleAndWakesOnDeadline(t *testing.T) {
-	store := &deadlineAgentRunStore{SQLiteStore: newTestKernelStore(t)}
+	store := &deadlineAgentRunStore{Store: newTestKernelStore(t)}
 	scope := Scope{Kind: "tenant", ID: "idle-runs"}
 	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
 		return nil, errors.New("unexpected idle turn")
@@ -338,7 +338,7 @@ func (s *checkedScopeSource) WorkerScopeActive(context.Context, Scope) (bool, er
 }
 
 func TestQueueDrivenSupervisorAdmitsScopesWithoutListingAndRetiresIdlePools(t *testing.T) {
-	store := &deadlineActionStore{SQLiteStore: newTestKernelStore(t)}
+	store := &deadlineActionStore{Store: newTestKernelStore(t)}
 	catalog, scope := governedActionCatalog(t)
 	source := &checkedScopeSource{}
 	source.active.Store(true)
@@ -457,17 +457,17 @@ func TestTerminalRunSweepProgressDoesNotRepeatCompletedSweeps(t *testing.T) {
 }
 
 type signalConversationStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	conversationLists atomic.Int64
 }
 
 func (s *signalConversationStore) ListConversations(ctx context.Context, filter ConversationFilter) ([]*Conversation, error) {
 	s.conversationLists.Add(1)
-	return s.SQLiteStore.ListConversations(ctx, filter)
+	return s.Store.ListConversations(ctx, filter)
 }
 
 func TestQueueDrivenConversationRunReconcilerRunsOnlyQueuedScopes(t *testing.T) {
-	store := &signalConversationStore{SQLiteStore: newTestKernelStore(t)}
+	store := &signalConversationStore{Store: newTestKernelStore(t)}
 	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)

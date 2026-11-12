@@ -13,7 +13,7 @@ const terminalConversationFailureMigrationVersion int64 = 59
 // Migration 59 requires quiescing pre-59 terminal-report SQL readers/writers.
 // The old three-column conflict/completion contract cannot represent two
 // manual attempts safely. No pending or leased delivery is overwritten.
-func (s *PostgresStore) migrateTerminalConversationFailures(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateTerminalConversationFailures(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, terminalConversationFailureMigrationVersion)
 	if err != nil {
 		return err
@@ -63,7 +63,7 @@ func (s *PostgresStore) migrateTerminalConversationFailures(ctx context.Context,
 	return err
 }
 
-func (s *PostgresStore) rollbackTerminalConversationFailures(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) rollbackTerminalConversationFailures(ctx context.Context, tx *sql.Tx) error {
 	var ambiguous bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM `+s.table("run_terminal_reports")+`
 		GROUP BY scope_kind,scope_id,run_id,terminal_status HAVING COUNT(*)>1)`).Scan(&ambiguous); err != nil {

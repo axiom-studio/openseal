@@ -16,7 +16,7 @@ func migrateSkillSetupRequests(db *sql.DB) error {
 	_, err := db.Exec(`CREATE INDEX IF NOT EXISTS skill_setup_requests_chat_idx ON skill_setup_requests(scope_kind,scope_id,conversation_id,created_at)`)
 	return err
 }
-func (s *SQLiteStore) GetSkillSetupRequest(ctx context.Context, scope models.Scope, id string) (*models.SkillSetupRequest, error) {
+func (s *Store) GetSkillSetupRequest(ctx context.Context, scope models.Scope, id string) (*models.SkillSetupRequest, error) {
 	if scope.Validate() != nil {
 		return nil, models.ErrInvalidSkillSetup
 	}
@@ -32,7 +32,7 @@ func (s *SQLiteStore) GetSkillSetupRequest(ctx context.Context, scope models.Sco
 	err = json.Unmarshal(payload, &r)
 	return &r, err
 }
-func (s *SQLiteStore) ListSkillSetupRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.SkillSetupRequest, error) {
+func (s *Store) ListSkillSetupRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.SkillSetupRequest, error) {
 	if scope.Validate() != nil || conversationID == "" {
 		return nil, models.ErrInvalidSkillSetup
 	}
@@ -55,7 +55,7 @@ func (s *SQLiteStore) ListSkillSetupRequests(ctx context.Context, scope models.S
 	}
 	return result, rows.Err()
 }
-func (s *SQLiteStore) SaveSkillSetupRequest(ctx context.Context, r *models.SkillSetupRequest, expected int64) error {
+func (s *Store) SaveSkillSetupRequest(ctx context.Context, r *models.SkillSetupRequest, expected int64) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}

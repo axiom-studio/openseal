@@ -44,7 +44,7 @@ func TestPostgresOwnerDefaultSpaceMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	indexes := func(store *PostgresStore) (perScope, perOwner bool) {
+	indexes := func(store *Store) (perScope, perOwner bool) {
 		t.Helper()
 		if err := store.db.QueryRowContext(ctx, `SELECT
 			EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = $1 AND tablename = 'spaces' AND indexname = 'spaces_default_idx'),
@@ -54,7 +54,7 @@ func TestPostgresOwnerDefaultSpaceMigration(t *testing.T) {
 		}
 		return perScope, perOwner
 	}
-	defaults := func(store *PostgresStore) map[string]bool {
+	defaults := func(store *Store) map[string]bool {
 		t.Helper()
 		rows, err := store.db.QueryContext(ctx, `SELECT id FROM `+store.table("spaces")+` WHERE is_default`)
 		if err != nil {
@@ -74,7 +74,7 @@ func TestPostgresOwnerDefaultSpaceMigration(t *testing.T) {
 		}
 		return result
 	}
-	assertDefaults := func(store *PostgresStore, when string, want ...string) {
+	assertDefaults := func(store *Store, when string, want ...string) {
 		t.Helper()
 		got := defaults(store)
 		if len(got) != len(want) {

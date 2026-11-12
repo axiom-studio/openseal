@@ -30,7 +30,7 @@ func agentTrialArguments() map[string]interface{} {
 // putAgentTrialRun stores run in whatever state it is in, bypassing
 // transition rules: it creates the Run, or saves it as the next revision of
 // the stored one and sets run.Revision to that revision.
-func putAgentTrialRun(t *testing.T, store *sqlite.SQLiteStore, run *AgentRun) *AgentRun {
+func putAgentTrialRun(t *testing.T, store *sqlite.Store, run *AgentRun) *AgentRun {
 	t.Helper()
 	ctx := context.Background()
 	current, err := store.GetAgentRun(ctx, run.Scope, run.ID)
@@ -164,7 +164,7 @@ func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
 	// A finished trial never parks.
 	now = child.CreatedAt.Add(time.Minute)
 	child.Status = AgentRunStatusCompleted
-	putAgentTrialRun(t, f.store.SQLiteStore, child)
+	putAgentTrialRun(t, f.store.Store, child)
 	if wake, _, err := parker.governedCardWait(context.Background(), f.run, call); err != nil || wake != nil {
 		t.Fatalf("wake after completion = %#v, %v", wake, err)
 	}
@@ -251,7 +251,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 
 // agentTrialFinalizerFixture is a builder Run waiting on its trial child.
 type agentTrialFinalizerFixture struct {
-	store  *sqlite.SQLiteStore
+	store  *sqlite.Store
 	scope  Scope
 	parent *AgentRun
 	child  *AgentRun
@@ -268,8 +268,8 @@ func newAgentTrialFinalizerFixture(t *testing.T, parentStatus AgentRunStatus) *a
 		deadline := agentTrialDeadline(child)
 		parent.WakeCondition = &WakeCondition{Type: AgentTrialWakeType, Reference: child.ID, WakeAt: &deadline}
 	}
-	putAgentTrialRun(t, f.store.SQLiteStore, parent)
-	return &agentTrialFinalizerFixture{store: f.store.SQLiteStore, scope: f.scope, parent: parent, child: child, call: call}
+	putAgentTrialRun(t, f.store.Store, parent)
+	return &agentTrialFinalizerFixture{store: f.store.Store, scope: f.scope, parent: parent, child: child, call: call}
 }
 
 func (f *agentTrialFinalizerFixture) endChild(t *testing.T, status AgentRunStatus, output map[string]interface{}, message string) *AgentRun {

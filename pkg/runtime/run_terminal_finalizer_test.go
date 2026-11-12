@@ -15,7 +15,7 @@ import (
 // test states (the finalizer only lists a Run's calls), and which records the
 // activity filters the finalizer asks for.
 type terminalFinalizerStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	actions         actionCallRecords
 	activityFilters []ActivityFilter
 }
@@ -26,12 +26,12 @@ func (s *terminalFinalizerStore) ListActionCalls(ctx context.Context, filter Act
 
 func (s *terminalFinalizerStore) ListActivity(ctx context.Context, filter ActivityFilter) ([]*ActivityEvent, error) {
 	s.activityFilters = append(s.activityFilters, filter)
-	return s.SQLiteStore.ListActivity(ctx, filter)
+	return s.Store.ListActivity(ctx, filter)
 }
 
 func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *testing.T) {
 	ctx := context.Background()
-	store := &terminalFinalizerStore{SQLiteStore: newTestKernelStore(t)}
+	store := &terminalFinalizerStore{Store: newTestKernelStore(t)}
 	catalog := skill.NewCatalog()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	definition := &skill.Definition{
@@ -134,7 +134,7 @@ func TestActionRunTerminalFinalizerReleasesSucceededAcquisitionExactlyOnce(t *te
 
 func TestActionRunTerminalFinalizerQuarantinesUnavailableHistoricalBindingOnce(t *testing.T) {
 	ctx := context.Background()
-	store := &terminalFinalizerStore{SQLiteStore: newTestKernelStore(t)}
+	store := &terminalFinalizerStore{Store: newTestKernelStore(t)}
 	catalog := skill.NewCatalog()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	definition := &skill.Definition{

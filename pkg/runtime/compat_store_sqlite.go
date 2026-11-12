@@ -8,14 +8,14 @@ package runtime
 
 import "github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 
-type SQLiteStore = sqlite.SQLiteStore
+type SQLiteStore = sqlite.Store
 
 // NewSQLiteStore forwards to sqlite.NewSQLiteStore.
-func NewSQLiteStore(path string) (*sqlite.SQLiteStore, error) {
+func NewSQLiteStore(path string) (*sqlite.Store, error) {
 	return sqlite.NewSQLiteStore(path)
 }
 
 // NewInMemorySQLiteStore forwards to sqlite.NewInMemorySQLiteStore.
-func NewInMemorySQLiteStore() (*sqlite.SQLiteStore, error) {
+func NewInMemorySQLiteStore() (*sqlite.Store, error) {
 	return sqlite.NewInMemorySQLiteStore()
 }

@@ -155,7 +155,7 @@ func TestRetryClearsFailureExplanation(t *testing.T) {
 }
 
 type retryGuardStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	actions  []*ActionCall
 	children []*AgentRun
 	pending  []*AgentTurn
@@ -174,7 +174,7 @@ func (s *retryGuardStore) ListAgentTurns(context.Context, AgentTurnFilter) ([]*A
 func TestRetryConversationRunRejectsUnrecoveredWork(t *testing.T) {
 	for _, kind := range []string{"actions", "children", "pending"} {
 		t.Run(kind, func(t *testing.T) {
-			store := &retryGuardStore{SQLiteStore: newTestKernelStore(t)}
+			store := &retryGuardStore{Store: newTestKernelStore(t)}
 			service, failed := failedReplyFixture(t, store)
 			switch kind {
 			case "actions":

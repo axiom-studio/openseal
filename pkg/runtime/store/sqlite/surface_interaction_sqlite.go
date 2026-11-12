@@ -11,7 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *SQLiteStore) CreateSurfaceInteraction(ctx context.Context, interaction *models.SurfaceInteraction) (*models.SurfaceInteraction, bool, error) {
+func (s *Store) CreateSurfaceInteraction(ctx context.Context, interaction *models.SurfaceInteraction) (*models.SurfaceInteraction, bool, error) {
 	if err := interaction.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -82,7 +82,7 @@ func (s *SQLiteStore) CreateSurfaceInteraction(ctx context.Context, interaction 
 	return models.CloneSurfaceInteraction(created), false, nil
 }
 
-func (s *SQLiteStore) ListSurfaceInteractions(ctx context.Context, filter models.SurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
+func (s *Store) ListSurfaceInteractions(ctx context.Context, filter models.SurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (s *SQLiteStore) ListSurfaceInteractions(ctx context.Context, filter models
 	return sqlstore.ScanSurfaceInteractions(rows)
 }
 
-func (s *SQLiteStore) ListLatestSurfaceInteractions(ctx context.Context, filter models.LatestSurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
+func (s *Store) ListLatestSurfaceInteractions(ctx context.Context, filter models.LatestSurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}

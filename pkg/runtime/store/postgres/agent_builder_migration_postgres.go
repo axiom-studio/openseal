@@ -22,7 +22,7 @@ var retiredChangeSetIndexes = []string{
 }
 
 // migrateAgentBuilder is PostgreSQL migration 76 (spec §3.6).
-func (s *PostgresStore) migrateAgentBuilder(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateAgentBuilder(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, agentBuilderMigrationVersion)
 	if err != nil || applied {
 		return err

@@ -44,7 +44,7 @@ func personActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 
 // claimedPersonChatRun claims a 1:1 chat run of release-agent acting for
 // actingUser.
-func claimedPersonChatRun(t *testing.T, store *sqlite.SQLiteStore, scope Scope, now time.Time, actingUser string) *AgentRun {
+func claimedPersonChatRun(t *testing.T, store *sqlite.Store, scope Scope, now time.Time, actingUser string) *AgentRun {
 	t.Helper()
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }
@@ -65,7 +65,7 @@ func claimedPersonChatRun(t *testing.T, store *sqlite.SQLiteStore, scope Scope, 
 
 // proposePersonAction proposes send as the governed tool call of run loop
 // step stepID, as the loop does for the Run's lease owner.
-func proposePersonAction(t *testing.T, store *sqlite.SQLiteStore, catalog *skill.Catalog, scope Scope, run *AgentRun, now time.Time, stepID, key string, policy ActionPolicyEvaluator) *ActionProposalResult {
+func proposePersonAction(t *testing.T, store *sqlite.Store, catalog *skill.Catalog, scope Scope, run *AgentRun, now time.Time, stepID, key string, policy ActionPolicyEvaluator) *ActionProposalResult {
 	t.Helper()
 	if policy == nil {
 		policy = ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {

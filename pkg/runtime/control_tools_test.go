@@ -214,7 +214,7 @@ func TestFinalAnswerWithOtherCallsIsRefusedOthersRun(t *testing.T) {
 type controlFixture struct {
 	t        *testing.T
 	ctx      context.Context
-	store    *sqlite.SQLiteStore
+	store    *sqlite.Store
 	records  *controlRecords
 	run      *AgentRun
 	session  *AgentSession
@@ -306,7 +306,7 @@ func newControlFixture(t *testing.T, calls []LoopToolCall) *controlFixture {
 	}
 	registry, handlers := fakeControlRegistry()
 	f.handlers = handlers
-	f.records = &controlRecords{SQLiteStore: store}
+	f.records = &controlRecords{Store: store}
 	f.exec = &ControlExecutor{Portfolio: f.records, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
 	return f
 }
@@ -317,7 +317,7 @@ func newControlFixture(t *testing.T, calls []LoopToolCall) *controlFixture {
 // test gives those records here instead of driving them through the action
 // and task workflows. The store itself holds no action calls or tasks.
 type controlRecords struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	actions actionCallRecords
 	tasks   []*ConversationTask
 }

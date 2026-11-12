@@ -15,7 +15,7 @@ const agentBuilderDraftMigrationVersion int64 = 82
 // for the builder conversations written before it by the rule the drafts
 // list applied on read: a person sent the first message, and no approved
 // create card of the conversation has a succeeded call.
-func (s *PostgresStore) migrateAgentBuilderDrafts(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateAgentBuilderDrafts(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, agentBuilderDraftMigrationVersion)
 	if err != nil || applied {
 		return err

@@ -17,7 +17,7 @@ const sqliteWorkingFilesTable = `
 		PRIMARY KEY (scope_kind, scope_id, id)
 	);`
 
-func (s *SQLiteStore) MarkArtifactFiles(ctx context.Context, scope models.Scope, working, results []string) error {
+func (s *Store) MarkArtifactFiles(ctx context.Context, scope models.Scope, working, results []string) error {
 	if err := scope.Validate(); err != nil {
 		return err
 	}
@@ -41,4 +41,4 @@ func (s *SQLiteStore) MarkArtifactFiles(ctx context.Context, scope models.Scope,
 	return tx.Commit()
 }
 
-var _ models.ArtifactWorkingFileStore = (*SQLiteStore)(nil)
+var _ models.ArtifactWorkingFileStore = (*Store)(nil)

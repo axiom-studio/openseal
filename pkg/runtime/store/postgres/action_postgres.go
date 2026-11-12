@@ -16,7 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func (s *PostgresStore) migrateActions(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateActions(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("action_calls")+` (
 			id TEXT NOT NULL, scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL,
@@ -51,7 +51,7 @@ func (s *PostgresStore) migrateActions(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal models.ActionProposalRecord) (*models.ActionProposalResult, error) {
+func (s *Store) CreateActionProposal(ctx context.Context, proposal models.ActionProposalRecord) (*models.ActionProposalResult, error) {
 	if err := models.ValidateActionProposalRecord(proposal); err != nil {
 		return nil, err
 	}
@@ -220,7 +220,7 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal model
 	return &models.ActionProposalResult{Call: models.CloneActionCall(call), Approval: models.CloneApprovalCheckpoint(proposal.Approval), Run: models.CloneAgentRun(proposal.Run), Event: event, Created: true}, nil
 }
 
-func (s *PostgresStore) actionProposalReplayTx(ctx context.Context, tx *sql.Tx, call *models.ActionCall) (*models.ActionProposalResult, error) {
+func (s *Store) actionProposalReplayTx(ctx context.Context, tx *sql.Tx, call *models.ActionCall) (*models.ActionProposalResult, error) {
 	if call.IdempotencyKey == "" {
 		return nil, nil
 	}
@@ -244,14 +244,14 @@ func (s *PostgresStore) actionProposalReplayTx(ctx context.Context, tx *sql.Tx, 
 	return &models.ActionProposalResult{Call: existing, Approval: approval, Created: false}, nil
 }
 
-func (s *PostgresStore) GetActionCall(ctx context.Context, scope models.Scope, actionID string) (*models.ActionCall, error) {
+func (s *Store) GetActionCall(ctx context.Context, scope models.Scope, actionID string) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return s.getActionByID(ctx, s.db, scope, actionID, false)
 }
 
-func (s *PostgresStore) ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
+func (s *Store) ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -298,7 +298,7 @@ func (s *PostgresStore) ListActionCalls(ctx context.Context, filter models.Actio
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) GetActionCallByExternalOperation(ctx context.Context, scope models.Scope, digest string) (*models.ActionCall, error) {
+func (s *Store) GetActionCallByExternalOperation(ctx context.Context, scope models.Scope, digest string) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -308,14 +308,14 @@ func (s *PostgresStore) GetActionCallByExternalOperation(ctx context.Context, sc
 	return s.getActionByExternalOperation(ctx, s.db, scope, digest, false)
 }
 
-func (s *PostgresStore) GetApproval(ctx context.Context, scope models.Scope, approvalID string) (*models.ApprovalCheckpoint, error) {
+func (s *Store) GetApproval(ctx context.Context, scope models.Scope, approvalID string) (*models.ApprovalCheckpoint, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return s.getApprovalByID(ctx, s.db, scope, approvalID, false)
 }
 
-func (s *PostgresStore) ListApprovals(ctx context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
+func (s *Store) ListApprovals(ctx context.Context, filter models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -418,7 +418,7 @@ func (s *PostgresStore) ListApprovals(ctx context.Context, filter models.Approva
 	return result, nil
 }
 
-func (s *PostgresStore) ResolveApproval(ctx context.Context, resolution models.ApprovalResolutionRecord) (*models.ApprovalResolutionResult, error) {
+func (s *Store) ResolveApproval(ctx context.Context, resolution models.ApprovalResolutionRecord) (*models.ApprovalResolutionResult, error) {
 	if err := models.ValidateApprovalResolutionRecord(resolution); err != nil {
 		return nil, err
 	}
@@ -498,7 +498,7 @@ func (s *PostgresStore) ResolveApproval(ctx context.Context, resolution models.A
 	return &models.ApprovalResolutionResult{Approval: models.CloneApprovalCheckpoint(resolution.Approval), Call: models.CloneActionCall(resolution.Call), Run: models.CloneAgentRun(resolvedRun), Event: event, Resolved: true}, nil
 }
 
-func (s *PostgresStore) ClaimNextAction(ctx context.Context, claim models.ActionClaim) (*models.ActionCall, error) {
+func (s *Store) ClaimNextAction(ctx context.Context, claim models.ActionClaim) (*models.ActionCall, error) {
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
@@ -561,7 +561,7 @@ func (s *PostgresStore) ClaimNextAction(ctx context.Context, claim models.Action
 	return selected, nil
 }
 
-func (s *PostgresStore) RenewActionLease(ctx context.Context, scope models.Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*models.ActionCall, error) {
+func (s *Store) RenewActionLease(ctx context.Context, scope models.Scope, actionID, workerID string, now time.Time, leaseDuration time.Duration) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -601,7 +601,7 @@ func (s *PostgresStore) RenewActionLease(ctx context.Context, scope models.Scope
 	return current, nil
 }
 
-func (s *PostgresStore) PersistActionExecution(ctx context.Context, execution models.ActionExecutionRecord) (*models.ActionExecutionResult, error) {
+func (s *Store) PersistActionExecution(ctx context.Context, execution models.ActionExecutionRecord) (*models.ActionExecutionResult, error) {
 	if err := models.ValidateActionExecutionRecord(execution); err != nil {
 		return nil, err
 	}
@@ -666,7 +666,7 @@ func (s *PostgresStore) PersistActionExecution(ctx context.Context, execution mo
 	return &models.ActionExecutionResult{Call: models.CloneActionCall(execution.Call), Run: models.CloneAgentRun(execution.Run), Event: event}, nil
 }
 
-func (s *PostgresStore) getActionByID(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, id string, lock bool) (*models.ActionCall, error) {
+func (s *Store) getActionByID(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, id string, lock bool) (*models.ActionCall, error) {
 	query := `SELECT payload FROM ` + s.table("action_calls") + ` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`
 	if lock {
 		query += ` FOR UPDATE`
@@ -681,7 +681,7 @@ func (s *PostgresStore) getActionByID(ctx context.Context, queryer sqlstore.RowQ
 	return sqlstore.DecodeActionCall(payload)
 }
 
-func (s *PostgresStore) GetActionCallByIdempotencyKey(ctx context.Context, scope models.Scope, runID, key string) (*models.ActionCall, error) {
+func (s *Store) GetActionCallByIdempotencyKey(ctx context.Context, scope models.Scope, runID, key string) (*models.ActionCall, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -691,7 +691,7 @@ func (s *PostgresStore) GetActionCallByIdempotencyKey(ctx context.Context, scope
 	return s.getActionByIdempotency(ctx, s.db, scope, runID, key)
 }
 
-func (s *PostgresStore) getActionByIdempotency(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, runID, key string) (*models.ActionCall, error) {
+func (s *Store) getActionByIdempotency(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, runID, key string) (*models.ActionCall, error) {
 	var payload string
 	if err := queryer.QueryRowContext(ctx, `SELECT payload FROM `+s.table("action_calls")+` WHERE scope_kind=$1 AND scope_id=$2 AND run_id=$3 AND idempotency_key=$4`, scope.Kind, scope.ID, runID, key).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -702,7 +702,7 @@ func (s *PostgresStore) getActionByIdempotency(ctx context.Context, queryer sqls
 	return sqlstore.DecodeActionCall(payload)
 }
 
-func (s *PostgresStore) getActionByExternalOperation(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, digest string, lock bool) (*models.ActionCall, error) {
+func (s *Store) getActionByExternalOperation(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, digest string, lock bool) (*models.ActionCall, error) {
 	query := `SELECT payload FROM ` + s.table("action_calls") + `
 		WHERE scope_kind=$1 AND scope_id=$2 AND external_operation_digest=$3
 		AND status IN ('ready','waiting_for_approval','running','succeeded','compensating','compensated')`
@@ -719,7 +719,7 @@ func (s *PostgresStore) getActionByExternalOperation(ctx context.Context, querye
 	return sqlstore.DecodeActionCall(payload)
 }
 
-func (s *PostgresStore) getApprovalByID(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, id string, lock bool) (*models.ApprovalCheckpoint, error) {
+func (s *Store) getApprovalByID(ctx context.Context, queryer sqlstore.RowQuerier, scope models.Scope, id string, lock bool) (*models.ApprovalCheckpoint, error) {
 	query := `SELECT payload FROM ` + s.table("approval_checkpoints") + ` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`
 	if lock {
 		query += ` FOR UPDATE`
@@ -734,7 +734,7 @@ func (s *PostgresStore) getApprovalByID(ctx context.Context, queryer sqlstore.Ro
 	return sqlstore.DecodeApproval(payload)
 }
 
-func (s *PostgresStore) updateAgentRunTx(ctx context.Context, tx *sql.Tx, run *models.AgentRun, expectedRevision int64) error {
+func (s *Store) updateAgentRunTx(ctx context.Context, tx *sql.Tx, run *models.AgentRun, expectedRevision int64) error {
 	payload, err := json.Marshal(run)
 	if err != nil {
 		return err
@@ -749,7 +749,7 @@ func (s *PostgresStore) updateAgentRunTx(ctx context.Context, tx *sql.Tx, run *m
 	return nil
 }
 
-func (s *PostgresStore) insertActivityTx(ctx context.Context, tx *sql.Tx, value *models.ActivityEvent) (*models.ActivityEvent, error) {
+func (s *Store) insertActivityTx(ctx context.Context, tx *sql.Tx, value *models.ActivityEvent) (*models.ActivityEvent, error) {
 	event := models.CloneActivityEvent(value)
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM `+s.table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`, event.Scope.Kind, event.Scope.ID, event.RunID).Scan(&exists); err != nil {

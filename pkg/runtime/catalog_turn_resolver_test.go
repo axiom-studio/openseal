@@ -126,7 +126,7 @@ func (bindingTestChatWorkspaces) PrepareChatWorkspace(_ context.Context, run *Ag
 
 // claimedBindingRun stores run as claimed by worker w1, so the resolver may
 // create its session.
-func claimedBindingRun(t *testing.T, store *sqlite.SQLiteStore, run *AgentRun) *AgentRun {
+func claimedBindingRun(t *testing.T, store *sqlite.Store, run *AgentRun) *AgentRun {
 	t.Helper()
 	expires := time.Now().Add(time.Hour)
 	run.Status, run.LeaseOwner, run.LeaseExpiresAt, run.Revision = AgentRunStatusRunning, "w1", &expires, 1

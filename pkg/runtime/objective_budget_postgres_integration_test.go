@@ -31,13 +31,13 @@ func TestPostgresObjectiveBudgetSerializesReplicaAllocations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stores := []*postgres.PostgresStore{primary, replica}
+	stores := []*postgres.Store{primary, replica}
 	start := make(chan struct{})
 	results := make(chan error, len(stores))
 	var wait sync.WaitGroup
 	for index, store := range stores {
 		wait.Add(1)
-		go func(index int, store *postgres.PostgresStore) {
+		go func(index int, store *postgres.Store) {
 			defer wait.Done()
 			<-start
 			_, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{

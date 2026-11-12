@@ -10,9 +10,9 @@ import (
 	"github.com/lib/pq"
 )
 
-var _ models.AgentBuilderCutoverStore = (*PostgresStore)(nil)
+var _ models.AgentBuilderCutoverStore = (*Store)(nil)
 
-func (s *PostgresStore) agentBuilderCutoverTablePresent(ctx context.Context, query sqlstore.RowQuerier) (bool, error) {
+func (s *Store) agentBuilderCutoverTablePresent(ctx context.Context, query sqlstore.RowQuerier) (bool, error) {
 	var relation sql.NullString
 	if err := query.QueryRowContext(ctx, `SELECT to_regclass($1)::text`, s.schema+"."+sqlstore.AgentBuilderCutoverTable).Scan(&relation); err != nil {
 		return false, err
@@ -20,7 +20,7 @@ func (s *PostgresStore) agentBuilderCutoverTablePresent(ctx context.Context, que
 	return relation.Valid, nil
 }
 
-func (s *PostgresStore) ListAgentBuilderCutoverDrafts(ctx context.Context) ([]models.AgentBuilderCutoverDraft, error) {
+func (s *Store) ListAgentBuilderCutoverDrafts(ctx context.Context) ([]models.AgentBuilderCutoverDraft, error) {
 	present, err := s.agentBuilderCutoverTablePresent(ctx, s.db)
 	if err != nil || !present {
 		return nil, err
@@ -36,7 +36,7 @@ func (s *PostgresStore) ListAgentBuilderCutoverDrafts(ctx context.Context) ([]mo
 	return sqlstore.ScanAgentBuilderCutoverDrafts(rows)
 }
 
-func (s *PostgresStore) DeleteAgentBuilderCutoverDraft(ctx context.Context, scope models.Scope, id string) error {
+func (s *Store) DeleteAgentBuilderCutoverDraft(ctx context.Context, scope models.Scope, id string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM `+s.table(sqlstore.AgentBuilderCutoverTable)+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`,
 		scope.Kind, scope.ID, id)
 	if postgresUndefinedTable(err) {
@@ -45,7 +45,7 @@ func (s *PostgresStore) DeleteAgentBuilderCutoverDraft(ctx context.Context, scop
 	return err
 }
 
-func (s *PostgresStore) DropAgentBuilderCutoverTable(ctx context.Context) (bool, error) {
+func (s *Store) DropAgentBuilderCutoverTable(ctx context.Context) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err

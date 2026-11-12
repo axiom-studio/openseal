@@ -15,7 +15,7 @@ import (
 const kernelProjectRemovalMigrationVersion int64 = 77
 
 // migrateRemoveKernelProjects is PostgreSQL migration 77.
-func (s *PostgresStore) migrateRemoveKernelProjects(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateRemoveKernelProjects(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, kernelProjectRemovalMigrationVersion)
 	if err != nil || applied {
 		return err

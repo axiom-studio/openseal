@@ -7,7 +7,7 @@ import (
 
 const dependencyReconciliationMigrationVersion int64 = 56
 
-func (s *PostgresStore) migrateDependencyReconciliation(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateDependencyReconciliation(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, dependencyReconciliationMigrationVersion)
 	if err != nil || applied {
 		return err

@@ -163,9 +163,9 @@ func WithPostgresMigrationObserver(observer PostgresMigrationObserver) PostgresS
 	}
 }
 
-// PostgresStore is the shared, horizontally safe OpenSeal persistence adapter.
+// Store is the shared, horizontally safe OpenSeal persistence adapter.
 // Additional kernel contracts are implemented on this type in focused slices.
-type PostgresStore struct {
+type Store struct {
 	db                        *sql.DB
 	schema                    string
 	workCommitted             chan struct{}
@@ -176,10 +176,10 @@ type PostgresStore struct {
 	migrationStats            PostgresMigrationStats
 }
 
-var _ models.KernelStore = (*PostgresStore)(nil)
+var _ models.KernelStore = (*Store)(nil)
 
 // NewPostgresStore opens PostgreSQL and applies OpenSeal's versioned schema.
-func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreOption) (*PostgresStore, error) {
+func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreOption) (*Store, error) {
 	if strings.TrimSpace(dsn) == "" {
 		return nil, errors.New("PostgreSQL DSN is required")
 	}
@@ -197,7 +197,7 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreO
 		}
 	}
 	workCommitted := make(chan struct{}, 1)
-	store := &PostgresStore{
+	store := &Store{
 		schema: config.schema, workCommitted: workCommitted,
 		migrationLockTimeout:      config.migrationLockTimeout,
 		migrationLockPollInterval: config.migrationLockPollInterval,
@@ -223,7 +223,7 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreO
 	return store, nil
 }
 
-func (s *PostgresStore) MigrationStats() PostgresMigrationStats {
+func (s *Store) MigrationStats() PostgresMigrationStats {
 	if s == nil {
 		return PostgresMigrationStats{}
 	}
@@ -232,7 +232,7 @@ func (s *PostgresStore) MigrationStats() PostgresMigrationStats {
 	return s.migrationStats
 }
 
-func (s *PostgresStore) PoolStats() PostgresPoolStats {
+func (s *Store) PoolStats() PostgresPoolStats {
 	if s == nil || s.db == nil {
 		return PostgresPoolStats{}
 	}
@@ -250,7 +250,7 @@ func (s *PostgresStore) PoolStats() PostgresPoolStats {
 	}
 }
 
-func (s *PostgresStore) migrate(ctx context.Context) error {
+func (s *Store) migrate(ctx context.Context) error {
 	startedAt := time.Now()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -496,7 +496,7 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	return nil
 }
 
-func (s *PostgresStore) postgresMigrationApplied(ctx context.Context, query sqlstore.RowQuerier, version int64) (bool, error) {
+func (s *Store) postgresMigrationApplied(ctx context.Context, query sqlstore.RowQuerier, version int64) (bool, error) {
 	var applied bool
 	err := query.QueryRowContext(ctx, `SELECT EXISTS (
 		SELECT 1 FROM `+s.table("schema_migrations")+` WHERE version = $1
@@ -516,7 +516,7 @@ func (s *PostgresStore) postgresMigrationApplied(ctx context.Context, query sqls
 // references) with kernel Projects; 20 and 22 (event source checkpoints,
 // subscriptions and health) with the Runbook event router. Older databases
 // may retain them; fresh databases omit them.
-func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query sqlstore.RowQuerier) (bool, int64, error) {
+func (s *Store) postgresSchemaCurrent(ctx context.Context, query sqlstore.RowQuerier) (bool, int64, error) {
 	var relation sql.NullString
 	if err := query.QueryRowContext(ctx, `SELECT to_regclass($1)`, s.schema+".schema_migrations").Scan(&relation); err != nil {
 		return false, 0, err
@@ -535,7 +535,7 @@ func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query sqlstor
 	return knownVersions == currentPostgresSchemaVersion-17, schemaVersion, nil
 }
 
-func (s *PostgresStore) recordMigrationOutcome(phase PostgresMigrationPhase, stats PostgresMigrationStats) {
+func (s *Store) recordMigrationOutcome(phase PostgresMigrationPhase, stats PostgresMigrationStats) {
 	s.migrationMu.Lock()
 	s.migrationStats = stats
 	s.migrationMu.Unlock()
@@ -544,7 +544,7 @@ func (s *PostgresStore) recordMigrationOutcome(phase PostgresMigrationPhase, sta
 	})
 }
 
-func (s *PostgresStore) acquireMigrationLock(ctx context.Context, tx *sql.Tx) (time.Duration, error) {
+func (s *Store) acquireMigrationLock(ctx context.Context, tx *sql.Tx) (time.Duration, error) {
 	startedAt := time.Now()
 	lockContext, cancel := context.WithTimeout(ctx, s.migrationLockTimeout)
 	defer cancel()
@@ -585,7 +585,7 @@ func (s *PostgresStore) acquireMigrationLock(ctx context.Context, tx *sql.Tx) (t
 	}
 }
 
-func (s *PostgresStore) observeMigration(event PostgresMigrationEvent) {
+func (s *Store) observeMigration(event PostgresMigrationEvent) {
 	if s == nil || s.migrationObserver == nil {
 		return
 	}
@@ -595,8 +595,8 @@ func (s *PostgresStore) observeMigration(event PostgresMigrationEvent) {
 	}()
 }
 
-func (s *PostgresStore) Close() error { return s.db.Close() }
+func (s *Store) Close() error { return s.db.Close() }
 
-func (s *PostgresStore) quotedSchema() string { return `"` + s.schema + `"` }
+func (s *Store) quotedSchema() string { return `"` + s.schema + `"` }
 
-func (s *PostgresStore) table(name string) string { return s.quotedSchema() + `.` + `"` + name + `"` }
+func (s *Store) table(name string) string { return s.quotedSchema() + `.` + `"` + name + `"` }

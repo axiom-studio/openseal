@@ -8,9 +8,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-var _ models.RunDependencyReconciliationStore = (*SQLiteStore)(nil)
+var _ models.RunDependencyReconciliationStore = (*Store)(nil)
 
-func (s *SQLiteStore) ListWaitingRunDependencyGroups(ctx context.Context, scope models.Scope, afterID string, limit int) ([]models.RunDependencyGroupWork, error) {
+func (s *Store) ListWaitingRunDependencyGroups(ctx context.Context, scope models.Scope, afterID string, limit int) ([]models.RunDependencyGroupWork, error) {
 	if err := models.ValidateWaitingDependencyGroupPage(scope, afterID, limit); err != nil {
 		return nil, err
 	}
@@ -38,7 +38,7 @@ func (s *SQLiteStore) ListWaitingRunDependencyGroups(ctx context.Context, scope 
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) ReconcileRunDependencyGroup(ctx context.Context, record models.RunDependencyGroupReconciliationRecord) (*models.RunDependencyResult, error) {
+func (s *Store) ReconcileRunDependencyGroup(ctx context.Context, record models.RunDependencyGroupReconciliationRecord) (*models.RunDependencyResult, error) {
 	if err := models.ValidateDependencyGroupReconciliationRecord(record); err != nil {
 		return nil, err
 	}

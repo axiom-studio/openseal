@@ -32,7 +32,7 @@ func TestPostgresConcurrentColdStartsSerializeMigrationLeadership(t *testing.T) 
 
 	const replicas = 6
 	start := make(chan struct{})
-	stores := make(chan *PostgresStore, replicas)
+	stores := make(chan *Store, replicas)
 	errorsFound := make(chan error, replicas)
 	events := make(chan PostgresMigrationEvent, replicas*3)
 	var wait sync.WaitGroup
@@ -182,7 +182,7 @@ func TestPostgresMigrationLockWaitIsObservableAndBounded(t *testing.T) {
 	})
 
 	events := make(chan PostgresMigrationEvent, 8)
-	result := make(chan *PostgresStore, 1)
+	result := make(chan *Store, 1)
 	openErrors := make(chan error, 1)
 	go func() {
 		store, openErr := NewPostgresStore(ctx, dsn,

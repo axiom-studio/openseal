@@ -20,7 +20,7 @@ func migrateConversationTaskContinuationsSQLite(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) ListDueConversationTaskRuns(ctx context.Context, filter models.ConversationTaskDueFilter) ([]*models.AgentRun, error) {
+func (s *Store) ListDueConversationTaskRuns(ctx context.Context, filter models.ConversationTaskDueFilter) ([]*models.AgentRun, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func (s *SQLiteStore) ListDueConversationTaskRuns(ctx context.Context, filter mo
 	return runs, rows.Err()
 }
 
-func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req models.ConversationTaskPromotionRequest) (*models.ConversationTaskResult, error) {
+func (s *Store) PromoteConversationTask(ctx context.Context, req models.ConversationTaskPromotionRequest) (*models.ConversationTaskResult, error) {
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}

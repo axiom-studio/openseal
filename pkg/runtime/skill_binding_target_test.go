@@ -18,7 +18,7 @@ import (
 // for: researcher (changeable), platform (fixed policy) and old (retired).
 type skillTargetFixture struct {
 	ctx        context.Context
-	store      *sqlite.SQLiteStore
+	store      *sqlite.Store
 	scope      Scope
 	skillScope skill.ScopeReference
 	agents     *kernelagent.Registry

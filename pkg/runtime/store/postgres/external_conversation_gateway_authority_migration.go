@@ -11,7 +11,7 @@ const externalConversationGatewayAuthorityMigrationVersion int64 = 48
 // from uniquely matching reviewed endpoint records. Ambiguous or unbound
 // installations remain unpinned and retain endpoint-only routing. It never
 // learns tenant/account ownership from incoming provider traffic.
-func (s *PostgresStore) migrateExternalConversationGatewayAuthority(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateExternalConversationGatewayAuthority(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, externalConversationGatewayAuthorityMigrationVersion)
 	if err != nil || applied {
 		return err

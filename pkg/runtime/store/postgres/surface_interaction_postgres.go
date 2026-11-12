@@ -13,7 +13,7 @@ import (
 
 const surfaceInteractionMigrationVersion int64 = 65
 
-func (s *PostgresStore) migrateSurfaceInteractions(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateSurfaceInteractions(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, surfaceInteractionMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -42,7 +42,7 @@ func (s *PostgresStore) migrateSurfaceInteractions(ctx context.Context, tx *sql.
 	return err
 }
 
-func (s *PostgresStore) CreateSurfaceInteraction(ctx context.Context, interaction *models.SurfaceInteraction) (*models.SurfaceInteraction, bool, error) {
+func (s *Store) CreateSurfaceInteraction(ctx context.Context, interaction *models.SurfaceInteraction) (*models.SurfaceInteraction, bool, error) {
 	if err := interaction.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -112,7 +112,7 @@ func (s *PostgresStore) CreateSurfaceInteraction(ctx context.Context, interactio
 	return models.CloneSurfaceInteraction(created), false, nil
 }
 
-func (s *PostgresStore) ListSurfaceInteractions(ctx context.Context, filter models.SurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
+func (s *Store) ListSurfaceInteractions(ctx context.Context, filter models.SurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (s *PostgresStore) ListSurfaceInteractions(ctx context.Context, filter mode
 	return sqlstore.ScanSurfaceInteractions(rows)
 }
 
-func (s *PostgresStore) ListLatestSurfaceInteractions(ctx context.Context, filter models.LatestSurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
+func (s *Store) ListLatestSurfaceInteractions(ctx context.Context, filter models.LatestSurfaceInteractionFilter) ([]*models.SurfaceInteraction, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func (s *PostgresStore) ListLatestSurfaceInteractions(ctx context.Context, filte
 
 // getPostgresSurfaceInteraction reads one interaction of a conversation; where
 // filters after the leading $1..$3 scope and conversation parameters.
-func (s *PostgresStore) getPostgresSurfaceInteraction(ctx context.Context, queryer sqlstore.Reader, where string, args ...interface{}) (*models.SurfaceInteraction, error) {
+func (s *Store) getPostgresSurfaceInteraction(ctx context.Context, queryer sqlstore.Reader, where string, args ...interface{}) (*models.SurfaceInteraction, error) {
 	var payload string
 	err := queryer.QueryRowContext(ctx, `SELECT payload FROM `+s.table("surface_interactions")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND conversation_id = $3 AND `+where+` ORDER BY sequence LIMIT 1`, args...).Scan(&payload)

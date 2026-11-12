@@ -9,7 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *SQLiteStore) prepareConversationTaskAdmissionConn(ctx context.Context, conn *sql.Conn, claim *models.AgentRunClaim, runs []*models.AgentRun) error {
+func (s *Store) prepareConversationTaskAdmissionConn(ctx context.Context, conn *sql.Conn, claim *models.AgentRunClaim, runs []*models.AgentRun) error {
 	return models.PrepareConversationTaskAdmission(ctx, claim, runs, models.ConversationTaskAdmissionLookup{
 		Task: func(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 			var payload string

@@ -11,7 +11,7 @@ const activityProjectionRepairMigrationVersion int64 = 38
 // with its migration ledger. Some restored databases retained migration 6
 // while missing one or more physical columns, which made activity writes
 // fail even though the schema appeared current.
-func (s *PostgresStore) migrateActivityProjectionRepair(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateActivityProjectionRepair(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, activityProjectionRepairMigrationVersion)
 	if err != nil || applied {
 		return err

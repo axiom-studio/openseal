@@ -13,7 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-var _ models.RunTerminalReportingStore = (*SQLiteStore)(nil)
+var _ models.RunTerminalReportingStore = (*Store)(nil)
 
 // Queue timestamps use integer microseconds, matching PostgreSQL precision.
 // Trigger-generated RFC3339 values must not be compared as strings against
@@ -136,7 +136,7 @@ func migrateRunTerminalReportingSQLite(db *sql.DB) error {
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) ClaimRunTerminalReports(ctx context.Context, request models.RunTerminalReportingClaim) ([]*models.RunTerminalReport, error) {
+func (s *Store) ClaimRunTerminalReports(ctx context.Context, request models.RunTerminalReportingClaim) ([]*models.RunTerminalReport, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func (s *SQLiteStore) ClaimRunTerminalReports(ctx context.Context, request model
 	return reports, nil
 }
 
-func (s *SQLiteStore) CompleteRunTerminalReport(ctx context.Context, request models.RunTerminalReportingCompletion) error {
+func (s *Store) CompleteRunTerminalReport(ctx context.Context, request models.RunTerminalReportingCompletion) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func (s *SQLiteStore) CompleteRunTerminalReport(ctx context.Context, request mod
 	return sqlstore.RunTerminalReportLeaseResult(result, err)
 }
 
-func (s *SQLiteStore) RetryRunTerminalReport(ctx context.Context, request models.RunTerminalReportingRetry) error {
+func (s *Store) RetryRunTerminalReport(ctx context.Context, request models.RunTerminalReportingRetry) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
@@ -235,7 +235,7 @@ func (s *SQLiteStore) RetryRunTerminalReport(ctx context.Context, request models
 	return sqlstore.RunTerminalReportLeaseResult(result, err)
 }
 
-func (s *SQLiteStore) GetRunTerminalReport(ctx context.Context, scope models.Scope, runID string, status models.AgentRunStatus) (*models.RunTerminalReport, error) {
+func (s *Store) GetRunTerminalReport(ctx context.Context, scope models.Scope, runID string, status models.AgentRunStatus) (*models.RunTerminalReport, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

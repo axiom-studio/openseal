@@ -62,7 +62,7 @@ func migrateCallbackRegistrySQLite(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration) error {
+func (s *Store) CreateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (s *SQLiteStore) CreateCallbackRegistration(ctx context.Context, value *mod
 	return err
 }
 
-func (s *SQLiteStore) GetCallbackRegistration(ctx context.Context, scope models.Scope, id string) (*models.CallbackRegistration, error) {
+func (s *Store) GetCallbackRegistration(ctx context.Context, scope models.Scope, id string) (*models.CallbackRegistration, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (s *SQLiteStore) GetCallbackRegistration(ctx context.Context, scope models.
 		WHERE scope_kind=? AND scope_id=? AND id=?`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *SQLiteStore) GetCallbackRegistrationByIngressRoute(ctx context.Context, route string) (*models.CallbackRegistration, error) {
+func (s *Store) GetCallbackRegistrationByIngressRoute(ctx context.Context, route string) (*models.CallbackRegistration, error) {
 	if !models.IsValidOpaqueIdentifier(strings.TrimSpace(route), 128) {
 		return nil, models.ErrInvalidCallbackRegistration
 	}
@@ -96,7 +96,7 @@ func (s *SQLiteStore) GetCallbackRegistrationByIngressRoute(ctx context.Context,
 		`SELECT payload FROM callback_registrations WHERE ingress_route=?`, strings.TrimSpace(route)))
 }
 
-func (s *SQLiteStore) ListCallbackRegistrations(ctx context.Context, filter models.CallbackRegistrationFilter) ([]*models.CallbackRegistration, error) {
+func (s *Store) ListCallbackRegistrations(ctx context.Context, filter models.CallbackRegistrationFilter) ([]*models.CallbackRegistration, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func (s *SQLiteStore) ListCallbackRegistrations(ctx context.Context, filter mode
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration, expectedRevision int64) error {
+func (s *Store) UpdateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration, expectedRevision int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (s *SQLiteStore) UpdateCallbackRegistration(ctx context.Context, value *mod
 	return nil
 }
 
-func (s *SQLiteStore) ReceiveCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt) (*models.CallbackEventReceipt, bool, error) {
+func (s *Store) ReceiveCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt) (*models.CallbackEventReceipt, bool, error) {
 	if err := value.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -197,7 +197,7 @@ func (s *SQLiteStore) ReceiveCallbackEvent(ctx context.Context, value *models.Ca
 	return current, true, err
 }
 
-func (s *SQLiteStore) UpdateCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt, expectedRevision int64) error {
+func (s *Store) UpdateCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt, expectedRevision int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func (s *SQLiteStore) UpdateCallbackEvent(ctx context.Context, value *models.Cal
 	return nil
 }
 
-func (s *SQLiteStore) ClaimCallbackEvent(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.CallbackEventReceipt, error) {
+func (s *Store) ClaimCallbackEvent(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.CallbackEventReceipt, error) {
 	if scope.Validate() != nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(worker), 256) || now.IsZero() || leaseDuration <= 0 {
 		return nil, models.ErrInvalidCallbackRegistration
 	}
@@ -266,7 +266,7 @@ func (s *SQLiteStore) ClaimCallbackEvent(ctx context.Context, scope models.Scope
 	return receipt, nil
 }
 
-func (s *SQLiteStore) SaveClaimedCallbackEvent(ctx context.Context, receipt *models.CallbackEventReceipt, expectedRevision int64, leaseOwner string) error {
+func (s *Store) SaveClaimedCallbackEvent(ctx context.Context, receipt *models.CallbackEventReceipt, expectedRevision int64, leaseOwner string) error {
 	if err := receipt.Validate(); err != nil {
 		return err
 	}

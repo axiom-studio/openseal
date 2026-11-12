@@ -381,7 +381,7 @@ func TestApprovalNotificationAlwaysCreatesAgentApprovalConversation(t *testing.T
 func registerApprovalNotificationCallback(
 	t *testing.T,
 	ctx context.Context,
-	store *sqlite.SQLiteStore,
+	store *sqlite.Store,
 	catalog *skill.Catalog,
 	endpoint *ExternalConversationEndpoint,
 ) *CallbackRegistration {

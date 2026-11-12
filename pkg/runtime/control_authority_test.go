@@ -65,7 +65,7 @@ func resolveControlAuthorityForTest(t *testing.T, in ControlAuthorityInput) Cont
 
 // claimedForegroundChatRun schedules and claims the foreground conversation
 // Run for one user message in an Agent's chat.
-func claimedForegroundChatRun(t *testing.T, store *sqlite.SQLiteStore) *AgentRun {
+func claimedForegroundChatRun(t *testing.T, store *sqlite.Store) *AgentRun {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "control-authority"}
 	conversations := NewConversationService(store)
@@ -91,7 +91,7 @@ func claimedForegroundChatRun(t *testing.T, store *sqlite.SQLiteStore) *AgentRun
 	return claimed
 }
 
-func chatAuthorityInput(store *sqlite.SQLiteStore, run *AgentRun) ControlAuthorityInput {
+func chatAuthorityInput(store *sqlite.Store, run *AgentRun) ControlAuthorityInput {
 	return ControlAuthorityInput{
 		Run: run, DeploymentID: "agent", ConversationTasks: store, Runs: store, Conversations: store,
 	}

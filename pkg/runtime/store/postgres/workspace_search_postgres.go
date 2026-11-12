@@ -25,7 +25,7 @@ type WorkspaceSearchHit struct {
 // SearchWorkspacePage searches existing active conversations and their full
 // message history. Expression indexes keep older records
 // searchable without a separate backfill or asynchronous indexing queue.
-func (s *PostgresStore) SearchWorkspacePage(ctx context.Context, scope models.Scope, query string, limit, offset int) ([]WorkspaceSearchHit, error) {
+func (s *Store) SearchWorkspacePage(ctx context.Context, scope models.Scope, query string, limit, offset int) ([]WorkspaceSearchHit, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

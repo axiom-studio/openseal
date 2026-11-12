@@ -45,7 +45,7 @@ func (c routineGoogleSourcesForTest) ListRoutineEventSources(context.Context, Sc
 }
 
 type eventRoutineFixture struct {
-	store      *sqlite.SQLiteStore
+	store      *sqlite.Store
 	run        *AgentRun
 	catalog    *skill.Catalog
 	bound      *skill.BoundAction

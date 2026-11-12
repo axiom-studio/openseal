@@ -10,7 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRun, error) {
+func (s *Store) ClaimNextAgentRun(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRun, error) {
 	decision, err := s.ClaimNextAgentRunWithDecision(ctx, claim)
 	if err != nil || decision == nil {
 		return nil, err
@@ -18,7 +18,7 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim models.AgentR
 	return decision.Run, nil
 }
 
-func (s *SQLiteStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
+func (s *Store) ClaimNextAgentRunWithDecision(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (s *SQLiteStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim m
 	return decision, nil
 }
 
-func (s *SQLiteStore) RenewAgentRunLease(ctx context.Context, scope models.Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentRun, error) {
+func (s *Store) RenewAgentRunLease(ctx context.Context, scope models.Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentRun, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

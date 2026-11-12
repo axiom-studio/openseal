@@ -23,7 +23,7 @@ import (
 type routineEventHarness struct {
 	t            *testing.T
 	ctx          context.Context
-	store        *sqlite.SQLiteStore
+	store        *sqlite.Store
 	scope        Scope
 	owner        ObjectiveOwner
 	matcher      *RoutineEventMatcher
@@ -48,7 +48,7 @@ func newRoutineEventRowsHarness(t *testing.T) (*routineEventHarness, *sql.DB) {
 	return newRoutineEventHarnessOn(t, store), db
 }
 
-func newRoutineEventHarnessOn(t *testing.T, store *sqlite.SQLiteStore) *routineEventHarness {
+func newRoutineEventHarnessOn(t *testing.T, store *sqlite.Store) *routineEventHarness {
 	t.Helper()
 	h := &routineEventHarness{
 		t: t, ctx: t.Context(), store: store, scope: Scope{Kind: "tenant", ID: "event-routines"},
@@ -463,7 +463,7 @@ func TestRoutineEventIndexRefreshOnActivationChange(t *testing.T) {
 // process would have.
 type routineEventStoreOnly struct {
 	RoutineEventStore
-	activations *sqlite.SQLiteStore
+	activations *sqlite.Store
 }
 
 func (s *routineEventStoreOnly) GetRunbookActivation(ctx context.Context, scope Scope, id string) (*RunbookActivation, error) {

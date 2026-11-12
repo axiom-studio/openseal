@@ -14,7 +14,7 @@ import (
 
 // skillSetupTaskFixture also returns the test's own connection to the
 // store's file, for the rows the tests tamper with.
-func skillSetupTaskFixture(t *testing.T) (*SkillBindingActionDispatcher, *sqlite.SQLiteStore, *sql.DB, *ConversationTaskResult) {
+func skillSetupTaskFixture(t *testing.T) (*SkillBindingActionDispatcher, *sqlite.Store, *sql.DB, *ConversationTaskResult) {
 	t.Helper()
 	store, db := newTestSQLiteStore(t)
 	source, turn, _, _ := settledWorkerTaskFixture(t, store)
@@ -174,7 +174,7 @@ func TestSkillSetupTaskOriginRejectsUnprovedContextAndChangedCanonicalSource(t *
 
 // skillSetupOriginAllowed reports whether a task work Run's in-chat setup
 // origin resolves to the task's source conversation and message.
-func skillSetupOriginAllowed(t *testing.T, store *sqlite.SQLiteStore, task *ConversationTaskResult) bool {
+func skillSetupOriginAllowed(t *testing.T, store *sqlite.Store, task *ConversationTaskResult) bool {
 	t.Helper()
 	run := task.WorkRun
 	conversationID, messageID, err := skillSetupConversationOrigin(t.Context(), store, run, run.AssignedAgentID, run.Owner)

@@ -12,7 +12,7 @@ import (
 
 const runbookActivationMigrationVersion int64 = 35
 
-func (s *PostgresStore) migrateRunbookActivations(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateRunbookActivations(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("runbook_activations")+` (
 			id TEXT NOT NULL,
@@ -42,7 +42,7 @@ func (s *PostgresStore) migrateRunbookActivations(ctx context.Context, tx *sql.T
 	return err
 }
 
-func (s *PostgresStore) CreateRunbookActivation(ctx context.Context, value *models.RunbookActivation) error {
+func (s *Store) CreateRunbookActivation(ctx context.Context, value *models.RunbookActivation) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -58,7 +58,7 @@ func (s *PostgresStore) CreateRunbookActivation(ctx context.Context, value *mode
 	return err
 }
 
-func (s *PostgresStore) GetRunbookActivation(ctx context.Context, scope models.Scope, id string) (*models.RunbookActivation, error) {
+func (s *Store) GetRunbookActivation(ctx context.Context, scope models.Scope, id string) (*models.RunbookActivation, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (s *PostgresStore) GetRunbookActivation(ctx context.Context, scope models.S
 	return sqlstore.DecodeRunbookActivation(payload)
 }
 
-func (s *PostgresStore) ListRunbookActivations(ctx context.Context, filter models.RunbookActivationFilter) ([]*models.RunbookActivation, error) {
+func (s *Store) ListRunbookActivations(ctx context.Context, filter models.RunbookActivationFilter) ([]*models.RunbookActivation, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (s *PostgresStore) ListRunbookActivations(ctx context.Context, filter model
 	return models.SortAndLimitRunbookActivations(values, filter.Limit, filter.Offset), nil
 }
 
-func (s *PostgresStore) UpdateRunbookActivation(ctx context.Context, value *models.RunbookActivation, expectedRevision int64) error {
+func (s *Store) UpdateRunbookActivation(ctx context.Context, value *models.RunbookActivation, expectedRevision int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func (s *PostgresStore) UpdateRunbookActivation(ctx context.Context, value *mode
 	return nil
 }
 
-func (s *PostgresStore) ListRunbookActivationScopes(ctx context.Context) ([]models.Scope, error) {
+func (s *Store) ListRunbookActivationScopes(ctx context.Context) ([]models.Scope, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT scope_kind,scope_id FROM `+s.table("runbook_activations")+` ORDER BY scope_kind,scope_id`)
 	if err != nil {
 		return nil, err

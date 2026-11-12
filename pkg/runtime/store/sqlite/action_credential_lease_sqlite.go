@@ -44,7 +44,7 @@ func migrateActionCredentialLeaseRedemptionsSQLite(db *sql.DB) error {
 // of the same atomic authority boundary as Postgres. BEGIN IMMEDIATE prevents
 // ActionCall, Run, or SkillBinding writers from committing between recheck and
 // nonce insertion.
-func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request models.ActionCredentialLeaseRedemptionRequest) error {
+func (s *Store) RedeemActionCredentialLease(ctx context.Context, request models.ActionCredentialLeaseRedemptionRequest) error {
 	if s == nil || s.db == nil {
 		return errors.New("SQLite store is not configured")
 	}

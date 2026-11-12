@@ -484,7 +484,7 @@ const runbookLoopWorker = "runbook-loop-worker"
 type runbookLoopFixture struct {
 	t        *testing.T
 	ctx      context.Context
-	store    *sqlite.SQLiteStore
+	store    *sqlite.Store
 	scope    Scope
 	control  *ControlExecutor
 	tools    *StepToolDispatcher

@@ -10,7 +10,7 @@ import (
 
 const conversationReactionMigrationVersion int64 = 68
 
-func (s *PostgresStore) migrateConversationReactions(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateConversationReactions(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, conversationReactionMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -39,15 +39,15 @@ func (s *PostgresStore) migrateConversationReactions(ctx context.Context, tx *sq
 	return err
 }
 
-func (s *PostgresStore) AddMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
+func (s *Store) AddMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
 	return s.changePostgresReaction(ctx, record, true)
 }
 
-func (s *PostgresStore) RemoveMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
+func (s *Store) RemoveMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
 	return s.changePostgresReaction(ctx, record, false)
 }
 
-func (s *PostgresStore) changePostgresReaction(ctx context.Context, record models.MessageReactionRecord, add bool) (*models.ConversationReactionEvent, error) {
+func (s *Store) changePostgresReaction(ctx context.Context, record models.MessageReactionRecord, add bool) (*models.ConversationReactionEvent, error) {
 	if err := record.Validate(); err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (s *PostgresStore) changePostgresReaction(ctx context.Context, record model
 	return event, nil
 }
 
-func (s *PostgresStore) ListMessageReactions(ctx context.Context, scope models.Scope, conversationID string, messageIDs []string) ([]*models.MessageReactionRecord, error) {
+func (s *Store) ListMessageReactions(ctx context.Context, scope models.Scope, conversationID string, messageIDs []string) ([]*models.MessageReactionRecord, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func (s *PostgresStore) ListMessageReactions(ctx context.Context, scope models.S
 	return sqlstore.ScanMessageReactionRecords(rows, scope, conversationID)
 }
 
-func (s *PostgresStore) ListConversationReactionEvents(ctx context.Context, scope models.Scope, conversationID string, afterSequence int64, limit int) ([]*models.ConversationReactionEvent, error) {
+func (s *Store) ListConversationReactionEvents(ctx context.Context, scope models.Scope, conversationID string, afterSequence int64, limit int) ([]*models.ConversationReactionEvent, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

@@ -290,7 +290,7 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 	}
 	team := &kernelteam.Deployment{ID: "research-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: "other", AgentDeploymentID: "writer"}}}
-	validator.SetTeamRoster(teamRosterPortfolio{SQLiteStore: store, team: team})
+	validator.SetTeamRoster(teamRosterPortfolio{Store: store, team: team})
 	if _, err := propose("team-rename-removed"); err == nil || !strings.Contains(err.Error(), "is not on the active Team roster") {
 		t.Fatalf("proposal from an Agent off the Team roster = %v, want the roster rejection", err)
 	}
@@ -309,7 +309,7 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 	if err != nil || resolved.Call.Status != ActionCallStatusReady {
 		t.Fatalf("resolve = %#v, %v", resolved, err)
 	}
-	dispatcher, err := NewAgentBehaviorActionDispatcher(teamRosterPortfolio{SQLiteStore: store, team: team}, agents, nil)
+	dispatcher, err := NewAgentBehaviorActionDispatcher(teamRosterPortfolio{Store: store, team: team}, agents, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -643,7 +643,7 @@ func TestAgentBehaviorRunOnRosterChecksTheCurrentTeamRoster(t *testing.T) {
 	ctx, store, scope := context.Background(), newTestKernelStore(t), Scope{Kind: "tenant", ID: "tenant-a"}
 	team := &kernelteam.Deployment{ID: "research-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: "member", AgentDeploymentID: "researcher"}}}
-	teams := teamRosterPortfolio{SQLiteStore: store, team: team}
+	teams := teamRosterPortfolio{Store: store, team: team}
 	member := &AgentRun{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "researcher"}
 	if err := agentBehaviorRunOnRoster(ctx, teams, member); err != nil {
 		t.Fatalf("roster member rejected: %v", err)

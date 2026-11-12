@@ -37,14 +37,14 @@ func TestPostgresAgentRunAttemptBudgetIsReplicaSafeAndRestartDurable(t *testing.
 
 	claimAcrossReplicas := func(at time.Time, prefix string) []*AgentRun {
 		t.Helper()
-		stores := []*postgres.PostgresStore{primary, replica}
+		stores := []*postgres.Store{primary, replica}
 		results := make(chan *AgentRun, len(stores))
 		errs := make(chan error, len(stores))
 		start := make(chan struct{})
 		var wait sync.WaitGroup
 		for index, store := range stores {
 			wait.Add(1)
-			go func(index int, store *postgres.PostgresStore) {
+			go func(index int, store *postgres.Store) {
 				defer wait.Done()
 				<-start
 				claimed, claimErr := store.ClaimNextAgentRun(ctx, AgentRunClaim{

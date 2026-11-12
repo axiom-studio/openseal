@@ -8,13 +8,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-// The put* fixtures write kernel records straight into a SQLiteStore's tables,
+// The put* fixtures write kernel records straight into the store's tables,
 // skipping every store rule, for tests that need a state no store method
 // produces (a record left by a crashed worker, a tampered row) or that only
 // need records to read back. Each replaces the row with the same key through
 // the store's own row insert, so triggers still project it.
 
-func putStoredRun(t testing.TB, store *SQLiteStore, run *models.AgentRun) {
+func putStoredRun(t testing.TB, store *Store, run *models.AgentRun) {
 	t.Helper()
 	ctx := context.Background()
 	encoded, err := json.Marshal(run)
@@ -45,7 +45,7 @@ func putStoredRun(t testing.TB, store *SQLiteStore, run *models.AgentRun) {
 	}
 }
 
-func putStoredAction(t testing.TB, store *SQLiteStore, call *models.ActionCall) {
+func putStoredAction(t testing.TB, store *Store, call *models.ActionCall) {
 	t.Helper()
 	deleteStoredRow(t, store, "action_calls", call.Scope, call.ID)
 	if err := insertSQLiteActionCall(context.Background(), store.db, call); err != nil {
@@ -53,7 +53,7 @@ func putStoredAction(t testing.TB, store *SQLiteStore, call *models.ActionCall) 
 	}
 }
 
-func putStoredApproval(t testing.TB, store *SQLiteStore, approval *models.ApprovalCheckpoint) {
+func putStoredApproval(t testing.TB, store *Store, approval *models.ApprovalCheckpoint) {
 	t.Helper()
 	deleteStoredRow(t, store, "approval_checkpoints", approval.Scope, approval.ID)
 	if err := insertSQLiteApprovalCheckpoint(context.Background(), store.db, approval); err != nil {
@@ -62,14 +62,14 @@ func putStoredApproval(t testing.TB, store *SQLiteStore, approval *models.Approv
 }
 
 // execStoreSQL runs a statement against the store's database.
-func execStoreSQL(t testing.TB, store *SQLiteStore, query string, args ...any) {
+func execStoreSQL(t testing.TB, store *Store, query string, args ...any) {
 	t.Helper()
 	if _, err := store.db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatalf("%s: %v", query, err)
 	}
 }
 
-func deleteStoredRow(t testing.TB, store *SQLiteStore, table string, scope models.Scope, id string) {
+func deleteStoredRow(t testing.TB, store *Store, table string, scope models.Scope, id string) {
 	t.Helper()
 	execStoreSQL(t, store, `DELETE FROM `+table+` WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id)
 }

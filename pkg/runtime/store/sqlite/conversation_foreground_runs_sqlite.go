@@ -7,7 +7,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *SQLiteStore) ListConversationForegroundRuns(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID string, limit, offset int) ([]*models.AgentRun, error) {
+func (s *Store) ListConversationForegroundRuns(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID string, limit, offset int) ([]*models.AgentRun, error) {
 	if err := models.ValidateConversationForegroundRunsQuery(scope, owner, conversationID, limit, offset); err != nil {
 		return nil, err
 	}

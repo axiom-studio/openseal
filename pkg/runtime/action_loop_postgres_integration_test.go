@@ -15,7 +15,7 @@ import (
 // nestedActionStores when OPENSEAL_TEST_POSTGRES_DSN is set. This file holds
 // the checks only the Postgres store has.
 
-func openLoopActionPostgresStore(t *testing.T) *postgres.PostgresStore {
+func openLoopActionPostgresStore(t *testing.T) *postgres.Store {
 	t.Helper()
 	pgSchema := storetest.NewPostgresSchema(t, "openseal_loop_actions_")
 	dsn := pgSchema.DSN

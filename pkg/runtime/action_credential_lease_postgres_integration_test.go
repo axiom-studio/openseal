@@ -27,12 +27,12 @@ func TestPostgresActionCredentialLeaseRedemptionIsReplicaAtomicAndDurable(t *tes
 		t.Fatal(err)
 	}
 
-	stores := []*postgres.PostgresStore{primary, replica}
+	stores := []*postgres.Store{primary, replica}
 	errorsFound := make(chan error, len(stores))
 	var wait sync.WaitGroup
 	for _, store := range stores {
 		wait.Add(1)
-		go func(store *postgres.PostgresStore) {
+		go func(store *postgres.Store) {
 			defer wait.Done()
 			errorsFound <- store.RedeemActionCredentialLease(ctx, request)
 		}(store)
@@ -108,7 +108,7 @@ func TestPostgresActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testi
 
 // newActionCredentialLeasePostgresStores opens two stores on one fresh schema,
 // as two replicas would, with the test's own schema connection.
-func newActionCredentialLeasePostgresStores(t *testing.T) (context.Context, *postgres.PostgresStore, *postgres.PostgresStore, storetest.PostgresSchema) {
+func newActionCredentialLeasePostgresStores(t *testing.T) (context.Context, *postgres.Store, *postgres.Store, storetest.PostgresSchema) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
@@ -116,7 +116,7 @@ func newActionCredentialLeasePostgresStores(t *testing.T) (context.Context, *pos
 	return ctx, openPostgresStoreOn(t, pgSchema), openPostgresStoreOn(t, pgSchema), pgSchema
 }
 
-func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store *postgres.PostgresStore, pgSchema storetest.PostgresSchema, nonce string) (ActionCredentialLeaseRedemptionRequest, *skill.Binding) {
+func createPostgresActionCredentialLeaseFixture(t *testing.T, ctx context.Context, store *postgres.Store, pgSchema storetest.PostgresSchema, nonce string) (ActionCredentialLeaseRedemptionRequest, *skill.Binding) {
 	t.Helper()
 	now := time.Now().UTC().Round(0)
 	scope := Scope{Kind: "tenant", ID: "tenant-credential-lease"}

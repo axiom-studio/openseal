@@ -74,7 +74,7 @@ func migrateConversationActiveRunsSQLite(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) ListConversationActiveRuns(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID string, limit int) ([]*models.AgentRun, error) {
+func (s *Store) ListConversationActiveRuns(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID string, limit int) ([]*models.AgentRun, error) {
 	if err := models.ValidateConversationActiveRunsQuery(scope, owner, conversationID, limit); err != nil {
 		return nil, err
 	}

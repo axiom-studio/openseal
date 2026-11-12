@@ -13,7 +13,7 @@ func TestServiceMessageInitiatorSurvivesPersistenceAndReplay(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
 			var store ConversationStore = newTestKernelStore(t)
-			var disk *sqlite.SQLiteStore
+			var disk *sqlite.Store
 			path := filepath.Join(t.TempDir(), "initiator.db")
 			if backend == "sqlite" {
 				var err error

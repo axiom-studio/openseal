@@ -14,7 +14,7 @@ import (
 const legacyEventSourcesMigrationVersion int64 = 79
 
 // migrateRemoveEventSources is PostgreSQL migration 79.
-func (s *PostgresStore) migrateRemoveEventSources(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateRemoveEventSources(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, legacyEventSourcesMigrationVersion)
 	if err != nil || applied {
 		return err

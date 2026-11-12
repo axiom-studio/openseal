@@ -146,7 +146,7 @@ func addMissingAgentRunColumns(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateObjective(ctx context.Context, objective *models.Objective) error {
+func (s *Store) CreateObjective(ctx context.Context, objective *models.Objective) error {
 	if err := objective.Validate(); err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func (s *SQLiteStore) CreateObjective(ctx context.Context, objective *models.Obj
 	return err
 }
 
-func (s *SQLiteStore) GetObjective(ctx context.Context, scope models.Scope, objectiveID string) (*models.Objective, error) {
+func (s *Store) GetObjective(ctx context.Context, scope models.Scope, objectiveID string) (*models.Objective, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func (s *SQLiteStore) GetObjective(ctx context.Context, scope models.Scope, obje
 	return sqlstore.DecodeObjective(payload)
 }
 
-func (s *SQLiteStore) ListObjectives(ctx context.Context, filter models.ObjectiveFilter) ([]*models.Objective, error) {
+func (s *Store) ListObjectives(ctx context.Context, filter models.ObjectiveFilter) ([]*models.Objective, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func (s *SQLiteStore) ListObjectives(ctx context.Context, filter models.Objectiv
 	return models.PageObjectives(result, filter.Offset, filter.Limit), nil
 }
 
-func (s *SQLiteStore) ListObjectiveScopes(ctx context.Context) ([]models.Scope, error) {
+func (s *Store) ListObjectiveScopes(ctx context.Context) ([]models.Scope, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT scope_kind, scope_id FROM objectives ORDER BY scope_kind, scope_id`)
 	if err != nil {
 		return nil, err
@@ -232,7 +232,7 @@ func (s *SQLiteStore) ListObjectiveScopes(ctx context.Context) ([]models.Scope, 
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateObjective(ctx context.Context, objective *models.Objective, expectedRevision int64) error {
+func (s *Store) UpdateObjective(ctx context.Context, objective *models.Objective, expectedRevision int64) error {
 	if err := objective.Validate(); err != nil {
 		return err
 	}
@@ -260,7 +260,7 @@ func (s *SQLiteStore) UpdateObjective(ctx context.Context, objective *models.Obj
 	return nil
 }
 
-func (s *SQLiteStore) CreateAgentRun(ctx context.Context, run *models.AgentRun) error {
+func (s *Store) CreateAgentRun(ctx context.Context, run *models.AgentRun) error {
 	if err := run.Validate(); err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func allocateSQLiteObjectiveRunConn(ctx context.Context, conn *sql.Conn, run *mo
 	return nil
 }
 
-func (s *SQLiteStore) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
+func (s *Store) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -338,7 +338,7 @@ func (s *SQLiteStore) GetAgentRun(ctx context.Context, scope models.Scope, runID
 	return sqlstore.DecodeAgentRun(payload)
 }
 
-func (s *SQLiteStore) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
+func (s *Store) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -397,7 +397,7 @@ func (s *SQLiteStore) ListAgentRuns(ctx context.Context, filter models.AgentRunF
 	return pageAgentRuns(result, filter.Offset, filter.Limit), nil
 }
 
-func (s *SQLiteStore) SummarizeAgentRuns(ctx context.Context, scope models.Scope, owners []models.ObjectiveOwner) ([]models.AgentRunOwnerSummary, error) {
+func (s *Store) SummarizeAgentRuns(ctx context.Context, scope models.Scope, owners []models.ObjectiveOwner) ([]models.AgentRunOwnerSummary, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

@@ -11,8 +11,8 @@ import (
 	"github.com/mattn/go-sqlite3"
 )
 
-// SQLiteStore persists canonical kernel state in SQLite.
-type SQLiteStore struct {
+// Store persists canonical kernel state in SQLite.
+type Store struct {
 	db *sql.DB
 	// memoryHold keeps an in-memory database alive: SQLite frees a memdb
 	// database when its last connection closes, and the pool may close idle
@@ -25,7 +25,7 @@ type SQLiteStore struct {
 const sqliteBusyTimeout = "_busy_timeout=5000"
 
 // NewSQLiteStore opens (and creates) a SQLite-backed canonical kernel store.
-func NewSQLiteStore(path string) (*SQLiteStore, error) {
+func NewSQLiteStore(path string) (*Store, error) {
 	db, err := sql.Open("sqlite3", path+"?"+sqliteBusyTimeout+"&_journal_mode=WAL")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -33,12 +33,12 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	if err := migrate(db); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	return &SQLiteStore{db: db}, nil
+	return &Store{db: db}, nil
 }
 
 var inMemorySQLiteStores atomic.Uint64
 
-// NewInMemorySQLiteStore opens a SQLiteStore whose database lives only in
+// NewInMemorySQLiteStore opens a Store whose database lives only in
 // process memory and is discarded by Close.
 //
 // It uses SQLite's memdb VFS under a name unique to this store. A memdb name
@@ -53,7 +53,7 @@ var inMemorySQLiteStores atomic.Uint64
 // Running every migration takes tens of milliseconds, and tests open a store
 // each, so the schema is migrated once per process into a template database
 // and each new store starts as a page-for-page copy of it.
-func NewInMemorySQLiteStore() (*SQLiteStore, error) {
+func NewInMemorySQLiteStore() (*Store, error) {
 	template, err := migratedTemplate()
 	if err != nil {
 		return nil, err
@@ -71,14 +71,14 @@ func NewInMemorySQLiteStore() (*SQLiteStore, error) {
 
 var kernelTemplate struct {
 	once  sync.Once
-	store *SQLiteStore
+	store *Store
 	err   error
 }
 
 // migratedTemplate returns the freshly migrated database that new in-memory
 // stores copy. It stays open for the life of the process and is never written
 // after migration, so copies made from it concurrently are all identical.
-func migratedTemplate() (*SQLiteStore, error) {
+func migratedTemplate() (*Store, error) {
 	kernelTemplate.once.Do(func() {
 		store, err := openInMemorySQLiteStore()
 		if err != nil {
@@ -96,7 +96,7 @@ func migratedTemplate() (*SQLiteStore, error) {
 }
 
 // openInMemorySQLiteStore opens an empty memdb database under a new name.
-func openInMemorySQLiteStore() (*SQLiteStore, error) {
+func openInMemorySQLiteStore() (*Store, error) {
 	name := fmt.Sprintf("file:/openseal-kernel-%d?vfs=memdb&%s", inMemorySQLiteStores.Add(1), sqliteBusyTimeout)
 	db, err := sql.Open("sqlite3", name)
 	if err != nil {
@@ -107,7 +107,7 @@ func openInMemorySQLiteStore() (*SQLiteStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	return &SQLiteStore{db: db, memoryHold: hold}, nil
+	return &Store{db: db, memoryHold: hold}, nil
 }
 
 // copySQLiteDatabase replaces dst's main database with a copy of src's, using
@@ -234,7 +234,7 @@ func migrate(db *sql.DB) error {
 }
 
 // Close closes the underlying database. An in-memory database is freed.
-func (s *SQLiteStore) Close() error {
+func (s *Store) Close() error {
 	if s.memoryHold != nil {
 		s.memoryHold.Close()
 	}
@@ -243,7 +243,7 @@ func (s *SQLiteStore) Close() error {
 
 // withImmediateTx runs fn on one connection in BEGIN IMMEDIATE and commits
 // when fn succeeds.
-func (s *SQLiteStore) withImmediateTx(ctx context.Context, fn func(*sql.Conn) error) error {
+func (s *Store) withImmediateTx(ctx context.Context, fn func(*sql.Conn) error) error {
 	conn, err := beginImmediateSQLite(ctx, s.db)
 	if err != nil {
 		return err

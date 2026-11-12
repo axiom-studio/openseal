@@ -40,7 +40,7 @@ func migrateRunbookActivationsSQLite(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateRunbookActivation(ctx context.Context, value *models.RunbookActivation) error {
+func (s *Store) CreateRunbookActivation(ctx context.Context, value *models.RunbookActivation) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -56,7 +56,7 @@ func (s *SQLiteStore) CreateRunbookActivation(ctx context.Context, value *models
 	return err
 }
 
-func (s *SQLiteStore) GetRunbookActivation(ctx context.Context, scope models.Scope, id string) (*models.RunbookActivation, error) {
+func (s *Store) GetRunbookActivation(ctx context.Context, scope models.Scope, id string) (*models.RunbookActivation, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func (s *SQLiteStore) GetRunbookActivation(ctx context.Context, scope models.Sco
 	return sqlstore.DecodeRunbookActivation(payload)
 }
 
-func (s *SQLiteStore) ListRunbookActivations(ctx context.Context, filter models.RunbookActivationFilter) ([]*models.RunbookActivation, error) {
+func (s *Store) ListRunbookActivations(ctx context.Context, filter models.RunbookActivationFilter) ([]*models.RunbookActivation, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (s *SQLiteStore) ListRunbookActivations(ctx context.Context, filter models.
 	return models.SortAndLimitRunbookActivations(values, filter.Limit, filter.Offset), nil
 }
 
-func (s *SQLiteStore) UpdateRunbookActivation(ctx context.Context, value *models.RunbookActivation, expectedRevision int64) error {
+func (s *Store) UpdateRunbookActivation(ctx context.Context, value *models.RunbookActivation, expectedRevision int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (s *SQLiteStore) UpdateRunbookActivation(ctx context.Context, value *models
 	return nil
 }
 
-func (s *SQLiteStore) ListRunbookActivationScopes(ctx context.Context) ([]models.Scope, error) {
+func (s *Store) ListRunbookActivationScopes(ctx context.Context) ([]models.Scope, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT scope_kind,scope_id FROM runbook_activations ORDER BY scope_kind,scope_id`)
 	if err != nil {
 		return nil, err

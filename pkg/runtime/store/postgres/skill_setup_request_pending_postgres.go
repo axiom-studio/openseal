@@ -7,6 +7,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *PostgresStore) ListPendingSkillSetupRequests(ctx context.Context, scope models.Scope, limit, offset int) ([]*models.SkillSetupRequest, error) {
+func (s *Store) ListPendingSkillSetupRequests(ctx context.Context, scope models.Scope, limit, offset int) ([]*models.SkillSetupRequest, error) {
 	return sqlstore.ListPendingSkillSetupRequests(ctx, s.db, s.table("skill_setup_requests"), scope, limit, offset)
 }

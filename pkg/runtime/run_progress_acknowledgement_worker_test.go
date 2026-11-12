@@ -13,7 +13,7 @@ import (
 )
 
 type runProgressWorkerFixture struct {
-	store        *sqlite.SQLiteStore
+	store        *sqlite.Store
 	catalog      *skill.Catalog
 	endpoint     *ExternalConversationEndpoint
 	conversation *Conversation
@@ -29,7 +29,7 @@ func newRunProgressWorkerFixture(t *testing.T, provider string, operations []cap
 
 // newRunProgressWorkerFixtureOn builds the fixture in store, so a test can
 // pass a store it also holds its own connection to (newTestSQLiteStore).
-func newRunProgressWorkerFixtureOn(t *testing.T, store *sqlite.SQLiteStore, provider string, operations []capability.ConversationDeliveryOperation) runProgressWorkerFixture {
+func newRunProgressWorkerFixtureOn(t *testing.T, store *sqlite.Store, provider string, operations []capability.ConversationDeliveryOperation) runProgressWorkerFixture {
 	t.Helper()
 	ctx := context.Background()
 	catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, provider, operations)

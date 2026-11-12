@@ -115,7 +115,7 @@ func testEntryView(entry *SessionEntry) SessionEntryView {
 
 type compactionFixture struct {
 	*storetest.SessionFixture
-	store     *sqlite.SQLiteStore
+	store     *sqlite.Store
 	runID     string
 	sessionID string
 	host      *fakeSummaryHost

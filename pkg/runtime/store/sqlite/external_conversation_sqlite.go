@@ -164,7 +164,7 @@ func migrateExternalConversationIngressRoutesSQLite(db *sql.DB) error {
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) CreateExternalConversationEndpoint(ctx context.Context, endpoint *models.ExternalConversationEndpoint) error {
+func (s *Store) CreateExternalConversationEndpoint(ctx context.Context, endpoint *models.ExternalConversationEndpoint) error {
 	if err := endpoint.Validate(); err != nil {
 		return err
 	}
@@ -175,7 +175,7 @@ func (s *SQLiteStore) CreateExternalConversationEndpoint(ctx context.Context, en
 	return err
 }
 
-func (s *SQLiteStore) GetExternalConversationEndpointByIngressRoute(ctx context.Context, route string) (*models.ExternalConversationEndpoint, error) {
+func (s *Store) GetExternalConversationEndpointByIngressRoute(ctx context.Context, route string) (*models.ExternalConversationEndpoint, error) {
 	route = strings.TrimSpace(route)
 	if !models.IsValidOpaqueIdentifier(route, 128) {
 		return nil, models.ErrInvalidExternalConversation
@@ -184,7 +184,7 @@ func (s *SQLiteStore) GetExternalConversationEndpointByIngressRoute(ctx context.
 		`SELECT payload FROM external_conversation_endpoints WHERE ingress_route=?`, route))
 }
 
-func (s *SQLiteStore) GetExternalConversationEndpoint(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationEndpoint, error) {
+func (s *Store) GetExternalConversationEndpoint(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationEndpoint, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func (s *SQLiteStore) GetExternalConversationEndpoint(ctx context.Context, scope
 		scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *SQLiteStore) ListExternalConversationEndpoints(ctx context.Context, filter models.ExternalConversationEndpointFilter) ([]*models.ExternalConversationEndpoint, error) {
+func (s *Store) ListExternalConversationEndpoints(ctx context.Context, filter models.ExternalConversationEndpointFilter) ([]*models.ExternalConversationEndpoint, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -231,7 +231,7 @@ func (s *SQLiteStore) ListExternalConversationEndpoints(ctx context.Context, fil
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) ListExternalConversationEndpointsByVerifiedRoute(
+func (s *Store) ListExternalConversationEndpointsByVerifiedRoute(
 	ctx context.Context,
 	route models.ExternalConversationVerifiedRoute,
 ) ([]*models.ExternalConversationEndpoint, error) {
@@ -258,11 +258,11 @@ func (s *SQLiteStore) ListExternalConversationEndpointsByVerifiedRoute(
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateExternalConversationEndpoint(ctx context.Context, endpoint *models.ExternalConversationEndpoint, expectedRevision int64) error {
+func (s *Store) UpdateExternalConversationEndpoint(ctx context.Context, endpoint *models.ExternalConversationEndpoint, expectedRevision int64) error {
 	return s.updateExternalConversationEndpoint(ctx, s.db, endpoint, expectedRevision)
 }
 
-func (s *SQLiteStore) updateExternalConversationEndpoint(ctx context.Context, executor sqlstore.Execer, endpoint *models.ExternalConversationEndpoint, expectedRevision int64) error {
+func (s *Store) updateExternalConversationEndpoint(ctx context.Context, executor sqlstore.Execer, endpoint *models.ExternalConversationEndpoint, expectedRevision int64) error {
 	if err := endpoint.Validate(); err != nil {
 		return err
 	}
@@ -284,7 +284,7 @@ func (s *SQLiteStore) updateExternalConversationEndpoint(ctx context.Context, ex
 	return nil
 }
 
-func (s *SQLiteStore) ReceiveExternalConversationEvent(ctx context.Context, item *models.ExternalConversationInboxItem) (*models.ExternalConversationInboxItem, bool, error) {
+func (s *Store) ReceiveExternalConversationEvent(ctx context.Context, item *models.ExternalConversationInboxItem) (*models.ExternalConversationInboxItem, bool, error) {
 	if err := item.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -342,7 +342,7 @@ func (s *SQLiteStore) ReceiveExternalConversationEvent(ctx context.Context, item
 	return models.CloneExternalConversationInboxItem(item), false, nil
 }
 
-func (s *SQLiteStore) GetExternalConversationInboxItem(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationInboxItem, error) {
+func (s *Store) GetExternalConversationInboxItem(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationInboxItem, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -351,7 +351,7 @@ func (s *SQLiteStore) GetExternalConversationInboxItem(ctx context.Context, scop
 		scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *SQLiteStore) ListExternalConversationInbox(ctx context.Context, filter models.ExternalConversationInboxFilter) ([]*models.ExternalConversationInboxItem, error) {
+func (s *Store) ListExternalConversationInbox(ctx context.Context, filter models.ExternalConversationInboxFilter) ([]*models.ExternalConversationInboxItem, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -389,7 +389,7 @@ func (s *SQLiteStore) ListExternalConversationInbox(ctx context.Context, filter 
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) ClaimExternalConversationInbox(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.ExternalConversationInboxItem, error) {
+func (s *Store) ClaimExternalConversationInbox(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.ExternalConversationInboxItem, error) {
 	if scope.Validate() != nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(worker), 256) || now.IsZero() || leaseDuration <= 0 {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -448,7 +448,7 @@ func (s *SQLiteStore) ClaimExternalConversationInbox(ctx context.Context, scope 
 	return item, nil
 }
 
-func (s *SQLiteStore) SaveExternalConversationInbox(ctx context.Context, item *models.ExternalConversationInboxItem, expectedRevision int64, leaseOwner string) error {
+func (s *Store) SaveExternalConversationInbox(ctx context.Context, item *models.ExternalConversationInboxItem, expectedRevision int64, leaseOwner string) error {
 	if err := item.Validate(); err != nil {
 		return err
 	}
@@ -488,7 +488,7 @@ func (s *SQLiteStore) SaveExternalConversationInbox(ctx context.Context, item *m
 	return commitSQLiteConn(ctx, conn, &committed)
 }
 
-func (s *SQLiteStore) GetExternalConversationMapping(ctx context.Context, scope models.Scope, endpointID, externalConversationID, externalThreadID string) (*models.ExternalConversationMapping, error) {
+func (s *Store) GetExternalConversationMapping(ctx context.Context, scope models.Scope, endpointID, externalConversationID, externalThreadID string) (*models.ExternalConversationMapping, error) {
 	if scope.Validate() != nil {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -497,7 +497,7 @@ func (s *SQLiteStore) GetExternalConversationMapping(ctx context.Context, scope 
 		scope.Kind, scope.ID, endpointID, externalConversationID, externalThreadID))
 }
 
-func (s *SQLiteStore) SaveExternalConversationMapping(ctx context.Context, mapping *models.ExternalConversationMapping, expectedRevision int64) error {
+func (s *Store) SaveExternalConversationMapping(ctx context.Context, mapping *models.ExternalConversationMapping, expectedRevision int64) error {
 	if err := mapping.Validate(); err != nil {
 		return err
 	}
@@ -528,7 +528,7 @@ func (s *SQLiteStore) SaveExternalConversationMapping(ctx context.Context, mappi
 	return err
 }
 
-func (s *SQLiteStore) GetExternalParticipantMapping(ctx context.Context, scope models.Scope, endpointID, externalParticipantID string) (*models.ExternalParticipantMapping, error) {
+func (s *Store) GetExternalParticipantMapping(ctx context.Context, scope models.Scope, endpointID, externalParticipantID string) (*models.ExternalParticipantMapping, error) {
 	if scope.Validate() != nil {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -537,7 +537,7 @@ func (s *SQLiteStore) GetExternalParticipantMapping(ctx context.Context, scope m
 		scope.Kind, scope.ID, endpointID, externalParticipantID))
 }
 
-func (s *SQLiteStore) SaveExternalParticipantMapping(ctx context.Context, mapping *models.ExternalParticipantMapping, expectedRevision int64) error {
+func (s *Store) SaveExternalParticipantMapping(ctx context.Context, mapping *models.ExternalParticipantMapping, expectedRevision int64) error {
 	if err := mapping.Validate(); err != nil {
 		return err
 	}
@@ -569,7 +569,7 @@ func (s *SQLiteStore) SaveExternalParticipantMapping(ctx context.Context, mappin
 	return err
 }
 
-func (s *SQLiteStore) GetExternalMessageMapping(ctx context.Context, scope models.Scope, endpointID string, direction models.ExternalMessageDirection, externalMessageID string) (*models.ExternalMessageMapping, error) {
+func (s *Store) GetExternalMessageMapping(ctx context.Context, scope models.Scope, endpointID string, direction models.ExternalMessageDirection, externalMessageID string) (*models.ExternalMessageMapping, error) {
 	if scope.Validate() != nil {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -578,7 +578,7 @@ func (s *SQLiteStore) GetExternalMessageMapping(ctx context.Context, scope model
 		scope.Kind, scope.ID, endpointID, direction, externalMessageID))
 }
 
-func (s *SQLiteStore) SaveExternalMessageMapping(ctx context.Context, mapping *models.ExternalMessageMapping, expectedRevision int64) error {
+func (s *Store) SaveExternalMessageMapping(ctx context.Context, mapping *models.ExternalMessageMapping, expectedRevision int64) error {
 	if err := mapping.Validate(); err != nil {
 		return err
 	}
@@ -610,7 +610,7 @@ func (s *SQLiteStore) SaveExternalMessageMapping(ctx context.Context, mapping *m
 	return err
 }
 
-func (s *SQLiteStore) EnqueueExternalConversationDelivery(ctx context.Context, delivery *models.ExternalConversationDelivery) (*models.ExternalConversationDelivery, bool, error) {
+func (s *Store) EnqueueExternalConversationDelivery(ctx context.Context, delivery *models.ExternalConversationDelivery) (*models.ExternalConversationDelivery, bool, error) {
 	if err := delivery.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -688,7 +688,7 @@ func (s *SQLiteStore) EnqueueExternalConversationDelivery(ctx context.Context, d
 	return models.CloneExternalConversationDelivery(delivery), false, nil
 }
 
-func (s *SQLiteStore) GetExternalConversationDelivery(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationDelivery, error) {
+func (s *Store) GetExternalConversationDelivery(ctx context.Context, scope models.Scope, id string) (*models.ExternalConversationDelivery, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -696,7 +696,7 @@ func (s *SQLiteStore) GetExternalConversationDelivery(ctx context.Context, scope
 		WHERE scope_kind=? AND scope_id=? AND id=?`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *SQLiteStore) ListExternalConversationDeliveries(ctx context.Context, filter models.ExternalConversationDeliveryFilter) ([]*models.ExternalConversationDelivery, error) {
+func (s *Store) ListExternalConversationDeliveries(ctx context.Context, filter models.ExternalConversationDeliveryFilter) ([]*models.ExternalConversationDelivery, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -742,7 +742,7 @@ func (s *SQLiteStore) ListExternalConversationDeliveries(ctx context.Context, fi
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) ClaimExternalConversationDelivery(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.ExternalConversationDelivery, error) {
+func (s *Store) ClaimExternalConversationDelivery(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.ExternalConversationDelivery, error) {
 	if scope.Validate() != nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(worker), 256) || now.IsZero() || leaseDuration <= 0 {
 		return nil, models.ErrInvalidExternalConversation
 	}
@@ -801,7 +801,7 @@ func (s *SQLiteStore) ClaimExternalConversationDelivery(ctx context.Context, sco
 	return delivery, nil
 }
 
-func (s *SQLiteStore) SaveExternalConversationDelivery(ctx context.Context, delivery *models.ExternalConversationDelivery, expectedRevision int64, leaseOwner string) error {
+func (s *Store) SaveExternalConversationDelivery(ctx context.Context, delivery *models.ExternalConversationDelivery, expectedRevision int64, leaseOwner string) error {
 	if err := delivery.Validate(); err != nil {
 		return err
 	}
@@ -861,7 +861,7 @@ func sqliteUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique")
 }
 
-func (s *SQLiteStore) SaveExternalConversationReplyProgress(ctx context.Context, scope models.Scope, id string, expectedRevision int64, progress models.ExternalConversationReplyProgress) error {
+func (s *Store) SaveExternalConversationReplyProgress(ctx context.Context, scope models.Scope, id string, expectedRevision int64, progress models.ExternalConversationReplyProgress) error {
 	if scope.Validate() != nil {
 		return models.ErrInvalidExternalConversation
 	}
@@ -924,6 +924,6 @@ func insertSQLiteExternalConversationDelivery(ctx context.Context, exec sqlstore
 }
 
 var (
-	_ models.ExternalConversationEndpointStore  = (*SQLiteStore)(nil)
-	_ models.ExternalConversationTransportStore = (*SQLiteStore)(nil)
+	_ models.ExternalConversationEndpointStore  = (*Store)(nil)
+	_ models.ExternalConversationTransportStore = (*Store)(nil)
 )

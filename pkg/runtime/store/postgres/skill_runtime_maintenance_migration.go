@@ -7,7 +7,7 @@ import (
 
 const skillRuntimeMaintenanceMigrationVersion int64 = 53
 
-func (s *PostgresStore) migrateSkillRuntimeMaintenance(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateSkillRuntimeMaintenance(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, skillRuntimeMaintenanceMigrationVersion)
 	if err != nil || applied {
 		return err

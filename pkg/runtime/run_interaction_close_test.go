@@ -10,12 +10,12 @@ import (
 
 // interactionCallsStore adds recorded interaction calls to a store's listing.
 type interactionCallsStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	calls []*ActionCall
 }
 
 func (s interactionCallsStore) ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error) {
-	calls, err := s.SQLiteStore.ListActionCalls(ctx, filter)
+	calls, err := s.Store.ListActionCalls(ctx, filter)
 	if err != nil {
 		return nil, err
 	}

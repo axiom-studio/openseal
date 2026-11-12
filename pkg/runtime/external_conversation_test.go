@@ -593,7 +593,7 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	}
 }
 
-func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*sqlite.SQLiteStore, *skill.Catalog, Scope, ExternalConversationAdapterReference) {
+func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*sqlite.Store, *skill.Catalog, Scope, ExternalConversationAdapterReference) {
 	t.Helper()
 	store := newTestKernelStore(t)
 	catalog := skill.NewCatalog()
@@ -620,7 +620,7 @@ func externalConversationTestCatalog(t *testing.T, ctx context.Context) (*sqlite
 	}
 }
 
-func activeExternalConversationTestEndpoint(t *testing.T, ctx context.Context) (*sqlite.SQLiteStore, *ExternalConversationEndpoint) {
+func activeExternalConversationTestEndpoint(t *testing.T, ctx context.Context) (*sqlite.Store, *ExternalConversationEndpoint) {
 	t.Helper()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	endpoint, err := NewExternalConversationEndpointService(store, catalog).Create(ctx, CreateExternalConversationEndpointRequest{

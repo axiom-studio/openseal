@@ -13,7 +13,7 @@ import (
 // when the test ends. runtimetest.NewKernelStore and store/sqlite's test
 // opener are its copies for other packages (importing runtimetest here
 // would be a cycle); change all three.
-func newTestKernelStore(t testing.TB) *sqlite.SQLiteStore {
+func newTestKernelStore(t testing.TB) *sqlite.Store {
 	t.Helper()
 	store, err := sqlite.NewInMemorySQLiteStore()
 	if err != nil {
@@ -36,7 +36,7 @@ func openTestSQLiteDB(t testing.TB, path string) *sql.DB {
 }
 
 // getStoredRun reads a Run that the test knows exists.
-func getStoredRun(t testing.TB, store *sqlite.SQLiteStore, scope Scope, id string) *AgentRun {
+func getStoredRun(t testing.TB, store *sqlite.Store, scope Scope, id string) *AgentRun {
 	t.Helper()
 	run, err := store.GetAgentRun(context.Background(), scope, id)
 	if err != nil {
@@ -49,7 +49,7 @@ func getStoredRun(t testing.TB, store *sqlite.SQLiteStore, scope Scope, id strin
 // connection to that file, both closed when the test ends. Use it instead of
 // newTestKernelStore when the test reads or writes rows no store method
 // offers.
-func newTestSQLiteStore(t testing.TB) (*sqlite.SQLiteStore, *sql.DB) {
+func newTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kernel.db")
 	store, err := sqlite.NewSQLiteStore(path)
@@ -62,7 +62,7 @@ func newTestSQLiteStore(t testing.TB) (*sqlite.SQLiteStore, *sql.DB) {
 
 // openTestSQLiteSessionStore opens a SQLite store on a fresh file, closed
 // when the test ends.
-func openTestSQLiteSessionStore(t *testing.T) *sqlite.SQLiteStore {
+func openTestSQLiteSessionStore(t *testing.T) *sqlite.Store {
 	t.Helper()
 	store, err := sqlite.NewSQLiteStore(filepath.Join(t.TempDir(), "sessions.db"))
 	if err != nil {

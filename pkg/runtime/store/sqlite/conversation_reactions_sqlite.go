@@ -27,15 +27,15 @@ func migrateSQLiteConversationReactions(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) AddMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
+func (s *Store) AddMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
 	return s.changeSQLiteReaction(ctx, record, true)
 }
 
-func (s *SQLiteStore) RemoveMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
+func (s *Store) RemoveMessageReaction(ctx context.Context, record models.MessageReactionRecord) (*models.ConversationReactionEvent, error) {
 	return s.changeSQLiteReaction(ctx, record, false)
 }
 
-func (s *SQLiteStore) changeSQLiteReaction(ctx context.Context, record models.MessageReactionRecord, add bool) (*models.ConversationReactionEvent, error) {
+func (s *Store) changeSQLiteReaction(ctx context.Context, record models.MessageReactionRecord, add bool) (*models.ConversationReactionEvent, error) {
 	if err := record.Validate(); err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (s *SQLiteStore) changeSQLiteReaction(ctx context.Context, record models.Me
 	return event, nil
 }
 
-func (s *SQLiteStore) ListMessageReactions(ctx context.Context, scope models.Scope, conversationID string, messageIDs []string) ([]*models.MessageReactionRecord, error) {
+func (s *Store) ListMessageReactions(ctx context.Context, scope models.Scope, conversationID string, messageIDs []string) ([]*models.MessageReactionRecord, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (s *SQLiteStore) ListMessageReactions(ctx context.Context, scope models.Sco
 	return sqlstore.ScanMessageReactionRecords(rows, scope, conversationID)
 }
 
-func (s *SQLiteStore) ListConversationReactionEvents(ctx context.Context, scope models.Scope, conversationID string, afterSequence int64, limit int) ([]*models.ConversationReactionEvent, error) {
+func (s *Store) ListConversationReactionEvents(ctx context.Context, scope models.Scope, conversationID string, afterSequence int64, limit int) ([]*models.ConversationReactionEvent, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

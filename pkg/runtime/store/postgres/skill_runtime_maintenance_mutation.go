@@ -7,7 +7,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-func (s *PostgresStore) WithSkillRuntimeMaintenanceMutation(ctx context.Context, proof *models.SkillRuntimeMaintenance, mutation func(context.Context) error) error {
+func (s *Store) WithSkillRuntimeMaintenanceMutation(ctx context.Context, proof *models.SkillRuntimeMaintenance, mutation func(context.Context) error) error {
 	if err := models.ValidateMaintenanceMutationArguments(proof, mutation); err != nil {
 		return err
 	}

@@ -10,7 +10,7 @@ import (
 
 const credentialRequestMigrationVersion int64 = 62
 
-func (s *PostgresStore) migrateCredentialRequests(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateCredentialRequests(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, credentialRequestMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -25,14 +25,14 @@ func (s *PostgresStore) migrateCredentialRequests(ctx context.Context, tx *sql.T
 	return err
 }
 
-func (s *PostgresStore) GetCredentialRequest(ctx context.Context, scope models.Scope, id string) (*models.CredentialRequest, error) {
+func (s *Store) GetCredentialRequest(ctx context.Context, scope models.Scope, id string) (*models.CredentialRequest, error) {
 	return sqlstore.GetCredentialRequest(ctx, s.db, s.table("credential_requests"), scope, id)
 }
 
-func (s *PostgresStore) ListCredentialRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.CredentialRequest, error) {
+func (s *Store) ListCredentialRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.CredentialRequest, error) {
 	return sqlstore.ListCredentialRequests(ctx, s.db, s.table("credential_requests"), scope, deploymentID, conversationID)
 }
 
-func (s *PostgresStore) SaveCredentialRequest(ctx context.Context, r *models.CredentialRequest, expected int64) error {
+func (s *Store) SaveCredentialRequest(ctx context.Context, r *models.CredentialRequest, expected int64) error {
 	return sqlstore.SaveCredentialRequest(ctx, s.db, s.table("credential_requests"), r, expected)
 }

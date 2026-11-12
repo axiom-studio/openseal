@@ -11,7 +11,7 @@ import (
 
 // newTestKernelStore returns an empty in-memory kernel store that is closed
 // when the test ends.
-func newTestKernelStore(t testing.TB) *SQLiteStore {
+func newTestKernelStore(t testing.TB) *Store {
 	t.Helper()
 	store, err := NewInMemorySQLiteStore()
 	if err != nil {
@@ -35,7 +35,7 @@ func openTestSQLiteDB(t testing.TB, path string) *sql.DB {
 
 // openTestSQLiteSessionStore opens a SQLite store on a fresh file, closed
 // when the test ends.
-func openTestSQLiteSessionStore(t *testing.T) *SQLiteStore {
+func openTestSQLiteSessionStore(t *testing.T) *Store {
 	t.Helper()
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "sessions.db"))
 	if err != nil {

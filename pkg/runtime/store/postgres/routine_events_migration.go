@@ -13,7 +13,7 @@ const routineEventsMigrationVersion int64 = 80
 var routineEventsTables = []string{"hooks", "routine_event_batches", "routine_events"}
 
 // migrateRoutineEvents is PostgreSQL migration 80.
-func (s *PostgresStore) migrateRoutineEvents(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateRoutineEvents(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, routineEventsMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -65,7 +65,7 @@ func (s *PostgresStore) migrateRoutineEvents(ctx context.Context, tx *sql.Tx) er
 // rollbackRoutineEvents drops the two activation indexes of migration 80.
 // The tables go through the down map; the two index columns stay, and
 // migrating again fills them anew.
-func (s *PostgresStore) rollbackRoutineEvents(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) rollbackRoutineEvents(ctx context.Context, tx *sql.Tx) error {
 	for _, index := range []string{"runbook_activations_event_idx", "runbook_activations_event_kind_idx"} {
 		if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS `+s.table(index)); err != nil {
 			return err

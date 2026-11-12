@@ -47,7 +47,7 @@ func migrateTeamRegistry(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment) error {
+func (s *Store) CreateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment) error {
 	payload, err := json.Marshal(amendment)
 	if err != nil {
 		return err
@@ -57,7 +57,7 @@ func (s *SQLiteStore) CreateTeamAmendment(ctx context.Context, amendment *kernel
 	return err
 }
 
-func (s *SQLiteStore) GetTeamAmendment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.DefinitionAmendment, error) {
+func (s *Store) GetTeamAmendment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.DefinitionAmendment, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM team_definition_amendments WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -72,7 +72,7 @@ func (s *SQLiteStore) GetTeamAmendment(ctx context.Context, scope capability.Sco
 	return &amendment, nil
 }
 
-func (s *SQLiteStore) ListTeamAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelteam.DefinitionAmendment, error) {
+func (s *Store) ListTeamAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelteam.DefinitionAmendment, error) {
 	query := `SELECT payload FROM team_definition_amendments WHERE scope_kind = ? AND scope_id = ?`
 	args := []interface{}{scope.Kind, scope.ID}
 	if deploymentID != "" {
@@ -100,7 +100,7 @@ func (s *SQLiteStore) ListTeamAmendments(ctx context.Context, scope capability.S
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment, expectedRevision int64) error {
+func (s *Store) UpdateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment, expectedRevision int64) error {
 	payload, err := json.Marshal(amendment)
 	if err != nil {
 		return err
@@ -119,7 +119,7 @@ func (s *SQLiteStore) UpdateTeamAmendment(ctx context.Context, amendment *kernel
 	return nil
 }
 
-func (s *SQLiteStore) ActivateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelteam.Definition, deployment *kernelteam.Deployment, expectedDeploymentRevision int64, activation workforce.DefinitionActivation) error {
+func (s *Store) ActivateTeamAmendment(ctx context.Context, amendment *kernelteam.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelteam.Definition, deployment *kernelteam.Deployment, expectedDeploymentRevision int64, activation workforce.DefinitionActivation) error {
 	amendmentPayload, err := json.Marshal(amendment)
 	if err != nil {
 		return err
@@ -161,7 +161,7 @@ func (s *SQLiteStore) ActivateTeamAmendment(ctx context.Context, amendment *kern
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) CreateTeamDefinition(ctx context.Context, definition *kernelteam.Definition) error {
+func (s *Store) CreateTeamDefinition(ctx context.Context, definition *kernelteam.Definition) error {
 	return createTeamDefinitionSQLite(ctx, s.db, definition)
 }
 
@@ -175,7 +175,7 @@ func createTeamDefinitionSQLite(ctx context.Context, db sqlstore.ReadWriter, def
 	return err
 }
 
-func (s *SQLiteStore) GetTeamDefinition(ctx context.Context, id, version string) (*kernelteam.Definition, error) {
+func (s *Store) GetTeamDefinition(ctx context.Context, id, version string) (*kernelteam.Definition, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM team_definitions WHERE id = ? AND version = ?`, id, version).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -190,7 +190,7 @@ func (s *SQLiteStore) GetTeamDefinition(ctx context.Context, id, version string)
 	return &definition, nil
 }
 
-func (s *SQLiteStore) ListTeamDefinitionVersions(ctx context.Context, id string) ([]*kernelteam.Definition, error) {
+func (s *Store) ListTeamDefinitionVersions(ctx context.Context, id string) ([]*kernelteam.Definition, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM team_definitions WHERE id = ? ORDER BY version`, id)
 	if err != nil {
 		return nil, err
@@ -211,7 +211,7 @@ func (s *SQLiteStore) ListTeamDefinitionVersions(ctx context.Context, id string)
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, activation workforce.DefinitionActivation) error {
+func (s *Store) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, activation workforce.DefinitionActivation) error {
 	deploymentPayload, activationPayload, err := sqlstore.TeamRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
@@ -235,7 +235,7 @@ func (s *SQLiteStore) CreateTeamDeployment(ctx context.Context, deployment *kern
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) GetTeamDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
+func (s *Store) GetTeamDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM team_deployments WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -250,7 +250,7 @@ func (s *SQLiteStore) GetTeamDeployment(ctx context.Context, scope capability.Sc
 	return &deployment, nil
 }
 
-func (s *SQLiteStore) ListTeamDeployments(ctx context.Context, scope capability.ScopeReference) ([]*kernelteam.Deployment, error) {
+func (s *Store) ListTeamDeployments(ctx context.Context, scope capability.ScopeReference) ([]*kernelteam.Deployment, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM team_deployments WHERE scope_kind = ? AND scope_id = ? ORDER BY updated_at DESC, id`, scope.Kind, scope.ID)
 	if err != nil {
 		return nil, err
@@ -271,7 +271,7 @@ func (s *SQLiteStore) ListTeamDeployments(ctx context.Context, scope capability.
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
+func (s *Store) UpdateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, expectedRevision int64, activation workforce.DefinitionActivation) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -304,7 +304,7 @@ func updateTeamDeploymentSQLiteTx(ctx context.Context, tx *sql.Tx, deployment *k
 	return insertTeamActivation(ctx, tx, activation, activationPayload)
 }
 
-func (s *SQLiteStore) ListTeamDefinitionActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
+func (s *Store) ListTeamDefinitionActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]workforce.DefinitionActivation, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM team_definition_activations WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? ORDER BY deployment_revision`, scope.Kind, scope.ID, deploymentID)
 	if err != nil {
 		return nil, err
@@ -338,4 +338,4 @@ func insertTeamActivation(ctx context.Context, tx *sql.Tx, activation workforce.
 	return nil
 }
 
-var _ kernelteam.Store = (*SQLiteStore)(nil)
+var _ kernelteam.Store = (*Store)(nil)

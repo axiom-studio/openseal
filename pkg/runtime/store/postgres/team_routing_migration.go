@@ -16,7 +16,7 @@ const (
 	teamRoutingMigrationVersion              int64 = 69
 )
 
-func (s *PostgresStore) migrateTeamRouting(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateTeamRouting(ctx context.Context, tx *sql.Tx) error {
 	for _, path := range sqlstore.TeamCoordinationPaths {
 		if _, err := tx.ExecContext(ctx, `UPDATE `+s.table(path.Table)+`
 			SET payload = payload #- '`+path.Postgres+`'
@@ -34,7 +34,7 @@ func (s *PostgresStore) migrateTeamRouting(ctx context.Context, tx *sql.Tx) erro
 }
 
 // rollbackTeamRouting removes the routing fields an older kernel does not know.
-func (s *PostgresStore) rollbackTeamRouting(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) rollbackTeamRouting(ctx context.Context, tx *sql.Tx) error {
 	for _, path := range sqlstore.TeamCoordinationPaths {
 		routing := path.Postgres[:len(path.Postgres)-len("coordination}")] + "routing}"
 		if _, err := tx.ExecContext(ctx, `UPDATE `+s.table(path.Table)+`

@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, application *models.SkillReferenceUpgradeMutation) error {
+func (s *Store) ApplySkillReferenceUpgrade(ctx context.Context, application *models.SkillReferenceUpgradeMutation) error {
 	if err := models.ValidateSkillReferenceUpgradeMutation(application); err != nil {
 		return err
 	}

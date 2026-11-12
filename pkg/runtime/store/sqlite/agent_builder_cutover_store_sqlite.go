@@ -8,7 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-var _ models.AgentBuilderCutoverStore = (*SQLiteStore)(nil)
+var _ models.AgentBuilderCutoverStore = (*Store)(nil)
 
 func sqliteAgentBuilderCutoverTablePresent(ctx context.Context, query interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
@@ -18,7 +18,7 @@ func sqliteAgentBuilderCutoverTablePresent(ctx context.Context, query interface 
 	return present > 0, err
 }
 
-func (s *SQLiteStore) ListAgentBuilderCutoverDrafts(ctx context.Context) ([]models.AgentBuilderCutoverDraft, error) {
+func (s *Store) ListAgentBuilderCutoverDrafts(ctx context.Context) ([]models.AgentBuilderCutoverDraft, error) {
 	present, err := sqliteAgentBuilderCutoverTablePresent(ctx, s.db)
 	if err != nil || !present {
 		return nil, err
@@ -31,7 +31,7 @@ func (s *SQLiteStore) ListAgentBuilderCutoverDrafts(ctx context.Context) ([]mode
 	return sqlstore.ScanAgentBuilderCutoverDrafts(rows)
 }
 
-func (s *SQLiteStore) DeleteAgentBuilderCutoverDraft(ctx context.Context, scope models.Scope, id string) error {
+func (s *Store) DeleteAgentBuilderCutoverDraft(ctx context.Context, scope models.Scope, id string) error {
 	present, err := sqliteAgentBuilderCutoverTablePresent(ctx, s.db)
 	if err != nil || !present {
 		return err
@@ -40,7 +40,7 @@ func (s *SQLiteStore) DeleteAgentBuilderCutoverDraft(ctx context.Context, scope 
 	return err
 }
 
-func (s *SQLiteStore) DropAgentBuilderCutoverTable(ctx context.Context) (bool, error) {
+func (s *Store) DropAgentBuilderCutoverTable(ctx context.Context) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err

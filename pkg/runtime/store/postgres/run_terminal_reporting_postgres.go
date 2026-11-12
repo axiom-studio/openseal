@@ -13,9 +13,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-var _ models.RunTerminalReportingStore = (*PostgresStore)(nil)
+var _ models.RunTerminalReportingStore = (*Store)(nil)
 
-func (s *PostgresStore) migrateRunTerminalReporting(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateRunTerminalReporting(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("run_terminal_reports")+` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, run_id TEXT NOT NULL,
@@ -60,7 +60,7 @@ func (s *PostgresStore) migrateRunTerminalReporting(ctx context.Context, tx *sql
 	return err
 }
 
-func (s *PostgresStore) ClaimRunTerminalReports(ctx context.Context, request models.RunTerminalReportingClaim) ([]*models.RunTerminalReport, error) {
+func (s *Store) ClaimRunTerminalReports(ctx context.Context, request models.RunTerminalReportingClaim) ([]*models.RunTerminalReport, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (s *PostgresStore) ClaimRunTerminalReports(ctx context.Context, request mod
 	return reports, nil
 }
 
-func (s *PostgresStore) CompleteRunTerminalReport(ctx context.Context, request models.RunTerminalReportingCompletion) error {
+func (s *Store) CompleteRunTerminalReport(ctx context.Context, request models.RunTerminalReportingCompletion) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func (s *PostgresStore) CompleteRunTerminalReport(ctx context.Context, request m
 	return sqlstore.RunTerminalReportLeaseResult(result, err)
 }
 
-func (s *PostgresStore) RetryRunTerminalReport(ctx context.Context, request models.RunTerminalReportingRetry) error {
+func (s *Store) RetryRunTerminalReport(ctx context.Context, request models.RunTerminalReportingRetry) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func (s *PostgresStore) RetryRunTerminalReport(ctx context.Context, request mode
 	return sqlstore.RunTerminalReportLeaseResult(result, err)
 }
 
-func (s *PostgresStore) GetRunTerminalReport(ctx context.Context, scope models.Scope, runID string, status models.AgentRunStatus) (*models.RunTerminalReport, error) {
+func (s *Store) GetRunTerminalReport(ctx context.Context, scope models.Scope, runID string, status models.AgentRunStatus) (*models.RunTerminalReport, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

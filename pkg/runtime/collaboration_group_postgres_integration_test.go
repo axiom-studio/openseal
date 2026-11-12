@@ -50,7 +50,7 @@ func TestPostgresGroupedAgentRequestsResolveAtomicallyAcrossReplicas(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	stores := []*postgres.PostgresStore{primary, replica}
+	stores := []*postgres.Store{primary, replica}
 	accepted := make([]*AgentRequestResult, len(created.Requests))
 	for index, request := range created.Requests {
 		result, err := NewCollaborationService(stores[index%len(stores)]).RespondAgentRequest(ctx, RespondAgentRequestRequest{
@@ -173,7 +173,7 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stores := []*postgres.PostgresStore{primary, replica}
+	stores := []*postgres.Store{primary, replica}
 	var successes atomic.Int32
 	var wait sync.WaitGroup
 	for index, agentID := range []string{"reviewer-a", "reviewer-b"} {

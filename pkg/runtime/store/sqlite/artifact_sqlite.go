@@ -49,7 +49,7 @@ func migrateArtifacts(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateArtifactVersion(ctx context.Context, artifact *models.Artifact, expectedLatestVersion int64) error {
+func (s *Store) CreateArtifactVersion(ctx context.Context, artifact *models.Artifact, expectedLatestVersion int64) error {
 	if err := artifact.Validate(); err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func insertSQLiteArtifactVersion(ctx context.Context, exec sqlstore.Execer, arti
 	return nil
 }
 
-func (s *SQLiteStore) GetArtifact(ctx context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
+func (s *Store) GetArtifact(ctx context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func (s *SQLiteStore) GetArtifact(ctx context.Context, scope models.Scope, id st
 	return sqlstore.DecodeArtifact(payload)
 }
 
-func (s *SQLiteStore) ListArtifacts(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
+func (s *Store) ListArtifacts(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -168,4 +168,4 @@ func (s *SQLiteStore) ListArtifacts(ctx context.Context, filter models.ArtifactF
 	return result[start:end], nil
 }
 
-var _ models.ArtifactStore = (*SQLiteStore)(nil)
+var _ models.ArtifactStore = (*Store)(nil)

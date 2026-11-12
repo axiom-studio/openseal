@@ -14,7 +14,7 @@ import (
 const defaultSpaceMigrationVersion int64 = 78
 
 // migrateDefaultSpace is PostgreSQL migration 78.
-func (s *PostgresStore) migrateDefaultSpace(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateDefaultSpace(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, defaultSpaceMigrationVersion)
 	if err != nil || applied {
 		return err

@@ -7,7 +7,7 @@ import (
 
 const callbackWorkerMigrationVersion int64 = 42
 
-func (s *PostgresStore) migrateCallbackWorker(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateCallbackWorker(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, callbackWorkerMigrationVersion)
 	if err != nil || applied {
 		return err

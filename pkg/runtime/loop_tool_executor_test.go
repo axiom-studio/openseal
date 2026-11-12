@@ -22,7 +22,7 @@ const toolExecWorker = "tool-exec-worker"
 type toolExecFixture struct {
 	t        *testing.T
 	ctx      context.Context
-	store    *sqlite.SQLiteStore
+	store    *sqlite.Store
 	scope    Scope
 	now      time.Time
 	run      *AgentRun

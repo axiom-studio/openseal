@@ -14,7 +14,7 @@ import (
 	"github.com/lib/pq"
 )
 
-func (s *PostgresStore) CreateObjectiveWithEvent(ctx context.Context, objective *models.Objective, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+func (s *Store) CreateObjectiveWithEvent(ctx context.Context, objective *models.Objective, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := models.ValidateObjectiveActivity(objective, event); err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func (s *PostgresStore) CreateObjectiveWithEvent(ctx context.Context, objective 
 	return persisted, nil
 }
 
-func (s *PostgresStore) UpdateObjectiveWithEvent(ctx context.Context, objective *models.Objective, expectedRevision int64, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+func (s *Store) UpdateObjectiveWithEvent(ctx context.Context, objective *models.Objective, expectedRevision int64, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := models.ValidateObjectiveActivity(objective, event); err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (s *PostgresStore) UpdateObjectiveWithEvent(ctx context.Context, objective 
 	return persisted, nil
 }
 
-func (s *PostgresStore) CreateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+func (s *Store) CreateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func (s *PostgresStore) CreateAgentRunWithEvent(ctx context.Context, run *models
 	return models.CloneActivityEvent(persisted), nil
 }
 
-func (s *PostgresStore) migrateActivityAndTurns(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateActivityAndTurns(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("run_activity")+` (
 			scope_kind TEXT NOT NULL,
@@ -165,7 +165,7 @@ func (s *PostgresStore) migrateActivityAndTurns(ctx context.Context, tx *sql.Tx)
 	return err
 }
 
-func (s *PostgresStore) migrateActivityFeed(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateActivityFeed(ctx context.Context, tx *sql.Tx) error {
 	activityProjectionApplied, err := s.postgresMigrationApplied(ctx, tx, 6)
 	if err != nil {
 		return err
@@ -203,7 +203,7 @@ func (s *PostgresStore) migrateActivityFeed(ctx context.Context, tx *sql.Tx) err
 	return err
 }
 
-func (s *PostgresStore) UpdateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, expectedRevision int64, event *models.ActivityEvent, lease *models.AgentRunLeaseGuard) (*models.ActivityEvent, error) {
+func (s *Store) UpdateAgentRunWithEvent(ctx context.Context, run *models.AgentRun, expectedRevision int64, event *models.ActivityEvent, lease *models.AgentRunLeaseGuard) (*models.ActivityEvent, error) {
 	if err := run.Validate(); err != nil {
 		return nil, err
 	}
@@ -254,21 +254,21 @@ func (s *PostgresStore) UpdateAgentRunWithEvent(ctx context.Context, run *models
 // refused for its lease: the row is still at expectedRevision with the same
 // acting user. A row that moved on is a revision conflict the caller reloads
 // (and then sees whether it still holds the lease), as on the other stores.
-func (s *PostgresStore) leasedRunUpdateLostLease(ctx context.Context, tx *sql.Tx, run *models.AgentRun, expectedRevision int64) bool {
+func (s *Store) leasedRunUpdateLostLease(ctx context.Context, tx *sql.Tx, run *models.AgentRun, expectedRevision int64) bool {
 	var stored string
 	err := tx.QueryRowContext(ctx, `SELECT COALESCE(payload->>'actingUser','') FROM `+s.table("agent_runs")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 AND revision = $4`, run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision).Scan(&stored)
 	return err == nil && stored == run.ActingUser
 }
 
-func (s *PostgresStore) AppendActivity(ctx context.Context, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+func (s *Store) AppendActivity(ctx context.Context, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	if err := event.Validate(); err != nil {
 		return nil, err
 	}
 	return s.withActivity(ctx, event, func(*sql.Tx) error { return nil })
 }
 
-func (s *PostgresStore) withActivity(ctx context.Context, event *models.ActivityEvent, beforeInsert func(*sql.Tx) error) (*models.ActivityEvent, error) {
+func (s *Store) withActivity(ctx context.Context, event *models.ActivityEvent, beforeInsert func(*sql.Tx) error) (*models.ActivityEvent, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -303,7 +303,7 @@ func (s *PostgresStore) withActivity(ctx context.Context, event *models.Activity
 	return models.CloneActivityEvent(persisted), nil
 }
 
-func (s *PostgresStore) insertPostgresActivityTx(ctx context.Context, tx *sql.Tx, event *models.ActivityEvent) (*models.ActivityEvent, error) {
+func (s *Store) insertPostgresActivityTx(ctx context.Context, tx *sql.Tx, event *models.ActivityEvent) (*models.ActivityEvent, error) {
 	persisted := models.CloneActivityEvent(event)
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM `+s.table("run_activity")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND run_id = $3`, event.Scope.Kind, event.Scope.ID, models.ActivityStreamID(event)).Scan(&persisted.Sequence); err != nil {
@@ -323,7 +323,7 @@ func (s *PostgresStore) insertPostgresActivityTx(ctx context.Context, tx *sql.Tx
 	return models.CloneActivityEvent(persisted), nil
 }
 
-func (s *PostgresStore) ListActivity(ctx context.Context, filter models.ActivityFilter) ([]*models.ActivityEvent, error) {
+func (s *Store) ListActivity(ctx context.Context, filter models.ActivityFilter) ([]*models.ActivityEvent, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -389,7 +389,7 @@ func appendPostgresActivityStrings(query string, args []interface{}, placeholder
 	return query, args, placeholder + 1
 }
 
-func (s *PostgresStore) CreateAgentTurn(ctx context.Context, turn *models.AgentTurn) (*models.AgentTurn, error) {
+func (s *Store) CreateAgentTurn(ctx context.Context, turn *models.AgentTurn) (*models.AgentTurn, error) {
 	if err := turn.Validate(); err != nil {
 		return nil, err
 	}
@@ -438,7 +438,7 @@ func (s *PostgresStore) CreateAgentTurn(ctx context.Context, turn *models.AgentT
 	return models.CloneAgentTurn(persisted), nil
 }
 
-func (s *PostgresStore) GetAgentTurn(ctx context.Context, scope models.Scope, turnID string) (*models.AgentTurn, error) {
+func (s *Store) GetAgentTurn(ctx context.Context, scope models.Scope, turnID string) (*models.AgentTurn, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -454,7 +454,7 @@ func (s *PostgresStore) GetAgentTurn(ctx context.Context, scope models.Scope, tu
 	return sqlstore.DecodeAgentTurnRecord(payload)
 }
 
-func (s *PostgresStore) ListAgentTurns(ctx context.Context, filter models.AgentTurnFilter) ([]*models.AgentTurn, error) {
+func (s *Store) ListAgentTurns(ctx context.Context, filter models.AgentTurnFilter) ([]*models.AgentTurn, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -502,7 +502,7 @@ func (s *PostgresStore) ListAgentTurns(ctx context.Context, filter models.AgentT
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) UpdateAgentTurn(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, workerID string) error {
+func (s *Store) UpdateAgentTurn(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, workerID string) error {
 	if err := turn.Validate(); err != nil {
 		return err
 	}
@@ -531,7 +531,7 @@ func (s *PostgresStore) UpdateAgentTurn(ctx context.Context, turn *models.AgentT
 	return nil
 }
 
-func (s *PostgresStore) RecordAgentTurnStepModel(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, events []*models.ActivityEvent) error {
+func (s *Store) RecordAgentTurnStepModel(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, events []*models.ActivityEvent) error {
 	if err := models.ValidateStepModelRecordInput(turn, expectedRevision, events); err != nil {
 		return err
 	}
@@ -593,7 +593,7 @@ func (s *PostgresStore) RecordAgentTurnStepModel(ctx context.Context, turn *mode
 	return tx.Commit()
 }
 
-func (s *PostgresStore) ClaimAgentTurn(ctx context.Context, scope models.Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentTurn, error) {
+func (s *Store) ClaimAgentTurn(ctx context.Context, scope models.Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentTurn, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

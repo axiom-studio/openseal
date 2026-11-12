@@ -23,7 +23,7 @@ func TestPostgresArtifactCatalogIsConcurrentRecoverableAndScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	stores := []*postgres.PostgresStore{primary, replica}
+	stores := []*postgres.Store{primary, replica}
 	artifact := validCatalogArtifact("postgres-report", 1)
 	var created atomic.Int32
 	errorsSeen := make(chan error, 20)

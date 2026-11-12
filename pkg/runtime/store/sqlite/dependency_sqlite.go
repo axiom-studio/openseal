@@ -63,7 +63,7 @@ func migrateRunDependencies(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record models.RunDependencyGroupCreateRecord) (*models.RunDependencyResult, error) {
+func (s *Store) CreateRunDependencyGroup(ctx context.Context, record models.RunDependencyGroupCreateRecord) (*models.RunDependencyResult, error) {
 	if err := models.ValidateRunDependencyGroupCreateRecord(record); err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record model
 // applySQLiteDependencyGroupSessionWrites creates the record's same-Agent
 // child sessions and moves the source's control tool entry, inside the
 // create's BEGIN IMMEDIATE. The source fence was checked by the caller.
-func (s *SQLiteStore) applySQLiteDependencyGroupSessionWrites(ctx context.Context, conn *sql.Conn, record models.RunDependencyGroupCreateRecord, sourceSessionID string, result *models.RunDependencyResult) error {
+func (s *Store) applySQLiteDependencyGroupSessionWrites(ctx context.Context, conn *sql.Conn, record models.RunDependencyGroupCreateRecord, sourceSessionID string, result *models.RunDependencyResult) error {
 	for i := range record.ChildSessions {
 		created, err := s.createRunAgentSessionTx(ctx, conn, models.DependencyGroupChildSession(record, i))
 		if err != nil {
@@ -221,14 +221,14 @@ func readSQLiteDependencyGroupSessionState(ctx context.Context, conn *sql.Conn, 
 	return nil
 }
 
-func (s *SQLiteStore) GetRunDependencyGroup(ctx context.Context, scope models.Scope, groupID string) (*models.RunDependencyGroup, error) {
+func (s *Store) GetRunDependencyGroup(ctx context.Context, scope models.Scope, groupID string) (*models.RunDependencyGroup, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return getSQLiteDependencyGroup(ctx, s.db, scope, strings.TrimSpace(groupID), "")
 }
 
-func (s *SQLiteStore) FindRunDependencyGroupByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.RunDependencyGroup, error) {
+func (s *Store) FindRunDependencyGroupByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.RunDependencyGroup, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -238,7 +238,7 @@ func (s *SQLiteStore) FindRunDependencyGroupByIdempotencyKey(ctx context.Context
 	return getSQLiteDependencyGroup(ctx, s.db, scope, "", strings.TrimSpace(key))
 }
 
-func (s *SQLiteStore) ListRunDependencies(ctx context.Context, scope models.Scope, groupID string) ([]*models.RunDependency, error) {
+func (s *Store) ListRunDependencies(ctx context.Context, scope models.Scope, groupID string) ([]*models.RunDependency, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -252,7 +252,7 @@ func (s *SQLiteStore) ListRunDependencies(ctx context.Context, scope models.Scop
 	return listSQLiteDependencies(ctx, s.db, scope, group.ID)
 }
 
-func (s *SQLiteStore) ResolveRunDependency(ctx context.Context, record models.RunDependencyResolutionRecord) (*models.RunDependencyResult, error) {
+func (s *Store) ResolveRunDependency(ctx context.Context, record models.RunDependencyResolutionRecord) (*models.RunDependencyResult, error) {
 	if err := models.ValidateRunDependencyResolutionRecord(record); err != nil {
 		return nil, err
 	}
@@ -273,7 +273,7 @@ func (s *SQLiteStore) ResolveRunDependency(ctx context.Context, record models.Ru
 	return result, nil
 }
 
-func (s *SQLiteStore) resolveSQLiteDependencyConn(ctx context.Context, conn *sql.Conn, record models.RunDependencyResolutionRecord) (*models.RunDependencyResult, error) {
+func (s *Store) resolveSQLiteDependencyConn(ctx context.Context, conn *sql.Conn, record models.RunDependencyResolutionRecord) (*models.RunDependencyResult, error) {
 	group, err := getSQLiteDependencyGroup(ctx, conn, record.Scope, record.GroupID, "")
 	if err != nil {
 		return nil, err

@@ -11,7 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func (s *PostgresStore) postgresSkillRuntimeMaintenanceActiveTx(ctx context.Context, tx *sql.Tx, scope models.Scope, skillID string) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) postgresSkillRuntimeMaintenanceActiveTx(ctx context.Context, tx *sql.Tx, scope models.Scope, skillID string) (*models.SkillRuntimeMaintenance, error) {
 	g, err := sqlstore.ReadSkillRuntimeMaintenance(ctx, tx, s.table("skill_runtime_maintenance"), scope, skillID, true, false)
 	if errors.Is(err, models.ErrSkillRuntimeMaintenanceNotFound) {
 		return nil, nil
@@ -25,7 +25,7 @@ func (s *PostgresStore) postgresSkillRuntimeMaintenanceActiveTx(ctx context.Cont
 	return g, nil
 }
 
-func (s *PostgresStore) withMaintenanceTransaction(ctx context.Context, scope models.Scope, skillID string, work func(*sql.Tx) (*models.SkillRuntimeMaintenance, error)) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) withMaintenanceTransaction(ctx context.Context, scope models.Scope, skillID string, work func(*sql.Tx) (*models.SkillRuntimeMaintenance, error)) (*models.SkillRuntimeMaintenance, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, err
@@ -44,7 +44,7 @@ func (s *PostgresStore) withMaintenanceTransaction(ctx context.Context, scope mo
 	return result, nil
 }
 
-func (s *PostgresStore) AcquireSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceRequest) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) AcquireSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceRequest) (*models.SkillRuntimeMaintenance, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
@@ -76,25 +76,25 @@ func (s *PostgresStore) AcquireSkillRuntimeMaintenance(ctx context.Context, r mo
 	})
 }
 
-func (s *PostgresStore) GetSkillRuntimeMaintenance(ctx context.Context, scope models.Scope, skillID string) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) GetSkillRuntimeMaintenance(ctx context.Context, scope models.Scope, skillID string) (*models.SkillRuntimeMaintenance, error) {
 	if err := models.ValidateMaintenanceIdentity(scope, skillID); err != nil {
 		return nil, err
 	}
 	return sqlstore.ReadSkillRuntimeMaintenance(ctx, s.db, s.table("skill_runtime_maintenance"), scope, skillID, true, false)
 }
-func (s *PostgresStore) ListActiveSkillRuntimeMaintenances(ctx context.Context, scope models.Scope) ([]*models.SkillRuntimeMaintenance, error) {
+func (s *Store) ListActiveSkillRuntimeMaintenances(ctx context.Context, scope models.Scope) ([]*models.SkillRuntimeMaintenance, error) {
 	return sqlstore.ListActiveSkillRuntimeMaintenances(ctx, s.db, s.table("skill_runtime_maintenance"), scope, true)
 }
-func (s *PostgresStore) ListSkillRuntimeMaintenanceBindings(ctx context.Context, scope models.Scope, skillID, afterDeploymentID, afterBindingID string, limit int) ([]*skill.Binding, error) {
+func (s *Store) ListSkillRuntimeMaintenanceBindings(ctx context.Context, scope models.Scope, skillID, afterDeploymentID, afterBindingID string, limit int) ([]*skill.Binding, error) {
 	return sqlstore.ListMaintenanceBindings(ctx, s.db, s.table("skill_bindings"), scope, skillID, afterDeploymentID, afterBindingID, limit, true)
 }
-func (s *PostgresStore) CompleteSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) CompleteSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion) (*models.SkillRuntimeMaintenance, error) {
 	return s.transitionSkillRuntimeMaintenance(ctx, r, false)
 }
-func (s *PostgresStore) BeginSkillRuntimeMaintenanceRollback(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) BeginSkillRuntimeMaintenanceRollback(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion) (*models.SkillRuntimeMaintenance, error) {
 	return s.transitionSkillRuntimeMaintenance(ctx, r, true)
 }
-func (s *PostgresStore) transitionSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion, rollback bool) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) transitionSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion, rollback bool) (*models.SkillRuntimeMaintenance, error) {
 	if err := models.ValidateMaintenanceIdentity(r.Scope, r.SkillID); err != nil {
 		return nil, err
 	}

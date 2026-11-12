@@ -24,7 +24,7 @@ func sqliteSkillRuntimeMaintenanceActiveTx(ctx context.Context, q sqlstore.RowQu
 	return g, nil
 }
 
-func (s *SQLiteStore) withMaintenanceTransaction(ctx context.Context, work func(*sql.Conn) (*models.SkillRuntimeMaintenance, error)) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) withMaintenanceTransaction(ctx context.Context, work func(*sql.Conn) (*models.SkillRuntimeMaintenance, error)) (*models.SkillRuntimeMaintenance, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func (s *SQLiteStore) withMaintenanceTransaction(ctx context.Context, work func(
 	return result, nil
 }
 
-func (s *SQLiteStore) AcquireSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceRequest) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) AcquireSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceRequest) (*models.SkillRuntimeMaintenance, error) {
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
@@ -82,26 +82,26 @@ func (s *SQLiteStore) AcquireSkillRuntimeMaintenance(ctx context.Context, r mode
 	})
 }
 
-func (s *SQLiteStore) GetSkillRuntimeMaintenance(ctx context.Context, scope models.Scope, skillID string) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) GetSkillRuntimeMaintenance(ctx context.Context, scope models.Scope, skillID string) (*models.SkillRuntimeMaintenance, error) {
 	if err := models.ValidateMaintenanceIdentity(scope, skillID); err != nil {
 		return nil, err
 	}
 	return sqlstore.ReadSkillRuntimeMaintenance(ctx, s.db, "skill_runtime_maintenance", scope, skillID, false, false)
 }
-func (s *SQLiteStore) ListActiveSkillRuntimeMaintenances(ctx context.Context, scope models.Scope) ([]*models.SkillRuntimeMaintenance, error) {
+func (s *Store) ListActiveSkillRuntimeMaintenances(ctx context.Context, scope models.Scope) ([]*models.SkillRuntimeMaintenance, error) {
 	return sqlstore.ListActiveSkillRuntimeMaintenances(ctx, s.db, "skill_runtime_maintenance", scope, false)
 }
-func (s *SQLiteStore) ListSkillRuntimeMaintenanceBindings(ctx context.Context, scope models.Scope, skillID, afterDeploymentID, afterBindingID string, limit int) ([]*skill.Binding, error) {
+func (s *Store) ListSkillRuntimeMaintenanceBindings(ctx context.Context, scope models.Scope, skillID, afterDeploymentID, afterBindingID string, limit int) ([]*skill.Binding, error) {
 	return sqlstore.ListMaintenanceBindings(ctx, s.db, "skill_bindings", scope, skillID, afterDeploymentID, afterBindingID, limit, false)
 }
 
-func (s *SQLiteStore) CompleteSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) CompleteSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion) (*models.SkillRuntimeMaintenance, error) {
 	return s.transitionSkillRuntimeMaintenance(ctx, r, false)
 }
-func (s *SQLiteStore) BeginSkillRuntimeMaintenanceRollback(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) BeginSkillRuntimeMaintenanceRollback(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion) (*models.SkillRuntimeMaintenance, error) {
 	return s.transitionSkillRuntimeMaintenance(ctx, r, true)
 }
-func (s *SQLiteStore) transitionSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion, rollback bool) (*models.SkillRuntimeMaintenance, error) {
+func (s *Store) transitionSkillRuntimeMaintenance(ctx context.Context, r models.SkillRuntimeMaintenanceCompletion, rollback bool) (*models.SkillRuntimeMaintenance, error) {
 	if err := models.ValidateMaintenanceIdentity(r.Scope, r.SkillID); err != nil {
 		return nil, err
 	}

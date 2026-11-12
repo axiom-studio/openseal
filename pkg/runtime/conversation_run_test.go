@@ -227,7 +227,7 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 	}
 }
 
-func mustConversationRunScheduler(t *testing.T, store *sqlite.SQLiteStore) *ConversationRunScheduler {
+func mustConversationRunScheduler(t *testing.T, store *sqlite.Store) *ConversationRunScheduler {
 	t.Helper()
 	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
 	if err != nil {

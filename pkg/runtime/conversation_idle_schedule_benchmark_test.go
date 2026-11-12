@@ -11,7 +11,7 @@ import (
 // Count authoritative reads while retaining the canonical SQLiteStore paths.
 // These benchmarks measure reconciliation work, not SQL latency or serving CPU.
 type idleConversationBenchmarkStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	messageReads uint64
 	roundReads   uint64
 	roundRows    uint64
@@ -20,19 +20,19 @@ type idleConversationBenchmarkStore struct {
 
 func (s *idleConversationBenchmarkStore) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
 	s.messageReads++
-	return s.SQLiteStore.ListChannelMessages(ctx, filter)
+	return s.Store.ListChannelMessages(ctx, filter)
 }
 
 func (s *idleConversationBenchmarkStore) ListParticipationRounds(ctx context.Context, filter ParticipationRoundFilter) ([]*ParticipationRoundResult, error) {
 	s.roundReads++
-	rounds, err := s.SQLiteStore.ListParticipationRounds(ctx, filter)
+	rounds, err := s.Store.ListParticipationRounds(ctx, filter)
 	s.roundRows += uint64(len(rounds))
 	return rounds, err
 }
 
 func (s *idleConversationBenchmarkStore) GetConversationCursor(ctx context.Context, scope Scope, id string, participant ConversationParticipant) (*ConversationCursor, error) {
 	s.cursorReads++
-	return s.SQLiteStore.GetConversationCursor(ctx, scope, id, participant)
+	return s.Store.GetConversationCursor(ctx, scope, id, participant)
 }
 
 func (s *idleConversationBenchmarkStore) resetReads() {
@@ -48,7 +48,7 @@ func (s *idleConversationBenchmarkStore) reportReads(b *testing.B) {
 
 func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (*idleConversationBenchmarkStore, *ConversationRunScheduler, Scope, []*Conversation) {
 	b.Helper()
-	store := &idleConversationBenchmarkStore{SQLiteStore: newTestKernelStore(b)}
+	store := &idleConversationBenchmarkStore{Store: newTestKernelStore(b)}
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "idle-scheduler-benchmark"}
 	ctx := b.Context()

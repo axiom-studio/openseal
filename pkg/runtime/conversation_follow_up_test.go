@@ -9,7 +9,7 @@ import (
 )
 
 type conversationFollowUpFixture struct {
-	store        *sqlite.SQLiteStore
+	store        *sqlite.Store
 	service      *ConversationService
 	scheduler    *ConversationRunScheduler
 	conversation *Conversation

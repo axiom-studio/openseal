@@ -17,7 +17,7 @@ import (
 
 // agentBuilderDispatchStore serves the approvals the test decides.
 type agentBuilderDispatchStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	approvals map[string]*ApprovalCheckpoint
 }
 
@@ -25,7 +25,7 @@ func (s *agentBuilderDispatchStore) GetApproval(ctx context.Context, scope Scope
 	if approval, ok := s.approvals[approvalID]; ok {
 		return approval, nil
 	}
-	return s.SQLiteStore.GetApproval(ctx, scope, approvalID)
+	return s.Store.GetApproval(ctx, scope, approvalID)
 }
 
 // agentBuilderTestProvisioner does what the Engine does for the builder.
@@ -113,7 +113,7 @@ func newAgentBuilderDispatchFixture(t *testing.T) *agentBuilderDispatchFixture {
 	t.Helper()
 	ctx := context.Background()
 	base := newAgentBuilderFixture(t, false)
-	store := &agentBuilderDispatchStore{SQLiteStore: newTestKernelStore(t), approvals: map[string]*ApprovalCheckpoint{}}
+	store := &agentBuilderDispatchStore{Store: newTestKernelStore(t), approvals: map[string]*ApprovalCheckpoint{}}
 	base.spaces = NewSpaceService(store)
 	base.salesID, base.homeID = seedAgentBuilderSpaces(t, base.spaces, base.scope)
 	recorder := &agentBuilderRecordingHost{}

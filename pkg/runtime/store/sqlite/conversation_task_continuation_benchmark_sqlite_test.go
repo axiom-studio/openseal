@@ -23,7 +23,7 @@ func BenchmarkConversationTaskContinuationDueSQLite(b *testing.B) {
 	})
 }
 
-func explainSQLiteConversationTaskDue(b *testing.B, store *SQLiteStore, filter models.ConversationTaskDueFilter) {
+func explainSQLiteConversationTaskDue(b *testing.B, store *Store, filter models.ConversationTaskDueFilter) {
 	b.Helper()
 	query := `EXPLAIN QUERY PLAN SELECT payload FROM agent_runs WHERE scope_kind=? AND scope_id=? AND ` + sqliteConversationTaskDuePredicate + ` AND created_at<=?`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID, filter.BeforeCreatedAt.UTC()}

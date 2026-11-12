@@ -16,18 +16,18 @@ import (
 )
 
 type gatewayVerificationStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	routeLookups, received int
 }
 
 func (s *gatewayVerificationStore) ListExternalConversationEndpointsByVerifiedRoute(ctx context.Context, route ExternalConversationVerifiedRoute) ([]*ExternalConversationEndpoint, error) {
 	s.routeLookups++
-	return s.SQLiteStore.ListExternalConversationEndpointsByVerifiedRoute(ctx, route)
+	return s.Store.ListExternalConversationEndpointsByVerifiedRoute(ctx, route)
 }
 
 func (s *gatewayVerificationStore) ReceiveExternalConversationEvent(ctx context.Context, item *ExternalConversationInboxItem) (*ExternalConversationInboxItem, bool, error) {
 	s.received++
-	return s.SQLiteStore.ReceiveExternalConversationEvent(ctx, item)
+	return s.Store.ReceiveExternalConversationEvent(ctx, item)
 }
 
 type gatewayVerificationHost struct {
@@ -58,7 +58,7 @@ func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *sk
 	if err := base.UpdateExternalConversationEndpoint(t.Context(), endpoint, previousRevision); err != nil {
 		t.Fatal(err)
 	}
-	store := &gatewayVerificationStore{SQLiteStore: base}
+	store := &gatewayVerificationStore{Store: base}
 	registration, err := NewExternalConversationGatewayService(store, catalog).Create(t.Context(), CreateExternalConversationGatewayRequest{
 		ID: "verification-gateway", Name: "Paused setup verification",
 		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider, InstallationID: "T123", ApplicationID: "A123"},

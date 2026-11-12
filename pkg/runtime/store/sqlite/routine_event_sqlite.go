@@ -42,7 +42,7 @@ func sqliteStringArgs(values []string) []interface{} {
 
 // withSQLiteWrite runs fn in a BEGIN IMMEDIATE transaction, so a read that
 // decides a write cannot race another writer.
-func (s *SQLiteStore) withSQLiteWrite(ctx context.Context, fn func(conn *sql.Conn) error) error {
+func (s *Store) withSQLiteWrite(ctx context.Context, fn func(conn *sql.Conn) error) error {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return err
@@ -62,7 +62,7 @@ func (s *SQLiteStore) withSQLiteWrite(ctx context.Context, fn func(conn *sql.Con
 	return nil
 }
 
-func (s *SQLiteStore) ListRoutineEventActivations(ctx context.Context, scope models.Scope, kind models.RoutineEventKind, sourceRef string) ([]*models.RunbookActivation, error) {
+func (s *Store) ListRoutineEventActivations(ctx context.Context, scope models.Scope, kind models.RoutineEventKind, sourceRef string) ([]*models.RunbookActivation, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (s *SQLiteStore) ListRoutineEventActivations(ctx context.Context, scope mod
 	return values, rows.Err()
 }
 
-func (s *SQLiteStore) ListRoutineEventSubscriptions(ctx context.Context, kinds []models.RoutineEventKind, after string, limit int) ([]models.RoutineEventSubscription, string, error) {
+func (s *Store) ListRoutineEventSubscriptions(ctx context.Context, kinds []models.RoutineEventKind, after string, limit int) ([]models.RoutineEventSubscription, string, error) {
 	kindValues, err := models.RoutineEventKindStrings(kinds)
 	if err != nil {
 		return nil, "", err
@@ -139,7 +139,7 @@ func (s *SQLiteStore) ListRoutineEventSubscriptions(ctx context.Context, kinds [
 	return values, next, nil
 }
 
-func (s *SQLiteStore) ListRoutineEventSourceKeysInScope(ctx context.Context, scope models.Scope) ([]models.RoutineEventSourceKey, error) {
+func (s *Store) ListRoutineEventSourceKeysInScope(ctx context.Context, scope models.Scope) ([]models.RoutineEventSourceKey, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func (s *SQLiteStore) ListRoutineEventSourceKeysInScope(ctx context.Context, sco
 	return keys, rows.Err()
 }
 
-func (s *SQLiteStore) CountActiveRoutineEventRuns(ctx context.Context, scope models.Scope) (int, error) {
+func (s *Store) CountActiveRoutineEventRuns(ctx context.Context, scope models.Scope) (int, error) {
 	if err := scope.Validate(); err != nil {
 		return 0, err
 	}
@@ -172,7 +172,7 @@ func (s *SQLiteStore) CountActiveRoutineEventRuns(ctx context.Context, scope mod
 	return count, err
 }
 
-func (s *SQLiteStore) InsertRoutineEvent(ctx context.Context, record *models.RoutineEventRecord) (bool, error) {
+func (s *Store) InsertRoutineEvent(ctx context.Context, record *models.RoutineEventRecord) (bool, error) {
 	if err := models.PrepareRoutineEventRecord(record); err != nil {
 		return false, err
 	}
@@ -199,7 +199,7 @@ func (s *SQLiteStore) InsertRoutineEvent(ctx context.Context, record *models.Rou
 	return inserted == 1, err
 }
 
-func (s *SQLiteStore) CountPendingRoutineEvents(ctx context.Context, scope models.Scope, activationID string) (int, error) {
+func (s *Store) CountPendingRoutineEvents(ctx context.Context, scope models.Scope, activationID string) (int, error) {
 	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return 0, err
 	}
@@ -209,7 +209,7 @@ func (s *SQLiteStore) CountPendingRoutineEvents(ctx context.Context, scope model
 	return count, err
 }
 
-func (s *SQLiteStore) CountPendingRoutineEventsInScope(ctx context.Context, scope models.Scope) (int, error) {
+func (s *Store) CountPendingRoutineEventsInScope(ctx context.Context, scope models.Scope) (int, error) {
 	if err := scope.Validate(); err != nil {
 		return 0, err
 	}
@@ -219,7 +219,7 @@ func (s *SQLiteStore) CountPendingRoutineEventsInScope(ctx context.Context, scop
 	return count, err
 }
 
-func (s *SQLiteStore) ListRoutineEventWorkScopes(ctx context.Context) ([]models.Scope, error) {
+func (s *Store) ListRoutineEventWorkScopes(ctx context.Context) ([]models.Scope, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT scope_kind, scope_id FROM routine_events
 		WHERE state IN ('pending','batched') ORDER BY scope_kind, scope_id`)
 	if err != nil {
@@ -237,7 +237,7 @@ func (s *SQLiteStore) ListRoutineEventWorkScopes(ctx context.Context) ([]models.
 	return scopes, rows.Err()
 }
 
-func (s *SQLiteStore) ListRoutineEventWork(ctx context.Context, scope models.Scope, after string, limit int) ([]string, error) {
+func (s *Store) ListRoutineEventWork(ctx context.Context, scope models.Scope, after string, limit int) ([]string, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -291,7 +291,7 @@ func sqliteOpenRoutineEventBatch(ctx context.Context, query sqlstore.ReadWriter,
 	return batch, err
 }
 
-func (s *SQLiteStore) ClaimRoutineEventBatch(ctx context.Context, scope models.Scope, activationID string, maxEvents int, now time.Time) (*models.RoutineEventBatch, error) {
+func (s *Store) ClaimRoutineEventBatch(ctx context.Context, scope models.Scope, activationID string, maxEvents int, now time.Time) (*models.RoutineEventBatch, error) {
 	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return nil, err
 	}
@@ -363,7 +363,7 @@ func (s *SQLiteStore) ClaimRoutineEventBatch(ctx context.Context, scope models.S
 	return claimed, nil
 }
 
-func (s *SQLiteStore) MarkRoutineEventBatchStarted(ctx context.Context, scope models.Scope, batchID, runID string, now time.Time) error {
+func (s *Store) MarkRoutineEventBatchStarted(ctx context.Context, scope models.Scope, batchID, runID string, now time.Time) error {
 	if err := models.ValidateRoutineEventScopeActivation(scope, batchID); err != nil {
 		return err
 	}
@@ -399,7 +399,7 @@ func (s *SQLiteStore) MarkRoutineEventBatchStarted(ctx context.Context, scope mo
 	})
 }
 
-func (s *SQLiteStore) GetRoutineEventBatch(ctx context.Context, scope models.Scope, batchID string) (*models.RoutineEventBatch, []*models.RoutineEventRecord, error) {
+func (s *Store) GetRoutineEventBatch(ctx context.Context, scope models.Scope, batchID string) (*models.RoutineEventBatch, []*models.RoutineEventRecord, error) {
 	if err := models.ValidateRoutineEventScopeActivation(scope, batchID); err != nil {
 		return nil, nil, err
 	}
@@ -454,14 +454,14 @@ func (s *SQLiteStore) GetRoutineEventBatch(ctx context.Context, scope models.Sco
 	return batch, records, nil
 }
 
-func (s *SQLiteStore) GetOpenRoutineEventBatch(ctx context.Context, scope models.Scope, activationID string) (*models.RoutineEventBatch, error) {
+func (s *Store) GetOpenRoutineEventBatch(ctx context.Context, scope models.Scope, activationID string) (*models.RoutineEventBatch, error) {
 	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return nil, err
 	}
 	return sqliteOpenRoutineEventBatch(ctx, s.db, scope, activationID)
 }
 
-func (s *SQLiteStore) CountRoutineEventBatchesSince(ctx context.Context, scope models.Scope, activationID string, since time.Time, test bool) (int, *time.Time, error) {
+func (s *Store) CountRoutineEventBatchesSince(ctx context.Context, scope models.Scope, activationID string, since time.Time, test bool) (int, *time.Time, error) {
 	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return 0, nil, err
 	}
@@ -476,7 +476,7 @@ func (s *SQLiteStore) CountRoutineEventBatchesSince(ctx context.Context, scope m
 	return count, first, err
 }
 
-func (s *SQLiteStore) CountRoutineTestEventsSince(ctx context.Context, scope models.Scope, activationID string, since time.Time) (int, error) {
+func (s *Store) CountRoutineTestEventsSince(ctx context.Context, scope models.Scope, activationID string, since time.Time) (int, error) {
 	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return 0, err
 	}
@@ -487,7 +487,7 @@ func (s *SQLiteStore) CountRoutineTestEventsSince(ctx context.Context, scope mod
 	return count, err
 }
 
-func (s *SQLiteStore) DropRoutineEvents(ctx context.Context, scope models.Scope, activationID string, reason string) (int, error) {
+func (s *Store) DropRoutineEvents(ctx context.Context, scope models.Scope, activationID string, reason string) (int, error) {
 	if err := models.ValidateRoutineEventScopeActivation(scope, activationID); err != nil {
 		return 0, err
 	}
@@ -511,7 +511,7 @@ func (s *SQLiteStore) DropRoutineEvents(ctx context.Context, scope models.Scope,
 	return int(dropped), err
 }
 
-func (s *SQLiteStore) RoutineEventActivity(ctx context.Context, scope models.Scope, activationIDs []string, now time.Time) (map[string]models.RoutineEventActivity, error) {
+func (s *Store) RoutineEventActivity(ctx context.Context, scope models.Scope, activationIDs []string, now time.Time) (map[string]models.RoutineEventActivity, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -605,7 +605,7 @@ func (s *SQLiteStore) RoutineEventActivity(ctx context.Context, scope models.Sco
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) PruneRoutineEvents(ctx context.Context, before time.Time, limit int) (int, error) {
+func (s *Store) PruneRoutineEvents(ctx context.Context, before time.Time, limit int) (int, error) {
 	limit = models.NormalizeRoutineEventLimit(limit, 10_000)
 	cutoff := sqliteRoutineTime(before)
 	result, err := s.db.ExecContext(ctx, `DELETE FROM routine_events WHERE rowid IN (
@@ -681,7 +681,7 @@ func scanSQLiteHook(row sqlstore.RowScanner) (*models.Hook, error) {
 	return &hook, nil
 }
 
-func (s *SQLiteStore) CreateHook(ctx context.Context, hook *models.Hook) (*models.Hook, error) {
+func (s *Store) CreateHook(ctx context.Context, hook *models.Hook) (*models.Hook, error) {
 	value, err := models.PrepareHook(hook)
 	if err != nil {
 		return nil, err
@@ -701,7 +701,7 @@ func (s *SQLiteStore) CreateHook(ctx context.Context, hook *models.Hook) (*model
 	return stored, nil
 }
 
-func (s *SQLiteStore) GetHook(ctx context.Context, hookID string) (*models.Hook, error) {
+func (s *Store) GetHook(ctx context.Context, hookID string) (*models.Hook, error) {
 	hook, err := scanSQLiteHook(s.db.QueryRowContext(ctx, `SELECT `+sqliteHookColumns+` FROM hooks WHERE id = ?`, hookID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -709,7 +709,7 @@ func (s *SQLiteStore) GetHook(ctx context.Context, hookID string) (*models.Hook,
 	return hook, err
 }
 
-func (s *SQLiteStore) UpdateHook(ctx context.Context, scope models.Scope, hookID string, expectedRevision int64, rotate bool, pathTokenEnabled *bool, now time.Time) (*models.Hook, error) {
+func (s *Store) UpdateHook(ctx context.Context, scope models.Scope, hookID string, expectedRevision int64, rotate bool, pathTokenEnabled *bool, now time.Time) (*models.Hook, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -749,7 +749,7 @@ func (s *SQLiteStore) UpdateHook(ctx context.Context, scope models.Scope, hookID
 	return updated, nil
 }
 
-func (s *SQLiteStore) PruneHooks(ctx context.Context, createdBefore time.Time) (int, error) {
+func (s *Store) PruneHooks(ctx context.Context, createdBefore time.Time) (int, error) {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM hooks
 		WHERE created_at < ? AND NOT EXISTS (
 			SELECT 1 FROM runbook_activations a
@@ -762,4 +762,4 @@ func (s *SQLiteStore) PruneHooks(ctx context.Context, createdBefore time.Time) (
 	return int(removed), err
 }
 
-var _ models.RoutineEventStore = (*SQLiteStore)(nil)
+var _ models.RoutineEventStore = (*Store)(nil)

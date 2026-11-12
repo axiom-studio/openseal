@@ -86,10 +86,10 @@ func TestPostgresPoolBudgetBoundsTwoOverlappingReplicas(t *testing.T) {
 	start := make(chan struct{})
 	errorsFound := make(chan error, callersPerReplica*2)
 	var group sync.WaitGroup
-	for _, store := range []*PostgresStore{primary, replacement} {
+	for _, store := range []*Store{primary, replacement} {
 		for index := 0; index < callersPerReplica; index++ {
 			group.Add(1)
-			go func(store *PostgresStore) {
+			go func(store *Store) {
 				defer group.Done()
 				<-start
 				_, queryErr := store.db.ExecContext(ctx, `SELECT pg_sleep(0.1)`)

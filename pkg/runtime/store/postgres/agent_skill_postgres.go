@@ -16,7 +16,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-func (s *PostgresStore) migrateAgentAndSkillControlPlane(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateAgentAndSkillControlPlane(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("agent_definitions")+` (
 			id TEXT NOT NULL, version TEXT NOT NULL, digest TEXT NOT NULL,
@@ -68,7 +68,7 @@ func (s *PostgresStore) migrateAgentAndSkillControlPlane(ctx context.Context, tx
 	return err
 }
 
-func (s *PostgresStore) migrateSourceQualifiedSkillVariants(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateSourceQualifiedSkillVariants(ctx context.Context, tx *sql.Tx) error {
 	var applied bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM `+s.table("schema_migrations")+` WHERE version = 19)`).Scan(&applied); err != nil {
 		return err
@@ -96,7 +96,7 @@ func (s *PostgresStore) migrateSourceQualifiedSkillVariants(ctx context.Context,
 	return err
 }
 
-func (s *PostgresStore) migrateAgentDefinitionCompilations(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateAgentDefinitionCompilations(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("agent_definition_compilations")+` (
 			id TEXT NOT NULL, scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL,
@@ -113,7 +113,7 @@ func (s *PostgresStore) migrateAgentDefinitionCompilations(ctx context.Context, 
 	return err
 }
 
-func (s *PostgresStore) CreateCompilation(ctx context.Context, compilation *kernelagent.DefinitionCompilation) error {
+func (s *Store) CreateCompilation(ctx context.Context, compilation *kernelagent.DefinitionCompilation) error {
 	payload, err := json.Marshal(compilation)
 	if err != nil {
 		return err
@@ -130,7 +130,7 @@ func (s *PostgresStore) CreateCompilation(ctx context.Context, compilation *kern
 	return nil
 }
 
-func (s *PostgresStore) GetCompilation(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.DefinitionCompilation, error) {
+func (s *Store) GetCompilation(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.DefinitionCompilation, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_definition_compilations")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -145,7 +145,7 @@ func (s *PostgresStore) GetCompilation(ctx context.Context, scope capability.Sco
 	return &compilation, nil
 }
 
-func (s *PostgresStore) ListCompilations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionCompilation, error) {
+func (s *Store) ListCompilations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionCompilation, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_definition_compilations")+` WHERE scope_kind = $1 AND scope_id = $2 AND deployment_id = $3 ORDER BY created_at DESC, id DESC`, scope.Kind, scope.ID, deploymentID)
 	if err != nil {
 		return nil, err
@@ -166,7 +166,7 @@ func (s *PostgresStore) ListCompilations(ctx context.Context, scope capability.S
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) CreateDefinition(ctx context.Context, definition *kernelagent.AgentDefinition) error {
+func (s *Store) CreateDefinition(ctx context.Context, definition *kernelagent.AgentDefinition) error {
 	payload, err := json.Marshal(definition)
 	if err != nil {
 		return err
@@ -185,7 +185,7 @@ func (s *PostgresStore) CreateDefinition(ctx context.Context, definition *kernel
 	return nil
 }
 
-func (s *PostgresStore) GetDefinition(ctx context.Context, id, version string) (*kernelagent.AgentDefinition, error) {
+func (s *Store) GetDefinition(ctx context.Context, id, version string) (*kernelagent.AgentDefinition, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_definitions")+` WHERE id = $1 AND version = $2`, id, version).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -200,7 +200,7 @@ func (s *PostgresStore) GetDefinition(ctx context.Context, id, version string) (
 	return &definition, nil
 }
 
-func (s *PostgresStore) ListDefinitionVersions(ctx context.Context, id string) ([]*kernelagent.AgentDefinition, error) {
+func (s *Store) ListDefinitionVersions(ctx context.Context, id string) ([]*kernelagent.AgentDefinition, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_definitions")+` WHERE id = $1 ORDER BY version`, id)
 	if err != nil {
 		return nil, err
@@ -221,7 +221,7 @@ func (s *PostgresStore) ListDefinitionVersions(ctx context.Context, id string) (
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) CreateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, activation kernelagent.DefinitionActivation) error {
+func (s *Store) CreateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, activation kernelagent.DefinitionActivation) error {
 	deploymentPayload, activationPayload, err := sqlstore.AgentRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
@@ -246,7 +246,7 @@ func (s *PostgresStore) CreateDeployment(ctx context.Context, deployment *kernel
 	return tx.Commit()
 }
 
-func (s *PostgresStore) GetDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.AgentDeployment, error) {
+func (s *Store) GetDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.AgentDeployment, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_deployments")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -261,7 +261,7 @@ func (s *PostgresStore) GetDeployment(ctx context.Context, scope capability.Scop
 	return &deployment, nil
 }
 
-func (s *PostgresStore) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
+func (s *Store) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_deployments")+` WHERE scope_kind = $1 AND scope_id = $2 ORDER BY updated_at DESC, id`, scope.Kind, scope.ID)
 	if err != nil {
 		return nil, err
@@ -282,7 +282,7 @@ func (s *PostgresStore) ListDeployments(ctx context.Context, scope capability.Sc
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) UpdateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, activation kernelagent.DefinitionActivation) error {
+func (s *Store) UpdateDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, activation kernelagent.DefinitionActivation) error {
 	deploymentPayload, activationPayload, err := sqlstore.AgentRegistryPayloads(deployment, activation)
 	if err != nil {
 		return err
@@ -323,7 +323,7 @@ func (s *PostgresStore) UpdateDeployment(ctx context.Context, deployment *kernel
 	return tx.Commit()
 }
 
-func (s *PostgresStore) ListActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]kernelagent.DefinitionActivation, error) {
+func (s *Store) ListActivations(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]kernelagent.DefinitionActivation, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_definition_activations")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND deployment_id = $3 ORDER BY deployment_revision`, scope.Kind, scope.ID, deploymentID)
 	if err != nil {
@@ -345,7 +345,7 @@ func (s *PostgresStore) ListActivations(ctx context.Context, scope capability.Sc
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) insertDefinitionActivation(ctx context.Context, tx *sql.Tx, activation kernelagent.DefinitionActivation, payload string) error {
+func (s *Store) insertDefinitionActivation(ctx context.Context, tx *sql.Tx, activation kernelagent.DefinitionActivation, payload string) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("agent_definition_activations")+`
 		(id, scope_kind, scope_id, deployment_id, deployment_revision, created_at, payload)
 		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`, activation.ID, activation.Scope.Kind, activation.Scope.ID,
@@ -353,7 +353,7 @@ func (s *PostgresStore) insertDefinitionActivation(ctx context.Context, tx *sql.
 	return err
 }
 
-func (s *PostgresStore) CreateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment) error {
+func (s *Store) CreateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment) error {
 	payload, err := json.Marshal(amendment)
 	if err != nil {
 		return err
@@ -365,7 +365,7 @@ func (s *PostgresStore) CreateAmendment(ctx context.Context, amendment *kernelag
 	return err
 }
 
-func (s *PostgresStore) GetAmendment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.DefinitionAmendment, error) {
+func (s *Store) GetAmendment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelagent.DefinitionAmendment, error) {
 	var payload string
 	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_definition_amendments")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -380,7 +380,7 @@ func (s *PostgresStore) GetAmendment(ctx context.Context, scope capability.Scope
 	return &amendment, nil
 }
 
-func (s *PostgresStore) ListAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionAmendment, error) {
+func (s *Store) ListAmendments(ctx context.Context, scope capability.ScopeReference, deploymentID string) ([]*kernelagent.DefinitionAmendment, error) {
 	query := `SELECT payload FROM ` + s.table("agent_definition_amendments") + ` WHERE scope_kind = $1 AND scope_id = $2`
 	args := []interface{}{scope.Kind, scope.ID}
 	if deploymentID != "" {
@@ -408,7 +408,7 @@ func (s *PostgresStore) ListAmendments(ctx context.Context, scope capability.Sco
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) UpdateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedRevision int64) error {
+func (s *Store) UpdateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedRevision int64) error {
 	payload, err := json.Marshal(amendment)
 	if err != nil {
 		return err
@@ -428,11 +428,11 @@ func (s *PostgresStore) UpdateAmendment(ctx context.Context, amendment *kernelag
 	return nil
 }
 
-func (s *PostgresStore) ActivateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, expectedDeploymentRevision int64, activation kernelagent.DefinitionActivation) error {
+func (s *Store) ActivateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, expectedDeploymentRevision int64, activation kernelagent.DefinitionActivation) error {
 	return s.activateAmendment(ctx, amendment, expectedAmendmentRevision, definition, deployment, expectedDeploymentRevision, activation, nil)
 }
 
-func (s *PostgresStore) activateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, expectedDeploymentRevision int64, activation kernelagent.DefinitionActivation, materialize func(*sql.Tx) error) error {
+func (s *Store) activateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, expectedDeploymentRevision int64, activation kernelagent.DefinitionActivation, materialize func(*sql.Tx) error) error {
 	definitionPayload, err := json.Marshal(definition)
 	if err != nil {
 		return err
@@ -491,7 +491,7 @@ func (s *PostgresStore) activateAmendment(ctx context.Context, amendment *kernel
 	return tx.Commit()
 }
 
-func (s *PostgresStore) synchronizeAgentRunbookActivations(ctx context.Context, tx *sql.Tx, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment) error {
+func (s *Store) synchronizeAgentRunbookActivations(ctx context.Context, tx *sql.Tx, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment) error {
 	rows, err := tx.QueryContext(ctx, `SELECT payload::text FROM `+s.table("runbook_activations")+` WHERE scope_kind=$1 AND scope_id=$2 AND assigned_agent_id=$3 FOR UPDATE`, deployment.Scope.Kind, deployment.Scope.ID, deployment.ID)
 	if err != nil {
 		return err
@@ -536,7 +536,7 @@ func (s *PostgresStore) synchronizeAgentRunbookActivations(ctx context.Context, 
 	return nil
 }
 
-func (s *PostgresStore) CreateSkillDefinition(ctx context.Context, definition *skill.Definition) error {
+func (s *Store) CreateSkillDefinition(ctx context.Context, definition *skill.Definition) error {
 	payload, err := json.Marshal(definition)
 	if err != nil {
 		return err
@@ -556,7 +556,7 @@ func (s *PostgresStore) CreateSkillDefinition(ctx context.Context, definition *s
 	return nil
 }
 
-func (s *PostgresStore) ListSkillDefinitionVariants(ctx context.Context, id, version string) ([]*skill.Definition, error) {
+func (s *Store) ListSkillDefinitionVariants(ctx context.Context, id, version string) ([]*skill.Definition, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT source_identity, payload FROM `+s.table("skill_definitions")+` WHERE id = $1 AND version = $2 ORDER BY source_identity`, id, version)
 	if err != nil {
 		return nil, err
@@ -580,7 +580,7 @@ func (s *PostgresStore) ListSkillDefinitionVariants(ctx context.Context, id, ver
 	return definitions, rows.Err()
 }
 
-func (s *PostgresStore) ListSkillDefinitionIdentities(ctx context.Context, id, version string) ([]capability.SkillIdentity, error) {
+func (s *Store) ListSkillDefinitionIdentities(ctx context.Context, id, version string) ([]capability.SkillIdentity, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, version, source_identity FROM `+s.table("skill_definitions")+` WHERE id = $1 AND version = $2 ORDER BY source_identity`, id, version)
 	if err != nil {
 		return nil, err
@@ -597,7 +597,7 @@ func (s *PostgresStore) ListSkillDefinitionIdentities(ctx context.Context, id, v
 	return identities, rows.Err()
 }
 
-func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Binding, expectedRevision int64) error {
+func (s *Store) SaveSkillBinding(ctx context.Context, binding *skill.Binding, expectedRevision int64) error {
 	if err := skill.ValidateBindingShape(binding); err != nil {
 		return err
 	}
@@ -676,7 +676,7 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 	return tx.Commit()
 }
 
-func (s *PostgresStore) ListSkillBindings(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]*skill.Binding, error) {
+func (s *Store) ListSkillBindings(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]*skill.Binding, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("skill_bindings")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND deployment_id = $3 ORDER BY id`, scope.Kind, scope.ID, deploymentID)
 	if err != nil {
@@ -698,7 +698,7 @@ func (s *PostgresStore) ListSkillBindings(ctx context.Context, scope skill.Scope
 	return bindings, rows.Err()
 }
 
-func (s *PostgresStore) ListSkillBindingRevisions(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.BindingRevision, error) {
+func (s *Store) ListSkillBindingRevisions(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.BindingRevision, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, revision, skill_id, skill_version, source_identity FROM `+s.table("skill_bindings")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND deployment_id = $3 ORDER BY id`, scope.Kind, scope.ID, deploymentID)
 	if err != nil {
@@ -719,7 +719,7 @@ func (s *PostgresStore) ListSkillBindingRevisions(ctx context.Context, scope ski
 // DeleteSkillBinding removes one binding row at its expected revision. It takes
 // the same Skill maintenance lock as SaveSkillBinding, and DELETE waits for
 // every action submission and credential lease that holds the row FOR SHARE.
-func (s *PostgresStore) DeleteSkillBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string, expectedRevision int64) error {
+func (s *Store) DeleteSkillBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string, expectedRevision int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -764,6 +764,6 @@ func (s *PostgresStore) DeleteSkillBinding(ctx context.Context, scope skill.Scop
 	return tx.Commit()
 }
 
-var _ skill.CatalogStore = (*PostgresStore)(nil)
-var _ skill.CatalogDefinitionIdentityStore = (*PostgresStore)(nil)
-var _ skill.CatalogBindingRevisionStore = (*PostgresStore)(nil)
+var _ skill.CatalogStore = (*Store)(nil)
+var _ skill.CatalogDefinitionIdentityStore = (*Store)(nil)
+var _ skill.CatalogBindingRevisionStore = (*Store)(nil)

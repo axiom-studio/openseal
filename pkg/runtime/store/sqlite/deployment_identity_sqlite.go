@@ -12,7 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-var _ workforce.DeploymentIDReserver = (*SQLiteStore)(nil)
+var _ workforce.DeploymentIDReserver = (*Store)(nil)
 
 // migrateDeploymentIdentitiesSQLite mirrors PostgreSQL migration 70 and is
 // safe to replay on every open: it fails on an ID shared by an Agent and a
@@ -68,11 +68,11 @@ func reserveDeploymentIDSQLite(ctx context.Context, db sqlstore.ExecRowQuerier, 
 	return nil
 }
 
-func (s *SQLiteStore) ReserveDeploymentID(ctx context.Context, scope capability.ScopeReference, id string, kind workforce.DeploymentKind) error {
+func (s *Store) ReserveDeploymentID(ctx context.Context, scope capability.ScopeReference, id string, kind workforce.DeploymentKind) error {
 	return reserveDeploymentIDSQLite(ctx, s.db, scope, id, kind)
 }
 
-func (s *SQLiteStore) DeploymentIDKind(ctx context.Context, scope capability.ScopeReference, id string) (workforce.DeploymentKind, error) {
+func (s *Store) DeploymentIDKind(ctx context.Context, scope capability.ScopeReference, id string) (workforce.DeploymentKind, error) {
 	var kind string
 	err := s.db.QueryRowContext(ctx, `SELECT kind FROM deployment_identities WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&kind)
 	if errors.Is(err, sql.ErrNoRows) {

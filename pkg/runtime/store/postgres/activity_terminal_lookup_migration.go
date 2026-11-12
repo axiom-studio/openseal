@@ -8,7 +8,7 @@ import (
 const terminalActivityLookupMigrationVersion int64 = 40
 const terminalRunScanMigrationVersion int64 = 41
 
-func (s *PostgresStore) migrateTerminalActivityLookup(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateTerminalActivityLookup(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, terminalActivityLookupMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -22,7 +22,7 @@ func (s *PostgresStore) migrateTerminalActivityLookup(ctx context.Context, tx *s
 	return err
 }
 
-func (s *PostgresStore) migrateTerminalRunScan(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateTerminalRunScan(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, terminalRunScanMigrationVersion)
 	if err != nil || applied {
 		return err

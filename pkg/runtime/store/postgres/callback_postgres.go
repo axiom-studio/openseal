@@ -14,7 +14,7 @@ import (
 
 const callbackRegistryMigrationVersion int64 = 39
 
-func (s *PostgresStore) migrateCallbackRegistry(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateCallbackRegistry(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("callback_registrations")+` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
@@ -45,7 +45,7 @@ func (s *PostgresStore) migrateCallbackRegistry(ctx context.Context, tx *sql.Tx)
 	return err
 }
 
-func (s *PostgresStore) CreateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration) error {
+func (s *Store) CreateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -63,7 +63,7 @@ func (s *PostgresStore) CreateCallbackRegistration(ctx context.Context, value *m
 	return err
 }
 
-func (s *PostgresStore) GetCallbackRegistration(ctx context.Context, scope models.Scope, id string) (*models.CallbackRegistration, error) {
+func (s *Store) GetCallbackRegistration(ctx context.Context, scope models.Scope, id string) (*models.CallbackRegistration, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func (s *PostgresStore) GetCallbackRegistration(ctx context.Context, scope model
 		WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *PostgresStore) GetCallbackRegistrationByIngressRoute(ctx context.Context, route string) (*models.CallbackRegistration, error) {
+func (s *Store) GetCallbackRegistrationByIngressRoute(ctx context.Context, route string) (*models.CallbackRegistration, error) {
 	if !models.IsValidOpaqueIdentifier(strings.TrimSpace(route), 128) {
 		return nil, models.ErrInvalidCallbackRegistration
 	}
@@ -79,7 +79,7 @@ func (s *PostgresStore) GetCallbackRegistrationByIngressRoute(ctx context.Contex
 		WHERE ingress_route=$1`, strings.TrimSpace(route)))
 }
 
-func (s *PostgresStore) ListCallbackRegistrations(ctx context.Context, filter models.CallbackRegistrationFilter) ([]*models.CallbackRegistration, error) {
+func (s *Store) ListCallbackRegistrations(ctx context.Context, filter models.CallbackRegistrationFilter) ([]*models.CallbackRegistration, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -122,13 +122,13 @@ func (s *PostgresStore) ListCallbackRegistrations(ctx context.Context, filter mo
 
 // migrateWorkflowSourceCallbackLookup is part of the workflow ingress authority
 // migration; keeping it separate avoids rewriting an already numbered migration.
-func (s *PostgresStore) migrateWorkflowSourceCallbackLookup(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateWorkflowSourceCallbackLookup(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS callback_registrations_deployment_idx
 		ON `+s.table("callback_registrations")+` (scope_kind,scope_id,(payload->>'deploymentId'),status,updated_at DESC,id)`)
 	return err
 }
 
-func (s *PostgresStore) UpdateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration, expectedRevision int64) error {
+func (s *Store) UpdateCallbackRegistration(ctx context.Context, value *models.CallbackRegistration, expectedRevision int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (s *PostgresStore) UpdateCallbackRegistration(ctx context.Context, value *m
 	return nil
 }
 
-func (s *PostgresStore) ReceiveCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt) (*models.CallbackEventReceipt, bool, error) {
+func (s *Store) ReceiveCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt) (*models.CallbackEventReceipt, bool, error) {
 	if err := value.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -192,7 +192,7 @@ func (s *PostgresStore) ReceiveCallbackEvent(ctx context.Context, value *models.
 	return current, true, err
 }
 
-func (s *PostgresStore) UpdateCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt, expectedRevision int64) error {
+func (s *Store) UpdateCallbackEvent(ctx context.Context, value *models.CallbackEventReceipt, expectedRevision int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -218,7 +218,7 @@ func (s *PostgresStore) UpdateCallbackEvent(ctx context.Context, value *models.C
 	return nil
 }
 
-func (s *PostgresStore) ClaimCallbackEvent(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.CallbackEventReceipt, error) {
+func (s *Store) ClaimCallbackEvent(ctx context.Context, scope models.Scope, worker string, now time.Time, leaseDuration time.Duration) (*models.CallbackEventReceipt, error) {
 	if scope.Validate() != nil || !models.IsValidOpaqueIdentifier(strings.TrimSpace(worker), 256) || now.IsZero() || leaseDuration <= 0 {
 		return nil, models.ErrInvalidCallbackRegistration
 	}
@@ -261,7 +261,7 @@ func (s *PostgresStore) ClaimCallbackEvent(ctx context.Context, scope models.Sco
 	return receipt, nil
 }
 
-func (s *PostgresStore) SaveClaimedCallbackEvent(ctx context.Context, receipt *models.CallbackEventReceipt, expectedRevision int64, leaseOwner string) error {
+func (s *Store) SaveClaimedCallbackEvent(ctx context.Context, receipt *models.CallbackEventReceipt, expectedRevision int64, leaseOwner string) error {
 	if err := receipt.Validate(); err != nil {
 		return err
 	}

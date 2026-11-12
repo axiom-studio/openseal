@@ -7,7 +7,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *SQLiteStore) HasSkillRuntimeMaintenanceUsage(ctx context.Context, scope models.Scope, skillID string) (bool, error) {
+func (s *Store) HasSkillRuntimeMaintenanceUsage(ctx context.Context, scope models.Scope, skillID string) (bool, error) {
 	if err := models.ValidateMaintenanceIdentity(scope, skillID); err != nil {
 		return false, err
 	}

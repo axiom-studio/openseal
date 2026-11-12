@@ -219,7 +219,7 @@ func TestKernelStoresProvideArtifactPlacementLookups(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sqlite.Close()
-	for name, store := range map[string]any{"sqlite": sqlite, "postgres": &postgres.PostgresStore{}} {
+	for name, store := range map[string]any{"sqlite": sqlite, "postgres": &postgres.Store{}} {
 		if placement := NewStoreArtifactPlacement(store); placement.Runs == nil || placement.Conversations == nil {
 			t.Fatalf("%s store placement = %#v", name, placement)
 		}

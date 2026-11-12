@@ -11,7 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
-func newAgentSessionMigrationStore(t *testing.T, prefix string) (*PostgresStore, string, string) {
+func newAgentSessionMigrationStore(t *testing.T, prefix string) (*Store, string, string) {
 	t.Helper()
 	pgSchema := storetest.NewPostgresSchema(t, prefix)
 	dsn := pgSchema.DSN
@@ -28,7 +28,7 @@ func newAgentSessionMigrationStore(t *testing.T, prefix string) (*PostgresStore,
 	return store, dsn, schema
 }
 
-func agentSessionLogTablesPresent(t *testing.T, store *PostgresStore) map[string]bool {
+func agentSessionLogTablesPresent(t *testing.T, store *Store) map[string]bool {
 	t.Helper()
 	present := map[string]bool{}
 	for _, table := range []string{"agent_sessions", "agent_session_entries"} {
@@ -41,7 +41,7 @@ func agentSessionLogTablesPresent(t *testing.T, store *PostgresStore) map[string
 	return present
 }
 
-func agentSessionLogIndexes(t *testing.T, store *PostgresStore, table string) []string {
+func agentSessionLogIndexes(t *testing.T, store *Store, table string) []string {
 	t.Helper()
 	rows, err := store.db.QueryContext(context.Background(), `SELECT indexname FROM pg_indexes WHERE schemaname = $1 AND tablename = $2 AND indexname NOT LIKE '%_pkey' AND indexname NOT LIKE '%_key'`, store.schema, table)
 	if err != nil {

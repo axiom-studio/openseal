@@ -46,7 +46,7 @@ func migrateSkillSourceArtifacts(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) ImportSourceArtifact(ctx context.Context, artifact *sourceartifact.Artifact, reference *sourceartifact.Reference) (bool, error) {
+func (s *Store) ImportSourceArtifact(ctx context.Context, artifact *sourceartifact.Artifact, reference *sourceartifact.Reference) (bool, error) {
 	if err := sourceartifact.ValidateArtifact(artifact); err != nil {
 		return false, err
 	}
@@ -117,7 +117,7 @@ func (s *SQLiteStore) ImportSourceArtifact(ctx context.Context, artifact *source
 	return created, nil
 }
 
-func (s *SQLiteStore) ListSourceArtifactReferences(ctx context.Context, scope capability.ScopeReference, digest string) ([]sourceartifact.Reference, error) {
+func (s *Store) ListSourceArtifactReferences(ctx context.Context, scope capability.ScopeReference, digest string) ([]sourceartifact.Reference, error) {
 	if err := sourceartifact.ValidateKey(sourceartifact.Key{Scope: scope, Digest: digest}); err != nil {
 		return nil, err
 	}
@@ -141,7 +141,7 @@ func (s *SQLiteStore) ListSourceArtifactReferences(ctx context.Context, scope ca
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) GetSourceArtifact(ctx context.Context, scope capability.ScopeReference, digest string) (*sourceartifact.Artifact, error) {
+func (s *Store) GetSourceArtifact(ctx context.Context, scope capability.ScopeReference, digest string) (*sourceartifact.Artifact, error) {
 	if err := sourceartifact.ValidateKey(sourceartifact.Key{Scope: scope, Digest: digest}); err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func (s *SQLiteStore) GetSourceArtifact(ctx context.Context, scope capability.Sc
 	return &artifact, nil
 }
 
-func (s *SQLiteStore) DeleteSourceArtifactReference(ctx context.Context, scope capability.ScopeReference, digest, referenceID string) error {
+func (s *Store) DeleteSourceArtifactReference(ctx context.Context, scope capability.ScopeReference, digest, referenceID string) error {
 	if err := sourceartifact.ValidateKey(sourceartifact.Key{Scope: scope, Digest: digest}); err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func (s *SQLiteStore) DeleteSourceArtifactReference(ctx context.Context, scope c
 	return err
 }
 
-func (s *SQLiteStore) PurgeExpiredSourceArtifactReferences(ctx context.Context, now time.Time, limit int) (int, error) {
+func (s *Store) PurgeExpiredSourceArtifactReferences(ctx context.Context, now time.Time, limit int) (int, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -189,7 +189,7 @@ func (s *SQLiteStore) PurgeExpiredSourceArtifactReferences(ctx context.Context, 
 	return int(rows), err
 }
 
-func (s *SQLiteStore) ListUnreferencedSourceArtifacts(ctx context.Context, before time.Time, limit int) ([]sourceartifact.Key, error) {
+func (s *Store) ListUnreferencedSourceArtifacts(ctx context.Context, before time.Time, limit int) ([]sourceartifact.Key, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -209,7 +209,7 @@ func (s *SQLiteStore) ListUnreferencedSourceArtifacts(ctx context.Context, befor
 	return keys, rows.Err()
 }
 
-func (s *SQLiteStore) DeleteSourceArtifactIfUnreferenced(ctx context.Context, key sourceartifact.Key, before time.Time) (bool, error) {
+func (s *Store) DeleteSourceArtifactIfUnreferenced(ctx context.Context, key sourceartifact.Key, before time.Time) (bool, error) {
 	if err := sourceartifact.ValidateKey(key); err != nil {
 		return false, err
 	}
@@ -221,4 +221,4 @@ func (s *SQLiteStore) DeleteSourceArtifactIfUnreferenced(ctx context.Context, ke
 	return rows == 1, err
 }
 
-var _ sourceartifact.Store = (*SQLiteStore)(nil)
+var _ sourceartifact.Store = (*Store)(nil)

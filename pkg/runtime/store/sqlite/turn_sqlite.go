@@ -75,7 +75,7 @@ func addMissingAgentTurnColumns(db *sql.DB) error {
 	return nil
 }
 
-func (s *SQLiteStore) CreateAgentTurn(ctx context.Context, turn *models.AgentTurn) (*models.AgentTurn, error) {
+func (s *Store) CreateAgentTurn(ctx context.Context, turn *models.AgentTurn) (*models.AgentTurn, error) {
 	if err := turn.Validate(); err != nil {
 		return nil, err
 	}
@@ -127,7 +127,7 @@ func (s *SQLiteStore) CreateAgentTurn(ctx context.Context, turn *models.AgentTur
 	return models.CloneAgentTurn(persisted), nil
 }
 
-func (s *SQLiteStore) GetAgentTurn(ctx context.Context, scope models.Scope, turnID string) (*models.AgentTurn, error) {
+func (s *Store) GetAgentTurn(ctx context.Context, scope models.Scope, turnID string) (*models.AgentTurn, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func (s *SQLiteStore) GetAgentTurn(ctx context.Context, scope models.Scope, turn
 	return sqlstore.DecodeAgentTurnRecord(payload)
 }
 
-func (s *SQLiteStore) ListAgentTurns(ctx context.Context, filter models.AgentTurnFilter) ([]*models.AgentTurn, error) {
+func (s *Store) ListAgentTurns(ctx context.Context, filter models.AgentTurnFilter) ([]*models.AgentTurn, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func (s *SQLiteStore) ListAgentTurns(ctx context.Context, filter models.AgentTur
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateAgentTurn(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, workerID string) error {
+func (s *Store) UpdateAgentTurn(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, workerID string) error {
 	if err := turn.Validate(); err != nil {
 		return err
 	}
@@ -217,7 +217,7 @@ func (s *SQLiteStore) UpdateAgentTurn(ctx context.Context, turn *models.AgentTur
 	return nil
 }
 
-func (s *SQLiteStore) RecordAgentTurnStepModel(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, events []*models.ActivityEvent) error {
+func (s *Store) RecordAgentTurnStepModel(ctx context.Context, turn *models.AgentTurn, expectedRevision int64, events []*models.ActivityEvent) error {
 	if err := models.ValidateStepModelRecordInput(turn, expectedRevision, events); err != nil {
 		return err
 	}
@@ -290,7 +290,7 @@ func (s *SQLiteStore) RecordAgentTurnStepModel(ctx context.Context, turn *models
 	return nil
 }
 
-func (s *SQLiteStore) ClaimAgentTurn(ctx context.Context, scope models.Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentTurn, error) {
+func (s *Store) ClaimAgentTurn(ctx context.Context, scope models.Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentTurn, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

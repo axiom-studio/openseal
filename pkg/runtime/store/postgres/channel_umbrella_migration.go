@@ -9,7 +9,7 @@ const channelUmbrellaMigrationVersion int64 = 73
 
 // migrateChannelUmbrellas gives every existing conversation gateway an Agent
 // owner (all of them were Agent-owned).
-func (s *PostgresStore) migrateChannelUmbrellas(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateChannelUmbrellas(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, channelUmbrellaMigrationVersion)
 	if err != nil || applied {
 		return err

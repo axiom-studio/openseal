@@ -80,7 +80,7 @@ func migrateConversations(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *models.Conversation, idempotencyKey string) (*models.Conversation, bool, error) {
+func (s *Store) CreateConversation(ctx context.Context, conversation *models.Conversation, idempotencyKey string) (*models.Conversation, bool, error) {
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -136,7 +136,7 @@ func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *mode
 	return models.CloneConversation(conversation), false, nil
 }
 
-func (s *SQLiteStore) UpdateConversation(ctx context.Context, conversation *models.Conversation, expectedRevision int64) (*models.Conversation, error) {
+func (s *Store) UpdateConversation(ctx context.Context, conversation *models.Conversation, expectedRevision int64) (*models.Conversation, error) {
 	if err := conversation.Validate(); err != nil {
 		return nil, err
 	}
@@ -157,7 +157,7 @@ func (s *SQLiteStore) UpdateConversation(ctx context.Context, conversation *mode
 	return models.CloneConversation(conversation), nil
 }
 
-func (s *SQLiteStore) UpdateConversationWithEvent(ctx context.Context, conversation *models.Conversation, expectedRevision int64, event *models.ActivityEvent) (*models.Conversation, *models.ActivityEvent, error) {
+func (s *Store) UpdateConversationWithEvent(ctx context.Context, conversation *models.Conversation, expectedRevision int64, event *models.ActivityEvent) (*models.Conversation, *models.ActivityEvent, error) {
 	if err := models.ValidateConversationEvent(conversation, event); err != nil {
 		return nil, nil, err
 	}
@@ -182,14 +182,14 @@ func (s *SQLiteStore) UpdateConversationWithEvent(ctx context.Context, conversat
 	return models.CloneConversation(conversation), models.CloneActivityEvent(persisted), nil
 }
 
-func (s *SQLiteStore) GetConversation(ctx context.Context, scope models.Scope, conversationID string) (*models.Conversation, error) {
+func (s *Store) GetConversation(ctx context.Context, scope models.Scope, conversationID string) (*models.Conversation, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return getSQLiteConversation(ctx, s.db, scope, strings.TrimSpace(conversationID))
 }
 
-func (s *SQLiteStore) FindConversationByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.Conversation, error) {
+func (s *Store) FindConversationByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.Conversation, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -199,7 +199,7 @@ func (s *SQLiteStore) FindConversationByIdempotencyKey(ctx context.Context, scop
 	return getSQLiteConversationByKey(ctx, s.db, scope, strings.TrimSpace(key))
 }
 
-func (s *SQLiteStore) ListConversations(ctx context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
+func (s *Store) ListConversations(ctx context.Context, filter models.ConversationFilter) ([]*models.Conversation, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -260,7 +260,7 @@ func (s *SQLiteStore) ListConversations(ctx context.Context, filter models.Conve
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) LastConversationActivity(ctx context.Context, scope models.Scope, ownerType models.OwnerType, ownerIDs []string) (map[string]time.Time, error) {
+func (s *Store) LastConversationActivity(ctx context.Context, scope models.Scope, ownerType models.OwnerType, ownerIDs []string) (map[string]time.Time, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -292,7 +292,7 @@ func (s *SQLiteStore) LastConversationActivity(ctx context.Context, scope models
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record models.ChannelMessageCommitRecord) (*models.ChannelMessageCommitResult, error) {
+func (s *Store) CommitChannelMessage(ctx context.Context, record models.ChannelMessageCommitRecord) (*models.ChannelMessageCommitResult, error) {
 	if err := models.ValidateChannelMessageCommitRecord(record); err != nil {
 		return nil, err
 	}
@@ -363,14 +363,14 @@ func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record models.Ch
 	return &models.ChannelMessageCommitResult{Conversation: models.CloneConversation(record.Conversation), Message: models.CloneChannelMessage(record.Message)}, nil
 }
 
-func (s *SQLiteStore) GetChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string) (*models.ChannelMessage, error) {
+func (s *Store) GetChannelMessage(ctx context.Context, scope models.Scope, conversationID, messageID string) (*models.ChannelMessage, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
 	return getSQLiteChannelMessage(ctx, s.db, scope, conversationID, messageID)
 }
 
-func (s *SQLiteStore) FindChannelMessageByIdempotencyKey(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ChannelMessage, error) {
+func (s *Store) FindChannelMessageByIdempotencyKey(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ChannelMessage, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -380,7 +380,7 @@ func (s *SQLiteStore) FindChannelMessageByIdempotencyKey(ctx context.Context, sc
 	return getSQLiteChannelMessageByKey(ctx, s.db, scope, conversationID, strings.TrimSpace(key))
 }
 
-func (s *SQLiteStore) ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
+func (s *Store) ListChannelMessages(ctx context.Context, filter models.ChannelMessageFilter) ([]*models.ChannelMessage, error) {
 	if err := models.ValidateChannelMessageViewFilter(filter); err != nil {
 		return nil, err
 	}
@@ -443,7 +443,7 @@ func (s *SQLiteStore) ListChannelMessages(ctx context.Context, filter models.Cha
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) CommitParticipationRound(ctx context.Context, record models.ParticipationRoundCommitRecord) (*models.ParticipationRoundResult, error) {
+func (s *Store) CommitParticipationRound(ctx context.Context, record models.ParticipationRoundCommitRecord) (*models.ParticipationRoundResult, error) {
 	if err := models.ValidateParticipationRoundCommitRecord(record); err != nil {
 		return nil, err
 	}
@@ -510,7 +510,7 @@ func (s *SQLiteStore) CommitParticipationRound(ctx context.Context, record model
 	return &models.ParticipationRoundResult{Conversation: models.CloneConversation(record.Conversation), Round: models.CloneParticipationRound(record.Round), Messages: models.CloneChannelMessages(record.Messages)}, nil
 }
 
-func (s *SQLiteStore) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ParticipationRoundResult, error) {
+func (s *Store) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope models.Scope, conversationID, key string) (*models.ParticipationRoundResult, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -528,7 +528,7 @@ func (s *SQLiteStore) FindParticipationRoundByIdempotencyKey(ctx context.Context
 	return result, err
 }
 
-func (s *SQLiteStore) GetParticipationRound(ctx context.Context, scope models.Scope, conversationID, roundID string) (*models.ParticipationRoundResult, error) {
+func (s *Store) GetParticipationRound(ctx context.Context, scope models.Scope, conversationID, roundID string) (*models.ParticipationRoundResult, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -539,7 +539,7 @@ func (s *SQLiteStore) GetParticipationRound(ctx context.Context, scope models.Sc
 	return loadSQLiteParticipationRoundResult(ctx, s.db, round)
 }
 
-func (s *SQLiteStore) ListParticipationRounds(ctx context.Context, filter models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error) {
+func (s *Store) ListParticipationRounds(ctx context.Context, filter models.ParticipationRoundFilter) ([]*models.ParticipationRoundResult, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -583,7 +583,7 @@ func (s *SQLiteStore) ListParticipationRounds(ctx context.Context, filter models
 	return result, nil
 }
 
-func (s *SQLiteStore) GetConversationCursor(ctx context.Context, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
+func (s *Store) GetConversationCursor(ctx context.Context, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationCursor, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -602,7 +602,7 @@ func (s *SQLiteStore) GetConversationCursor(ctx context.Context, scope models.Sc
 	return sqlstore.DecodeConversationCursor(payload)
 }
 
-func (s *SQLiteStore) ListConversationCursors(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationCursor, error) {
+func (s *Store) ListConversationCursors(ctx context.Context, scope models.Scope, conversationID string) ([]*models.ConversationCursor, error) {
 	if _, err := s.GetConversation(ctx, scope, conversationID); err != nil {
 		return nil, err
 	}
@@ -628,7 +628,7 @@ func (s *SQLiteStore) ListConversationCursors(ctx context.Context, scope models.
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) PutConversationCursor(ctx context.Context, record models.ConversationCursorRecord) (*models.ConversationCursor, bool, error) {
+func (s *Store) PutConversationCursor(ctx context.Context, record models.ConversationCursorRecord) (*models.ConversationCursor, bool, error) {
 	if record.Cursor == nil {
 		return nil, false, models.ErrConversationCursorConflict
 	}
@@ -698,7 +698,7 @@ func (s *SQLiteStore) PutConversationCursor(ctx context.Context, record models.C
 	return models.CloneConversationCursor(record.Cursor), false, nil
 }
 
-func (s *SQLiteStore) GetConversationPresence(ctx context.Context, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationPresence, error) {
+func (s *Store) GetConversationPresence(ctx context.Context, scope models.Scope, conversationID string, participant models.ConversationParticipant) (*models.ConversationPresence, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -708,7 +708,7 @@ func (s *SQLiteStore) GetConversationPresence(ctx context.Context, scope models.
 	return getSQLiteConversationPresence(ctx, s.db, scope, conversationID, participant)
 }
 
-func (s *SQLiteStore) PutConversationPresence(ctx context.Context, record models.ConversationPresenceRecord) (*models.ConversationPresence, error) {
+func (s *Store) PutConversationPresence(ctx context.Context, record models.ConversationPresenceRecord) (*models.ConversationPresence, error) {
 	if record.Presence == nil {
 		return nil, models.ErrConversationPresenceConflict
 	}
@@ -774,7 +774,7 @@ func (s *SQLiteStore) PutConversationPresence(ctx context.Context, record models
 	return models.CloneConversationPresence(record.Presence), nil
 }
 
-func (s *SQLiteStore) ReleaseConversationPresence(ctx context.Context, request models.ReleaseConversationPresenceRequest) error {
+func (s *Store) ReleaseConversationPresence(ctx context.Context, request models.ReleaseConversationPresenceRequest) error {
 	if err := request.Scope.Validate(); err != nil {
 		return err
 	}
@@ -803,7 +803,7 @@ func (s *SQLiteStore) ReleaseConversationPresence(ctx context.Context, request m
 	return nil
 }
 
-func (s *SQLiteStore) ListConversationPresence(ctx context.Context, scope models.Scope, conversationID string, activeAt time.Time) ([]*models.ConversationPresence, error) {
+func (s *Store) ListConversationPresence(ctx context.Context, scope models.Scope, conversationID string, activeAt time.Time) ([]*models.ConversationPresence, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -1000,4 +1000,4 @@ func getSQLiteConversationPresence(ctx context.Context, queryer sqlstore.Reader,
 	return sqlstore.DecodeConversationPresence(payload)
 }
 
-var _ models.ConversationStore = (*SQLiteStore)(nil)
+var _ models.ConversationStore = (*Store)(nil)

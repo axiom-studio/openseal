@@ -14,7 +14,7 @@ const ownerDefaultSpaceMigrationVersion int64 = 86
 
 // migrateOwnerDefaultSpace is PostgreSQL migration 86. The spaces that were
 // a scope's one default keep the flag for the owner they have.
-func (s *PostgresStore) migrateOwnerDefaultSpace(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateOwnerDefaultSpace(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, ownerDefaultSpaceMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -37,7 +37,7 @@ func (s *PostgresStore) migrateOwnerDefaultSpace(ctx context.Context, tx *sql.Tx
 
 // rollbackOwnerDefaultSpace restores one default space per scope: the oldest
 // default space of the scope keeps the flag and every other one loses it.
-func (s *PostgresStore) rollbackOwnerDefaultSpace(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) rollbackOwnerDefaultSpace(ctx context.Context, tx *sql.Tx) error {
 	spaces := s.table("spaces")
 	// A rollback may run again after an earlier one already took the spaces
 	// table away.

@@ -14,9 +14,9 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-var _ models.ActionCredentialLeaseRedeemer = (*PostgresStore)(nil)
+var _ models.ActionCredentialLeaseRedeemer = (*Store)(nil)
 
-func (s *PostgresStore) migrateActionCredentialLeaseRedemptions(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateActionCredentialLeaseRedemptions(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("action_credential_lease_redemptions")+` (
 			issuer TEXT NOT NULL,
@@ -50,7 +50,7 @@ func (s *PostgresStore) migrateActionCredentialLeaseRedemptions(ctx context.Cont
 // authenticate the signature, tenant, issuer, and audience before invoking
 // this method. Secret resolution must happen only after this transaction
 // commits successfully.
-func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request models.ActionCredentialLeaseRedemptionRequest) error {
+func (s *Store) RedeemActionCredentialLease(ctx context.Context, request models.ActionCredentialLeaseRedemptionRequest) error {
 	if s == nil || s.db == nil {
 		return errors.New("PostgreSQL store is not configured")
 	}

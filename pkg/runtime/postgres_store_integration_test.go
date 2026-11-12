@@ -71,7 +71,7 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	stores := []*postgres.PostgresStore{primary, replica}
+	stores := []*postgres.Store{primary, replica}
 	var wait sync.WaitGroup
 
 	const agentRunCount = 16

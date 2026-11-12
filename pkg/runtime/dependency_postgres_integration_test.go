@@ -47,7 +47,7 @@ func TestPostgresDependencyFanInIsConcurrentRecoverableAndIsolated(t *testing.T)
 		},
 		IdempotencyKey: "market-research-fan-in", Actor: ActivityActor{Type: "agent", ID: "lead"}, Visibility: ActivityVisibilityTeam,
 	}
-	stores := []*postgres.PostgresStore{primary, replica}
+	stores := []*postgres.Store{primary, replica}
 	created := make(chan *RunDependencyResult, 2)
 	createErrors := make(chan error, 2)
 	var createWait sync.WaitGroup
@@ -172,7 +172,7 @@ func TestPostgresDependencyFanInPreservesIndependentMultiObjectiveProgress(t *te
 		t.Fatal(err)
 	}
 	defer replica.Close()
-	stores := []*postgres.PostgresStore{primary, replica}
+	stores := []*postgres.Store{primary, replica}
 	scope := Scope{Kind: "tenant", ID: "portfolio-load"}
 	const objectiveCount = 8
 	groupIDs := make([]string, objectiveCount)

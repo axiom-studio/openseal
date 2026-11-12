@@ -18,7 +18,7 @@ import (
 // Store test: it runs storetest.RunRoutineEventContract and reads the
 // store's own routine event queries and tables.
 
-func openPostgresRoutineEventStore(t *testing.T) *PostgresStore {
+func openPostgresRoutineEventStore(t *testing.T) *Store {
 	t.Helper()
 	pgSchema := storetest.NewPostgresSchema(t, "routine_events_")
 	dsn := pgSchema.DSN
@@ -133,7 +133,7 @@ func TestPostgresRoutineEventStore(t *testing.T) {
 
 // explainWithoutSeqScan returns the plan with sequential scans priced out, so
 // a Seq Scan in it means no index can serve the query.
-func explainWithoutSeqScan(t *testing.T, ctx context.Context, store *PostgresStore, query string, args ...interface{}) string {
+func explainWithoutSeqScan(t *testing.T, ctx context.Context, store *Store, query string, args ...interface{}) string {
 	t.Helper()
 	tx, err := store.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -219,7 +219,7 @@ func TestPostgresMigration80RoutineEvents(t *testing.T) {
 	}
 }
 
-func assertRoutineEventTables(t *testing.T, ctx context.Context, store *PostgresStore, want bool) {
+func assertRoutineEventTables(t *testing.T, ctx context.Context, store *Store, want bool) {
 	t.Helper()
 	for _, table := range routineEventsTables {
 		var relation sql.NullString

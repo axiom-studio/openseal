@@ -34,7 +34,7 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 			}
 			approval := &ApprovalCheckpoint{ID: "review-approval", Revision: 1, Scope: fixture.run.Scope, RunID: fixture.run.ID, Status: ApprovalStatusPending, Summary: "Review **this change**.", ExpiresAt: time.Now().Add(time.Hour)}
 			approval.ActionCallID = "review-call"
-			reviews := &reviewApprovalStore{SQLiteStore: fixture.store, approval: approval,
+			reviews := &reviewApprovalStore{Store: fixture.store, approval: approval,
 				call: &ActionCall{ID: approval.ActionCallID, Scope: approval.Scope, InvocationDigest: strings.Repeat("a", 64)}}
 			worker, err := NewRunProgressAcknowledgementWorker(reviews, fixture.catalog, RunProgressAcknowledgementRendererFunc(func(context.Context, RunProgressAcknowledgementRequest) (string, error) {
 				t.Fatal("review invoked a model")
@@ -239,13 +239,13 @@ func TestOriginApprovalConversationMembersMayDecide(t *testing.T) {
 // a store, for an approval a test sets directly instead of proposing it from
 // a leased Run.
 type reviewApprovalStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	approval *ApprovalCheckpoint
 	call     *ActionCall
 }
 
 func (s *reviewApprovalStore) ListApprovals(ctx context.Context, filter ApprovalFilter) ([]*ApprovalCheckpoint, error) {
-	approvals, err := s.SQLiteStore.ListApprovals(ctx, filter)
+	approvals, err := s.Store.ListApprovals(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -259,19 +259,19 @@ func (s *reviewApprovalStore) GetApproval(ctx context.Context, scope Scope, id s
 	if scope == s.approval.Scope && id == s.approval.ID {
 		return cloneApprovalCheckpoint(s.approval), nil
 	}
-	return s.SQLiteStore.GetApproval(ctx, scope, id)
+	return s.Store.GetApproval(ctx, scope, id)
 }
 
 func (s *reviewApprovalStore) GetActionCall(ctx context.Context, scope Scope, id string) (*ActionCall, error) {
 	if scope == s.call.Scope && id == s.call.ID {
 		return cloneActionCall(s.call), nil
 	}
-	return s.SQLiteStore.GetActionCall(ctx, scope, id)
+	return s.Store.GetActionCall(ctx, scope, id)
 }
 
 // markReviewCardDelivered delivers the review card with correlation id, as
 // the delivery worker does once the provider accepts it.
-func markReviewCardDelivered(t *testing.T, store *sqlite.SQLiteStore, scope Scope, correlationID, providerMessageID string) {
+func markReviewCardDelivered(t *testing.T, store *sqlite.Store, scope Scope, correlationID, providerMessageID string) {
 	t.Helper()
 	now := time.Now().UTC()
 	leased, err := store.ClaimExternalConversationDelivery(t.Context(), scope, "delivery-worker", now, time.Minute)
@@ -288,7 +288,7 @@ func markReviewCardDelivered(t *testing.T, store *sqlite.SQLiteStore, scope Scop
 }
 
 // saveReviewTestRun saves run as the next revision of the stored Run.
-func saveReviewTestRun(t *testing.T, store *sqlite.SQLiteStore, run *AgentRun) {
+func saveReviewTestRun(t *testing.T, store *sqlite.Store, run *AgentRun) {
 	t.Helper()
 	expected := run.Revision
 	run.Revision++

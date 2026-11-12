@@ -22,7 +22,7 @@ type collaborationTeamStoreStub struct {
 }
 
 type collaborationAgentCatalogStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	deployments map[string]*kernelagent.AgentDeployment
 	definitions map[string]*kernelagent.AgentDefinition
 }
@@ -233,7 +233,7 @@ func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "acme"}
-	newService := func(policy kernelteam.DelegationPolicy) (*sqlite.SQLiteStore, *PortfolioService, *CollaborationService) {
+	newService := func(policy kernelteam.DelegationPolicy) (*sqlite.Store, *PortfolioService, *CollaborationService) {
 		store := newTestKernelStore(t)
 		portfolio := NewPortfolioService(store)
 		service := NewCollaborationService(store)
@@ -757,7 +757,7 @@ func TestTeamWorkOfferFiltersMemberSkillsAndRecordsCapacity(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "team-authority"}
 	kernel := newTestKernelStore(t)
 	store := &collaborationAgentCatalogStore{
-		SQLiteStore: kernel,
+		Store: kernel,
 		deployments: map[string]*kernelagent.AgentDeployment{
 			"eligible": {ID: "eligible", DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 2}},
 			"busy":     {ID: "busy", DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}},

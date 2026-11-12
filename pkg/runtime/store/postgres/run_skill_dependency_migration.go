@@ -9,7 +9,7 @@ import (
 
 const runSkillDependencyMigrationVersion int64 = 54
 
-func (s *PostgresStore) migrateRunSkillDependencies(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateRunSkillDependencies(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, runSkillDependencyMigrationVersion)
 	if err != nil || applied {
 		return err

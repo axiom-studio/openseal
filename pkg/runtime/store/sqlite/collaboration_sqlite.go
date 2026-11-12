@@ -42,7 +42,7 @@ func migrateCollaboration(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record models.AgentRequestCreateRecord) (*models.ActivityEvent, error) {
+func (s *Store) CreateAgentRequest(ctx context.Context, record models.AgentRequestCreateRecord) (*models.ActivityEvent, error) {
 	if err := models.ValidateAgentRequestCreateRecord(record); err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record models.Agen
 	return persisted, nil
 }
 
-func (s *SQLiteStore) GetAgentRequest(ctx context.Context, scope models.Scope, requestID string) (*models.AgentRequest, error) {
+func (s *Store) GetAgentRequest(ctx context.Context, scope models.Scope, requestID string) (*models.AgentRequest, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func (s *SQLiteStore) GetAgentRequest(ctx context.Context, scope models.Scope, r
 	return sqlstore.DecodeAgentRequest(payload)
 }
 
-func (s *SQLiteStore) FindAgentRequestByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.AgentRequest, error) {
+func (s *Store) FindAgentRequestByIdempotencyKey(ctx context.Context, scope models.Scope, key string) (*models.AgentRequest, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -151,7 +151,7 @@ func (s *SQLiteStore) FindAgentRequestByIdempotencyKey(ctx context.Context, scop
 	return sqlstore.DecodeAgentRequest(payload)
 }
 
-func (s *SQLiteStore) ListAgentRequests(ctx context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
+func (s *Store) ListAgentRequests(ctx context.Context, filter models.AgentRequestFilter) ([]*models.AgentRequest, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -209,7 +209,7 @@ func (s *SQLiteStore) ListAgentRequests(ctx context.Context, filter models.Agent
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) CoordinateAgentRequest(ctx context.Context, record models.AgentRequestCoordinationRecord) (*models.ActivityEvent, error) {
+func (s *Store) CoordinateAgentRequest(ctx context.Context, record models.AgentRequestCoordinationRecord) (*models.ActivityEvent, error) {
 	if err := models.ValidateAgentRequestCoordinationRecord(record); err != nil {
 		return nil, err
 	}
@@ -247,7 +247,7 @@ func (s *SQLiteStore) CoordinateAgentRequest(ctx context.Context, record models.
 	return persisted, nil
 }
 
-func (s *SQLiteStore) RespondAgentRequest(ctx context.Context, record models.AgentRequestResponseRecord) ([]*models.ActivityEvent, error) {
+func (s *Store) RespondAgentRequest(ctx context.Context, record models.AgentRequestResponseRecord) ([]*models.ActivityEvent, error) {
 	if err := models.ValidateAgentRequestResponseRecord(record); err != nil {
 		return nil, err
 	}
@@ -314,7 +314,7 @@ func (s *SQLiteStore) RespondAgentRequest(ctx context.Context, record models.Age
 	return events, nil
 }
 
-func (s *SQLiteStore) CompleteAgentRequest(ctx context.Context, record models.AgentRequestCompletionRecord) ([]*models.ActivityEvent, error) {
+func (s *Store) CompleteAgentRequest(ctx context.Context, record models.AgentRequestCompletionRecord) ([]*models.ActivityEvent, error) {
 	if err := models.ValidateAgentRequestCompletionRecord(record); err != nil {
 		return nil, err
 	}

@@ -12,7 +12,7 @@ import (
 )
 
 type agentRequestInboxTeamStore struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	deployment *kernelteam.Deployment
 	definition *kernelteam.Definition
 }
@@ -72,7 +72,7 @@ func TestAgentRequestInboxBoundsConversationProjectionCadence(t *testing.T) {
 }
 
 func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
-	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
 
 func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *testing.T) {
 	kernel, db := newTestSQLiteStore(t)
-	store := &agentRequestInboxTeamStore{SQLiteStore: kernel}
+	store := &agentRequestInboxTeamStore{Store: kernel}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -151,7 +151,7 @@ func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *te
 }
 
 func TestAgentRequestInboxTerminalDecisionFailureResolvesRequestAndWakesSource(t *testing.T) {
-	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -212,7 +212,7 @@ func TestAgentRequestInboxTerminalDecisionFailureResolvesRequestAndWakesSource(t
 }
 
 func TestAgentRequestInboxTerminalDecisionFailureConvergesAfterSourceAlreadyEnded(t *testing.T) {
-	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -270,7 +270,7 @@ func TestAgentRequestInboxTerminalDecisionFailureConvergesAfterSourceAlreadyEnde
 }
 
 func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing.T) {
-	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	otherSource, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: request.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"},
@@ -322,7 +322,7 @@ func TestAgentRequestInboxIrreconcilableIdempotencyCollisionFailsOnce(t *testing
 }
 
 func TestAgentRequestInboxReconcilesEveryPaginatedRequest(t *testing.T) {
-	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
 	scope := Scope{Kind: "tenant", ID: "paginated-inbox"}
 	portfolio := NewPortfolioService(store)
 	collaboration := NewCollaborationService(store)
@@ -366,7 +366,7 @@ func TestAgentRequestInboxReconcilesEveryPaginatedRequest(t *testing.T) {
 }
 
 func TestAgentRequestInboxRecoversPreauthorizedDelegationWithoutReview(t *testing.T) {
-	store := &agentRequestInboxTeamStore{SQLiteStore: newTestKernelStore(t)}
+	store := &agentRequestInboxTeamStore{Store: newTestKernelStore(t)}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptancePreauthorized, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
 	reconciler, err := NewAgentRequestInboxReconciler(store)
 	if err != nil {
@@ -394,7 +394,7 @@ func TestAgentRequestInboxUsesDeterministicTeamMemberAndAcceptancePolicy(t *test
 		t.Run(fmt.Sprintf("review-%t", requireAcceptance), func(t *testing.T) {
 			scope := Scope{Kind: "tenant", ID: "inbox"}
 			store := &agentRequestInboxTeamStore{
-				SQLiteStore: newTestKernelStore(t),
+				Store: newTestKernelStore(t),
 				deployment: &kernelteam.Deployment{
 					ID: "marketing", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 					DefinitionID: "marketing", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,

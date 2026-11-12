@@ -9,7 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
-func (s *PostgresStore) migrateSkillSetupRequests(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateSkillSetupRequests(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+s.table("skill_setup_requests")+` (scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL, deployment_id TEXT NOT NULL, conversation_id TEXT NOT NULL, status TEXT NOT NULL, revision BIGINT NOT NULL, created_at TIMESTAMPTZ NOT NULL, payload JSONB NOT NULL, PRIMARY KEY(scope_kind,scope_id,id))`); err != nil {
 		return err
 	}
@@ -24,7 +24,7 @@ func (s *PostgresStore) migrateSkillSetupRequests(ctx context.Context, tx *sql.T
 	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name) VALUES(45,'durable Skill setup requests') ON CONFLICT(version) DO NOTHING`)
 	return err
 }
-func (s *PostgresStore) GetSkillSetupRequest(ctx context.Context, scope models.Scope, id string) (*models.SkillSetupRequest, error) {
+func (s *Store) GetSkillSetupRequest(ctx context.Context, scope models.Scope, id string) (*models.SkillSetupRequest, error) {
 	if scope.Validate() != nil {
 		return nil, models.ErrInvalidSkillSetup
 	}
@@ -40,7 +40,7 @@ func (s *PostgresStore) GetSkillSetupRequest(ctx context.Context, scope models.S
 	err = json.Unmarshal(payload, &r)
 	return &r, err
 }
-func (s *PostgresStore) ListSkillSetupRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.SkillSetupRequest, error) {
+func (s *Store) ListSkillSetupRequests(ctx context.Context, scope models.Scope, deploymentID, conversationID string) ([]*models.SkillSetupRequest, error) {
 	if scope.Validate() != nil || conversationID == "" {
 		return nil, models.ErrInvalidSkillSetup
 	}
@@ -63,7 +63,7 @@ func (s *PostgresStore) ListSkillSetupRequests(ctx context.Context, scope models
 	}
 	return result, rows.Err()
 }
-func (s *PostgresStore) SaveSkillSetupRequest(ctx context.Context, r *models.SkillSetupRequest, expected int64) error {
+func (s *Store) SaveSkillSetupRequest(ctx context.Context, r *models.SkillSetupRequest, expected int64) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}

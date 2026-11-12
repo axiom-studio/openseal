@@ -18,7 +18,7 @@ import (
 )
 
 type channelActionFixture struct {
-	store       *sqlite.SQLiteStore
+	store       *sqlite.Store
 	db          *sql.DB
 	agents      *kernelagent.Registry
 	endpoints   *ExternalConversationEndpointService

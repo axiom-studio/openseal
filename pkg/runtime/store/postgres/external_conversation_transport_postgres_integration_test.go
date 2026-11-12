@@ -82,9 +82,9 @@ func TestPostgresExternalConversationTransportIsConcurrentAndRestartSafe(t *test
 	var inboxClaims, deliveryClaims int
 	var claimMu sync.Mutex
 	var wait sync.WaitGroup
-	for index, store := range []*PostgresStore{primary, replica} {
+	for index, store := range []*Store{primary, replica} {
 		wait.Add(1)
-		go func(index int, store *PostgresStore) {
+		go func(index int, store *Store) {
 			defer wait.Done()
 			worker := "worker-" + string(rune('a'+index))
 			claimedInbox, claimErr := store.ClaimExternalConversationInbox(ctx, scope, worker, now, time.Minute)

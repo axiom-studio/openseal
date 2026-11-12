@@ -40,12 +40,12 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 		}
 	}
 
-	stores := []*sqlite.SQLiteStore{primary, replica}
+	stores := []*sqlite.Store{primary, replica}
 	results := make(chan error, len(stores))
 	var wait sync.WaitGroup
 	for _, store := range stores {
 		wait.Add(1)
-		go func(store *sqlite.SQLiteStore) {
+		go func(store *sqlite.Store) {
 			defer wait.Done()
 			results <- store.RedeemActionCredentialLease(ctx, request)
 		}(store)
@@ -101,9 +101,9 @@ func TestSQLiteActionCredentialLeaseRedemptionIsAtomicDurableAndBounded(t *testi
 func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing.T) {
 	for _, test := range []struct {
 		name  string
-		drift func(*testing.T, context.Context, *sqlite.SQLiteStore, *sql.DB, *skill.Binding, ActionCredentialLeaseRedemptionRequest)
+		drift func(*testing.T, context.Context, *sqlite.Store, *sql.DB, *skill.Binding, ActionCredentialLeaseRedemptionRequest)
 	}{
-		{"action lease owner", func(t *testing.T, ctx context.Context, _ *sqlite.SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
+		{"action lease owner", func(t *testing.T, ctx context.Context, _ *sqlite.Store, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
 			var payload string
 			if err := db.QueryRowContext(ctx, `SELECT payload FROM action_calls WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.ActionCallID).Scan(&payload); err != nil {
 				t.Fatal(err)
@@ -118,7 +118,7 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 				t.Fatal(err)
 			}
 		}},
-		{"assigned agent", func(t *testing.T, ctx context.Context, _ *sqlite.SQLiteStore, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
+		{"assigned agent", func(t *testing.T, ctx context.Context, _ *sqlite.Store, db *sql.DB, _ *skill.Binding, request ActionCredentialLeaseRedemptionRequest) {
 			var payload string
 			if err := db.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind=? AND scope_id=? AND id=?`, request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.RunID).Scan(&payload); err != nil {
 				t.Fatal(err)
@@ -133,7 +133,7 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 				t.Fatal(err)
 			}
 		}},
-		{"binding revision", func(t *testing.T, ctx context.Context, store *sqlite.SQLiteStore, _ *sql.DB, binding *skill.Binding, _ ActionCredentialLeaseRedemptionRequest) {
+		{"binding revision", func(t *testing.T, ctx context.Context, store *sqlite.Store, _ *sql.DB, binding *skill.Binding, _ ActionCredentialLeaseRedemptionRequest) {
 			catalog := skill.NewCatalogWithStore(store)
 			if _, err := catalog.DisableBinding(ctx, skill.DisableBindingRequest{
 				Scope: binding.Scope, DeploymentID: binding.DeploymentID, BindingID: binding.ID, ExpectedRevision: binding.Revision,
@@ -168,4 +168,4 @@ func TestSQLiteActionCredentialLeaseAuthorityDriftDoesNotConsumeNonce(t *testing
 	}
 }
 
-var _ ActionCredentialLeaseRedeemer = (*sqlite.SQLiteStore)(nil)
+var _ ActionCredentialLeaseRedeemer = (*sqlite.Store)(nil)

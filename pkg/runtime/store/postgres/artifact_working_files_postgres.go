@@ -15,7 +15,7 @@ import (
 const artifactWorkingFilesMigrationVersion int64 = 83
 
 // migrateArtifactWorkingFiles is PostgreSQL migration 83.
-func (s *PostgresStore) migrateArtifactWorkingFiles(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateArtifactWorkingFiles(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, artifactWorkingFilesMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -34,7 +34,7 @@ func (s *PostgresStore) migrateArtifactWorkingFiles(ctx context.Context, tx *sql
 	return err
 }
 
-func (s *PostgresStore) MarkArtifactFiles(ctx context.Context, scope models.Scope, working, results []string) error {
+func (s *Store) MarkArtifactFiles(ctx context.Context, scope models.Scope, working, results []string) error {
 	if err := scope.Validate(); err != nil {
 		return err
 	}
@@ -58,4 +58,4 @@ func (s *PostgresStore) MarkArtifactFiles(ctx context.Context, scope models.Scop
 	return tx.Commit()
 }
 
-var _ models.ArtifactWorkingFileStore = (*PostgresStore)(nil)
+var _ models.ArtifactWorkingFileStore = (*Store)(nil)

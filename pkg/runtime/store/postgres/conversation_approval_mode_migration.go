@@ -12,7 +12,7 @@ const conversationApprovalModeMigrationVersion int64 = 61
 // migrateConversationApprovalMode makes every stored conversation's approval
 // mode explicit. Conversations created before the mode existed get the
 // default, auto.
-func (s *PostgresStore) migrateConversationApprovalMode(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateConversationApprovalMode(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, conversationApprovalModeMigrationVersion)
 	if err != nil || applied {
 		return err
@@ -27,7 +27,7 @@ func (s *PostgresStore) migrateConversationApprovalMode(ctx context.Context, tx 
 	return err
 }
 
-func (s *PostgresStore) rollbackConversationApprovalMode(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) rollbackConversationApprovalMode(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `UPDATE `+s.table("conversations")+` SET payload = payload - 'approvalMode' WHERE payload ? 'approvalMode'`)
 	return err
 }

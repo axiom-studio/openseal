@@ -11,7 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *PostgresStore) migrateArtifacts(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateArtifacts(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("artifacts")+` (
 			scope_kind TEXT NOT NULL,
@@ -49,7 +49,7 @@ func (s *PostgresStore) migrateArtifacts(ctx context.Context, tx *sql.Tx) error 
 	return err
 }
 
-func (s *PostgresStore) CreateArtifactVersion(ctx context.Context, artifact *models.Artifact, expectedLatestVersion int64) error {
+func (s *Store) CreateArtifactVersion(ctx context.Context, artifact *models.Artifact, expectedLatestVersion int64) error {
 	if err := artifact.Validate(); err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (s *PostgresStore) CreateArtifactVersion(ctx context.Context, artifact *mod
 	return tx.Commit()
 }
 
-func (s *PostgresStore) GetArtifact(ctx context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
+func (s *Store) GetArtifact(ctx context.Context, scope models.Scope, id string, version int64) (*models.Artifact, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (s *PostgresStore) GetArtifact(ctx context.Context, scope models.Scope, id 
 	return sqlstore.DecodeArtifact(payload)
 }
 
-func (s *PostgresStore) ListArtifacts(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
+func (s *Store) ListArtifacts(ctx context.Context, filter models.ArtifactFilter) ([]*models.Artifact, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (s *PostgresStore) ListArtifacts(ctx context.Context, filter models.Artifac
 	return result[start:end], nil
 }
 
-var _ models.ArtifactStore = (*PostgresStore)(nil)
+var _ models.ArtifactStore = (*Store)(nil)
 
 func artifactStorageKey(scope models.Scope, id string) string {
 	return scope.Kind + "\x00" + scope.ID + "\x00" + id

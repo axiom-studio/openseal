@@ -8,7 +8,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *PostgresStore) postgresConversationActiveRunProjection() string {
+func (s *Store) postgresConversationActiveRunProjection() string {
 	return `SELECT child.scope_kind, child.scope_id, child.id, child.payload->'owner'->>'type', child.payload->'owner'->>'id',
 		root.payload->'context'->>'conversationId', child.root_run_id, child.created_at
 		FROM ` + s.table("agent_runs") + ` child JOIN ` + s.table("agent_runs") + ` root
@@ -19,7 +19,7 @@ func (s *PostgresStore) postgresConversationActiveRunProjection() string {
 		AND COALESCE(child.payload->>'kind','agent_work')<>'conversation' AND child.status NOT IN ('completed','failed','canceled')`
 }
 
-func (s *PostgresStore) migrateConversationActiveRuns(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateConversationActiveRuns(ctx context.Context, tx *sql.Tx) error {
 	insert := `INSERT INTO ` + s.table("conversation_active_runs") + ` ` + sqlstore.ConversationActiveRunProjectionColumns + ` ` + s.postgresConversationActiveRunProjection()
 	upsert := ` ON CONFLICT (scope_kind,scope_id,id) DO UPDATE SET owner_type=EXCLUDED.owner_type,owner_id=EXCLUDED.owner_id,
 		conversation_id=EXCLUDED.conversation_id,root_run_id=EXCLUDED.root_run_id,created_at=EXCLUDED.created_at`
@@ -69,7 +69,7 @@ func (s *PostgresStore) migrateConversationActiveRuns(ctx context.Context, tx *s
 	return err
 }
 
-func (s *PostgresStore) ListConversationActiveRuns(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID string, limit int) ([]*models.AgentRun, error) {
+func (s *Store) ListConversationActiveRuns(ctx context.Context, scope models.Scope, owner models.ObjectiveOwner, conversationID string, limit int) ([]*models.AgentRun, error) {
 	if err := models.ValidateConversationActiveRunsQuery(scope, owner, conversationID, limit); err != nil {
 		return nil, err
 	}

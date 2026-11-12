@@ -257,7 +257,7 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Each firing rechecks the roster; a removed member's routine is unverified, so the scheduler pauses it.
-	reader := teamRosterPortfolio{SQLiteStore: store, team: team}
+	reader := teamRosterPortfolio{Store: store, team: team}
 	if err := validateScheduledTaskTarget(ctx, reader, agents, activations[0]); err != nil {
 		t.Fatalf("member routine target = %v", err)
 	}
@@ -276,7 +276,7 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	ctx, memory, scope := t.Context(), newTestKernelStore(t), Scope{Kind: "tenant", ID: "task-sql"}
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
 	team := chatRosterTeam(scope, "task-agent")
-	store := teamRosterPortfolio{SQLiteStore: memory, team: team}
+	store := teamRosterPortfolio{Store: memory, team: team}
 	conversations := NewConversationService(store)
 	seedTestSpace(t, memory, scope)
 	chat, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Team task", IdempotencyKey: "team-task-chat"})

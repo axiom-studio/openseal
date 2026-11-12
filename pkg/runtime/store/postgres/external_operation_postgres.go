@@ -9,7 +9,7 @@ import (
 
 const externalOperationReceiptMigrationVersion int64 = 33
 
-func (s *PostgresStore) migrateExternalOperationReceipts(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateExternalOperationReceipts(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		ALTER TABLE `+s.table("action_calls")+`
 			ADD COLUMN IF NOT EXISTS external_operation_digest TEXT NOT NULL DEFAULT '';

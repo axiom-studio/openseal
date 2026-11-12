@@ -19,7 +19,7 @@ type latestSetupTestLocation struct {
 type latestSetupTestFixture struct {
 	ctx        context.Context
 	scope      Scope
-	store      *sqlite.SQLiteStore
+	store      *sqlite.Store
 	catalog    *skill.Catalog
 	run        *AgentRun
 	dispatcher *SkillBindingActionDispatcher

@@ -20,11 +20,11 @@ func withRunLoopCutoverLocalLock(ctx context.Context, fn func(context.Context) e
 	return fn(ctx)
 }
 
-func (s *SQLiteStore) WithRunLoopCutoverLock(ctx context.Context, fn func(context.Context) error) error {
+func (s *Store) WithRunLoopCutoverLock(ctx context.Context, fn func(context.Context) error) error {
 	return withRunLoopCutoverLocalLock(ctx, fn)
 }
 
-func (s *SQLiteStore) ListRunLoopCutoverCandidates(ctx context.Context) ([]models.RunLoopCutoverRef, error) {
+func (s *Store) ListRunLoopCutoverCandidates(ctx context.Context) ([]models.RunLoopCutoverRef, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT scope_kind, scope_id, id FROM agent_runs
 		WHERE status NOT IN ('completed', 'failed', 'canceled') AND COALESCE(json_extract(payload, '$.engine'), '') = ''
 		ORDER BY created_at, id`)

@@ -13,7 +13,7 @@ import (
 
 const externalConversationGatewayMigrationVersion int64 = 28
 
-func (s *PostgresStore) migrateExternalConversationGateways(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migrateExternalConversationGateways(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("external_conversation_gateways")+` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
@@ -32,7 +32,7 @@ func (s *PostgresStore) migrateExternalConversationGateways(ctx context.Context,
 	return err
 }
 
-func (s *PostgresStore) CreateExternalConversationGateway(
+func (s *Store) CreateExternalConversationGateway(
 	ctx context.Context,
 	value *models.ExternalConversationGatewayRegistration,
 ) error {
@@ -54,7 +54,7 @@ func (s *PostgresStore) CreateExternalConversationGateway(
 	return err
 }
 
-func (s *PostgresStore) GetExternalConversationGateway(
+func (s *Store) GetExternalConversationGateway(
 	ctx context.Context,
 	scope models.Scope,
 	id string,
@@ -68,7 +68,7 @@ func (s *PostgresStore) GetExternalConversationGateway(
 		scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *PostgresStore) GetExternalConversationGatewayByIngressRoute(
+func (s *Store) GetExternalConversationGatewayByIngressRoute(
 	ctx context.Context,
 	route string,
 ) (*models.ExternalConversationGatewayRegistration, error) {
@@ -80,7 +80,7 @@ func (s *PostgresStore) GetExternalConversationGatewayByIngressRoute(
 		strings.TrimSpace(route)))
 }
 
-func (s *PostgresStore) ListExternalConversationGateways(
+func (s *Store) ListExternalConversationGateways(
 	ctx context.Context,
 	filter models.ExternalConversationGatewayFilter,
 ) ([]*models.ExternalConversationGatewayRegistration, error) {
@@ -129,7 +129,7 @@ func (s *PostgresStore) ListExternalConversationGateways(
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) UpdateExternalConversationGateway(
+func (s *Store) UpdateExternalConversationGateway(
 	ctx context.Context,
 	value *models.ExternalConversationGatewayRegistration,
 	expectedRevision int64,

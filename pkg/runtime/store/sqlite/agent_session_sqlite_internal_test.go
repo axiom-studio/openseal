@@ -60,7 +60,7 @@ func TestSQLiteAgentSessionLogMigrationReplays(t *testing.T) {
 	}
 }
 
-func putTestSQLiteSessionRun(t *testing.T, store *SQLiteStore, runID, sessionID string, status models.AgentRunStatus) {
+func putTestSQLiteSessionRun(t *testing.T, store *Store, runID, sessionID string, status models.AgentRunStatus) {
 	t.Helper()
 	ctx := context.Background()
 	expires := sqliteSessionNow.Add(time.Minute)

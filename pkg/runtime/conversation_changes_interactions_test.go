@@ -256,7 +256,7 @@ func TestConversationRunLineageValueInheritsThreadPlacement(t *testing.T) {
 }
 
 type teamRosterPortfolio struct {
-	*sqlite.SQLiteStore
+	*sqlite.Store
 	team *kernelteam.Deployment
 }
 
@@ -289,7 +289,7 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	}
 	team := &kernelteam.Deployment{ID: "gtm", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: "a", AgentDeploymentID: "member"}, {ID: "b", AgentDeploymentID: "other"}}}
-	changes, err := NewConversationChangeService(store, teamRosterPortfolio{SQLiteStore: store, team: team})
+	changes, err := NewConversationChangeService(store, teamRosterPortfolio{Store: store, team: team})
 	if err != nil {
 		t.Fatal(err)
 	}

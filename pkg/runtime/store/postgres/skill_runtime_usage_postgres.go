@@ -7,11 +7,11 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 )
 
-func (s *PostgresStore) HasSkillRuntimeUsage(ctx context.Context, filter models.SkillRuntimeUsageFilter) (bool, error) {
+func (s *Store) HasSkillRuntimeUsage(ctx context.Context, filter models.SkillRuntimeUsageFilter) (bool, error) {
 	return sqlstore.HasSkillRuntimeUsage(ctx, s.db, filter, s.table("action_calls"), s.table("agent_runs"), true)
 }
 
-func (s *PostgresStore) ListReferencedSkillRuntimeVersions(ctx context.Context, scope models.Scope) ([]models.SkillRuntimeReference, error) {
+func (s *Store) ListReferencedSkillRuntimeVersions(ctx context.Context, scope models.Scope) ([]models.SkillRuntimeReference, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

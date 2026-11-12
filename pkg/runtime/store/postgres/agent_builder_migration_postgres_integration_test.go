@@ -20,7 +20,7 @@ import (
 // outbox functions with the authoring CASE, a running workforce_authoring
 // Run, deployments with an activation continuation and the ledger rows of
 // the retired migrations.
-func seedPostgresChangeSets(t *testing.T, store *PostgresStore) string {
+func seedPostgresChangeSets(t *testing.T, store *Store) string {
 	t.Helper()
 	ctx := context.Background()
 	run := storetest.QueuedAgentRun(storetest.BuilderCutoverScope, "agent", "author", time.Now())
@@ -101,7 +101,7 @@ func seedPostgresChangeSets(t *testing.T, store *PostgresStore) string {
 	return run.ID
 }
 
-func postgresRelationPresent(t *testing.T, store *PostgresStore, name string) bool {
+func postgresRelationPresent(t *testing.T, store *Store, name string) bool {
 	t.Helper()
 	var relation sql.NullString
 	if err := store.db.QueryRowContext(context.Background(), `SELECT to_regclass($1)::text`, store.schema+"."+name).Scan(&relation); err != nil {
@@ -110,7 +110,7 @@ func postgresRelationPresent(t *testing.T, store *PostgresStore, name string) bo
 	return relation.Valid
 }
 
-func postgresCount(t *testing.T, store *PostgresStore, query string, args ...interface{}) int {
+func postgresCount(t *testing.T, store *Store, query string, args ...interface{}) int {
 	t.Helper()
 	var count int
 	if err := store.db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
@@ -119,7 +119,7 @@ func postgresCount(t *testing.T, store *PostgresStore, query string, args ...int
 	return count
 }
 
-func assertPostgresLedgerCurrent(t *testing.T, store *PostgresStore) {
+func assertPostgresLedgerCurrent(t *testing.T, store *Store) {
 	t.Helper()
 	current, version, err := store.postgresSchemaCurrent(context.Background(), store.db)
 	if err != nil || !current || version != currentPostgresSchemaVersion {

@@ -29,7 +29,7 @@ func (s *conversationAppContent) Open(_ context.Context, _ Scope, ref string) (i
 	return io.NopCloser(strings.NewReader(text)), nil
 }
 
-func storeConversationApp(t *testing.T, store *sqlite.SQLiteStore, content *conversationAppContent, scope Scope, version int64, files []appproject.File) {
+func storeConversationApp(t *testing.T, store *sqlite.Store, content *conversationAppContent, scope Scope, version int64, files []appproject.File) {
 	t.Helper()
 	project, err := appproject.New("Tracker", files)
 	if err != nil {

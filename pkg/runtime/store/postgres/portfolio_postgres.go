@@ -16,7 +16,7 @@ import (
 	"github.com/lib/pq"
 )
 
-func (s *PostgresStore) migratePortfolio(ctx context.Context, tx *sql.Tx) error {
+func (s *Store) migratePortfolio(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS `+s.table("objectives")+` (
 			id TEXT NOT NULL,
@@ -73,7 +73,7 @@ func (s *PostgresStore) migratePortfolio(ctx context.Context, tx *sql.Tx) error 
 	return err
 }
 
-func (s *PostgresStore) CreateObjective(ctx context.Context, objective *models.Objective) error {
+func (s *Store) CreateObjective(ctx context.Context, objective *models.Objective) error {
 	if err := objective.Validate(); err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func (s *PostgresStore) CreateObjective(ctx context.Context, objective *models.O
 	return err
 }
 
-func (s *PostgresStore) GetObjective(ctx context.Context, scope models.Scope, objectiveID string) (*models.Objective, error) {
+func (s *Store) GetObjective(ctx context.Context, scope models.Scope, objectiveID string) (*models.Objective, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (s *PostgresStore) GetObjective(ctx context.Context, scope models.Scope, ob
 	return sqlstore.DecodeObjective(payload)
 }
 
-func (s *PostgresStore) ListObjectives(ctx context.Context, filter models.ObjectiveFilter) ([]*models.Objective, error) {
+func (s *Store) ListObjectives(ctx context.Context, filter models.ObjectiveFilter) ([]*models.Objective, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func (s *PostgresStore) ListObjectives(ctx context.Context, filter models.Object
 	return models.PageObjectives(result, filter.Offset, filter.Limit), nil
 }
 
-func (s *PostgresStore) ListObjectiveScopes(ctx context.Context) ([]models.Scope, error) {
+func (s *Store) ListObjectiveScopes(ctx context.Context) ([]models.Scope, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT scope_kind, scope_id FROM `+s.table("objectives")+` ORDER BY scope_kind, scope_id`)
 	if err != nil {
 		return nil, err
@@ -159,7 +159,7 @@ func (s *PostgresStore) ListObjectiveScopes(ctx context.Context) ([]models.Scope
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) UpdateObjective(ctx context.Context, objective *models.Objective, expectedRevision int64) error {
+func (s *Store) UpdateObjective(ctx context.Context, objective *models.Objective, expectedRevision int64) error {
 	if err := objective.Validate(); err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func (s *PostgresStore) UpdateObjective(ctx context.Context, objective *models.O
 	return nil
 }
 
-func (s *PostgresStore) CreateAgentRun(ctx context.Context, run *models.AgentRun) error {
+func (s *Store) CreateAgentRun(ctx context.Context, run *models.AgentRun) error {
 	if err := run.Validate(); err != nil {
 		return err
 	}
@@ -206,7 +206,7 @@ func (s *PostgresStore) CreateAgentRun(ctx context.Context, run *models.AgentRun
 	return tx.Commit()
 }
 
-func (s *PostgresStore) allocatePostgresObjectiveRunTx(ctx context.Context, tx *sql.Tx, run *models.AgentRun) error {
+func (s *Store) allocatePostgresObjectiveRunTx(ctx context.Context, tx *sql.Tx, run *models.AgentRun) error {
 	if run == nil || run.ObjectiveID == "" || run.ParentRunID != "" {
 		return nil
 	}
@@ -246,7 +246,7 @@ func (s *PostgresStore) allocatePostgresObjectiveRunTx(ctx context.Context, tx *
 	return nil
 }
 
-func (s *PostgresStore) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
+func (s *Store) GetAgentRun(ctx context.Context, scope models.Scope, runID string) (*models.AgentRun, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -261,7 +261,7 @@ func (s *PostgresStore) GetAgentRun(ctx context.Context, scope models.Scope, run
 	return sqlstore.DecodeAgentRun(payload)
 }
 
-func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
+func (s *Store) ListAgentRuns(ctx context.Context, filter models.AgentRunFilter) ([]*models.AgentRun, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -349,7 +349,7 @@ func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter models.AgentRu
 	return result, nil
 }
 
-func (s *PostgresStore) SummarizeAgentRuns(ctx context.Context, scope models.Scope, owners []models.ObjectiveOwner) ([]models.AgentRunOwnerSummary, error) {
+func (s *Store) SummarizeAgentRuns(ctx context.Context, scope models.Scope, owners []models.ObjectiveOwner) ([]models.AgentRunOwnerSummary, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -385,7 +385,7 @@ func (s *PostgresStore) SummarizeAgentRuns(ctx context.Context, scope models.Sco
 	return models.SummarizeAgentRunOwners(runs, owners), nil
 }
 
-func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRun, error) {
+func (s *Store) ClaimNextAgentRun(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRun, error) {
 	decision, err := s.ClaimNextAgentRunWithDecision(ctx, claim)
 	if err != nil || decision == nil {
 		return nil, err
@@ -393,7 +393,7 @@ func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim models.Agen
 	return decision.Run, nil
 }
 
-func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
+func (s *Store) ClaimNextAgentRunWithDecision(ctx context.Context, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
@@ -505,7 +505,7 @@ func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim
 	return decision, nil
 }
 
-func (s *PostgresStore) explainPostgresAgentRunAdmission(ctx context.Context, tx *sql.Tx, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
+func (s *Store) explainPostgresAgentRunAdmission(ctx context.Context, tx *sql.Tx, claim models.AgentRunClaim) (*models.AgentRunAdmissionDecision, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_runs")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND status IN ($3, $4)`,
 		claim.Scope.Kind, claim.Scope.ID, models.AgentRunStatusQueued, models.AgentRunStatusRunning)
@@ -558,7 +558,7 @@ func (s *PostgresStore) explainPostgresAgentRunAdmission(ctx context.Context, tx
 	return decision, nil
 }
 
-func (s *PostgresStore) RenewAgentRunLease(ctx context.Context, scope models.Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentRun, error) {
+func (s *Store) RenewAgentRunLease(ctx context.Context, scope models.Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*models.AgentRun, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}

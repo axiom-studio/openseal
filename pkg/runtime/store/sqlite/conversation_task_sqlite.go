@@ -85,7 +85,7 @@ func migrateConversationTasksSQLite(db *sql.DB) error {
 	return migrateConversationTaskContinuationsSQLite(db)
 }
 
-func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record models.ConversationTaskCreateRecord) (*models.ConversationTaskResult, error) {
+func (s *Store) CreateConversationTask(ctx context.Context, record models.ConversationTaskCreateRecord) (*models.ConversationTaskResult, error) {
 	if err := models.ValidateConversationTaskCreateRecord(record); err != nil {
 		return nil, err
 	}
@@ -191,7 +191,7 @@ func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record models.
 	return &models.ConversationTaskResult{Task: models.CloneConversationTask(record.Task), WorkRun: models.CloneAgentRun(record.WorkRun), SourceRun: models.CloneAgentRun(record.SourceRun)}, nil
 }
 
-func (s *SQLiteStore) GetConversationTask(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
+func (s *Store) GetConversationTask(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func (s *SQLiteStore) GetConversationTask(ctx context.Context, scope models.Scop
 	return getSQLiteConversationTask(ctx, s.db, scope, strings.TrimSpace(id), "", "")
 }
 
-func (s *SQLiteStore) FindConversationTaskByWorkRunID(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
+func (s *Store) FindConversationTaskByWorkRunID(ctx context.Context, scope models.Scope, id string) (*models.ConversationTask, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -220,7 +220,7 @@ func (s *SQLiteStore) FindConversationTaskByWorkRunID(ctx context.Context, scope
 	return sqlstore.DecodeConversationTask(payload)
 }
 
-func (s *SQLiteStore) ListConversationTasks(ctx context.Context, filter models.ConversationTaskFilter) ([]*models.ConversationTaskResult, error) {
+func (s *Store) ListConversationTasks(ctx context.Context, filter models.ConversationTaskFilter) ([]*models.ConversationTaskResult, error) {
 	if err := filter.Validate(); err != nil {
 		return nil, err
 	}

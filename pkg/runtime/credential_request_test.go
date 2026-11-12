@@ -62,7 +62,7 @@ func TestCredentialRequestStoresScopeCASAndTerminalState(t *testing.T) {
 	}
 }
 
-func credentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.SQLiteStore, *skill.Catalog, *SkillBindingActionDispatcher, Scope) {
+func credentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.Store, *skill.Catalog, *SkillBindingActionDispatcher, Scope) {
 	t.Helper()
 	ctx := context.Background()
 	store := newTestKernelStore(t)
@@ -83,7 +83,7 @@ func credentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.SQ
 	return ctx, store, catalog, dispatcher, scope
 }
 
-func proposeInteraction(t *testing.T, ctx context.Context, store *sqlite.SQLiteStore, catalog *skill.Catalog, scope Scope, action string, arguments map[string]interface{}) *AgentRun {
+func proposeInteraction(t *testing.T, ctx context.Context, store *sqlite.Store, catalog *skill.Catalog, scope Scope, action string, arguments map[string]interface{}) *AgentRun {
 	t.Helper()
 	f, _ := proposeInteractionCall(t, ctx, store, catalog, scope, action, arguments)
 	return f.run
@@ -92,7 +92,7 @@ func proposeInteraction(t *testing.T, ctx context.Context, store *sqlite.SQLiteS
 // proposeInteractionCall proposes a SkillManagement interaction action as a
 // loop step of a new chat Run leased by "worker" and returns the Run's
 // fixture and its ready call.
-func proposeInteractionCall(t *testing.T, ctx context.Context, store *sqlite.SQLiteStore, catalog *skill.Catalog, scope Scope, action string, arguments map[string]interface{}) (*loopProposalFixture, *ActionCall) {
+func proposeInteractionCall(t *testing.T, ctx context.Context, store *sqlite.Store, catalog *skill.Catalog, scope Scope, action string, arguments map[string]interface{}) (*loopProposalFixture, *ActionCall) {
 	t.Helper()
 	created, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "Order a cable on amazon.in", Source: RunSourceChat, Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}})
@@ -195,7 +195,7 @@ func TestRepeatedRefusedSetupIsNotRetriedInTheSameRun(t *testing.T) {
 	}
 }
 
-func mustConversationChanges(t *testing.T, ctx context.Context, store *sqlite.SQLiteStore, scope Scope) (*ConversationChangeSet, error) {
+func mustConversationChanges(t *testing.T, ctx context.Context, store *sqlite.Store, scope Scope) (*ConversationChangeSet, error) {
 	t.Helper()
 	now := time.Now().UTC()
 	seedTestSpace(t, store, scope)

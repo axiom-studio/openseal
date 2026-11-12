@@ -28,7 +28,7 @@ func migrateEmbedInstallationsSQLite(db *sql.DB) error {
 	return err
 }
 
-func (s *SQLiteStore) CreateEmbedInstallation(ctx context.Context, value *models.EmbedInstallation) error {
+func (s *Store) CreateEmbedInstallation(ctx context.Context, value *models.EmbedInstallation) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -43,11 +43,11 @@ func (s *SQLiteStore) CreateEmbedInstallation(ctx context.Context, value *models
 	return err
 }
 
-func (s *SQLiteStore) GetEmbedInstallation(ctx context.Context, scope models.Scope, id string) (*models.EmbedInstallation, error) {
+func (s *Store) GetEmbedInstallation(ctx context.Context, scope models.Scope, id string) (*models.EmbedInstallation, error) {
 	return scanSQLiteEmbedInstallation(s.db.QueryRowContext(ctx, `SELECT payload FROM embed_installations WHERE scope_kind=? AND scope_id=? AND id=?`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *SQLiteStore) GetEmbedInstallationByRoute(ctx context.Context, route string) (*models.EmbedInstallation, error) {
+func (s *Store) GetEmbedInstallationByRoute(ctx context.Context, route string) (*models.EmbedInstallation, error) {
 	return scanSQLiteEmbedInstallation(s.db.QueryRowContext(ctx, `SELECT payload FROM embed_installations WHERE public_route=?`, strings.TrimSpace(route)))
 }
 
@@ -65,7 +65,7 @@ func scanSQLiteEmbedInstallation(row *sql.Row) (*models.EmbedInstallation, error
 	return &value, value.Validate()
 }
 
-func (s *SQLiteStore) ListEmbedInstallations(ctx context.Context, filter models.EmbedInstallationFilter) ([]*models.EmbedInstallation, error) {
+func (s *Store) ListEmbedInstallations(ctx context.Context, filter models.EmbedInstallationFilter) ([]*models.EmbedInstallation, error) {
 	query := `SELECT payload FROM embed_installations WHERE scope_kind=? AND scope_id=?`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
 	if filter.DeploymentID != "" {
@@ -93,7 +93,7 @@ func (s *SQLiteStore) ListEmbedInstallations(ctx context.Context, filter models.
 	return result, rows.Err()
 }
 
-func (s *SQLiteStore) UpdateEmbedInstallation(ctx context.Context, value *models.EmbedInstallation, expected int64) error {
+func (s *Store) UpdateEmbedInstallation(ctx context.Context, value *models.EmbedInstallation, expected int64) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func (s *SQLiteStore) UpdateEmbedInstallation(ctx context.Context, value *models
 	return nil
 }
 
-func (s *SQLiteStore) CreateEmbedSession(ctx context.Context, value *models.EmbedSession) error {
+func (s *Store) CreateEmbedSession(ctx context.Context, value *models.EmbedSession) error {
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -128,11 +128,11 @@ func (s *SQLiteStore) CreateEmbedSession(ctx context.Context, value *models.Embe
 	return err
 }
 
-func (s *SQLiteStore) GetEmbedSession(ctx context.Context, scope models.Scope, id string) (*models.EmbedSession, error) {
+func (s *Store) GetEmbedSession(ctx context.Context, scope models.Scope, id string) (*models.EmbedSession, error) {
 	return scanSQLiteEmbedSession(s.db.QueryRowContext(ctx, `SELECT payload,capability_hash,verified_claims,message_count,status,updated_at FROM embed_sessions WHERE scope_kind=? AND scope_id=? AND id=?`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
-func (s *SQLiteStore) GetEmbedSessionByConversation(ctx context.Context, scope models.Scope, id string) (*models.EmbedSession, error) {
+func (s *Store) GetEmbedSessionByConversation(ctx context.Context, scope models.Scope, id string) (*models.EmbedSession, error) {
 	return scanSQLiteEmbedSession(s.db.QueryRowContext(ctx, `SELECT payload,capability_hash,verified_claims,message_count,status,updated_at FROM embed_sessions WHERE scope_kind=? AND scope_id=? AND conversation_id=?`, scope.Kind, scope.ID, strings.TrimSpace(id)))
 }
 
@@ -157,7 +157,7 @@ func scanSQLiteEmbedSession(row *sql.Row) (*models.EmbedSession, error) {
 	return &value, value.Validate()
 }
 
-func (s *SQLiteStore) ConsumeEmbedSessionMessage(ctx context.Context, scope models.Scope, id string, maximum int, now time.Time) (*models.EmbedSession, error) {
+func (s *Store) ConsumeEmbedSessionMessage(ctx context.Context, scope models.Scope, id string, maximum int, now time.Time) (*models.EmbedSession, error) {
 	result, err := s.db.ExecContext(ctx, `UPDATE embed_sessions SET message_count=message_count+1,updated_at=? WHERE scope_kind=? AND scope_id=? AND id=? AND status=? AND expires_at>? AND message_count<?`, now, scope.Kind, scope.ID, strings.TrimSpace(id), models.EmbedSessionActive, now, maximum)
 	if err != nil {
 		return nil, err
