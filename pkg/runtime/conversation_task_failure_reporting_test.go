@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
@@ -57,7 +58,7 @@ func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore,
 	if err != nil || claimed == nil {
 		t.Fatalf("source claim: %#v %v", claimed, err)
 	}
-	settled := settleTaskSource(t, store, scope, claimed.ID, "worker", taskSourceProposal{Goal: "GOAL_SECRET prepare the complete result", Acknowledgment: "I will prepare the result."})
+	settled := conversationruntest.SettleTaskSource(t, store, scope, claimed.ID, "worker", conversationruntest.TaskSourceProposal{Goal: "GOAL_SECRET prepare the complete result", Acknowledgment: "I will prepare the result."})
 	accepted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil {
 		t.Fatal(err)

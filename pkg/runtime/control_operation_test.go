@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -334,7 +335,7 @@ func TestRunOperationPostsStartedMessagePerChild(t *testing.T) {
 			t.Fatal(err)
 		}
 		conversation = created
-		trigger = postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Engage acme and globex.", "engage")
+		trigger = conversationruntest.PostMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Engage acme and globex.", "engage")
 		req.Kind = RunKindConversation
 		req.Context[conversationRunContextConversationID] = conversation.ID
 		req.Context[conversationRunContextTriggerID] = trigger.ID

@@ -6,6 +6,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 )
 
 func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
@@ -21,7 +22,7 @@ func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Run it now.", "run-now")
+	trigger := conversationruntest.PostMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Run it now.", "run-now")
 	source := &AgentRun{
 		ID: "conversation-run", Kind: RunKindConversation, Scope: scope, Owner: owner, AssignedAgentID: owner.ID,
 		Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID},

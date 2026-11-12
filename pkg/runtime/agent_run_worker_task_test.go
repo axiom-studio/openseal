@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -52,7 +53,7 @@ func startTaskStep(goal, ack string) agentrun.StepOutput {
 	args, _ := json.Marshal(map[string]string{"goal": goal, "acknowledgment": ack})
 	return agentrun.StepOutput{ModelProvider: "fake", Model: "deterministic", Assistant: &AssistantEntry{
 		Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls,
-		ToolCalls: []ModelToolCall{{ID: taskStartFixtureCallID, Name: string(ControlToolStartTask), Arguments: args}},
+		ToolCalls: []ModelToolCall{{ID: conversationruntest.TaskStartCallID, Name: string(ControlToolStartTask), Arguments: args}},
 	}}
 }
 
@@ -159,7 +160,7 @@ func (s *admissionLostTaskStore) CreateConversationTask(context.Context, Convers
 // the point where its conversation_start_task call is recorded and its step
 // applied, and stops before admission: the Run is running, leased by
 // "worker", its last step completed and applied, and the tool entry
-// pending. Callers admit the task themselves (taskStartRequest).
+// pending. Callers admit the task themselves (conversationruntest.TaskStartRequest).
 func settledWorkerTaskFixture(t *testing.T, store *sqlite.Store) (*AgentRun, *AgentTurn, *Conversation, *ChannelMessage) {
 	t.Helper()
 	scope := Scope{Kind: "tenant", ID: "worker-task"}
@@ -171,9 +172,9 @@ func settledWorkerTaskFixture(t *testing.T, store *sqlite.Store) (*AgentRun, *Ag
 	if err != nil {
 		t.Fatal(err)
 	}
-	message := postConversationRunTestMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion,
+	message := conversationruntest.PostMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion,
 		"Review the release in the background", "task-user-message")
-	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(t.Context(), scope, conversation.ID, message.ID)
+	scheduled, _, err := conversationruntest.NewScheduler(t, store).ScheduleMessage(t.Context(), scope, conversation.ID, message.ID)
 	if err != nil || scheduled == nil || scheduled.Run == nil {
 		t.Fatalf("schedule foreground: %#v %v", scheduled, err)
 	}
@@ -201,7 +202,7 @@ func settledWorkerTaskFixture(t *testing.T, store *sqlite.Store) (*AgentRun, *Ag
 	if err != nil || len(turns) != 1 || turns[0].Status != AgentTurnStatusCompleted || turns[0].Sequence != source.LastAppliedTurn {
 		t.Fatalf("start_task step row: %#v %v", turns, err)
 	}
-	entry, err := store.GetSessionEntry(t.Context(), scope, SessionEntryID(source.SessionID, ToolEntryKey(turns[0].ID, taskStartFixtureCallID)))
+	entry, err := store.GetSessionEntry(t.Context(), scope, SessionEntryID(source.SessionID, ToolEntryKey(turns[0].ID, conversationruntest.TaskStartCallID)))
 	if err != nil || entry == nil || entry.State != ToolEntryPending || entry.StepID != turns[0].ID {
 		t.Fatalf("start_task tool entry: %#v %v", entry, err)
 	}
@@ -247,7 +248,7 @@ func TestLoopResumesPendingTaskStartWithoutAnotherStep(t *testing.T) {
 	if err != nil || len(assistants) != 1 || assistants[0].StepID != step.ID {
 		t.Fatalf("resume called the model again: %#v %v", assistants, err)
 	}
-	entry, err := store.GetSessionEntry(t.Context(), source.Scope, SessionEntryID(source.SessionID, ToolEntryKey(step.ID, taskStartFixtureCallID)))
+	entry, err := store.GetSessionEntry(t.Context(), source.Scope, SessionEntryID(source.SessionID, ToolEntryKey(step.ID, conversationruntest.TaskStartCallID)))
 	if err != nil || entry == nil || entry.State != ToolEntryCompleted {
 		t.Fatalf("start_task entry after resume: %#v %v", entry, err)
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -32,7 +33,7 @@ func newConversationFollowUpFixture(t *testing.T) *conversationFollowUpFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &conversationFollowUpFixture{store: store, service: service, scheduler: mustConversationRunScheduler(t, store), conversation: conversation}
+	return &conversationFollowUpFixture{store: store, service: service, scheduler: conversationruntest.NewScheduler(t, store), conversation: conversation}
 }
 
 func (f *conversationFollowUpFixture) post(t *testing.T, sender, content string) *ChannelMessage {

@@ -20,10 +20,11 @@ import (
 )
 
 // The helpers in this file are for the in-package conversation run tests,
-// which cannot use the test helpers of the packages above them. They copy
-// runtime's run scheduler, coordinator, message post, SQLite store opener,
-// visual content store and continuation fixture, and a trimmed chat loop
-// fixture of the run loop tests. Change the copies together.
+// which cannot import conversationruntest (it imports conversationrun) or
+// use the test helpers of runtime. They copy conversationruntest's run
+// scheduler and message post, and runtime's coordinator, SQLite store
+// opener, visual content store and continuation fixture, and a trimmed chat
+// loop fixture of the run loop tests. Change the copies together.
 
 // newTestScheduler is a run scheduler over store with the default config.
 func newTestScheduler(t *testing.T, store *sqlite.Store) *ConversationRunScheduler {

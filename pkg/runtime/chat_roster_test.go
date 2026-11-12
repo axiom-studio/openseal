@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -107,7 +108,7 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	message := postConversationRunTestMessage(t, conversations, chat, ConversationParticipantUser, MessageIntentQuestion, "Read the community in the background", "team-task-source")
+	message := conversationruntest.PostMessage(t, conversations, chat, ConversationParticipantUser, MessageIntentQuestion, "Read the community in the background", "team-task-source")
 	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: "task-agent", Goal: "Answer", Source: RunSourceChat,
 		ConcurrencyKey: ConversationRunLane(chat.ID, message.ThreadRootID, "task-agent"),
@@ -119,7 +120,7 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	if _, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil {
 		t.Fatal(err)
 	}
-	settled := settleTaskSource(t, store, scope, source.ID, "worker", taskSourceProposal{
+	settled := conversationruntest.SettleTaskSource(t, store, scope, source.ID, "worker", conversationruntest.TaskSourceProposal{
 		Goal: "Read the community and report the outcome", Acknowledgment: "I have started reading the community.", Budget: &BudgetPolicy{MaxTurns: 5}})
 	task, err := conversationrun.NewConversationTaskService(store).Start(ctx, settled.Request)
 	if err != nil {

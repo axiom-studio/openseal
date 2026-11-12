@@ -8,6 +8,7 @@ import (
 
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -37,7 +38,7 @@ func settleConversationTaskForChanges(t *testing.T, store KernelStore, conversat
 	if err != nil || claimed == nil || claimed.ID != scheduled.Run.ID {
 		t.Fatalf("claim task source: %#v %v", claimed, err)
 	}
-	result := settleTaskSource(t, store, conversation.Scope, claimed.ID, "worker", taskProposalFixture())
+	result := conversationruntest.SettleTaskSource(t, store, conversation.Scope, claimed.ID, "worker", conversationruntest.TaskProposal())
 	return result.Run, result.Turn
 }
 
@@ -63,7 +64,7 @@ func TestConversationChangesProjectIndependentTaskBeforeAndWithTerminalReport(t 
 			if err != nil {
 				t.Fatal(err)
 			}
-			message := postConversationRunTestMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion, "Review the release in the background", "task-question")
+			message := conversationruntest.PostMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion, "Review the release in the background", "task-question")
 			source, turn := settleConversationTaskForChanges(t, store, conversation, message)
 			changes, err := runtimeconversation.NewConversationChangeService(store.(ConversationStore), store)
 			if err != nil {
@@ -74,7 +75,7 @@ func TestConversationChangesProjectIndependentTaskBeforeAndWithTerminalReport(t 
 			if err != nil || changeRunByID(initial.Runs, source.ID) == nil {
 				t.Fatalf("foreground projection missing: %#v %v", initial, err)
 			}
-			admitted, err := conversationrun.NewConversationTaskService(store.(ConversationTaskKernelStore)).Start(t.Context(), taskStartRequest(t, store.(ConversationTaskKernelStore), source, turn))
+			admitted, err := conversationrun.NewConversationTaskService(store.(ConversationTaskKernelStore)).Start(t.Context(), conversationruntest.TaskStartRequest(t, store.(ConversationTaskKernelStore), source, turn))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -174,7 +175,7 @@ func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	source, turn := settleConversationTaskForChanges(t, store, conversation, question.Message)
-	admitted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
+	admitted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,8 +204,8 @@ func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
 
 func TestConversationTaskTerminalWindowCountsVisibleRuns(t *testing.T) {
 	store := newTestKernelStore(t)
-	source, turn, conversation, message := settledTaskSourceFixture(t, store)
-	admitted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
+	source, turn, conversation, message := conversationruntest.SettledTaskSource(t, store)
+	admitted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +276,7 @@ func TestConversationChangesIncludeCanonicalLocalRootedForeground(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			root := postConversationRunTestMessage(t, conversations, conversation, ConversationParticipantService, MessageIntentSystem, "Call root", "call-root")
+			root := conversationruntest.PostMessage(t, conversations, conversation, ConversationParticipantService, MessageIntentSystem, "Call root", "call-root")
 			latest, err := conversations.GetConversation(t.Context(), scope, conversation.ID)
 			if err != nil {
 				t.Fatal(err)

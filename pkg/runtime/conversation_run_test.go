@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -30,7 +31,7 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is the canary healthy?", "message-one")
+	first := conversationruntest.PostMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is the canary healthy?", "message-one")
 	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{ConversationPageSize: 1, MessagePageSize: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -54,12 +55,12 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	}
 	// A member's message without an @mention is not a wake in a Team channel;
 	// a second human message is.
-	second := postConversationRunTestMessage(t, service, current, ConversationParticipantUser, MessageIntentQuestion, "Please review the release notes.", "message-two")
+	second := conversationruntest.PostMessage(t, service, current, ConversationParticipantUser, MessageIntentQuestion, "Please review the release notes.", "message-two")
 	current, err = service.GetConversation(ctx, scope, conversation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	postConversationRunTestMessage(t, service, current, ConversationParticipantService, MessageIntentSystem, "Channel metadata synchronized.", "message-system")
+	conversationruntest.PostMessage(t, service, current, ConversationParticipantService, MessageIntentSystem, "Channel metadata synchronized.", "message-system")
 
 	reconciled, err := scheduler.ReconcileScope(ctx, scope)
 	if err != nil {
@@ -102,12 +103,12 @@ func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "What is failing?", "restart-one")
+	first := conversationruntest.PostMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "What is failing?", "restart-one")
 	current, err := service.GetConversation(ctx, scope, conversation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := postConversationRunTestMessage(t, service, current, ConversationParticipantUser, MessageIntentUpdate, "The database is healthy.", "restart-two")
+	second := conversationruntest.PostMessage(t, service, current, ConversationParticipantUser, MessageIntentUpdate, "The database is healthy.", "restart-two")
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +172,7 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler := mustConversationRunScheduler(t, store)
+	scheduler := conversationruntest.NewScheduler(t, store)
 	scheduled, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, posted.Message.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -208,15 +209,6 @@ func TestConversationRunSchedulerProjectsCanceledRequestExactlyOnce(t *testing.T
 	}
 }
 
-func mustConversationRunScheduler(t *testing.T, store *sqlite.Store) *conversationrun.ConversationRunScheduler {
-	t.Helper()
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return scheduler
-}
-
 func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *testing.T) {
 	store := newTestKernelStore(t)
 	ctx := context.Background()
@@ -230,7 +222,7 @@ func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is the release ready?", "legacy-trigger")
+	trigger := conversationruntest.PostMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is the release ready?", "legacy-trigger")
 	coordinator := conversationRunTestCoordinator(t, service)
 	if _, err := coordinator.Coordinate(ctx, runtimeconversation.ConversationRoutingRequest{
 		Scope: scope, ConversationID: conversation.ID, TriggerMessageID: trigger.ID, IdempotencyKey: "legacy-manual-round",
@@ -267,27 +259,6 @@ func conversationRunTestCoordinator(t *testing.T, service *runtimeconversation.C
 		t.Fatal(err)
 	}
 	return coordinator
-}
-
-func postConversationRunTestMessage(
-	t *testing.T,
-	service *runtimeconversation.ConversationService,
-	conversation *Conversation,
-	senderType ConversationParticipantType,
-	intent ConversationMessageIntent,
-	content string,
-	key string,
-) *ChannelMessage {
-	t.Helper()
-	result, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
-		Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: senderType, ID: "sender-" + string(senderType)},
-		Intent: intent, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: key,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return result.Message
 }
 
 func conversationRunRoundKey(scope Scope, conversationID, triggerID string) string {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
@@ -16,7 +17,7 @@ func claimedForkTaskFixture(t *testing.T) (*sqlite.Store, *AgentRun, *Conversati
 	t.Helper()
 	store := newTestKernelStore(t)
 	foreground, turn, _, _ := settledWorkerTaskFixture(t, store)
-	accepted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, foreground, turn))
+	accepted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, foreground, turn))
 	if err != nil {
 		t.Fatal(err)
 	}

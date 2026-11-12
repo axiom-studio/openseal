@@ -14,6 +14,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -37,7 +38,7 @@ func newConversationActorFixture(t *testing.T, scope models.Scope, agentID strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &conversationActorFixture{store, service, mustConversationRunScheduler(t, store), conversation}
+	return &conversationActorFixture{store, service, conversationruntest.NewScheduler(t, store), conversation}
 }
 
 func (f *conversationActorFixture) post(t *testing.T, request runtimeconversation.PostChannelMessageRequest) *models.ChannelMessage {
@@ -150,7 +151,7 @@ func TestConversationClarificationOnlyAcceptsInitiatingUsersAnswer(t *testing.T)
 			if receipt, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), root.Scope, f.conversation.ID, "conversation-answer-received:"+answerB.ID); err != nil || receipt != nil {
 				t.Fatalf("other member's answer was acknowledged as accepted: %#v, %v", receipt, err)
 			}
-			f.scheduler = mustConversationRunScheduler(t, f.store)
+			f.scheduler = conversationruntest.NewScheduler(t, f.store)
 			replayed, replay, err := f.scheduler.ScheduleMessage(t.Context(), root.Scope, f.conversation.ID, answerB.ID)
 			if err != nil || !replay || replayed == nil || replayed.Run.ID != runB.ID {
 				t.Fatalf("member B replay = %#v, %v, %v", replayed, replay, err)
@@ -163,7 +164,7 @@ func TestConversationClarificationOnlyAcceptsInitiatingUsersAnswer(t *testing.T)
 			if resumed.ID != child.ID || resumed.Status != models.AgentRunStatusQueued || resumed.WakeCondition != nil || len(resumed.PendingInterventions) != 1 || resumed.PendingInterventions[0].Actor.ID != a.ID {
 				t.Fatalf("original member's clarification did not resume exactly once: %#v", resumed)
 			}
-			f.scheduler = mustConversationRunScheduler(t, f.store)
+			f.scheduler = conversationruntest.NewScheduler(t, f.store)
 			replayed, replay, err = f.scheduler.ScheduleMessage(t.Context(), root.Scope, f.conversation.ID, answerA.ID)
 			if err != nil || !replay || replayed == nil || replayed.Run.ID != child.ID || len(replayed.Run.PendingInterventions) != 1 {
 				t.Fatalf("original member's clarification replay = %#v, %v, %v", replayed, replay, err)
@@ -224,7 +225,7 @@ func TestConversationFollowUpsSeparateMembersIncludingDelayedScheduling(t *testi
 				t.Fatalf("member B Run = %#v, %v", memberB, err)
 			}
 			// Replaying any message changes neither member's Run.
-			f.scheduler = mustConversationRunScheduler(t, f.store)
+			f.scheduler = conversationruntest.NewScheduler(t, f.store)
 			for _, message := range messages {
 				f.schedule(t, message)
 			}

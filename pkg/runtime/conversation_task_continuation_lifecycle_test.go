@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
@@ -30,8 +31,8 @@ func continuationLifecycleFixture(t *testing.T, store *sqlite.Store, id string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	message := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Review the release", id+"-message")
-	result, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(t.Context(), scope, conversation.ID, message.ID)
+	message := conversationruntest.PostMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Review the release", id+"-message")
+	result, _, err := conversationruntest.NewScheduler(t, store).ScheduleMessage(t.Context(), scope, conversation.ID, message.ID)
 	if err != nil || result == nil || result.Run == nil {
 		t.Fatalf("schedule conversation: %#v %v", result, err)
 	}
@@ -261,7 +262,7 @@ func TestConversationRunReconcilerKeepsAgedRunsForeground(t *testing.T) {
 					t.Fatalf("claim: %#v %v", claimed, err)
 				}
 			}
-			reconciler, err := conversationrun.NewConversationRunReconciler(mustConversationRunScheduler(t, store), workqueue.WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) {
+			reconciler, err := conversationrun.NewConversationRunReconciler(conversationruntest.NewScheduler(t, store), workqueue.WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) {
 				return []Scope{run.Scope}, nil
 			}), nil, conversationrun.ConversationRunReconcilerConfig{})
 			if err != nil {

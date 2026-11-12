@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 )
 
 func TestActiveConversationRunsIncludeNonterminalDescendantAfterCoordinationRootEnds(t *testing.T) {
@@ -44,8 +45,8 @@ func TestActiveConversationRunsIncludeNonterminalDescendantAfterCoordinationRoot
 
 func TestActiveConversationRunsIncludeOnlyExactIndependentTaskThreadAndActor(t *testing.T) {
 	store := conversationtest.NewStore(t)
-	source, turn, conversation, trigger := settledTaskSourceFixture(t, store)
-	if _, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err != nil {
+	source, turn, conversation, trigger := conversationruntest.SettledTaskSource(t, store)
+	if _, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, source, turn)); err != nil {
 		t.Fatal(err)
 	}
 	runner := conversationrun.NewPortfolioTurnRunner(store)

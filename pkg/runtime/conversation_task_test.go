@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -10,233 +9,15 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
-	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
-
-// taskStartRequest is the admission of the task a loop-built step
-// (settledWorkerTaskFixture) called conversation_start_task for: the request
-// names that step's pending tool entry.
-func taskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *AgentTurn) conversationrun.StartConversationTaskRequest {
-	t.Helper()
-	sessions, ok := store.(taskStartFixtureStore)
-	if !ok {
-		t.Fatalf("task start fixture needs a session store")
-	}
-	entryID := SessionEntryID(source.SessionID, ToolEntryKey(turn.ID, taskStartFixtureCallID))
-	entry, err := optionalSessionEntry(sessions.GetSessionEntry(t.Context(), source.Scope, entryID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	args := startTaskArguments(entry)
-	if source.SessionID == "" || args == nil {
-		t.Fatalf("task start fixture needs a conversation_start_task tool entry")
-	}
-	current, err := sessions.GetAgentRun(t.Context(), source.Scope, source.ID)
-	if err != nil || current == nil {
-		t.Fatalf("get source: %#v %v", current, err)
-	}
-	return conversationrun.StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: current.Revision, WorkerID: "worker",
-		TurnID: turn.ID, ToolEntryID: entryID, AssignedAgentID: source.AssignedAgentID, TaskKey: startTaskKey(entryID),
-		Goal: args.Goal, Acknowledgment: args.Acknowledgment}
-}
-
-// proposedTaskStartRequest writes the [assistant, conversation_start_task]
-// entries of a hand-built source step turn (after the triggering message)
-// and returns the admission request naming that tool entry.
-func proposedTaskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *AgentTurn, proposal taskSourceProposal) conversationrun.StartConversationTaskRequest {
-	t.Helper()
-	sessions, ok := store.(taskStartFixtureStore)
-	if !ok {
-		t.Fatalf("task start fixture needs a session store")
-	}
-	entryID, revision := ensureStartTaskToolEntry(t, sessions, source, turn, proposal.Goal, proposal.Acknowledgment)
-	return conversationrun.StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: revision, WorkerID: "worker",
-		TurnID: turn.ID, ToolEntryID: entryID, AssignedAgentID: source.AssignedAgentID, TaskKey: startTaskKey(entryID),
-		Goal: proposal.Goal, Acknowledgment: proposal.Acknowledgment, Budget: cloneBudgetPolicy(proposal.Budget)}
-}
-
-// taskSourceProposal is the conversation_start_task call a settled fixture
-// step makes.
-type taskSourceProposal struct {
-	Goal, Acknowledgment string
-	Budget               *BudgetPolicy
-}
-
-func taskProposalFixture() taskSourceProposal {
-	return taskSourceProposal{Goal: "Review the release and report the outcome", Acknowledgment: "I’ve started the release review."}
-}
-
-// settledTaskSource is a claimed conversation Run with one completed,
-// applied step whose conversation_start_task call Request admits.
-type settledTaskSource struct {
-	Run     *AgentRun
-	Turn    *AgentTurn
-	Request conversationrun.StartConversationTaskRequest
-}
-
-// settleTaskSource settles one step on the claimed source Run runID (held by
-// workerID) the way the loop leaves a conversation_start_task step before its
-// settle: the step row is completed and applied, and the step's [assistant,
-// conversation_start_task] entries are in the Run's lane session after the
-// triggering message.
-func settleTaskSource(t *testing.T, store interface{}, scope Scope, runID, workerID string, proposal taskSourceProposal) settledTaskSource {
-	t.Helper()
-	ctx := t.Context()
-	sessions, ok := store.(taskStartFixtureStore)
-	if !ok {
-		t.Fatalf("task start fixture needs a session store")
-	}
-	run, step := settleFixtureStep(t, store, scope, runID, workerID, RunTransitionRequest{Status: AgentRunStatusRunning, Summary: "Step applied"})
-	var err error
-	entryID, revision := ensureStartTaskToolEntry(t, sessions, run, step, proposal.Goal, proposal.Acknowledgment)
-	if run, err = sessions.GetAgentRun(ctx, scope, runID); err != nil || run == nil {
-		t.Fatalf("reload source: %#v %v", run, err)
-	}
-	return settledTaskSource{Run: run, Turn: step, Request: conversationrun.StartConversationTaskRequest{Scope: scope, SourceRunID: runID, ExpectedSourceRevision: revision,
-		WorkerID: workerID, TurnID: step.ID, ToolEntryID: entryID, AssignedAgentID: run.AssignedAgentID, TaskKey: startTaskKey(entryID),
-		Goal: proposal.Goal, Acknowledgment: proposal.Acknowledgment, Budget: cloneBudgetPolicy(proposal.Budget)}}
-}
-
-// settleFixtureStep runs one completed step on the claimed Run runID (held
-// by workerID) and applies it with transition (its revision, step, lease
-// and applied-turn fields are filled in).
-func settleFixtureStep(t *testing.T, store interface{}, scope Scope, runID, workerID string, transition RunTransitionRequest) (*AgentRun, *AgentTurn) {
-	t.Helper()
-	ctx := t.Context()
-	type fixtureStepStore interface {
-		PortfolioStore
-		RunActivityStore
-		AgentTurnStore
-	}
-	steps, ok := store.(fixtureStepStore)
-	if !ok {
-		t.Fatalf("step fixture needs portfolio, activity and turn stores")
-	}
-	turns := NewAgentTurnService(steps, steps)
-	activities := NewRunActivityService(steps, steps)
-	run, err := steps.GetAgentRun(ctx, scope, runID)
-	if err != nil || run == nil {
-		t.Fatalf("get run: %#v %v", run, err)
-	}
-	if run.Status == AgentRunStatusPlanning {
-		if run, _, err = activities.TransitionRun(ctx, scope, runID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning,
-			Summary: "Run started", LeaseOwner: workerID}); err != nil {
-			t.Fatalf("start run: %v", err)
-		}
-	}
-	step, err := turns.BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: runID, SessionID: run.SessionID, Producer: StepProducerModel,
-		WorkerID: workerID, LeaseDuration: time.Minute})
-	if err != nil {
-		t.Fatalf("begin step: %v", err)
-	}
-	if step, err = turns.FinishTurn(ctx, scope, step.ID, FinishAgentTurnRequest{ExpectedRevision: step.Revision, Status: AgentTurnStatusCompleted, WorkerID: workerID}); err != nil {
-		t.Fatalf("finish step: %v", err)
-	}
-	transition.ExpectedRevision, transition.TurnID, transition.AppliedTurn, transition.LeaseOwner = run.Revision, step.ID, step.Sequence, workerID
-	if run, _, err = activities.TransitionRun(ctx, scope, runID, transition); err != nil {
-		t.Fatalf("apply step: %v", err)
-	}
-	return run, step
-}
-
-const taskStartFixtureCallID = "call-start-task"
-
-// settledTaskSourceFixture is settledWorkerTaskFixture's chat and source Run
-// with the start_task step settled by hand (settleTaskSource) instead of by
-// the worker: the Run is running, leased by "worker", its step completed and
-// applied, and the tool entry pending.
-func settledTaskSourceFixture(t *testing.T, store *sqlite.Store) (*AgentRun, *AgentTurn, *Conversation, *ChannelMessage) {
-	t.Helper()
-	scope := Scope{Kind: "tenant", ID: "worker-task"}
-	conversations := runtimeconversation.NewConversationService(store)
-	seedTestSpace(t, store, scope)
-	conversation, _, err := conversations.CreateConversation(t.Context(), runtimeconversation.CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Assistant", IdempotencyKey: "worker-task-chat",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	message := postConversationRunTestMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion,
-		"Review the release in the background", "task-user-message")
-	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(t.Context(), scope, conversation.ID, message.ID)
-	if err != nil || scheduled == nil || scheduled.Run == nil {
-		t.Fatalf("schedule foreground: %#v %v", scheduled, err)
-	}
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
-		Scope: scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
-	})
-	if err != nil || claimed == nil || claimed.ID != scheduled.Run.ID {
-		t.Fatalf("claim foreground: %#v %v", claimed, err)
-	}
-	settled := settleTaskSource(t, store, scope, claimed.ID, "worker", taskProposalFixture())
-	return settled.Run, settled.Turn, conversation, message
-}
-
-type taskStartFixtureStore interface {
-	AgentSessionStore
-	conversationTaskSQLTestStore
-}
-
-func ensureStartTaskToolEntry(t *testing.T, store taskStartFixtureStore, source *AgentRun, turn *AgentTurn, goal, ack string) (string, int64) {
-	t.Helper()
-	ctx := t.Context()
-	entryID := SessionEntryID(source.SessionID, ToolEntryKey(turn.ID, taskStartFixtureCallID))
-	current, err := store.GetAgentRun(ctx, source.Scope, source.ID)
-	if err != nil || current == nil {
-		t.Fatalf("get source: %#v %v", current, err)
-	}
-	now := time.Now().UTC()
-	if current.Status != AgentRunStatusRunning || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(now) {
-		return entryID, source.Revision
-	}
-	lease := AgentRunLeaseGuard{WorkerID: current.LeaseOwner, Now: now}
-	conversationID, _ := current.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := current.Context[conversationRunContextTriggerID].(string)
-	thread, _ := current.Context["threadRootMessageId"].(string)
-	if current.SessionID == "" {
-		// A hand-built source Run: bind it to its lane session first.
-		current.SessionID = conversationSessionID(current.Scope, ConversationRunLane(conversationID, thread, current.AssignedAgentID))
-		current.UpdatedAt = now
-		current.Revision++
-		updateConversationTaskSQLRun(t, store, current, current.Revision-1)
-		entryID = SessionEntryID(current.SessionID, ToolEntryKey(turn.ID, taskStartFixtureCallID))
-	}
-	if _, err := store.OpenConversationAgentSession(ctx, OpenConversationAgentSessionRequest{Scope: current.Scope, ConversationID: conversationID,
-		ThreadRootID: thread, AgentID: current.AssignedAgentID, RunID: current.ID, Lease: lease, Now: now}); err != nil {
-		t.Fatalf("open lane session: %v", err)
-	}
-	args, _ := json.Marshal(map[string]string{"goal": goal, "acknowledgment": ack})
-	user := &SessionEntry{ID: SessionEntryID(current.SessionID, "message:"+triggerID), RunID: current.ID, Type: SessionEntryUser,
-		SourceKey: "message:" + triggerID, User: &UserEntry{Origin: UserEntryChannelMessage, Author: SessionAuthor{Type: "user", ID: "requester"},
-			Content: []ContentPart{storetest.TextPart("Please do this in the background.")}, MessageID: triggerID}}
-	assistant := &SessionEntry{ID: SessionEntryID(current.SessionID, AssistantEntryKey(turn.ID)), RunID: current.ID, StepID: turn.ID, Step: turn.Sequence,
-		Type: SessionEntryAssistant, Assistant: &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls,
-			ToolCalls: []ModelToolCall{{ID: taskStartFixtureCallID, Name: string(ControlToolStartTask), Arguments: args}}}}
-	tool := &SessionEntry{ID: entryID, RunID: current.ID, StepID: turn.ID, Step: turn.Sequence, Type: SessionEntryTool, State: ToolEntryPending,
-		ToolCallID: taskStartFixtureCallID, Tool: &ToolEntry{Name: string(ControlToolStartTask), Arguments: args, SideEffect: ToolSideEffectWrite}}
-	if existing, err := store.GetSessionEntry(ctx, current.Scope, entryID); err == nil && existing != nil {
-		return entryID, current.Revision
-	}
-	for _, batch := range [][]*SessionEntry{{user}, {assistant, tool}} {
-		if _, err := store.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{Scope: current.Scope, SessionID: current.SessionID,
-			RunID: current.ID, Lease: &lease, Entries: batch, Now: now}); err != nil {
-			t.Fatalf("append start_task entries: %v", err)
-		}
-	}
-	reloaded, err := store.GetAgentRun(ctx, current.Scope, current.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return entryID, reloaded.Revision
-}
 
 func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
 	store := newTestKernelStore(t)
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
 	service := conversationrun.NewConversationTaskService(store)
-	req := taskStartRequest(t, store, source, turn)
+	req := conversationruntest.TaskStartRequest(t, store, source, turn)
 	var wg sync.WaitGroup
 	results := make(chan *ConversationTaskResult, 8)
 	errs := make(chan error, 8)
@@ -307,7 +88,7 @@ func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) 
 			} else {
 				expireRunLease(t, store, source)
 			}
-			if _, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err == nil {
+			if _, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, source, turn)); err == nil {
 				t.Fatal("non-current source admitted work")
 			}
 			tasks, err := store.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, Limit: 10})
@@ -329,7 +110,7 @@ func TestConversationTaskTransfersOnlyRemainingSourceBudget(t *testing.T) {
 	source.Revision++
 	source.UpdatedAt = time.Now()
 	updateConversationTaskSQLRun(t, store, source, previous)
-	result, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
+	result, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +162,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, err = mustConversationRunScheduler(t, store).ScheduleMessage(t.Context(), scope, conversation.ID, posted.Message.ID)
+			_, _, err = conversationruntest.NewScheduler(t, store).ScheduleMessage(t.Context(), scope, conversation.ID, posted.Message.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -389,7 +170,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 			if err != nil || source == nil {
 				t.Fatalf("claim: %#v %v", source, err)
 			}
-			settled := settleTaskSource(t, store, scope, source.ID, "worker", taskProposalFixture())
+			settled := conversationruntest.SettleTaskSource(t, store, scope, source.ID, "worker", conversationruntest.TaskProposal())
 			accepted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), settled.Request)
 			if err != nil {
 				t.Fatal(err)
@@ -440,7 +221,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *testing.T) {
 	store := newTestKernelStore(t)
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
-	first, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
+	first, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), conversationruntest.TaskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,14 +230,14 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 		t.Fatalf("hold background: %#v %v", held, err)
 	}
 	conversations := runtimeconversation.NewConversationService(store)
-	scheduler := mustConversationRunScheduler(t, store)
+	scheduler := conversationruntest.NewScheduler(t, store)
 	post := func(key, content string) *AgentRun {
 		t.Helper()
 		current, e := conversations.GetConversation(t.Context(), source.Scope, conversation.ID)
 		if e != nil {
 			t.Fatal(e)
 		}
-		message := postConversationRunTestMessage(t, conversations, current, ConversationParticipantUser, MessageIntentQuestion, content, key)
+		message := conversationruntest.PostMessage(t, conversations, current, ConversationParticipantUser, MessageIntentQuestion, content, key)
 		scheduled, _, e := scheduler.ScheduleMessage(t.Context(), source.Scope, conversation.ID, message.ID)
 		if e != nil {
 			t.Fatal(e)
@@ -484,7 +265,7 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if err != nil || claimed == nil || claimed.ID != secondSource.ID {
 		t.Fatalf("second task source claim: %#v %v", claimed, err)
 	}
-	settled := settleTaskSource(t, store, source.Scope, claimed.ID, "worker", taskSourceProposal{
+	settled := conversationruntest.SettleTaskSource(t, store, source.Scope, claimed.ID, "worker", conversationruntest.TaskSourceProposal{
 		Goal: "Review documentation independently", Acknowledgment: "I will review the documentation in the background."})
 	second, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil {

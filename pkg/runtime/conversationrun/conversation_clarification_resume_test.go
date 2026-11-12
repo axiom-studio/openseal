@@ -7,6 +7,7 @@ import (
 	runtimeactivity "github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 )
 
@@ -39,7 +40,7 @@ func TestConversationClarificationReplayWithInactiveParent(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				f.scheduler = mustConversationRunScheduler(t, f.store)
+				f.scheduler = conversationruntest.NewScheduler(t, f.store)
 				if accepted {
 					result, replayed, err := f.scheduler.ScheduleMessage(t.Context(), root.Scope, f.conversation.ID, answer.ID)
 					if err != nil || !replayed || result == nil || result.Run.ID != child.ID || len(result.Run.PendingInterventions) != 1 {

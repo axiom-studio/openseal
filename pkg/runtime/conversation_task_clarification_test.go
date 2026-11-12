@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -72,8 +73,8 @@ func newConversationTaskClarificationFixture(t *testing.T, store conversationTas
 	if err != nil || claimed == nil || claimed.ID != scheduled.Run.ID {
 		t.Fatalf("claim source: %#v, %v", claimed, err)
 	}
-	proposal := taskSourceProposal{Goal: f.trigger.Content, Acknowledgment: "I have started the introduction."}
-	settled := settleTaskSource(t, store, conversation.Scope, claimed.ID, "worker", proposal)
+	proposal := conversationruntest.TaskSourceProposal{Goal: f.trigger.Content, Acknowledgment: "I have started the introduction."}
+	settled := conversationruntest.SettleTaskSource(t, store, conversation.Scope, claimed.ID, "worker", proposal)
 	accepted, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil || accepted == nil || accepted.Task == nil || accepted.SourceRun == nil || accepted.WorkRun == nil {
 		t.Fatalf("admit independent task: %#v, %v", accepted, err)

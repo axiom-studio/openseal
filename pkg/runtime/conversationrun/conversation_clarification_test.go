@@ -13,6 +13,7 @@ import (
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation/conversationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -37,7 +38,7 @@ func newClarificationFixture(t *testing.T, store clarificationStore, scopeID str
 	if err != nil {
 		t.Fatal(err)
 	}
-	trigger := postConversationRunTestMessage(t, service, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion, "Write a 1000 letter blog about a black hole", "request")
+	trigger := conversationruntest.PostMessage(t, service, conversation, models.ConversationParticipantUser, models.MessageIntentQuestion, "Write a 1000 letter blog about a black hole", "request")
 	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{MessagePageSize: 2})
 	if err != nil {
 		t.Fatal(err)

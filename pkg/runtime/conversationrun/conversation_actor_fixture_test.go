@@ -14,8 +14,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -25,16 +23,6 @@ import (
 // copies of the helpers they need from runtime's tests; the ask_user ones
 // belong to control's tests and move to a control test-support package when
 // control is extracted. Change the copies together with the originals.
-
-// Copied from conversation_run_test.go
-func mustConversationRunScheduler(t *testing.T, store *sqlite.Store) *conversationrun.ConversationRunScheduler {
-	t.Helper()
-	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return scheduler
-}
 
 // Copied from control_ask_user_test.go
 // askUserParked settles an ask_user call of a claimed Run and parks it.
@@ -111,28 +99,6 @@ func cancellationActionCatalog(t *testing.T) (*skill.Catalog, models.Scope) {
 type askUserTestStore interface {
 	models.KernelStore
 	models.ConversationStore
-}
-
-// Copied from conversation_run_test.go
-func postConversationRunTestMessage(
-	t *testing.T,
-	service *runtimeconversation.ConversationService,
-	conversation *models.Conversation,
-	senderType models.ConversationParticipantType,
-	intent models.ConversationMessageIntent,
-	content string,
-	key string,
-) *models.ChannelMessage {
-	t.Helper()
-	result, err := service.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
-		Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: models.ConversationParticipant{Type: senderType, ID: "sender-" + string(senderType)},
-		Intent: intent, Content: content, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: key,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return result.Message
 }
 
 // Copied from control_ask_user_test.go

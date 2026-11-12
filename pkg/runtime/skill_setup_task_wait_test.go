@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding/skillbindingtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -74,7 +75,7 @@ func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *Conve
 	if err != nil {
 		t.Fatal(err)
 	}
-	message := postConversationRunTestMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion, "Read the community in the background", "task-setup-source")
+	message := conversationruntest.PostMessage(t, conversations, conversation, ConversationParticipantUser, MessageIntentQuestion, "Read the community in the background", "task-setup-source")
 	scheduler, err := conversationrun.NewConversationRunScheduler(store, store, conversationrun.ConversationRunSchedulerConfig{})
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +90,7 @@ func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *Conve
 	if err != nil || source == nil || source.ID != scheduled.Run.ID {
 		t.Fatalf("claim setup task source: %#v %v", source, err)
 	}
-	settled := settleTaskSource(t, store, scope, source.ID, "worker", taskSourceProposal{
+	settled := conversationruntest.SettleTaskSource(t, store, scope, source.ID, "worker", conversationruntest.TaskSourceProposal{
 		Goal: "Read the community and report the outcome", Acknowledgment: "I have started reading the community.", Budget: &BudgetPolicy{MaxTurns: 5}})
 	task, err := conversationrun.NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil {

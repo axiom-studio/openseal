@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
 
@@ -52,7 +53,7 @@ func TestCatalogConversationTaskContextSkipsOrdinaryRunReads(t *testing.T) {
 
 func TestCatalogConversationTaskContextSkipsUnmarkedChatChildTaskLookups(t *testing.T) {
 	kernel := newTestKernelStore(t)
-	source, _, _, _ := settledTaskSourceFixture(t, kernel)
+	source, _, _, _ := conversationruntest.SettledTaskSource(t, kernel)
 	child, err := NewPortfolioService(kernel).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: source.Scope, Owner: source.Owner, Kind: RunKindAgentWork, ParentRunID: source.ID, AssignedAgentID: source.AssignedAgentID,
 		Goal: "Ordinary delegated operation", Source: RunSourceFork, Context: maps.Clone(source.Context),
@@ -115,7 +116,7 @@ func catalogTaskPageFixture(t *testing.T, count int) (*sqlite.Store, *Conversati
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := proposedTaskStartRequest(t, store, source, turn, taskSourceProposal{Goal: record.Task.Goal, Acknowledgment: record.Task.Acknowledgment, Budget: record.Task.RequestedBudget})
+		req := conversationruntest.ProposedTaskStartRequest(t, store, source, turn, conversationruntest.TaskSourceProposal{Goal: record.Task.Goal, Acknowledgment: record.Task.Acknowledgment, Budget: record.Task.RequestedBudget})
 		req.WorkerID = "task-worker"
 		accepted, err := tasks.Start(t.Context(), req)
 		if err != nil {

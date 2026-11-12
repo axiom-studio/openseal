@@ -6,6 +6,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 )
 
 func TestInstallationWideInboxKeepsChannelAndDMContextsSeparate(t *testing.T) {
@@ -23,7 +24,7 @@ func TestInstallationWideInboxKeepsChannelAndDMContextsSeparate(t *testing.T) {
 			t.Fatalf("%s inherited %s context", channel, previous)
 		}
 		seen[conversation.ID] = channel
-		message := postConversationRunTestMessage(t, worker.conversations, conversation, ConversationParticipantUser, MessageIntentQuestion, channel+"_SECRET", channel+"-message")
+		message := conversationruntest.PostMessage(t, worker.conversations, conversation, ConversationParticipantUser, MessageIntentQuestion, channel+"_SECRET", channel+"-message")
 		thread, _, err := worker.ensureConversation(ctx, endpoint, NormalizedExternalConversationEvent{ExternalConversationID: channel, ExternalThreadID: "same-thread-id"})
 		if err != nil || thread.ID != conversation.ID {
 			t.Fatalf("thread escaped its channel context: %#v, %v", thread, err)
