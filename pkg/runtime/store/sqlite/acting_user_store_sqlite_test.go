@@ -1,4 +1,4 @@
-package runtime
+package sqlite_test
 
 import (
 	"path/filepath"
