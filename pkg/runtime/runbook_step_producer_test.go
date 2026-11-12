@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
@@ -34,7 +36,7 @@ func TestRunbookProducerEmitsPinnedGovernedCallAndConsumesActionCall(t *testing.
 		"fetch": {Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "web", SkillVersion: "1", Action: "fetch", Arguments: map[string]runbook.Value{"url": {Ref: "/input/url"}}, ResultPath: "/steps/fetch", Next: "done"}},
 		"done":  {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{"content": {Ref: "/steps/fetch/content"}}}},
 	}}
-	calls := FixedActionCalls{}
+	calls := modelsteptest.FixedActionCalls{}
 	producer := newTestRunbookProducer(t, definition, "manual", calls)
 	if producer.Kind() != StepProducerDeterministic {
 		t.Fatalf("kind = %s", producer.Kind())
@@ -205,7 +207,7 @@ func TestRunbookProducerKeepsModelMediaAndOversizeOutputOutOfCheckpoint(t *testi
 			"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 		},
 	}
-	calls := FixedActionCalls{}
+	calls := modelsteptest.FixedActionCalls{}
 	producer := newTestRunbookProducer(t, definition, "daily", calls)
 	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{
 		{Name: "browser_screenshot", SkillID: "browser", Version: "1", Action: "screenshot"},

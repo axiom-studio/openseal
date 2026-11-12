@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -77,7 +79,7 @@ type modelProducerFixture struct {
 	preparer *modelProducerTestPreparer
 	store    *modelProducerTestStore
 	producer *modelstep.ModelStepProducer
-	render   *RenderFixture
+	render   *modelsteptest.RenderFixture
 	in       agentrun.StepInput
 }
 
@@ -85,7 +87,7 @@ func newModelProducerFixture(t *testing.T) *modelProducerFixture {
 	t.Helper()
 	f := &modelProducerFixture{
 		host:   &modelProducerTestHost{},
-		render: NewRenderFixture(t, "lane"),
+		render: modelsteptest.NewRenderFixture(t, "lane"),
 	}
 	prepared := validModelStepRequest()
 	// The preparer's identity is overwritten; the producer owns it.
@@ -152,7 +154,7 @@ func TestModelStepProducerRequestShape(t *testing.T) {
 	// Entries are the path rendered from the latest compaction.
 	if len(req.Entries) != 3 || req.Entries[0].Type != SessionEntryCompaction ||
 		req.Entries[1].Type != SessionEntryUser || req.Entries[2].Type != SessionEntryNote {
-		t.Fatalf("entries = %v", RenderIDs(req.Entries))
+		t.Fatalf("entries = %v", modelsteptest.RenderIDs(req.Entries))
 	}
 	// Unbounded: the preparer's (catalog) cap stays, 0 here; no preview observer.
 	if req.MaxOutputTokens != 0 || req.Stream.AnswerPreview {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -198,7 +200,7 @@ func loopRoutineScriptFixture(t *testing.T) *loopRoutineScript {
 // returns the terminal tool entry the loop records from the outcome.
 func loopRunCommandEntry(t *testing.T, routine *loopRoutineScript, sequence int64, arguments map[string]interface{}, reply map[string]interface{}) *SessionEntry {
 	t.Helper()
-	answer := HostReplyError(errors.New("connection reset"))
+	answer := modelsteptest.HostReplyError(errors.New("connection reset"))
 	if reply != nil {
 		answer = func(_ context.Context, request HostToolRequest) (HostToolResult, error) {
 			result := map[string]interface{}{}
@@ -212,12 +214,12 @@ func loopRunCommandEntry(t *testing.T, routine *loopRoutineScript, sequence int6
 			if result[workspace.ExpectedDigestArgument] == false {
 				delete(result, workspace.ExpectedDigestArgument)
 			}
-			return HostReplyJSON(result, false)(context.Background(), request)
+			return modelsteptest.HostReplyJSON(result, false)(context.Background(), request)
 		}
 	}
-	dispatcher := modelstep.NewHostToolDispatcher(&FakeHostToolHost{Replies: []func(context.Context, HostToolRequest) (HostToolResult, error){answer}},
+	dispatcher := modelstep.NewHostToolDispatcher(&modelsteptest.FakeHostToolHost{Replies: []func(context.Context, HostToolRequest) (HostToolResult, error){answer}},
 		runtimeaction.NewActionCoordinator(nil, nil, nil, nil, nil), nil)
-	call := HostToolCallFixture(t, workspace.OperationRunCommand, arguments)
+	call := modelsteptest.HostToolCallFixture(t, workspace.OperationRunCommand, arguments)
 	call.ToolEntryID = fmt.Sprintf("ent_%d", sequence)
 	call.CommandPins = routine.CommandPins()
 	outcome, ok := dispatcher.Run(context.Background(), call)

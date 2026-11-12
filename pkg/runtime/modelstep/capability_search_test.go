@@ -1,12 +1,15 @@
-package modelstep
+package modelstep_test
 
 import (
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 var capabilitySearchFixtureTools = []string{
@@ -17,8 +20,8 @@ var capabilitySearchFixtureTools = []string{
 
 // capabilitySearchFixture is an Agent with servers connected MCP servers of
 // toolsPerServer binding tools each, named like the kernel names them.
-func capabilitySearchFixture(servers, toolsPerServer int) CapabilityCatalog {
-	catalog := CapabilityCatalog{Scope: models.Scope{Kind: "tenant", ID: "11"}, AgentID: "agent"}
+func capabilitySearchFixture(servers, toolsPerServer int) modelstep.CapabilityCatalog {
+	catalog := modelstep.CapabilityCatalog{Scope: models.Scope{Kind: "tenant", ID: "11"}, AgentID: "agent"}
 	for server := 0; server < servers; server++ {
 		slug := fmt.Sprintf("svc%04d", server)
 		for tool := 0; tool < toolsPerServer; tool++ {
@@ -41,14 +44,14 @@ func searchArgs(query string) map[string]interface{} {
 }
 
 func TestSearchCapabilitiesRanksExactNameFirst(t *testing.T) {
-	s := NewCapabilitySet(capabilitySearchFixture(100, 20), nil, CapabilitySetConfig{})
+	s := modelstep.NewCapabilitySet(capabilitySearchFixture(100, 20), nil, modelstep.CapabilitySetConfig{})
 	if !s.Searching() {
 		t.Fatal("expected search mode")
 	}
-	content, isError := ExecuteSearchCapabilities(s, map[string]interface{}{"query": "svc0042 search pages"}, 0)
+	content, isError := modelstep.ExecuteSearchCapabilities(s, map[string]interface{}{"query": "svc0042 search pages"}, 0)
 	fields := decodeCapabilityContent(t, content)
 	results, _ := fields["results"].([]interface{})
-	if isError || fields["status"] != "search_results" || len(results) != capabilitySearchDefaultLimit ||
+	if isError || fields["status"] != "search_results" || len(results) != modelstep.CapabilitySearchDefaultLimit ||
 		results[0].(map[string]interface{})["id"] != "action:mcp.svc0042.search_pages" {
 		t.Fatalf("search = %s", content)
 	}
@@ -57,7 +60,7 @@ func TestSearchCapabilitiesRanksExactNameFirst(t *testing.T) {
 		t.Fatalf("result = %v", first)
 	}
 	// Description match and explicit limit (JSON numbers decode as float64).
-	content, _ = ExecuteSearchCapabilities(s, map[string]interface{}{"query": "Service 99 export", "limit": float64(3)}, 0)
+	content, _ = modelstep.ExecuteSearchCapabilities(s, map[string]interface{}{"query": "Service 99 export", "limit": float64(3)}, 0)
 	results = decodeCapabilityContent(t, content)["results"].([]interface{})
 	if len(results) != 3 || results[0].(map[string]interface{})["id"] != "action:mcp.svc0099.export_page" {
 		t.Fatalf("description search = %s", content)
@@ -70,7 +73,7 @@ func TestSearchCapabilitiesRanksExactNameFirst(t *testing.T) {
 		{}, {"query": ""}, {"query": "  "}, {"query": "x", "limit": float64(21)}, {"query": "x", "limit": float64(0)},
 		{"query": "x", "limit": 1.5}, {"query": "x", "extra": 1}, {"query": strings.Repeat("q", 201)}, {"query": 7},
 	} {
-		content, isError := ExecuteSearchCapabilities(s, args, 0)
+		content, isError := modelstep.ExecuteSearchCapabilities(s, args, 0)
 		if !isError || decodeCapabilityContent(t, content)["status"] != "invalid_arguments" {
 			t.Fatalf("invalid search %v accepted: %s", args, content)
 		}
@@ -79,62 +82,62 @@ func TestSearchCapabilitiesRanksExactNameFirst(t *testing.T) {
 
 func TestSearchCapabilitiesMarksLoaded(t *testing.T) {
 	catalog := capabilitySearchFixture(100, 20)
-	s := NewCapabilitySet(catalog, []string{"action:mcp.svc0001.get_user"}, CapabilitySetConfig{})
-	content, _ := ExecuteSearchCapabilities(s, map[string]interface{}{"query": "svc0001 get user", "limit": 2}, 0)
+	s := modelstep.NewCapabilitySet(catalog, []string{"action:mcp.svc0001.get_user"}, modelstep.CapabilitySetConfig{})
+	content, _ := modelstep.ExecuteSearchCapabilities(s, map[string]interface{}{"query": "svc0001 get user", "limit": 2}, 0)
 	results := decodeCapabilityContent(t, content)["results"].([]interface{})
 	if len(results) != 2 || results[0].(map[string]interface{})["id"] != "action:mcp.svc0001.get_user" ||
 		results[0].(map[string]interface{})["loaded"] != true || results[1].(map[string]interface{})["loaded"] != false {
 		t.Fatalf("loaded flags = %s", content)
 	}
 	// Loading a result in the same step marks it for a later search.
-	if _, isError, _ := ExecuteLoadCapabilities(s, loadArgs("action:mcp.svc0001.list_users"), capabilityToolName); isError {
+	if _, isError, _ := modelstep.ExecuteLoadCapabilities(s, loadArgs("action:mcp.svc0001.list_users"), capabilityToolName); isError {
 		t.Fatal("load after search failed")
 	}
-	content, _ = ExecuteSearchCapabilities(s, map[string]interface{}{"query": "svc0001 list users", "limit": 1}, 1)
+	content, _ = modelstep.ExecuteSearchCapabilities(s, map[string]interface{}{"query": "svc0001 list users", "limit": 1}, 1)
 	if r := decodeCapabilityContent(t, content)["results"].([]interface{})[0].(map[string]interface{}); r["loaded"] != true {
 		t.Fatalf("after load = %s", content)
 	}
 }
 
 func TestSearchCapabilitiesLimitEightPerRun(t *testing.T) {
-	s := NewCapabilitySet(capabilitySearchFixture(100, 20), nil, CapabilitySetConfig{})
+	s := modelstep.NewCapabilitySet(capabilitySearchFixture(100, 20), nil, modelstep.CapabilitySetConfig{})
 	var path []*models.SessionEntry
-	for i := 0; i < MaxCapabilitySearchesPerRun; i++ {
-		count := CapabilitySearchesThisRun(path, "run-1")
+	for i := 0; i < modelstep.MaxCapabilitySearchesPerRun; i++ {
+		count := modelstep.CapabilitySearchesThisRun(path, "run-1")
 		if count != i {
 			t.Fatalf("count = %d, want %d", count, i)
 		}
-		content, isError := ExecuteSearchCapabilities(s, searchArgs("page"), count)
+		content, isError := modelstep.ExecuteSearchCapabilities(s, searchArgs("page"), count)
 		if isError || decodeCapabilityContent(t, content)["status"] != "search_results" {
 			t.Fatalf("search %d = %s", i, content)
 		}
 		path = append(path, &models.SessionEntry{ID: fmt.Sprintf("s%d", i), RunID: "run-1", Type: models.SessionEntryTool, State: models.ToolEntryCompleted,
-			Tool: &models.ToolEntry{Name: SearchCapabilitiesTool}})
+			Tool: &models.ToolEntry{Name: modelstep.SearchCapabilitiesTool}})
 	}
 	// Errored searches and other Runs' searches do not count.
 	path = append(path,
-		&models.SessionEntry{ID: "err", RunID: "run-1", Type: models.SessionEntryTool, State: models.ToolEntryError, Tool: &models.ToolEntry{Name: SearchCapabilitiesTool}},
-		&models.SessionEntry{ID: "other", RunID: "run-0", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, Tool: &models.ToolEntry{Name: SearchCapabilitiesTool}},
+		&models.SessionEntry{ID: "err", RunID: "run-1", Type: models.SessionEntryTool, State: models.ToolEntryError, Tool: &models.ToolEntry{Name: modelstep.SearchCapabilitiesTool}},
+		&models.SessionEntry{ID: "other", RunID: "run-0", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, Tool: &models.ToolEntry{Name: modelstep.SearchCapabilitiesTool}},
 		capabilityLoadEntry("load", "run-1", models.ToolEntryCompleted, "action:mcp.svc0001.get_user"))
-	count := CapabilitySearchesThisRun(path, "run-1")
-	if count != MaxCapabilitySearchesPerRun {
+	count := modelstep.CapabilitySearchesThisRun(path, "run-1")
+	if count != modelstep.MaxCapabilitySearchesPerRun {
 		t.Fatalf("count = %d", count)
 	}
-	content, isError := ExecuteSearchCapabilities(s, searchArgs("page"), count)
+	content, isError := modelstep.ExecuteSearchCapabilities(s, searchArgs("page"), count)
 	fields := decodeCapabilityContent(t, content)
 	if isError || fields["status"] != "search_limit_reached" || fields["results"] != nil ||
 		!strings.Contains(fields["next"].(string), "load_capabilities") {
 		t.Fatalf("past the limit = %s", content)
 	}
-	if fresh := CapabilitySearchesThisRun(path, "run-2"); fresh != 0 {
+	if fresh := modelstep.CapabilitySearchesThisRun(path, "run-2"); fresh != 0 {
 		t.Fatalf("a new Run starts with %d searches", fresh)
 	}
 }
 
 func TestSearchCapabilitiesNoMatch(t *testing.T) {
-	s := NewCapabilitySet(capabilitySearchFixture(100, 20), nil, CapabilitySetConfig{})
+	s := modelstep.NewCapabilitySet(capabilitySearchFixture(100, 20), nil, modelstep.CapabilitySetConfig{})
 	for _, query := range []string{"zzzz qqqq", "the and of"} {
-		content, isError := ExecuteSearchCapabilities(s, searchArgs(query), 0)
+		content, isError := modelstep.ExecuteSearchCapabilities(s, searchArgs(query), 0)
 		fields := decodeCapabilityContent(t, content)
 		results, ok := fields["results"].([]interface{})
 		if isError || fields["status"] != "no_match" || !ok || len(results) != 0 {
@@ -143,26 +146,26 @@ func TestSearchCapabilitiesNoMatch(t *testing.T) {
 	}
 	// A catalog that lists everything still offers search, so the tool
 	// list does not change when the catalog crosses the budget.
-	listed := NewCapabilitySet(capabilityCatalogFixture(), nil, CapabilitySetConfig{})
+	listed := modelstep.NewCapabilitySet(modelsteptest.CapabilityCatalogFixture(), nil, modelstep.CapabilitySetConfig{})
 	if listed.Searching() {
 		t.Fatal("fixture must list its catalog")
 	}
-	if content, isError := ExecuteSearchCapabilities(listed, searchArgs("notion"), 0); isError {
+	if content, isError := modelstep.ExecuteSearchCapabilities(listed, searchArgs("notion"), 0); isError {
 		t.Fatalf("search of a listed catalog = %s", content)
 	}
 	// A small catalog is deferred and searchable too.
-	small := NewCapabilitySet(CapabilityCatalog{Actions: capabilityCatalogFixture().Actions[:1]}, nil, CapabilitySetConfig{})
-	if content, isError := ExecuteSearchCapabilities(small, searchArgs("notion"), 0); isError {
+	small := modelstep.NewCapabilitySet(modelstep.CapabilityCatalog{Actions: modelsteptest.CapabilityCatalogFixture().Actions[:1]}, nil, modelstep.CapabilitySetConfig{})
+	if content, isError := modelstep.ExecuteSearchCapabilities(small, searchArgs("notion"), 0); isError {
 		t.Fatalf("search of a small catalog = %s", content)
 	}
-	if _, isError := ExecuteSearchCapabilities(nil, searchArgs("notion"), 0); !isError {
+	if _, isError := modelstep.ExecuteSearchCapabilities(nil, searchArgs("notion"), 0); !isError {
 		t.Fatal("nil set must refuse search")
 	}
 }
 
 func TestSearchCapabilitiesAtCatalogScale(t *testing.T) {
-	s := NewCapabilitySet(capabilitySearchFixture(2000, 20), nil, CapabilitySetConfig{})
-	content, isError := ExecuteSearchCapabilities(s, map[string]interface{}{"query": "svc1234 create page", "limit": 5}, 0)
+	s := modelstep.NewCapabilitySet(capabilitySearchFixture(2000, 20), nil, modelstep.CapabilitySetConfig{})
+	content, isError := modelstep.ExecuteSearchCapabilities(s, map[string]interface{}{"query": "svc1234 create page", "limit": 5}, 0)
 	results := decodeCapabilityContent(t, content)["results"].([]interface{})
 	if isError || len(results) != 5 || results[0].(map[string]interface{})["id"] != "action:mcp.svc1234.create_page" {
 		t.Fatalf("results = %s", content)

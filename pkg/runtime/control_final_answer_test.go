@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -819,7 +821,7 @@ func TestFinalAnswerSchemaStableAcrossSkillRefs(t *testing.T) {
 			t.Fatalf("%s changes with its targets", name)
 		}
 	}
-	items := CapabilityNoteLines(modelstep.ControlTargetItems(more))
+	items := modelsteptest.CapabilityNoteLines(modelstep.ControlTargetItems(more))
 	for _, want := range []string{"- agent-2: Ada", "- agent-3: Bo", "- audit — Audit. Input schema:"} {
 		if !strings.Contains(items, want) {
 			t.Fatalf("targets missing %q from the note: %s", want, items)

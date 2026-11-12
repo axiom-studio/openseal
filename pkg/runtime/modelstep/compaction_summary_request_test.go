@@ -1,4 +1,4 @@
-package modelstep
+package modelstep_test
 
 import (
 	"context"
@@ -6,30 +6,33 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 func TestCompactionSummaryRequestKeepsStepPrefix(t *testing.T) {
-	f := newRenderFixture(t, "chat")
-	f.user("run-1", "find the launch notes")
+	f := modelsteptest.NewRenderFixture(t, "chat")
+	f.User("run-1", "find the launch notes")
 	early := addSurfacingLoad(f, "step-1", "c1", "action:notion.fetch", "action_notion_fetch")
-	f.user("run-1", "and gmail")
+	f.User("run-1", "and gmail")
 	late := addSurfacingLoad(f, "step-2", "c2", "action:gmail.read", "action_gmail_read")
-	step := surfacedModelStep(t, f.path())
+	step := surfacedModelStep(t, f.Path())
 
 	// A compaction carries the earlier compaction's tools, then the tools
 	// of the loads it summarizes, each name once.
-	if carried := carriedToolsAfter(nil, f.entries[:3]); !reflect.DeepEqual(carried, early.Tool.SurfacedTools) {
+	if carried := modelstep.CarriedToolsAfter(nil, f.Entries[:3]); !reflect.DeepEqual(carried, early.Tool.SurfacedTools) {
 		t.Fatalf("carried after the first load = %+v", carried)
 	}
-	carried := carriedToolsAfter(&models.CompactionEntry{CarriedTools: []models.SurfacedTool{{Capability: "action:drive.list", Name: "action_drive_list",
+	carried := modelstep.CarriedToolsAfter(&models.CompactionEntry{CarriedTools: []models.SurfacedTool{{Capability: "action:drive.list", Name: "action_drive_list",
 		InputSchema: map[string]interface{}{"type": "object"}}}}, []*models.SessionEntry{early})
 	if got := []string{carried[0].Name, carried[1].Name}; len(carried) != 2 || !reflect.DeepEqual(got, []string{"action_drive_list", "action_notion_fetch"}) {
 		t.Fatalf("carried = %+v", carried)
 	}
 
 	// The whole-path summary is the step's request plus the instruction.
-	whole := compactionSummaryRequest(step)
+	whole := modelstep.CompactionSummaryRequest(step)
 	if !reflect.DeepEqual(whole.Tools, step.Tools) || !reflect.DeepEqual(whole.Entries, step.Entries) || !reflect.DeepEqual(whole.System, step.System) {
 		t.Fatal("the whole-path summary request changed the step's tools, entries or system")
 	}
@@ -56,7 +59,7 @@ func TestCompactionSummaryRequestKeepsStepPrefix(t *testing.T) {
 	}
 	// A chunk ending at the first load: its tool keeps the surface, the
 	// later load's tool is not declared.
-	first := compactionChunkSummaryRequest(step, step.Entries[:at(early.ID)+1])
+	first := modelstep.CompactionChunkSummaryRequest(step, step.Entries[:at(early.ID)+1])
 	if surface, ok := surfaceOf(first, "action_notion_fetch"); !ok || surface != early.ID {
 		t.Fatalf("first chunk notion surface = %q %v", surface, ok)
 	}
@@ -67,7 +70,7 @@ func TestCompactionSummaryRequestKeepsStepPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A chunk after the first load: its tool is callable from the start.
-	second := compactionChunkSummaryRequest(step, step.Entries[at(early.ID)+1:])
+	second := modelstep.CompactionChunkSummaryRequest(step, step.Entries[at(early.ID)+1:])
 	if surface, ok := surfaceOf(second, "action_notion_fetch"); !ok || surface != "" {
 		t.Fatalf("second chunk notion surface = %q %v", surface, ok)
 	}
@@ -78,16 +81,16 @@ func TestCompactionSummaryRequestKeepsStepPrefix(t *testing.T) {
 
 // addSurfacingLoad appends a load_capabilities call and its completed entry
 // that surfaced one tool, frozen as the tool executor freezes it.
-func addSurfacingLoad(f *renderFixture, step, call, capabilityID, name string) *models.SessionEntry {
+func addSurfacingLoad(f *modelsteptest.RenderFixture, step, call, capabilityID, name string) *models.SessionEntry {
 	arguments := json.RawMessage(`{"ids":["` + capabilityID + `"]}`)
-	f.add(&models.SessionEntry{RunID: "run-1", StepID: step, Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
+	f.Add(&models.SessionEntry{RunID: "run-1", StepID: step, Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
 		Provider: models.ModelStepProviderAnthropic, Model: "claude-test", StopReason: models.ModelStopToolCalls,
-		ToolCalls: []models.ModelToolCall{{ID: call, Name: LoadCapabilitiesTool, Arguments: arguments}},
+		ToolCalls: []models.ModelToolCall{{ID: call, Name: modelstep.LoadCapabilitiesTool, Arguments: arguments}},
 	}})
 	tool := models.ModelStepTool{Name: name, Description: "Read " + name, InputSchema: map[string]interface{}{"type": "object"}}
-	return f.add(&models.SessionEntry{RunID: "run-1", StepID: step, Type: models.SessionEntryTool, State: models.ToolEntryCompleted, ToolCallID: call, Tool: &models.ToolEntry{
-		Name: LoadCapabilitiesTool, Arguments: arguments, SideEffect: models.ToolSideEffectNone,
-		SurfacedTools: []models.SurfacedTool{NewSurfacedTool(capabilityID, tool)},
+	return f.Add(&models.SessionEntry{RunID: "run-1", StepID: step, Type: models.SessionEntryTool, State: models.ToolEntryCompleted, ToolCallID: call, Tool: &models.ToolEntry{
+		Name: modelstep.LoadCapabilitiesTool, Arguments: arguments, SideEffect: models.ToolSideEffectNone,
+		SurfacedTools: []models.SurfacedTool{modelstep.NewSurfacedTool(capabilityID, tool)},
 		Result:        &models.ToolResult{Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartText, Text: `{"status":"loaded"}`}}},
 	}})
 }
@@ -96,13 +99,13 @@ func addSurfacingLoad(f *renderFixture, step, call, capabilityID, name string) *
 // the rendered entries, and the base tools with the loaded group of the path.
 func surfacedModelStep(t *testing.T, path *models.AgentSessionPath) models.ModelStepRequest {
 	t.Helper()
-	step := validStepRequest()
-	entries, err := ProjectSessionPath(context.Background(), path, SessionRenderOptions{})
+	step := modelsteptest.ValidModelStepRequest()
+	entries, err := modelstep.ProjectSessionPath(context.Background(), path, modelstep.SessionRenderOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	load := models.ModelStepTool{Name: LoadCapabilitiesTool, Description: "Load.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness}
-	step.Tools = ApplySurfaces(append([]models.ModelStepTool{step.Tools[0], load}, step.Tools[1]), path, entries)
+	load := models.ModelStepTool{Name: modelstep.LoadCapabilitiesTool, Description: "Load.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness}
+	step.Tools = modelstep.ApplySurfaces(append([]models.ModelStepTool{step.Tools[0], load}, step.Tools[1]), path, entries)
 	step.Entries = entries
 	if err := step.Validate(); err != nil {
 		t.Fatalf("surfaced step does not validate: %v", err)

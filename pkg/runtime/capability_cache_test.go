@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -16,7 +18,7 @@ import (
 // between Runs only append to what the model already saw.
 
 // fixtureNoteAppender appends capabilities notes to a render fixture.
-type fixtureNoteAppender struct{ f *RenderFixture }
+type fixtureNoteAppender struct{ f *modelsteptest.RenderFixture }
 
 func (a fixtureNoteAppender) AppendAgentSessionEntries(_ context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
 	var out []*SessionEntry
@@ -259,8 +261,8 @@ func TestSurfacedToolDefinitionFrozen(t *testing.T) {
 }
 
 func TestLoadDescriptionModeIndependent(t *testing.T) {
-	listed := modelstep.NewCapabilitySet(CapabilityCatalogFixture(), nil, modelstep.CapabilitySetConfig{})
-	searching := modelstep.NewCapabilitySet(CapabilityCatalogFixture(), nil, modelstep.CapabilitySetConfig{CatalogBytes: 200})
+	listed := modelstep.NewCapabilitySet(modelsteptest.CapabilityCatalogFixture(), nil, modelstep.CapabilitySetConfig{})
+	searching := modelstep.NewCapabilitySet(modelsteptest.CapabilityCatalogFixture(), nil, modelstep.CapabilitySetConfig{CatalogBytes: 200})
 	if listed.Searching() || !searching.Searching() {
 		t.Fatal("fixtures must cover both modes")
 	}
@@ -282,7 +284,7 @@ func TestLoadDescriptionModeIndependent(t *testing.T) {
 
 func TestLoadFreezesSurfacedToolsOnTheEntry(t *testing.T) {
 	x := newToolExecFixture(t, agentrun.ControlAuthority{})
-	x.binding.ModelActions = CapabilityCatalogFixture().Actions
+	x.binding.ModelActions = modelsteptest.CapabilityCatalogFixture().Actions
 	step := x.step("step-1", AgentTurnStatusRunning, toolCall("call-load", modelstep.LoadCapabilitiesTool, `{"ids":["action:notion.op2"]}`))
 	if _, err := x.binding.Tools.ExecuteStepTools(x.ctx, x.input(step)); err != nil {
 		t.Fatal(err)

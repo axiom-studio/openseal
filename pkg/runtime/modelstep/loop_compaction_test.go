@@ -725,3 +725,15 @@ func TestCompactionModelPrefersStepThenBindingThenNewest(t *testing.T) {
 		t.Fatalf("model after a change = %q, want the binding's", got)
 	}
 }
+
+// newModelStepTestStore opens an in-memory SQLite store closed when the test
+// ends.
+func newModelStepTestStore(t testing.TB) *sqlite.Store {
+	t.Helper()
+	store, err := sqlite.NewInMemorySQLiteStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}

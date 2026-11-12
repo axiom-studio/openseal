@@ -1,4 +1,4 @@
-package modelstep
+package modelstep_test
 
 import (
 	"fmt"
@@ -6,58 +6,28 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+
 	"github.com/axiom-studio/openseal/pkg/builtin"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
-// capabilityCatalogFixture is a deferred catalog: eight Notion-like actions
-// bound to one prompt each, four research prompts, and the built-in Skill.
-func capabilityCatalogFixture() CapabilityCatalog {
-	catalog := CapabilityCatalog{Scope: models.Scope{Kind: "tenant", ID: "tenant-1"}, AgentID: "agent-1"}
-	for i := 0; i < 4; i++ {
-		catalog.SkillPrompts = append(catalog.SkillPrompts, models.HostedSkillPrompt{
-			SkillID: fmt.Sprintf("research.%d", i), Version: "1.0.0", Reference: fmt.Sprintf("skill-research-%d@1", i),
-			Name: fmt.Sprintf("Research %d", i), Description: "Research guidance", Instructions: fmt.Sprintf("Research instructions %d.", i),
-		})
-	}
-	catalog.SkillPrompts = append(catalog.SkillPrompts, models.HostedSkillPrompt{
-		SkillID: "notion", Version: "3", Reference: "skill-notion@3", Name: "Notion", Description: "Notion workspace", Instructions: "Use Notion carefully.",
-	})
-	for i := 0; i < 8; i++ {
-		catalog.Actions = append(catalog.Actions, capability.ModelAction{
-			Name: fmt.Sprintf("notion.op%d", i), SkillID: "notion", Version: "3", Action: fmt.Sprintf("op%d", i),
-			Description: fmt.Sprintf("Notion operation %d", i), InputSchema: map[string]interface{}{"type": "object"},
-		})
-	}
-	catalog.SkillPrompts = append(catalog.SkillPrompts, models.HostedSkillPrompt{
-		SkillID: builtin.SkillID, Version: "1", Reference: "builtin-z@1", Name: "Built-in", Instructions: "Built-in instructions.",
-	}, models.HostedSkillPrompt{
-		SkillID: builtin.SkillID, Version: "1", Reference: "builtin-a@1", Name: "Built-in A", Instructions: "Built-in A instructions.",
-	})
-	catalog.Actions = append(catalog.Actions, capability.ModelAction{
-		Name: "openseal.builtin.web_search", SkillID: builtin.SkillID, Version: "1", Action: "web_search", Description: "Search the web",
-	}, capability.ModelAction{
-		Name: "openseal.builtin.generate_image", SkillID: builtin.SkillID, Version: "1", Action: "generate_image", Description: "Make an image",
-	})
-	catalog.HostTools = HostToolSpecs(workspace.ChatAuthority("chat-1"))
-	return catalog
-}
-
 func TestPinnedCapabilitySkillIDIsBuiltin(t *testing.T) {
-	if PinnedCapabilitySkillID != builtin.SkillID {
-		t.Fatalf("pinned skill %q != builtin %q", PinnedCapabilitySkillID, builtin.SkillID)
+	if modelstep.PinnedCapabilitySkillID != builtin.SkillID {
+		t.Fatalf("pinned skill %q != builtin %q", modelstep.PinnedCapabilitySkillID, builtin.SkillID)
 	}
 }
 
 func TestCapabilitySetSmallCatalogIsDeferred(t *testing.T) {
-	catalog := CapabilityCatalog{
+	catalog := modelstep.CapabilityCatalog{
 		Actions:      []capability.ModelAction{{Name: "notion.search", SkillID: "notion", Version: "1"}},
 		SkillPrompts: []models.HostedSkillPrompt{{SkillID: "notion", Version: "1", Reference: "skill-notion@1"}},
-		HostTools:    HostToolSpecs(workspace.ChatAuthority("chat-1")),
+		HostTools:    modelstep.HostToolSpecs(workspace.ChatAuthority("chat-1")),
 	}
-	s := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
+	s := modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{})
 	if s.Searching() {
 		t.Fatal("a small catalog is listed, not searched")
 	}
@@ -73,8 +43,8 @@ func TestCapabilitySetSmallCatalogIsDeferred(t *testing.T) {
 }
 
 func TestCapabilitySetPinsHostToolsThenBuiltinWithinBudget(t *testing.T) {
-	catalog := capabilityCatalogFixture()
-	s := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
+	catalog := modelsteptest.CapabilityCatalogFixture()
+	s := modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{})
 	var want []string
 	for _, spec := range catalog.HostTools {
 		want = append(want, "workspace:"+spec.Operation)
@@ -101,23 +71,23 @@ func TestCapabilitySetPinsHostToolsThenBuiltinWithinBudget(t *testing.T) {
 	}
 
 	// An oversized pinned definition is skipped, never truncated, and stays loadable.
-	big := capabilityCatalogFixture()
+	big := modelsteptest.CapabilityCatalogFixture()
 	big.Actions[len(big.Actions)-2].Description = strings.Repeat("x", 4096)
 	budget := 0
-	probe := NewCapabilitySet(big, nil, CapabilitySetConfig{})
+	probe := modelstep.NewCapabilitySet(big, nil, modelstep.CapabilitySetConfig{})
 	for _, id := range probe.IDs() {
 		if id != "action:openseal.builtin.web_search" {
-			budget += probe.definitionCost(id)
+			budget += probe.DefinitionCost(id)
 		}
 	}
-	small := NewCapabilitySet(big, nil, CapabilitySetConfig{PinnedBytes: budget})
+	small := modelstep.NewCapabilitySet(big, nil, modelstep.CapabilitySetConfig{PinnedBytes: budget})
 	if small.Loaded("action:openseal.builtin.web_search") || !small.Loaded("action:openseal.builtin.generate_image") {
 		t.Fatalf("budget skip: %v", small.IDs())
 	}
 	if !small.Loaded("workspace:" + workspace.OperationRunCommand) {
 		t.Fatal("run_command must stay pinned ahead of the builtin Skill")
 	}
-	reloaded := NewCapabilitySet(big, []string{"action:openseal.builtin.web_search"}, CapabilitySetConfig{PinnedBytes: budget})
+	reloaded := modelstep.NewCapabilitySet(big, []string{"action:openseal.builtin.web_search"}, modelstep.CapabilitySetConfig{PinnedBytes: budget})
 	if !reloaded.Loaded("action:openseal.builtin.web_search") || reloaded.Pinned("action:openseal.builtin.web_search") {
 		t.Fatal("skipped pinned capability must stay loadable")
 	}
@@ -128,8 +98,8 @@ func TestCapabilitySetPinsHostToolsThenBuiltinWithinBudget(t *testing.T) {
 	}
 }
 
-func longPromptCatalogFixture() CapabilityCatalog {
-	catalog := capabilityCatalogFixture()
+func longPromptCatalogFixture() modelstep.CapabilityCatalog {
+	catalog := modelsteptest.CapabilityCatalogFixture()
 	for i := 0; i < 4; i++ {
 		catalog.SkillPrompts[i].Reference = fmt.Sprintf("skill:example.research.module.%d@1.2.3#binding:workforce:deployment-1234567890:example.research.module.%d@17", i, i)
 	}
@@ -138,16 +108,16 @@ func longPromptCatalogFixture() CapabilityCatalog {
 
 func TestCapabilitySetDiscoveryHandlesForLongPromptRefs(t *testing.T) {
 	catalog := longPromptCatalogFixture()
-	s := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
+	s := modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{})
 	id := "prompt:" + catalog.SkillPrompts[3].Reference
-	handle := s.discoveryID(id)
+	handle := s.DiscoveryID(id)
 	if handle == id || !strings.HasPrefix(handle, "prompt:") || len(handle) != len("prompt:")+16 {
 		t.Fatalf("long reference not compacted: %q", handle)
 	}
-	if short := s.discoveryID("prompt:skill-notion@3"); short != "prompt:skill-notion@3" {
+	if short := s.DiscoveryID("prompt:skill-notion@3"); short != "prompt:skill-notion@3" {
 		t.Fatalf("short reference compacted: %q", short)
 	}
-	listing := capabilityNoteLines(s.CatalogLines())
+	listing := modelsteptest.CapabilityNoteLines(s.CatalogLines())
 	if !strings.Contains(listing, "\n- "+handle+" — ") || strings.Contains(listing, id) {
 		t.Fatal("the capabilities listing must show the handle, not the long ID")
 	}
@@ -158,7 +128,7 @@ func TestCapabilitySetDiscoveryHandlesForLongPromptRefs(t *testing.T) {
 		t.Fatalf("Resolve(canonical) = %q, %v", got, ok)
 	}
 	// Loads keep canonical identity: a handle passed as loaded ID resolves.
-	loaded := NewCapabilitySet(catalog, []string{handle}, CapabilitySetConfig{})
+	loaded := modelstep.NewCapabilitySet(catalog, []string{handle}, modelstep.CapabilitySetConfig{})
 	if !loaded.Loaded(id) || !loaded.Loaded(handle) {
 		t.Fatal("handle load not resolved")
 	}
@@ -177,7 +147,7 @@ func TestCapabilitySetDiscoveryHandlesForLongPromptRefs(t *testing.T) {
 		case "reordered":
 			next.SkillPrompts[3], next.SkillPrompts[4] = next.SkillPrompts[4], next.SkillPrompts[3]
 		}
-		got, ok := NewCapabilitySet(next, nil, CapabilitySetConfig{}).Resolve(handle)
+		got, ok := modelstep.NewCapabilitySet(next, nil, modelstep.CapabilitySetConfig{}).Resolve(handle)
 		if change == "reordered" {
 			if !ok || got != id {
 				t.Fatalf("reordering changed identity: %q %v", got, ok)
@@ -191,10 +161,10 @@ func TestCapabilitySetDiscoveryHandlesForLongPromptRefs(t *testing.T) {
 func TestCapabilitySetHandleCollisionFallsBack(t *testing.T) {
 	catalog := longPromptCatalogFixture()
 	id := "prompt:" + catalog.SkillPrompts[0].Reference
-	handle := NewCapabilitySet(catalog, nil, CapabilitySetConfig{}).discoveryID(id)
+	handle := modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{}).DiscoveryID(id)
 	catalog.SkillPrompts[1].Reference = strings.TrimPrefix(handle, "prompt:")
-	next := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
-	if next.discoveryID(id) != id {
+	next := modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{})
+	if next.DiscoveryID(id) != id {
 		t.Fatal("ambiguous handle retained")
 	}
 	if got, ok := next.Resolve(handle); !ok || got != handle {
@@ -203,10 +173,10 @@ func TestCapabilitySetHandleCollisionFallsBack(t *testing.T) {
 }
 
 func TestCapabilitySetLoadedOrderAppendsAndClosesOverBoundPrompts(t *testing.T) {
-	catalog := capabilityCatalogFixture()
-	base := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
+	catalog := modelsteptest.CapabilityCatalogFixture()
+	base := modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{})
 	pinned := base.IDs()
-	s := NewCapabilitySet(catalog, []string{"action:notion.op5", "prompt:skill-research-2@1", "action:notion.op1", "action:notion.op5"}, CapabilitySetConfig{})
+	s := modelstep.NewCapabilitySet(catalog, []string{"action:notion.op5", "prompt:skill-research-2@1", "action:notion.op1", "action:notion.op5"}, modelstep.CapabilitySetConfig{})
 	want := append(append([]string(nil), pinned...),
 		"prompt:skill-notion@3", "action:notion.op5", "prompt:skill-research-2@1", "action:notion.op1")
 	if got := s.IDs(); !reflect.DeepEqual(got, want) {
@@ -222,20 +192,20 @@ func TestCapabilitySetLoadedOrderAppendsAndClosesOverBoundPrompts(t *testing.T) 
 	if prompts[len(prompts)-2].Reference != "skill-notion@3" || prompts[len(prompts)-1].Instructions != "Research instructions 2." {
 		t.Fatalf("visible prompts: %v", prompts)
 	}
-	if got := s.closure("action:notion.op2"); !reflect.DeepEqual(got, []string{"action:notion.op2"}) {
+	if got := s.Closure("action:notion.op2"); !reflect.DeepEqual(got, []string{"action:notion.op2"}) {
 		t.Fatalf("closure of an action whose prompt is loaded: %v", got)
 	}
-	if got := base.closure("action:notion.op2"); !reflect.DeepEqual(got, []string{"prompt:skill-notion@3", "action:notion.op2"}) {
+	if got := base.Closure("action:notion.op2"); !reflect.DeepEqual(got, []string{"prompt:skill-notion@3", "action:notion.op2"}) {
 		t.Fatalf("closure: %v", got)
 	}
 }
 
 func TestCapabilitySetFiltersLoadsAbsentFromCatalog(t *testing.T) {
-	catalog := capabilityCatalogFixture()
-	pinned := NewCapabilitySet(catalog, nil, CapabilitySetConfig{}).IDs()
+	catalog := modelsteptest.CapabilityCatalogFixture()
+	pinned := modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{}).IDs()
 	// action:notion.op7 was revoked (binding revision); the other unknowns never existed.
 	catalog.Actions = append(catalog.Actions[:7], catalog.Actions[8:]...)
-	s := NewCapabilitySet(catalog, []string{"action:notion.op7", "action:ghost", "prompt:skill-gone@1", "", "action:notion.op0"}, CapabilitySetConfig{})
+	s := modelstep.NewCapabilitySet(catalog, []string{"action:notion.op7", "action:ghost", "prompt:skill-gone@1", "", "action:notion.op0"}, modelstep.CapabilitySetConfig{})
 	want := append(append([]string(nil), pinned...), "prompt:skill-notion@3", "action:notion.op0")
 	if got := s.IDs(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v\nwant %v", got, want)
@@ -248,24 +218,15 @@ func TestCapabilitySetFiltersLoadsAbsentFromCatalog(t *testing.T) {
 	}
 }
 
-// capabilityNoteLines joins listing items as the note renders them.
-func capabilityNoteLines(items []CapabilityNoteItem) string {
-	var b strings.Builder
-	for _, item := range items {
-		b.WriteString("\n" + item.Text)
-	}
-	return b.String()
-}
-
 func TestCapabilityListingIndependentOfLoads(t *testing.T) {
-	catalog := capabilityCatalogFixture()
-	empty := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
-	loaded := NewCapabilitySet(catalog, []string{"action:notion.op3", "prompt:skill-research-0@1"}, CapabilitySetConfig{})
+	catalog := modelsteptest.CapabilityCatalogFixture()
+	empty := modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{})
+	loaded := modelstep.NewCapabilitySet(catalog, []string{"action:notion.op3", "prompt:skill-research-0@1"}, modelstep.CapabilitySetConfig{})
 	if empty.Searching() {
 		t.Fatal("fixture must list the full catalog")
 	}
-	listing := capabilityNoteLines(empty.CatalogLines())
-	if listing == "" || listing != capabilityNoteLines(loaded.CatalogLines()) {
+	listing := modelsteptest.CapabilityNoteLines(empty.CatalogLines())
+	if listing == "" || listing != modelsteptest.CapabilityNoteLines(loaded.CatalogLines()) {
 		t.Fatal("listing depends on loads")
 	}
 	for _, want := range []string{"\n- action:notion.op3 — Notion operation 3", "\n- prompt:skill-notion@3 — Notion: Notion workspace",
@@ -280,14 +241,14 @@ func TestCapabilityListingIndependentOfLoads(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"load_capabilities", "search_capabilities", "Loaded tools become callable in your next step", "capabilities note"} {
-		if !strings.Contains(CapabilityLoadingText, want) {
+		if !strings.Contains(modelstep.CapabilityLoadingText, want) {
 			t.Fatalf("loading instructions missing %q", want)
 		}
 	}
 }
 
 func TestCapabilityDirectorySearchModeBounded(t *testing.T) {
-	catalog := capabilityCatalogFixture()
+	catalog := modelsteptest.CapabilityCatalogFixture()
 	for server := 0; server < 30; server++ {
 		bindingID := fmt.Sprintf("binding-%02d", server)
 		catalog.SkillPrompts = append(catalog.SkillPrompts, models.HostedSkillPrompt{SkillID: "mcp", Version: "1", BindingID: bindingID,
@@ -299,11 +260,11 @@ func TestCapabilityDirectorySearchModeBounded(t *testing.T) {
 			})
 		}
 	}
-	s := NewCapabilitySet(catalog, nil, CapabilitySetConfig{})
+	s := modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{})
 	if !s.Searching() {
 		t.Fatal("more than 64 entries must switch to search mode")
 	}
-	directory := capabilityNoteLines(s.DirectoryLines())
+	directory := modelsteptest.CapabilityNoteLines(s.DirectoryLines())
 	for _, want := range []string{"\n- mcp.server07 — Server 07 (4 tools, instructions)", "\n- notion — Notion (8 tools, instructions)",
 		"\n- workspace (" + fmt.Sprint(len(catalog.HostTools)) + " tools)"} {
 		if !strings.Contains(directory, want) {
@@ -313,20 +274,20 @@ func TestCapabilityDirectorySearchModeBounded(t *testing.T) {
 	if strings.Contains(directory, "action:mcp.server07.tool1") {
 		t.Fatal("search mode must not list every capability")
 	}
-	if directory != capabilityNoteLines(NewCapabilitySet(catalog, []string{"action:mcp.server03.tool2"}, CapabilitySetConfig{}).DirectoryLines()) {
+	if directory != modelsteptest.CapabilityNoteLines(modelstep.NewCapabilitySet(catalog, []string{"action:mcp.server03.tool2"}, modelstep.CapabilitySetConfig{}).DirectoryLines()) {
 		t.Fatal("directory depends on loads")
 	}
 
-	bounded := capabilityNoteLines(NewCapabilitySet(catalog, nil, CapabilitySetConfig{SummaryBytes: 300}).DirectoryLines())
+	bounded := modelsteptest.CapabilityNoteLines(modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{SummaryBytes: 300}).DirectoryLines())
 	if !strings.Contains(bounded, " more; search to find them") {
 		t.Fatalf("directory not bounded: %s", bounded)
 	}
-	if lines := strings.Count(bounded, "\n- "); lines >= len(s.capabilityGroups()) {
-		t.Fatalf("directory lists %d of %d groups", lines, len(s.capabilityGroups()))
+	if lines := strings.Count(bounded, "\n- "); lines >= s.CapabilityGroupCount() {
+		t.Fatalf("directory lists %d of %d groups", lines, s.CapabilityGroupCount())
 	}
 
-	byBytes := capabilityCatalogFixture()
-	if !NewCapabilitySet(byBytes, nil, CapabilitySetConfig{CatalogBytes: 200}).Searching() {
+	byBytes := modelsteptest.CapabilityCatalogFixture()
+	if !modelstep.NewCapabilitySet(byBytes, nil, modelstep.CapabilitySetConfig{CatalogBytes: 200}).Searching() {
 		t.Fatal("a listing over the byte budget must switch to search mode")
 	}
 }
@@ -334,15 +295,15 @@ func TestCapabilityDirectorySearchModeBounded(t *testing.T) {
 // capabilityLoadEntry is a load_capabilities tool entry: action and
 // workspace IDs become frozen tools, other IDs loaded instructions.
 func capabilityLoadEntry(id, runID string, state models.ToolEntryState, loaded ...string) *models.SessionEntry {
-	tool := &models.ToolEntry{Name: LoadCapabilitiesTool}
+	tool := &models.ToolEntry{Name: modelstep.LoadCapabilitiesTool}
 	for _, capabilityID := range loaded {
 		switch {
 		case strings.HasPrefix(capabilityID, models.CapabilityActionPrefix):
 			name := "action_" + strings.ReplaceAll(strings.TrimPrefix(capabilityID, models.CapabilityActionPrefix), ".", "_")
 			tool.SurfacedTools = append(tool.SurfacedTools, models.SurfacedTool{Capability: capabilityID, Name: name,
 				Description: "Frozen " + name, InputSchema: map[string]interface{}{"type": "object"}})
-		case strings.HasPrefix(capabilityID, CapabilityWorkspacePrefix):
-			name := strings.ReplaceAll(strings.TrimPrefix(capabilityID, CapabilityWorkspacePrefix), ".", "_")
+		case strings.HasPrefix(capabilityID, modelstep.CapabilityWorkspacePrefix):
+			name := strings.ReplaceAll(strings.TrimPrefix(capabilityID, modelstep.CapabilityWorkspacePrefix), ".", "_")
 			tool.SurfacedTools = append(tool.SurfacedTools, models.SurfacedTool{Capability: capabilityID, Name: name,
 				InputSchema: map[string]interface{}{"type": "object"}})
 		default:
@@ -363,7 +324,7 @@ func TestPathLoadedCapabilityIDsIgnoresErroredAndPreCompactionLoads(t *testing.T
 			SurfacedTools: []models.SurfacedTool{{Capability: "action:notion.op4", Name: "action_notion_op4"}}}},
 		capabilityLoadEntry("e7", "run-1", models.ToolEntryCompleted, "action:notion.op5", "action:notion.op1"),
 	}
-	if got, want := PathLoadedCapabilityIDs(&models.AgentSessionPath{Entries: entries}), []string{"prompt:skill-notion@3", "action:notion.op0", "action:notion.op1", "action:notion.op5"}; !reflect.DeepEqual(got, want) {
+	if got, want := modelstep.PathLoadedCapabilityIDs(&models.AgentSessionPath{Entries: entries}), []string{"prompt:skill-notion@3", "action:notion.op0", "action:notion.op1", "action:notion.op5"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 
@@ -374,17 +335,17 @@ func TestPathLoadedCapabilityIDsIgnoresErroredAndPreCompactionLoads(t *testing.T
 		withSessionSequence(capabilityLoadEntry("p1", "run-1", models.ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op0"), "s1", 1),
 		withSessionSequence(capabilityLoadEntry("p2", "run-1", models.ToolEntryCompleted, "action:notion.op1"), "s1", 2),
 		withSessionSequence(&models.SessionEntry{ID: "p3", Type: models.SessionEntryCompaction, Compaction: &models.CompactionEntry{Summary: "s", FirstKeptEntryID: "p2",
-			CarriedTools: carriedToolsAfter(nil, segmentPrefix(1))}}, "s1", 3),
+			CarriedTools: modelstep.CarriedToolsAfter(nil, segmentPrefix(1))}}, "s1", 3),
 		withSessionSequence(capabilityLoadEntry("p4", "run-1", models.ToolEntryCompleted, "action:notion.op2"), "s1", 4),
 	}
 	rendered, err := models.BuildAgentSessionPath([]*models.AgentSession{session}, [][]*models.SessionEntry{segment}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := PathCarriedCapabilityIDs(rendered), []string{"action:notion.op0"}; !reflect.DeepEqual(got, want) {
+	if got, want := modelstep.PathCarriedCapabilityIDs(rendered), []string{"action:notion.op0"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rendered path carried %v want %v", got, want)
 	}
-	if got, want := PathLoadedCapabilityIDs(rendered), []string{"action:notion.op1", "action:notion.op2"}; !reflect.DeepEqual(got, want) {
+	if got, want := modelstep.PathLoadedCapabilityIDs(rendered), []string{"action:notion.op1", "action:notion.op2"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rendered path got %v want %v", got, want)
 	}
 }
@@ -402,7 +363,7 @@ func withSessionSequence(entry *models.SessionEntry, sessionID string, sequence 
 }
 
 func TestPathLoadedCapabilityIDsCarryAcrossRunsInSession(t *testing.T) {
-	catalog := capabilityCatalogFixture()
+	catalog := modelsteptest.CapabilityCatalogFixture()
 	session := &models.AgentSession{ID: "conv", NextSequence: 5}
 	segment := []*models.SessionEntry{
 		withSessionSequence(capabilityLoadEntry("r1-load", "run-1", models.ToolEntryCompleted, "prompt:skill-notion@3", "action:notion.op4"), "conv", 1),
@@ -414,11 +375,11 @@ func TestPathLoadedCapabilityIDsCarryAcrossRunsInSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loaded := PathLoadedCapabilityIDs(path)
+	loaded := modelstep.PathLoadedCapabilityIDs(path)
 	if want := []string{"prompt:skill-notion@3", "action:notion.op4", "action:notion.op6"}; !reflect.DeepEqual(loaded, want) {
 		t.Fatalf("got %v want %v", loaded, want)
 	}
-	s := NewCapabilitySet(catalog, loaded, CapabilitySetConfig{})
+	s := modelstep.NewCapabilitySet(catalog, loaded, modelstep.CapabilitySetConfig{})
 	if !s.Loaded("action:notion.op4") || !s.Loaded("action:notion.op6") {
 		t.Fatal("a later Run in the session must see earlier loads")
 	}
@@ -439,15 +400,15 @@ func TestPathLoadedCapabilityIDsChildSessionInheritsParentUpToFork(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := PathLoadedCapabilityIDs(path), []string{"action:notion.op0", "action:notion.op3"}; !reflect.DeepEqual(got, want) {
+	if got, want := modelstep.PathLoadedCapabilityIDs(path), []string{"action:notion.op0", "action:notion.op3"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 }
 
 func TestLoadSurfacesWholeSkillWithinBudget(t *testing.T) {
-	catalog := capabilityCatalogFixture()
-	s := NewCapabilitySet(catalog, []string{"action:notion.op3"}, CapabilitySetConfig{})
-	_, isError, loaded := ExecuteLoadCapabilities(s, loadArgs("action:notion.op5"), capabilityToolName)
+	catalog := modelsteptest.CapabilityCatalogFixture()
+	s := modelstep.NewCapabilitySet(catalog, []string{"action:notion.op3"}, modelstep.CapabilitySetConfig{})
+	_, isError, loaded := modelstep.ExecuteLoadCapabilities(s, loadArgs("action:notion.op5"), capabilityToolName)
 	if isError {
 		t.Fatal("load failed")
 	}
@@ -459,21 +420,21 @@ func TestLoadSurfacesWholeSkillWithinBudget(t *testing.T) {
 	}
 
 	// A budget for two more definitions keeps the first two siblings.
-	cost := s.toolCost("action:notion.op0")
-	bounded := NewCapabilitySet(catalog, nil, CapabilitySetConfig{SkillLoadBudget: 3*cost + cost/2})
-	_, _, loaded = ExecuteLoadCapabilities(bounded, loadArgs("action:notion.op5"), capabilityToolName)
+	cost := s.ToolCost("action:notion.op0")
+	bounded := modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{SkillLoadBudget: 3*cost + cost/2})
+	_, _, loaded = modelstep.ExecuteLoadCapabilities(bounded, loadArgs("action:notion.op5"), capabilityToolName)
 	if want := []string{"prompt:skill-notion@3", "action:notion.op5", "action:notion.op0", "action:notion.op1"}; !reflect.DeepEqual(loaded, want) {
 		t.Fatalf("bounded loaded = %v\nwant %v", loaded, want)
 	}
 	// Instructions load one at a time.
-	_, _, loaded = ExecuteLoadCapabilities(NewCapabilitySet(catalog, nil, CapabilitySetConfig{}), loadArgs("prompt:skill-research-1@1"), capabilityToolName)
+	_, _, loaded = modelstep.ExecuteLoadCapabilities(modelstep.NewCapabilitySet(catalog, nil, modelstep.CapabilitySetConfig{}), loadArgs("prompt:skill-research-1@1"), capabilityToolName)
 	if !reflect.DeepEqual(loaded, []string{"prompt:skill-research-1@1"}) {
 		t.Fatalf("prompt load = %v", loaded)
 	}
 	// Another Skill connection (binding) is not a sibling.
-	other := capabilityCatalogFixture()
+	other := modelsteptest.CapabilityCatalogFixture()
 	other.Actions[1].BindingID = "binding-2"
-	_, _, loaded = ExecuteLoadCapabilities(NewCapabilitySet(other, nil, CapabilitySetConfig{}), loadArgs("action:notion.op0"), capabilityToolName)
+	_, _, loaded = modelstep.ExecuteLoadCapabilities(modelstep.NewCapabilitySet(other, nil, modelstep.CapabilitySetConfig{}), loadArgs("action:notion.op0"), capabilityToolName)
 	for _, id := range loaded {
 		if id == "action:notion.op1" {
 			t.Fatal("an action of another binding was loaded")

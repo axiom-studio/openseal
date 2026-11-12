@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runbook"
@@ -28,7 +30,7 @@ func runbookRef(pointer string) *runbook.Value {
 func newTestRunbookProducer(t *testing.T, definition *runbook.Definition, entrypoint string, calls ActionCallReader, opts ...models.ServiceOption) *RunbookStepProducer {
 	t.Helper()
 	if calls == nil {
-		calls = FixedActionCalls{}
+		calls = modelsteptest.FixedActionCalls{}
 	}
 	producer, err := NewRunbookStepProducer(definition, entrypoint, calls, opts...)
 	if err != nil {
@@ -56,7 +58,7 @@ func produceRunbook(t *testing.T, producer *RunbookStepProducer, in agentrun.Ste
 	if err != nil {
 		t.Fatalf("produce step %s: %v", in.Step.ID, err)
 	}
-	RequireValidDeterministicOutput(t, out)
+	modelsteptest.RequireValidDeterministicOutput(t, out)
 	if out.KernelState == nil {
 		t.Fatalf("step %s returned no engine state: %#v", in.Step.ID, out)
 	}
@@ -66,7 +68,7 @@ func produceRunbook(t *testing.T, producer *RunbookStepProducer, in agentrun.Ste
 // appendRunbookToolResult adds the terminal tool entry of a governed call to
 // path, as the inline executor would record it.
 func appendRunbookToolResult(path *AgentSessionPath, runID, toolCallID string, state ToolEntryState, actionCallID string) {
-	path.Entries = append(path.Entries, ProducerToolPath(runID, toolCallID, state, actionCallID).Entries...)
+	path.Entries = append(path.Entries, modelsteptest.ProducerToolPath(runID, toolCallID, state, actionCallID).Entries...)
 }
 
 func webFetchAction() capability.ModelAction {
@@ -88,7 +90,7 @@ func TestRunbookProducerFailsOnUnsuccessfulOrRefusedAction(t *testing.T) {
 		{name: "refused before a row", expect: "was refused before it ran"},
 	} {
 		t.Run(item.name, func(t *testing.T) {
-			calls := FixedActionCalls{}
+			calls := modelsteptest.FixedActionCalls{}
 			producer := newTestRunbookProducer(t, definition, "manual", calls)
 			run := &AgentRun{ID: "run-1", Context: map[string]interface{}{}}
 			path := &AgentSessionPath{}
@@ -147,7 +149,7 @@ func TestRunbookProducerThreadsActionOutputAcrossBrowserLifecycle(t *testing.T) 
 			"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 		},
 	}
-	calls := FixedActionCalls{}
+	calls := modelsteptest.FixedActionCalls{}
 	producer := newTestRunbookProducer(t, definition, "daily", calls)
 	binding := &agentrun.TurnRunnerBinding{ModelActions: []capability.ModelAction{
 		{Name: "browser_start", SkillID: "browser", Version: "1", Action: "start"},

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
@@ -38,7 +40,7 @@ type prepareFixture struct {
 	preparer *catalogModelStepPreparer
 	binding  *agentrun.TurnRunnerBinding
 	run      *AgentRun
-	render   *RenderFixture
+	render   *modelsteptest.RenderFixture
 }
 
 func newPrepareFixture(t *testing.T, authority agentrun.ControlAuthority) *prepareFixture {
@@ -63,7 +65,7 @@ func newPrepareFixture(t *testing.T, authority agentrun.ControlAuthority) *prepa
 			},
 		},
 		run:    &AgentRun{ID: "run-1", Scope: testSessionScope, AssignedAgentID: "agent-1"},
-		render: NewRenderFixture(t, "chat"),
+		render: modelsteptest.NewRenderFixture(t, "chat"),
 	}
 	f.render.User("run-1", "find the launch notes")
 	return f

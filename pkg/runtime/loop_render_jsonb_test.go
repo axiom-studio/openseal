@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
+
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -47,36 +49,36 @@ func TestAResultReadBackFromJSONBStillFitsItsCap(t *testing.T) {
 		t.Fatalf("a result that fit when written is refused when read: %v", err)
 	}
 
-	f := NewRenderFixture(t, "lane")
+	f := modelsteptest.NewRenderFixture(t, "lane")
 	f.User("run-a", "look it up")
 	f.Assistant("run-a", "step-a", "c1")
 	tool := f.Tool("run-a", "step-a", "c1", ToolEntryCompleted, ContentPart{Type: ContentPartJSON, Value: spaced})
-	views, err := modelstep.ProjectSessionPath(context.Background(), f.Path(), NewRenderImageSources().Options(false))
+	views, err := modelstep.ProjectSessionPath(context.Background(), f.Path(), modelsteptest.NewRenderImageSources().Options(false))
 	if err != nil {
 		t.Fatalf("projectSessionPath: %v", err)
 	}
-	content := ViewByID(t, views, tool.ID).Tool.Result.Content
+	content := modelsteptest.ViewByID(t, views, tool.ID).Tool.Result.Content
 	if len(content) != 1 || string(content[0].Value) != string(compact) {
 		t.Fatalf("the model is not shown the compact value (%d parts, %d bytes)", len(content), len(content[0].Value))
 	}
-	RequireRenderedStep(t, views)
+	modelsteptest.RequireRenderedStep(t, views)
 }
 
 // A stored result over the cap is shortened for the model instead of failing
 // the step.
 func TestAStoredResultOverTheCapIsShortenedNotFatal(t *testing.T) {
 	compact, _ := jsonbStyle(t, 3000, 30)
-	f := NewRenderFixture(t, "lane")
+	f := modelsteptest.NewRenderFixture(t, "lane")
 	f.User("run-a", "look it up")
 	f.Assistant("run-a", "step-a", "c1")
 	tool := f.Tool("run-a", "step-a", "c1", ToolEntryCompleted,
 		ContentPart{Type: ContentPartText, Text: strings.Repeat("page text ", 4000)},
 		ContentPart{Type: ContentPartJSON, Value: compact})
-	views, err := modelstep.ProjectSessionPath(context.Background(), f.Path(), NewRenderImageSources().Options(false))
+	views, err := modelstep.ProjectSessionPath(context.Background(), f.Path(), modelsteptest.NewRenderImageSources().Options(false))
 	if err != nil {
 		t.Fatalf("projectSessionPath: %v", err)
 	}
-	content := ViewByID(t, views, tool.ID).Tool.Result.Content
+	content := modelsteptest.ViewByID(t, views, tool.ID).Tool.Result.Content
 	total := 0
 	for _, part := range content {
 		total += len(part.Text) + jsonPartBytes(part.Value)
@@ -87,7 +89,7 @@ func TestAStoredResultOverTheCapIsShortenedNotFatal(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(content), "truncated") && !strings.Contains(fmt.Sprint(content), "too large to show in full") {
 		t.Fatalf("the shortened result does not say it was shortened: %.300v", content)
 	}
-	RequireRenderedStep(t, views)
+	modelsteptest.RequireRenderedStep(t, views)
 }
 
 // A model step refused for its content is not reported as a misconfigured host.
