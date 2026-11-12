@@ -45,16 +45,7 @@ func TestInstallationWideInboxKeepsChannelAndDMContextsSeparate(t *testing.T) {
 // chatLoopFixture.bind does for agent-1.
 func bindChatAgent(f *chatLoopFixture, run *AgentRun, producer StepProducer, agentID string) *TurnRunnerBinding {
 	f.t.Helper()
-	binding := &TurnRunnerBinding{
-		DeploymentID: agentID, DefinitionID: "agent-definition", DefinitionVersion: "1",
-		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model",
-		Producer: producer, Preparers: []StepPreparer{newRunStartPreparer(f.store, f.store)},
-		Authority: ControlAuthority{AgentID: agentID, CanAskUser: true, CanReact: true},
-	}
-	if err := f.runner.bindConversationLoop(f.ctx, run, binding, ConversationLoopStores{Sessions: f.store, Actions: f.actions, Activity: f.store}); err != nil {
-		f.t.Fatalf("bind conversation loop: %v", err)
-	}
-	return binding
+	return f.bindAgent(run, agentID, producer)
 }
 
 // chatStepText is everything one model step was given: the system sections

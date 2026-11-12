@@ -202,13 +202,7 @@ func TestTeamMemberStepGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 			if err := artifacts.CreateArtifactVersion(f.ctx, artifact, 0); err != nil {
 				t.Fatal(err)
 			}
-			runner, err := NewConversationRunTurnRunner(f.store, conversationRunTestCoordinator(t, f.service), ConversationRunTurnRunnerConfig{
-				AttachmentContent: &conversationTestContent{text: content},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			f.runner = runner
+			f.runner = f.newRunner(ConversationRunTurnRunnerConfig{AttachmentContent: &conversationTestContent{text: content}})
 			posted, err := f.service.PostChannelMessage(f.ctx, PostChannelMessageRequest{
 				Scope: f.conversation.Scope, ConversationID: f.conversation.ID, ExpectedRevision: f.conversation.Revision,
 				Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user-1"}, Intent: MessageIntentQuestion,

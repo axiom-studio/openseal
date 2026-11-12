@@ -259,16 +259,7 @@ func (f *chatLoopFixture) startMember(trigger *ChannelMessage, agentID string) *
 // bindMember is bind for agentID's member Run.
 func (f *chatLoopFixture) bindMember(run *AgentRun, agentID string, producer StepProducer) *TurnRunnerBinding {
 	f.t.Helper()
-	binding := &TurnRunnerBinding{
-		DeploymentID: agentID, DefinitionID: "agent-definition", DefinitionVersion: "1",
-		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model",
-		Producer: producer, Preparers: []StepPreparer{newRunStartPreparer(f.store, f.store)},
-		Authority: ControlAuthority{AgentID: agentID, CanAskUser: true, CanReact: true},
-	}
-	if err := f.runner.bindConversationLoop(f.ctx, run, binding, ConversationLoopStores{Sessions: f.store, Actions: f.actions, Activity: f.store}); err != nil {
-		f.t.Fatalf("bind %s: %v", agentID, err)
-	}
-	return binding
+	return f.bindAgent(run, agentID, producer)
 }
 
 func (f *chatLoopFixture) eventTypes(runID string) []string {
