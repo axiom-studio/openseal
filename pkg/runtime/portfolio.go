@@ -19,9 +19,6 @@ var (
 // RunCreditErrorWorkspaceCreditsExhausted is the only RunCreditError code.
 const RunCreditErrorWorkspaceCreditsExhausted = "workspace_credits_exhausted"
 
-// RunEngineLoop is AgentRun.Engine for Runs created by the run loop.
-const RunEngineLoop = "loop"
-
 type CreateObjectiveRequest struct {
 	Scope           Scope
 	Owner           ObjectiveOwner

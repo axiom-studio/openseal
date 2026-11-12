@@ -284,6 +284,9 @@ type RunCreditError struct {
 
 // AgentRun is the canonical durable workstream. Workflow execution records are
 // subordinate execution details and must not be used as agent-run identity.
+// RunEngineLoop is AgentRun.Engine for Runs created by the run loop.
+const RunEngineLoop = "loop"
+
 type AgentRun struct {
 	ID              string         `json:"id"`
 	Kind            RunKind        `json:"kind"`
