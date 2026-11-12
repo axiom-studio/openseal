@@ -3,7 +3,6 @@ package skillbinding_test
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -334,54 +333,6 @@ func newTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
 	}
 	t.Cleanup(func() { store.Close() })
 	return store, openTestSQLiteDB(t, path)
-}
-
-// copied from raw_sql_test.go
-// rewriteRowPayload decodes the JSON payload of one scoped row of a SQLite
-// table, applies edit and writes it back. It bypasses every store rule, so a
-// test can model a tampered or inconsistent row that no store method would
-// produce. Indexed columns are not touched; edit only payload-only fields
-// with it.
-func rewriteRowPayload[T any](t testing.TB, db *sql.DB, table string, scope models.Scope, id string, edit func(*T)) {
-	t.Helper()
-	ctx := context.Background()
-	var payload []byte
-	if err := db.QueryRowContext(ctx, `SELECT payload FROM `+table+` WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, id).Scan(&payload); err != nil {
-		t.Fatalf("read %s %s: %v", table, id, err)
-	}
-	var value T
-	if err := json.Unmarshal(payload, &value); err != nil {
-		t.Fatalf("decode %s %s: %v", table, id, err)
-	}
-	edit(&value)
-	encoded, err := json.Marshal(&value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE `+table+` SET payload = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, string(encoded), scope.Kind, scope.ID, id); err != nil {
-		t.Fatalf("write %s %s: %v", table, id, err)
-	}
-}
-
-// copied from raw_sql_test.go
-// execSQL runs a statement on db.
-func execSQL(t testing.TB, db *sql.DB, query string, args ...any) {
-	t.Helper()
-	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
-		t.Fatalf("%s: %v", query, err)
-	}
-}
-
-// copied from raw_sql_test.go
-// countRows counts the rows of table; table is used as given, so a
-// Postgres test passes storetest.PostgresSchema.Table(name).
-func countRows(t testing.TB, db *sql.DB, table string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(context.Background(), `SELECT count(*) FROM `+table).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	return count
 }
 
 // copied from connect_app_test.go

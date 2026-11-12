@@ -228,43 +228,43 @@ func TestSkillSetupTaskOriginRejectsUnprovedContextAndChangedCanonicalSource(t *
 			deploymentID := "agent"
 			switch scenario {
 			case "non-task":
-				rewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(canonical *models.AgentRun) {
+				storetest.RewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(canonical *models.AgentRun) {
 					delete(canonical.Context, models.ConversationTaskContextKey)
 					canonical.ConcurrencyKey = "ordinary-work"
 				})
-				execSQL(t, db, `UPDATE conversation_tasks SET work_run_id = '' WHERE scope_kind = ? AND scope_id = ? AND id = ?`, run.Scope.Kind, run.Scope.ID, task.Task.ID)
+				storetest.ExecSQL(t, db, `UPDATE conversation_tasks SET work_run_id = '' WHERE scope_kind = ? AND scope_id = ? AND id = ?`, run.Scope.Kind, run.Scope.ID, task.Task.ID)
 			case "foreign-scope":
 				run.Scope.ID = "other"
 			case "foreign-agent":
 				deploymentID = "other"
 			case "source-changed":
-				rewriteRowPayload(t, db, "agent_runs", run.Scope, task.Task.SourceRunID, func(source *models.AgentRun) {
+				storetest.RewriteRowPayload(t, db, "agent_runs", run.Scope, task.Task.SourceRunID, func(source *models.AgentRun) {
 					source.Context["triggerMessageId"] = "other"
 				})
 			case "actor-changed":
-				rewriteRowPayload(t, db, "conversation_tasks", run.Scope, task.Task.ID, func(ledger *models.ConversationTask) {
+				storetest.RewriteRowPayload(t, db, "conversation_tasks", run.Scope, task.Task.ID, func(ledger *models.ConversationTask) {
 					ledger.AuthenticatedActor.ID = "other"
 				})
 			case "thread-changed":
-				rewriteRowPayload(t, db, "conversation_tasks", run.Scope, task.Task.ID, func(ledger *models.ConversationTask) {
+				storetest.RewriteRowPayload(t, db, "conversation_tasks", run.Scope, task.Task.ID, func(ledger *models.ConversationTask) {
 					ledger.ThreadRootID = "other"
 				})
 			case "turn-changed":
-				rewriteRowPayload(t, db, "agent_turns", run.Scope, task.Task.SourceTurnID, func(turn *models.AgentTurn) {
+				storetest.RewriteRowPayload(t, db, "agent_turns", run.Scope, task.Task.SourceTurnID, func(turn *models.AgentTurn) {
 					turn.Status = models.AgentTurnStatusFailed
 				})
-				execSQL(t, db, `UPDATE agent_turns SET status = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, models.AgentTurnStatusFailed, run.Scope.Kind, run.Scope.ID, task.Task.SourceTurnID)
+				storetest.ExecSQL(t, db, `UPDATE agent_turns SET status = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, models.AgentTurnStatusFailed, run.Scope.Kind, run.Scope.ID, task.Task.SourceTurnID)
 			case "archived":
-				rewriteRowPayload(t, db, "conversations", run.Scope, task.Task.ConversationID, func(conversation *models.Conversation) {
+				storetest.RewriteRowPayload(t, db, "conversations", run.Scope, task.Task.ConversationID, func(conversation *models.Conversation) {
 					conversation.Status = models.ConversationStatusArchived
 				})
-				execSQL(t, db, `UPDATE conversations SET status = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, models.ConversationStatusArchived, run.Scope.Kind, run.Scope.ID, task.Task.ConversationID)
+				storetest.ExecSQL(t, db, `UPDATE conversations SET status = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, models.ConversationStatusArchived, run.Scope.Kind, run.Scope.ID, task.Task.ConversationID)
 			case "fork-owner":
-				rewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(canonical *models.AgentRun) {
+				storetest.RewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(canonical *models.AgentRun) {
 					canonical.Owner.ID = "other"
 				})
 			case "missing-ledger":
-				execSQL(t, db, `DELETE FROM conversation_tasks WHERE scope_kind = ? AND scope_id = ? AND id = ?`, run.Scope.Kind, run.Scope.ID, task.Task.ID)
+				storetest.ExecSQL(t, db, `DELETE FROM conversation_tasks WHERE scope_kind = ? AND scope_id = ? AND id = ?`, run.Scope.Kind, run.Scope.ID, task.Task.ID)
 			}
 			input := agentrun.ActionDispatchInput{Call: &models.ActionCall{ID: "rejected", Scope: run.Scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Connect"}}
 			if _, err := dispatcher.RequestSkillSetup(t.Context(), input, run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}); err == nil {
@@ -273,7 +273,7 @@ func TestSkillSetupTaskOriginRejectsUnprovedContextAndChangedCanonicalSource(t *
 			if _, err := dispatcher.ListSkillSetupRequests(t.Context(), run, deploymentID, models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: deploymentID}); err == nil {
 				t.Fatal("unproved origin listed setup")
 			}
-			if countRows(t, db, "skill_setup_requests") != 0 {
+			if storetest.CountRows(t, db, "skill_setup_requests") != 0 {
 				t.Fatal("rejected origin left durable setup")
 			}
 		})
@@ -328,8 +328,8 @@ func TestSkillSetupOriginDeniesTamperedGoal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, store, db, task := skillSetupTaskFixture(t)
 			scope := task.Task.Scope
-			rewriteRowPayload(t, db, "agent_session_entries", scope, task.Task.SourceToolEntryID, func(entry *models.SessionEntry) {
-				rewriteRowPayload(t, db, "conversation_tasks", scope, task.Task.ID, func(ledger *models.ConversationTask) {
+			storetest.RewriteRowPayload(t, db, "agent_session_entries", scope, task.Task.SourceToolEntryID, func(entry *models.SessionEntry) {
+				storetest.RewriteRowPayload(t, db, "conversation_tasks", scope, task.Task.ID, func(ledger *models.ConversationTask) {
 					tamper(entry, ledger)
 				})
 			})
@@ -347,11 +347,11 @@ func TestSkillSetupOriginDeniesTaskWithoutEntry(t *testing.T) {
 			scope := task.Task.Scope
 			switch scenario {
 			case "no-entry-id":
-				rewriteRowPayload(t, db, "conversation_tasks", scope, task.Task.ID, func(ledger *models.ConversationTask) {
+				storetest.RewriteRowPayload(t, db, "conversation_tasks", scope, task.Task.ID, func(ledger *models.ConversationTask) {
 					ledger.SourceToolEntryID = ""
 				})
 			case "entry-missing":
-				execSQL(t, db, `DELETE FROM agent_session_entries WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, task.Task.SourceToolEntryID)
+				storetest.ExecSQL(t, db, `DELETE FROM agent_session_entries WHERE scope_kind = ? AND scope_id = ? AND id = ?`, scope.Kind, scope.ID, task.Task.SourceToolEntryID)
 			}
 			if skillSetupOriginAllowed(t, store, task) {
 				t.Fatal("task without its start_task entry proved an origin")

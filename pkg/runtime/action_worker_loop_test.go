@@ -17,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -517,7 +518,7 @@ func TestLoopMaintenanceAtExecutionParks(t *testing.T) {
 				// Maintenance ends: the same call executes on resume.
 				wrapped.active = false
 				if boundary == "before_claim" {
-					execSQL(t, backend.db, `DELETE FROM skill_runtime_maintenance WHERE scope_kind = ? AND scope_id = ? AND skill_id = ?`, f.scope.Kind, f.scope.ID, "release")
+					storetest.ExecSQL(t, backend.db, `DELETE FROM skill_runtime_maintenance WHERE scope_kind = ? AND scope_id = ? AND skill_id = ?`, f.scope.Kind, f.scope.ID, "release")
 				}
 				catalog.afterResolve = nil
 				f.clock = held.RetryAt

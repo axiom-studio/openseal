@@ -9,6 +9,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
@@ -131,7 +132,7 @@ func TestAgentRequestInboxReusesHistoricalDecisionRunAfterInputSchemaDrift(t *te
 	// Simulate a decision Run authored by an older OpenSeal release. Its
 	// idempotency fingerprint no longer matches the current enriched input,
 	// but its authoritative request lineage remains unchanged.
-	rewriteRowPayload(t, db, "agent_runs", request.Scope, runs[0].ID, func(persisted *AgentRun) {
+	storetest.RewriteRowPayload(t, db, "agent_runs", request.Scope, runs[0].ID, func(persisted *AgentRun) {
 		inbox := persisted.Context[agentrun.AgentRequestInboxContextKey].(map[string]interface{})
 		delete(inbox, "clarificationQuestion")
 		delete(inbox, "clarificationResponse")

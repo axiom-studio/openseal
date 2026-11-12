@@ -140,9 +140,9 @@ func registerCallbackFixture(t *testing.T, ctx context.Context, catalog *skill.C
 	return definition, binding
 }
 
-// The store helpers below copy runtime's newTestKernelStore,
-// newTestSQLiteStore and countRows, so the callback tests do not depend on
-// runtime's test helpers and can live with the callback code.
+// The store helpers below copy runtime's newTestKernelStore and
+// newTestSQLiteStore, so the callback tests do not depend on runtime's test
+// helpers and can live with the callback code.
 
 // newCallbackTestStore returns an empty in-memory kernel store that is closed
 // when the test ends.
@@ -172,15 +172,4 @@ func newCallbackTestSQLiteStore(t testing.TB) (*sqlite.Store, *sql.DB) {
 	}
 	t.Cleanup(func() { db.Close() })
 	return store, db
-}
-
-// countCallbackRows counts the rows of table through the test's own
-// connection.
-func countCallbackRows(t testing.TB, db *sql.DB, table string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(context.Background(), `SELECT count(*) FROM `+table).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	return count
 }

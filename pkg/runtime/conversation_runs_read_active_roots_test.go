@@ -49,7 +49,7 @@ func TestConversationActiveRunsTracksCanonicalRootChanges(t *testing.T) {
 	child.Revision++
 	updateConversationTaskSQLRun(t, store, child, child.Revision-1)
 	check("moved", 0)
-	if countRows(t, db, "conversation_active_runs") != 0 {
+	if storetest.CountRows(t, db, "conversation_active_runs") != 0 {
 		t.Fatal("terminal children retained active root lookup entries")
 	}
 }

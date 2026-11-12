@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -20,7 +21,7 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 		t.Run(provider, func(t *testing.T) {
 			store, db := newTestSQLiteStore(t)
 			fixture := newRunProgressWorkerFixtureOn(t, store, provider, []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryMessageUpdate, capability.ConversationDeliveryTypingIndicator})
-			rewriteRowPayload(t, db, "agent_runs", fixture.run.Scope, fixture.run.ID, func(run *AgentRun) {
+			storetest.RewriteRowPayload(t, db, "agent_runs", fixture.run.Scope, fixture.run.ID, func(run *AgentRun) {
 				run.Context = map[string]interface{}{"conversationId": fixture.conversation.ID, "triggerMessageId": fixture.inbound.ID}
 			})
 			request := setupRequestFixture()
@@ -119,7 +120,7 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 			if decided != 1 {
 				t.Fatal("decided card update missing")
 			}
-			if countRows(t, db, "external_conversation_deliveries") != 4 {
+			if storetest.CountRows(t, db, "external_conversation_deliveries") != 4 {
 				t.Fatal("terminal requests generated duplicate notifications")
 			}
 		})

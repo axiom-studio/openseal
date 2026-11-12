@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/callback"
 	"github.com/axiom-studio/openseal/pkg/runtime/internal/sqlstore"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -134,7 +135,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
 	// Marketplace definitions may retain their portable manifest channel key
 	// after the reviewed callback has been placed onto a concrete endpoint.
-	rewriteRowPayload(t, db, "approval_checkpoints", endpoint.Scope, approval.ID, func(stored *ApprovalCheckpoint) {
+	storetest.RewriteRowPayload(t, db, "approval_checkpoints", endpoint.Scope, approval.ID, func(stored *ApprovalCheckpoint) {
 		stored.Destinations = []ApprovalDestination{{EndpointID: "coding-slack-channel"}}
 	})
 	lookupStore := &approvalNotificationDeliveryLookupStore{ApprovalNotificationStore: store}
@@ -299,7 +300,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	}
 	for _, message := range messages {
 		if strings.HasPrefix(message.IdempotencyKey, "approval-outcome:"+approval.ID+":") {
-			execSQL(t, db, `UPDATE channel_messages SET payload = json_set(payload, '$.content', ?)
+			storetest.ExecSQL(t, db, `UPDATE channel_messages SET payload = json_set(payload, '$.content', ?)
 				WHERE scope_kind = ? AND scope_id = ? AND conversation_id = ? AND id = ?`,
 				"historical presentation", message.Scope.Kind, message.Scope.ID, message.ConversationID, message.ID)
 		}

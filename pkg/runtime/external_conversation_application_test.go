@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 )
 
 func checkApplicationRouteMatching(t *testing.T, store ExternalConversationEndpointStore) {
@@ -105,7 +106,7 @@ func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 				tc.mutate(endpoint, host.result)
 			}
 			// Reinsert to allow a foreign-scope fixture without weakening normal update checks.
-			execSQL(t, db, `DELETE FROM external_conversation_endpoints`)
+			storetest.ExecSQL(t, db, `DELETE FROM external_conversation_endpoints`)
 			if err := store.CreateExternalConversationEndpoint(ctx, endpoint); err != nil {
 				t.Fatal(err)
 			}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 )
 
@@ -40,8 +41,8 @@ func continuationLifecycleFixture(t *testing.T, store *sqlite.Store, id string) 
 // db, the test's own connection to the store's file.
 func backdateContinuationLifecycleRun(t *testing.T, store *sqlite.Store, db *sql.DB, run *AgentRun, createdAt time.Time) *AgentRun {
 	t.Helper()
-	execSQL(t, db, `UPDATE agent_runs SET created_at = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, createdAt, run.Scope.Kind, run.Scope.ID, run.ID)
-	rewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(stored *AgentRun) { stored.CreatedAt = createdAt })
+	storetest.ExecSQL(t, db, `UPDATE agent_runs SET created_at = ? WHERE scope_kind = ? AND scope_id = ? AND id = ?`, createdAt, run.Scope.Kind, run.Scope.ID, run.ID)
+	storetest.RewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(stored *AgentRun) { stored.CreatedAt = createdAt })
 	return getStoredRun(t, store, run.Scope, run.ID)
 }
 
@@ -51,7 +52,7 @@ func TestConversationTaskContinuationReconcilesQueuedRunFromCreationTime(t *test
 	now := time.Now().UTC()
 	run = backdateContinuationLifecycleRun(t, store, db, run, now.Add(-ConversationTaskForegroundTimeout))
 	// A fresh activity timestamp is not a new foreground deadline.
-	rewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(stored *AgentRun) { stored.UpdatedAt = now })
+	storetest.RewriteRowPayload(t, db, "agent_runs", run.Scope, run.ID, func(stored *AgentRun) { stored.UpdatedAt = now })
 	reconciler, err := NewConversationTaskContinuationReconciler(store)
 	if err != nil {
 		t.Fatal(err)

@@ -157,7 +157,7 @@ func TestOpenConversationSessionChecksRunBinding(t *testing.T) {
 	if _, err := store.OpenConversationAgentSession(context.Background(), bad); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("open with a foreign lease = %v, want ErrLeaseLost", err)
 	}
-	if countRows(t, db, "agent_sessions") != 0 {
+	if storetest.CountRows(t, db, "agent_sessions") != 0 {
 		t.Fatalf("a failed open stored a session")
 	}
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
+	"github.com/axiom-studio/openseal/pkg/runtime/storetest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -218,7 +219,7 @@ func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T)
 	_, err := service.Receive(ctx, CallbackPublicRequest{
 		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte("forged"),
 	}, &callbackHostStub{err: verificationErr})
-	if receipts := countCallbackRows(t, db, "callback_events"); !errors.Is(err, verificationErr) || consumed != 0 || receipts != 0 {
+	if receipts := storetest.CountRows(t, db, "callback_events"); !errors.Is(err, verificationErr) || consumed != 0 || receipts != 0 {
 		t.Fatalf("verification failure = %v, consumed %d, receipts %d", err, consumed, receipts)
 	}
 }
