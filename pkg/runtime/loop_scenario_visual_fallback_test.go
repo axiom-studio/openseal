@@ -1,15 +1,16 @@
 package runtime
 
-// Run-loop scenarios for an answer whose optional visual is wrong: the answer
-// goes without it at once, with no retry, and the drop is recorded. A visual
-// never costs the answer, re-sends it, or counts toward the three rejected
-// answers that fail a Run.
+// Run-loop scenarios for an answer whose optional visual is wrong: the model
+// gets one chance to fix the visual or leave it out, then the answer goes
+// without it. A visual never costs the answer or counts toward the three
+// rejected answers that fail a Run.
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
@@ -40,9 +41,10 @@ func answerSteps(replies ...map[string]any) *looptest.ModelRule {
 	}}
 }
 
-func TestLoopInvalidVisualDeliversTheAnswerWithoutItAtOnce(t *testing.T) {
+func TestLoopInvalidVisualTwiceDeliversTheAnswerWithoutIt(t *testing.T) {
 	looptest.EachStore(t, "visual_dropped", func(t *testing.T, store models.KernelStore) {
 		f := looptest.NewFixture(t, store, looptest.WithRules(answerSteps(
+			map[string]any{"answer": "Spring is cheapest.", "visual": visualWithoutSummary()},
 			map[string]any{"answer": "Spring is cheapest.", "visual": visualWithUnknownKey()},
 		)))
 		content := &looptest.AnswerVisualContent{}
@@ -50,8 +52,10 @@ func TestLoopInvalidVisualDeliversTheAnswerWithoutItAtOnce(t *testing.T) {
 		conversation, run := f.StartChat("when is it cheapest?")
 		done := f.DriveToRest(run.ID, 3)
 		f.MustStatus(done, models.AgentRunStatusCompleted)
-		if finals := portFinalEntries(f, run.ID); len(finals) != 1 || finals[0].State != models.ToolEntryCompleted {
-			t.Fatalf("final entries = %v, want one delivered answer", f.EntryTypes(run.ID))
+		finals := portFinalEntries(f, run.ID)
+		if len(finals) != 2 || finals[0].State != models.ToolEntryError || !strings.Contains(portEntryText(finals[0]), "summary is required for callout") ||
+			control.CountsAsRejectedAnswer(finals[0]) {
+			t.Fatalf("final entries = %v (%q)", f.EntryTypes(run.ID), portEntryText(finals[0]))
 		}
 		answers := portAgentMessages(f, conversation.ID)
 		if len(answers) != 1 || answers[0].Content != "Spring is cheapest." || len(answers[0].References) != 1 || content.Puts != 0 {
@@ -64,9 +68,10 @@ func TestLoopInvalidVisualDeliversTheAnswerWithoutItAtOnce(t *testing.T) {
 	})
 }
 
-func TestLoopValidVisualIsDeliveredWithTheAnswer(t *testing.T) {
-	looptest.EachStore(t, "visual_valid", func(t *testing.T, store models.KernelStore) {
+func TestLoopInvalidVisualFixedOnRetryIsDelivered(t *testing.T) {
+	looptest.EachStore(t, "visual_fixed", func(t *testing.T, store models.KernelStore) {
 		f := looptest.NewFixture(t, store, looptest.WithRules(answerSteps(
+			map[string]any{"answer": "Revenue is up.", "visual": visualWithUnknownKey()},
 			map[string]any{"answer": "Revenue is up.", "visual": failurePortVisual()},
 		)))
 		content := &looptest.AnswerVisualContent{}

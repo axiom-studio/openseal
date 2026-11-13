@@ -131,7 +131,10 @@ type FinalDeliveryResult struct {
 	Kind          FinalDeliveryKind
 	Output        map[string]interface{}
 	RejectionText string
-	Failure       *LoopFailure
+	// OptionalOnly marks a retry_final for an optional part the model may
+	// also leave out (the visual); it does not count as a rejected answer.
+	OptionalOnly bool
+	Failure      *LoopFailure
 }
 
 // FinalAnswerHandler posts the final answer (CONV-08 for chats,

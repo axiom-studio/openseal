@@ -25,6 +25,10 @@ const (
 	conversationEmptyAnswerText     = "The reply is empty. Write the user-visible answer."
 	conversationEmptyAnswerFailure  = "Agent channel response did not contain user-visible output"
 	conversationEmptyAnswerCode     = "empty_answer"
+	// conversationVisualRejectedText starts the retry_final text of a visual
+	// that failed the host checks; a second such rejection in the Run posts
+	// the answer without the visual.
+	conversationVisualRejectedText = "The visual failed its checks: "
 )
 
 // conversationFinalHandler is the FinalAnswerHandler of an Agent chat Run
@@ -190,10 +194,19 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 			if !errors.Is(checkErr, errInvalidAnswerVisual) {
 				return agentrun.FinalDeliveryResult{}, checkErr
 			}
-			// A visual that fails the host checks never costs the answer, and
-			// is not retried: a retry re-sends the whole answer, which the
-			// chat would show vanishing and streaming in again.
-			visualRejection = strings.TrimSpace(strings.TrimPrefix(checkErr.Error(), errInvalidAnswerVisual.Error()+":"))
+			prior, err := h.priorDeliveryRejections(ctx, run, answer, func(text string) bool {
+				return strings.HasPrefix(text, conversationVisualRejectedText)
+			})
+			if err != nil {
+				return agentrun.FinalDeliveryResult{}, err
+			}
+			reason := strings.TrimSpace(strings.TrimPrefix(checkErr.Error(), errInvalidAnswerVisual.Error()+":"))
+			if prior == 0 {
+				return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, OptionalOnly: true,
+					RejectionText: conversationVisualRejectedText + reason + ". Fix the visual or leave it out."}, nil
+			}
+			// The second rejected visual in the Run never costs the answer.
+			visualRejection = reason
 		}
 	}
 

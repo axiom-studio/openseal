@@ -36,6 +36,7 @@ const (
 	finalSilentAfterChangeCode  = "silent_after_change"
 	finalAnswerEmptyCode        = "answer_empty"
 	finalSkillIdentityCode      = "final_skill_identity_invalid"
+	finalVisualInvalidCode      = "visual_invalid"
 	finalOutputInvalidCode      = "final_output_invalid"
 	finalToolRequiredCode       = "final_tool_required"
 	finalEmptyReplyCode         = "empty_answer"
@@ -392,12 +393,15 @@ func (d *finalAnswerDraft) content() string {
 
 // finalAnswerRejection is a check's verdict: an is_error result the model
 // can correct (Failure nil), or a failure of the Run (Failure set; the
-// rejection is still recorded on the entry or as the note).
+// rejection is still recorded on the entry or as the note). OptionalOnly
+// marks a rejection of an optional part the model may also leave out; the
+// loop does not count it toward the consecutive rejections that fail a Run.
 type finalAnswerRejection struct {
-	Code    string
-	Message string
-	Extra   map[string]interface{}
-	Failure *agentrun.LoopFailure
+	Code         string
+	Message      string
+	Extra        map[string]interface{}
+	Failure      *agentrun.LoopFailure
+	OptionalOnly bool
 }
 
 // finalAnswerCheck is one completion check of an accepted final answer.
@@ -471,10 +475,16 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 	if d.sentVisual() {
 		visual, err := checkFinalVisual(ctx, d)
 		if err != nil {
-			// An invalid visual never costs the answer and is not retried: a
-			// retry re-sends the whole answer, which the chat would show
-			// vanishing and streaming in again. The answer goes without it,
-			// and delivery records why.
+			prior, countErr := x.priorFinalErrorCodes(ctx, cc)
+			if countErr != nil {
+				return Result{}, countErr
+			}
+			if prior[finalVisualInvalidCode] == 0 {
+				return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalVisualInvalidCode, OptionalOnly: true,
+					Message: fmt.Sprintf("visual: %v. Fix the visual or leave it out.", err)})
+			}
+			// The second invalid visual in the Run never costs the answer:
+			// it goes without one, and delivery records why.
 			d.VisualRejection = "visual: " + err.Error()
 		} else {
 			d.Visual = visual
@@ -602,7 +612,7 @@ func (x *Executor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, 
 		recorded = note
 	} else {
 		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil,
-			ErrorResult(models.ToolResultFailed, r.Code, r.Message, r.Extra), &EntryMeta{ErrorCode: r.Code})
+			ErrorResult(models.ToolResultFailed, r.Code, r.Message, r.Extra), &EntryMeta{ErrorCode: r.Code, OptionalOnly: r.OptionalOnly})
 		if err != nil {
 			return Result{}, err
 		}
@@ -616,7 +626,28 @@ func (x *Executor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, 
 
 // finalRejectionNoteData is the kernel data of a final_rejection note.
 type finalRejectionNoteData struct {
-	ErrorCode string `json:"errorCode"`
+	ErrorCode    string `json:"errorCode"`
+	OptionalOnly bool   `json:"optionalOnly,omitempty"`
+}
+
+// CountsAsRejectedAnswer reports whether a rejected final attempt counts
+// toward the consecutive rejections that fail a Run. entry is what the
+// rejection recorded: the final tool entry or the final_rejection note.
+// Every rejection counts except one of an optional part only (a visual the
+// model may fix or leave out, and which is dropped the second time).
+func CountsAsRejectedAnswer(entry *models.SessionEntry) bool {
+	if entry == nil {
+		return true
+	}
+	if entry.Note != nil {
+		var data finalRejectionNoteData
+		if len(entry.Note.Data) > 0 && json.Unmarshal(entry.Note.Data, &data) == nil {
+			return !data.OptionalOnly
+		}
+		return true
+	}
+	meta, err := DecodeControlEntryMeta(entry)
+	return err != nil || meta == nil || !meta.OptionalOnly
 }
 
 // appendFinalRejectionNote appends the step's final_rejection note (one per
@@ -630,7 +661,7 @@ func (x *Executor) appendFinalRejectionNote(ctx context.Context, cc agentrun.Con
 	if sessionID == "" || cc.Step == nil || cc.Step.ID == "" {
 		return nil, errors.New("plain-text final needs the Run's session and step")
 	}
-	data, err := json.Marshal(finalRejectionNoteData{ErrorCode: code})
+	data, err := json.Marshal(finalRejectionNoteData{ErrorCode: code, OptionalOnly: r.OptionalOnly})
 	if err != nil {
 		return nil, err
 	}

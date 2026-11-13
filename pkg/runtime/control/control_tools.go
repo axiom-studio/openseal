@@ -142,7 +142,10 @@ type EntryMeta struct {
 	WorkRunID         string                 `json:"workRunId,omitempty"`
 	QuestionMessageID string                 `json:"questionMessageId,omitempty"`
 	WakeAt            *time.Time             `json:"wakeAt,omitempty"`
-	ErrorCode         string                 `json:"errorCode,omitempty"` // e.g. answer_empty, task_completion_revise
+	ErrorCode         string                 `json:"errorCode,omitempty"` // e.g. visual_invalid, task_completion_revise
+	// OptionalOnly marks a final answer rejected only for an optional part
+	// (its visual); the run loop does not count it as a rejected answer.
+	OptionalOnly bool `json:"optionalOnly,omitempty"`
 }
 
 // DecodeControlEntryMeta reads an entry's kernel control metadata (nil when

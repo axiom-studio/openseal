@@ -364,8 +364,9 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			conversation, run := f.StartChat("how is revenue?")
 			done := f.DriveToRest(run.ID, 3)
 			f.MustStatus(done, models.AgentRunStatusCompleted)
-			if finals := portFinalEntries(f, run.ID); len(finals) != 1 || finals[0].State != models.ToolEntryCompleted {
-				t.Fatalf("final entries = %v, want one delivered answer", f.EntryTypes(run.ID))
+			finals := portFinalEntries(f, run.ID)
+			if len(finals) != 2 || finals[0].State != models.ToolEntryError || !strings.HasPrefix(portEntryText(finals[0]), "The visual failed its checks: ") {
+				t.Fatalf("final entries = %v (%q)", f.EntryTypes(run.ID), portEntryText(finals[0]))
 			}
 			answers := portAgentMessages(f, conversation.ID)
 			if len(answers) != 1 || answers[0].Content != "Revenue is up." || len(answers[0].References) != 1 || content.Puts != 0 {

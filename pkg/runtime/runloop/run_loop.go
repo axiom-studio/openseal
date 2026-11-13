@@ -223,6 +223,8 @@ func (l *Loop) Drive(ctx context.Context, claim Claim) Exit {
 		switch res.kind {
 		case stepNext:
 			rejections = 0
+		case stepFinalPartRejected:
+			// Only the answer's visual was rejected; the answer was not.
 		case stepFinalRejected:
 			rejections++
 			if rejections >= maximumFinalRejections {
