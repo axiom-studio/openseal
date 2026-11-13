@@ -252,9 +252,6 @@ func (d *drive) rejectDeliveredFinal(ctx context.Context, st *stepState, final *
 			return d.stepError(ctx, st, err, "")
 		}
 	}
-	if result.OptionalOnly {
-		return d.continueAfter(ctx, st, stepFinalPartRejected)
-	}
 	return d.continueAfter(ctx, st, stepFinalRejected)
 }
 

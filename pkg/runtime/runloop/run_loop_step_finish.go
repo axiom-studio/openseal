@@ -9,7 +9,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -38,9 +37,8 @@ func (d *drive) finishAndSettle(ctx context.Context, st *stepState) stepResult {
 }
 
 // finalOutcome is stepFinalRejected when this step's final-tool entry ended
-// in an error result that counts toward maximumFinalRejections,
-// stepFinalPartRejected when only an optional part was rejected, and
-// stepNext otherwise.
+// in an error result (it counts toward maximumFinalRejections), and stepNext
+// otherwise.
 func (d *drive) finalOutcome(ctx context.Context, st *stepState) stepResultKind {
 	if st.finalEntry == "" {
 		return stepNext
@@ -48,9 +46,6 @@ func (d *drive) finalOutcome(ctx context.Context, st *stepState) stepResultKind 
 	entry, err := d.l.sessions.GetSessionEntry(ctx, d.run.Scope, st.finalEntry)
 	if err != nil || entry == nil || entry.State != models.ToolEntryError {
 		return stepNext
-	}
-	if !control.CountsAsRejectedAnswer(entry) {
-		return stepFinalPartRejected
 	}
 	return stepFinalRejected
 }

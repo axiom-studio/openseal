@@ -383,22 +383,16 @@ func TestPlainFinalWithAnInvalidVisualIsDeliveredWithoutIt(t *testing.T) {
 	}
 }
 
-// Errors outside the visual still refuse the whole call and count.
-func TestArgumentErrorOutsideVisualIsNotVisualOnly(t *testing.T) {
+// Errors outside the visual still refuse the whole call.
+func TestArgumentErrorOutsideVisualRefusesTheCall(t *testing.T) {
 	visual := `{"title":"Status","components":[{"id":"note","type":"text","text":"All good"}]}`
 	f := newFinalFixture(t,
 		finalCall("typed", `{"answer":42,"visual":`+visual+`}`),
 		finalCall("offered", `{"answer":"Done.","visual":`+visual+`}`),
 	)
 	requireRejected(t, f, f.settleFinal("typed", agentrun.ControlAuthority{VisualAllowed: true}), "typed", ArgumentsInvalidCode)
-	if !CountsAsRejectedAnswer(f.stored("typed")) {
-		t.Fatal("a refused answer does not count")
-	}
 	// visual is a top-level key this claim does not offer.
 	requireRejected(t, f, f.settleFinal("offered", agentrun.ControlAuthority{}), "offered", ArgumentsInvalidCode)
-	if !CountsAsRejectedAnswer(f.stored("offered")) {
-		t.Fatal("a refused answer does not count")
-	}
 }
 
 func TestValidVisualRidesOnOutput(t *testing.T) {
