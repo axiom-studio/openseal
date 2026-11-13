@@ -71,17 +71,21 @@ var finalAnswerKernelFields = map[string]bool{
 }
 
 // finalAnswerCall is the decoded call: the strict kernel arguments, which
-// keys were present, and the remaining (host extension) fields.
+// keys were present, and the remaining (host extension) fields. VisualErr
+// is why the visual did not decode; Args.Visual is then nil.
 type finalAnswerCall struct {
-	Args    finalAnswerArgs
-	Present map[string]bool
-	Extra   map[string]json.RawMessage
+	Args      finalAnswerArgs
+	Present   map[string]bool
+	Extra     map[string]json.RawMessage
+	VisualErr error
 }
 
 // decodeFinalAnswerCall decodes raw as one JSON object. Kernel fields are
 // decoded strictly by type; every other key is kept in Extra and checked
 // against the claim's offered fields when the call settles (the dispatcher's
-// decode does not see the Run).
+// decode does not see the Run). The visual is decoded on its own: a visual
+// that does not decode (a key the format does not have) is a visual
+// rejection, which never costs the answer, not a refusal of the whole call.
 func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 	var fields map[string]json.RawMessage
 	if err := models.DecodeControlArguments(raw, &fields); err != nil {
@@ -93,6 +97,11 @@ func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 	call := &finalAnswerCall{Present: map[string]bool{}, Extra: map[string]json.RawMessage{}}
 	kernel := map[string]json.RawMessage{}
 	for key, value := range fields {
+		if key == "visual" {
+			call.Present[key] = true
+			call.Args.Visual, call.VisualErr = decodeFinalVisual(value)
+			continue
+		}
 		if finalAnswerKernelFields[key] {
 			if key == "appliedSkillRefs" {
 				value = finalSkillRefsList(value)
@@ -111,6 +120,18 @@ func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 		return nil, err
 	}
 	return call, nil
+}
+
+// decodeFinalVisual strictly decodes the visual argument; null is no visual.
+func decodeFinalVisual(raw json.RawMessage) (*presentation.Visual, error) {
+	if trimmed := strings.TrimSpace(string(raw)); trimmed == "" || trimmed == "null" {
+		return nil, nil
+	}
+	var visual presentation.Visual
+	if err := models.DecodeControlArguments(raw, &visual); err != nil {
+		return nil, err
+	}
+	return &visual, nil
 }
 
 // finalSkillRefsList takes one Skill ref sent as a bare string as a list of
@@ -303,7 +324,7 @@ func (finalAnswerHandler) Run(ctx context.Context, x *Executor, cc agentrun.Cont
 	if message := checkFinalAnswerFields(call, cc); message != "" {
 		return x.refuse(ctx, cc, controlArgumentsInvalid(message))
 	}
-	draft := &finalAnswerDraft{Args: call.Args, Extra: call.Extra}
+	draft := &finalAnswerDraft{Args: call.Args, Extra: call.Extra, VisualErr: call.VisualErr}
 	return x.acceptFinalAnswer(ctx, cc, draft)
 }
 
@@ -345,16 +366,23 @@ func checkFinalAnswerFields(call *finalAnswerCall, cc agentrun.ControlContext) s
 // Acceptance pipeline (§11.3)
 
 // finalAnswerDraft is a final answer under validation. Checks may change
-// Output (evidence grounding adds its review) and Visual.
+// Output (evidence grounding adds its review) and Visual. VisualErr is why
+// the sent visual did not decode.
 type finalAnswerDraft struct {
 	Args            finalAnswerArgs
 	Extra           map[string]json.RawMessage
+	VisualErr       error
 	PlainText       bool
 	ReactionsOnly   bool
 	Visual          *presentation.Visual
 	VisualRejection string
 	SkillSelections []models.HostedSkillSelection
 	Output          map[string]interface{}
+}
+
+// sentVisual reports whether the call carried a visual, decoded or not.
+func (d *finalAnswerDraft) sentVisual() bool {
+	return d.Args.Visual != nil || d.VisualErr != nil
 }
 
 // content is the user-visible text: the trimmed report when present, else the
@@ -368,12 +396,15 @@ func (d *finalAnswerDraft) content() string {
 
 // finalAnswerRejection is a check's verdict: an is_error result the model
 // can correct (Failure nil), or a failure of the Run (Failure set; the
-// rejection is still recorded on the entry or as the note).
+// rejection is still recorded on the entry or as the note). OptionalOnly
+// marks a rejection of an optional part the model may also leave out; the
+// loop does not count it toward the consecutive rejections that fail a Run.
 type finalAnswerRejection struct {
-	Code    string
-	Message string
-	Extra   map[string]interface{}
-	Failure *agentrun.LoopFailure
+	Code         string
+	Message      string
+	Extra        map[string]interface{}
+	Failure      *agentrun.LoopFailure
+	OptionalOnly bool
 }
 
 // finalAnswerCheck is one completion check of an accepted final answer.
@@ -404,7 +435,7 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 	// something always reports it.
 	if d.Args.Silent {
 		routine := mode == agentrun.FinalModeDefault && cc.Authority.RoutineOccurrence
-		if (mode != conversationrun.FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.Args.Visual != nil ||
+		if (mode != conversationrun.FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.sentVisual() ||
 			len(d.Args.Files) > 0 || len(d.Extra) > 0 {
 			message := "silent is only for a spoken reply that needs no response: leave answer empty and send no visual or files."
 			if routine {
@@ -429,7 +460,7 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 		if err != nil {
 			return Result{}, err
 		}
-		if !reacted || d.Args.Visual != nil {
+		if !reacted || d.sentVisual() {
 			return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalAnswerEmptyCode,
 				Message: "The answer is empty; write the reply in answer."})
 		}
@@ -441,21 +472,22 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 		return x.rejectFinal(ctx, cc, d, rejection)
 	}
 	d.SkillSelections = selections
-	// 5. Visual: structure here; the host's binding/link/image/place checks
-	// and place stamping run where the visual is stored (delivery), which
-	// answers retry_final when they fail.
-	if d.Args.Visual != nil {
-		visual := conversation.CloneVisual(d.Args.Visual)
-		if _, err := presentation.Validate(ctx, visual.Surface(presentation.StateReady), presentation.ValidateOptions{SkipHostChecks: true}); err != nil {
+	// 5. Visual: decode and structure here; the host's binding/link/image/
+	// place checks and place stamping run where the visual is stored
+	// (delivery), which answers retry_final when they fail.
+	if d.sentVisual() {
+		visual, err := checkFinalVisual(ctx, d)
+		if err != nil {
 			prior, countErr := x.priorFinalErrorCodes(ctx, cc)
 			if countErr != nil {
 				return Result{}, countErr
 			}
 			if prior[finalVisualInvalidCode] == 0 {
-				return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalVisualInvalidCode,
+				return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalVisualInvalidCode, OptionalOnly: true,
 					Message: fmt.Sprintf("visual: %v. Fix the visual or leave it out.", err)})
 			}
-			// The second invalid visual in the Run never costs the answer.
+			// The second invalid visual in the Run never costs the answer:
+			// it goes without one, and delivery records why.
 			d.VisualRejection = "visual: " + err.Error()
 		} else {
 			d.Visual = visual
@@ -502,6 +534,19 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 	}
 	final.Park = park
 	return Result{Kind: Final, Run: cc.Run, Entry: cc.Entry, Final: final}, nil
+}
+
+// checkFinalVisual returns the sent visual once it decodes and passes the
+// structural checks.
+func checkFinalVisual(ctx context.Context, d *finalAnswerDraft) (*presentation.Visual, error) {
+	if d.VisualErr != nil {
+		return nil, d.VisualErr
+	}
+	visual := conversation.CloneVisual(d.Args.Visual)
+	if _, err := presentation.Validate(ctx, visual.Surface(presentation.StateReady), presentation.ValidateOptions{SkipHostChecks: true}); err != nil {
+		return nil, err
+	}
+	return visual, nil
 }
 
 // output is FinalAnswer.Output (§11.3 RunOutput).
@@ -563,14 +608,14 @@ func finalSkillSelections(applied, offered []string) ([]models.HostedSkillSelect
 func (x *Executor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, d *finalAnswerDraft, r *finalAnswerRejection) (Result, error) {
 	var recorded *models.SessionEntry
 	if d.PlainText {
-		note, err := x.appendFinalRejectionNote(ctx, cc, r.Code, r.Message)
+		note, err := x.appendFinalRejectionNote(ctx, cc, r)
 		if err != nil {
 			return Result{}, err
 		}
 		recorded = note
 	} else {
 		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil,
-			ErrorResult(models.ToolResultFailed, r.Code, r.Message, r.Extra), &EntryMeta{ErrorCode: r.Code})
+			ErrorResult(models.ToolResultFailed, r.Code, r.Message, r.Extra), &EntryMeta{ErrorCode: r.Code, OptionalOnly: r.OptionalOnly})
 		if err != nil {
 			return Result{}, err
 		}
@@ -584,12 +629,34 @@ func (x *Executor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, 
 
 // finalRejectionNoteData is the kernel data of a final_rejection note.
 type finalRejectionNoteData struct {
-	ErrorCode string `json:"errorCode"`
+	ErrorCode    string `json:"errorCode"`
+	OptionalOnly bool   `json:"optionalOnly,omitempty"`
+}
+
+// CountsAsRejectedAnswer reports whether a rejected final attempt counts
+// toward the consecutive rejections that fail a Run. entry is what the
+// rejection recorded: the final tool entry or the final_rejection note.
+// Every rejection counts except one of an optional part only (a visual the
+// model may fix or leave out, and which is dropped the second time).
+func CountsAsRejectedAnswer(entry *models.SessionEntry) bool {
+	if entry == nil {
+		return true
+	}
+	if entry.Note != nil {
+		var data finalRejectionNoteData
+		if len(entry.Note.Data) > 0 && json.Unmarshal(entry.Note.Data, &data) == nil {
+			return !data.OptionalOnly
+		}
+		return true
+	}
+	meta, err := DecodeControlEntryMeta(entry)
+	return err != nil || meta == nil || !meta.OptionalOnly
 }
 
 // appendFinalRejectionNote appends the step's final_rejection note (one per
 // step: id and SourceKey final-rejection:<stepId>).
-func (x *Executor) appendFinalRejectionNote(ctx context.Context, cc agentrun.ControlContext, code, message string) (*models.SessionEntry, error) {
+func (x *Executor) appendFinalRejectionNote(ctx context.Context, cc agentrun.ControlContext, r *finalAnswerRejection) (*models.SessionEntry, error) {
+	code, message := r.Code, r.Message
 	sessionID := cc.Run.SessionID
 	if cc.Session != nil {
 		sessionID = cc.Session.ID
@@ -597,7 +664,7 @@ func (x *Executor) appendFinalRejectionNote(ctx context.Context, cc agentrun.Con
 	if sessionID == "" || cc.Step == nil || cc.Step.ID == "" {
 		return nil, errors.New("plain-text final needs the Run's session and step")
 	}
-	data, err := json.Marshal(finalRejectionNoteData{ErrorCode: code})
+	data, err := json.Marshal(finalRejectionNoteData{ErrorCode: code, OptionalOnly: r.OptionalOnly})
 	if err != nil {
 		return nil, err
 	}
@@ -822,7 +889,7 @@ func (x *Executor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContex
 	if finalOffered && strings.HasPrefix(trimmed, "{") {
 		if call, err := decodeFinalAnswerCall(json.RawMessage(trimmed)); err == nil && call.Present["answer"] &&
 			len(call.Extra) == 0 && checkFinalAnswerFields(call, cc) == "" {
-			return x.acceptFinalAnswer(ctx, cc, &finalAnswerDraft{Args: call.Args, Extra: call.Extra, PlainText: true})
+			return x.acceptFinalAnswer(ctx, cc, &finalAnswerDraft{Args: call.Args, Extra: call.Extra, VisualErr: call.VisualErr, PlainText: true})
 		}
 	}
 	// 2. Modes that need a structured final tool.

@@ -99,7 +99,7 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.
 	case agentrun.FinalDeliveryContinue:
 		return d.supersedeFinal(ctx, st, final)
 	case agentrun.FinalDeliveryRetryFinal:
-		return d.rejectDeliveredFinal(ctx, st, final, result.RejectionText)
+		return d.rejectDeliveredFinal(ctx, st, final, result)
 	case agentrun.FinalDeliveryFail:
 		if explaining && d.run.FailureExplanation != nil && (result.Failure == nil || len(result.Output) > 0) {
 			// §8.2 step 3: the explanation is posted. The Run ends failed
@@ -220,9 +220,10 @@ func (d *drive) supersedeFinal(ctx context.Context, st *stepState, final *agentr
 
 // rejectDeliveredFinal records a delivery-time rejection (retry_final): an
 // error result on the final tool entry, or a final_rejection note for plain
-// text. It counts toward maximumFinalRejections.
-func (d *drive) rejectDeliveredFinal(ctx context.Context, st *stepState, final *agentrun.FinalAnswer, text string) stepResult {
-	text = strings.TrimSpace(text)
+// text. It counts toward maximumFinalRejections unless it rejects only an
+// optional part.
+func (d *drive) rejectDeliveredFinal(ctx context.Context, st *stepState, final *agentrun.FinalAnswer, result agentrun.FinalDeliveryResult) stepResult {
+	text := strings.TrimSpace(result.RejectionText)
 	if text == "" {
 		text = "The answer could not be delivered; correct it and answer again."
 	}
@@ -250,6 +251,9 @@ func (d *drive) rejectDeliveredFinal(ctx context.Context, st *stepState, final *
 		if err != nil {
 			return d.stepError(ctx, st, err, "")
 		}
+	}
+	if result.OptionalOnly {
+		return d.continueAfter(ctx, st, stepFinalPartRejected)
 	}
 	return d.continueAfter(ctx, st, stepFinalRejected)
 }

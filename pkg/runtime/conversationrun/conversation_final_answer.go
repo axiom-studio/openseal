@@ -202,7 +202,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 			}
 			reason := strings.TrimSpace(strings.TrimPrefix(checkErr.Error(), errInvalidAnswerVisual.Error()+":"))
 			if prior == 0 {
-				return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal,
+				return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, OptionalOnly: true,
 					RejectionText: conversationVisualRejectedText + reason + ". Fix the visual or leave it out."}, nil
 			}
 			// The second rejected visual in the Run never costs the answer.

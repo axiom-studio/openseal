@@ -22,7 +22,11 @@ type stepResultKind int
 const (
 	stepNext          stepResultKind = iota // the Run keeps running; Drive starts the next step
 	stepFinalRejected                       // as stepNext, and the step's final answer was rejected
-	stepExit                                // the claim ends with exit
+	// stepFinalPartRejected is as stepNext, and only an optional part of
+	// the step's final answer (its visual) was rejected: it neither counts
+	// toward nor resets the consecutive rejections.
+	stepFinalPartRejected
+	stepExit // the claim ends with exit
 )
 
 type stepResult struct {
@@ -766,6 +770,9 @@ func (d *drive) plainTextFinal(ctx context.Context, st *stepState, text string) 
 	case control.Final:
 		return d.finishFinal(ctx, st, result.Final, "")
 	case control.Continue:
+		if !control.CountsAsRejectedAnswer(result.Entry) {
+			return d.continueAfter(ctx, st, stepFinalPartRejected)
+		}
 		return d.continueAfter(ctx, st, stepFinalRejected)
 	case control.Failed:
 		return d.fail(ctx, st, *result.Failure, nil, "")
