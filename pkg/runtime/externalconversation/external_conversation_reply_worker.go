@@ -392,8 +392,8 @@ func (w *ReplyWorker) finishAnswerStream(
 	if !stream.live() || !containsConversationDeliveryOperation(adapter.Delivery.Operations, capability.ConversationDeliveryMessageUpdate) {
 		return nil
 	}
-	// Only files force a new message; a visual the channel leaves out does
-	// not, so it finishes the preview like a text-only answer.
+	// Only files force a new message. A visual rides on the finishing edit
+	// when the channel shows visuals and is left out otherwise.
 	files := false
 	if containsConversationFeature(adapter.Features, capability.ConversationFeatureAttachments) {
 		catalog, _ := w.store.(models.ArtifactStore)

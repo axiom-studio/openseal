@@ -15,6 +15,7 @@ import (
 
 type DeliveryHostRequest struct {
 	Attachments []AttachmentContent                  `json:"attachments,omitempty"`
+	Visuals     []DeliveryVisual                     `json:"visuals,omitempty"`
 	Endpoint    *models.ExternalConversationEndpoint `json:"endpoint"`
 	Adapter     *skill.BoundConversationAdapter      `json:"adapter"`
 	Delivery    *models.ExternalConversationDelivery `json:"delivery"`
@@ -111,10 +112,6 @@ type AdapterHost interface {
 		DeliveryHostRequest,
 	) (*DeliveryHostResult, error)
 }
-
-// visualsLeftOutSummary records on a delivered send that the message's
-// visual was not sent: no channel can show one yet (externalDeliveryFiles).
-const visualsLeftOutSummary = "Visual left out: this connection does not show visuals."
 
 type DeliveryWorkerConfig struct {
 	AttachmentContent models.ArtifactContentStore
@@ -245,18 +242,9 @@ func (w *DeliveryWorker) deliver(ctx context.Context, delivery *models.ExternalC
 	request := DeliveryHostRequest{
 		Endpoint: deliveryEndpoint, Adapter: adapter, Delivery: effectiveDelivery, Message: message,
 	}
-	// A delivered send that left out a visual says so in its summary, so the
-	// omission is on record without reaching the channel.
-	deliveredSummary := ""
-	if containsConversationFeature(adapter.Adapter.Features, capability.ConversationFeatureAttachments) && delivery.Operation == capability.ConversationDeliveryMessageSend {
-		var visuals int
-		request.Attachments, visuals, err = externalDeliveryAttachments(ctx, w.store, w.config.AttachmentContent, delivery.Scope, message)
-		if err != nil {
-			return err
-		}
-		if visuals > 0 {
-			deliveredSummary = visualsLeftOutSummary
-		}
+	deliveredSummary, err := w.attachArtifacts(ctx, delivery, adapter, message, &request)
+	if err != nil {
+		return err
 	}
 	// Typing/progress indicators are ephemeral state, not durable messages.
 	// Provider message lookup cannot prove their delivery and can turn a harmless
@@ -299,6 +287,51 @@ func (w *DeliveryWorker) deliver(ctx context.Context, delivery *models.ExternalC
 	default:
 		return models.ErrInvalidExternalConversation
 	}
+}
+
+// attachArtifacts adds the files and visuals message carries to request, as
+// the adapter's features allow. Files ride on a new message only; a visual
+// also rides on the edit that finishes a streamed answer. It returns the
+// delivered summary that records a visual left out.
+func (w *DeliveryWorker) attachArtifacts(
+	ctx context.Context,
+	delivery *models.ExternalConversationDelivery,
+	adapter *skill.BoundConversationAdapter,
+	message *models.ChannelMessage,
+	request *DeliveryHostRequest,
+) (string, error) {
+	send := delivery.Operation == capability.ConversationDeliveryMessageSend
+	takesFiles := send && containsConversationFeature(adapter.Adapter.Features, capability.ConversationFeatureAttachments)
+	showsVisuals := (send || delivery.Operation == capability.ConversationDeliveryMessageUpdate) &&
+		containsConversationFeature(adapter.Adapter.Features, capability.ConversationFeatureVisuals)
+	if !takesFiles && !showsVisuals {
+		return "", nil
+	}
+	catalog, _ := w.store.(models.ArtifactStore)
+	files, visuals, err := externalDeliveryFiles(ctx, catalog, delivery.Scope, message)
+	if err != nil {
+		return "", err
+	}
+	if takesFiles {
+		if request.Attachments, err = externalDeliveryAttachments(ctx, w.config.AttachmentContent, delivery.Scope, files); err != nil {
+			return "", err
+		}
+	}
+	if !showsVisuals {
+		if len(visuals) > 0 {
+			return visualsLeftOutSummary, nil
+		}
+		return "", nil
+	}
+	shown, leftOut, err := externalDeliveryVisuals(ctx, w.config.AttachmentContent, delivery.Scope, visuals)
+	if err != nil {
+		return "", err
+	}
+	request.Visuals = shown
+	if leftOut > 0 {
+		return visualsUnsafeSummary, nil
+	}
+	return "", nil
 }
 
 func (w *DeliveryWorker) resolve(

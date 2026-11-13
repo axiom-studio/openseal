@@ -234,9 +234,10 @@ const (
 	ConversationFeatureTyping         ConversationAdapterFeature = "typing"
 	ConversationFeatureContextHistory ConversationAdapterFeature = "context_history"
 	// ConversationFeatureVisuals declares that the provider can show an
-	// answer's visual (a presentation surface) natively. No delivery carries
-	// visuals yet, so declaring it changes nothing today; without it a
-	// visual is always left out of the channel.
+	// answer's visual (a presentation surface) natively. Its sends, and the
+	// edit that finishes a streamed answer, carry the visual in the delivery
+	// request's visuals field; without it a visual is left out of the
+	// channel.
 	ConversationFeatureVisuals ConversationAdapterFeature = "visuals"
 )
 

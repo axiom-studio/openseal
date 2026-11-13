@@ -96,16 +96,23 @@ func TestExternalConversationImportsFileOnceAndScopesArtifact(t *testing.T) {
 		t.Fatal("replay downloaded duplicate file")
 	}
 	reply := &models.ChannelMessage{References: refs}
-	files, _, err := externalDeliveryAttachments(t.Context(), store, content, endpoint.Scope, reply)
+	attachments := func(scope models.Scope) ([]AttachmentContent, error) {
+		artifacts, _, err := externalDeliveryFiles(t.Context(), store, scope, reply)
+		if err != nil {
+			return nil, err
+		}
+		return externalDeliveryAttachments(t.Context(), content, scope, artifacts)
+	}
+	files, err := attachments(endpoint.Scope)
 	if err != nil || len(files) != 1 || string(files[0].Data) != "real contents" {
 		t.Fatalf("files=%#v %v", files, err)
 	}
 	before := content.opens
-	if _, _, err := externalDeliveryAttachments(t.Context(), store, content, models.Scope{Kind: "tenant", ID: "other"}, reply); err == nil || content.opens != before {
+	if _, err := attachments(models.Scope{Kind: "tenant", ID: "other"}); err == nil || content.opens != before {
 		t.Fatal("cross tenant file was opened")
 	}
 	content.data = []byte("tampered")
-	if _, _, err := externalDeliveryAttachments(t.Context(), store, content, endpoint.Scope, reply); err == nil {
+	if _, err := attachments(endpoint.Scope); err == nil {
 		t.Fatal("tampered artifact sent")
 	}
 }

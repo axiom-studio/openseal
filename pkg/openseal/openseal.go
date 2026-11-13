@@ -851,6 +851,7 @@ type (
 	CallbackEventWorkerConfig                       = callback.EventWorkerConfig
 	ExternalConversationInboxWorker                 = externalconversation.InboxWorker
 	ExternalConversationDeliveryHostRequest         = externalconversation.DeliveryHostRequest
+	ExternalConversationDeliveryVisual              = externalconversation.DeliveryVisual
 	ExternalConversationAcknowledgementStatus       = externalconversation.AcknowledgementStatus
 	ExternalConversationDeliveryAcknowledgement     = externalconversation.DeliveryAcknowledgement
 	ExternalConversationDeliveryOutcome             = externalconversation.DeliveryOutcome
