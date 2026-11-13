@@ -81,27 +81,38 @@ type AgendaFreeSlot struct {
 	End   string `json:"end"`
 }
 
+// Agenda limits.
+const (
+	maxTimezoneRunes  = 64
+	maxAgendaDays     = 7
+	maxDayLabelRunes  = 40 // agenda and itinerary days
+	maxDayItems       = 12 // agenda and itinerary days
+	maxPlanTitleRunes = 80 // agenda and itinerary items
+	maxPlanPlaceRunes = 80 // agenda and itinerary items
+	maxFreeSlots      = 12
+)
+
 func validateAgenda(_ *validator, c Component, _ string) error {
 	agenda := c.Agenda
 	if agenda == nil {
 		return payloadRequired("agenda")
 	}
 	if agenda.Timezone != "" {
-		if len(agenda.Timezone) > 64 || agenda.Timezone == "Local" {
+		if len(agenda.Timezone) > maxTimezoneRunes || agenda.Timezone == "Local" {
 			return fmt.Errorf("agenda.timezone %q must be an IANA time zone such as Europe/London", agenda.Timezone)
 		}
 		if _, err := time.LoadLocation(agenda.Timezone); err != nil {
 			return fmt.Errorf("agenda.timezone %q must be an IANA time zone such as Europe/London", agenda.Timezone)
 		}
 	}
-	if err := firstError(bounded("agenda.days", len(agenda.Days), 1, 7), bounded("agenda.freeSlots", len(agenda.FreeSlots), 0, 12)); err != nil {
+	if err := firstError(bounded("agenda.days", len(agenda.Days), 1, maxAgendaDays), bounded("agenda.freeSlots", len(agenda.FreeSlots), 0, maxFreeSlots)); err != nil {
 		return err
 	}
 	ids := map[string]bool{}
 	dates := map[string]bool{}
 	for index, day := range agenda.Days {
 		at := fmt.Sprintf("agenda.days[%d]", index)
-		if err := firstError(dateField(at+".date", day.Date, true), optional(at+".label", day.Label, 40), bounded(at+".items", len(day.Items), 0, 12)); err != nil {
+		if err := firstError(dateField(at+".date", day.Date, true), optional(at+".label", day.Label, maxDayLabelRunes), bounded(at+".items", len(day.Items), 0, maxDayItems)); err != nil {
 			return err
 		}
 		if index > 0 && day.Date <= agenda.Days[index-1].Date {
@@ -111,7 +122,7 @@ func validateAgenda(_ *validator, c Component, _ string) error {
 		for item, entry := range day.Items {
 			itemAt := fmt.Sprintf("%s.items[%d]", at, item)
 			if err := firstError(itemIDs(ids, itemAt, entry.ID), validClock(itemAt+".start", entry.Start, true), validClock(itemAt+".end", entry.End, false),
-				required(itemAt+".title", entry.Title, 80), optional(itemAt+".place", entry.Place, 80), validateTone(itemAt+".tone", entry.Tone)); err != nil {
+				required(itemAt+".title", entry.Title, maxPlanTitleRunes), optional(itemAt+".place", entry.Place, maxPlanPlaceRunes), validateTone(itemAt+".tone", entry.Tone)); err != nil {
 				return err
 			}
 			if entry.End != "" && entry.End <= entry.Start {
@@ -175,28 +186,33 @@ type Travel struct {
 var TravelModes = []string{"walk", "drive", "transit", "bike", "flight", "boat"}
 
 // MaxTravelMinutes bounds one travel leg (a day).
-const MaxTravelMinutes = 1440
+// Itinerary limits.
+const (
+	MaxTravelMinutes        = 1440
+	maxItineraryDays        = 10
+	maxItineraryDetailRunes = 200
+)
 
 func validateItinerary(v *validator, c Component, _ string) error {
 	itinerary := c.Itinerary
 	if itinerary == nil {
 		return payloadRequired("itinerary")
 	}
-	if err := bounded("itinerary.days", len(itinerary.Days), 1, 10); err != nil {
+	if err := bounded("itinerary.days", len(itinerary.Days), 1, maxItineraryDays); err != nil {
 		return err
 	}
 	days := map[string]bool{}
 	items := map[string]bool{}
 	for index, day := range itinerary.Days {
 		at := fmt.Sprintf("itinerary.days[%d]", index)
-		if err := firstError(itemIDs(days, at, day.ID), required(at+".label", day.Label, 40), dateField(at+".date", day.Date, false),
-			bounded(at+".items", len(day.Items), 1, 12)); err != nil {
+		if err := firstError(itemIDs(days, at, day.ID), required(at+".label", day.Label, maxDayLabelRunes), dateField(at+".date", day.Date, false),
+			bounded(at+".items", len(day.Items), 1, maxDayItems)); err != nil {
 			return err
 		}
 		for item, entry := range day.Items {
 			itemAt := fmt.Sprintf("%s.items[%d]", at, item)
-			if err := firstError(itemIDs(items, itemAt, entry.ID), validClock(itemAt+".time", entry.Time, false), required(itemAt+".title", entry.Title, 80),
-				optional(itemAt+".place", entry.Place, 80), optional(itemAt+".detail", entry.Detail, 200), v.image(itemAt+".image", entry.Image),
+			if err := firstError(itemIDs(items, itemAt, entry.ID), validClock(itemAt+".time", entry.Time, false), required(itemAt+".title", entry.Title, maxPlanTitleRunes),
+				optional(itemAt+".place", entry.Place, maxPlanPlaceRunes), optional(itemAt+".detail", entry.Detail, maxItineraryDetailRunes), v.image(itemAt+".image", entry.Image),
 				v.location(itemAt, entry.Location, entry.Lat, entry.Lon)); err != nil {
 				return err
 			}
@@ -239,8 +255,8 @@ func validateRating(field string, rating *ItemRating) error {
 	if rating == nil {
 		return nil
 	}
-	if math.IsNaN(rating.Value) || rating.Value < 0 || rating.Value > 5 {
-		return fmt.Errorf("%s.value must be 0-5", field)
+	if math.IsNaN(rating.Value) || rating.Value < 0 || rating.Value > maxRating {
+		return fmt.Errorf("%s.value must be 0-%d", field, maxRating)
 	}
 	if rating.Count != nil && *rating.Count < 0 {
 		return fmt.Errorf("%s.count must be 0 or more", field)
@@ -248,30 +264,38 @@ func validateRating(field string, rating *ItemRating) error {
 	return nil
 }
 
+// Place limits; the name, category and address limits sit with the fields
+// the host stamps in (components_wave5.go).
+const (
+	maxPriceLevel = 4
+	maxHours      = 7
+	maxHoursRunes = 40
+)
+
 func validatePlace(v *validator, c Component, _ string) error {
 	place := c.Place
 	if place == nil {
 		return payloadRequired("place")
 	}
-	name := required("place.name", place.Name, 80)
+	name := required("place.name", place.Name, maxPlaceNameRunes)
 	if place.Location != "" {
-		name = optional("place.name", place.Name, 80)
+		name = optional("place.name", place.Name, maxPlaceNameRunes)
 	}
-	if err := firstError(name, v.location("place", place.Location, place.Lat, place.Lon), optional("place.category", place.Category, 30), v.image("place.image", place.Image),
-		optional("place.address", place.Address, 160), validateRating("place.rating", place.Rating),
-		bounded("place.hours", len(place.Hours), 0, 7), bounded("place.facts", len(place.Facts), 0, 4)); err != nil {
+	if err := firstError(name, v.location("place", place.Location, place.Lat, place.Lon), optional("place.category", place.Category, maxPlaceCategoryRunes), v.image("place.image", place.Image),
+		optional("place.address", place.Address, maxStampedAddressRunes), validateRating("place.rating", place.Rating),
+		bounded("place.hours", len(place.Hours), 0, maxHours), bounded("place.facts", len(place.Facts), 0, maxFacts)); err != nil {
 		return err
 	}
-	if place.PriceLevel != 0 && (place.PriceLevel < 1 || place.PriceLevel > 4) {
-		return fmt.Errorf("place.priceLevel must be 1-4 (got %d)", place.PriceLevel)
+	if place.PriceLevel != 0 && (place.PriceLevel < 1 || place.PriceLevel > maxPriceLevel) {
+		return fmt.Errorf("place.priceLevel must be 1-%d (got %d)", maxPriceLevel, place.PriceLevel)
 	}
 	for index, hours := range place.Hours {
-		if err := required(fmt.Sprintf("place.hours[%d]", index), hours, 40); err != nil {
+		if err := required(fmt.Sprintf("place.hours[%d]", index), hours, maxHoursRunes); err != nil {
 			return err
 		}
 	}
 	for index, fact := range place.Facts {
-		if err := required(fmt.Sprintf("place.facts[%d]", index), fact, 60); err != nil {
+		if err := required(fmt.Sprintf("place.facts[%d]", index), fact, maxFactRunes); err != nil {
 			return err
 		}
 	}
@@ -297,6 +321,14 @@ type BreakdownItem struct {
 // BreakdownKinds lists the values of Breakdown.Kind.
 var BreakdownKinds = []string{"treemap", "waffle", "stacked_bar"}
 
+// Breakdown and progress limits.
+const (
+	minBreakdownItems = 2
+	maxBreakdownItems = 12
+	maxPartLabelRunes = 40 // breakdown and progress items
+	maxProgressItems  = 6
+)
+
 func validateBreakdown(v *validator, c Component, _ string) error {
 	breakdown := c.Breakdown
 	if breakdown == nil {
@@ -305,15 +337,15 @@ func validateBreakdown(v *validator, c Component, _ string) error {
 	if !contains(BreakdownKinds, breakdown.Kind) {
 		return fmt.Errorf("breakdown.kind %q is not one of %s", breakdown.Kind, strings.Join(BreakdownKinds, ", "))
 	}
-	if err := firstError(validateFormat("breakdown", breakdown.Format, breakdown.Currency), optional("breakdown.unit", breakdown.Unit, 24),
-		bounded("breakdown.items", len(breakdown.Items), 2, 12)); err != nil {
+	if err := firstError(validateFormat("breakdown", breakdown.Format, breakdown.Currency), optional("breakdown.unit", breakdown.Unit, maxUnitRunes),
+		bounded("breakdown.items", len(breakdown.Items), minBreakdownItems, maxBreakdownItems)); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	positive := false
 	for index, item := range breakdown.Items {
 		at := fmt.Sprintf("breakdown.items[%d]", index)
-		if err := firstError(itemIDs(seen, at, item.ID), required(at+".label", item.Label, 40), finiteNumber(at+".value", item.Value),
+		if err := firstError(itemIDs(seen, at, item.ID), required(at+".label", item.Label, maxPartLabelRunes), finiteNumber(at+".value", item.Value),
 			v.icon(at+".icon", c.ID, item.Icon)); err != nil {
 			return err
 		}
@@ -355,14 +387,14 @@ func validateProgress(_ *validator, c Component, _ string) error {
 	if !contains(ProgressKinds, progress.Kind) {
 		return fmt.Errorf("progress.kind %q is not one of %s", progress.Kind, strings.Join(ProgressKinds, ", "))
 	}
-	if err := bounded("progress.items", len(progress.Items), 1, 6); err != nil {
+	if err := bounded("progress.items", len(progress.Items), 1, maxProgressItems); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, item := range progress.Items {
 		at := fmt.Sprintf("progress.items[%d]", index)
-		if err := firstError(itemIDs(seen, at, item.ID), required(at+".label", item.Label, 40), finiteNumber(at+".value", item.Value),
-			finiteNumber(at+".target", item.Target), validateFormat(at, item.Format, item.Currency), optional(at+".unit", item.Unit, 24)); err != nil {
+		if err := firstError(itemIDs(seen, at, item.ID), required(at+".label", item.Label, maxPartLabelRunes), finiteNumber(at+".value", item.Value),
+			finiteNumber(at+".target", item.Target), validateFormat(at, item.Format, item.Currency), optional(at+".unit", item.Unit, maxUnitRunes)); err != nil {
 			return err
 		}
 		if item.Value < 0 {
@@ -390,18 +422,26 @@ type PollOption struct {
 	Image *ImageRef `json:"image,omitempty"`
 }
 
+// Poll limits.
+const (
+	maxPollQuestionRunes = 200
+	minPollOptions       = 2
+	maxPollOptions       = 8
+	maxPollLabelRunes    = 60
+)
+
 func validatePoll(v *validator, c Component, _ string) error {
 	poll := c.Poll
 	if poll == nil {
 		return payloadRequired("poll")
 	}
-	if err := firstError(required("poll.question", poll.Question, 200), bounded("poll.options", len(poll.Options), 2, 8)); err != nil {
+	if err := firstError(required("poll.question", poll.Question, maxPollQuestionRunes), bounded("poll.options", len(poll.Options), minPollOptions, maxPollOptions)); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, option := range poll.Options {
 		at := fmt.Sprintf("poll.options[%d]", index)
-		if err := firstError(itemIDs(seen, at, option.ID), required(at+".label", option.Label, 60), v.image(at+".image", option.Image)); err != nil {
+		if err := firstError(itemIDs(seen, at, option.ID), required(at+".label", option.Label, maxPollLabelRunes), v.image(at+".image", option.Image)); err != nil {
 			return err
 		}
 	}
@@ -478,6 +518,13 @@ const (
 	// explorerStepTolerance absorbs binary rounding when checking that a
 	// value sits on a step.
 	explorerStepTolerance = 1e-9
+
+	maxExplorerInputs      = 4
+	maxExplorerOutputs     = 4
+	maxExplorerLabelRunes  = 40
+	maxExplorerUnitRunes   = 16
+	maxExplorerSeries      = 3
+	maxExplorerSeriesRunes = 30 // series and t labels
 )
 
 // explorerName is an input id that expressions can use as a name.
@@ -490,7 +537,7 @@ func validateExplorer(_ *validator, c Component, _ string) error {
 	if explorer == nil {
 		return payloadRequired("explorer")
 	}
-	if err := firstError(bounded("explorer.inputs", len(explorer.Inputs), 1, 4), bounded("explorer.outputs", len(explorer.Outputs), 1, 4)); err != nil {
+	if err := firstError(bounded("explorer.inputs", len(explorer.Inputs), 1, maxExplorerInputs), bounded("explorer.outputs", len(explorer.Outputs), 1, maxExplorerOutputs)); err != nil {
 		return err
 	}
 	inputs := map[string]bool{}
@@ -509,7 +556,7 @@ func validateExplorer(_ *validator, c Component, _ string) error {
 		if err := itemIDs(inputs, at, input.ID); err != nil {
 			return err
 		}
-		if err := firstError(required(at+".label", input.Label, 40), optional(at+".unit", input.Unit, 16), validateFormat(at, input.Format, input.Currency)); err != nil {
+		if err := firstError(required(at+".label", input.Label, maxExplorerLabelRunes), optional(at+".unit", input.Unit, maxExplorerUnitRunes), validateFormat(at, input.Format, input.Currency)); err != nil {
 			return err
 		}
 		if err := validateExplorerInput(at, input); err != nil {
@@ -521,7 +568,7 @@ func validateExplorer(_ *validator, c Component, _ string) error {
 	outputs := map[string]bool{}
 	for index, output := range explorer.Outputs {
 		at := fmt.Sprintf("explorer.outputs[%d]", index)
-		if err := firstError(itemIDs(outputs, at, output.ID), required(at+".label", output.Label, 40), optional(at+".unit", output.Unit, 16),
+		if err := firstError(itemIDs(outputs, at, output.ID), required(at+".label", output.Label, maxExplorerLabelRunes), optional(at+".unit", output.Unit, maxExplorerUnitRunes),
 			validateFormat(at, output.Format, output.Currency)); err != nil {
 			return err
 		}
@@ -622,7 +669,7 @@ func compileExplorerExpr(field, source string, types map[string]expr.Type) (*exp
 
 func validateExplorerChart(explorer *Explorer, types map[string]expr.Type, env map[string]float64) error {
 	chart := explorer.Chart
-	if err := bounded("explorer.chart.series", len(chart.Series), 1, 3); err != nil {
+	if err := bounded("explorer.chart.series", len(chart.Series), 1, maxExplorerSeries); err != nil {
 		return err
 	}
 	if chart.Points != nil && (*chart.Points < 2 || *chart.Points > MaxExplorerPoints) {
@@ -635,7 +682,7 @@ func validateExplorerChart(explorer *Explorer, types map[string]expr.Type, env m
 		if t == nil {
 			return errors.New(`explorer.chart.t {from, to} is required when x is "t"`)
 		}
-		if err := firstError(finiteNumber("explorer.chart.t.from", t.From), finiteNumber("explorer.chart.t.to", t.To), optional("explorer.chart.t.label", t.Label, 30)); err != nil {
+		if err := firstError(finiteNumber("explorer.chart.t.from", t.From), finiteNumber("explorer.chart.t.to", t.To), optional("explorer.chart.t.label", t.Label, maxExplorerSeriesRunes)); err != nil {
 			return err
 		}
 		if t.From >= t.To {
@@ -666,7 +713,7 @@ func validateExplorerChart(explorer *Explorer, types map[string]expr.Type, env m
 	}
 	for index, series := range chart.Series {
 		at := fmt.Sprintf("explorer.chart.series[%d]", index)
-		if err := required(at+".label", series.Label, 30); err != nil {
+		if err := required(at+".label", series.Label, maxExplorerSeriesRunes); err != nil {
 			return err
 		}
 		program, err := compileExplorerExpr(at+".expr", series.Expr, seriesTypes)
@@ -713,16 +760,27 @@ type RoutineItem struct {
 	Text  string `json:"text"`
 }
 
+// Routine, tasks and agent card limits.
+const (
+	maxRoutineItems      = 14
+	maxRoutineLabelRunes = 40
+	maxRoutineTextRunes  = 300
+	maxTaskRows          = 12
+	maxTaskLabelRunes    = 80
+	maxAgentPoints       = 4
+	maxAgentLineRunes    = 80 // headline and points
+)
+
 func validateRoutine(_ *validator, c Component, _ string) error {
 	if c.Routine == nil {
 		return nil
 	}
-	if err := bounded("routine.items", len(c.Routine.Items), 0, 14); err != nil {
+	if err := bounded("routine.items", len(c.Routine.Items), 0, maxRoutineItems); err != nil {
 		return err
 	}
 	for index, item := range c.Routine.Items {
 		at := fmt.Sprintf("routine.items[%d]", index)
-		if err := firstError(required(at+".label", item.Label, 40), required(at+".text", item.Text, 300)); err != nil {
+		if err := firstError(required(at+".label", item.Label, maxRoutineLabelRunes), required(at+".text", item.Text, maxRoutineTextRunes)); err != nil {
 			return err
 		}
 	}
@@ -744,13 +802,13 @@ func validateTasks(v *validator, c Component, _ string) error {
 	if c.Tasks == nil {
 		return payloadRequired("tasks")
 	}
-	if err := bounded("tasks.rows", len(c.Tasks.Rows), 1, 12); err != nil {
+	if err := bounded("tasks.rows", len(c.Tasks.Rows), 1, maxTaskRows); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, row := range c.Tasks.Rows {
 		at := fmt.Sprintf("tasks.rows[%d]", index)
-		if err := required(at+".label", row.Label, 80); err != nil {
+		if err := required(at+".label", row.Label, maxTaskLabelRunes); err != nil {
 			return err
 		}
 		if row.Binding.Kind != BindingConversationTask {
@@ -777,11 +835,11 @@ func validateAgentCard(_ *validator, c Component, _ string) error {
 	if c.Agent == nil {
 		return payloadRequired("agent")
 	}
-	if err := firstError(required("agent.headline", c.Agent.Headline, 80), bounded("agent.points", len(c.Agent.Points), 0, 4)); err != nil {
+	if err := firstError(required("agent.headline", c.Agent.Headline, maxAgentLineRunes), bounded("agent.points", len(c.Agent.Points), 0, maxAgentPoints)); err != nil {
 		return err
 	}
 	for index, point := range c.Agent.Points {
-		if err := required(fmt.Sprintf("agent.points[%d]", index), point, 80); err != nil {
+		if err := required(fmt.Sprintf("agent.points[%d]", index), point, maxAgentLineRunes); err != nil {
 			return err
 		}
 	}

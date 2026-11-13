@@ -54,6 +54,13 @@ func (v *validator) image(path string, ref *ImageRef) error {
 	return nil
 }
 
+// Limits shared by several payloads.
+const (
+	maxUnitRunes  = 24 // the unit of an amount, stat, chart, breakdown or progress item
+	maxBadgeRunes = 24
+	maxRating     = 5
+)
+
 // Amount is a number the host formats in the viewer's locale, with the same
 // conventions as a stat: percent 12 means 12%, duration is in seconds, and
 // currency (ISO 4217) is required exactly when format is currency.
@@ -68,7 +75,7 @@ func validateAmount(at string, amount Amount) error {
 	if math.IsNaN(amount.Value) || math.IsInf(amount.Value, 0) {
 		return fmt.Errorf("%s.value must be a finite number", at)
 	}
-	if err := optional(at+".unit", amount.Unit, 24); err != nil {
+	if err := optional(at+".unit", amount.Unit, maxUnitRunes); err != nil {
 		return err
 	}
 	return validateFormat(at, amount.Format, amount.Currency)

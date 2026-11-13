@@ -311,10 +311,10 @@ func payloadSchemas() map[string]map[string]interface{} {
 		"agenda": agendaSchema(), "itinerary": itinerarySchema(), "place": placeSchema(), "breakdown": breakdownSchema(),
 		"progress": progressSchema(), "poll": pollSchema(), "explorer": explorerSchema(), "routine": routineSchema(),
 		"tasks": tasksSchema(), "agent": agentCardSchema(), "map": mapSchema(),
-		"grid": closedObject([]interface{}{"columns"}, map[string]interface{}{"columns": integer(2, 4)}),
+		"grid": closedObject([]interface{}{"columns"}, map[string]interface{}{"columns": integer(minGridColumns, maxGridColumns)}),
 		"tabs": array(closedObject([]interface{}{"label", "children"}, map[string]interface{}{
-			"label": strRange(1, 40), "children": array(componentRef(), 1, maxChildren),
-		}), 2, 5),
+			"label": strRange(1, maxTabLabelRunes), "children": array(componentRef(), 1, maxChildren),
+		}), minTabs, maxTabs),
 	}
 }
 
@@ -371,27 +371,29 @@ func bindingSchema(allowed []BindingKind) map[string]interface{} {
 }
 
 func chartSchema() map[string]interface{} {
-	point := closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": strRange(1, 160), "value": number()})
+	point := closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": strRange(1, maxChartPointLabelRunes), "value": number()})
 	series := closedObject([]interface{}{"name", "points"}, map[string]interface{}{
-		"name": strRange(1, 120), "points": array(point, 1, MaxChartPoints),
+		"name": strRange(1, maxChartSeriesNameRunes), "points": array(point, 1, MaxChartPoints),
 	})
 	return closedObject([]interface{}{"kind", "series"}, map[string]interface{}{
-		"kind": enum(ChartKinds), "xLabel": str(120), "yLabel": str(120),
-		"format": enum(formatNames()), "currency": currencySchema(), "unit": str(24),
-		"series":        array(series, 1, MaxChartSeries),
-		"annotations":   array(closedObject([]interface{}{"x", "label"}, map[string]interface{}{"x": strRange(1, 160), "label": strRange(1, 40)}), 0, MaxChartAnnotations),
-		"referenceLine": closedObject([]interface{}{"value"}, map[string]interface{}{"value": number(), "label": str(40)}),
-		"highlight":     closedObject([]interface{}{}, map[string]interface{}{"series": str(120), "x": str(160)}),
+		"kind": enum(ChartKinds), "xLabel": str(maxChartAxisLabelRunes), "yLabel": str(maxChartAxisLabelRunes),
+		"format": enum(formatNames()), "currency": currencySchema(), "unit": str(maxUnitRunes),
+		"series": array(series, 1, MaxChartSeries),
+		"annotations": array(closedObject([]interface{}{"x", "label"}, map[string]interface{}{
+			"x": strRange(1, maxChartPointLabelRunes), "label": strRange(1, maxChartNoteRunes),
+		}), 0, MaxChartAnnotations),
+		"referenceLine": closedObject([]interface{}{"value"}, map[string]interface{}{"value": number(), "label": str(maxChartNoteRunes)}),
+		"highlight":     closedObject([]interface{}{}, map[string]interface{}{"series": str(maxChartSeriesNameRunes), "x": str(maxChartPointLabelRunes)}),
 	})
 }
 
 func diagramSchema() map[string]interface{} {
 	node := closedObject([]interface{}{"id", "label"}, map[string]interface{}{
-		"id": itemIDSchema(), "label": strRange(1, 40), "icon": iconSchema(),
-		"group": describe(itemIDSchema(), "Id of one of groups."), "detail": describe(str(300), "Markdown shown when the node is tapped."),
+		"id": itemIDSchema(), "label": strRange(1, maxNodeLabelRunes), "icon": iconSchema(),
+		"group": describe(itemIDSchema(), "Id of one of groups."), "detail": describe(str(maxNodeDetailRunes), "Markdown shown when the node is tapped."),
 	})
-	edge := closedObject([]interface{}{"from", "to"}, map[string]interface{}{"from": itemIDSchema(), "to": itemIDSchema(), "label": str(30)})
-	group := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, 30)})
+	edge := closedObject([]interface{}{"from", "to"}, map[string]interface{}{"from": itemIDSchema(), "to": itemIDSchema(), "label": str(maxEdgeLabelRunes)})
+	group := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, maxGroupLabelRunes)})
 	return closedObject([]interface{}{"layout", "nodes"}, map[string]interface{}{
 		"layout":    describe(enum(DiagramLayouts), "flow: steps with arrows; cycle: nodes in order around a ring (at least 3; edges optional); hierarchy: parent to child edges, one parent each; mindmap: the first node is the centre and every node connects to it; network: any links."),
 		"direction": describe(enum(DiagramDirections), "flow and hierarchy only; down by default."),
@@ -402,9 +404,9 @@ func diagramSchema() map[string]interface{} {
 func labeledImageSchema() map[string]interface{} {
 	fraction := map[string]interface{}{"type": "number", "minimum": 0, "maximum": 1}
 	marker := closedObject([]interface{}{"id", "x", "y", "label"}, map[string]interface{}{
-		"id": itemIDSchema(), "x": fraction, "y": fraction, "label": strRange(1, 40), "detail": str(300),
+		"id": itemIDSchema(), "x": fraction, "y": fraction, "label": strRange(1, maxMarkerLabelRunes), "detail": str(maxMarkerDetailRunes),
 	})
-	return closedObject([]interface{}{"image", "markers"}, map[string]interface{}{"image": imageRefSchema(), "markers": array(marker, 1, 12)})
+	return closedObject([]interface{}{"image", "markers"}, map[string]interface{}{"image": imageRefSchema(), "markers": array(marker, 1, maxMarkers)})
 }
 
 func integer(minimum, maximum int) map[string]interface{} {
@@ -426,7 +428,7 @@ func quantityValueProperties() map[string]interface{} {
 		"groups": describe(array(closedObject([]interface{}{"count"}, map[string]interface{}{"count": integer(0, MaxUnitBlocks), "label": label}), 1, maxQuantityGroupings),
 			"unit_blocks: one row of blocks per group."),
 		"parts": describe(array(closedObject([]interface{}{"value", "label"}, map[string]interface{}{
-			"value": map[string]interface{}{"type": "number", "minimum": 0, "maximum": 100}, "label": strRange(1, quantityLabelRunes),
+			"value": map[string]interface{}{"type": "number", "minimum": 0, "maximum": maxPercent}, "label": strRange(1, quantityLabelRunes),
 		}), 1, maxQuantityGroupings), "percent_waffle: percentages totalling at most 100 on a 10x10 grid."),
 		"items": describe(array(closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": strRange(1, quantityLabelRunes), "value": amountSchema()}), 2, maxQuantityGroupings),
 			"scale_compare: sizes drawn in proportion."),
@@ -449,7 +451,7 @@ func quantityVisualSchema() map[string]interface{} {
 }
 
 func amountSchema() map[string]interface{} {
-	return closedObject([]interface{}{"value"}, map[string]interface{}{"value": number(), "format": enum(formatNames()), "currency": currencySchema(), "unit": str(24)})
+	return closedObject([]interface{}{"value"}, map[string]interface{}{"value": number(), "format": enum(formatNames()), "currency": currencySchema(), "unit": str(maxUnitRunes)})
 }
 
 func priceSchema() map[string]interface{} {
@@ -460,24 +462,25 @@ func priceSchema() map[string]interface{} {
 
 func mathSchema() map[string]interface{} {
 	step := closedObject([]interface{}{"latex"}, map[string]interface{}{
-		"latex": describe(strRange(1, MaxLaTeXRunes), "No \\href, \\url, \\includegraphics, \\html or new macros."), "note": str(200),
+		"latex": describe(strRange(1, MaxLaTeXRunes), "No \\href, \\url, \\includegraphics, \\html or new macros."), "note": str(maxMathNoteRunes),
 	})
 	return closedObject([]interface{}{"steps"}, map[string]interface{}{
-		"steps": array(step, 1, 12), "reveal": enum(MathReveals),
+		"steps": array(step, 1, maxMathSteps), "reveal": enum(MathReveals),
 	})
 }
 
 func definitionSchema() map[string]interface{} {
 	return closedObject([]interface{}{"term", "meaning"}, map[string]interface{}{
-		"term": strRange(1, 60), "phonetic": str(60), "partOfSpeech": str(20), "meaning": strRange(1, 300), "example": str(200), "image": imageRefSchema(),
+		"term": strRange(1, maxTermRunes), "phonetic": str(maxPhoneticRunes), "partOfSpeech": str(maxPartOfSpeechRunes),
+		"meaning": strRange(1, maxMeaningRunes), "example": str(maxExampleRunes), "image": imageRefSchema(),
 	})
 }
 
 func flashcardsSchema() map[string]interface{} {
 	card := closedObject([]interface{}{"id", "front", "back"}, map[string]interface{}{
-		"id": itemIDSchema(), "front": strRange(1, 200), "back": strRange(1, 400), "image": imageRefSchema(),
+		"id": itemIDSchema(), "front": strRange(1, maxCardFrontRunes), "back": strRange(1, maxCardBackRunes), "image": imageRefSchema(),
 	})
-	return closedObject([]interface{}{"cards"}, map[string]interface{}{"cards": array(card, 2, 30), "shuffle": boolean()})
+	return closedObject([]interface{}{"cards"}, map[string]interface{}{"cards": array(card, minFlashcards, maxFlashcards), "shuffle": boolean()})
 }
 
 func beforeAfterSchema() map[string]interface{} {
@@ -485,17 +488,18 @@ func beforeAfterSchema() map[string]interface{} {
 	return closedObject([]interface{}{"mode", "before", "after"}, map[string]interface{}{
 		"mode":   describe(enum(BeforeAfterModes), "diff highlights changed words (texts); split shows both side by side; slider wipes between images."),
 		"before": side, "after": side,
-		"labels": closedObject([]interface{}{}, map[string]interface{}{"before": str(20), "after": str(20)}),
+		"labels": closedObject([]interface{}{}, map[string]interface{}{"before": str(maxSideLabelRunes), "after": str(maxSideLabelRunes)}),
 	})
 }
 
 func beforeAfterSideSchema() map[string]interface{} {
-	return describe(closedObject([]interface{}{}, map[string]interface{}{"text": str(4000), "image": imageRefSchema()}), "Text or an image, not both; both sides the same kind.")
+	return describe(closedObject([]interface{}{}, map[string]interface{}{"text": str(maxSideTextRunes), "image": imageRefSchema()}), "Text or an image, not both; both sides the same kind.")
 }
 
 func draftSchema() map[string]interface{} {
 	return closedObject([]interface{}{"channel", "body"}, map[string]interface{}{
-		"channel": enum(DraftChannels), "to": describe(str(200), "Shown only; it sends nothing."), "subject": str(200), "body": describe(strRange(1, 4000), "Markdown."),
+		"channel": enum(DraftChannels), "to": describe(str(maxDraftHeaderRunes), "Shown only; it sends nothing."), "subject": str(maxDraftHeaderRunes),
+		"body": describe(strRange(1, maxDraftBodyRunes), "Markdown."),
 	})
 }
 
@@ -503,45 +507,47 @@ func recipeSchema() map[string]interface{} {
 	minutes := integer(0, MaxRecipeMinutes)
 	ingredient := closedObject([]interface{}{"id", "name"}, map[string]interface{}{
 		"id": itemIDSchema(), "qty": describe(map[string]interface{}{"type": "number", "exclusiveMinimum": 0}, "Leave out for to taste."),
-		"unit": str(16), "name": strRange(1, 60), "group": str(30),
+		"unit": str(maxIngredientUnitRunes), "name": strRange(1, maxIngredientNameRunes), "group": str(maxIngredientGroupRunes),
 	})
-	step := closedObject([]interface{}{"id", "text"}, map[string]interface{}{"id": itemIDSchema(), "text": strRange(1, 300)})
+	step := closedObject([]interface{}{"id", "text"}, map[string]interface{}{"id": itemIDSchema(), "text": strRange(1, maxRecipeStepRunes)})
 	return closedObject([]interface{}{"servings", "ingredients", "steps"}, map[string]interface{}{
-		"servings": integer(1, 24), "time": describe(closedObject([]interface{}{}, map[string]interface{}{"prep": minutes, "cook": minutes}), "Minutes."),
-		"ingredients": array(ingredient, 1, 30), "steps": array(step, 1, 15), "image": imageRefSchema(),
+		"servings": integer(1, maxServings), "time": describe(closedObject([]interface{}{}, map[string]interface{}{"prep": minutes, "cook": minutes}), "Minutes."),
+		"ingredients": array(ingredient, 1, maxIngredients), "steps": array(step, 1, maxRecipeSteps), "image": imageRefSchema(),
 		"checkable": boolean(),
 	})
 }
 
 func itemSchema() map[string]interface{} {
 	return closedObject([]interface{}{"name"}, map[string]interface{}{
-		"name": strRange(1, 80), "image": imageRefSchema(), "price": priceSchema(), "rating": ratingSchema(),
-		"facts": array(strRange(1, 60), 0, 4), "badge": str(24),
+		"name": strRange(1, maxItemNameRunes), "image": imageRefSchema(), "price": priceSchema(), "rating": ratingSchema(),
+		"facts": array(strRange(1, maxFactRunes), 0, maxFacts), "badge": str(maxBadgeRunes),
 	})
 }
 
 func analogySchema() map[string]interface{} {
-	side := closedObject([]interface{}{"label"}, map[string]interface{}{"label": strRange(1, 40), "icon": iconSchema()})
-	pair := closedObject([]interface{}{"a", "b"}, map[string]interface{}{"a": describe(strRange(1, 60), "A part of from."), "b": describe(strRange(1, 60), "What it is like in to.")})
-	return closedObject([]interface{}{"from", "to", "mapping"}, map[string]interface{}{"from": side, "to": side, "mapping": array(pair, 1, 5)})
+	side := closedObject([]interface{}{"label"}, map[string]interface{}{"label": strRange(1, maxAnalogyLabelRunes), "icon": iconSchema()})
+	pair := closedObject([]interface{}{"a", "b"}, map[string]interface{}{
+		"a": describe(strRange(1, maxAnalogyPartRunes), "A part of from."), "b": describe(strRange(1, maxAnalogyPartRunes), "What it is like in to."),
+	})
+	return closedObject([]interface{}{"from", "to", "mapping"}, map[string]interface{}{"from": side, "to": side, "mapping": array(pair, 1, maxAnalogyPairs)})
 }
 
 func formSchema() map[string]interface{} {
-	option := closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": strRange(1, 240), "value": strRange(1, 240)})
+	option := closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": strRange(1, maxFormLabelRunes), "value": strRange(1, maxFormLabelRunes)})
 	field := closedObject([]interface{}{"id", "type", "label"}, map[string]interface{}{
 		"id": idSchema(), "type": enum(FormFieldTypes),
-		"label": strRange(1, 240), "description": str(1000), "required": map[string]interface{}{"type": "boolean"}, "placeholder": str(500),
-		"options": map[string]interface{}{"type": "array", "maxItems": 100, "items": option}, "min": number(), "max": number(),
+		"label": strRange(1, maxFormLabelRunes), "description": str(maxFormFieldDetailRunes), "required": boolean(), "placeholder": str(maxFormPlaceholderRunes),
+		"options": array(option, 0, maxFormOptions), "min": number(), "max": number(),
 	})
 	return closedObject([]interface{}{"fields"}, map[string]interface{}{
-		"description": str(2000), "submitLabel": str(120),
-		"fields": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 40, "items": field},
+		"description": str(maxFormDescriptionRunes), "submitLabel": str(maxFormSubmitLabelRunes),
+		"fields": array(field, 1, maxFormFields),
 	})
 }
 
 func tableSchema() map[string]interface{} {
 	column := closedObject([]interface{}{"key", "label", "kind"}, map[string]interface{}{
-		"key": itemIDSchema(), "label": strRange(1, 40), "kind": enum(TableColumnKinds), "currency": currencySchema(),
+		"key": itemIDSchema(), "label": strRange(1, maxColumnLabelRunes), "kind": enum(TableColumnKinds), "currency": currencySchema(),
 	})
 	cell := map[string]interface{}{"anyOf": []interface{}{str(MaxTableCellRunes), number(), imageRefSchema()}}
 	return closedObject([]interface{}{"columns"}, map[string]interface{}{
@@ -552,28 +558,28 @@ func tableSchema() map[string]interface{} {
 }
 
 func calloutSchema() map[string]interface{} {
-	return closedObject([]interface{}{"body"}, map[string]interface{}{"icon": iconSchema(), "body": strRange(1, 300)})
+	return closedObject([]interface{}{"body"}, map[string]interface{}{"icon": iconSchema(), "body": strRange(1, maxCalloutBodyRunes)})
 }
 
 func stepsSchema() map[string]interface{} {
 	step := closedObject([]interface{}{"id", "title"}, map[string]interface{}{
-		"id": itemIDSchema(), "title": strRange(1, 80), "detail": str(400), "icon": iconSchema(), "image": imageRefSchema(),
+		"id": itemIDSchema(), "title": strRange(1, maxStepTitleRunes), "detail": str(maxStepDetailRunes), "icon": iconSchema(), "image": imageRefSchema(),
 	})
 	return closedObject([]interface{}{"items"}, map[string]interface{}{
-		"items": array(step, 2, 10), "checkable": boolean(),
+		"items": array(step, minSteps, maxSteps), "checkable": boolean(),
 	})
 }
 
 func comparisonSchema() map[string]interface{} {
-	attribute := closedObject([]interface{}{"key", "label"}, map[string]interface{}{"key": itemIDSchema(), "label": strRange(1, 40)})
+	attribute := closedObject([]interface{}{"key", "label"}, map[string]interface{}{"key": itemIDSchema(), "label": strRange(1, maxAttributeLabelRunes)})
 	price := priceSchema()
 	option := closedObject([]interface{}{"id", "name", "values"}, map[string]interface{}{
-		"id": itemIDSchema(), "name": strRange(1, 60), "image": imageRefSchema(), "badge": str(24), "price": price,
-		"values": describe(map[string]interface{}{"type": "object", "additionalProperties": str(80)}, "A value for every attribute key; an empty string is allowed."),
-		"pros":   array(strRange(1, 80), 0, 4), "cons": array(strRange(1, 80), 0, 4),
+		"id": itemIDSchema(), "name": strRange(1, maxOptionNameRunes), "image": imageRefSchema(), "badge": str(maxBadgeRunes), "price": price,
+		"values": describe(map[string]interface{}{"type": "object", "additionalProperties": str(maxOptionValueRunes)}, "A value for every attribute key; an empty string is allowed."),
+		"pros":   array(strRange(1, maxProConRunes), 0, maxProsCons), "cons": array(strRange(1, maxProConRunes), 0, maxProsCons),
 	})
 	return closedObject([]interface{}{"attributes", "options"}, map[string]interface{}{
-		"attributes": array(attribute, 1, 10), "options": array(option, 2, 4),
+		"attributes": array(attribute, 1, maxComparisonAttributes), "options": array(option, minComparisonOptions, maxComparisonOptions),
 		"recommended": describe(itemIDSchema(), "Id of the option you recommend."),
 		"pickable":    boolean(),
 	})
@@ -581,39 +587,42 @@ func comparisonSchema() map[string]interface{} {
 
 func timelineSchema() map[string]interface{} {
 	event := closedObject([]interface{}{"id", "when", "title"}, map[string]interface{}{
-		"id": itemIDSchema(), "when": describe(strRange(1, 40), "Label shown, e.g. 1789, Mon 3 Nov or Week 2."),
+		"id": itemIDSchema(), "when": describe(strRange(1, maxEventWhenRunes), "Label shown, e.g. 1789, Mon 3 Nov or Week 2."),
 		"date":  describe(map[string]interface{}{"type": "string", "pattern": isoDate.String()}, "YYYY-MM-DD, used only to order events."),
-		"title": strRange(1, 80), "detail": str(300), "icon": iconSchema(), "image": imageRefSchema(),
+		"title": strRange(1, maxEventTitleRunes), "detail": str(maxEventDetailRunes), "icon": iconSchema(), "image": imageRefSchema(),
 	})
-	return closedObject([]interface{}{"events"}, map[string]interface{}{"events": array(event, 2, 20)})
+	return closedObject([]interface{}{"events"}, map[string]interface{}{"events": array(event, minTimelineEvents, maxTimelineEvents)})
 }
 
 func imageBlockSchema() map[string]interface{} {
-	return closedObject([]interface{}{"image"}, map[string]interface{}{"image": imageRefSchema(), "caption": str(200), "aspect": enum(ImageAspects)})
+	return closedObject([]interface{}{"image"}, map[string]interface{}{"image": imageRefSchema(), "caption": str(maxImageCaptionRunes), "aspect": enum(ImageAspects)})
 }
 
 func gallerySchema() map[string]interface{} {
-	image := closedObject([]interface{}{"image"}, map[string]interface{}{"image": imageRefSchema(), "caption": str(120)})
-	return closedObject([]interface{}{"images"}, map[string]interface{}{"images": array(image, 2, 12), "layout": enum(GalleryLayouts)})
+	image := closedObject([]interface{}{"image"}, map[string]interface{}{"image": imageRefSchema(), "caption": str(maxGalleryCaptionRunes)})
+	return closedObject([]interface{}{"images"}, map[string]interface{}{"images": array(image, minGalleryImages, maxGalleryImages), "layout": enum(GalleryLayouts)})
 }
 
 func choicesSchema() map[string]interface{} {
-	chip := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, 40)})
-	return closedObject([]interface{}{"chips"}, map[string]interface{}{"chips": array(chip, 2, 5)})
+	chip := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, maxChipLabelRunes)})
+	return closedObject([]interface{}{"chips"}, map[string]interface{}{"chips": array(chip, minChips, maxChips)})
 }
 
 func checklistSchema() map[string]interface{} {
-	item := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, 100), "group": str(40)})
-	return closedObject([]interface{}{"items"}, map[string]interface{}{"items": array(item, 1, 40)})
+	item := closedObject([]interface{}{"id", "label"}, map[string]interface{}{
+		"id": itemIDSchema(), "label": strRange(1, maxChecklistLabelRunes), "group": str(maxChecklistGroupRunes),
+	})
+	return closedObject([]interface{}{"items"}, map[string]interface{}{"items": array(item, 1, maxChecklistItems)})
 }
 
 func quizSchema() map[string]interface{} {
-	option := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, 120), "image": imageRefSchema()})
+	option := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, maxQuizOptionLabelRunes), "image": imageRefSchema()})
 	key := closedObject([]interface{}{"correct"}, map[string]interface{}{
-		"correct": describe(array(itemIDSchema(), 1, 6), "Ids of the correct options: exactly one unless allowMultiple."), "explanation": str(400),
+		"correct":     describe(array(itemIDSchema(), 1, maxQuizOptions), "Ids of the correct options: exactly one unless allowMultiple."),
+		"explanation": str(maxQuizExplanationRunes),
 	})
 	return closedObject([]interface{}{"question", "options", "answerKey"}, map[string]interface{}{
-		"question": strRange(1, 300), "options": array(option, 2, 6), "allowMultiple": boolean(), "answerKey": key,
+		"question": strRange(1, maxQuizQuestionRunes), "options": array(option, minQuizOptions, maxQuizOptions), "allowMultiple": boolean(), "answerKey": key,
 	})
 }
 
@@ -632,7 +641,7 @@ func itemIDSchema() map[string]interface{} {
 }
 
 func iconSchema() map[string]interface{} {
-	return map[string]interface{}{"type": "string", "maxLength": 40, "pattern": iconPattern.String()}
+	return map[string]interface{}{"type": "string", "maxLength": maxIconRunes, "pattern": iconPattern.String()}
 }
 
 func currencySchema() map[string]interface{} {
@@ -659,16 +668,16 @@ func boolean() map[string]interface{} { return map[string]interface{}{"type": "b
 
 func statRowSchema() map[string]interface{} {
 	stat := closedObject([]interface{}{"label", "value"}, map[string]interface{}{
-		"label":    strRange(1, 60),
+		"label":    strRange(1, maxStatLabelRunes),
 		"value":    describe(number(), "The raw number; the app formats it for the reader's language and region."),
 		"format":   describe(enum(formatNames()), "number (default); currency (set currency); percent (12 means 12%); duration (value in seconds)."),
 		"currency": currencySchema(),
-		"unit":     describe(str(24), "Shown after the value, e.g. GB/mo or per month."), "delta": str(40),
+		"unit":     describe(str(maxUnitRunes), "Shown after the value, e.g. GB/mo or per month."), "delta": str(maxStatDeltaRunes),
 		"trend": enum(Trends), "goodDirection": enum(GoodDirections),
-		"sparkline": map[string]interface{}{"type": "array", "maxItems": 30, "items": number()},
+		"sparkline": array(number(), 0, maxSparkline),
 	})
 	return closedObject([]interface{}{"stats"}, map[string]interface{}{
-		"stats": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 4, "items": stat},
+		"stats": array(stat, 1, maxStats),
 	})
 }
 
@@ -684,8 +693,8 @@ func actionsSchema() map[string]interface{} {
 	sort.Strings(commands)
 	kind := describe(enum(kinds), "respond sends value (default label) as the user's reply; edit opens the draft named by target; approval sends decision on the approval binding; entity sends command to the bound routine (pause, resume, run_now, stop), task (cancel) or agent (open_chat).")
 	action := closedObject([]interface{}{"id", "label", "kind"}, map[string]interface{}{
-		"id": idSchema(), "label": strRange(1, 40), "kind": kind, "icon": iconSchema(),
-		"value": str(500), "target": idSchema(),
+		"id": idSchema(), "label": strRange(1, maxActionLabelRunes), "kind": kind, "icon": iconSchema(),
+		"value": str(maxActionValueRunes), "target": idSchema(),
 		"decision": enum([]string{"approve", "reject"}), "command": enum(commands), "binding": bindingSchema(BindingKinds),
 	})
 	return array(action, 1, MaxActions)

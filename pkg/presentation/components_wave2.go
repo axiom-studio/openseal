@@ -53,6 +53,11 @@ const (
 	MaxDiagramNodes  = 30
 	MaxDiagramEdges  = 40
 	MaxDiagramGroups = 6
+
+	maxNodeLabelRunes  = 40
+	maxNodeDetailRunes = 300
+	maxEdgeLabelRunes  = 30
+	maxGroupLabelRunes = 30
 )
 
 func validateDiagram(v *validator, c Component, _ string) error {
@@ -78,15 +83,15 @@ func validateDiagram(v *validator, c Component, _ string) error {
 	groups := map[string]bool{}
 	for index, group := range d.Groups {
 		at := fmt.Sprintf("diagram.groups[%d]", index)
-		if err := firstError(itemIDs(groups, at, group.ID), required(at+".label", group.Label, 30)); err != nil {
+		if err := firstError(itemIDs(groups, at, group.ID), required(at+".label", group.Label, maxGroupLabelRunes)); err != nil {
 			return err
 		}
 	}
 	nodes := map[string]bool{}
 	for index, node := range d.Nodes {
 		at := fmt.Sprintf("diagram.nodes[%d]", index)
-		if err := firstError(itemIDs(nodes, at, node.ID), required(at+".label", node.Label, 40), v.icon(at+".icon", c.ID, node.Icon),
-			markdown(at+".detail", node.Detail, 0, 300)); err != nil {
+		if err := firstError(itemIDs(nodes, at, node.ID), required(at+".label", node.Label, maxNodeLabelRunes), v.icon(at+".icon", c.ID, node.Icon),
+			markdown(at+".detail", node.Detail, 0, maxNodeDetailRunes)); err != nil {
 			return err
 		}
 		if node.Group != "" && !groups[node.Group] {
@@ -101,7 +106,7 @@ func validateDiagram(v *validator, c Component, _ string) error {
 		if !nodes[edge.To] {
 			return fmt.Errorf("%s.to %q is not the id of a node", at, edge.To)
 		}
-		if err := optional(at+".label", edge.Label, 30); err != nil {
+		if err := optional(at+".label", edge.Label, maxEdgeLabelRunes); err != nil {
 			return err
 		}
 	}
@@ -194,19 +199,26 @@ type ImageMarker struct {
 	Detail string  `json:"detail,omitempty"`
 }
 
+// Labeled image limits.
+const (
+	maxMarkers           = 12
+	maxMarkerLabelRunes  = 40
+	maxMarkerDetailRunes = 300
+)
+
 func validateLabeledImage(v *validator, c Component, _ string) error {
 	l := c.LabeledImage
 	if l == nil {
 		return payloadRequired("labeled_image")
 	}
-	if err := firstError(v.image("labeled_image.image", &l.Image), bounded("labeled_image.markers", len(l.Markers), 1, 12)); err != nil {
+	if err := firstError(v.image("labeled_image.image", &l.Image), bounded("labeled_image.markers", len(l.Markers), 1, maxMarkers)); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, marker := range l.Markers {
 		at := fmt.Sprintf("labeled_image.markers[%d]", index)
 		if err := firstError(itemIDs(seen, at, marker.ID), unitInterval(at+".x", marker.X), unitInterval(at+".y", marker.Y),
-			required(at+".label", marker.Label, 40), markdown(at+".detail", marker.Detail, 0, 300)); err != nil {
+			required(at+".label", marker.Label, maxMarkerLabelRunes), markdown(at+".detail", marker.Detail, 0, maxMarkerDetailRunes)); err != nil {
 			return err
 		}
 	}
@@ -297,6 +309,7 @@ const (
 	maxNumberLinePoints  = 6
 	maxNumberLineRanges  = 3
 	maxQuantityGroupings = 4
+	maxPercent           = 100
 )
 
 func validateQuantityVisual(_ *validator, c Component, _ string) error {
@@ -377,7 +390,7 @@ func quantityValues(at, kind string, q QuantityValues) error {
 		total := 0.0
 		for index, part := range q.Parts {
 			item := fmt.Sprintf("%s.parts[%d]", at, index)
-			if math.IsNaN(part.Value) || part.Value < 0 || part.Value > 100 {
+			if math.IsNaN(part.Value) || part.Value < 0 || part.Value > maxPercent {
 				return fmt.Errorf("%s.value must be a percentage from 0 to 100", item)
 			}
 			if err := required(item+".label", part.Label, quantityLabelRunes); err != nil {
@@ -385,7 +398,7 @@ func quantityValues(at, kind string, q QuantityValues) error {
 			}
 			total += part.Value
 		}
-		if total > 100+1e-9 {
+		if total > maxPercent+1e-9 {
 			return fmt.Errorf("%s.parts add up to %g%%; they must total at most 100", at, total)
 		}
 	case "scale_compare":
@@ -462,7 +475,12 @@ type MathStep struct {
 var MathReveals = []string{"all", "stepwise"}
 
 // MaxLaTeXRunes bounds one math step.
-const MaxLaTeXRunes = 300
+// Math limits.
+const (
+	MaxLaTeXRunes    = 300
+	maxMathSteps     = 12
+	maxMathNoteRunes = 200
+)
 
 // deniedLaTeX lists macros that could fetch, embed or define code. KaTeX
 // also runs with trust off, but such macros never reach a viewer.
@@ -507,12 +525,12 @@ func validateMath(_ *validator, c Component, _ string) error {
 	if m == nil {
 		return payloadRequired("math")
 	}
-	if err := firstError(bounded("math.steps", len(m.Steps), 1, 12), oneOf("math.reveal", m.Reveal, MathReveals)); err != nil {
+	if err := firstError(bounded("math.steps", len(m.Steps), 1, maxMathSteps), oneOf("math.reveal", m.Reveal, MathReveals)); err != nil {
 		return err
 	}
 	for index, step := range m.Steps {
 		at := fmt.Sprintf("math.steps[%d]", index)
-		if err := firstError(ValidateLaTeX(at+".latex", step.LaTeX), optional(at+".note", step.Note, 200)); err != nil {
+		if err := firstError(ValidateLaTeX(at+".latex", step.LaTeX), optional(at+".note", step.Note, maxMathNoteRunes)); err != nil {
 			return err
 		}
 	}
@@ -529,14 +547,23 @@ type Definition struct {
 	Image        *ImageRef `json:"image,omitempty"`
 }
 
+// Definition limits.
+const (
+	maxTermRunes         = 60
+	maxPhoneticRunes     = 60
+	maxPartOfSpeechRunes = 20
+	maxMeaningRunes      = 300
+	maxExampleRunes      = 200
+)
+
 func validateDefinition(v *validator, c Component, _ string) error {
 	d := c.Definition
 	if d == nil {
 		return payloadRequired("definition")
 	}
-	return firstError(required("definition.term", d.Term, 60), optional("definition.phonetic", d.Phonetic, 60),
-		optional("definition.partOfSpeech", d.PartOfSpeech, 20), required("definition.meaning", d.Meaning, 300),
-		optional("definition.example", d.Example, 200), v.image("definition.image", d.Image))
+	return firstError(required("definition.term", d.Term, maxTermRunes), optional("definition.phonetic", d.Phonetic, maxPhoneticRunes),
+		optional("definition.partOfSpeech", d.PartOfSpeech, maxPartOfSpeechRunes), required("definition.meaning", d.Meaning, maxMeaningRunes),
+		optional("definition.example", d.Example, maxExampleRunes), v.image("definition.image", d.Image))
 }
 
 // Flashcards is a practice deck. Viewers flip cards, mark each "got" or
@@ -553,18 +580,26 @@ type Flashcard struct {
 	Image *ImageRef `json:"image,omitempty"`
 }
 
+// Flashcard limits.
+const (
+	minFlashcards     = 2
+	maxFlashcards     = 30
+	maxCardFrontRunes = 200
+	maxCardBackRunes  = 400
+)
+
 func validateFlashcards(v *validator, c Component, _ string) error {
 	f := c.Flashcards
 	if f == nil {
 		return payloadRequired("flashcards")
 	}
-	if err := bounded("flashcards.cards", len(f.Cards), 2, 30); err != nil {
+	if err := bounded("flashcards.cards", len(f.Cards), minFlashcards, maxFlashcards); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, card := range f.Cards {
 		at := fmt.Sprintf("flashcards.cards[%d]", index)
-		if err := firstError(itemIDs(seen, at, card.ID), required(at+".front", card.Front, 200), required(at+".back", card.Back, 400),
+		if err := firstError(itemIDs(seen, at, card.ID), required(at+".front", card.Front, maxCardFrontRunes), required(at+".back", card.Back, maxCardBackRunes),
 			v.image(at+".image", card.Image)); err != nil {
 			return err
 		}
@@ -595,6 +630,12 @@ type BeforeAfterLabels struct {
 // changed words highlighted), split (side by side) and slider (images).
 var BeforeAfterModes = []string{"diff", "split", "slider"}
 
+// Before and after limits.
+const (
+	maxSideTextRunes  = 4000
+	maxSideLabelRunes = 20
+)
+
 func validateBeforeAfter(v *validator, c Component, _ string) error {
 	b := c.BeforeAfter
 	if b == nil {
@@ -610,7 +651,7 @@ func validateBeforeAfter(v *validator, c Component, _ string) error {
 		case s.Image != nil:
 			return "image", v.image(at+".image", s.Image)
 		default:
-			return "text", required(at+".text", s.Text, 4000)
+			return "text", required(at+".text", s.Text, maxSideTextRunes)
 		}
 	}
 	before, err := side("before_after.before", b.Before)
@@ -631,7 +672,7 @@ func validateBeforeAfter(v *validator, c Component, _ string) error {
 		return fmt.Errorf("before_after.mode slider compares images; use diff or split for texts")
 	}
 	if b.Labels != nil {
-		return firstError(optional("before_after.labels.before", b.Labels.Before, 20), optional("before_after.labels.after", b.Labels.After, 20))
+		return firstError(optional("before_after.labels.before", b.Labels.Before, maxSideLabelRunes), optional("before_after.labels.after", b.Labels.After, maxSideLabelRunes))
 	}
 	return nil
 }
@@ -650,6 +691,12 @@ type Draft struct {
 // DraftChannels lists the values of Draft.Channel.
 var DraftChannels = []string{"email", "message", "post", "note"}
 
+// Draft limits.
+const (
+	maxDraftHeaderRunes = 200 // to and subject
+	maxDraftBodyRunes   = 4000
+)
+
 func validateDraft(_ *validator, c Component, _ string) error {
 	d := c.Draft
 	if d == nil {
@@ -658,7 +705,7 @@ func validateDraft(_ *validator, c Component, _ string) error {
 	if !contains(DraftChannels, d.Channel) {
 		return fmt.Errorf("draft.channel %q is not one of %s", d.Channel, strings.Join(DraftChannels, ", "))
 	}
-	return firstError(optional("draft.to", d.To, 200), optional("draft.subject", d.Subject, 200), markdown("draft.body", d.Body, 1, 4000))
+	return firstError(optional("draft.to", d.To, maxDraftHeaderRunes), optional("draft.subject", d.Subject, maxDraftHeaderRunes), markdown("draft.body", d.Body, 1, maxDraftBodyRunes))
 }
 
 // Recipe is a dish with scalable ingredients and steps.
@@ -693,15 +740,25 @@ type RecipeStep struct {
 }
 
 // MaxRecipeMinutes bounds a recipe's prep and cook times (a week).
-const MaxRecipeMinutes = 7 * 24 * 60
+// Recipe limits.
+const (
+	MaxRecipeMinutes        = 7 * 24 * 60
+	maxServings             = 24
+	maxIngredients          = 30
+	maxRecipeSteps          = 15
+	maxIngredientUnitRunes  = 16
+	maxIngredientNameRunes  = 60
+	maxIngredientGroupRunes = 30
+	maxRecipeStepRunes      = 300
+)
 
 func validateRecipe(v *validator, c Component, _ string) error {
 	r := c.Recipe
 	if r == nil {
 		return payloadRequired("recipe")
 	}
-	if r.Servings < 1 || r.Servings > 24 {
-		return fmt.Errorf("recipe.servings must be 1-24 (got %d)", r.Servings)
+	if r.Servings < 1 || r.Servings > maxServings {
+		return fmt.Errorf("recipe.servings must be 1-%d (got %d)", maxServings, r.Servings)
 	}
 	if r.Time != nil {
 		for index, minutes := range []*int{r.Time.Prep, r.Time.Cook} {
@@ -710,14 +767,14 @@ func validateRecipe(v *validator, c Component, _ string) error {
 			}
 		}
 	}
-	if err := firstError(bounded("recipe.ingredients", len(r.Ingredients), 1, 30), bounded("recipe.steps", len(r.Steps), 1, 15), v.image("recipe.image", r.Image)); err != nil {
+	if err := firstError(bounded("recipe.ingredients", len(r.Ingredients), 1, maxIngredients), bounded("recipe.steps", len(r.Steps), 1, maxRecipeSteps), v.image("recipe.image", r.Image)); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, ingredient := range r.Ingredients {
 		at := fmt.Sprintf("recipe.ingredients[%d]", index)
-		if err := firstError(itemIDs(seen, at, ingredient.ID), optional(at+".unit", ingredient.Unit, 16), required(at+".name", ingredient.Name, 60),
-			optional(at+".group", ingredient.Group, 30)); err != nil {
+		if err := firstError(itemIDs(seen, at, ingredient.ID), optional(at+".unit", ingredient.Unit, maxIngredientUnitRunes), required(at+".name", ingredient.Name, maxIngredientNameRunes),
+			optional(at+".group", ingredient.Group, maxIngredientGroupRunes)); err != nil {
 			return err
 		}
 		if qty := ingredient.Qty; qty != nil && (math.IsNaN(*qty) || math.IsInf(*qty, 0) || *qty <= 0) {
@@ -727,7 +784,7 @@ func validateRecipe(v *validator, c Component, _ string) error {
 	steps := map[string]bool{}
 	for index, step := range r.Steps {
 		at := fmt.Sprintf("recipe.steps[%d]", index)
-		if err := firstError(itemIDs(steps, at, step.ID), required(at+".text", step.Text, 300)); err != nil {
+		if err := firstError(itemIDs(steps, at, step.ID), required(at+".text", step.Text, maxRecipeStepRunes)); err != nil {
 			return err
 		}
 	}
@@ -749,13 +806,20 @@ type ItemRating struct {
 	Count *int    `json:"count,omitempty"`
 }
 
+// Item limits.
+const (
+	maxItemNameRunes = 80
+	maxFacts         = 4 // facts of an item or a place
+	maxFactRunes     = 60
+)
+
 func validateItem(v *validator, c Component, _ string) error {
 	item := c.Item
 	if item == nil {
 		return payloadRequired("item")
 	}
-	if err := firstError(required("item.name", item.Name, 80), v.image("item.image", item.Image), optional("item.badge", item.Badge, 24),
-		bounded("item.facts", len(item.Facts), 0, 4)); err != nil {
+	if err := firstError(required("item.name", item.Name, maxItemNameRunes), v.image("item.image", item.Image), optional("item.badge", item.Badge, maxBadgeRunes),
+		bounded("item.facts", len(item.Facts), 0, maxFacts)); err != nil {
 		return err
 	}
 	if item.Price != nil {
@@ -764,15 +828,15 @@ func validateItem(v *validator, c Component, _ string) error {
 		}
 	}
 	if rating := item.Rating; rating != nil {
-		if math.IsNaN(rating.Value) || rating.Value < 0 || rating.Value > 5 {
-			return fmt.Errorf("item.rating.value must be 0-5")
+		if math.IsNaN(rating.Value) || rating.Value < 0 || rating.Value > maxRating {
+			return fmt.Errorf("item.rating.value must be 0-%d", maxRating)
 		}
 		if rating.Count != nil && *rating.Count < 0 {
 			return fmt.Errorf("item.rating.count must be 0 or more")
 		}
 	}
 	for index, fact := range item.Facts {
-		if err := required(fmt.Sprintf("item.facts[%d]", index), fact, 60); err != nil {
+		if err := required(fmt.Sprintf("item.facts[%d]", index), fact, maxFactRunes); err != nil {
 			return err
 		}
 	}
@@ -797,19 +861,26 @@ type AnalogyMapping struct {
 	B string `json:"b"`
 }
 
+// Analogy limits.
+const (
+	maxAnalogyLabelRunes = 40
+	maxAnalogyPairs      = 5
+	maxAnalogyPartRunes  = 60
+)
+
 func validateAnalogy(v *validator, c Component, _ string) error {
 	a := c.Analogy
 	if a == nil {
 		return payloadRequired("analogy")
 	}
-	if err := firstError(required("analogy.from.label", a.From.Label, 40), v.icon("analogy.from.icon", c.ID, a.From.Icon),
-		required("analogy.to.label", a.To.Label, 40), v.icon("analogy.to.icon", c.ID, a.To.Icon),
-		bounded("analogy.mapping", len(a.Mapping), 1, 5)); err != nil {
+	if err := firstError(required("analogy.from.label", a.From.Label, maxAnalogyLabelRunes), v.icon("analogy.from.icon", c.ID, a.From.Icon),
+		required("analogy.to.label", a.To.Label, maxAnalogyLabelRunes), v.icon("analogy.to.icon", c.ID, a.To.Icon),
+		bounded("analogy.mapping", len(a.Mapping), 1, maxAnalogyPairs)); err != nil {
 		return err
 	}
 	for index, pair := range a.Mapping {
 		at := fmt.Sprintf("analogy.mapping[%d]", index)
-		if err := firstError(required(at+".a", pair.A, 60), required(at+".b", pair.B, 60)); err != nil {
+		if err := firstError(required(at+".a", pair.A, maxAnalogyPartRunes), required(at+".b", pair.B, maxAnalogyPartRunes)); err != nil {
 			return err
 		}
 	}

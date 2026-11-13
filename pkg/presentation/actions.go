@@ -38,7 +38,11 @@ var ActionKinds = []ActionKind{ActionRespond, ActionEdit, ActionApproval, Action
 // EditableTypes are the component types an edit action can target.
 var EditableTypes = []string{"draft"}
 
-const MaxActions = 4
+const (
+	MaxActions          = 4
+	maxActionLabelRunes = 40
+	maxActionValueRunes = 500
+)
 
 func validateActions(v *validator, c Component, _ string) error {
 	if len(c.Actions) == 0 || len(c.Actions) > MaxActions {
@@ -51,7 +55,7 @@ func validateActions(v *validator, c Component, _ string) error {
 			return fmt.Errorf("%s.id %q must be a unique id matching %s", at, action.ID, opaqueIDPattern)
 		}
 		ids[action.ID] = true
-		if err := required(at+".label", action.Label, 40); err != nil {
+		if err := required(at+".label", action.Label, maxActionLabelRunes); err != nil {
 			return err
 		}
 		if err := v.icon(at+".icon", c.ID, action.Icon); err != nil {
@@ -77,7 +81,7 @@ func (v *validator) action(c Component, action Action, at string) error {
 	}
 	switch action.Kind {
 	case ActionRespond:
-		if err := optional(at+".value", action.Value, 500); err != nil {
+		if err := optional(at+".value", action.Value, maxActionValueRunes); err != nil {
 			return err
 		}
 		return firstError(only("target", action.Target != ""), only("decision", action.Decision != ""), only("command", action.Command != ""), only("binding", action.Binding != nil))

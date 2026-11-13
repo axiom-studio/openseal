@@ -53,6 +53,11 @@ const (
 	maxTextRunes     = 1200
 	maxCaptionRunes  = 300
 	maxDividerRunes  = 80
+	minGridColumns   = 2
+	maxGridColumns   = 4
+	minTabs          = 2
+	maxTabs          = 5
+	maxTabLabelRunes = 40
 )
 
 var catalogue = map[string]typeSpec{
@@ -148,19 +153,19 @@ func layoutAndText(spec typeSpec, c Component) error {
 }
 
 func validateGrid(_ *validator, c Component, _ string) error {
-	if c.Grid == nil || c.Grid.Columns < 2 || c.Grid.Columns > 4 {
-		return errors.New("grid.columns must be 2, 3 or 4")
+	if c.Grid == nil || c.Grid.Columns < minGridColumns || c.Grid.Columns > maxGridColumns {
+		return fmt.Errorf("grid.columns must be %d-%d", minGridColumns, maxGridColumns)
 	}
 	return nil
 }
 
 func validateTabs(_ *validator, c Component, _ string) error {
-	if len(c.Tabs) < 2 || len(c.Tabs) > 5 {
-		return fmt.Errorf("tabs needs 2-5 tabs (got %d)", len(c.Tabs))
+	if len(c.Tabs) < minTabs || len(c.Tabs) > maxTabs {
+		return fmt.Errorf("tabs needs %d-%d tabs (got %d)", minTabs, maxTabs, len(c.Tabs))
 	}
 	labels := map[string]bool{}
 	for index, tab := range c.Tabs {
-		if err := required(fmt.Sprintf("tabs[%d].label", index), tab.Label, 40); err != nil {
+		if err := required(fmt.Sprintf("tabs[%d].label", index), tab.Label, maxTabLabelRunes); err != nil {
 			return err
 		}
 		if labels[strings.TrimSpace(tab.Label)] {
@@ -228,6 +233,11 @@ const (
 	MaxChartAnnotations = 4
 	// MaxPieSlices is the most slices a pie or donut may have.
 	MaxPieSlices = 7
+
+	maxChartAxisLabelRunes  = 120
+	maxChartSeriesNameRunes = 120
+	maxChartPointLabelRunes = 160
+	maxChartNoteRunes       = 40 // annotation and reference line labels
 )
 
 func validateChart(_ *validator, c Component, _ string) error {
@@ -239,7 +249,7 @@ func validateChart(_ *validator, c Component, _ string) error {
 		return fmt.Errorf("chart.kind %q is not one of %s", chart.Kind, strings.Join(ChartKinds, ", "))
 	}
 	for _, check := range []error{
-		optional("chart.xLabel", chart.XLabel, 120), optional("chart.yLabel", chart.YLabel, 120), optional("chart.unit", chart.Unit, 24),
+		optional("chart.xLabel", chart.XLabel, maxChartAxisLabelRunes), optional("chart.yLabel", chart.YLabel, maxChartAxisLabelRunes), optional("chart.unit", chart.Unit, maxUnitRunes),
 		validateFormat("chart", chart.Format, chart.Currency), bounded("chart.series", len(chart.Series), 1, MaxChartSeries),
 	} {
 		if check != nil {
@@ -250,7 +260,7 @@ func validateChart(_ *validator, c Component, _ string) error {
 	names := map[string]bool{}
 	for index, series := range chart.Series {
 		at := fmt.Sprintf("chart.series[%d]", index)
-		if err := required(at+".name", series.Name, 120); err != nil {
+		if err := required(at+".name", series.Name, maxChartSeriesNameRunes); err != nil {
 			return err
 		}
 		if names[series.Name] {
@@ -262,7 +272,7 @@ func validateChart(_ *validator, c Component, _ string) error {
 		}
 		for point, value := range series.Points {
 			pointAt := fmt.Sprintf("%s.points[%d]", at, point)
-			if err := required(pointAt+".label", value.Label, 160); err != nil {
+			if err := required(pointAt+".label", value.Label, maxChartPointLabelRunes); err != nil {
 				return err
 			}
 			if math.IsNaN(value.Value) || math.IsInf(value.Value, 0) {
@@ -307,7 +317,7 @@ func validateChart(_ *validator, c Component, _ string) error {
 		if !labels[annotation.X] {
 			return fmt.Errorf("%s.x %q must be the label of a point in the chart", at, annotation.X)
 		}
-		if err := required(at+".label", annotation.Label, 40); err != nil {
+		if err := required(at+".label", annotation.Label, maxChartNoteRunes); err != nil {
 			return err
 		}
 	}
@@ -315,7 +325,7 @@ func validateChart(_ *validator, c Component, _ string) error {
 		if math.IsNaN(line.Value) || math.IsInf(line.Value, 0) {
 			return errors.New("chart.referenceLine.value must be a finite number")
 		}
-		if err := optional("chart.referenceLine.label", line.Label, 40); err != nil {
+		if err := optional("chart.referenceLine.label", line.Label, maxChartNoteRunes); err != nil {
 			return err
 		}
 	}
@@ -361,19 +371,30 @@ type FormOption struct {
 // FormFieldTypes lists the supported form field types.
 var FormFieldTypes = []string{"text", "textarea", "number", "select", "radio", "checkbox", "date"}
 
+// Form limits.
+const (
+	maxFormDescriptionRunes = 2000
+	maxFormSubmitLabelRunes = 120
+	maxFormFields           = 40
+	maxFormLabelRunes       = 240 // field labels and option labels and values
+	maxFormFieldDetailRunes = 1000
+	maxFormPlaceholderRunes = 500
+	maxFormOptions          = 100
+)
+
 func validateForm(_ *validator, c Component, _ string) error {
 	f := c.Form
 	if f == nil {
 		return errors.New("form payload is required")
 	}
-	if err := optional("form.description", f.Description, 2000); err != nil {
+	if err := optional("form.description", f.Description, maxFormDescriptionRunes); err != nil {
 		return err
 	}
-	if err := optional("form.submitLabel", f.SubmitLabel, 120); err != nil {
+	if err := optional("form.submitLabel", f.SubmitLabel, maxFormSubmitLabelRunes); err != nil {
 		return err
 	}
-	if len(f.Fields) == 0 || len(f.Fields) > 40 {
-		return fmt.Errorf("form.fields needs 1-40 fields (got %d)", len(f.Fields))
+	if len(f.Fields) == 0 || len(f.Fields) > maxFormFields {
+		return fmt.Errorf("form.fields needs 1-%d fields (got %d)", maxFormFields, len(f.Fields))
 	}
 	seen := map[string]bool{}
 	for index, field := range f.Fields {
@@ -385,27 +406,27 @@ func validateForm(_ *validator, c Component, _ string) error {
 		if !contains(FormFieldTypes, field.Type) {
 			return fmt.Errorf("%s.type %q is not one of %s", at, field.Type, strings.Join(FormFieldTypes, ", "))
 		}
-		if err := required(at+".label", field.Label, 240); err != nil {
+		if err := required(at+".label", field.Label, maxFormLabelRunes); err != nil {
 			return err
 		}
-		if err := optional(at+".description", field.Description, 1000); err != nil {
+		if err := optional(at+".description", field.Description, maxFormFieldDetailRunes); err != nil {
 			return err
 		}
-		if err := optional(at+".placeholder", field.Placeholder, 500); err != nil {
+		if err := optional(at+".placeholder", field.Placeholder, maxFormPlaceholderRunes); err != nil {
 			return err
 		}
 		choice := field.Type == "select" || field.Type == "radio"
-		if choice && (len(field.Options) == 0 || len(field.Options) > 100) {
-			return fmt.Errorf("%s is a %s field and needs 1-100 options (got %d)", at, field.Type, len(field.Options))
+		if choice && (len(field.Options) == 0 || len(field.Options) > maxFormOptions) {
+			return fmt.Errorf("%s is a %s field and needs 1-%d options (got %d)", at, field.Type, maxFormOptions, len(field.Options))
 		}
 		if !choice && len(field.Options) > 0 {
 			return fmt.Errorf("%s.options are only allowed on select and radio fields", at)
 		}
 		for option, value := range field.Options {
-			if err := required(fmt.Sprintf("%s.options[%d].label", at, option), value.Label, 240); err != nil {
+			if err := required(fmt.Sprintf("%s.options[%d].label", at, option), value.Label, maxFormLabelRunes); err != nil {
 				return err
 			}
-			if err := required(fmt.Sprintf("%s.options[%d].value", at, option), value.Value, 240); err != nil {
+			if err := required(fmt.Sprintf("%s.options[%d].value", at, option), value.Value, maxFormLabelRunes); err != nil {
 				return err
 			}
 		}
@@ -445,6 +466,8 @@ const (
 	MaxTableColumns   = 8
 	MaxTableRows      = 50
 	MaxTableCellRunes = 120
+
+	maxColumnLabelRunes = 40
 )
 
 // TableCell is one table value: exactly one of Text, Number or Image. In
@@ -521,7 +544,7 @@ func validateTable(v *validator, c Component, _ string) error {
 			return fmt.Errorf("%s.key %q is used twice", at, column.Key)
 		}
 		columns[column.Key] = column
-		if err := required(at+".label", column.Label, 40); err != nil {
+		if err := required(at+".label", column.Label, maxColumnLabelRunes); err != nil {
 			return err
 		}
 		if !contains(TableColumnKinds, column.Kind) {
@@ -635,6 +658,14 @@ const (
 	StatDuration StatFormat = "duration"
 )
 
+// Stat row limits.
+const (
+	maxStats          = 4
+	maxStatLabelRunes = 60
+	maxStatDeltaRunes = 40
+	maxSparkline      = 30
+)
+
 var (
 	StatFormats    = []StatFormat{StatNumber, StatCurrency, StatPercent, StatDuration}
 	Trends         = []string{"up", "down", "flat"}
@@ -646,13 +677,13 @@ func validateStatRow(_ *validator, c Component, _ string) error {
 		return errors.New("stat_row payload is required")
 	}
 	stats := c.StatRow.Stats
-	if len(stats) == 0 || len(stats) > 4 {
-		return fmt.Errorf("stat_row.stats needs 1-4 stats (got %d)", len(stats))
+	if len(stats) == 0 || len(stats) > maxStats {
+		return fmt.Errorf("stat_row.stats needs 1-%d stats (got %d)", maxStats, len(stats))
 	}
 	for index, stat := range stats {
 		at := fmt.Sprintf("stat_row.stats[%d]", index)
 		for _, check := range []error{
-			required(at+".label", stat.Label, 60), optional(at+".unit", stat.Unit, 24), optional(at+".delta", stat.Delta, 40),
+			required(at+".label", stat.Label, maxStatLabelRunes), optional(at+".unit", stat.Unit, maxUnitRunes), optional(at+".delta", stat.Delta, maxStatDeltaRunes),
 		} {
 			if check != nil {
 				return check
@@ -670,8 +701,8 @@ func validateStatRow(_ *validator, c Component, _ string) error {
 		if stat.GoodDirection != "" && !contains(GoodDirections, stat.GoodDirection) {
 			return fmt.Errorf("%s.goodDirection %q is not one of up, down", at, stat.GoodDirection)
 		}
-		if len(stat.Sparkline) > 30 {
-			return fmt.Errorf("%s.sparkline allows at most 30 values (got %d)", at, len(stat.Sparkline))
+		if len(stat.Sparkline) > maxSparkline {
+			return fmt.Errorf("%s.sparkline allows at most %d values (got %d)", at, maxSparkline, len(stat.Sparkline))
 		}
 	}
 	return nil

@@ -28,6 +28,9 @@ var Icons = []string{
 	"weight", "x", "zap",
 }
 
+// maxIconRunes bounds an icon name.
+const maxIconRunes = 40
+
 var (
 	iconSet     = map[string]bool{}
 	iconPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -48,7 +51,7 @@ func (v *validator) icon(path, componentID, name string) error {
 	if name == "" {
 		return nil
 	}
-	if len(name) > 40 || !iconPattern.MatchString(name) {
+	if len(name) > maxIconRunes || !iconPattern.MatchString(name) {
 		return fmt.Errorf("%s %q must be a lowercase Lucide icon name such as \"circle-check\"", path, name)
 	}
 	if !KnownIcon(name) {

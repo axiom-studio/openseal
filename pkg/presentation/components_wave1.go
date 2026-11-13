@@ -5,6 +5,50 @@ import (
 	"strings"
 )
 
+// Limits of the wave 1 payloads.
+const (
+	maxCalloutBodyRunes = 300
+
+	minSteps           = 2
+	maxSteps           = 10
+	maxStepTitleRunes  = 80
+	maxStepDetailRunes = 400
+
+	maxComparisonAttributes = 10
+	maxAttributeLabelRunes  = 40
+	minComparisonOptions    = 2
+	maxComparisonOptions    = 4
+	maxOptionNameRunes      = 60
+	maxOptionValueRunes     = 80
+	maxProsCons             = 4
+	maxProConRunes          = 80
+
+	minTimelineEvents   = 2
+	maxTimelineEvents   = 20
+	maxEventWhenRunes   = 40
+	maxEventTitleRunes  = 80
+	maxEventDetailRunes = 300
+
+	maxImageCaptionRunes   = 200
+	minGalleryImages       = 2
+	maxGalleryImages       = 12
+	maxGalleryCaptionRunes = 120
+
+	minChips          = 2
+	maxChips          = 5
+	maxChipLabelRunes = 40
+
+	maxChecklistItems      = 40
+	maxChecklistLabelRunes = 100
+	maxChecklistGroupRunes = 40
+
+	maxQuizQuestionRunes    = 300
+	minQuizOptions          = 2
+	maxQuizOptions          = 6
+	maxQuizOptionLabelRunes = 120
+	maxQuizExplanationRunes = 400
+)
+
 // Callout is a key takeaway, tip or warning. Its tone comes from the
 // component envelope (info when unset).
 type Callout struct {
@@ -19,7 +63,7 @@ func validateCallout(v *validator, c Component, _ string) error {
 	if err := v.icon("callout.icon", c.ID, c.Callout.Icon); err != nil {
 		return err
 	}
-	return markdown("callout.body", c.Callout.Body, 1, 300)
+	return markdown("callout.body", c.Callout.Body, 1, maxCalloutBodyRunes)
 }
 
 // Steps is a how-to in order. Checkable steps let viewers tick them off.
@@ -40,14 +84,14 @@ func validateSteps(v *validator, c Component, _ string) error {
 	if c.Steps == nil {
 		return payloadRequired("steps")
 	}
-	if err := bounded("steps.items", len(c.Steps.Items), 2, 10); err != nil {
+	if err := bounded("steps.items", len(c.Steps.Items), minSteps, maxSteps); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, step := range c.Steps.Items {
 		at := fmt.Sprintf("steps.items[%d]", index)
 		for _, check := range []error{
-			itemIDs(seen, at, step.ID), required(at+".title", step.Title, 80), markdown(at+".detail", step.Detail, 0, 400),
+			itemIDs(seen, at, step.ID), required(at+".title", step.Title, maxStepTitleRunes), markdown(at+".detail", step.Detail, 0, maxStepDetailRunes),
 			v.icon(at+".icon", c.ID, step.Icon), v.image(at+".image", step.Image),
 		} {
 			if check != nil {
@@ -98,7 +142,7 @@ func validateComparison(v *validator, c Component, _ string) error {
 	if cmp == nil {
 		return payloadRequired("comparison")
 	}
-	if err := bounded("comparison.attributes", len(cmp.Attributes), 1, 10); err != nil {
+	if err := bounded("comparison.attributes", len(cmp.Attributes), 1, maxComparisonAttributes); err != nil {
 		return err
 	}
 	keys := map[string]bool{}
@@ -111,19 +155,19 @@ func validateComparison(v *validator, c Component, _ string) error {
 			return fmt.Errorf("%s.key %q is used twice", at, attribute.Key)
 		}
 		keys[attribute.Key] = true
-		if err := required(at+".label", attribute.Label, 40); err != nil {
+		if err := required(at+".label", attribute.Label, maxAttributeLabelRunes); err != nil {
 			return err
 		}
 	}
-	if err := bounded("comparison.options", len(cmp.Options), 2, 4); err != nil {
+	if err := bounded("comparison.options", len(cmp.Options), minComparisonOptions, maxComparisonOptions); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, option := range cmp.Options {
 		at := fmt.Sprintf("comparison.options[%d]", index)
 		for _, check := range []error{
-			itemIDs(seen, at, option.ID), required(at+".name", option.Name, 60), optional(at+".badge", option.Badge, 24),
-			v.image(at+".image", option.Image), bounded(at+".pros", len(option.Pros), 0, 4), bounded(at+".cons", len(option.Cons), 0, 4),
+			itemIDs(seen, at, option.ID), required(at+".name", option.Name, maxOptionNameRunes), optional(at+".badge", option.Badge, maxBadgeRunes),
+			v.image(at+".image", option.Image), bounded(at+".pros", len(option.Pros), 0, maxProsCons), bounded(at+".cons", len(option.Cons), 0, maxProsCons),
 		} {
 			if check != nil {
 				return check
@@ -142,7 +186,7 @@ func validateComparison(v *validator, c Component, _ string) error {
 			if !ok {
 				return fmt.Errorf("%s.values needs a value for %q (an empty string is allowed)", at, attribute.Key)
 			}
-			if err := optional(fmt.Sprintf("%s.values.%s", at, attribute.Key), value, 80); err != nil {
+			if err := optional(fmt.Sprintf("%s.values.%s", at, attribute.Key), value, maxOptionValueRunes); err != nil {
 				return err
 			}
 		}
@@ -152,12 +196,12 @@ func validateComparison(v *validator, c Component, _ string) error {
 			}
 		}
 		for item, value := range option.Pros {
-			if err := required(fmt.Sprintf("%s.pros[%d]", at, item), value, 80); err != nil {
+			if err := required(fmt.Sprintf("%s.pros[%d]", at, item), value, maxProConRunes); err != nil {
 				return err
 			}
 		}
 		for item, value := range option.Cons {
-			if err := required(fmt.Sprintf("%s.cons[%d]", at, item), value, 80); err != nil {
+			if err := required(fmt.Sprintf("%s.cons[%d]", at, item), value, maxProConRunes); err != nil {
 				return err
 			}
 		}
@@ -189,15 +233,15 @@ func validateTimeline(v *validator, c Component, _ string) error {
 	if c.Timeline == nil {
 		return payloadRequired("timeline")
 	}
-	if err := bounded("timeline.events", len(c.Timeline.Events), 2, 20); err != nil {
+	if err := bounded("timeline.events", len(c.Timeline.Events), minTimelineEvents, maxTimelineEvents); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, event := range c.Timeline.Events {
 		at := fmt.Sprintf("timeline.events[%d]", index)
 		for _, check := range []error{
-			itemIDs(seen, at, event.ID), required(at+".when", event.When, 40), required(at+".title", event.Title, 80),
-			markdown(at+".detail", event.Detail, 0, 300), v.icon(at+".icon", c.ID, event.Icon), v.image(at+".image", event.Image),
+			itemIDs(seen, at, event.ID), required(at+".when", event.When, maxEventWhenRunes), required(at+".title", event.Title, maxEventTitleRunes),
+			markdown(at+".detail", event.Detail, 0, maxEventDetailRunes), v.icon(at+".icon", c.ID, event.Icon), v.image(at+".image", event.Image),
 		} {
 			if check != nil {
 				return check
@@ -224,7 +268,7 @@ func validateImage(v *validator, c Component, _ string) error {
 	if c.Image == nil {
 		return payloadRequired("image")
 	}
-	return firstError(v.image("image.image", &c.Image.Image), optional("image.caption", c.Image.Caption, 200), oneOf("image.aspect", c.Image.Aspect, ImageAspects))
+	return firstError(v.image("image.image", &c.Image.Image), optional("image.caption", c.Image.Caption, maxImageCaptionRunes), oneOf("image.aspect", c.Image.Aspect, ImageAspects))
 }
 
 // Gallery shows 2-12 images from the chat.
@@ -245,13 +289,13 @@ func validateGallery(v *validator, c Component, _ string) error {
 	if c.Gallery == nil {
 		return payloadRequired("gallery")
 	}
-	if err := firstError(bounded("gallery.images", len(c.Gallery.Images), 2, 12), oneOf("gallery.layout", c.Gallery.Layout, GalleryLayouts)); err != nil {
+	if err := firstError(bounded("gallery.images", len(c.Gallery.Images), minGalleryImages, maxGalleryImages), oneOf("gallery.layout", c.Gallery.Layout, GalleryLayouts)); err != nil {
 		return err
 	}
 	for index, image := range c.Gallery.Images {
 		at := fmt.Sprintf("gallery.images[%d]", index)
 		ref := image.Image
-		if err := firstError(v.image(at+".image", &ref), optional(at+".caption", image.Caption, 120)); err != nil {
+		if err := firstError(v.image(at+".image", &ref), optional(at+".caption", image.Caption, maxGalleryCaptionRunes)); err != nil {
 			return err
 		}
 	}
@@ -272,13 +316,13 @@ func validateChoices(_ *validator, c Component, _ string) error {
 	if c.Choices == nil {
 		return payloadRequired("choices")
 	}
-	if err := bounded("choices.chips", len(c.Choices.Chips), 2, 5); err != nil {
+	if err := bounded("choices.chips", len(c.Choices.Chips), minChips, maxChips); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, chip := range c.Choices.Chips {
 		at := fmt.Sprintf("choices.chips[%d]", index)
-		if err := firstError(itemIDs(seen, at, chip.ID), required(at+".label", chip.Label, 40)); err != nil {
+		if err := firstError(itemIDs(seen, at, chip.ID), required(at+".label", chip.Label, maxChipLabelRunes)); err != nil {
 			return err
 		}
 	}
@@ -300,13 +344,13 @@ func validateChecklist(_ *validator, c Component, _ string) error {
 	if c.Checklist == nil {
 		return payloadRequired("checklist")
 	}
-	if err := bounded("checklist.items", len(c.Checklist.Items), 1, 40); err != nil {
+	if err := bounded("checklist.items", len(c.Checklist.Items), 1, maxChecklistItems); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, item := range c.Checklist.Items {
 		at := fmt.Sprintf("checklist.items[%d]", index)
-		if err := firstError(itemIDs(seen, at, item.ID), required(at+".label", item.Label, 100), optional(at+".group", item.Group, 40)); err != nil {
+		if err := firstError(itemIDs(seen, at, item.ID), required(at+".label", item.Label, maxChecklistLabelRunes), optional(at+".group", item.Group, maxChecklistGroupRunes)); err != nil {
 			return err
 		}
 	}
@@ -338,13 +382,13 @@ func validateQuiz(v *validator, c Component, _ string) error {
 	if quiz == nil {
 		return payloadRequired("quiz")
 	}
-	if err := firstError(required("quiz.question", quiz.Question, 300), bounded("quiz.options", len(quiz.Options), 2, 6)); err != nil {
+	if err := firstError(required("quiz.question", quiz.Question, maxQuizQuestionRunes), bounded("quiz.options", len(quiz.Options), minQuizOptions, maxQuizOptions)); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, option := range quiz.Options {
 		at := fmt.Sprintf("quiz.options[%d]", index)
-		if err := firstError(itemIDs(seen, at, option.ID), required(at+".label", option.Label, 120), v.image(at+".image", option.Image)); err != nil {
+		if err := firstError(itemIDs(seen, at, option.ID), required(at+".label", option.Label, maxQuizOptionLabelRunes), v.image(at+".image", option.Image)); err != nil {
 			return err
 		}
 	}
@@ -359,7 +403,7 @@ func validateQuiz(v *validator, c Component, _ string) error {
 	} else if len(key.Correct) != 1 {
 		return fmt.Errorf("quiz.answerKey.correct needs exactly 1 option id unless allowMultiple is true (got %d)", len(key.Correct))
 	}
-	if err := bounded("quiz.answerKey.correct", len(key.Correct), 1, 6); err != nil {
+	if err := bounded("quiz.answerKey.correct", len(key.Correct), 1, maxQuizOptions); err != nil {
 		return err
 	}
 	correct := map[string]bool{}
@@ -372,7 +416,7 @@ func validateQuiz(v *validator, c Component, _ string) error {
 		}
 		correct[id] = true
 	}
-	return markdown("quiz.answerKey.explanation", key.Explanation, 0, 400)
+	return markdown("quiz.answerKey.explanation", key.Explanation, 0, maxQuizExplanationRunes)
 }
 
 // optionLabels returns the labels of the quiz options with ids, in ids order.
