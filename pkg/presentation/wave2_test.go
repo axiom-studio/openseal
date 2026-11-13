@@ -331,7 +331,7 @@ func TestLintWave2(t *testing.T) {
 }
 
 func TestWave2SchemaEntries(t *testing.T) {
-	properties := componentJSONSchema()["properties"].(map[string]interface{})
+	properties := strictPayloads()
 	for _, name := range []string{"diagram", "labeled_image", "quantity_visual", "math", "definition", "flashcards", "before_after", "draft", "recipe", "item", "analogy"} {
 		if properties[name] == nil {
 			t.Fatalf("schema has no %s payload", name)

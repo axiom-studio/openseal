@@ -23,27 +23,46 @@ const (
 type typeSpec struct {
 	// payload is the JSON key of the type's payload; empty when it has none.
 	payload string
-	// children reports whether Component.Children is allowed.
-	children bool
+	// payloadOptional types may leave their payload out.
+	payloadOptional bool
+	// text bounds the text payload of text, caption and divider in runes.
+	text bounds
+	// children bounds Component.Children; a zero max allows none.
+	children bounds
 	summary  summaryRule
 	// bindings lists the binding kinds the type accepts; nil accepts any
 	// and an empty list none.
 	bindings []BindingKind
 	// bindingRequired types need a component binding.
 	bindingRequired bool
-	validate        func(v *validator, c Component, path string) error
+	// validate checks the payload; nil when the spec's bounds say it all.
+	validate func(v *validator, c Component, path string) error
 	// sentence is the type's one-line purpose in the visual format.
 	sentence string
 }
 
+// bounds is an inclusive range of a length or count.
+type bounds struct{ min, max int }
+
+// Layout and text limits. The type specs below carry them so the schema
+// and Validate read the same numbers.
+const (
+	// maxChildren bounds the children of a section or grid and of a tab.
+	maxChildren      = 12
+	maxCarouselCards = 10
+	maxTextRunes     = 1200
+	maxCaptionRunes  = 300
+	maxDividerRunes  = 80
+)
+
 var catalogue = map[string]typeSpec{
-	"text":            {payload: "text", validate: validateText, sentence: "Short markdown block (GFM, no HTML)."},
-	"caption":         {payload: "text", validate: validateCaption, sentence: "Small print under a visual (sources, assumptions)."},
-	"divider":         {payload: "text", validate: validateDivider, sentence: "Visual break, optionally labelled."},
-	"section":         {children: true, validate: validateSection, sentence: "Group of children under the component title."},
-	"grid":            {payload: "grid", children: true, validate: validateGrid, sentence: "Children side by side in 2-4 columns."},
+	"text":            {payload: "text", text: bounds{1, maxTextRunes}, sentence: "Short markdown block (GFM, no HTML)."},
+	"caption":         {payload: "text", text: bounds{1, maxCaptionRunes}, sentence: "Small print under a visual (sources, assumptions)."},
+	"divider":         {payload: "text", payloadOptional: true, text: bounds{0, maxDividerRunes}, sentence: "Visual break, optionally labelled."},
+	"section":         {children: bounds{1, maxChildren}, sentence: "Group of children under the component title."},
+	"grid":            {payload: "grid", children: bounds{1, maxChildren}, validate: validateGrid, sentence: "Children side by side in 2-4 columns."},
 	"tabs":            {payload: "tabs", validate: validateTabs, sentence: "2-5 alternative views, e.g. Simple / Detailed."},
-	"carousel":        {children: true, validate: validateCarousel, sentence: "2-10 swipeable cards, e.g. recipes or places."},
+	"carousel":        {children: bounds{2, maxCarouselCards}, sentence: "2-10 swipeable cards, e.g. recipes or places."},
 	"chart":           {payload: "chart", summary: summaryRequired, validate: validateChart, sentence: "Trend or distribution of numbers; pie and donut take one series of at most 7 slices; stacked_bar and grouped_bar need 2+ series with the same labels; scatter labels are x numbers."},
 	"diagram":         {payload: "diagram", summary: summaryRequired, validate: validateDiagram, sentence: "How 2-30 ideas connect; the app places the nodes by layout; tap a node for its detail."},
 	"form":            {payload: "form", summary: summaryRequired, validate: validateForm, sentence: "Structured input the user submits once."},
@@ -75,7 +94,7 @@ var catalogue = map[string]typeSpec{
 	"progress":        {payload: "progress", summary: summaryRequired, validate: validateProgress, sentence: "Values against targets."},
 	"poll":            {payload: "poll", summary: summaryRequired, validate: validatePoll, sentence: "A group vote; people can change their vote and you hear the tally once everyone has voted."},
 	"explorer":        {payload: "explorer", summary: summaryRequired, validate: validateExplorer, sentence: "A what-if: people move inputs and outputs recompute. Expressions use input ids, + - * / ^, comparisons, && || !, min max round floor ceil abs sqrt log exp, if(c,a,b), sum(i,from,to,body); a toggle is true/false."},
-	"routine":         {payload: "routine", summary: summaryRequired, bindings: []BindingKind{BindingRunbook}, bindingRequired: true, validate: validateRoutine, sentence: "A routine with live schedule, status and buttons; items are its latest highlights."},
+	"routine":         {payload: "routine", payloadOptional: true, summary: summaryRequired, bindings: []BindingKind{BindingRunbook}, bindingRequired: true, validate: validateRoutine, sentence: "A routine with live schedule, status and buttons; items are its latest highlights."},
 	"tasks":           {payload: "tasks", summary: summaryRequired, bindings: []BindingKind{}, validate: validateTasks, sentence: "Work handed to helpers in this chat, each row bound to its task; status is live."},
 	"agent":           {payload: "agent", summary: summaryRequired, bindings: []BindingKind{BindingAgent}, bindingRequired: true, validate: validateAgentCard, sentence: "Introduces an agent people can start chatting with."},
 	"map":             {payload: "map", summary: summaryRequired, validate: validateMap, sentence: "Pins for 1-20 real places from find_place; tap a pin for its detail."},
@@ -100,7 +119,7 @@ func RequiresSummary(componentType string) bool {
 
 // IsLayout reports whether a component type holds other components.
 func IsLayout(componentType string) bool {
-	return catalogue[componentType].children || componentType == "tabs"
+	return catalogue[componentType].children.max > 0 || componentType == "tabs"
 }
 
 // Layout payloads.
@@ -114,38 +133,25 @@ type Tab struct {
 	Children []Component `json:"children"`
 }
 
-func validateText(_ *validator, c Component, _ string) error {
-	return required("text", c.Text, 1200)
-}
-
-func validateCaption(_ *validator, c Component, _ string) error {
-	return required("text", c.Text, 300)
-}
-
-func validateDivider(_ *validator, c Component, _ string) error {
-	return optional("text", c.Text, 80)
-}
-
-func childCount(c Component, minimum, maximum int) error {
-	if len(c.Children) < minimum || len(c.Children) > maximum {
-		return fmt.Errorf("%s needs %d-%d children (got %d)", c.Type, minimum, maximum, len(c.Children))
+// layoutAndText checks the limits a type spec carries itself: the number
+// of children and the length of a text payload.
+func layoutAndText(spec typeSpec, c Component) error {
+	if spec.children.max > 0 && (len(c.Children) < spec.children.min || len(c.Children) > spec.children.max) {
+		return fmt.Errorf("%s needs %d-%d children (got %d)", c.Type, spec.children.min, spec.children.max, len(c.Children))
+	}
+	if spec.payload == "text" {
+		if err := boundedText(c.Text, spec.text.min, spec.text.max); err != nil {
+			return fmt.Errorf("text %w", err)
+		}
 	}
 	return nil
-}
-
-func validateSection(_ *validator, c Component, _ string) error {
-	return childCount(c, 1, 12)
 }
 
 func validateGrid(_ *validator, c Component, _ string) error {
 	if c.Grid == nil || c.Grid.Columns < 2 || c.Grid.Columns > 4 {
 		return errors.New("grid.columns must be 2, 3 or 4")
 	}
-	return childCount(c, 1, 12)
-}
-
-func validateCarousel(_ *validator, c Component, _ string) error {
-	return childCount(c, 2, 10)
+	return nil
 }
 
 func validateTabs(_ *validator, c Component, _ string) error {
@@ -161,8 +167,8 @@ func validateTabs(_ *validator, c Component, _ string) error {
 			return fmt.Errorf("tabs[%d].label %q is used twice", index, tab.Label)
 		}
 		labels[strings.TrimSpace(tab.Label)] = true
-		if len(tab.Children) < 1 || len(tab.Children) > 12 {
-			return fmt.Errorf("tabs[%d] needs 1-12 children (got %d)", index, len(tab.Children))
+		if len(tab.Children) < 1 || len(tab.Children) > maxChildren {
+			return fmt.Errorf("tabs[%d] needs 1-%d children (got %d)", index, maxChildren, len(tab.Children))
 		}
 	}
 	return nil
@@ -390,7 +396,7 @@ func validateForm(_ *validator, c Component, _ string) error {
 		}
 		choice := field.Type == "select" || field.Type == "radio"
 		if choice && (len(field.Options) == 0 || len(field.Options) > 100) {
-			return fmt.Errorf("%s is a %s field and needs 1-100 options", at, field.Type)
+			return fmt.Errorf("%s is a %s field and needs 1-100 options (got %d)", at, field.Type, len(field.Options))
 		}
 		if !choice && len(field.Options) > 0 {
 			return fmt.Errorf("%s.options are only allowed on select and radio fields", at)

@@ -95,7 +95,10 @@ func TestVisualFormatKeepsEverything(t *testing.T) {
 			t.Fatalf("format lacks icon %s", icon)
 		}
 	}
-	roots := map[string]map[string]interface{}{"component": componentJSONSchema(), "visual": visualSchema(componentRef(), "")}
+	roots := map[string]map[string]interface{}{"visual": visualSchema(componentRef(), "")}
+	for _, name := range TypeNames() {
+		roots["component."+name] = componentTypeSchema(name, componentRef())
+	}
 	for _, shape := range visualShapes() {
 		roots[shape.name] = shape.schema
 	}
@@ -114,9 +117,11 @@ func TestVisualFormatKeepsEverything(t *testing.T) {
 				}
 			}
 			// Below the root, each sub-schema renders to an exact
-			// substring of the format (the component's type list is
-			// spelled out as one line per type instead).
-			if depth > 0 && path != "component.type" {
+			// substring of the format. A type's own type, summary and
+			// binding rules are spelled out on its line instead (name, *
+			// and binding.kind).
+			key := path[strings.LastIndex(path, ".")+1:]
+			if depth > 0 && !(depth == 1 && (key == "type" || key == "summary" || key == "binding")) {
 				if rendered := notation.render(schema); !strings.Contains(format, rendered) {
 					t.Errorf("%s renders as %q, which the format lacks", path, rendered)
 				}
@@ -197,8 +202,11 @@ func TestModelFacingVisualBudget(t *testing.T) {
 	// 25,840 bytes even after the format stopped repeating notes and named
 	// the shared Format, Tone, Binding, Side and Rating shapes, so the
 	// ceiling moved to 26 KB (recorded in the Wave 3 contract). Wave 5's
-	// map and locations fit under it at 26,573 bytes.
-	const ceiling = 26 * 1024
+	// map and locations fit under it at 26,573 bytes. Telling the model
+	// each type's text limit and which types need a summary on the loose
+	// schema too (a caption was rejected for a limit the schema did not
+	// state) took it to 26,920, so the ceiling is 27 KB.
+	const ceiling = 27 * 1024
 	if total := len(encodedField) + len(encodedUpdate); total > ceiling {
 		t.Fatalf("visual field %d + update_visual %d = %d bytes; the ceiling is %d", len(encodedField), len(encodedUpdate), total, ceiling)
 	}

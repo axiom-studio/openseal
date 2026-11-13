@@ -342,7 +342,7 @@ func TestPlaceHasNoLink(t *testing.T) {
 	if _, err := Decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), `unknown field "link"`) {
 		t.Fatalf("place link decoded: %v", err)
 	}
-	if place := componentJSONSchema()["properties"].(map[string]interface{})["place"].(map[string]interface{})["properties"].(map[string]interface{}); place["link"] != nil {
+	if place := strictPayloads()["place"].(map[string]interface{})["properties"].(map[string]interface{}); place["link"] != nil {
 		t.Fatal("place schema has a link")
 	}
 }
@@ -383,7 +383,7 @@ func TestLintWave3(t *testing.T) {
 }
 
 func TestWave3SchemaEntries(t *testing.T) {
-	properties := componentJSONSchema()["properties"].(map[string]interface{})
+	properties := strictPayloads()
 	format := VisualFormat()
 	for _, name := range []string{"agenda", "itinerary", "place", "breakdown", "progress", "poll", "explorer", "routine", "tasks", "agent"} {
 		if properties[name] == nil {

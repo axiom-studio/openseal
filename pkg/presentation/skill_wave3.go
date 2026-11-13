@@ -18,7 +18,7 @@ func agendaSchema() map[string]interface{} {
 	item := closedObject([]interface{}{"id", "start", "title"}, map[string]interface{}{
 		"id": itemIDSchema(), "start": clockSchema(), "end": clockSchema(), "title": strRange(1, 80), "place": str(80), "tone": enum(toneNames()),
 	})
-	day := closedObject([]interface{}{"date", "items"}, map[string]interface{}{"date": dateSchema(), "label": str(40), "items": array(item, 0, 12)})
+	day := closedObject([]interface{}{"date"}, map[string]interface{}{"date": dateSchema(), "label": str(40), "items": array(item, 0, 12)})
 	slot := closedObject([]interface{}{"date", "start", "end"}, map[string]interface{}{"date": dateSchema(), "start": clockSchema(), "end": clockSchema()})
 	return closedObject([]interface{}{"days"}, map[string]interface{}{
 		"timezone": describe(str(64), "IANA name, shown only."), "days": array(day, 1, 7), "freeSlots": array(slot, 0, 12),

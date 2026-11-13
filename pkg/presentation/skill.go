@@ -152,7 +152,6 @@ func VisualFormat() string {
 	}
 	b.WriteString("Visual = " + notation.render(visualSchema(componentRef(), "")) + "\n")
 	envelope := envelopeProperties(componentRef())
-	children := envelope["children"]
 	delete(envelope, "children")
 	envelope["type"] = describe(map[string]interface{}{"type": "string"}, "one of the types below")
 	envelope["summary"] = describe(envelope["summary"].(map[string]interface{}), "one plain sentence for screen readers and voice; required for types marked *")
@@ -168,19 +167,19 @@ func VisualFormat() string {
 		MaxDepth, strings.Join(layouts, ", "), MaxDepth, MaxComponents, MaxSurfaceBytes/1024)
 	b.WriteString("Markdown fields are GFM without HTML or images; $…$ maths is allowed.\n")
 	b.WriteString("Types (* = summary required):")
-	payloads := payloadSchemas()
 	for _, name := range TypeNames() {
 		spec := catalogue[name]
+		properties := componentTypeSchema(name, componentRef())["properties"].(map[string]interface{})
 		line := "\n" + name
 		if spec.summary == summaryRequired {
 			line += "*"
 		}
 		line += ": " + spec.sentence
 		if spec.payload != "" {
-			line += " " + spec.payload + ":" + notation.render(payloads[spec.payload])
+			line += " " + spec.payload + ":" + notation.render(properties[spec.payload].(map[string]interface{}))
 		}
-		if spec.children {
-			line += " children:" + notation.render(children)
+		if spec.children.max > 0 {
+			line += " children:" + notation.render(properties["children"].(map[string]interface{}))
 		}
 		if len(spec.bindings) > 0 {
 			kinds := make([]string, len(spec.bindings))
@@ -229,9 +228,6 @@ func UpdateVisualInputSchema() map[string]interface{} {
 	})
 }
 
-// maxChildren bounds children and tab children.
-const maxChildren = 12
-
 func visualSchema(component map[string]interface{}, description string) map[string]interface{} {
 	components := array(component, 1, MaxComponents)
 	if description != "" {
@@ -246,18 +242,66 @@ func componentRef() map[string]interface{} {
 }
 
 // envelopeProperties are the fields every component shares; component is
-// the schema of a nested child.
+// the schema of a nested child. Children take the widest bounds of any
+// type; componentTypeSchema narrows them per type.
 func envelopeProperties(component map[string]interface{}) map[string]interface{} {
 	return map[string]interface{}{
 		"id": idSchema(), "type": enum(TypeNames()), "summary": str(MaxSummaryRunes), "title": str(MaxTitleRunes),
-		"tone": enum(toneNames()), "binding": bindingSchema(), "children": array(component, 1, maxChildren),
+		"tone": enum(toneNames()), "binding": bindingSchema(BindingKinds), "children": array(component, 1, maxChildren),
 	}
 }
 
-// payloadSchemas maps every payload key to its strict schema.
+// componentTypeSchema is the strict schema of one component type: the
+// envelope narrowed to the type's summary, binding and children rules, plus
+// its own payload. component is the schema of a nested child. Validate
+// reads the same type spec, so the two agree by construction.
+func componentTypeSchema(name string, component map[string]interface{}) map[string]interface{} {
+	spec := catalogue[name]
+	properties := envelopeProperties(component)
+	properties["type"] = enum([]string{name})
+	required := []interface{}{"id", "type"}
+	if spec.summary == summaryRequired {
+		properties["summary"] = strRange(1, MaxSummaryRunes)
+		required = append(required, "summary")
+	}
+	delete(properties, "children")
+	if spec.children.max > 0 {
+		properties["children"] = array(component, spec.children.min, spec.children.max)
+		required = append(required, "children")
+	}
+	if spec.bindings != nil {
+		delete(properties, "binding")
+		if len(spec.bindings) > 0 {
+			properties["binding"] = bindingSchema(spec.bindings)
+		}
+	}
+	if spec.bindingRequired {
+		required = append(required, "binding")
+	}
+	if spec.payload != "" {
+		properties[spec.payload] = payloadSchema(name)
+		if !spec.payloadOptional {
+			required = append(required, spec.payload)
+		}
+	}
+	return closedObject(required, properties)
+}
+
+// payloadSchema is the strict payload schema of one component type. text,
+// caption and divider share the text key with different limits.
+func payloadSchema(name string) map[string]interface{} {
+	spec := catalogue[name]
+	if spec.payload == "text" {
+		return strRange(spec.text.min, spec.text.max)
+	}
+	return payloadSchemas()[spec.payload]
+}
+
+// payloadSchemas maps every payload key except text, whose limits depend
+// on the type, to its strict schema.
 func payloadSchemas() map[string]map[string]interface{} {
 	return map[string]map[string]interface{}{
-		"text": str(1200), "chart": chartSchema(), "diagram": diagramSchema(), "form": formSchema(),
+		"chart": chartSchema(), "diagram": diagramSchema(), "form": formSchema(),
 		"table": tableSchema(), "stat_row": statRowSchema(), "actions": actionsSchema(),
 		"callout": calloutSchema(), "steps": stepsSchema(), "comparison": comparisonSchema(), "timeline": timelineSchema(),
 		"image": imageBlockSchema(), "gallery": gallerySchema(), "choices": choicesSchema(), "checklist": checklistSchema(), "quiz": quizSchema(),
@@ -274,23 +318,21 @@ func payloadSchemas() map[string]map[string]interface{} {
 	}
 }
 
-// componentJSONSchema is the strict schema of one component, with nested
-// components as references to it. It feeds VisualFormat and tests; models
-// get the loose schema plus the compact format instead.
-func componentJSONSchema() map[string]interface{} {
-	properties := envelopeProperties(componentRef())
-	for key, payload := range payloadSchemas() {
-		properties[key] = payload
-	}
-	return closedObject([]interface{}{"id", "type"}, properties)
-}
-
 // looseComponentSchema lists every envelope and payload key with payloads
-// and nested components left open.
+// and nested components left open. Where one key means different things
+// per type (summary, text), its description gives each type's rule.
 func looseComponentSchema() map[string]interface{} {
 	open := map[string]interface{}{"type": "object"}
 	properties := envelopeProperties(open)
 	properties["type"] = describe(properties["type"].(map[string]interface{}), "Set only the payload whose key equals type (text, caption and divider use text).")
+	var optionalSummary []string
+	for _, name := range TypeNames() {
+		if !RequiresSummary(name) {
+			optionalSummary = append(optionalSummary, name)
+		}
+	}
+	properties["summary"] = describe(properties["summary"].(map[string]interface{}), "Required unless type is "+strings.Join(optionalSummary, ", ")+".")
+	properties["text"] = textPayloadSchema()
 	for key, payload := range payloadSchemas() {
 		switch payload["type"] {
 		case "string":
@@ -304,9 +346,25 @@ func looseComponentSchema() map[string]interface{} {
 	return closedObject([]interface{}{"id", "type"}, properties)
 }
 
-func bindingSchema() map[string]interface{} {
-	kinds := make([]string, len(BindingKinds))
-	for index, kind := range BindingKinds {
+// textPayloadSchema is the loose schema of the shared text key: the widest
+// limit, with each type's own limit in the description.
+func textPayloadSchema() map[string]interface{} {
+	widest := 0
+	var limits []string
+	for _, name := range TypeNames() {
+		spec := catalogue[name]
+		if spec.payload != "text" {
+			continue
+		}
+		widest = max(widest, spec.text.max)
+		limits = append(limits, fmt.Sprintf("%s %d-%d", name, spec.text.min, spec.text.max))
+	}
+	return describe(str(widest), "Characters: "+strings.Join(limits, ", ")+".")
+}
+
+func bindingSchema(allowed []BindingKind) map[string]interface{} {
+	kinds := make([]string, len(allowed))
+	for index, kind := range allowed {
 		kinds[index] = string(kind)
 	}
 	return closedObject([]interface{}{"kind", "id"}, map[string]interface{}{"kind": enum(kinds), "id": idSchema()})
@@ -486,7 +544,7 @@ func tableSchema() map[string]interface{} {
 		"key": itemIDSchema(), "label": strRange(1, 40), "kind": enum(TableColumnKinds), "currency": currencySchema(),
 	})
 	cell := map[string]interface{}{"anyOf": []interface{}{str(MaxTableCellRunes), number(), imageRefSchema()}}
-	return closedObject([]interface{}{"columns", "rows"}, map[string]interface{}{
+	return closedObject([]interface{}{"columns"}, map[string]interface{}{
 		"columns": array(column, 1, MaxTableColumns),
 		"rows": describe(array(map[string]interface{}{"type": "object", "additionalProperties": cell}, 0, MaxTableRows),
 			"Each row maps column keys to cells: numbers for number, currency and percent; YYYY-MM-DD for date; an image for image; text otherwise."),
@@ -551,7 +609,7 @@ func checklistSchema() map[string]interface{} {
 
 func quizSchema() map[string]interface{} {
 	option := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, 120), "image": imageRefSchema()})
-	key := closedObject([]interface{}{"correct", "explanation"}, map[string]interface{}{
+	key := closedObject([]interface{}{"correct"}, map[string]interface{}{
 		"correct": describe(array(itemIDSchema(), 1, 6), "Ids of the correct options: exactly one unless allowMultiple."), "explanation": str(400),
 	})
 	return closedObject([]interface{}{"question", "options", "answerKey"}, map[string]interface{}{
@@ -628,7 +686,7 @@ func actionsSchema() map[string]interface{} {
 	action := closedObject([]interface{}{"id", "label", "kind"}, map[string]interface{}{
 		"id": idSchema(), "label": strRange(1, 40), "kind": kind, "icon": iconSchema(),
 		"value": str(500), "target": idSchema(),
-		"decision": enum([]string{"approve", "reject"}), "command": enum(commands), "binding": bindingSchema(),
+		"decision": enum([]string{"approve", "reject"}), "command": enum(commands), "binding": bindingSchema(BindingKinds),
 	})
 	return array(action, 1, MaxActions)
 }

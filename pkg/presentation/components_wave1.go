@@ -359,6 +359,9 @@ func validateQuiz(v *validator, c Component, _ string) error {
 	} else if len(key.Correct) != 1 {
 		return fmt.Errorf("quiz.answerKey.correct needs exactly 1 option id unless allowMultiple is true (got %d)", len(key.Correct))
 	}
+	if err := bounded("quiz.answerKey.correct", len(key.Correct), 1, 6); err != nil {
+		return err
+	}
 	correct := map[string]bool{}
 	for index, id := range key.Correct {
 		if !seen[id] {

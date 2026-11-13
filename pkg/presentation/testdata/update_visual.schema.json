@@ -148,6 +148,7 @@
             "type": "object"
           },
           "summary": {
+            "description": "Required unless type is actions, caption, carousel, divider, grid, section, tabs, text.",
             "maxLength": 280,
             "type": "string"
           },
@@ -164,6 +165,7 @@
             "type": "object"
           },
           "text": {
+            "description": "Characters: caption 1-300, divider 0-80, text 1-1200.",
             "maxLength": 1200,
             "type": "string"
           },

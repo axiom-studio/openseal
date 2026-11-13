@@ -342,11 +342,17 @@ func (v *validator) component(c Component, path string) error {
 			return fmt.Errorf("binding: %w", err)
 		}
 	}
-	if len(c.Children) > 0 && !spec.children {
+	if len(c.Children) > 0 && spec.children.max == 0 {
 		return fmt.Errorf("%s cannot have children; only section, grid and carousel can", c.Type)
 	}
 	if err := exactPayload(c); err != nil {
 		return err
+	}
+	if err := layoutAndText(spec, c); err != nil {
+		return err
+	}
+	if spec.validate == nil {
+		return nil
 	}
 	return spec.validate(v, c, path)
 }

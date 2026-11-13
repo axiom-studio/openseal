@@ -198,7 +198,7 @@ func TestLintWave5(t *testing.T) {
 
 // The model-facing format never offers the fields the host stamps in.
 func TestStampedFieldsAreNotModelFacing(t *testing.T) {
-	properties := componentJSONSchema()["properties"].(map[string]interface{})
+	properties := strictPayloads()
 	pin := properties["map"].(map[string]interface{})["properties"].(map[string]interface{})["pins"].(map[string]interface{})["items"].(map[string]interface{})["properties"].(map[string]interface{})
 	place := properties["place"].(map[string]interface{})["properties"].(map[string]interface{})
 	item := properties["itinerary"].(map[string]interface{})["properties"].(map[string]interface{})["days"].(map[string]interface{})["items"].(map[string]interface{})["properties"].(map[string]interface{})["items"].(map[string]interface{})["items"].(map[string]interface{})["properties"].(map[string]interface{})

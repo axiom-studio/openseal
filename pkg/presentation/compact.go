@@ -72,7 +72,7 @@ func visualShapes() []namedShape {
 		{"Rating", ratingSchema()},
 		{"Format", enum(formatNames())},
 		{"Tone", enum(toneNames())},
-		{"Binding", bindingSchema()},
+		{"Binding", bindingSchema(BindingKinds)},
 		{"Side", beforeAfterSideSchema()},
 	}
 }
