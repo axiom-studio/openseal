@@ -249,6 +249,9 @@ func (v *validator) warn(code, path, id, format string, args ...interface{}) {
 	v.warnings = append(v.warnings, Warning{Code: code, Path: path, ComponentID: id, Message: fmt.Sprintf(format, args...)})
 }
 
+// ruleUniqueComponentIDs is checked by Validate across the whole tree.
+const ruleUniqueComponentIDs = "component ids are unique across the visual"
+
 // Validate checks a surface against the v2 contract. It returns non-blocking
 // warnings (such as unknown icons) and the first blocking error.
 func Validate(ctx context.Context, surface Surface, opts ValidateOptions) ([]Warning, error) {

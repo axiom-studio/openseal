@@ -87,6 +87,14 @@ func validateCurrency(at, code string) error {
 	return nil
 }
 
+// Rules every payload shares that the schema cannot state.
+const (
+	ruleUniqueItemIDs = "ids within one list of a component (steps, options, fields, chips...) are unique"
+	ruleMarkdown      = "markdown fields are GFM without HTML or images; $…$ maths is allowed"
+	ruleCurrency      = "currency is set exactly when format is currency and is a real ISO 4217 code"
+	ruleImagesInChat  = "an image is one already in this chat (generated, uploaded or a screenshot), by the id and version it was shown with; never a URL"
+)
+
 // itemIDPattern is the id of an item inside a component (steps, options,
 // chips).
 const itemIDPattern = `^[a-z0-9][a-z0-9_-]{0,39}$`

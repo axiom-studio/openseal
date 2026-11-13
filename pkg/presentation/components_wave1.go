@@ -122,6 +122,11 @@ type Price struct {
 // PricePeriods lists the values of Price.Per.
 var PricePeriods = []string{"once", "month", "year"}
 
+const (
+	ruleComparisonValues      = "a value for every attribute key and no other keys; an empty string is allowed"
+	ruleComparisonRecommended = "the id of the option you recommend"
+)
+
 func validateComparison(v *validator, c Component, _ string) error {
 	cmp := c.Comparison
 	keys := map[string]bool{}
@@ -289,6 +294,8 @@ type QuizAnswerKey struct {
 	Correct     []string `json:"correct"`
 	Explanation string   `json:"explanation"`
 }
+
+const ruleQuizCorrect = "ids of the correct options, each once: exactly one unless allowMultiple"
 
 func validateQuiz(v *validator, c Component, _ string) error {
 	quiz := c.Quiz

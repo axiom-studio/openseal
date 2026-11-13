@@ -3,8 +3,13 @@ package presentation
 import (
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -501,4 +506,74 @@ func remove(root interface{}, path []step) {
 	if object, ok := get(root, path[:len(path)-1]).(map[string]interface{}); ok {
 		delete(object, path[len(path)-1].(string))
 	}
+}
+
+// TestGoOnlyRulesReachTheModel: every rule only Go checks is a rule*
+// constant next to its check, and its text is in the visual format the
+// model reads, so the model is told every rule from the same source.
+func TestGoOnlyRulesReachTheModel(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	format := VisualFormat()
+	found := 0
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, declaration := range parsed.Decls {
+			general, ok := declaration.(*ast.GenDecl)
+			if !ok || general.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range general.Specs {
+				value := spec.(*ast.ValueSpec)
+				for index, ident := range value.Names {
+					if !regexp.MustCompile(`^rule[A-Z]`).MatchString(ident.Name) {
+						continue
+					}
+					found++
+					text, ok := constantText(value.Values[index])
+					if !ok {
+						t.Errorf("%s: %s must be a plain string so this test can read it", name, ident.Name)
+						continue
+					}
+					if !strings.Contains(format, text) {
+						t.Errorf("%s: %s is not in the visual format: %q", name, ident.Name, text)
+					}
+				}
+			}
+		}
+	}
+	if found < 40 {
+		t.Fatalf("found %d rules; the rule* constants moved or were renamed", found)
+	}
+	// Limits written into rule text match the constants Go checks.
+	for rule, limit := range map[string]int{ruleChartPie: MaxPieSlices, ruleQuantityNumberLine: MaxNumberLineTicks} {
+		if !strings.Contains(rule, fmt.Sprintf(" %d ", limit)) {
+			t.Errorf("rule %q does not state the limit %d", rule, limit)
+		}
+	}
+}
+
+// constantText is the value of a string literal or a + of them.
+func constantText(expression ast.Expr) (string, bool) {
+	switch node := expression.(type) {
+	case *ast.BasicLit:
+		if node.Kind != token.STRING {
+			return "", false
+		}
+		text, err := strconv.Unquote(node.Value)
+		return text, err == nil
+	case *ast.BinaryExpr:
+		left, okLeft := constantText(node.X)
+		right, okRight := constantText(node.Y)
+		return left + right, okLeft && okRight && node.Op == token.ADD
+	}
+	return "", false
 }

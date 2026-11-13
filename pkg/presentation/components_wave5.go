@@ -41,6 +41,8 @@ const (
 	maxItineraryPlaceRunes = 80
 )
 
+const ruleMapPins = "each place is pinned once"
+
 func validateMap(v *validator, c Component, _ string) error {
 	ids := map[string]bool{}
 	places := map[string]int{}

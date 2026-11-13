@@ -59,6 +59,14 @@ const (
 	maxGroupLabelRunes = 30
 )
 
+const (
+	ruleDiagramLayouts = "flow: steps with arrows; cycle: nodes in order around a ring (at least 3; edges optional); " +
+		"hierarchy: parent to child edges, one parent each, no loops; mindmap: the first node is the centre and every node connects to it; network: any links"
+	ruleDiagramDirection = "flow and hierarchy only; down by default"
+	ruleDiagramGroup     = "the id of one of groups"
+	ruleDiagramEdges     = "edges join node ids"
+)
+
 func validateDiagram(v *validator, c Component, _ string) error {
 	d := c.Diagram
 	if d.Direction != "" && d.Layout != "flow" && d.Layout != "hierarchy" {
@@ -287,6 +295,16 @@ const (
 	maxPercent           = 100
 )
 
+// Quantity rules the schema cannot state. The tick limit is
+// MaxNumberLineTicks.
+const (
+	ruleQuantityFields     = "each kind takes only its own fields: fraction_bars fractions; number_line min and max (required), ticks, points, ranges; unit_blocks groups; percent_waffle parts; scale_compare items"
+	ruleQuantityNumerator  = "at most the denominator"
+	ruleQuantityNumberLine = "a number_line has min below max, at most 100 ticks between them, points and ranges inside them, and each range's from below its to"
+	ruleQuantityPercent    = "percent_waffle parts total at most 100"
+	ruleQuantityScale      = "scale_compare sizes are 0 or more"
+)
+
 func validateQuantityVisual(_ *validator, c Component, _ string) error {
 	q := c.QuantityVisual
 	if err := quantityValues("quantity_visual", q.Kind, q.QuantityValues); err != nil {
@@ -421,6 +439,8 @@ var deniedLaTeX = map[string]bool{
 	"renewcommand": true, "providecommand": true, "gdef": true, "edef": true, "xdef": true, "let": true,
 }
 
+const ruleLaTeX = "LaTeX without $ delimiters and without \\href, \\url, \\includegraphics, \\html… or new macros"
+
 // ValidateLaTeX checks the rules of one math expression the schema cannot: no $
 // delimiters, and none of the macros that can fetch or define (\href, \url,
 // \includegraphics, \html…, \def, \newcommand and their kin).
@@ -541,6 +561,11 @@ var BeforeAfterModes = []string{"diff", "split", "slider"}
 const (
 	maxSideTextRunes  = 4000
 	maxSideLabelRunes = 20
+)
+
+const (
+	ruleBeforeAfterSides = "text or an image, not both; both sides the same kind"
+	ruleBeforeAfterModes = "diff highlights changed words (texts); split shows both side by side; slider wipes between images"
 )
 
 func validateBeforeAfter(v *validator, c Component, _ string) error {

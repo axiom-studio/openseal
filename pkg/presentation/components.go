@@ -35,6 +35,9 @@ type typeSpec struct {
 	bindings []BindingKind
 	// bindingRequired types need a component binding.
 	bindingRequired bool
+	// rules are the type's own rules that only Go checks; the visual format
+	// lists them on the type's line.
+	rules []string
 	// validate checks the payload; nil when the spec's bounds say it all.
 	validate func(v *validator, c Component, path string) error
 	// sentence is the type's one-line purpose in the visual format.
@@ -43,6 +46,12 @@ type typeSpec struct {
 
 // bounds is an inclusive range of a length or count.
 type bounds struct{ min, max int }
+
+// sharedRules are the rules only Go checks that hold for every type; the
+// visual format lists them once.
+var sharedRules = []string{
+	ruleUniqueComponentIDs, ruleUniqueItemIDs, ruleMarkdown, ruleCurrency, ruleCalendarDates, ruleBindings, rulePlaces,
+}
 
 // Layout and text limits. The type specs below carry them so the schema
 // and Validate read the same numbers.
@@ -66,16 +75,16 @@ var catalogue = map[string]typeSpec{
 	"divider":         {payload: "text", payloadOptional: true, text: bounds{0, maxDividerRunes}, sentence: "Visual break, optionally labelled."},
 	"section":         {children: bounds{1, maxChildren}, sentence: "Group of children under the component title."},
 	"grid":            {payload: "grid", children: bounds{1, maxChildren}, sentence: "Children side by side in 2-4 columns."},
-	"tabs":            {payload: "tabs", validate: validateTabs, sentence: "2-5 alternative views, e.g. Simple / Detailed."},
+	"tabs":            {payload: "tabs", validate: validateTabs, rules: []string{ruleTabLabels}, sentence: "2-5 alternative views, e.g. Simple / Detailed."},
 	"carousel":        {children: bounds{2, maxCarouselCards}, sentence: "2-10 swipeable cards, e.g. recipes or places."},
-	"chart":           {payload: "chart", summary: summaryRequired, validate: validateChart, sentence: "Trend or distribution of numbers; pie and donut take one series of at most 7 slices; stacked_bar and grouped_bar need 2+ series with the same labels; scatter labels are x numbers."},
-	"diagram":         {payload: "diagram", summary: summaryRequired, validate: validateDiagram, sentence: "How 2-30 ideas connect; the app places the nodes by layout; tap a node for its detail."},
-	"form":            {payload: "form", summary: summaryRequired, validate: validateForm, sentence: "Structured input the user submits once."},
-	"table":           {payload: "table", summary: summaryRequired, validate: validateTable, sentence: "Exact values in rows and columns."},
+	"chart":           {payload: "chart", summary: summaryRequired, validate: validateChart, rules: []string{ruleChartSeriesNames, ruleChartScatter, ruleChartPie, ruleChartBars, ruleChartReferences}, sentence: "Trend or distribution of numbers."},
+	"diagram":         {payload: "diagram", summary: summaryRequired, validate: validateDiagram, rules: []string{ruleDiagramEdges}, sentence: "How 2-30 ideas connect; the app places the nodes by layout; tap a node for its detail."},
+	"form":            {payload: "form", summary: summaryRequired, validate: validateForm, rules: []string{ruleFormOptions, ruleFormRange}, sentence: "Structured input the user submits once."},
+	"table":           {payload: "table", summary: summaryRequired, validate: validateTable, rules: []string{ruleTableColumns}, sentence: "Exact values in rows and columns."},
 	"stat_row":        {payload: "stat_row", summary: summaryRequired, validate: validateStatRow, sentence: "1-4 headline numbers."},
 	"callout":         {payload: "callout", summary: summaryRequired, validate: validateCallout, sentence: "Key takeaway, tip or warning (markdown body); tone sets its colour, info by default."},
 	"steps":           {payload: "steps", summary: summaryRequired, validate: validateSteps, sentence: "2-10 steps in order; checkable lets people tick them off."},
-	"comparison":      {payload: "comparison", summary: summaryRequired, validate: validateComparison, sentence: "2-4 options against the same attributes (every option gives every attribute a value); pickable lets the user pick one, which answers you."},
+	"comparison":      {payload: "comparison", summary: summaryRequired, validate: validateComparison, sentence: "2-4 options against the same attributes; pickable lets the user pick one, which answers you."},
 	"timeline":        {payload: "timeline", summary: summaryRequired, validate: validateTimeline, sentence: "2-20 events in time order; when is the label shown, date (YYYY-MM-DD) only orders."},
 	"image":           {payload: "image", summary: summaryRequired, validate: validateImage, sentence: "One image already in this chat (by the id and version shown with it, never a URL) with a caption."},
 	"gallery":         {payload: "gallery", summary: summaryRequired, validate: validateGallery, sentence: "2-12 images already in this chat."},
@@ -83,7 +92,7 @@ var catalogue = map[string]typeSpec{
 	"checklist":       {payload: "checklist", summary: summaryRequired, validate: validateChecklist, sentence: "1-40 items people tick off together (packing, shopping, to-dos); you see progress next turn."},
 	"quiz":            {payload: "quiz", summary: summaryRequired, validate: validateQuiz, sentence: "One question with 2-6 options; answerKey stays hidden until they answer, then you hear whether they were right."},
 	"labeled_image":   {payload: "labeled_image", summary: summaryRequired, validate: validateLabeledImage, sentence: "Numbered markers on an image already in this chat; x and y are 0-1 from the top-left; tap a marker for its detail."},
-	"quantity_visual": {payload: "quantity_visual", summary: summaryRequired, validate: validateQuantityVisual, sentence: "Numbers made tangible for learners: fraction_bars (fractions), number_line (min, max, ticks, points, ranges), unit_blocks (groups), percent_waffle (parts totalling at most 100) or scale_compare (items); steps (at most 4) let people step through a change, each with the same fields."},
+	"quantity_visual": {payload: "quantity_visual", summary: summaryRequired, validate: validateQuantityVisual, rules: []string{ruleQuantityFields, ruleQuantityNumberLine, ruleQuantityPercent, ruleQuantityScale}, sentence: "Numbers made tangible for learners; steps (at most 4) let people step through a change, each with the same fields."},
 	"math":            {payload: "math", summary: summaryRequired, validate: validateMath, sentence: "A worked solution, one LaTeX line (no $ delimiters) per step with an optional note; reveal stepwise to show one step at a time."},
 	"definition":      {payload: "definition", summary: summaryRequired, validate: validateDefinition, sentence: "One term made simple, with an optional example and image."},
 	"flashcards":      {payload: "flashcards", summary: summaryRequired, validate: validateFlashcards, sentence: "A practice deck of 2-30 cards; people flip each, mark it Got it or Again, and you hear their tally when they finish."},
@@ -92,17 +101,17 @@ var catalogue = map[string]typeSpec{
 	"recipe":          {payload: "recipe", summary: summaryRequired, validate: validateRecipe, sentence: "A dish with ingredients (qty for the servings given; people rescale it) and steps; checkable lets people tick ingredients off together."},
 	"item":            {payload: "item", summary: summaryRequired, validate: validateItem, sentence: "One product, option or listing with price, rating and up to 4 facts."},
 	"analogy":         {payload: "analogy", summary: summaryRequired, validate: validateAnalogy, sentence: "Something new explained as something familiar, with 1-5 matching pairs."},
-	"agenda":          {payload: "agenda", summary: summaryRequired, validate: validateAgenda, sentence: "Fixed plans on 1-7 days in date order, items in start order, with free slots."},
-	"itinerary":       {payload: "itinerary", summary: summaryRequired, validate: validateItinerary, sentence: "A trip day by day; travel is the leg into an item from the one before (never on a day's first)."},
-	"place":           {payload: "place", summary: summaryRequired, validate: validatePlace, sentence: "One venue; several go in a carousel; location adds a map."},
-	"breakdown":       {payload: "breakdown", summary: summaryRequired, validate: validateBreakdown, sentence: "Parts of a whole; tap a part for its share."},
+	"agenda":          {payload: "agenda", summary: summaryRequired, validate: validateAgenda, rules: []string{ruleAgendaOrder, ruleAgendaFreeSlots}, sentence: "Fixed plans on 1-7 days, with free slots."},
+	"itinerary":       {payload: "itinerary", summary: summaryRequired, validate: validateItinerary, rules: []string{ruleItineraryTravel}, sentence: "A trip day by day."},
+	"place":           {payload: "place", summary: summaryRequired, validate: validatePlace, rules: []string{rulePlaceName}, sentence: "One venue; several go in a carousel; location adds a map."},
+	"breakdown":       {payload: "breakdown", summary: summaryRequired, validate: validateBreakdown, rules: []string{ruleBreakdownPositive}, sentence: "Parts of a whole; tap a part for its share."},
 	"progress":        {payload: "progress", summary: summaryRequired, validate: validateProgress, sentence: "Values against targets."},
 	"poll":            {payload: "poll", summary: summaryRequired, validate: validatePoll, sentence: "A group vote; people can change their vote and you hear the tally once everyone has voted."},
-	"explorer":        {payload: "explorer", summary: summaryRequired, validate: validateExplorer, sentence: "A what-if: people move inputs and outputs recompute. Expressions use input ids, + - * / ^, comparisons, && || !, min max round floor ceil abs sqrt log exp, if(c,a,b), sum(i,from,to,body); a toggle is true/false."},
+	"explorer":        {payload: "explorer", summary: summaryRequired, validate: validateExplorer, rules: []string{ruleExplorerReserved, ruleExplorerExpr}, sentence: "A what-if: people move inputs and outputs recompute. Expressions use input ids, + - * / ^, comparisons, && || !, min max round floor ceil abs sqrt log exp, if(c,a,b), sum(i,from,to,body); a toggle is true/false."},
 	"routine":         {payload: "routine", payloadOptional: true, summary: summaryRequired, bindings: []BindingKind{BindingRunbook}, bindingRequired: true, sentence: "A routine with live schedule, status and buttons; items are its latest highlights."},
-	"tasks":           {payload: "tasks", summary: summaryRequired, bindings: []BindingKind{}, validate: validateTasks, sentence: "Work handed to helpers in this chat, each row bound to its task; status is live."},
+	"tasks":           {payload: "tasks", summary: summaryRequired, bindings: []BindingKind{}, validate: validateTasks, rules: []string{ruleTaskRows}, sentence: "Work handed to helpers in this chat, each row bound to its task; status is live."},
 	"agent":           {payload: "agent", summary: summaryRequired, bindings: []BindingKind{BindingAgent}, bindingRequired: true, sentence: "Introduces an agent people can start chatting with."},
-	"map":             {payload: "map", summary: summaryRequired, validate: validateMap, sentence: "Pins for 1-20 real places from find_place; tap a pin for its detail."},
+	"map":             {payload: "map", summary: summaryRequired, validate: validateMap, rules: []string{ruleMapPins}, sentence: "Pins for 1-20 real places from find_place; tap a pin for its detail."},
 	"actions":         {payload: "actions", validate: validateActions, sentence: "Up to 4 buttons: respond sends a reply to you; approval and entity act on the bound item."},
 }
 
@@ -137,6 +146,8 @@ type Tab struct {
 	Label    string      `json:"label"`
 	Children []Component `json:"children"`
 }
+
+const ruleTabLabels = "tab labels are unique"
 
 func validateTabs(_ *validator, c Component, _ string) error {
 	labels := map[string]bool{}
@@ -209,6 +220,15 @@ const (
 	maxChartSeriesNameRunes = 120
 	maxChartPointLabelRunes = 160
 	maxChartNoteRunes       = 40 // annotation and reference line labels
+)
+
+// Chart rules the schema cannot state. The pie limit is MaxPieSlices.
+const (
+	ruleChartSeriesNames = "series names are unique"
+	ruleChartScatter     = "in a scatter chart each point label is its x number"
+	ruleChartPie         = "pie and donut take exactly 1 series of at most 7 slices"
+	ruleChartBars        = "stacked_bar and grouped_bar take 2 or more series with the same point labels in the same order"
+	ruleChartReferences  = "annotations[].x and highlight.x name a point label, highlight.series names a series, and highlight sets at least one"
 )
 
 func validateChart(_ *validator, c Component, _ string) error {
@@ -312,6 +332,11 @@ const (
 	maxFormFieldDetailRunes = 1000
 	maxFormPlaceholderRunes = 500
 	maxFormOptions          = 100
+)
+
+const (
+	ruleFormOptions = "select and radio fields have options and other fields none"
+	ruleFormRange   = "only number fields have min and max, and min is at most max"
 )
 
 func validateForm(_ *validator, c Component, _ string) error {
@@ -422,6 +447,11 @@ func (c *TableCell) UnmarshalJSON(raw []byte) error {
 	}
 	return nil
 }
+
+const (
+	ruleTableColumns = "column keys are unique; a currency column, and no other, has a currency"
+	ruleTableCells   = "each row maps column keys to cells: numbers for number, currency and percent; YYYY-MM-DD for date; an image for image; text otherwise"
+)
 
 func validateTable(v *validator, c Component, _ string) error {
 	t := c.Table

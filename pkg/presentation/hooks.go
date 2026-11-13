@@ -78,6 +78,9 @@ func (v *validator) binding(binding Binding) error {
 	return nil
 }
 
+// ruleBindings is checked by the host for every binding.
+const ruleBindings = "a binding names a routine, task, run, approval or agent this chat can reach"
+
 // bindingNoun names what a binding kind points at, in the words people use.
 func bindingNoun(kind BindingKind) string {
 	switch kind {
@@ -157,6 +160,9 @@ type PlaceProvenance func(ctx context.Context, placeID string) (PlaceFix, bool, 
 // lowercase hex characters the host derives from its geocoder's own id, so
 // the same place always gets the same id.
 const PlaceIDPattern = `^place:[0-9a-f]{12}$`
+
+// rulePlaces is checked by the host for every place id.
+const rulePlaces = "place ids come from find_place in this chat; the app fills in coordinates and addresses, so never send lat, lon or address"
 
 // placeRef checks a place id field (a map pin's place, a location) and,
 // with host checks, that find_place returned it in this conversation.

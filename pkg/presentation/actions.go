@@ -44,6 +44,11 @@ const (
 	maxActionValueRunes = 500
 )
 
+// ruleActionKinds says what each kind of action sends and needs.
+const ruleActionKinds = "respond sends value (default label) as the user's reply; edit opens the draft in this visual named by target; " +
+	"approval sends decision (required) on an approval binding; entity sends command to the bound routine (pause, resume, run_now, stop), " +
+	"task (cancel) or agent (open_chat); a kind's binding is on the action or the component, and other kinds' fields are left out"
+
 func validateActions(v *validator, c Component, _ string) error {
 	ids := map[string]bool{}
 	for index, action := range c.Actions {

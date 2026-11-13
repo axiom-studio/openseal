@@ -14,6 +14,9 @@ import (
 
 const clockTimePattern = `^([01][0-9]|2[0-3]):[0-5][0-9]$`
 
+// ruleCalendarDates: the date pattern admits 2026-02-30; Go does not.
+const ruleCalendarDates = "dates are real calendar days"
+
 // calendarDate checks that a YYYY-MM-DD the schema admitted is a real
 // day.
 func calendarDate(field, value string) error {
@@ -61,6 +64,12 @@ const (
 	maxPlanTitleRunes = 80 // agenda and itinerary items
 	maxPlanPlaceRunes = 80 // agenda and itinerary items
 	maxFreeSlots      = 12
+)
+
+const (
+	ruleAgendaOrder     = "days in date order, each date once; items in start order, each ending after it starts"
+	ruleAgendaFreeSlots = "a free slot is on the date of one of days and ends after it starts"
+	ruleTimezone        = "an IANA time zone name, shown only"
 )
 
 func validateAgenda(_ *validator, c Component, _ string) error {
@@ -151,6 +160,8 @@ const (
 	maxItineraryDetailRunes = 200
 )
 
+const ruleItineraryTravel = "travel is the leg into an item from the one before, never on a day's first item"
+
 func validateItinerary(v *validator, c Component, _ string) error {
 	days := map[string]bool{}
 	items := map[string]bool{}
@@ -200,6 +211,8 @@ const (
 	maxHoursRunes = 40
 )
 
+const rulePlaceName = "name is required unless location names a place"
+
 func validatePlace(v *validator, c Component, _ string) error {
 	place := c.Place
 	if place.Location == "" && strings.TrimSpace(place.Name) == "" {
@@ -234,6 +247,8 @@ const (
 	maxPartLabelRunes = 40 // breakdown and progress items
 	maxProgressItems  = 6
 )
+
+const ruleBreakdownPositive = "at least one value is above 0"
 
 func validateBreakdown(v *validator, c Component, _ string) error {
 	breakdown := c.Breakdown
@@ -308,6 +323,8 @@ const (
 	maxPollOptions       = 8
 	maxPollLabelRunes    = 60
 )
+
+const rulePollClosesAt = "RFC 3339 time voting ends"
 
 func validatePoll(v *validator, c Component, _ string) error {
 	poll := c.Poll
@@ -401,6 +418,14 @@ const (
 )
 
 const explorerNamePattern = `^[a-z][a-z0-9_]{0,39}$`
+
+const (
+	ruleExplorerReserved = "input ids are not t or a function name"
+	ruleExplorerInputs   = "slider and stepper: min below max, default on a step; toggle: default 0 or 1, no min, max or step"
+	ruleExplorerExpr     = "every expr gives a number and can be worked out at the inputs' defaults"
+	ruleExplorerX        = "the id of a slider or stepper input (swept min to max), or t"
+	ruleExplorerT        = "required when x is t, with from below to, and only then; series may use t"
+)
 
 func validateExplorer(_ *validator, c Component, _ string) error {
 	explorer := c.Explorer
@@ -601,6 +626,8 @@ type TaskRow struct {
 	Binding Binding `json:"binding"`
 	Label   string  `json:"label"`
 }
+
+const ruleTaskRows = "each task is listed once"
 
 func validateTasks(v *validator, c Component, _ string) error {
 	seen := map[string]bool{}

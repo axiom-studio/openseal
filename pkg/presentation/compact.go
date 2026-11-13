@@ -54,7 +54,7 @@ type namedShape struct {
 func visualPatterns() []namedPattern {
 	return []namedPattern{
 		{"id", opaqueIDPattern, ""},
-		{"itemId", itemIDPattern, "lowercase letters, digits, - and _; unique within its component"},
+		{"itemId", itemIDPattern, "lowercase letters, digits, - and _"},
 		{"iconName", iconPattern.String(), ""},
 		{"date", isoDate.String(), "YYYY-MM-DD"},
 		{"time", clockTimePattern, "HH:MM, 24-hour"},

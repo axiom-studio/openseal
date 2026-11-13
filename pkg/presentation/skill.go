@@ -163,9 +163,9 @@ func VisualFormat() string {
 			layouts = append(layouts, name)
 		}
 	}
-	fmt.Fprintf(&b, "Components nest at most %d levels deep (top level is 1, so no %s at level %d); at most %d components in all including nested ones; at most %d KB of JSON; ids are unique across the visual.\n",
+	fmt.Fprintf(&b, "Components nest at most %d levels deep (top level is 1, so no %s at level %d); at most %d components in all including nested ones; at most %d KB of JSON.\n",
 		MaxDepth, strings.Join(layouts, ", "), MaxDepth, MaxComponents, MaxSurfaceBytes/1024)
-	b.WriteString("Markdown fields are GFM without HTML or images; $…$ maths is allowed.\n")
+	b.WriteString("Also checked: " + strings.Join(sharedRules, "; ") + ".\n")
 	b.WriteString("Types (* = summary required):")
 	for _, name := range TypeNames() {
 		spec := catalogue[name]
@@ -180,6 +180,9 @@ func VisualFormat() string {
 		}
 		if spec.children.max > 0 {
 			line += " children:" + notation.render(properties["children"].(map[string]interface{}))
+		}
+		if len(spec.rules) > 0 {
+			line += " Checks: " + strings.Join(spec.rules, "; ") + "."
 		}
 		if len(spec.bindings) > 0 {
 			kinds := make([]string, len(spec.bindings))
@@ -390,13 +393,13 @@ func chartSchema() map[string]interface{} {
 func diagramSchema() map[string]interface{} {
 	node := closedObject([]interface{}{"id", "label"}, map[string]interface{}{
 		"id": itemIDSchema(), "label": strRange(1, maxNodeLabelRunes), "icon": iconSchema(),
-		"group": describe(itemIDSchema(), "Id of one of groups."), "detail": describe(str(maxNodeDetailRunes), "Markdown shown when the node is tapped."),
+		"group": describe(itemIDSchema(), ruleDiagramGroup), "detail": describe(str(maxNodeDetailRunes), "Markdown shown when the node is tapped."),
 	})
 	edge := closedObject([]interface{}{"from", "to"}, map[string]interface{}{"from": itemIDSchema(), "to": itemIDSchema(), "label": str(maxEdgeLabelRunes)})
 	group := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, maxGroupLabelRunes)})
 	return closedObject([]interface{}{"layout", "nodes"}, map[string]interface{}{
-		"layout":    describe(enum(DiagramLayouts), "flow: steps with arrows; cycle: nodes in order around a ring (at least 3; edges optional); hierarchy: parent to child edges, one parent each; mindmap: the first node is the centre and every node connects to it; network: any links."),
-		"direction": describe(enum(DiagramDirections), "flow and hierarchy only; down by default."),
+		"layout":    describe(enum(DiagramLayouts), ruleDiagramLayouts),
+		"direction": describe(enum(DiagramDirections), ruleDiagramDirection),
 		"nodes":     array(node, 2, MaxDiagramNodes), "edges": array(edge, 0, MaxDiagramEdges), "groups": array(group, 0, MaxDiagramGroups),
 	})
 }
@@ -419,7 +422,7 @@ func quantityValueProperties() map[string]interface{} {
 	label := str(quantityLabelRunes)
 	return map[string]interface{}{
 		"fractions": describe(array(closedObject([]interface{}{"numerator", "denominator"}, map[string]interface{}{
-			"numerator": describe(integer(0, MaxDenominator), "At most the denominator."), "denominator": integer(1, MaxDenominator), "label": label,
+			"numerator": describe(integer(0, MaxDenominator), ruleQuantityNumerator), "denominator": integer(1, MaxDenominator), "label": label,
 		}), 1, maxQuantityGroupings), "fraction_bars: one equal-width bar per fraction."),
 		"min": describe(number(), "number_line: required with max."), "max": number(),
 		"ticks":  describe(map[string]interface{}{"type": "number", "exclusiveMinimum": 0}, "number_line: gap between ticks."),
@@ -462,7 +465,7 @@ func priceSchema() map[string]interface{} {
 
 func mathSchema() map[string]interface{} {
 	step := closedObject([]interface{}{"latex"}, map[string]interface{}{
-		"latex": describe(strRange(1, MaxLaTeXRunes), "No \\href, \\url, \\includegraphics, \\html or new macros."), "note": str(maxMathNoteRunes),
+		"latex": describe(strRange(1, MaxLaTeXRunes), ruleLaTeX), "note": str(maxMathNoteRunes),
 	})
 	return closedObject([]interface{}{"steps"}, map[string]interface{}{
 		"steps": array(step, 1, maxMathSteps), "reveal": enum(MathReveals),
@@ -486,14 +489,14 @@ func flashcardsSchema() map[string]interface{} {
 func beforeAfterSchema() map[string]interface{} {
 	side := beforeAfterSideSchema()
 	return closedObject([]interface{}{"mode", "before", "after"}, map[string]interface{}{
-		"mode":   describe(enum(BeforeAfterModes), "diff highlights changed words (texts); split shows both side by side; slider wipes between images."),
+		"mode":   describe(enum(BeforeAfterModes), ruleBeforeAfterModes),
 		"before": side, "after": side,
 		"labels": closedObject([]interface{}{}, map[string]interface{}{"before": str(maxSideLabelRunes), "after": str(maxSideLabelRunes)}),
 	})
 }
 
 func beforeAfterSideSchema() map[string]interface{} {
-	return describe(closedObject([]interface{}{}, map[string]interface{}{"text": str(maxSideTextRunes), "image": imageRefSchema()}), "Text or an image, not both; both sides the same kind.")
+	return describe(closedObject([]interface{}{}, map[string]interface{}{"text": str(maxSideTextRunes), "image": imageRefSchema()}), ruleBeforeAfterSides)
 }
 
 func draftSchema() map[string]interface{} {
@@ -553,7 +556,7 @@ func tableSchema() map[string]interface{} {
 	return closedObject([]interface{}{"columns"}, map[string]interface{}{
 		"columns": array(column, 1, MaxTableColumns),
 		"rows": describe(array(map[string]interface{}{"type": "object", "additionalProperties": cell}, 0, MaxTableRows),
-			"Each row maps column keys to cells: numbers for number, currency and percent; YYYY-MM-DD for date; an image for image; text otherwise."),
+			ruleTableCells),
 	})
 }
 
@@ -575,12 +578,12 @@ func comparisonSchema() map[string]interface{} {
 	price := priceSchema()
 	option := closedObject([]interface{}{"id", "name", "values"}, map[string]interface{}{
 		"id": itemIDSchema(), "name": strRange(1, maxOptionNameRunes), "image": imageRefSchema(), "badge": str(maxBadgeRunes), "price": price,
-		"values": describe(map[string]interface{}{"type": "object", "additionalProperties": str(maxOptionValueRunes)}, "A value for every attribute key; an empty string is allowed."),
+		"values": describe(map[string]interface{}{"type": "object", "additionalProperties": str(maxOptionValueRunes)}, ruleComparisonValues),
 		"pros":   array(strRange(1, maxProConRunes), 0, maxProsCons), "cons": array(strRange(1, maxProConRunes), 0, maxProsCons),
 	})
 	return closedObject([]interface{}{"attributes", "options"}, map[string]interface{}{
 		"attributes": array(attribute, 1, maxComparisonAttributes), "options": array(option, minComparisonOptions, maxComparisonOptions),
-		"recommended": describe(itemIDSchema(), "Id of the option you recommend."),
+		"recommended": describe(itemIDSchema(), ruleComparisonRecommended),
 		"pickable":    boolean(),
 	})
 }
@@ -618,7 +621,7 @@ func checklistSchema() map[string]interface{} {
 func quizSchema() map[string]interface{} {
 	option := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, maxQuizOptionLabelRunes), "image": imageRefSchema()})
 	key := closedObject([]interface{}{"correct"}, map[string]interface{}{
-		"correct":     describe(array(itemIDSchema(), 1, maxQuizOptions), "Ids of the correct options: exactly one unless allowMultiple."),
+		"correct":     describe(array(itemIDSchema(), 1, maxQuizOptions), ruleQuizCorrect),
 		"explanation": str(maxQuizExplanationRunes),
 	})
 	return closedObject([]interface{}{"question", "options", "answerKey"}, map[string]interface{}{
@@ -629,7 +632,7 @@ func quizSchema() map[string]interface{} {
 func imageRefSchema() map[string]interface{} {
 	return describe(closedObject([]interface{}{"artifactId", "version"}, map[string]interface{}{
 		"artifactId": idSchema(), "version": map[string]interface{}{"type": "integer", "minimum": 1},
-	}), "An image already in this chat (generated, uploaded or a screenshot), by the id and version it was shown with. Never a URL.")
+	}), ruleImagesInChat)
 }
 
 func idSchema() map[string]interface{} {
@@ -691,7 +694,7 @@ func actionsSchema() map[string]interface{} {
 		commands = append(commands, list...)
 	}
 	sort.Strings(commands)
-	kind := describe(enum(kinds), "respond sends value (default label) as the user's reply; edit opens the draft named by target; approval sends decision on the approval binding; entity sends command to the bound routine (pause, resume, run_now, stop), task (cancel) or agent (open_chat).")
+	kind := describe(enum(kinds), ruleActionKinds)
 	action := closedObject([]interface{}{"id", "label", "kind"}, map[string]interface{}{
 		"id": idSchema(), "label": strRange(1, maxActionLabelRunes), "kind": kind, "icon": iconSchema(),
 		"value": str(maxActionValueRunes), "target": idSchema(),

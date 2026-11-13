@@ -206,8 +206,10 @@ func TestModelFacingVisualBudget(t *testing.T) {
 	// map and locations fit under it at 26,573 bytes. Telling the model
 	// each type's text limit and which types need a summary on the loose
 	// schema too (a caption was rejected for a limit the schema did not
-	// state) took it to 26,920, so the ceiling is 27 KB.
-	const ceiling = 27 * 1024
+	// state) took it to 26,920, so the ceiling moved to 27 KB. Telling the
+	// model every rule that only Go checks (unique ids, references between
+	// fields, per-kind rules) took it to 28,732, so the ceiling is 29 KB.
+	const ceiling = 29 * 1024
 	if total := len(encodedField) + len(encodedUpdate); total > ceiling {
 		t.Fatalf("visual field %d + update_visual %d = %d bytes; the ceiling is %d", len(encodedField), len(encodedUpdate), total, ceiling)
 	}

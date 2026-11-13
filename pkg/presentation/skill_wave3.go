@@ -21,7 +21,7 @@ func agendaSchema() map[string]interface{} {
 	day := closedObject([]interface{}{"date"}, map[string]interface{}{"date": dateSchema(), "label": str(maxDayLabelRunes), "items": array(item, 0, maxDayItems)})
 	slot := closedObject([]interface{}{"date", "start", "end"}, map[string]interface{}{"date": dateSchema(), "start": clockSchema(), "end": clockSchema()})
 	return closedObject([]interface{}{"days"}, map[string]interface{}{
-		"timezone": describe(str(maxTimezoneRunes), "IANA name, shown only."), "days": array(day, 1, maxAgendaDays), "freeSlots": array(slot, 0, maxFreeSlots),
+		"timezone": describe(str(maxTimezoneRunes), ruleTimezone), "days": array(day, 1, maxAgendaDays), "freeSlots": array(slot, 0, maxFreeSlots),
 	})
 }
 
@@ -69,7 +69,7 @@ func pollSchema() map[string]interface{} {
 	option := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, maxPollLabelRunes), "image": imageRefSchema()})
 	return closedObject([]interface{}{"question", "options"}, map[string]interface{}{
 		"question": strRange(1, maxPollQuestionRunes), "options": array(option, minPollOptions, maxPollOptions), "multiple": boolean(),
-		"closesAt": describe(map[string]interface{}{"type": "string"}, "RFC 3339 time voting ends."),
+		"closesAt": describe(map[string]interface{}{"type": "string"}, rulePollClosesAt),
 	})
 }
 
@@ -77,7 +77,7 @@ func explorerSchema() map[string]interface{} {
 	expression := strRange(1, MaxExplorerExprRunes)
 	input := closedObject([]interface{}{"id", "label", "kind", "default"}, map[string]interface{}{
 		"id": map[string]interface{}{"type": "string", "pattern": explorerNamePattern}, "label": strRange(1, maxExplorerLabelRunes),
-		"kind": describe(enum(ExplorerInputKinds), "slider and stepper: min below max, step above 0, default on a step; toggle: default 0 or 1, no min, max or step."),
+		"kind": describe(enum(ExplorerInputKinds), ruleExplorerInputs),
 		"min":  number(), "max": number(), "step": map[string]interface{}{"type": "number", "exclusiveMinimum": 0}, "default": number(), "unit": str(maxExplorerUnitRunes), "format": enum(formatNames()), "currency": currencySchema(),
 	})
 	output := closedObject([]interface{}{"id", "label", "expr"}, map[string]interface{}{
@@ -87,8 +87,8 @@ func explorerSchema() map[string]interface{} {
 	})
 	series := closedObject([]interface{}{"label", "expr"}, map[string]interface{}{"label": strRange(1, maxExplorerSeriesRunes), "expr": expression})
 	chart := closedObject([]interface{}{"x", "series"}, map[string]interface{}{
-		"x":      describe(map[string]interface{}{"type": "string"}, "An input id (swept min to max) or t."),
-		"t":      describe(closedObject([]interface{}{"from", "to"}, map[string]interface{}{"from": number(), "to": number(), "label": str(maxExplorerSeriesRunes)}), "Required when x is t; series may use t."),
+		"x":      describe(map[string]interface{}{"type": "string"}, ruleExplorerX),
+		"t":      describe(closedObject([]interface{}{"from", "to"}, map[string]interface{}{"from": number(), "to": number(), "label": str(maxExplorerSeriesRunes)}), ruleExplorerT),
 		"points": integer(2, MaxExplorerPoints), "series": array(series, 1, maxExplorerSeries),
 	})
 	return closedObject([]interface{}{"inputs", "outputs"}, map[string]interface{}{
