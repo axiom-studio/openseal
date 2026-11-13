@@ -645,7 +645,7 @@ func iconSchema() map[string]interface{} {
 }
 
 func currencySchema() map[string]interface{} {
-	return describe(map[string]interface{}{"type": "string", "pattern": "^[A-Z]{3}$"}, "ISO 4217 code such as GBP, USD or EUR; required with format currency.")
+	return describe(map[string]interface{}{"type": "string", "pattern": currencyPattern}, "ISO 4217 code such as GBP, USD or EUR; required with format currency.")
 }
 
 func formatNames() []string {
@@ -723,10 +723,13 @@ func str(maximum int) map[string]interface{} {
 	return map[string]interface{}{"type": "string", "maxLength": maximum}
 }
 
+// strRange is text of minimum to maximum characters; with a minimum, it
+// must not be blank either.
 func strRange(minimum, maximum int) map[string]interface{} {
 	schema := str(maximum)
 	if minimum > 0 {
 		schema["minLength"] = minimum
+		schema["pattern"] = notBlankPattern
 	}
 	return schema
 }

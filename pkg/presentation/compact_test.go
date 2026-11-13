@@ -136,7 +136,8 @@ func TestVisualFormatKeepsEverything(t *testing.T) {
 					}
 				}
 			}
-			if pattern, ok := schema["pattern"].(string); ok && !strings.Contains(format, "/"+pattern+"/") {
+			// The not-blank pattern reads as str1.. (see the legend).
+			if pattern, ok := schema["pattern"].(string); ok && pattern != notBlankPattern && !strings.Contains(format, "/"+pattern+"/") {
 				t.Errorf("%s pattern %s is missing", path, pattern)
 			}
 			for _, keyword := range []string{"minimum", "maximum", "exclusiveMinimum", "minLength", "maxLength", "minItems", "maxItems"} {

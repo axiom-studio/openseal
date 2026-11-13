@@ -278,7 +278,7 @@ func TestValidateWave3(t *testing.T) {
 		{"tasks", tasksOf("task-1", "task-2"), bindings, ""},
 		{"tasks rows", tasksOf(), bindings, "tasks.rows needs 1-12 (got 0)"},
 		{"tasks 13 rows", tasksOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"), bindings, "tasks.rows needs 1-12 (got 13)"},
-		{"tasks row kind", func() Component { c := tasksOf("task-1"); c.Tasks.Rows[0].Binding.Kind = BindingRun; return c }(), bindings, `tasks.rows[0].binding.kind "run" is not allowed; each row is bound to a conversation_task`},
+		{"tasks row kind", func() Component { c := tasksOf("task-1"); c.Tasks.Rows[0].Binding.Kind = BindingRun; return c }(), bindings, `tasks.rows[0].binding.kind "run" is not one of conversation_task`},
 		{"tasks duplicate", tasksOf("task-1", "task-1"), bindings, `tasks.rows[1].binding.id "task-1" is listed twice`},
 		{"tasks not visible", tasksOf("task-1", "elsewhere"), bindings, "tasks.rows[1].binding: conversation_task/elsewhere: is not part of this conversation"},
 		{"tasks unchecked", tasksOf("task-1"), ValidateOptions{}, "tasks.rows[0].binding: bindings cannot be checked here"},

@@ -122,16 +122,13 @@ func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 	return call, nil
 }
 
-// decodeFinalVisual strictly decodes the visual argument; null is no visual.
+// decodeFinalVisual decodes the visual argument against the visual schema;
+// null is no visual.
 func decodeFinalVisual(raw json.RawMessage) (*presentation.Visual, error) {
 	if trimmed := strings.TrimSpace(string(raw)); trimmed == "" || trimmed == "null" {
 		return nil, nil
 	}
-	var visual presentation.Visual
-	if err := models.DecodeControlArguments(raw, &visual); err != nil {
-		return nil, err
-	}
-	return &visual, nil
+	return presentation.DecodeVisual(raw)
 }
 
 // finalSkillRefsList takes one Skill ref sent as a bare string as a list of

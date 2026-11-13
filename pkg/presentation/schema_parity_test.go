@@ -108,10 +108,6 @@ var parityExceptions = []struct {
 }{
 	{regexp.MustCompile(`:[A-Za-z_.\[\]0-9]*\.(currency|format):left out$`),
 		"currency goes with format currency and nothing else; both are described on Currency and Format"},
-	{regexp.MustCompile(`:[A-Za-z_.\[\]0-9]*(value|from|x|y|numerator|count):missing$`),
-		"a missing JSON number decodes as 0, which is in range; the schema is stricter, never looser"},
-	{regexp.MustCompile(`^place:place.priceLevel:0$`), "0 is how an unset price level decodes"},
-	{regexp.MustCompile(`^place:place.name:empty$`), "a place with a location takes its name from find_place"},
 	{regexp.MustCompile(`^quantity_visual:quantity_visual(\.steps\[0\])?\.(fractions|groups|parts|items|min|max):left out$`),
 		"each quantity kind needs its own fields; the kind's description names them"},
 	{regexp.MustCompile(`^before_after:before_after\.(before|after)\.(text|image):(left out|empty|4001 chars)$`),
@@ -120,9 +116,6 @@ var parityExceptions = []struct {
 		"a slider needs min, max and step, and a chart over t needs t; the descriptions say so"},
 	{regexp.MustCompile(`^form:form\.fields\[0\]\.options:left out$`), "select and radio fields need options; other fields take none"},
 	{regexp.MustCompile(`^diagram:diagram\.groups:left out$`), "a node's group must name one of groups"},
-	{regexp.MustCompile(`^chart:chart\.(annotations\[0\]\.x|highlight\.(series|x)):\d+ chars$`),
-		"these name a point label or series name, whose own limits are the same"},
-	{regexp.MustCompile(`^agenda:agenda\.timezone:65 chars$`), "no IANA zone name is that long, so the zone check fires first"},
 }
 
 // TestSchemaMatchesValidator checks that the schema the model is given and
@@ -258,7 +251,7 @@ func (p *parityProbe) object(schema map[string]interface{}, path []step, field s
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		at := join(field, key)
+		at := joinField(field, key)
 		child := append(append([]step{}, path...), key)
 		_, present := node[key]
 		if required[key] {
@@ -279,12 +272,12 @@ func (p *parityProbe) object(schema map[string]interface{}, path []step, field s
 		}
 		sort.Strings(entries)
 		for _, key := range entries {
-			p.visit(additional, append(append([]step{}, path...), key), join(field, key))
+			p.visit(additional, append(append([]step{}, path...), key), joinField(field, key))
 		}
 		return
 	}
 	if schema["additionalProperties"] == false {
-		p.check(join(field, "unknown_key"), "added", func(root interface{}) {
+		p.check(joinField(field, "unknown_key"), "added", func(root interface{}) {
 			set(root, append(append([]step{}, path...), "unknown_key"), "x")
 		}, false, `unknown field "unknown_key"`)
 	}
@@ -423,7 +416,7 @@ func renameIDs(value interface{}, index int) interface{} {
 	return value
 }
 
-func join(field, key string) string {
+func joinField(field, key string) string {
 	if field == "" {
 		return key
 	}

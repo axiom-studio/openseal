@@ -28,7 +28,7 @@ import (
 // A keyword the notation does not know is kept as <keyword=json>, so nothing
 // is ever dropped silently.
 const compactLegend = "Notation: {a:T, b?:T} is an object with exactly these keys, b optional; {*:T} maps any key to T; [T]1..12 is a list of 1-12 T; " +
-	"a..b is an inclusive range (characters for str, the value for int and num, items for lists) and a missing end is open; " +
+	"a..b is an inclusive range (characters for str, the value for int and num, items for lists) and a missing end is open; str1.. is never only spaces; " +
 	"x|y is one of these values; A | B is any of these; (…) is a note on the field."
 
 // compactRenderer renders schemas in the compact notation. patterns names
@@ -203,7 +203,7 @@ func (r compactRenderer) typed(kind string, schema map[string]interface{}, mark 
 	case "string":
 		mark("pattern", "minLength", "maxLength")
 		base := "str"
-		if pattern, ok := schema["pattern"].(string); ok {
+		if pattern, ok := schema["pattern"].(string); ok && pattern != notBlankPattern {
 			if name, named := r.patterns[pattern]; named {
 				base = name
 			} else {

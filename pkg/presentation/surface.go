@@ -9,7 +9,6 @@
 package presentation
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -132,10 +131,15 @@ func Decode(raw []byte) (*Surface, error) {
 	if len(raw) == 0 || len(raw) > MaxSurfaceBytes {
 		return nil, fmt.Errorf("presentation surface must be between 1 byte and %d bytes", MaxSurfaceBytes)
 	}
+	document, err := surfaceDocument(raw, true)
+	if err != nil {
+		return nil, fmt.Errorf("decode presentation surface: %w", err)
+	}
+	if err := checkSchema(document); err != nil {
+		return nil, err
+	}
 	var surface Surface
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&surface); err != nil {
+	if err := json.Unmarshal(raw, &surface); err != nil {
 		return nil, fmt.Errorf("decode presentation surface: %w", err)
 	}
 	if _, err := Validate(context.Background(), surface, ValidateOptions{SkipHostChecks: true}); err != nil {
@@ -273,6 +277,13 @@ func Validate(ctx context.Context, surface Surface, opts ValidateOptions) ([]War
 	}
 	if len(encoded) > MaxSurfaceBytes {
 		return fail("", "the visual is %d bytes of JSON; the limit is %d. Use fewer or smaller components", len(encoded), MaxSurfaceBytes)
+	}
+	document, err := surfaceDocument(encoded, opts.SkipHostChecks)
+	if err != nil {
+		return fail("", "read visual: %v", err)
+	}
+	if err := checkSchema(document); err != nil {
+		return nil, err
 	}
 	v := &validator{ctx: ctx, opts: opts, surface: surface, ids: map[string]*Component{}}
 	count := 0

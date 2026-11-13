@@ -255,6 +255,7 @@
     "requirementName": {
       "maxLength": 128,
       "minLength": 1,
+      "pattern": "\\S",
       "type": "string"
     },
     "state": {
@@ -267,6 +268,7 @@
     "title": {
       "maxLength": 300,
       "minLength": 1,
+      "pattern": "\\S",
       "type": "string"
     },
     "visualId": {

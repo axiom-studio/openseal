@@ -96,6 +96,8 @@ func validateFormat(at string, format StatFormat, code string) error {
 	return nil
 }
 
+const currencyPattern = `^[A-Z]{3}$`
+
 func validateCurrency(at, code string) error {
 	if code == "" {
 		return fmt.Errorf("%s.currency is required with format currency, e.g. GBP, USD or EUR", at)

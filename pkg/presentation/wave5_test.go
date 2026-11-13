@@ -56,7 +56,7 @@ func TestValidateWave5(t *testing.T) {
 		{"unknown place", mapOf(MapPin{ID: "a", Place: "place:000000000001"}, MapPin{ID: "b", Place: "place:000000000002"}, MapPin{ID: "c", Place: "place:4b2f9c0e1a77"}), places(),
 			"map.pins[2].place place:4b2f9c0e1a77 was not found by find_place in this chat"},
 		{"not a place id", mapOf(MapPin{ID: "a", Place: "Lalbagh"}), places(), `map.pins[0].place "Lalbagh" must be a place id returned by find_place`},
-		{"missing place", mapOf(MapPin{ID: "a"}), places(), "map.pins[0].place is required"},
+		{"missing place", mapOf(MapPin{ID: "a"}), places(), "map.pins[0].place \"\" must be a place id returned by find_place"},
 		{"place pinned twice", mapOf(MapPin{ID: "a", Place: "place:000000000001"}, MapPin{ID: "b", Place: "place:000000000001"}), places(), "already pinned by map.pins[0]"},
 		{"too many pins", Component{ID: "m", Type: "map", Summary: "s", Map: &Map{Pins: pins(21)}}, ValidateOptions{SkipHostChecks: true}, "map.pins needs 1-20"},
 		{"no pins", Component{ID: "m", Type: "map", Summary: "s", Map: &Map{}}, places(), "map.pins needs 1-20"},

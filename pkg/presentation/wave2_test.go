@@ -128,7 +128,7 @@ func TestValidateWave2(t *testing.T) {
 		{"labeled_image needs a resolver", Component{ID: "l", Type: "labeled_image", Summary: "x", LabeledImage: &LabeledImage{Image: *img("img-1"), Markers: []ImageMarker{{ID: "n", Label: "N"}}}}, ValidateOptions{}, "labeled_image.image: this host cannot show images yet"},
 		{"labeled_image no markers", Component{ID: "l", Type: "labeled_image", Summary: "x", LabeledImage: &LabeledImage{Image: *img("img-1")}}, images("img-1"), "labeled_image.markers needs 1-12 (got 0)"},
 		{"labeled_image 13 markers", Component{ID: "l", Type: "labeled_image", Summary: "x", LabeledImage: &LabeledImage{Image: *img("img-1"), Markers: make([]ImageMarker, 13)}}, images("img-1"), "labeled_image.markers needs 1-12 (got 13)"},
-		{"marker x", Component{ID: "l", Type: "labeled_image", Summary: "x", LabeledImage: &LabeledImage{Image: *img("img-1"), Markers: []ImageMarker{{ID: "n", X: 1.2, Label: "N"}}}}, images("img-1"), "labeled_image.markers[0].x must be between 0 and 1"},
+		{"marker x", Component{ID: "l", Type: "labeled_image", Summary: "x", LabeledImage: &LabeledImage{Image: *img("img-1"), Markers: []ImageMarker{{ID: "n", X: 1.2, Label: "N"}}}}, images("img-1"), "labeled_image.markers[0].x must be 0-1 (got 1.2)"},
 		{"marker label", Component{ID: "l", Type: "labeled_image", Summary: "x", LabeledImage: &LabeledImage{Image: *img("img-1"), Markers: []ImageMarker{{ID: "n", Label: strings.Repeat("l", 41)}}}}, images("img-1"), "labeled_image.markers[0].label"},
 		// quantity_visual
 		{"fraction bars with steps", quantity("fraction_bars", QuantityValues{Fractions: fractions(3, 4, 2, 3)}, QuantityStep{Label: "Twelfths", QuantityValues: QuantityValues{Fractions: fractions(9, 12, 8, 12)}}), ValidateOptions{}, ""},
@@ -203,14 +203,14 @@ func TestValidateWave2(t *testing.T) {
 			c := recipeOf(false)
 			c.Recipe.Time = &RecipeTime{Prep: minutes(10), Cook: minutes(-1)}
 			return c
-		}(), ValidateOptions{}, "recipe.time.cook is in minutes"},
+		}(), ValidateOptions{}, "recipe.time.cook must be 0-10080 (got -1)"},
 		{"recipe no steps", Component{ID: "r", Type: "recipe", Summary: "x", Recipe: &Recipe{Servings: 2, Ingredients: recipeOf(false).Recipe.Ingredients}}, ValidateOptions{}, "recipe.steps needs 1-15 (got 0)"},
 		{"recipe 31 ingredients", Component{ID: "r", Type: "recipe", Summary: "x", Recipe: &Recipe{Servings: 2, Ingredients: make([]RecipeIngredient, 31)}}, ValidateOptions{}, "recipe.ingredients needs 1-30 (got 31)"},
 		{"recipe qty", func() Component {
 			c := recipeOf(false)
 			c.Recipe.Ingredients[0].Qty = num(0)
 			return c
-		}(), ValidateOptions{}, "recipe.ingredients[0].qty must be a number above 0"},
+		}(), ValidateOptions{}, "recipe.ingredients[0].qty must be above 0 (got 0)"},
 		{"recipe unit", func() Component {
 			c := recipeOf(false)
 			c.Recipe.Ingredients[0].Unit = strings.Repeat("u", 17)

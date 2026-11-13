@@ -113,7 +113,7 @@ func TestValidateWave1(t *testing.T) {
 		{"image unknown", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: *img("img-2")}}, images("img-1"), "image.image (image img-2 version 1): is not an image in this chat"},
 		{"image skipped for stored content", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: *img("img-2")}}, ValidateOptions{SkipHostChecks: true}, ""},
 		{"image version", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: ImageRef{ArtifactID: "img-1"}}}, images("img-1"), "image.image.version must be 1 or more"},
-		{"image url", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: ImageRef{ArtifactID: "https://x.example/a.png", Version: 1}}}, images(), "must be the id of an image in this chat"},
+		{"image url", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: ImageRef{ArtifactID: "https://x.example/a.png", Version: 1}}}, images(), `image.image.artifactId "https://x.example/a.png" must match`},
 		{"image aspect", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: *img("img-1"), Aspect: "wide"}}, images("img-1"), `image.aspect "wide"`},
 		{"image caption", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: *img("img-1"), Caption: strings.Repeat("c", 201)}}, images("img-1"), "image.caption"},
 		{"gallery", Component{ID: "a", Type: "gallery", Summary: "x", Gallery: &Gallery{Layout: "strip", Images: []GalleryImage{{Image: *img("a")}, {Image: *img("b"), Caption: "B"}}}}, images("a", "b"), ""},
@@ -274,7 +274,7 @@ func TestValidateWave1(t *testing.T) {
 		{"quiz", quizOf(false, "mito"), ValidateOptions{}, ""},
 		{"quiz multiple", quizOf(true, "mito", "wall"), ValidateOptions{}, ""},
 		{"quiz two correct", quizOf(false, "mito", "wall"), ValidateOptions{}, "needs exactly 1 option id unless allowMultiple"},
-		{"quiz none correct", quizOf(true), ValidateOptions{}, "quiz.answerKey.correct needs at least 1"},
+		{"quiz none correct", quizOf(true), ValidateOptions{}, "quiz.answerKey.correct needs 1-6 (got 0)"},
 		{"quiz unknown correct", quizOf(false, "dna"), ValidateOptions{}, `quiz.answerKey.correct[0] "dna" is not the id of an option`},
 		{"quiz duplicate correct", quizOf(true, "mito", "mito"), ValidateOptions{}, "listed twice"},
 		{"quiz without key", func() Component {
