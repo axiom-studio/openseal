@@ -11,3 +11,6 @@ type ExternalConversationAttachmentHost = externalconversation.AttachmentHost
 type ExternalConversationAttachmentHostRequest = externalconversation.AttachmentHostRequest
 
 const MaximumExternalConversationAttachmentBytes = externalconversation.MaximumExternalConversationAttachmentBytes
+
+// MaximumExternalDeliveryAttachmentBytes bounds the files one reply sends out.
+const MaximumExternalDeliveryAttachmentBytes = externalconversation.MaximumExternalDeliveryAttachmentBytes

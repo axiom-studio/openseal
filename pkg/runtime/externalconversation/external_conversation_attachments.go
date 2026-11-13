@@ -16,9 +16,15 @@ import (
 )
 
 // MaximumExternalConversationAttachmentBytes bounds the files of one external
-// message (a Slack or Telegram screenshot). As base64 it stays under the Skill
-// client's response limit (skillgrpc.MaxResponseBytes).
+// message read in (a Slack or Telegram screenshot). They come back in a Skill's
+// response, which may be up to skillgrpc.MaxResponseBytes, so 3 MiB of files
+// still fit as base64.
 const MaximumExternalConversationAttachmentBytes = 3 << 20
+
+// MaximumExternalDeliveryAttachmentBytes bounds the files one reply sends out.
+// They travel in the Skill execute request, which Atlas and every Skill's gRPC
+// server cap at 4 MiB, so 2 MiB of files fit as base64.
+const MaximumExternalDeliveryAttachmentBytes = 2 << 20
 
 type AttachmentContent struct {
 	ID        string `json:"id"`
@@ -133,7 +139,7 @@ func externalDeliveryAttachments(ctx context.Context, store models.ExternalConve
 	var result []AttachmentContent
 	seen := map[string]bool{}
 	catalog, ok := store.(models.ArtifactStore)
-	remaining := MaximumExternalConversationAttachmentBytes
+	remaining := MaximumExternalDeliveryAttachmentBytes
 	for _, ref := range message.References {
 		if ref.Kind != models.ConversationReferenceArtifact {
 			continue
