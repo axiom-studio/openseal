@@ -291,7 +291,8 @@ func (w *DeliveryWorker) deliver(ctx context.Context, delivery *models.ExternalC
 
 // attachArtifacts adds the files and visuals message carries to request, as
 // the adapter's features allow. Files ride on a new message only; a visual
-// also rides on the edit that finishes a streamed answer. It returns the
+// also rides on edits: the one that finishes a streamed answer and the one
+// that refreshes a card after an answer. It returns the
 // delivered summary that records a visual left out.
 func (w *DeliveryWorker) attachArtifacts(
 	ctx context.Context,
@@ -323,7 +324,7 @@ func (w *DeliveryWorker) attachArtifacts(
 		}
 		return "", nil
 	}
-	shown, leftOut, err := externalDeliveryVisuals(ctx, w.config.AttachmentContent, delivery.Scope, visuals)
+	shown, leftOut, err := externalDeliveryVisuals(ctx, w.config.AttachmentContent, w.store, message, visuals)
 	if err != nil {
 		return "", err
 	}

@@ -285,6 +285,57 @@ func TestCardAnswerWithoutItsVisualIsRefusedAtTheDoor(t *testing.T) {
 	}
 }
 
+func TestRefreshedCardCountsTheAnswers(t *testing.T) {
+	f := newCardAnswerFixture(t, 1)
+	f.answer("U1", 1, "pick", "", map[string]interface{}{"chipId": "thai"})
+	f.answer("U2", 1, "pick", "", map[string]interface{}{"chipId": "thai"})
+	f.answer("U3", 1, "vote", presentation.PollVoteAction, map[string]interface{}{"optionIds": []interface{}{"eight"}})
+	host := &editingHost{}
+	delivery, err := NewDeliveryWorker(f.store, f.catalog, host, DeliveryWorkerConfig{WorkerID: "delivery", AttachmentContent: f.content},
+		models.WithClock(func() time.Time { return time.Now().UTC().Add(time.Second) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refresh *DeliveryHostRequest
+	for range 3 {
+		if _, err := delivery.ProcessOne(t.Context(), f.endpoint.Scope); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index := range host.requests {
+		request := host.requests[index]
+		if request.Delivery.Operation == capability.ConversationDeliveryMessageUpdate && request.Message.ID == f.card.ID {
+			refresh = &request
+		}
+	}
+	if refresh == nil || len(refresh.Visuals) != 1 {
+		t.Fatalf("refresh = %#v", refresh)
+	}
+	answers := map[string]DeliveryVisualAnswers{}
+	for _, answer := range refresh.Visuals[0].Answers {
+		answers[answer.ComponentID] = answer
+	}
+	pick, vote := answers["pick"], answers["vote"]
+	if pick.People != 2 || len(pick.Chosen) != 1 || pick.Chosen[0] != (DeliveryVisualChoice{ID: "thai", Count: 2}) ||
+		vote.People != 1 || len(vote.Chosen) != 1 || vote.Chosen[0].ID != "eight" || len(answers) != 2 {
+		t.Fatalf("answers = %#v", refresh.Visuals[0].Answers)
+	}
+}
+
+// editingHost delivers every request, keeping it, and edits the message it
+// is asked to update.
+type editingHost struct{ requests []DeliveryHostRequest }
+
+func (h *editingHost) LookupExternalConversationDelivery(context.Context, DeliveryHostRequest) (*DeliveryAcknowledgement, error) {
+	return &DeliveryAcknowledgement{Status: AcknowledgementUnknown}, nil
+}
+
+func (h *editingHost) DeliverExternalConversation(_ context.Context, request DeliveryHostRequest) (*DeliveryHostResult, error) {
+	h.requests = append(h.requests, request)
+	id, _ := request.Delivery.Parameters["providerMessageId"].(string)
+	return &DeliveryHostResult{Outcome: DeliveryOutcomeDelivered, ProviderMessageID: id}, nil
+}
+
 func mustSurface(t *testing.T) *presentation.Surface {
 	t.Helper()
 	surface, err := presentation.Decode([]byte(cardSurface))
