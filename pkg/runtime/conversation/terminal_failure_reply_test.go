@@ -29,6 +29,20 @@ func TestTerminalFailureReplyUsesOnlyFixedSafeReasons(t *testing.T) {
 	}
 }
 
+// A Run that did its work but whose answer kept failing the final checks
+// says so, instead of the generic execution failure.
+func TestTerminalFailureReplyNamesARejectedAnswer(t *testing.T) {
+	failure := &models.RunFailureExplanation{Kind: RunFailureKindExecution, Code: RunFailureCodeFinalAnswerRejected}
+	if got := terminalFailureCodeOf(failure); got != RunFailureCodeFinalAnswerRejected {
+		t.Fatalf("code = %q", got)
+	}
+	reply := TerminalRunFailureReply(context.Background(), nil, nil, &models.AgentRun{Status: models.AgentRunStatusFailed, FailureExplanation: failure})
+	want := "I worked on this but couldn't deliver my answer: it failed the checks every answer must pass three times in a row, so I stopped this attempt. Ask me to try again."
+	if reply != want {
+		t.Fatalf("reply = %q, want %q", reply, want)
+	}
+}
+
 func TestTerminalFailureCodeOfRecordedFailure(t *testing.T) {
 	for _, tc := range []struct {
 		failure *models.RunFailureExplanation

@@ -59,7 +59,6 @@ const (
 	StepFailureContextExceeded      = modelstep.TurnHostContextExceeded
 	StepFailureProducerFailed       = "producer_failed"
 	StepFailurePreparationFailed    = "step_preparation_failed"
-	runFailureCodeFinalRejected     = "final_answer_rejected"
 	runFailureCodePreparedRuntime   = "prepared_runtime_invalid"
 	runFailureCodeFinalDelivery     = "final_delivery_failed"
 	runFailureCodeOutputPublication = "output_publication_failed"
@@ -228,7 +227,7 @@ func (l *Loop) Drive(ctx context.Context, claim Claim) Exit {
 			rejections++
 			if rejections >= maximumFinalRejections {
 				return d.withSteps(d.failWithoutStep(ctx, agentrun.LoopFailure{
-					Kind: conversation.RunFailureKindExecution, Code: runFailureCodeFinalRejected,
+					Kind: conversation.RunFailureKindExecution, Code: conversation.RunFailureCodeFinalAnswerRejected,
 					Message: "The agent's final answer was rejected three times in a row, so the run stopped.",
 				}, nil))
 			}

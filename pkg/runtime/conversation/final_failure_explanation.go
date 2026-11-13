@@ -24,6 +24,11 @@ const (
 	RunFailureKindCredits            = "credits"
 )
 
+// RunFailureCodeFinalAnswerRejected fails a Run whose final answer was
+// rejected three times in a row: the work was done but no answer could be
+// delivered, which the terminal reply says.
+const RunFailureCodeFinalAnswerRejected = "final_answer_rejected"
+
 const maximumRunFailureCodeBytes = 64
 
 // BeginRunFailureExplanation records the failure of a stopped attempt. The
