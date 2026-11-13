@@ -475,16 +475,10 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 	if d.sentVisual() {
 		visual, err := checkFinalVisual(ctx, d)
 		if err != nil {
-			prior, countErr := x.priorFinalErrorCodes(ctx, cc)
-			if countErr != nil {
-				return Result{}, countErr
-			}
-			if prior[finalVisualInvalidCode] == 0 {
-				return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalVisualInvalidCode, OptionalOnly: true,
-					Message: fmt.Sprintf("visual: %v. Fix the visual or leave it out.", err)})
-			}
-			// The second invalid visual in the Run never costs the answer:
-			// it goes without one, and delivery records why.
+			// An invalid visual never costs the answer and is not retried: a
+			// retry re-sends the whole answer, which the chat would show
+			// vanishing and streaming in again. The answer goes without it,
+			// and delivery records why.
 			d.VisualRejection = "visual: " + err.Error()
 		} else {
 			d.Visual = visual

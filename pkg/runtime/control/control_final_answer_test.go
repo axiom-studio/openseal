@@ -336,18 +336,13 @@ func TestEmptyAnswerAfterReactionIsReactionsOnly(t *testing.T) {
 	}
 }
 
-func TestInvalidVisualOnceThenDropped(t *testing.T) {
+// An invalid visual is dropped the first time: the answer is delivered without
+// it and the reason is recorded, so the model never re-sends the answer.
+func TestInvalidVisualIsDroppedWithoutARetry(t *testing.T) {
 	invalid := `{"answer":"Here.","visual":{"title":"Prices","components":[]}}`
-	f := newFinalFixture(t, finalCall("first", invalid), finalCall("second", invalid))
+	f := newFinalFixture(t, finalCall("first", invalid))
 	authority := agentrun.ControlAuthority{VisualAllowed: true}
-	value := requireRejected(t, f, f.settleFinal("first", authority), "first", finalVisualInvalidCode)
-	if !strings.Contains(value["message"].(string), "at least one component") {
-		t.Fatalf("message = %v", value["message"])
-	}
-	if CountsAsRejectedAnswer(f.stored("first")) {
-		t.Fatal("a visual-only rejection counts as a rejected answer")
-	}
-	final := requireFinal(t, f.settleFinal("second", authority))
+	final := requireFinal(t, f.settleFinal("first", authority))
 	if final.Visual() != nil || final.Answer != "Here." {
 		t.Fatalf("final = %#v", final)
 	}
@@ -359,22 +354,13 @@ func TestInvalidVisualOnceThenDropped(t *testing.T) {
 	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{}), "final", ArgumentsInvalidCode)
 }
 
-// A visual that does not decode (a key the format lacks) is a visual
-// rejection like a visual that fails Validate: once a correctable error that
-// does not count as a rejected answer, then the answer goes without it.
-func TestUnknownFieldInsideVisualIsAVisualRejection(t *testing.T) {
+// A visual that does not decode (a key the format lacks) is dropped like a
+// visual that fails Validate; it never refuses the whole call.
+func TestUnknownFieldInsideVisualDropsOnlyTheVisual(t *testing.T) {
 	invalid := `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"t","type":"table","summary":"s",` +
 		`"table":{"columns":[{"key":"a","label":"A","kind":"text"}],"columns_note":"x","rows":[]}}]}}`
-	f := newFinalFixture(t, finalCall("first", invalid), finalCall("second", invalid))
-	authority := agentrun.ControlAuthority{VisualAllowed: true}
-	value := requireRejected(t, f, f.settleFinal("first", authority), "first", finalVisualInvalidCode)
-	if message := value["message"].(string); !strings.Contains(message, `unknown field "columns_note"`) || !strings.HasSuffix(message, "Fix the visual or leave it out.") {
-		t.Fatalf("message = %q", message)
-	}
-	if CountsAsRejectedAnswer(f.stored("first")) {
-		t.Fatal("a visual-only rejection counts as a rejected answer")
-	}
-	final := requireFinal(t, f.settleFinal("second", authority))
+	f := newFinalFixture(t, finalCall("first", invalid))
+	final := requireFinal(t, f.settleFinal("first", agentrun.ControlAuthority{VisualAllowed: true}))
 	if final.Visual() != nil || final.Answer != "Here." {
 		t.Fatalf("final = %#v", final)
 	}
@@ -383,15 +369,17 @@ func TestUnknownFieldInsideVisualIsAVisualRejection(t *testing.T) {
 	}
 }
 
-// A plain reply that repairs into a final with a bad visual leaves a note
-// that does not count as a rejected answer either.
-func TestPlainFinalVisualRejectionIsVisualOnly(t *testing.T) {
+// A plain reply that repairs into a final with a bad visual is delivered
+// without the visual too.
+func TestPlainFinalWithAnInvalidVisualIsDeliveredWithoutIt(t *testing.T) {
 	f := newFinalFixture(t)
 	authority := agentrun.ControlAuthority{VisualAllowed: true}
-	result := f.plain("step-1", 1, authority, `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"c","type":"callout","callout":{"body":"b"}}]}}`)
-	note := requireRejectionNote(t, result, "step-1", finalVisualInvalidCode)
-	if !strings.Contains(note.Note.Text, "summary is required for callout") || CountsAsRejectedAnswer(note) {
-		t.Fatalf("note = %q, counts = %v", note.Note.Text, CountsAsRejectedAnswer(note))
+	final := requireFinal(t, f.plain("step-1", 1, authority, `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"c","type":"callout","callout":{"body":"b"}}]}}`))
+	if final.Visual() != nil || final.Answer != "Here." {
+		t.Fatalf("final = %#v", final)
+	}
+	if rejection, _ := final.Output["visualRejection"].(string); !strings.Contains(rejection, "summary is required for callout") {
+		t.Fatalf("visualRejection = %v", final.Output["visualRejection"])
 	}
 }
 
