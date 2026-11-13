@@ -397,7 +397,7 @@ func TestModelFacingTextAvoidsInternalWords(t *testing.T) {
 
 func TestSkillDefinitionRegisters(t *testing.T) {
 	definition := SkillDefinition()
-	if definition.ID != SkillID || definition.Version != "6.0.0" || !definition.Requirements.AlwaysAvailable {
+	if definition.ID != SkillID || definition.Version != "6.0.1" || !definition.Requirements.AlwaysAvailable {
 		t.Fatalf("definition = %#v", definition)
 	}
 	if err := skill.NewCatalog().Register(context.Background(), definition); err != nil {

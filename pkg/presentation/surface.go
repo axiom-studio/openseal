@@ -16,7 +16,7 @@ import (
 
 const (
 	SkillID      = "openseal.presentation"
-	SkillVersion = "6.0.0"
+	SkillVersion = "6.0.1"
 	// UpdateVisual replaces a visual already shown in the chat with a newer
 	// version. Visuals that answer a turn ride on the answer instead.
 	UpdateVisual = "update_visual"
