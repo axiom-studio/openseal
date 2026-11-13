@@ -1974,6 +1974,7 @@ const (
 	ConversationEventReactionRemoved   = capability.ConversationEventReactionRemoved
 	ConversationEventParticipantJoined = capability.ConversationEventParticipantJoined
 	ConversationEventParticipantLeft   = capability.ConversationEventParticipantLeft
+	ConversationEventCardInteracted    = capability.ConversationEventCardInteracted
 )
 
 const (
@@ -2688,6 +2689,7 @@ func (e *Engine) rebuildExternalConversations() error {
 		inboxConfig.AttachmentHost = attachmentHost
 		inboxConfig.ContextCatalog = e.skills
 	}
+	inboxConfig.Transport = e.externalConversations.transport
 	inbox, err := externalconversation.NewInboxWorker(store, dispatcher, inboxConfig)
 	if err != nil {
 		return err

@@ -68,6 +68,16 @@ func saveFile(t *testing.T, store models.ArtifactStore, content artifactBytes, s
 // added and returns the catalog that resolves it.
 func withAdapterFeatures(t *testing.T, catalog *skill.Catalog, endpoint *models.ExternalConversationEndpoint, features ...capability.ConversationAdapterFeature) *skill.Catalog {
 	t.Helper()
+	return withAdapterChange(t, catalog, endpoint, func(adapter *skill.ConversationAdapter) {
+		adapter.Features = append(append([]capability.ConversationAdapterFeature(nil), adapter.Features...), features...)
+		sort.Slice(adapter.Features, func(i, j int) bool { return adapter.Features[i] < adapter.Features[j] })
+	})
+}
+
+// withAdapterChange re-registers the endpoint's adapter as change leaves it
+// and returns the catalog that resolves it.
+func withAdapterChange(t *testing.T, catalog *skill.Catalog, endpoint *models.ExternalConversationEndpoint, change func(*skill.ConversationAdapter)) *skill.Catalog {
+	t.Helper()
 	bound, err := catalog.ResolveConversationAdapterBinding(t.Context(), skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID)
 	if err != nil {
 		t.Fatal(err)
@@ -78,8 +88,7 @@ func withAdapterFeatures(t *testing.T, catalog *skill.Catalog, endpoint *models.
 		definition.ConversationAdapters[id] = adapter
 	}
 	adapter := definition.ConversationAdapters[endpoint.Adapter.AdapterID]
-	adapter.Features = append(append([]capability.ConversationAdapterFeature(nil), adapter.Features...), features...)
-	sort.Slice(adapter.Features, func(i, j int) bool { return adapter.Features[i] < adapter.Features[j] })
+	change(&adapter)
 	definition.ConversationAdapters[endpoint.Adapter.AdapterID] = adapter
 	next := skill.NewCatalog()
 	if err := next.Register(t.Context(), &definition); err != nil {

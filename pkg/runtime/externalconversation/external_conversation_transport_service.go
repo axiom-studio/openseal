@@ -81,6 +81,11 @@ func (s *TransportService) Receive(ctx context.Context, req ReceiveExternalConve
 	if err := req.Event.Validate(); err != nil {
 		return nil, err
 	}
+	if req.Event.Type == capability.ConversationEventCardInteracted {
+		if _, err := externalCardInteraction(req.Event); err != nil {
+			return nil, err
+		}
+	}
 	endpoint, resolved, err := s.resolveActiveEndpoint(ctx, req.Scope, req.EndpointID)
 	if err != nil {
 		return nil, err
@@ -407,6 +412,13 @@ func externalConversationPolicyAccepts(policy models.ExternalConversationPolicy,
 		// reactions and are never imported back.
 		if event.ParticipantIsBot {
 			return false, "Ignored a provider bot reaction."
+		}
+		return true, ""
+	}
+	if event.Type == capability.ConversationEventCardInteracted {
+		// Answering a card the endpoint sent needs no mention.
+		if event.ParticipantIsBot {
+			return false, "Ignored a provider bot card answer."
 		}
 		return true, ""
 	}

@@ -234,10 +234,10 @@ const (
 	ConversationFeatureTyping         ConversationAdapterFeature = "typing"
 	ConversationFeatureContextHistory ConversationAdapterFeature = "context_history"
 	// ConversationFeatureVisuals declares that the provider can show an
-	// answer's visual (a presentation surface) natively. Its sends, and the
-	// edit that finishes a streamed answer, carry the visual in the delivery
-	// request's visuals field; without it a visual is left out of the
-	// channel.
+	// answer's visual (a presentation surface) natively. Its sends and edits
+	// (the one that finishes a streamed answer, the one that refreshes a card
+	// after an answer) carry the visual in the delivery request's visuals
+	// field; without it a visual is left out of the channel.
 	ConversationFeatureVisuals ConversationAdapterFeature = "visuals"
 )
 
@@ -252,6 +252,11 @@ const (
 	ConversationEventParticipantJoined = "conversation.participant.joined"
 	ConversationEventParticipantLeft   = "conversation.participant.left"
 	ConversationEventApprovalDecided   = "conversation.approval.decided"
+	// ConversationEventCardInteracted is a person's answer to an interactive
+	// component of a visual the provider showed (a choice, button, quiz,
+	// poll or form). Only adapters with ConversationFeatureVisuals declare
+	// it.
+	ConversationEventCardInteracted = "conversation.card.interacted"
 )
 
 type ConversationDeliveryOperation string

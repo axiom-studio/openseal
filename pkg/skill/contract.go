@@ -128,6 +128,7 @@ const (
 	ConversationEventParticipantJoined = capability.ConversationEventParticipantJoined
 	ConversationEventParticipantLeft   = capability.ConversationEventParticipantLeft
 	ConversationEventApprovalDecided   = capability.ConversationEventApprovalDecided
+	ConversationEventCardInteracted    = capability.ConversationEventCardInteracted
 
 	BindingLifecycleCreated  = capability.BindingLifecycleCreated
 	BindingLifecycleUpdated  = capability.BindingLifecycleUpdated

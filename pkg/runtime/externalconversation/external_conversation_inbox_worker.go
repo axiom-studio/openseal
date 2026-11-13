@@ -10,6 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/cardinteraction"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
@@ -79,6 +80,11 @@ type InboxWorkerConfig struct {
 	MaximumRetry      time.Duration
 	ContextHost       ContextHost
 	ContextCatalog    AdapterResolver
+	// HumanParticipants lists the people in a conversation, which polls
+	// answered from a channel count to know when everyone voted.
+	HumanParticipants cardinteraction.PeopleLister
+	// Transport refreshes a card in place after an answer from a channel.
+	Transport *TransportService
 }
 
 func (c InboxWorkerConfig) normalize() (InboxWorkerConfig, error) {
@@ -157,6 +163,9 @@ func (w *InboxWorker) apply(ctx context.Context, item *models.ExternalConversati
 	}
 	if item.Event.Type == capability.ConversationEventReactionAdded || item.Event.Type == capability.ConversationEventReactionRemoved {
 		return w.applyReaction(ctx, item)
+	}
+	if item.Event.Type == capability.ConversationEventCardInteracted {
+		return w.applyCardInteraction(ctx, item)
 	}
 	if item.Event.Type != capability.ConversationEventMessageReceived {
 		return fmt.Errorf("%w: event type %q is not yet a canonical message", models.ErrInvalidExternalConversation, item.Event.Type)

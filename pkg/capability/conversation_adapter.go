@@ -2,6 +2,7 @@ package capability
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -41,6 +42,10 @@ func NormalizeConversationAdapter(value ConversationAdapter) (ConversationAdapte
 	value.Features, err = normalizeConversationFeatures(value.Features)
 	if err != nil {
 		return ConversationAdapter{}, err
+	}
+	if slices.Contains(value.InboundEventTypes, ConversationEventCardInteracted) &&
+		!slices.Contains(value.Features, ConversationFeatureVisuals) {
+		return ConversationAdapter{}, errors.New("conversation adapter takes card answers only when it shows visuals")
 	}
 	value.DestinationDiscovery, err = normalizeConversationDestinationDiscovery(value.DestinationDiscovery, value.EndpointModes)
 	if err != nil {
@@ -304,7 +309,8 @@ func normalizeConversationEventTypes(values []string) ([]string, error) {
 		switch value {
 		case ConversationEventMessageReceived, ConversationEventMessageUpdated, ConversationEventMessageDeleted,
 			ConversationEventReactionAdded, ConversationEventReactionRemoved,
-			ConversationEventParticipantJoined, ConversationEventParticipantLeft, ConversationEventApprovalDecided:
+			ConversationEventParticipantJoined, ConversationEventParticipantLeft, ConversationEventApprovalDecided,
+			ConversationEventCardInteracted:
 		default:
 			return nil, errors.New("conversation adapter inbound event type is invalid")
 		}

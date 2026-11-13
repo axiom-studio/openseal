@@ -286,7 +286,7 @@ func (e *NormalizedExternalConversationEvent) Validate() error {
 		if !IsValidExternalConversationReference(e.ExternalParticipantID, 1024) {
 			return ErrInvalidExternalConversation
 		}
-	case capability.ConversationEventApprovalDecided:
+	case capability.ConversationEventApprovalDecided, capability.ConversationEventCardInteracted:
 		if !IsValidExternalConversationReference(e.ExternalParticipantID, 1024) ||
 			!IsValidExternalConversationReference(e.ExternalMessageID, 1024) {
 			return ErrInvalidExternalConversation
