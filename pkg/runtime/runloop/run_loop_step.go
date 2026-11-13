@@ -584,10 +584,23 @@ func (d *drive) recordModelStep(ctx context.Context, st *stepState, out agentrun
 	if err := d.recordStep(ctx, st, provider, model, a, st.usage, out.SkillSelections); err != nil {
 		return err
 	}
-	if len(a.ToolCalls) > 0 {
+	if len(a.ToolCalls) > 0 && !onlyFinalAnswerCalls(a.ToolCalls) {
 		d.resetPreview(ctx, st)
 	}
 	return nil
+}
+
+// onlyFinalAnswerCalls reports whether a step's tool calls are only the final
+// answer. Its preview is that answer, so it stays: the reply replaces it, or,
+// when the answer is rejected, the next attempt streams over it in place
+// instead of the chat blanking and streaming the answer in again.
+func onlyFinalAnswerCalls(calls []models.ModelToolCall) bool {
+	for _, call := range calls {
+		if call.Name != string(models.ControlToolFinalAnswer) {
+			return false
+		}
+	}
+	return true
 }
 
 // explanationToolRefusal is the result of a tool call made by the

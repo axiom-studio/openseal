@@ -388,6 +388,31 @@ func previewRule(name, attempt, text string, reply func(looptest.StepView) model
 	}}
 }
 
+// TestLoopRejectedAnswerKeepsItsPreview: a step whose only call is the final
+// answer previews that answer, so a rejection does not clear it; the next
+// attempt streams over it in place and the chat never blanks.
+func TestLoopRejectedAnswerKeepsItsPreview(t *testing.T) {
+	looptest.EachStore(t, "external_preview_retry", func(t *testing.T, store models.KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			previewRule("step-1", "attempt-1", "Issue 7 is open", func(looptest.StepView) models.ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": 42})
+			}, nil),
+			previewRule("step-2", "attempt-2", "Issue 7 is open", func(looptest.StepView) models.ModelStepResult {
+				return looptest.FinalAnswer(map[string]any{"answer": "Issue 7 is open."})
+			}, nil),
+		))
+		_, run := f.StartChat("Is issue 7 open?")
+		f.MustStatus(f.DriveToRest(run.ID, 4), models.AgentRunStatusCompleted)
+		want := []looptest.PreviewFrame{
+			{Attempt: "attempt-1", Sequence: "1", Text: "Issue 7 is open"},
+			{Attempt: "attempt-2", Sequence: "1", Text: "Issue 7 is open"},
+		}
+		if frames := f.PreviewFrames(run.ID); fmt.Sprint(frames) != fmt.Sprint(want) {
+			t.Fatalf("preview frames = %v, want %v", frames, want)
+		}
+	})
+}
+
 // TestLoopAnswerPreviewOnlyForTheFinalStep: a step that previews and then
 // calls tools has its preview reset by the kernel; only the final step's
 // preview stands, and the canonical answer replaces it.
