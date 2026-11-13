@@ -447,7 +447,7 @@ func (r *sessionRenderer) callImage(ctx context.Context, callID string) ([]byte,
 		return nil, nil
 	}
 	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
-	if err != nil || !renderImageBytesValid(data) {
+	if err != nil || !modelImageSourceValid(data) {
 		return nil, nil
 	}
 	return data, nil

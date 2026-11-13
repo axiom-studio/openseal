@@ -227,7 +227,7 @@ func TestGovernedScreenshotBecomesImagePart(t *testing.T) {
 		"bad detail":       map[string]interface{}{"mediaType": "image/png", "contentBase64": encoded, "detail": "ultra"},
 		"not base64":       map[string]interface{}{"mediaType": "image/png", "contentBase64": "%%%"},
 		"empty":            map[string]interface{}{"mediaType": "image/png", "contentBase64": ""},
-		"too large":        map[string]interface{}{"mediaType": "image/png", "contentBase64": base64.StdEncoding.EncodeToString(make([]byte, governedMediaMaxBytes+1))},
+		"too large":        map[string]interface{}{"mediaType": "image/png", "contentBase64": base64.StdEncoding.EncodeToString(make([]byte, models.MaxModelImageSourceBytes+1))},
 		"not an object":    "attached",
 	} {
 		t.Run(name, func(t *testing.T) {

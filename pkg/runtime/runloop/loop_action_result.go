@@ -78,9 +78,6 @@ const (
 	governedMaintenanceRefusalCode = "skill_maintenance"
 )
 
-// governedMediaMaxBytes bounds the decoded bytes of output.modelMedia that
-// become an image part (the renderer's validateHostedMedia rule).
-const governedMediaMaxBytes = 1 << 20
 
 // renderGovernedResult renders a call that reached a terminal status as its
 // tool entry state and result (section 03 §7.1). approval is the call's
@@ -255,7 +252,7 @@ func splitGovernedModelMedia(call *models.ActionCall) (map[string]interface{}, *
 		return output, nil
 	}
 	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(data))
-	if err != nil || len(decoded) == 0 || len(decoded) > governedMediaMaxBytes {
+	if err != nil || len(decoded) == 0 || len(decoded) > models.MaxModelImageSourceBytes {
 		return output, nil
 	}
 	digest := sha256.Sum256(decoded)

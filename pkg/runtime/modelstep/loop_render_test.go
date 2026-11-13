@@ -1,11 +1,15 @@
 package modelstep_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"image"
+	"image/jpeg"
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -155,6 +159,45 @@ func TestRenderImageRefResolvesBytes(t *testing.T) {
 	}
 	if stored := f.Entries[0].User.Content[1]; stored.DataBase64 != "" {
 		t.Fatal("rendering wrote bytes into the stored entry")
+	}
+	modelsteptest.RequireRenderedStep(t, views)
+}
+
+// A Skill may return a screenshot over the hosted 1 MiB rule; the model gets
+// it scaled like any other image, not "image unavailable".
+func TestRenderScalesALargeActionImage(t *testing.T) {
+	src := modelsteptest.NewRenderImageSources()
+	big := image.NewNRGBA(image.Rect(0, 0, 2000, 1000))
+	random := rand.New(rand.NewPCG(3, 4))
+	for i := range big.Pix {
+		big.Pix[i] = uint8(random.IntN(256))
+	}
+	for i := 3; i < len(big.Pix); i += 4 {
+		big.Pix[i] = 0xff
+	}
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, big, &jpeg.Options{Quality: 80}); err != nil {
+		t.Fatal(err)
+	}
+	if encoded.Len() <= models.MaxModelStepMediaBytes || encoded.Len() > models.MaxModelImageSourceBytes {
+		t.Fatalf("fixture is %d bytes; want over 1 MiB and within the source limit", encoded.Len())
+	}
+	src.Calls.Calls["ac-shot"].Output["modelMedia"] = map[string]interface{}{"mediaType": "image/jpeg", "contentBase64": base64.StdEncoding.EncodeToString(encoded.Bytes())}
+	f := modelsteptest.NewRenderFixture(t, "lane")
+	f.User("run-a", "check this")
+	f.Assistant("run-a", "step-a", "c1")
+	tool := f.Tool("run-a", "step-a", "c1", models.ToolEntryCompleted, shotPart(hexDigest(encoded.Bytes())))
+	views, err := modelstep.ProjectSessionPath(context.Background(), f.Path(), src.Options(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shot := modelsteptest.ViewByID(t, views, tool.ID).Tool.Result.Content[0]
+	data, err := base64.StdEncoding.DecodeString(shot.DataBase64)
+	if shot.Type != models.ContentPartImage || err != nil || len(data) > models.MaxModelStepMediaBytes {
+		t.Fatalf("large screenshot = %s, %d bytes, %v", shot.Type, len(data), err)
+	}
+	if config, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || config.Width != modelstep.MaxModelImageEdge {
+		t.Fatalf("scaled to %d wide (%v), want %d", config.Width, err, modelstep.MaxModelImageEdge)
 	}
 	modelsteptest.RequireRenderedStep(t, views)
 }

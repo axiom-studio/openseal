@@ -200,9 +200,11 @@ type ModelStepRenderInfo struct {
 // MaxModelStepMediaBytes is the decoded cap of one view image (1 MiB).
 const MaxModelStepMediaBytes = 1 << 20
 
-// MaxModelImageSourceBytes is the largest stored image read for a model (16
-// MiB): it is scaled to fit MaxModelStepMediaBytes before it is sent, so a
-// phone photo is seen instead of skipped.
+// MaxModelImageSourceBytes is the largest image read for a model (16 MiB),
+// whatever it came from: a chat file, a stored artifact or an image a Skill
+// action returned. Every one is scaled the same way to fit
+// MaxModelStepMediaBytes before it is sent, so a phone photo or a screenshot
+// is seen instead of skipped.
 const MaxModelImageSourceBytes = 16 << 20
 
 var (
