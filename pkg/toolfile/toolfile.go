@@ -89,14 +89,28 @@ func IsRef(value interface{}) bool {
 
 // RefPaths lists the kept files a result refers to, each once, sorted.
 func RefPaths(value interface{}) []string {
-	seen := map[string]bool{}
+	refs := Refs(value)
+	paths := make([]string, len(refs))
+	for i, ref := range refs {
+		paths[i] = ref.Path
+	}
+	return paths
+}
+
+// Refs lists the Refs of kept files a result holds anywhere in it, one per
+// path, sorted by path. Refs of files that were not kept (no path) are left
+// out.
+func Refs(value interface{}) []Ref {
+	seen := map[string]Ref{}
 	var walk func(interface{})
 	walk = func(value interface{}) {
 		switch typed := value.(type) {
 		case map[string]interface{}:
 			if IsRef(typed) {
-				if name, _ := typed["path"].(string); name != "" {
-					seen[name] = true
+				if ref := refOf(typed); ref.Path != "" {
+					if _, dup := seen[ref.Path]; !dup {
+						seen[ref.Path] = ref
+					}
 				}
 				return
 			}
@@ -110,12 +124,31 @@ func RefPaths(value interface{}) []string {
 		}
 	}
 	walk(value)
-	paths := make([]string, 0, len(seen))
-	for name := range seen {
-		paths = append(paths, name)
+	refs := make([]Ref, 0, len(seen))
+	for _, ref := range seen {
+		refs = append(refs, ref)
 	}
-	sort.Strings(paths)
-	return paths
+	sort.Slice(refs, func(i, j int) bool { return refs[i].Path < refs[j].Path })
+	return refs
+}
+
+// refOf reads a value IsRef accepted; sizeBytes is a float64 once decoded
+// from JSON and an integer while still in memory.
+func refOf(object map[string]interface{}) Ref {
+	ref := Ref{Type: RefType}
+	ref.Path, _ = object["path"].(string)
+	ref.MimeType, _ = object["mimeType"].(string)
+	ref.URI, _ = object["uri"].(string)
+	ref.Note, _ = object["note"].(string)
+	switch size := object["sizeBytes"].(type) {
+	case float64:
+		ref.SizeBytes = int64(size)
+	case int64:
+		ref.SizeBytes = size
+	case int:
+		ref.SizeBytes = int64(size)
+	}
+	return ref
 }
 
 // Payload is one binary payload taken out of a tool result: its bytes, the
@@ -208,7 +241,7 @@ func Decode(text string) (data []byte, mimeType string, err error) {
 // Path is where a payload of the call is kept: tool-output/<call>/<name>.<ext>,
 // unique among used, which it records.
 func Path(actionCallID string, payload Payload, used map[string]bool) string {
-	directory := Folder + segment(actionCallID, "call") + "/"
+	directory := CallFolder(actionCallID)
 	base := path.Base(strings.TrimSpace(payload.Name))
 	ext := chatpath.Extension(base, payload.MimeType)
 	if ext == "" {
@@ -221,6 +254,11 @@ func Path(actionCallID string, payload Payload, used map[string]bool) string {
 	}
 	used[candidate] = true
 	return candidate
+}
+
+// CallFolder is the folder the files one call returned are kept in.
+func CallFolder(actionCallID string) string {
+	return Folder + segment(actionCallID, "call") + "/"
 }
 
 // segment keeps a path segment to letters, digits, dots, dashes and

@@ -237,6 +237,112 @@ func TestRenderUnavailableImageBecomesText(t *testing.T) {
 	modelsteptest.RequireRenderedStep(t, views)
 }
 
+func chatFilePart(path string, size int) models.ContentPart {
+	return models.ContentPart{Type: models.ContentPartImage, MediaType: "image/png", Path: path, SizeBytes: int64(size)}
+}
+
+// A tool image kept as a chat file resolves from the rendering Run's chat;
+// one that is missing, of another size or of another media type renders as
+// unavailable, as does any chat file without a chat file reader.
+func TestRenderChatFileImage(t *testing.T) {
+	src := modelsteptest.NewRenderImageSources()
+	src.ChatFiles.Files["tool-output/ac-read/renamed.png"] = modelsteptest.RenderChatFile{Data: src.ChatShot, MediaType: "image/jpeg"}
+	f := modelsteptest.NewRenderFixture(t, "lane")
+	f.User("run-a", "read the screenshot")
+	f.Assistant("run-a", "step-a", "c1")
+	tool := f.Tool("run-a", "step-a", "c1", models.ToolEntryCompleted,
+		models.ContentPart{Type: models.ContentPartJSON, Value: json.RawMessage(`{"evidenceRef":"action-call:ac-read"}`)},
+		chatFilePart(modelsteptest.ChatShotPath, len(src.ChatShot)),
+		chatFilePart(modelsteptest.ChatShotPath, len(src.ChatShot)+1),
+		chatFilePart("tool-output/ac-read/gone.png", 10),
+		chatFilePart("tool-output/ac-read/renamed.png", len(src.ChatShot)),
+	)
+
+	views, err := modelstep.ProjectSessionPath(context.Background(), f.Path(), src.Options(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := modelsteptest.ViewByID(t, views, tool.ID).Tool.Result.Content
+	if len(result) != 5 {
+		t.Fatalf("content = %+v", result)
+	}
+	if shot := result[1]; shot.Type != models.ContentPartImage || shot.Path != modelsteptest.ChatShotPath ||
+		shot.DataBase64 != base64.StdEncoding.EncodeToString(src.ChatShot) || shot.SHA256 != hexDigest(src.ChatShot) {
+		t.Fatalf("chat file image = %+v", shot)
+	}
+	unavailable := modelstep.RenderImageUnavailableText("image/png")
+	for i := 2; i < 5; i++ {
+		if result[i].Type != models.ContentPartText || result[i].Text != unavailable {
+			t.Fatalf("part %d = %+v, want %q", i, result[i], unavailable)
+		}
+	}
+	if src.ChatFiles.Reads != 3 {
+		t.Fatalf("chat file reads = %d, want 3 (cached per path)", src.ChatFiles.Reads)
+	}
+	if stored := f.Entries[2].Tool.Result.Content[1]; stored.DataBase64 != "" {
+		t.Fatal("rendering wrote bytes into the stored entry")
+	}
+	modelsteptest.RequireRenderedStep(t, views)
+
+	without := src.Options(true)
+	without.ChatFiles = nil
+	views, err = modelstep.ProjectSessionPath(context.Background(), f.Path(), without)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := modelsteptest.ViewByID(t, views, tool.ID).Tool.Result.Content[1]; got.Type != models.ContentPartText || got.Text != unavailable {
+		t.Fatalf("without a reader = %+v", got)
+	}
+
+	views, err = modelstep.ProjectSessionPath(context.Background(), f.Path(), src.Options(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := modelsteptest.ViewByID(t, views, tool.ID).Tool.Result.Content[1]; got.Type != models.ContentPartText || got.Text != "[image omitted: image/png]" {
+		t.Fatalf("non-vision = %+v", got)
+	}
+}
+
+// A large tool image kept as a chat file is scaled like every other image.
+func TestRenderScalesALargeChatFileImage(t *testing.T) {
+	src := modelsteptest.NewRenderImageSources()
+	big := image.NewNRGBA(image.Rect(0, 0, 2000, 1000))
+	random := rand.New(rand.NewPCG(5, 6))
+	for i := range big.Pix {
+		big.Pix[i] = uint8(random.IntN(256))
+	}
+	for i := 3; i < len(big.Pix); i += 4 {
+		big.Pix[i] = 0xff
+	}
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, big, &jpeg.Options{Quality: 80}); err != nil {
+		t.Fatal(err)
+	}
+	if encoded.Len() <= models.MaxModelStepMediaBytes || encoded.Len() > models.MaxModelImageSourceBytes {
+		t.Fatalf("fixture is %d bytes; want over 1 MiB and within the source limit", encoded.Len())
+	}
+	path := "tool-output/ac-read/photo.jpg"
+	src.ChatFiles.Files[path] = modelsteptest.RenderChatFile{Data: encoded.Bytes(), MediaType: "image/jpeg"}
+	f := modelsteptest.NewRenderFixture(t, "lane")
+	f.User("run-a", "check this")
+	f.Assistant("run-a", "step-a", "c1")
+	tool := f.Tool("run-a", "step-a", "c1", models.ToolEntryCompleted,
+		models.ContentPart{Type: models.ContentPartImage, MediaType: "image/jpeg", Path: path, SizeBytes: int64(encoded.Len())})
+	views, err := modelstep.ProjectSessionPath(context.Background(), f.Path(), src.Options(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shot := modelsteptest.ViewByID(t, views, tool.ID).Tool.Result.Content[0]
+	data, err := base64.StdEncoding.DecodeString(shot.DataBase64)
+	if shot.Type != models.ContentPartImage || err != nil || len(data) > models.MaxModelStepMediaBytes {
+		t.Fatalf("large chat file image = %s, %d bytes, %v", shot.Type, len(data), err)
+	}
+	if config, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || config.Width != modelstep.MaxModelImageEdge {
+		t.Fatalf("scaled to %d wide (%v), want %d", config.Width, err, modelstep.MaxModelImageEdge)
+	}
+	modelsteptest.RequireRenderedStep(t, views)
+}
+
 func TestRenderNonVisionReplacesImage(t *testing.T) {
 	src := modelsteptest.NewRenderImageSources()
 	f := modelsteptest.NewRenderFixture(t, "lane")

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/axiom-studio/openseal/pkg/toolfile"
 )
 
 func governedResultCall(status models.ActionCallStatus) *models.ActionCall {
@@ -240,5 +242,70 @@ func TestGovernedScreenshotBecomesImagePart(t *testing.T) {
 				t.Fatalf("invalid media produced parts %#v", result.Content)
 			}
 		})
+	}
+}
+
+// A file the tool returned that the host kept in the chat (a toolfile Ref)
+// becomes an image part naming that chat file when it is an image the call
+// itself returned; other Refs stay JSON only.
+func TestGovernedFileRefImagesBecomeImageParts(t *testing.T) {
+	ref := func(path, mimeType string, size int64) map[string]interface{} {
+		return toolfile.Ref{Type: toolfile.RefType, Path: path, MimeType: mimeType, SizeBytes: size}.Value()
+	}
+	call := governedResultCall(models.ActionCallStatusSucceeded)
+	call.SideEffect = skill.SideEffectRead
+	call.Output = map[string]interface{}{
+		"file": ref("tool-output/call-1/screenshot.png", "image/png", 1200),
+		"attachments": []interface{}{
+			map[string]interface{}{"preview": ref("tool-output/call-1/a.webp", "image/webp", 300)},
+			ref("tool-output/call-1/report.pdf", "application/pdf", 900),
+			map[string]interface{}{"type": toolfile.RefType, "mimeType": "image/png", "sizeBytes": float64(10), "note": "too large to keep"},
+			ref("tool-output/call-2/other.png", "image/png", 50),
+			ref("uploads/secret.png", "image/png", 50),
+		},
+	}
+	state, result := renderGovernedResult(call, nil, "")
+	if state != models.ToolEntryCompleted || result == nil {
+		t.Fatalf("render = %q %#v", state, result)
+	}
+	want := []models.ContentPart{
+		{Type: models.ContentPartImage, MediaType: "image/webp", Path: "tool-output/call-1/a.webp", SizeBytes: 300},
+		{Type: models.ContentPartImage, MediaType: "image/png", Path: "tool-output/call-1/screenshot.png", SizeBytes: 1200},
+	}
+	if len(result.Content) != 1+len(want) || result.Content[0].Type != models.ContentPartJSON {
+		t.Fatalf("content = %#v", result.Content)
+	}
+	for i, part := range want {
+		if got := result.Content[1+i]; got.Type != part.Type || got.MediaType != part.MediaType || got.Path != part.Path ||
+			got.SizeBytes != part.SizeBytes || got.ActionCallID != "" || got.DataBase64 != "" {
+			t.Fatalf("image %d = %#v, want %#v", i, got, part)
+		}
+	}
+	entry := &models.SessionEntry{ID: "governed", Type: models.SessionEntryTool, State: state, StepID: "step-1", ToolCallID: "call-1",
+		Tool: &models.ToolEntry{Name: "governed", SideEffect: models.ToolSideEffectRead, Result: result}}
+	if err := entry.Validate(); err != nil {
+		t.Fatalf("result invalid: %v", err)
+	}
+}
+
+func TestGovernedFileRefImagesAreCapped(t *testing.T) {
+	call := governedResultCall(models.ActionCallStatusSucceeded)
+	files := make([]interface{}, 0, models.MaxSessionEntryImageParts+3)
+	for i := 0; i < models.MaxSessionEntryImageParts+3; i++ {
+		files = append(files, toolfile.Ref{Type: toolfile.RefType, Path: fmt.Sprintf("tool-output/call-1/%02d.png", i), MimeType: "image/png", SizeBytes: 10}.Value())
+	}
+	call.Output = map[string]interface{}{
+		"files":      files,
+		"modelMedia": map[string]interface{}{"mediaType": "image/png", "contentBase64": base64.StdEncoding.EncodeToString([]byte("png"))},
+	}
+	_, result := renderGovernedResult(call, nil, "")
+	images := 0
+	for _, part := range result.Content {
+		if part.Type == models.ContentPartImage {
+			images++
+		}
+	}
+	if images != models.MaxSessionEntryImageParts || result.Content[1].ActionCallID != "call-1" || result.Content[2].Path != "tool-output/call-1/00.png" {
+		t.Fatalf("images = %d; content = %#v", images, result.Content)
 	}
 }

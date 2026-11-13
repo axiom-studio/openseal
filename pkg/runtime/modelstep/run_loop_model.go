@@ -38,6 +38,9 @@ type Producer struct {
 type Media struct {
 	Artifacts models.ArtifactStore
 	Content   models.ArtifactContentStore
+	// ChatFiles reads tool images kept as files in a Run's chat; nil renders
+	// them as unavailable.
+	ChatFiles ChatFileReader
 	// ImageInput reports whether the model the prepared request resolves to
 	// accepts image input (catalog modality). nil = no image input.
 	ImageInput func(ctx context.Context, in agentrun.StepInput, req models.ModelStepRequest) bool
@@ -268,7 +271,10 @@ func (p *Producer) render(ctx context.Context, in agentrun.StepInput, prepared m
 	if err != nil {
 		return models.ModelStepRequest{}, fmt.Errorf("load session path: %w", err)
 	}
-	opts := SessionRenderOptions{Artifacts: p.Media.Artifacts, Content: p.Media.Content, Actions: p.sessions}
+	opts := SessionRenderOptions{
+		Artifacts: p.Media.Artifacts, Content: p.Media.Content, Actions: p.sessions,
+		ChatFiles: p.Media.ChatFiles, Run: in.Run,
+	}
 	if p.Media.ImageInput != nil {
 		opts.ImageInput = p.Media.ImageInput(ctx, in, req)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/axiom-studio/openseal/pkg/toolfile"
 )
 
 // GovernedToolOutcome is what the governed executor reports for one governed
@@ -78,7 +79,6 @@ const (
 	governedMaintenanceRefusalCode = "skill_maintenance"
 )
 
-
 // renderGovernedResult renders a call that reached a terminal status as its
 // tool entry state and result (section 03 §7.1). approval is the call's
 // approval checkpoint when it has one; the approval outcome is read from its
@@ -104,9 +104,12 @@ func renderGovernedResult(call *models.ActionCall, approval *models.ApprovalChec
 			value["outcome"] = settled
 		}
 		result := governedJSONResult(models.ToolResultSucceeded, value)
+		images := 0
 		if image != nil {
 			result.Content = append(result.Content, *image)
+			images++
 		}
+		result.Content = append(result.Content, governedFileImages(call.ID, output, models.MaxSessionEntryImageParts-images)...)
 		return models.ToolEntryCompleted, result
 	case models.ActionCallStatusFailed:
 		if call.RecoveredRunning && !governedReadOnly(call.SideEffect) {
@@ -260,6 +263,32 @@ func splitGovernedModelMedia(call *models.ActionCall) (map[string]interface{}, *
 		Type: models.ContentPartImage, MediaType: mediaType, Detail: detail,
 		SHA256: hex.EncodeToString(digest[:]), ActionCallID: call.ID,
 	}
+}
+
+// governedFileImages returns an image part for each image file the call
+// returned and the host kept as a chat file (a toolfile Ref with a path), at
+// most limit, in path order. The renderer reads the bytes from the chat the
+// rendering Run works in; the part never carries them. Only Refs inside the
+// call's own tool-output folder count: the output comes from the tool, and a
+// Ref it made up must not show the model some other file of the chat.
+func governedFileImages(callID string, output map[string]interface{}, limit int) []models.ContentPart {
+	folder := toolfile.CallFolder(callID)
+	var parts []models.ContentPart
+	for _, ref := range toolfile.Refs(output) {
+		if len(parts) >= limit {
+			break
+		}
+		switch ref.MimeType {
+		case "image/png", "image/jpeg", "image/webp":
+		default:
+			continue
+		}
+		if !strings.HasPrefix(ref.Path, folder) || ref.SizeBytes <= 0 || ref.SizeBytes > models.MaxModelImageSourceBytes {
+			continue
+		}
+		parts = append(parts, models.ContentPart{Type: models.ContentPartImage, MediaType: ref.MimeType, Path: ref.Path, SizeBytes: ref.SizeBytes})
+	}
+	return parts
 }
 
 // governedReadOnly reports whether a side effect cannot have changed

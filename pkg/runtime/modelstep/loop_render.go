@@ -29,8 +29,8 @@ import (
 //     dropped. An assistant tool call with no tool entry on the path (a
 //     sibling call cut off by a fork or a promotion) gets a synthetic
 //     completed result, renderMissingToolText, so every call is answered.
-//   - Images resolve to DataBase64 from the artifact store or the governed
-//     call's output.modelMedia. Without image input every image becomes
+//   - Images resolve to DataBase64 from the artifact store, the governed
+//     call's output.modelMedia, or a file in the rendering Run's chat. Without image input every image becomes
 //     "[image omitted: <mediaType>]"; an image whose bytes cannot be read or
 //     do not match becomes "[image unavailable: <mediaType>]".
 //   - Compactions render CompactionSummaryText.
@@ -85,6 +85,18 @@ type renderActionCalls interface {
 	GetActionCall(ctx context.Context, scope models.Scope, actionID string) (*models.ActionCall, error)
 }
 
+// ChatFileReader reads a file of the chat a Run works in, for image parts
+// that name a chat file (tool images kept under tool-output/<call>/). The
+// host decides the chat from the Run's persisted conversation, the same way
+// it does for the Run's chat file tools; nothing in the part picks the chat.
+type ChatFileReader interface {
+	// ReadChatFile returns the bytes and stored media type of path in run's
+	// chat. It returns nil data and no error when the Run works in no chat,
+	// or the file is missing, larger than limit or does not match its
+	// record; an error is a store failure and fails the render.
+	ReadChatFile(ctx context.Context, run *models.AgentRun, path string, limit int64) ([]byte, string, error)
+}
+
 // SessionRenderOptions are the sources and binding facts of one render.
 type SessionRenderOptions struct {
 	// ImageInput is true when the bound model accepts image input (the
@@ -94,6 +106,10 @@ type SessionRenderOptions struct {
 	Artifacts  models.ArtifactStore
 	Content    models.ArtifactContentStore
 	Actions    renderActionCalls
+	// ChatFiles and Run resolve image parts that name a chat file; without
+	// either those render as unavailable.
+	ChatFiles ChatFileReader
+	Run       *models.AgentRun
 }
 
 // ProjectSessionPath renders path in model step order. A store error other
@@ -367,6 +383,8 @@ func (r *sessionRenderer) image(ctx context.Context, part models.ContentPart) (*
 		key = "call:" + part.ActionCallID
 	case part.ArtifactID != "":
 		key = "artifact:" + part.ArtifactID + "@" + part.ArtifactVersion
+	case part.Path != "":
+		key = "chat:" + part.Path
 	default:
 		return nil, nil
 	}
@@ -376,10 +394,13 @@ func (r *sessionRenderer) image(ctx context.Context, part models.ContentPart) (*
 			data []byte
 			err  error
 		)
-		if part.ActionCallID != "" {
+		switch {
+		case part.ActionCallID != "":
 			data, err = r.callImage(ctx, part.ActionCallID)
-		} else {
+		case part.ArtifactID != "":
 			data, err = r.artifactImage(ctx, part)
+		default:
+			data, err = r.chatFileImage(ctx, part)
 		}
 		if err != nil {
 			return nil, err
@@ -390,13 +411,16 @@ func (r *sessionRenderer) image(ctx context.Context, part models.ContentPart) (*
 			digest := sha256.Sum256(data)
 			if sent, mediaType, ok := fitModelImage(data, part.MediaType); ok {
 				sentDigest := sha256.Sum256(sent)
-				cached = &renderedImage{source: hex.EncodeToString(digest[:]), part: models.ContentPart{
+				cached = &renderedImage{source: hex.EncodeToString(digest[:]), size: int64(len(data)), part: models.ContentPart{
 					MediaType: mediaType, DataBase64: base64.StdEncoding.EncodeToString(sent), SHA256: hex.EncodeToString(sentDigest[:])}}
 			}
 		}
 		r.images[key] = cached
 	}
 	if cached == nil || (part.SHA256 != "" && !strings.EqualFold(strings.TrimPrefix(part.SHA256, "sha256:"), cached.source)) {
+		return nil, nil
+	}
+	if part.SizeBytes > 0 && part.SizeBytes != cached.size {
 		return nil, nil
 	}
 	resolved := part
@@ -406,10 +430,11 @@ func (r *sessionRenderer) image(ctx context.Context, part models.ContentPart) (*
 	return &resolved, nil
 }
 
-// renderedImage is one resolved image: the digest of the stored bytes the
-// reference names, and the part as sent to the model.
+// renderedImage is one resolved image: the digest and size of the stored
+// bytes the reference names, and the part as sent to the model.
 type renderedImage struct {
 	source string
+	size   int64
 	part   models.ContentPart
 }
 
@@ -473,7 +498,7 @@ func (r *sessionRenderer) artifactImage(ctx context.Context, part models.Content
 	if artifact == nil || artifact.SizeBytes <= 0 || artifact.SizeBytes > models.MaxModelImageSourceBytes {
 		return nil, nil
 	}
-	if mediaType, _, err := mime.ParseMediaType(artifact.MediaType); err != nil || mediaType != part.MediaType {
+	if !renderSameMediaType(artifact.MediaType, part.MediaType) {
 		return nil, nil
 	}
 	reader, err := r.opts.Content.Open(ctx, artifact.Scope, artifact.ContentRef)
@@ -498,4 +523,31 @@ func (r *sessionRenderer) artifactImage(ctx context.Context, part models.Content
 		return nil, nil
 	}
 	return data, nil
+}
+
+// chatFileImage reads a chat file of the rendering Run. A kept tool file's
+// Ref carries no digest, so unlike an artifact there is none to check; the
+// part only names a path in the call's own tool-output folder of the Run's own
+// chat (governedFileImages), which the model could read with its chat file
+// tools anyway, and a file replaced since with one of another size or media
+// type renders as unavailable.
+func (r *sessionRenderer) chatFileImage(ctx context.Context, part models.ContentPart) ([]byte, error) {
+	if r.opts.ChatFiles == nil || r.opts.Run == nil {
+		return nil, nil
+	}
+	data, mediaType, err := r.opts.ChatFiles.ReadChatFile(ctx, r.opts.Run, part.Path, models.MaxModelImageSourceBytes)
+	if err != nil {
+		return nil, fmt.Errorf("render image of chat file %s: %w", part.Path, err)
+	}
+	if !renderSameMediaType(mediaType, part.MediaType) || !modelImageSourceValid(data) {
+		return nil, nil
+	}
+	return data, nil
+}
+
+// renderSameMediaType reports whether a stored media type (which may carry
+// parameters) is the part's.
+func renderSameMediaType(stored, want string) bool {
+	mediaType, _, err := mime.ParseMediaType(stored)
+	return err == nil && mediaType == want
 }

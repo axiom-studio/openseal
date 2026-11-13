@@ -143,11 +143,20 @@ func ValidateContentParts(parts []ContentPart, limits ContentPartLimits) (images
 			default:
 				return 0, InvalidSessionEntryf("%s part %d: unknown image detail %q", limits.Field, i, part.Detail)
 			}
-			if part.ArtifactID == "" && part.ActionCallID == "" && !(limits.AllowDataBytes && part.DataBase64 != "") {
-				return 0, InvalidSessionEntryf("%s part %d: image part needs artifactId or actionCallId", limits.Field, i)
+			sources := 0
+			for _, source := range []string{part.ArtifactID, part.ActionCallID, part.Path} {
+				if source != "" {
+					sources++
+				}
 			}
-			if part.ArtifactID != "" && part.ActionCallID != "" {
-				return 0, InvalidSessionEntryf("%s part %d: image part names both an artifact and an action call; it needs exactly one source", limits.Field, i)
+			if sources == 0 && !(limits.AllowDataBytes && part.DataBase64 != "") {
+				return 0, InvalidSessionEntryf("%s part %d: image part needs artifactId, actionCallId or path", limits.Field, i)
+			}
+			if sources > 1 {
+				return 0, InvalidSessionEntryf("%s part %d: image part names more than one of artifactId, actionCallId and path; it needs exactly one source", limits.Field, i)
+			}
+			if part.SizeBytes < 0 {
+				return 0, InvalidSessionEntryf("%s part %d: negative size", limits.Field, i)
 			}
 			images++
 		default:

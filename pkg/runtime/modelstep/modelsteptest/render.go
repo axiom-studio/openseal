@@ -181,22 +181,55 @@ func (s *RenderCalls) GetActionCall(_ context.Context, scope models.Scope, id st
 	return call, nil
 }
 
-// RenderImageSources holds one image artifact ("photo" v2) and one governed
-// call with model media ("ac-shot").
+// RenderChatFile is one file of RenderChatFiles.
+type RenderChatFile struct {
+	Data      []byte
+	MediaType string
+}
+
+// RenderChatFiles serves the files of one Run's chat from memory and counts
+// reads; another Run reads no files.
+type RenderChatFiles struct {
+	RunID string
+	Files map[string]RenderChatFile
+	Reads int
+}
+
+func (s *RenderChatFiles) ReadChatFile(_ context.Context, run *models.AgentRun, path string, limit int64) ([]byte, string, error) {
+	s.Reads++
+	file, ok := s.Files[path]
+	if run == nil || run.ID != s.RunID || !ok || int64(len(file.Data)) > limit {
+		return nil, "", nil
+	}
+	return file.Data, file.MediaType, nil
+}
+
+// RenderImageSources holds one image artifact ("photo" v2), one governed
+// call with model media ("ac-shot") and one tool image kept in the chat of
+// Run "run-a" (ChatShotPath).
 type RenderImageSources struct {
 	Artifacts *RenderArtifacts
 	Content   RenderContent
 	Calls     *RenderCalls
+	ChatFiles *RenderChatFiles
 	Photo     []byte // artifact "photo" v2
 	Shot      []byte // governed call "ac-shot"
+	ChatShot  []byte // chat file ChatShotPath
 }
+
+// ChatShotPath is the chat file NewRenderImageSources keeps.
+const ChatShotPath = "tool-output/ac-read/screenshot.png"
 
 // NewRenderImageSources serves the photo artifact and the ac-shot call.
 func NewRenderImageSources() *RenderImageSources {
 	photo := []byte("\x89PNG\r\n\x1a\nphoto-bytes")
 	shot := []byte("\xff\xd8\xffscreenshot-bytes")
+	chatShot := []byte("\x89PNG\r\n\x1a\nchat-file-bytes")
 	return &RenderImageSources{
-		Photo: photo, Shot: shot,
+		Photo: photo, Shot: shot, ChatShot: chatShot,
+		ChatFiles: &RenderChatFiles{RunID: "run-a", Files: map[string]RenderChatFile{
+			ChatShotPath: {Data: chatShot, MediaType: "image/png"},
+		}},
 		Artifacts: &RenderArtifacts{Artifacts: map[string]*models.Artifact{
 			"photo@2": {ID: "photo", Version: 2, Scope: SessionScope, MediaType: "image/png", ContentRef: "ref-photo",
 				SizeBytes: int64(len(photo)), Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(photo))},
@@ -215,5 +248,8 @@ func NewRenderImageSources() *RenderImageSources {
 
 // Options are render options reading images from these sources.
 func (s *RenderImageSources) Options(imageInput bool) modelstep.SessionRenderOptions {
-	return modelstep.SessionRenderOptions{ImageInput: imageInput, Artifacts: s.Artifacts, Content: s.Content, Actions: s.Calls}
+	return modelstep.SessionRenderOptions{
+		ImageInput: imageInput, Artifacts: s.Artifacts, Content: s.Content, Actions: s.Calls,
+		ChatFiles: s.ChatFiles, Run: &models.AgentRun{ID: "run-a", Scope: SessionScope},
+	}
 }

@@ -305,7 +305,10 @@ type ContentPart struct {
 	SizeBytes int64  `json:"sizeBytes,omitempty"`
 	URI       string `json:"uri,omitempty"`
 	Note      string `json:"note,omitempty"`
-	// image: a reference; bytes are resolved by the kernel renderer
+	// image: a reference; bytes are resolved by the kernel renderer from
+	// exactly one source: an artifact version, a governed call's
+	// output.modelMedia, or Path, a file in the chat the rendering Run works
+	// in (a tool image kept under tool-output/<call>/; SizeBytes is its size).
 	MediaType       string `json:"mediaType,omitempty"` // image/png|jpeg|webp
 	Detail          string `json:"detail,omitempty"`    // auto|low|high
 	SHA256          string `json:"sha256,omitempty"`

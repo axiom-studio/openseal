@@ -388,7 +388,10 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 		AgentInstructions: instructions, SkillPrompts: prompts, HostTools: hostTools,
 		ModelCredential: deploymentModelCredential(r.deployment),
 		Capabilities:    r.config.Capabilities,
-		Render:          modelstep.SessionRenderOptions{Artifacts: r.config.Media.Artifacts, Content: r.config.Media.Content, Actions: r.config.Store},
+		Render: modelstep.SessionRenderOptions{
+			Artifacts: r.config.Media.Artifacts, Content: r.config.Media.Content, Actions: r.config.Store,
+			ChatFiles: r.config.Media.ChatFiles, Run: r.run,
+		},
 	}
 	if script != nil {
 		preparerConfig.RoutineScript = script.Section().Text
