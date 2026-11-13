@@ -112,6 +112,10 @@ type AdapterHost interface {
 	) (*DeliveryHostResult, error)
 }
 
+// visualsLeftOutSummary records on a delivered send that the message's
+// visual was not sent: no channel can show one yet (externalDeliveryFiles).
+const visualsLeftOutSummary = "Visual left out: this connection does not show visuals."
+
 type DeliveryWorkerConfig struct {
 	AttachmentContent models.ArtifactContentStore
 	WorkerID          string
@@ -241,10 +245,17 @@ func (w *DeliveryWorker) deliver(ctx context.Context, delivery *models.ExternalC
 	request := DeliveryHostRequest{
 		Endpoint: deliveryEndpoint, Adapter: adapter, Delivery: effectiveDelivery, Message: message,
 	}
+	// A delivered send that left out a visual says so in its summary, so the
+	// omission is on record without reaching the channel.
+	deliveredSummary := ""
 	if containsConversationFeature(adapter.Adapter.Features, capability.ConversationFeatureAttachments) && delivery.Operation == capability.ConversationDeliveryMessageSend {
-		request.Attachments, err = externalDeliveryAttachments(ctx, w.store, w.config.AttachmentContent, delivery.Scope, message)
+		var visuals int
+		request.Attachments, visuals, err = externalDeliveryAttachments(ctx, w.store, w.config.AttachmentContent, delivery.Scope, message)
 		if err != nil {
 			return err
+		}
+		if visuals > 0 {
+			deliveredSummary = visualsLeftOutSummary
 		}
 	}
 	// Typing/progress indicators are ephemeral state, not durable messages.
@@ -259,7 +270,7 @@ func (w *DeliveryWorker) deliver(ctx context.Context, delivery *models.ExternalC
 				return validateErr
 			}
 			if acknowledgement.Status == AcknowledgementFound {
-				return w.markDelivered(ctx, delivery, acknowledgement.ProviderMessageID)
+				return w.markDelivered(ctx, delivery, acknowledgement.ProviderMessageID, deliveredSummary)
 			}
 		}
 		// Lookup failure or an unknown acknowledgement does not abandon the
@@ -277,7 +288,7 @@ func (w *DeliveryWorker) deliver(ctx context.Context, delivery *models.ExternalC
 	}
 	switch result.Outcome {
 	case DeliveryOutcomeDelivered:
-		return w.markDelivered(ctx, delivery, result.ProviderMessageID)
+		return w.markDelivered(ctx, delivery, result.ProviderMessageID, deliveredSummary)
 	case DeliveryOutcomeRetry:
 		if result.RetryAfter > 0 && !adapter.Adapter.Delivery.SupportsRetryAfter {
 			return fmt.Errorf("%w: adapter returned undeclared retry-after", models.ErrInvalidExternalConversation)
@@ -319,7 +330,7 @@ func (w *DeliveryWorker) resolve(
 func (w *DeliveryWorker) markDelivered(
 	ctx context.Context,
 	delivery *models.ExternalConversationDelivery,
-	providerMessageID string,
+	providerMessageID, summary string,
 ) error {
 	now := w.now().UTC()
 	// Ephemeral status acknowledgements identify a thread, not a message.
@@ -353,7 +364,7 @@ func (w *DeliveryWorker) markDelivered(
 	next.Status = models.ExternalConversationDeliveryDelivered
 	next.ProviderMessageID = providerMessageID
 	next.LeaseOwner, next.LeaseExpiresAt = "", time.Time{}
-	next.ErrorCode, next.Summary = "", ""
+	next.ErrorCode, next.Summary = "", summary
 	next.DeliveredAt, next.UpdatedAt = now, now
 	next.Revision++
 	if err := next.Validate(); err != nil {

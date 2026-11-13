@@ -59,6 +59,8 @@ type answerStreamFixture struct {
 	delivery *DeliveryWorker
 	clock    time.Time
 	sequence uint64
+	// files are the artifact references the committed answer carries.
+	files []models.ConversationReference
 }
 
 func newAnswerStreamFixture(t *testing.T, operations ...capability.ConversationDeliveryOperation) *answerStreamFixture {
@@ -149,7 +151,7 @@ func (f *answerStreamFixture) finish(status models.AgentRunStatus, answer string
 			Scope: f.endpoint.Scope, ConversationID: f.conversation.ID, ExpectedRevision: current.Revision,
 			Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: f.endpoint.DeploymentID},
 			Intent: models.MessageIntentAnswer, Content: answer, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
-			ReplyToMessageID: f.inbound.ID, References: []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: f.run.ID}},
+			ReplyToMessageID: f.inbound.ID, References: append([]models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: f.run.ID}}, f.files...),
 			IdempotencyKey: "streamed-answer",
 		}); err != nil {
 			f.t.Fatal(err)

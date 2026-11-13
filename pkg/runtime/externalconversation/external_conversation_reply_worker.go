@@ -392,11 +392,16 @@ func (w *ReplyWorker) finishAnswerStream(
 	if !stream.live() || !containsConversationDeliveryOperation(adapter.Delivery.Operations, capability.ConversationDeliveryMessageUpdate) {
 		return nil
 	}
+	// Only files force a new message; a visual the channel leaves out does
+	// not, so it finishes the preview like a text-only answer.
 	files := false
 	if containsConversationFeature(adapter.Features, capability.ConversationFeatureAttachments) {
-		for _, reference := range message.References {
-			files = files || reference.Kind == models.ConversationReferenceArtifact
+		catalog, _ := w.store.(models.ArtifactStore)
+		artifacts, _, err := externalDeliveryFiles(ctx, catalog, item.Scope, message)
+		if err != nil {
+			return err
 		}
+		files = len(artifacts) > 0
 	}
 	if run.Status == models.AgentRunStatusFailed || files {
 		deleted, err := deleteAnswerStream(ctx, w.transport, item, replyID, endpoint, adapter.Delivery.Operations, stream)

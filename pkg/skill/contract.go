@@ -107,6 +107,7 @@ const (
 	ConversationFeatureEdits       = capability.ConversationFeatureEdits
 	ConversationFeatureDeletes     = capability.ConversationFeatureDeletes
 	ConversationFeatureTyping      = capability.ConversationFeatureTyping
+	ConversationFeatureVisuals     = capability.ConversationFeatureVisuals
 
 	ConversationDeliveryMessageSend     = capability.ConversationDeliveryMessageSend
 	ConversationDeliveryMessageUpdate   = capability.ConversationDeliveryMessageUpdate

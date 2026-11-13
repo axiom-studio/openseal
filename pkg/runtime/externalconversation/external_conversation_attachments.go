@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -135,11 +136,18 @@ func (w *InboxWorker) importAttachments(ctx context.Context, endpoint *models.Ex
 	return refs, notices, nil
 }
 
-func externalDeliveryAttachments(ctx context.Context, store models.ExternalConversationStore, content models.ArtifactContentStore, scope models.Scope, message *models.ChannelMessage) ([]AttachmentContent, error) {
-	var result []AttachmentContent
+// externalDeliveryFiles returns the artifacts message carries that an
+// adapter receives as files, in reference order, and how many visuals it
+// left out. A visual (a presentation surface) is never a file: its bytes are
+// the surface contract, which a chat would show as a raw JSON snippet. A
+// channel gets the answer without it, with no text in its place. Declaring
+// capability.ConversationFeatureVisuals does not change this: a visual a
+// provider can show will travel in its own DeliveryHostRequest field, which
+// does not exist yet. catalog is nil when the store keeps no artifacts.
+func externalDeliveryFiles(ctx context.Context, catalog models.ArtifactStore, scope models.Scope, message *models.ChannelMessage) ([]*models.Artifact, int, error) {
+	var files []*models.Artifact
+	visuals := 0
 	seen := map[string]bool{}
-	catalog, ok := store.(models.ArtifactStore)
-	remaining := MaximumExternalDeliveryAttachmentBytes
 	for _, ref := range message.References {
 		if ref.Kind != models.ConversationReferenceArtifact {
 			continue
@@ -149,24 +157,53 @@ func externalDeliveryAttachments(ctx context.Context, store models.ExternalConve
 			continue
 		}
 		seen[key] = true
-		if !ok || content == nil || len(result) >= 8 {
-			return nil, errors.New("attachment delivery is unavailable")
+		if catalog == nil {
+			return nil, 0, errors.New("attachment delivery is unavailable")
 		}
 		artifact, err := catalog.GetArtifact(ctx, scope, ref.ID, ref.Version)
-		if err != nil || artifact == nil || artifact.Scope != scope || artifact.SizeBytes < 0 || artifact.SizeBytes > int64(remaining) {
-			return nil, errors.New("attachment delivery exceeds limits or is unavailable")
+		if err != nil || artifact == nil || artifact.Scope != scope {
+			return nil, 0, errors.New("attachment is unavailable")
+		}
+		if artifact.Type == presentation.ArtifactType {
+			visuals++
+			continue
+		}
+		files = append(files, artifact)
+	}
+	return files, visuals, nil
+}
+
+// externalDeliveryAttachments reads the bytes of message's files
+// (externalDeliveryFiles) and reports how many visuals it left out.
+func externalDeliveryAttachments(ctx context.Context, store models.ExternalConversationStore, content models.ArtifactContentStore, scope models.Scope, message *models.ChannelMessage) ([]AttachmentContent, int, error) {
+	catalog, _ := store.(models.ArtifactStore)
+	files, visuals, err := externalDeliveryFiles(ctx, catalog, scope, message)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(files) == 0 {
+		return nil, visuals, nil
+	}
+	if content == nil || len(files) > 8 {
+		return nil, 0, errors.New("attachment delivery is unavailable")
+	}
+	result := make([]AttachmentContent, 0, len(files))
+	remaining := MaximumExternalDeliveryAttachmentBytes
+	for _, artifact := range files {
+		if artifact.SizeBytes < 0 || artifact.SizeBytes > int64(remaining) {
+			return nil, 0, errors.New("attachment delivery exceeds limits")
 		}
 		reader, err := content.Open(ctx, scope, artifact.ContentRef)
 		if err != nil {
-			return nil, errors.New("attachment bytes are unavailable")
+			return nil, 0, errors.New("attachment bytes are unavailable")
 		}
 		data, readErr := io.ReadAll(io.LimitReader(reader, int64(remaining)+1))
 		reader.Close()
 		if readErr != nil || int64(len(data)) != artifact.SizeBytes || fmt.Sprintf("sha256:%x", sha256.Sum256(data)) != artifact.Digest {
-			return nil, errors.New("attachment integrity check failed")
+			return nil, 0, errors.New("attachment integrity check failed")
 		}
-		result = append(result, AttachmentContent{ID: key, Name: artifact.Name, MediaType: artifact.MediaType, Data: data})
+		result = append(result, AttachmentContent{ID: fmt.Sprintf("%s:%d", artifact.ID, artifact.Version), Name: artifact.Name, MediaType: artifact.MediaType, Data: data})
 		remaining -= len(data)
 	}
-	return result, nil
+	return result, visuals, nil
 }
