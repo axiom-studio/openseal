@@ -200,6 +200,11 @@ type ModelStepRenderInfo struct {
 // MaxModelStepMediaBytes is the decoded cap of one view image (1 MiB).
 const MaxModelStepMediaBytes = 1 << 20
 
+// MaxModelImageSourceBytes is the largest stored image read for a model (16
+// MiB): it is scaled to fit MaxModelStepMediaBytes before it is sent, so a
+// phone photo is seen instead of skipped.
+const MaxModelImageSourceBytes = 16 << 20
+
 var (
 	modelStepToolNamePattern  = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 	modelStepSectionIDPattern = regexp.MustCompile(`^[a-z0-9_.-]{1,64}$`)

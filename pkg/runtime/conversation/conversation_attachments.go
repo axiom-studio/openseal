@@ -34,9 +34,10 @@ const (
 	// conversationAttachmentsPerMessage caps the artifact references read from
 	// one message (and so the image parts of its entry).
 	conversationAttachmentsPerMessage = models.MaxSessionEntryImageParts
-	// conversationImageMaxBytes bounds the verified image bytes of one message;
-	// each view image must stay within the 1 MiB host media limit.
-	conversationImageMaxBytes = models.MaxModelStepMediaBytes
+	// conversationImageMaxBytes bounds the verified image bytes of one message.
+	// The renderer scales each image to the 1 MiB host media limit, so a
+	// stored photo may be larger.
+	conversationImageMaxBytes = models.MaxModelImageSourceBytes
 )
 
 // AttachmentReader reads the artifact attachments of one channel

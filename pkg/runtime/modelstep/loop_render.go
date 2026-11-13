@@ -103,7 +103,7 @@ func ProjectSessionPath(ctx context.Context, path *models.AgentSessionPath, opts
 	if path == nil {
 		return nil, nil
 	}
-	r := &sessionRenderer{opts: opts, images: map[string]*models.ContentPart{}}
+	r := &sessionRenderer{opts: opts, images: map[string]*renderedImage{}}
 	if path.Session != nil {
 		r.scope = path.Session.Scope
 	}
@@ -198,7 +198,7 @@ func renderBeforeCompaction(entry, compaction *models.SessionEntry, segment map[
 type sessionRenderer struct {
 	opts   SessionRenderOptions
 	scope  models.Scope
-	images map[string]*models.ContentPart // resolved image by source; nil value = unavailable
+	images map[string]*renderedImage // resolved image by source; nil value = unavailable
 }
 
 // entry renders one non-tool entry; an assistant entry brings its tool group.
@@ -385,18 +385,32 @@ func (r *sessionRenderer) image(ctx context.Context, part models.ContentPart) (*
 			return nil, err
 		}
 		if data != nil {
+			// The reference names the stored bytes; the model gets them scaled
+			// to MaxModelImageEdge and the hosted size rule.
 			digest := sha256.Sum256(data)
-			cached = &models.ContentPart{DataBase64: base64.StdEncoding.EncodeToString(data), SHA256: hex.EncodeToString(digest[:])}
+			if sent, mediaType, ok := fitModelImage(data, part.MediaType); ok {
+				sentDigest := sha256.Sum256(sent)
+				cached = &renderedImage{source: hex.EncodeToString(digest[:]), part: models.ContentPart{
+					MediaType: mediaType, DataBase64: base64.StdEncoding.EncodeToString(sent), SHA256: hex.EncodeToString(sentDigest[:])}}
+			}
 		}
 		r.images[key] = cached
 	}
-	if cached == nil || (part.SHA256 != "" && !strings.EqualFold(strings.TrimPrefix(part.SHA256, "sha256:"), cached.SHA256)) {
+	if cached == nil || (part.SHA256 != "" && !strings.EqualFold(strings.TrimPrefix(part.SHA256, "sha256:"), cached.source)) {
 		return nil, nil
 	}
 	resolved := part
-	resolved.SHA256 = cached.SHA256
-	resolved.DataBase64 = cached.DataBase64
+	resolved.MediaType = cached.part.MediaType
+	resolved.SHA256 = cached.part.SHA256
+	resolved.DataBase64 = cached.part.DataBase64
 	return &resolved, nil
+}
+
+// renderedImage is one resolved image: the digest of the stored bytes the
+// reference names, and the part as sent to the model.
+type renderedImage struct {
+	source string
+	part   models.ContentPart
 }
 
 func renderSupportedImage(mediaType string) bool {
@@ -456,7 +470,7 @@ func (r *sessionRenderer) artifactImage(ctx context.Context, part models.Content
 	if err != nil {
 		return nil, fmt.Errorf("render image of artifact %s v%d: %w", part.ArtifactID, version, err)
 	}
-	if artifact == nil || artifact.SizeBytes <= 0 || artifact.SizeBytes > models.MaxModelStepMediaBytes {
+	if artifact == nil || artifact.SizeBytes <= 0 || artifact.SizeBytes > models.MaxModelImageSourceBytes {
 		return nil, nil
 	}
 	if mediaType, _, err := mime.ParseMediaType(artifact.MediaType); err != nil || mediaType != part.MediaType {
@@ -470,14 +484,14 @@ func (r *sessionRenderer) artifactImage(ctx context.Context, part models.Content
 		return nil, nil
 	}
 	defer reader.Close()
-	data, err := io.ReadAll(io.LimitReader(reader, models.MaxModelStepMediaBytes+1))
+	data, err := io.ReadAll(io.LimitReader(reader, models.MaxModelImageSourceBytes+1))
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
 		return nil, nil
 	}
-	if int64(len(data)) != artifact.SizeBytes || !renderImageBytesValid(data) {
+	if int64(len(data)) != artifact.SizeBytes || !modelImageSourceValid(data) {
 		return nil, nil
 	}
 	if !strings.EqualFold(fmt.Sprintf("sha256:%x", sha256.Sum256(data)), artifact.Digest) {
