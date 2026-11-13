@@ -17,6 +17,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// MaxResponseBytes is the largest Skill response accepted (8 MiB, over gRPC's
+// 4 MiB default): a Skill returns a downloaded file such as a 3 MiB Slack
+// screenshot as base64, which alone is about 4.2 MB.
+const MaxResponseBytes = 8 << 20
+
 // Client connects to external skill gRPC services
 type Client struct {
 	mu             sync.RWMutex
@@ -92,6 +97,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
 		grpc.WithTimeout(5 * time.Second),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(MaxResponseBytes)),
 	}
 	if c.options.RoundRobin {
 		options = append(options,

@@ -15,8 +15,10 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// Bound the wire payload below the default four MiB gRPC envelope limit.
-const MaximumExternalConversationAttachmentBytes = 2 << 20
+// MaximumExternalConversationAttachmentBytes bounds the files of one external
+// message (a Slack or Telegram screenshot). As base64 it stays under the Skill
+// client's response limit (skillgrpc.MaxResponseBytes).
+const MaximumExternalConversationAttachmentBytes = 3 << 20
 
 type AttachmentContent struct {
 	ID        string `json:"id"`
