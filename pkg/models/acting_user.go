@@ -15,6 +15,16 @@ func IsValidActingUser(value string) bool {
 	return IsValidOpaqueIdentifier(value, 256) && !strings.ContainsFunc(value, unicode.IsSpace)
 }
 
+// MessageActor returns the participant a message acts for: its sender, or,
+// for a service sender (a voice call starting, a finished sign-in), the
+// participant that initiated it.
+func MessageActor(message *ChannelMessage) ConversationParticipant {
+	if message.Sender.Type == ConversationParticipantService && message.Initiator != nil {
+		return *message.Initiator
+	}
+	return message.Sender
+}
+
 // MessageActingUser returns the human a conversation message acts for: its
 // user sender, or, for a service sender, the user that initiated it. It
 // returns "" when the message belongs to another conversation or no person
@@ -23,10 +33,7 @@ func MessageActingUser(conversation *Conversation, message *ChannelMessage) stri
 	if conversation == nil || message == nil || message.Scope != conversation.Scope || message.ConversationID != conversation.ID {
 		return ""
 	}
-	actor := message.Sender
-	if actor.Type == ConversationParticipantService && message.Initiator != nil {
-		actor = *message.Initiator
-	}
+	actor := MessageActor(message)
 	if actor.Type != ConversationParticipantUser || actor.Validate() != nil || !IsValidActingUser(actor.ID) {
 		return ""
 	}

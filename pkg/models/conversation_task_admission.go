@@ -221,10 +221,7 @@ func IsValidConversationTaskAdmissionSourceWithRound(source *AgentRun, conversat
 		conversation.Owner != task.Owner || message.Scope != task.Scope || message.ID != task.SourceMessageID || message.ConversationID != task.ConversationID {
 		return false
 	}
-	actor := message.Sender
-	if actor.Type == ConversationParticipantService && message.Initiator != nil {
-		actor = *message.Initiator
-	}
+	actor := MessageActor(message)
 	thread := message.ThreadRootID
 	if thread == "" {
 		thread = message.ID

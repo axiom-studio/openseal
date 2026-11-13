@@ -28,6 +28,12 @@ func SkillPersonCredentialAllowed(definition *SkillDefinition, b *SkillBinding, 
 	return skill.PersonCredentialAllowed(definition, b, slot)
 }
 
+// MessageActor returns the participant a message acts for: its sender, or the
+// person who started a service message.
+func MessageActor(message *ChannelMessage) ConversationParticipant {
+	return models.MessageActor(message)
+}
+
 // MessageActingUser returns the human a conversation message acts for, or ""
 // when no person sent it.
 func MessageActingUser(conversation *Conversation, message *ChannelMessage) string {

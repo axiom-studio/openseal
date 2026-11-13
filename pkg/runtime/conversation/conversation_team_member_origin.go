@@ -73,7 +73,10 @@ func VerifyTeamMemberRun(ctx context.Context, runs teamMemberRunReader, conversa
 // ResolveTeamHandoffRequest returns the person's message behind a Team
 // member Run that a teammate's hand-off started: the run's trigger is that
 // teammate's answer @mentioning this member, and the answer replies to the
-// person. A hand-off is one hop, so the replied-to message must be a person's.
+// person. A hand-off is one hop, so the replied-to message must act for a
+// person: sent by them, or a service message they started (a voice call
+// starting, a sign-in they finished). Callers read the person with
+// models.MessageActor.
 // It returns nil, nil when run is not a hand-off; a hand-off whose lineage
 // does not verify is an error.
 func ResolveTeamHandoffRequest(ctx context.Context, reader models.TeamHandoffMessageReader, run *models.AgentRun, handoff *models.ChannelMessage) (*models.ChannelMessage, error) {
@@ -101,11 +104,7 @@ func ResolveTeamHandoffRequest(ctx context.Context, reader models.TeamHandoffMes
 		request.ConversationID != conversationID || request.Sequence >= handoff.Sequence {
 		return nil, denied
 	}
-	actor := request.Sender
-	if models.VoiceCallStartedMessage(request) && request.Initiator != nil {
-		actor = *request.Initiator
-	}
-	if actor.Type != models.ConversationParticipantUser || actor.Validate() != nil {
+	if actor := models.MessageActor(request); actor.Type != models.ConversationParticipantUser || actor.Validate() != nil {
 		return nil, denied
 	}
 	return request, nil
