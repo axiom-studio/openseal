@@ -12,8 +12,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
-	"strings"
 )
 
 const (
@@ -119,8 +117,6 @@ const (
 
 // Tones lists every semantic tone. Hosts map tones to design tokens.
 var Tones = []Tone{ToneNeutral, ToneAccent, TonePositive, ToneNegative, ToneWarning, ToneInfo}
-
-var opaqueID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 const opaqueIDPattern = `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`
 
@@ -259,18 +255,6 @@ func Validate(ctx context.Context, surface Surface, opts ValidateOptions) ([]War
 	fail := func(path, format string, args ...interface{}) ([]Warning, error) {
 		return nil, &ValidationError{Path: path, Message: fmt.Sprintf(format, args...)}
 	}
-	if surface.Schema != Schema {
-		return fail("schema", "must be %q", Schema)
-	}
-	if err := boundedText(surface.Title, 1, MaxTitleRunes); err != nil {
-		return fail("title", "%v", err)
-	}
-	if surface.State != StateStreaming && surface.State != StateReady {
-		return fail("state", "must be streaming or ready")
-	}
-	if len(surface.Components) == 0 {
-		return fail("components", "at least one component is required")
-	}
 	encoded, err := json.Marshal(surface)
 	if err != nil {
 		return fail("", "encode visual: %v", err)
@@ -295,8 +279,6 @@ func Validate(ctx context.Context, surface Surface, opts ValidateOptions) ([]War
 			failure = &ValidationError{Path: path, ComponentID: component.ID, Message: fmt.Sprintf("a visual can hold at most %d components including nested ones", MaxComponents)}
 		case depth > MaxDepth:
 			failure = &ValidationError{Path: path, ComponentID: component.ID, Message: fmt.Sprintf("components can nest at most %d levels deep", MaxDepth)}
-		case !opaqueID.MatchString(component.ID):
-			failure = &ValidationError{Path: path + ".id", ComponentID: component.ID, Message: "id must match " + opaqueIDPattern}
 		case v.ids[component.ID] != nil:
 			failure = &ValidationError{Path: path + ".id", ComponentID: component.ID, Message: "id is already used by another component"}
 		}
@@ -323,104 +305,14 @@ func Validate(ctx context.Context, surface Surface, opts ValidateOptions) ([]War
 }
 
 func (v *validator) component(c Component, path string) error {
-	spec, ok := catalogue[c.Type]
-	if !ok {
-		return fmt.Errorf("unsupported type %q; use one of %s", c.Type, strings.Join(TypeNames(), ", "))
-	}
-	if spec.summary == summaryRequired && strings.TrimSpace(c.Summary) == "" {
-		return fmt.Errorf("summary is required for %s: one plain sentence saying what it shows", c.Type)
-	}
-	if err := boundedText(c.Summary, 0, MaxSummaryRunes); err != nil {
-		return fmt.Errorf("summary %v", err)
-	}
-	if err := boundedText(c.Title, 0, MaxTitleRunes); err != nil {
-		return fmt.Errorf("title %v", err)
-	}
-	if c.Tone != "" && !validTone(c.Tone) {
-		return fmt.Errorf("tone %q is not one of neutral, accent, positive, negative, warning, info", c.Tone)
-	}
-	if c.Binding == nil && spec.bindingRequired {
-		return fmt.Errorf("binding is required: {kind: %s, id} names the %s this card shows", joinBindingKinds(spec.bindings), bindingNoun(spec.bindings[0]))
-	}
+	spec := catalogue[c.Type]
 	if c.Binding != nil {
-		if spec.bindings != nil && len(spec.bindings) == 0 {
-			return fmt.Errorf("%s takes no component binding", c.Type)
-		}
-		if spec.bindings != nil && !containsBindingKind(spec.bindings, c.Binding.Kind) {
-			return fmt.Errorf("binding.kind %q is not allowed on %s; use %s", c.Binding.Kind, c.Type, joinBindingKinds(spec.bindings))
-		}
 		if err := v.binding(*c.Binding); err != nil {
 			return fmt.Errorf("binding: %w", err)
 		}
-	}
-	if len(c.Children) > 0 && spec.children.max == 0 {
-		return fmt.Errorf("%s cannot have children; only section, grid and carousel can", c.Type)
-	}
-	if err := exactPayload(c); err != nil {
-		return err
-	}
-	if err := layoutAndText(spec, c); err != nil {
-		return err
 	}
 	if spec.validate == nil {
 		return nil
 	}
 	return spec.validate(v, c, path)
-}
-
-// exactPayload enforces that exactly the payload matching Type is present.
-func exactPayload(c Component) error {
-	present := map[string]bool{
-		"text": c.Text != "", "chart": c.Chart != nil, "diagram": c.Diagram != nil, "form": c.Form != nil,
-		"table": c.Table != nil, "stat_row": c.StatRow != nil, "grid": c.Grid != nil, "tabs": len(c.Tabs) > 0, "actions": len(c.Actions) > 0,
-		"callout": c.Callout != nil, "steps": c.Steps != nil, "comparison": c.Comparison != nil, "timeline": c.Timeline != nil,
-		"image": c.Image != nil, "gallery": c.Gallery != nil, "choices": c.Choices != nil, "checklist": c.Checklist != nil, "quiz": c.Quiz != nil,
-		"labeled_image": c.LabeledImage != nil, "quantity_visual": c.QuantityVisual != nil, "math": c.Math != nil, "definition": c.Definition != nil,
-		"flashcards": c.Flashcards != nil, "before_after": c.BeforeAfter != nil, "draft": c.Draft != nil, "recipe": c.Recipe != nil,
-		"item": c.Item != nil, "analogy": c.Analogy != nil,
-		"agenda": c.Agenda != nil, "itinerary": c.Itinerary != nil, "place": c.Place != nil, "breakdown": c.Breakdown != nil,
-		"progress": c.Progress != nil, "poll": c.Poll != nil, "explorer": c.Explorer != nil, "routine": c.Routine != nil,
-		"tasks": c.Tasks != nil, "agent": c.Agent != nil, "map": c.Map != nil,
-	}
-	allowed := catalogue[c.Type].payload
-	for key, set := range present {
-		if set && key != allowed {
-			return fmt.Errorf("%s cannot carry a %q payload", c.Type, key)
-		}
-	}
-	return nil
-}
-
-func validTone(tone Tone) bool {
-	for _, candidate := range Tones {
-		if tone == candidate {
-			return true
-		}
-	}
-	return false
-}
-
-func boundedText(value string, minimum, maximum int) error {
-	length := len([]rune(strings.TrimSpace(value)))
-	if length < minimum || length > maximum {
-		if minimum == 0 {
-			return fmt.Errorf("must be at most %d characters (got %d)", maximum, length)
-		}
-		return fmt.Errorf("must contain between %d and %d characters (got %d)", minimum, maximum, length)
-	}
-	return nil
-}
-
-func required(field, value string, maximum int) error {
-	if err := boundedText(value, 1, maximum); err != nil {
-		return fmt.Errorf("%s %w", field, err)
-	}
-	return nil
-}
-
-func optional(field, value string, maximum int) error {
-	if err := boundedText(value, 0, maximum); err != nil {
-		return fmt.Errorf("%s %w", field, err)
-	}
-	return nil
 }

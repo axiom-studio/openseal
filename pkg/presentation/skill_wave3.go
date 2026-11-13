@@ -78,7 +78,7 @@ func explorerSchema() map[string]interface{} {
 	input := closedObject([]interface{}{"id", "label", "kind", "default"}, map[string]interface{}{
 		"id": map[string]interface{}{"type": "string", "pattern": explorerNamePattern}, "label": strRange(1, maxExplorerLabelRunes),
 		"kind": describe(enum(ExplorerInputKinds), "slider and stepper: min below max, step above 0, default on a step; toggle: default 0 or 1, no min, max or step."),
-		"min":  number(), "max": number(), "step": number(), "default": number(), "unit": str(maxExplorerUnitRunes), "format": enum(formatNames()), "currency": currencySchema(),
+		"min":  number(), "max": number(), "step": map[string]interface{}{"type": "number", "exclusiveMinimum": 0}, "default": number(), "unit": str(maxExplorerUnitRunes), "format": enum(formatNames()), "currency": currencySchema(),
 	})
 	output := closedObject([]interface{}{"id", "label", "expr"}, map[string]interface{}{
 		"id": itemIDSchema(), "label": strRange(1, maxExplorerLabelRunes), "expr": expression, "format": enum(formatNames()), "currency": currencySchema(),

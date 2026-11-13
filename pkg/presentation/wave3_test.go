@@ -196,7 +196,7 @@ func TestValidateWave3(t *testing.T) {
 		{"itinerary duplicate item", itineraryOf(stops("sat", "pier"), stops("sun", "pier")), ValidateOptions{}, `itinerary.days[1].items[0].id "pier" is used twice`},
 		// place
 		{"place", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{Name: "Cafe", Category: "Café", Address: "1 High St", Rating: &ItemRating{Value: 4.5, Count: minutes(120)}, PriceLevel: 2, Hours: []string{"Mon-Fri 8-18"}, Facts: []string{"Dog friendly"}}}, ValidateOptions{}, ""},
-		{"place name", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{}}, ValidateOptions{}, "place.name must contain between 1 and 80"},
+		{"place name", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{}}, ValidateOptions{}, "place.name is required unless location names a place from find_place"},
 		{"place price level", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{Name: "Cafe", PriceLevel: 5}}, ValidateOptions{}, "place.priceLevel must be 1-4 (got 5)"},
 		{"place rating", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{Name: "Cafe", Rating: &ItemRating{Value: 6}}}, ValidateOptions{}, "place.rating.value must be 0-5"},
 		{"place hours", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{Name: "Cafe", Hours: make([]string, 8)}}, ValidateOptions{}, "place.hours allows at most 7 (got 8)"},

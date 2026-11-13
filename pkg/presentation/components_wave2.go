@@ -2,7 +2,6 @@ package presentation
 
 import (
 	"fmt"
-	"math"
 	"strings"
 )
 
@@ -62,36 +61,20 @@ const (
 
 func validateDiagram(v *validator, c Component, _ string) error {
 	d := c.Diagram
-	if d == nil {
-		return payloadRequired("diagram")
-	}
-	if !contains(DiagramLayouts, d.Layout) {
-		return fmt.Errorf("diagram.layout %q is not one of %s", d.Layout, strings.Join(DiagramLayouts, ", "))
-	}
-	if d.Direction != "" {
-		if d.Layout != "flow" && d.Layout != "hierarchy" {
-			return fmt.Errorf("diagram.direction is only used by flow and hierarchy layouts")
-		}
-		if err := oneOf("diagram.direction", d.Direction, DiagramDirections); err != nil {
-			return err
-		}
-	}
-	if err := firstError(bounded("diagram.nodes", len(d.Nodes), 2, MaxDiagramNodes), bounded("diagram.edges", len(d.Edges), 0, MaxDiagramEdges),
-		bounded("diagram.groups", len(d.Groups), 0, MaxDiagramGroups)); err != nil {
-		return err
+	if d.Direction != "" && d.Layout != "flow" && d.Layout != "hierarchy" {
+		return fmt.Errorf("diagram.direction is only used by flow and hierarchy layouts")
 	}
 	groups := map[string]bool{}
 	for index, group := range d.Groups {
-		at := fmt.Sprintf("diagram.groups[%d]", index)
-		if err := firstError(itemIDs(groups, at, group.ID), required(at+".label", group.Label, maxGroupLabelRunes)); err != nil {
+		if err := itemIDs(groups, fmt.Sprintf("diagram.groups[%d]", index), group.ID); err != nil {
 			return err
 		}
 	}
 	nodes := map[string]bool{}
 	for index, node := range d.Nodes {
 		at := fmt.Sprintf("diagram.nodes[%d]", index)
-		if err := firstError(itemIDs(nodes, at, node.ID), required(at+".label", node.Label, maxNodeLabelRunes), v.icon(at+".icon", c.ID, node.Icon),
-			markdown(at+".detail", node.Detail, 0, maxNodeDetailRunes)); err != nil {
+		v.icon(at+".icon", c.ID, node.Icon)
+		if err := firstError(itemIDs(nodes, at, node.ID), markdown(at+".detail", node.Detail)); err != nil {
 			return err
 		}
 		if node.Group != "" && !groups[node.Group] {
@@ -105,9 +88,6 @@ func validateDiagram(v *validator, c Component, _ string) error {
 		}
 		if !nodes[edge.To] {
 			return fmt.Errorf("%s.to %q is not the id of a node", at, edge.To)
-		}
-		if err := optional(at+".label", edge.Label, maxEdgeLabelRunes); err != nil {
-			return err
 		}
 	}
 	switch d.Layout {
@@ -208,26 +188,15 @@ const (
 
 func validateLabeledImage(v *validator, c Component, _ string) error {
 	l := c.LabeledImage
-	if l == nil {
-		return payloadRequired("labeled_image")
-	}
-	if err := firstError(v.image("labeled_image.image", &l.Image), bounded("labeled_image.markers", len(l.Markers), 1, maxMarkers)); err != nil {
+	if err := v.image("labeled_image.image", &l.Image); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, marker := range l.Markers {
 		at := fmt.Sprintf("labeled_image.markers[%d]", index)
-		if err := firstError(itemIDs(seen, at, marker.ID), unitInterval(at+".x", marker.X), unitInterval(at+".y", marker.Y),
-			required(at+".label", marker.Label, maxMarkerLabelRunes), markdown(at+".detail", marker.Detail, 0, maxMarkerDetailRunes)); err != nil {
+		if err := firstError(itemIDs(seen, at, marker.ID), markdown(at+".detail", marker.Detail)); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func unitInterval(field string, value float64) error {
-	if math.IsNaN(value) || value < 0 || value > 1 {
-		return fmt.Errorf("%s must be between 0 and 1 (a fraction of the image size from the top-left)", field)
 	}
 	return nil
 }
@@ -298,6 +267,12 @@ type ScaleItem struct {
 // QuantityKinds lists the values of QuantityVisual.Kind.
 var QuantityKinds = []string{"fraction_bars", "number_line", "unit_blocks", "percent_waffle", "scale_compare"}
 
+// quantityKindFields are the fields each quantity kind takes.
+var quantityKindFields = map[string][]string{
+	"fraction_bars": {"fractions"}, "number_line": {"min", "max", "ticks", "points", "ranges"},
+	"unit_blocks": {"groups"}, "percent_waffle": {"parts"}, "scale_compare": {"items"},
+}
+
 // Quantity visual limits.
 const (
 	MaxQuantitySteps     = 4
@@ -314,21 +289,11 @@ const (
 
 func validateQuantityVisual(_ *validator, c Component, _ string) error {
 	q := c.QuantityVisual
-	if q == nil {
-		return payloadRequired("quantity_visual")
-	}
-	if !contains(QuantityKinds, q.Kind) {
-		return fmt.Errorf("quantity_visual.kind %q is not one of %s", q.Kind, strings.Join(QuantityKinds, ", "))
-	}
 	if err := quantityValues("quantity_visual", q.Kind, q.QuantityValues); err != nil {
 		return err
 	}
-	if err := bounded("quantity_visual.steps", len(q.Steps), 0, MaxQuantitySteps); err != nil {
-		return err
-	}
 	for index, step := range q.Steps {
-		at := fmt.Sprintf("quantity_visual.steps[%d]", index)
-		if err := firstError(required(at+".label", step.Label, quantityStepRunes), quantityValues(at, q.Kind, step.QuantityValues)); err != nil {
+		if err := quantityValues(fmt.Sprintf("quantity_visual.steps[%d]", index), q.Kind, step.QuantityValues); err != nil {
 			return err
 		}
 	}
@@ -342,10 +307,7 @@ func quantityValues(at, kind string, q QuantityValues) error {
 		"fractions": len(q.Fractions) > 0, "min": q.Min != nil, "max": q.Max != nil, "ticks": q.Ticks != nil, "points": len(q.Points) > 0,
 		"ranges": len(q.Ranges) > 0, "groups": len(q.Groups) > 0, "parts": len(q.Parts) > 0, "items": len(q.Items) > 0,
 	}
-	fields := map[string][]string{
-		"fraction_bars": {"fractions"}, "number_line": {"min", "max", "ticks", "points", "ranges"},
-		"unit_blocks": {"groups"}, "percent_waffle": {"parts"}, "scale_compare": {"items"},
-	}[kind]
+	fields := quantityKindFields[kind]
 	for _, name := range []string{"fractions", "min", "max", "ticks", "points", "ranges", "groups", "parts", "items"} {
 		if used[name] && !contains(fields, name) {
 			return fmt.Errorf("%s.%s is not used by %s (it takes %s)", at, name, kind, strings.Join(fields, ", "))
@@ -353,61 +315,38 @@ func quantityValues(at, kind string, q QuantityValues) error {
 	}
 	switch kind {
 	case "fraction_bars":
-		if err := bounded(at+".fractions", len(q.Fractions), 1, maxQuantityGroupings); err != nil {
-			return err
+		if len(q.Fractions) == 0 {
+			return fmt.Errorf("%s.fractions needs 1-%d (got 0)", at, maxQuantityGroupings)
 		}
 		for index, fraction := range q.Fractions {
-			item := fmt.Sprintf("%s.fractions[%d]", at, index)
-			if fraction.Denominator < 1 || fraction.Denominator > MaxDenominator {
-				return fmt.Errorf("%s.denominator must be 1-%d (got %d)", item, MaxDenominator, fraction.Denominator)
-			}
-			if fraction.Numerator < 0 || fraction.Numerator > fraction.Denominator {
-				return fmt.Errorf("%s.numerator must be 0-%d, at most the denominator (got %d); show a whole as its own bar", item, fraction.Denominator, fraction.Numerator)
-			}
-			if err := optional(item+".label", fraction.Label, quantityLabelRunes); err != nil {
-				return err
+			if fraction.Numerator > fraction.Denominator {
+				return fmt.Errorf("%s.fractions[%d].numerator must be 0-%d, at most the denominator (got %d); show a whole as its own bar", at, index, fraction.Denominator, fraction.Numerator)
 			}
 		}
 	case "number_line":
 		return numberLine(at, q)
 	case "unit_blocks":
-		if err := bounded(at+".groups", len(q.Groups), 1, maxQuantityGroupings); err != nil {
-			return err
-		}
-		for index, group := range q.Groups {
-			item := fmt.Sprintf("%s.groups[%d]", at, index)
-			if group.Count < 0 || group.Count > MaxUnitBlocks {
-				return fmt.Errorf("%s.count must be 0-%d (got %d)", item, MaxUnitBlocks, group.Count)
-			}
-			if err := optional(item+".label", group.Label, quantityLabelRunes); err != nil {
-				return err
-			}
+		if len(q.Groups) == 0 {
+			return fmt.Errorf("%s.groups needs 1-%d (got 0)", at, maxQuantityGroupings)
 		}
 	case "percent_waffle":
-		if err := bounded(at+".parts", len(q.Parts), 1, maxQuantityGroupings); err != nil {
-			return err
+		if len(q.Parts) == 0 {
+			return fmt.Errorf("%s.parts needs 1-%d (got 0)", at, maxQuantityGroupings)
 		}
 		total := 0.0
-		for index, part := range q.Parts {
-			item := fmt.Sprintf("%s.parts[%d]", at, index)
-			if math.IsNaN(part.Value) || part.Value < 0 || part.Value > maxPercent {
-				return fmt.Errorf("%s.value must be a percentage from 0 to 100", item)
-			}
-			if err := required(item+".label", part.Label, quantityLabelRunes); err != nil {
-				return err
-			}
+		for _, part := range q.Parts {
 			total += part.Value
 		}
 		if total > maxPercent+1e-9 {
 			return fmt.Errorf("%s.parts add up to %g%%; they must total at most 100", at, total)
 		}
 	case "scale_compare":
-		if err := bounded(at+".items", len(q.Items), 2, maxQuantityGroupings); err != nil {
-			return err
+		if len(q.Items) < 2 {
+			return fmt.Errorf("%s.items needs 2-%d (got %d)", at, maxQuantityGroupings, len(q.Items))
 		}
 		for index, item := range q.Items {
 			itemAt := fmt.Sprintf("%s.items[%d]", at, index)
-			if err := firstError(required(itemAt+".label", item.Label, quantityLabelRunes), validateAmount(itemAt+".value", item.Value)); err != nil {
+			if err := validateAmount(itemAt+".value", item.Value); err != nil {
 				return err
 			}
 			if item.Value.Value < 0 {
@@ -423,33 +362,26 @@ func numberLine(at string, q QuantityValues) error {
 		return fmt.Errorf("%s needs min and max for a number_line", at)
 	}
 	low, high := *q.Min, *q.Max
-	if math.IsNaN(low) || math.IsInf(low, 0) || math.IsNaN(high) || math.IsInf(high, 0) || low >= high {
+	if low >= high {
 		return fmt.Errorf("%s.min must be a number below max", at)
 	}
-	if q.Ticks != nil {
-		step := *q.Ticks
-		if math.IsNaN(step) || step <= 0 || (high-low)/step > MaxNumberLineTicks {
-			return fmt.Errorf("%s.ticks is the gap between ticks and must give at most %d ticks between min and max", at, MaxNumberLineTicks)
-		}
+	if q.Ticks != nil && (high-low)/(*q.Ticks) > MaxNumberLineTicks {
+		return fmt.Errorf("%s.ticks is the gap between ticks and must give at most %d ticks between min and max", at, MaxNumberLineTicks)
 	}
 	inside := func(field string, value float64) error {
-		if math.IsNaN(value) || value < low || value > high {
+		if value < low || value > high {
 			return fmt.Errorf("%s must be between min %g and max %g", field, low, high)
 		}
 		return nil
 	}
-	if err := firstError(bounded(at+".points", len(q.Points), 0, maxNumberLinePoints), bounded(at+".ranges", len(q.Ranges), 0, maxNumberLineRanges)); err != nil {
-		return err
-	}
 	for index, point := range q.Points {
-		item := fmt.Sprintf("%s.points[%d]", at, index)
-		if err := firstError(inside(item+".value", point.Value), optional(item+".label", point.Label, quantityLabelRunes)); err != nil {
+		if err := inside(fmt.Sprintf("%s.points[%d].value", at, index), point.Value); err != nil {
 			return err
 		}
 	}
 	for index, span := range q.Ranges {
 		item := fmt.Sprintf("%s.ranges[%d]", at, index)
-		if err := firstError(inside(item+".from", span.From), inside(item+".to", span.To), optional(item+".label", span.Label, quantityLabelRunes)); err != nil {
+		if err := firstError(inside(item+".from", span.From), inside(item+".to", span.To)); err != nil {
 			return err
 		}
 		if span.From >= span.To {
@@ -489,13 +421,10 @@ var deniedLaTeX = map[string]bool{
 	"renewcommand": true, "providecommand": true, "gdef": true, "edef": true, "xdef": true, "let": true,
 }
 
-// ValidateLaTeX checks one math expression: at most MaxLaTeXRunes, no $
+// ValidateLaTeX checks the rules of one math expression the schema cannot: no $
 // delimiters, and none of the macros that can fetch or define (\href, \url,
 // \includegraphics, \html…, \def, \newcommand and their kin).
 func ValidateLaTeX(field, latex string) error {
-	if err := required(field, latex, MaxLaTeXRunes); err != nil {
-		return err
-	}
 	trimmed := strings.TrimSpace(latex)
 	if strings.HasPrefix(trimmed, "$") || strings.HasSuffix(trimmed, "$") {
 		return fmt.Errorf("%s is LaTeX without $ delimiters, e.g. \\frac{3}{4}", field)
@@ -521,16 +450,8 @@ func ValidateLaTeX(field, latex string) error {
 }
 
 func validateMath(_ *validator, c Component, _ string) error {
-	m := c.Math
-	if m == nil {
-		return payloadRequired("math")
-	}
-	if err := firstError(bounded("math.steps", len(m.Steps), 1, maxMathSteps), oneOf("math.reveal", m.Reveal, MathReveals)); err != nil {
-		return err
-	}
-	for index, step := range m.Steps {
-		at := fmt.Sprintf("math.steps[%d]", index)
-		if err := firstError(ValidateLaTeX(at+".latex", step.LaTeX), optional(at+".note", step.Note, maxMathNoteRunes)); err != nil {
+	for index, step := range c.Math.Steps {
+		if err := ValidateLaTeX(fmt.Sprintf("math.steps[%d].latex", index), step.LaTeX); err != nil {
 			return err
 		}
 	}
@@ -557,13 +478,7 @@ const (
 )
 
 func validateDefinition(v *validator, c Component, _ string) error {
-	d := c.Definition
-	if d == nil {
-		return payloadRequired("definition")
-	}
-	return firstError(required("definition.term", d.Term, maxTermRunes), optional("definition.phonetic", d.Phonetic, maxPhoneticRunes),
-		optional("definition.partOfSpeech", d.PartOfSpeech, maxPartOfSpeechRunes), required("definition.meaning", d.Meaning, maxMeaningRunes),
-		optional("definition.example", d.Example, maxExampleRunes), v.image("definition.image", d.Image))
+	return v.image("definition.image", c.Definition.Image)
 }
 
 // Flashcards is a practice deck. Viewers flip cards, mark each "got" or
@@ -589,18 +504,10 @@ const (
 )
 
 func validateFlashcards(v *validator, c Component, _ string) error {
-	f := c.Flashcards
-	if f == nil {
-		return payloadRequired("flashcards")
-	}
-	if err := bounded("flashcards.cards", len(f.Cards), minFlashcards, maxFlashcards); err != nil {
-		return err
-	}
 	seen := map[string]bool{}
-	for index, card := range f.Cards {
+	for index, card := range c.Flashcards.Cards {
 		at := fmt.Sprintf("flashcards.cards[%d]", index)
-		if err := firstError(itemIDs(seen, at, card.ID), required(at+".front", card.Front, maxCardFrontRunes), required(at+".back", card.Back, maxCardBackRunes),
-			v.image(at+".image", card.Image)); err != nil {
+		if err := firstError(itemIDs(seen, at, card.ID), v.image(at+".image", card.Image)); err != nil {
 			return err
 		}
 	}
@@ -638,20 +545,16 @@ const (
 
 func validateBeforeAfter(v *validator, c Component, _ string) error {
 	b := c.BeforeAfter
-	if b == nil {
-		return payloadRequired("before_after")
-	}
-	if !contains(BeforeAfterModes, b.Mode) {
-		return fmt.Errorf("before_after.mode %q is not one of %s", b.Mode, strings.Join(BeforeAfterModes, ", "))
-	}
 	side := func(at string, s BeforeAfterSide) (string, error) {
 		switch {
 		case s.Text != "" && s.Image != nil:
 			return "", fmt.Errorf("%s takes text or image, not both", at)
 		case s.Image != nil:
 			return "image", v.image(at+".image", s.Image)
+		case strings.TrimSpace(s.Text) == "":
+			return "", fmt.Errorf("%s needs text or an image", at)
 		default:
-			return "text", required(at+".text", s.Text, maxSideTextRunes)
+			return "text", nil
 		}
 	}
 	before, err := side("before_after.before", b.Before)
@@ -670,9 +573,6 @@ func validateBeforeAfter(v *validator, c Component, _ string) error {
 	}
 	if b.Mode == "slider" && before != "image" {
 		return fmt.Errorf("before_after.mode slider compares images; use diff or split for texts")
-	}
-	if b.Labels != nil {
-		return firstError(optional("before_after.labels.before", b.Labels.Before, maxSideLabelRunes), optional("before_after.labels.after", b.Labels.After, maxSideLabelRunes))
 	}
 	return nil
 }
@@ -698,14 +598,7 @@ const (
 )
 
 func validateDraft(_ *validator, c Component, _ string) error {
-	d := c.Draft
-	if d == nil {
-		return payloadRequired("draft")
-	}
-	if !contains(DraftChannels, d.Channel) {
-		return fmt.Errorf("draft.channel %q is not one of %s", d.Channel, strings.Join(DraftChannels, ", "))
-	}
-	return firstError(optional("draft.to", d.To, maxDraftHeaderRunes), optional("draft.subject", d.Subject, maxDraftHeaderRunes), markdown("draft.body", d.Body, 1, maxDraftBodyRunes))
+	return markdown("draft.body", c.Draft.Body)
 }
 
 // Recipe is a dish with scalable ingredients and steps.
@@ -754,37 +647,18 @@ const (
 
 func validateRecipe(v *validator, c Component, _ string) error {
 	r := c.Recipe
-	if r == nil {
-		return payloadRequired("recipe")
-	}
-	if r.Servings < 1 || r.Servings > maxServings {
-		return fmt.Errorf("recipe.servings must be 1-%d (got %d)", maxServings, r.Servings)
-	}
-	if r.Time != nil {
-		for index, minutes := range []*int{r.Time.Prep, r.Time.Cook} {
-			if minutes != nil && (*minutes < 0 || *minutes > MaxRecipeMinutes) {
-				return fmt.Errorf("recipe.time.%s is in minutes and must be 0-%d", []string{"prep", "cook"}[index], MaxRecipeMinutes)
-			}
-		}
-	}
-	if err := firstError(bounded("recipe.ingredients", len(r.Ingredients), 1, maxIngredients), bounded("recipe.steps", len(r.Steps), 1, maxRecipeSteps), v.image("recipe.image", r.Image)); err != nil {
+	if err := v.image("recipe.image", r.Image); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	for index, ingredient := range r.Ingredients {
-		at := fmt.Sprintf("recipe.ingredients[%d]", index)
-		if err := firstError(itemIDs(seen, at, ingredient.ID), optional(at+".unit", ingredient.Unit, maxIngredientUnitRunes), required(at+".name", ingredient.Name, maxIngredientNameRunes),
-			optional(at+".group", ingredient.Group, maxIngredientGroupRunes)); err != nil {
+		if err := itemIDs(seen, fmt.Sprintf("recipe.ingredients[%d]", index), ingredient.ID); err != nil {
 			return err
-		}
-		if qty := ingredient.Qty; qty != nil && (math.IsNaN(*qty) || math.IsInf(*qty, 0) || *qty <= 0) {
-			return fmt.Errorf("%s.qty must be a number above 0; leave it out for \"to taste\"", at)
 		}
 	}
 	steps := map[string]bool{}
 	for index, step := range r.Steps {
-		at := fmt.Sprintf("recipe.steps[%d]", index)
-		if err := firstError(itemIDs(steps, at, step.ID), required(at+".text", step.Text, maxRecipeStepRunes)); err != nil {
+		if err := itemIDs(steps, fmt.Sprintf("recipe.steps[%d]", index), step.ID); err != nil {
 			return err
 		}
 	}
@@ -815,30 +689,11 @@ const (
 
 func validateItem(v *validator, c Component, _ string) error {
 	item := c.Item
-	if item == nil {
-		return payloadRequired("item")
-	}
-	if err := firstError(required("item.name", item.Name, maxItemNameRunes), v.image("item.image", item.Image), optional("item.badge", item.Badge, maxBadgeRunes),
-		bounded("item.facts", len(item.Facts), 0, maxFacts)); err != nil {
+	if err := v.image("item.image", item.Image); err != nil {
 		return err
 	}
 	if item.Price != nil {
-		if err := firstError(validateAmount("item.price", item.Price.Amount), oneOf("item.price.per", item.Price.Per, PricePeriods)); err != nil {
-			return err
-		}
-	}
-	if rating := item.Rating; rating != nil {
-		if math.IsNaN(rating.Value) || rating.Value < 0 || rating.Value > maxRating {
-			return fmt.Errorf("item.rating.value must be 0-%d", maxRating)
-		}
-		if rating.Count != nil && *rating.Count < 0 {
-			return fmt.Errorf("item.rating.count must be 0 or more")
-		}
-	}
-	for index, fact := range item.Facts {
-		if err := required(fmt.Sprintf("item.facts[%d]", index), fact, maxFactRunes); err != nil {
-			return err
-		}
+		return validateAmount("item.price", item.Price.Amount)
 	}
 	return nil
 }
@@ -869,20 +724,7 @@ const (
 )
 
 func validateAnalogy(v *validator, c Component, _ string) error {
-	a := c.Analogy
-	if a == nil {
-		return payloadRequired("analogy")
-	}
-	if err := firstError(required("analogy.from.label", a.From.Label, maxAnalogyLabelRunes), v.icon("analogy.from.icon", c.ID, a.From.Icon),
-		required("analogy.to.label", a.To.Label, maxAnalogyLabelRunes), v.icon("analogy.to.icon", c.ID, a.To.Icon),
-		bounded("analogy.mapping", len(a.Mapping), 1, maxAnalogyPairs)); err != nil {
-		return err
-	}
-	for index, pair := range a.Mapping {
-		at := fmt.Sprintf("analogy.mapping[%d]", index)
-		if err := firstError(required(at+".a", pair.A, maxAnalogyPartRunes), required(at+".b", pair.B, maxAnalogyPartRunes)); err != nil {
-			return err
-		}
-	}
+	v.icon("analogy.from.icon", c.ID, c.Analogy.From.Icon)
+	v.icon("analogy.to.icon", c.ID, c.Analogy.To.Icon)
 	return nil
 }

@@ -183,7 +183,7 @@ func TestValidateWave2(t *testing.T) {
 		{"diff of images", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "diff", Before: picture("a"), After: picture("b")}}, images("a", "b"), "before_after.mode diff compares texts"},
 		{"slider of texts", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "slider", Before: text("a"), After: text("b")}}, ValidateOptions{}, "before_after.mode slider compares images"},
 		{"both on one side", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "split", Before: BeforeAfterSide{Text: "a", Image: img("a")}, After: text("b")}}, images("a"), "before_after.before takes text or image, not both"},
-		{"empty side", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "split", Before: text("a")}}, ValidateOptions{}, "before_after.after.text must contain between 1 and 4000"},
+		{"empty side", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "split", Before: text("a")}}, ValidateOptions{}, "before_after.after needs text or an image"},
 		{"before_after mode", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "wipe", Before: text("a"), After: text("b")}}, ValidateOptions{}, `before_after.mode "wipe"`},
 		{"before_after label", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "split", Before: text("a"), After: text("b"), Labels: &BeforeAfterLabels{After: strings.Repeat("l", 21)}}}, ValidateOptions{}, "before_after.labels.after"},
 		// draft
@@ -275,8 +275,6 @@ func TestValidateLaTeX(t *testing.T) {
 		`\renewcommand{\frac}{1}`:      `\renewcommand`,
 		`a \\ \gdef\y{2}`:              `\gdef`,
 		`$x$`:                          "without $ delimiters",
-		strings.Repeat("x", 301):       "between 1 and 300",
-		"   ":                          "between 1 and 300",
 		`x + \let\a\b`:                 `\let`,
 		`\frac{1}{2}\providecommand\z`: `\providecommand`,
 	} {

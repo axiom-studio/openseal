@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"net/url"
-	"regexp"
 	"strings"
 )
 
@@ -67,12 +66,6 @@ func (f BindingResolverFunc) ResolveBinding(ctx context.Context, binding Binding
 }
 
 func (v *validator) binding(binding Binding) error {
-	if !validBindingKind(binding.Kind) {
-		return fmt.Errorf("kind %q is not one of runbook, conversation_task, run, approval, agent", binding.Kind)
-	}
-	if !opaqueID.MatchString(binding.ID) {
-		return fmt.Errorf("id %q must match %s", binding.ID, opaqueIDPattern)
-	}
 	if v.opts.SkipHostChecks {
 		return nil
 	}
@@ -97,30 +90,12 @@ func bindingNoun(kind BindingKind) string {
 	}
 }
 
-func containsBindingKind(kinds []BindingKind, kind BindingKind) bool {
-	for _, candidate := range kinds {
-		if kind == candidate {
-			return true
-		}
-	}
-	return false
-}
-
 func joinBindingKinds(kinds []BindingKind) string {
 	names := make([]string, len(kinds))
 	for index, kind := range kinds {
 		names[index] = string(kind)
 	}
 	return strings.Join(names, ", ")
-}
-
-func validBindingKind(kind BindingKind) bool {
-	for _, candidate := range BindingKinds {
-		if kind == candidate {
-			return true
-		}
-	}
-	return false
 }
 
 // LinkProvenance is supplied by the host. It reports whether this exact URL
@@ -183,14 +158,9 @@ type PlaceProvenance func(ctx context.Context, placeID string) (PlaceFix, bool, 
 // the same place always gets the same id.
 const PlaceIDPattern = `^place:[0-9a-f]{12}$`
 
-var placeIDRegexp = regexp.MustCompile(PlaceIDPattern)
-
 // placeRef checks a place id field (a map pin's place, a location) and,
 // with host checks, that find_place returned it in this conversation.
 func (v *validator) placeRef(field, id string) error {
-	if !placeIDRegexp.MatchString(id) {
-		return fmt.Errorf("%s %q must be a place id returned by find_place, such as place:4b2f9c0e1a77", field, id)
-	}
 	if v.opts.SkipHostChecks {
 		return nil
 	}
@@ -211,30 +181,16 @@ func (v *validator) placeRef(field, id string) error {
 }
 
 // stampedPoint checks the output-only lat and lon at field (".lat" and
-// ".lon" are appended). The host fills them in; a visual from the model
-// must leave them out, and stored ones must be a pair on a place id.
+// ".lon" are appended) of a stored surface: the schema keeps them out of a
+// visual from the model, and the host stamps them as a pair on a place id.
 func (v *validator) stampedPoint(field, placeID string, lat, lon *float64) error {
 	if lat == nil && lon == nil {
 		return nil
-	}
-	if !v.opts.SkipHostChecks {
-		return fmt.Errorf("%s.lat and .lon are filled in from find_place; leave them out and never type coordinates", field)
 	}
 	if lat == nil || lon == nil || placeID == "" {
 		return fmt.Errorf("%s.lat and .lon come as a pair with a place id", field)
 	}
 	return validCoordinates(field, *lat, *lon)
-}
-
-// stampedText checks an output-only text field the host fills in.
-func (v *validator) stampedText(field, value string, maximum int) error {
-	if value == "" {
-		return nil
-	}
-	if !v.opts.SkipHostChecks {
-		return fmt.Errorf("%s is filled in from find_place; leave it out", field)
-	}
-	return optional(field, value, maximum)
 }
 
 func validCoordinates(field string, lat, lon float64) error {

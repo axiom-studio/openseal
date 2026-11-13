@@ -65,7 +65,7 @@ var catalogue = map[string]typeSpec{
 	"caption":         {payload: "text", text: bounds{1, maxCaptionRunes}, sentence: "Small print under a visual (sources, assumptions)."},
 	"divider":         {payload: "text", payloadOptional: true, text: bounds{0, maxDividerRunes}, sentence: "Visual break, optionally labelled."},
 	"section":         {children: bounds{1, maxChildren}, sentence: "Group of children under the component title."},
-	"grid":            {payload: "grid", children: bounds{1, maxChildren}, validate: validateGrid, sentence: "Children side by side in 2-4 columns."},
+	"grid":            {payload: "grid", children: bounds{1, maxChildren}, sentence: "Children side by side in 2-4 columns."},
 	"tabs":            {payload: "tabs", validate: validateTabs, sentence: "2-5 alternative views, e.g. Simple / Detailed."},
 	"carousel":        {children: bounds{2, maxCarouselCards}, sentence: "2-10 swipeable cards, e.g. recipes or places."},
 	"chart":           {payload: "chart", summary: summaryRequired, validate: validateChart, sentence: "Trend or distribution of numbers; pie and donut take one series of at most 7 slices; stacked_bar and grouped_bar need 2+ series with the same labels; scatter labels are x numbers."},
@@ -99,9 +99,9 @@ var catalogue = map[string]typeSpec{
 	"progress":        {payload: "progress", summary: summaryRequired, validate: validateProgress, sentence: "Values against targets."},
 	"poll":            {payload: "poll", summary: summaryRequired, validate: validatePoll, sentence: "A group vote; people can change their vote and you hear the tally once everyone has voted."},
 	"explorer":        {payload: "explorer", summary: summaryRequired, validate: validateExplorer, sentence: "A what-if: people move inputs and outputs recompute. Expressions use input ids, + - * / ^, comparisons, && || !, min max round floor ceil abs sqrt log exp, if(c,a,b), sum(i,from,to,body); a toggle is true/false."},
-	"routine":         {payload: "routine", payloadOptional: true, summary: summaryRequired, bindings: []BindingKind{BindingRunbook}, bindingRequired: true, validate: validateRoutine, sentence: "A routine with live schedule, status and buttons; items are its latest highlights."},
+	"routine":         {payload: "routine", payloadOptional: true, summary: summaryRequired, bindings: []BindingKind{BindingRunbook}, bindingRequired: true, sentence: "A routine with live schedule, status and buttons; items are its latest highlights."},
 	"tasks":           {payload: "tasks", summary: summaryRequired, bindings: []BindingKind{}, validate: validateTasks, sentence: "Work handed to helpers in this chat, each row bound to its task; status is live."},
-	"agent":           {payload: "agent", summary: summaryRequired, bindings: []BindingKind{BindingAgent}, bindingRequired: true, validate: validateAgentCard, sentence: "Introduces an agent people can start chatting with."},
+	"agent":           {payload: "agent", summary: summaryRequired, bindings: []BindingKind{BindingAgent}, bindingRequired: true, sentence: "Introduces an agent people can start chatting with."},
 	"map":             {payload: "map", summary: summaryRequired, validate: validateMap, sentence: "Pins for 1-20 real places from find_place; tap a pin for its detail."},
 	"actions":         {payload: "actions", validate: validateActions, sentence: "Up to 4 buttons: respond sends a reply to you; approval and entity act on the bound item."},
 }
@@ -138,43 +138,14 @@ type Tab struct {
 	Children []Component `json:"children"`
 }
 
-// layoutAndText checks the limits a type spec carries itself: the number
-// of children and the length of a text payload.
-func layoutAndText(spec typeSpec, c Component) error {
-	if spec.children.max > 0 && (len(c.Children) < spec.children.min || len(c.Children) > spec.children.max) {
-		return fmt.Errorf("%s needs %d-%d children (got %d)", c.Type, spec.children.min, spec.children.max, len(c.Children))
-	}
-	if spec.payload == "text" {
-		if err := boundedText(c.Text, spec.text.min, spec.text.max); err != nil {
-			return fmt.Errorf("text %w", err)
-		}
-	}
-	return nil
-}
-
-func validateGrid(_ *validator, c Component, _ string) error {
-	if c.Grid == nil || c.Grid.Columns < minGridColumns || c.Grid.Columns > maxGridColumns {
-		return fmt.Errorf("grid.columns must be %d-%d", minGridColumns, maxGridColumns)
-	}
-	return nil
-}
-
 func validateTabs(_ *validator, c Component, _ string) error {
-	if len(c.Tabs) < minTabs || len(c.Tabs) > maxTabs {
-		return fmt.Errorf("tabs needs %d-%d tabs (got %d)", minTabs, maxTabs, len(c.Tabs))
-	}
 	labels := map[string]bool{}
 	for index, tab := range c.Tabs {
-		if err := required(fmt.Sprintf("tabs[%d].label", index), tab.Label, maxTabLabelRunes); err != nil {
-			return err
-		}
-		if labels[strings.TrimSpace(tab.Label)] {
+		label := strings.TrimSpace(tab.Label)
+		if labels[label] {
 			return fmt.Errorf("tabs[%d].label %q is used twice", index, tab.Label)
 		}
-		labels[strings.TrimSpace(tab.Label)] = true
-		if len(tab.Children) < 1 || len(tab.Children) > maxChildren {
-			return fmt.Errorf("tabs[%d] needs 1-%d children (got %d)", index, maxChildren, len(tab.Children))
-		}
+		labels[label] = true
 	}
 	return nil
 }
@@ -242,45 +213,21 @@ const (
 
 func validateChart(_ *validator, c Component, _ string) error {
 	chart := c.Chart
-	if chart == nil {
-		return payloadRequired("chart")
-	}
-	if !contains(ChartKinds, chart.Kind) {
-		return fmt.Errorf("chart.kind %q is not one of %s", chart.Kind, strings.Join(ChartKinds, ", "))
-	}
-	for _, check := range []error{
-		optional("chart.xLabel", chart.XLabel, maxChartAxisLabelRunes), optional("chart.yLabel", chart.YLabel, maxChartAxisLabelRunes), optional("chart.unit", chart.Unit, maxUnitRunes),
-		validateFormat("chart", chart.Format, chart.Currency), bounded("chart.series", len(chart.Series), 1, MaxChartSeries),
-	} {
-		if check != nil {
-			return check
-		}
+	if err := validateFormat("chart", chart.Format, chart.Currency); err != nil {
+		return err
 	}
 	labels := map[string]bool{}
 	names := map[string]bool{}
 	for index, series := range chart.Series {
 		at := fmt.Sprintf("chart.series[%d]", index)
-		if err := required(at+".name", series.Name, maxChartSeriesNameRunes); err != nil {
-			return err
-		}
 		if names[series.Name] {
 			return fmt.Errorf("%s.name %q is used twice", at, series.Name)
 		}
 		names[series.Name] = true
-		if err := bounded(at+".points", len(series.Points), 1, MaxChartPoints); err != nil {
-			return err
-		}
 		for point, value := range series.Points {
-			pointAt := fmt.Sprintf("%s.points[%d]", at, point)
-			if err := required(pointAt+".label", value.Label, maxChartPointLabelRunes); err != nil {
-				return err
-			}
-			if math.IsNaN(value.Value) || math.IsInf(value.Value, 0) {
-				return fmt.Errorf("%s.value must be a finite number", pointAt)
-			}
 			if chart.Kind == "scatter" {
 				if x, err := strconv.ParseFloat(strings.TrimSpace(value.Label), 64); err != nil || math.IsNaN(x) || math.IsInf(x, 0) {
-					return fmt.Errorf("%s.label %q must be a number: in a scatter chart the label is the x value", pointAt, value.Label)
+					return fmt.Errorf("%s.points[%d].label %q must be a number: in a scatter chart the label is the x value", at, point, value.Label)
 				}
 			}
 			labels[value.Label] = true
@@ -309,24 +256,9 @@ func validateChart(_ *validator, c Component, _ string) error {
 			}
 		}
 	}
-	if err := bounded("chart.annotations", len(chart.Annotations), 0, MaxChartAnnotations); err != nil {
-		return err
-	}
 	for index, annotation := range chart.Annotations {
-		at := fmt.Sprintf("chart.annotations[%d]", index)
 		if !labels[annotation.X] {
-			return fmt.Errorf("%s.x %q must be the label of a point in the chart", at, annotation.X)
-		}
-		if err := required(at+".label", annotation.Label, maxChartNoteRunes); err != nil {
-			return err
-		}
-	}
-	if line := chart.ReferenceLine; line != nil {
-		if math.IsNaN(line.Value) || math.IsInf(line.Value, 0) {
-			return errors.New("chart.referenceLine.value must be a finite number")
-		}
-		if err := optional("chart.referenceLine.label", line.Label, maxChartNoteRunes); err != nil {
-			return err
+			return fmt.Errorf("chart.annotations[%d].x %q must be the label of a point in the chart", index, annotation.X)
 		}
 	}
 	if highlight := chart.Highlight; highlight != nil {
@@ -383,52 +315,19 @@ const (
 )
 
 func validateForm(_ *validator, c Component, _ string) error {
-	f := c.Form
-	if f == nil {
-		return errors.New("form payload is required")
-	}
-	if err := optional("form.description", f.Description, maxFormDescriptionRunes); err != nil {
-		return err
-	}
-	if err := optional("form.submitLabel", f.SubmitLabel, maxFormSubmitLabelRunes); err != nil {
-		return err
-	}
-	if len(f.Fields) == 0 || len(f.Fields) > maxFormFields {
-		return fmt.Errorf("form.fields needs 1-%d fields (got %d)", maxFormFields, len(f.Fields))
-	}
 	seen := map[string]bool{}
-	for index, field := range f.Fields {
+	for index, field := range c.Form.Fields {
 		at := fmt.Sprintf("form.fields[%d]", index)
-		if !opaqueID.MatchString(field.ID) || seen[field.ID] {
-			return fmt.Errorf("%s.id %q must be a unique id matching %s", at, field.ID, opaqueIDPattern)
+		if seen[field.ID] {
+			return fmt.Errorf("%s.id %q is used twice", at, field.ID)
 		}
 		seen[field.ID] = true
-		if !contains(FormFieldTypes, field.Type) {
-			return fmt.Errorf("%s.type %q is not one of %s", at, field.Type, strings.Join(FormFieldTypes, ", "))
-		}
-		if err := required(at+".label", field.Label, maxFormLabelRunes); err != nil {
-			return err
-		}
-		if err := optional(at+".description", field.Description, maxFormFieldDetailRunes); err != nil {
-			return err
-		}
-		if err := optional(at+".placeholder", field.Placeholder, maxFormPlaceholderRunes); err != nil {
-			return err
-		}
 		choice := field.Type == "select" || field.Type == "radio"
-		if choice && (len(field.Options) == 0 || len(field.Options) > maxFormOptions) {
-			return fmt.Errorf("%s is a %s field and needs 1-%d options (got %d)", at, field.Type, maxFormOptions, len(field.Options))
+		if choice && len(field.Options) == 0 {
+			return fmt.Errorf("%s is a %s field and needs 1-%d options (got 0)", at, field.Type, maxFormOptions)
 		}
 		if !choice && len(field.Options) > 0 {
 			return fmt.Errorf("%s.options are only allowed on select and radio fields", at)
-		}
-		for option, value := range field.Options {
-			if err := required(fmt.Sprintf("%s.options[%d].label", at, option), value.Label, maxFormLabelRunes); err != nil {
-				return err
-			}
-			if err := required(fmt.Sprintf("%s.options[%d].value", at, option), value.Value, maxFormLabelRunes); err != nil {
-				return err
-			}
 		}
 		if (field.Min != nil || field.Max != nil) && field.Type != "number" {
 			return fmt.Errorf("%s.min/max are only allowed on number fields", at)
@@ -510,9 +409,7 @@ func (c *TableCell) UnmarshalJSON(raw []byte) error {
 		c.Text = &text
 	case trimmed[0] == '{':
 		var ref ImageRef
-		decoder := json.NewDecoder(bytes.NewReader(trimmed))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&ref); err != nil {
+		if err := json.Unmarshal(trimmed, &ref); err != nil {
 			return fmt.Errorf("a table cell object must be an image reference {artifactId, version}: %w", err)
 		}
 		c.Image = &ref
@@ -528,28 +425,13 @@ func (c *TableCell) UnmarshalJSON(raw []byte) error {
 
 func validateTable(v *validator, c Component, _ string) error {
 	t := c.Table
-	if t == nil {
-		return payloadRequired("table")
-	}
-	if err := bounded("table.columns", len(t.Columns), 1, MaxTableColumns); err != nil {
-		return err
-	}
 	columns := map[string]TableColumn{}
 	for index, column := range t.Columns {
 		at := fmt.Sprintf("table.columns[%d]", index)
-		if !itemID.MatchString(column.Key) {
-			return fmt.Errorf("%s.key %q must match %s", at, column.Key, itemIDPattern)
-		}
 		if _, used := columns[column.Key]; used {
 			return fmt.Errorf("%s.key %q is used twice", at, column.Key)
 		}
 		columns[column.Key] = column
-		if err := required(at+".label", column.Label, maxColumnLabelRunes); err != nil {
-			return err
-		}
-		if !contains(TableColumnKinds, column.Kind) {
-			return fmt.Errorf("%s.kind %q is not one of %s", at, column.Kind, strings.Join(TableColumnKinds, ", "))
-		}
 		if column.Kind == "currency" {
 			if err := validateCurrency(at, column.Currency); err != nil {
 				return err
@@ -557,9 +439,6 @@ func validateTable(v *validator, c Component, _ string) error {
 		} else if column.Currency != "" {
 			return fmt.Errorf("%s.currency is only used by currency columns", at)
 		}
-	}
-	if err := bounded("table.rows", len(t.Rows), 0, MaxTableRows); err != nil {
-		return err
 	}
 	for index, row := range t.Rows {
 		keys := make([]string, 0, len(row))
@@ -582,18 +461,9 @@ func validateTable(v *validator, c Component, _ string) error {
 }
 
 func (v *validator) tableCell(at string, column TableColumn, cell TableCell) error {
-	set := 0
-	for _, present := range []bool{cell.Text != nil, cell.Number != nil, cell.Image != nil} {
-		if present {
-			set++
-		}
-	}
-	if set != 1 {
-		return fmt.Errorf("%s must be one value", at)
-	}
 	switch column.Kind {
 	case "number", "currency", "percent":
-		if cell.Number == nil || math.IsNaN(*cell.Number) || math.IsInf(*cell.Number, 0) {
+		if cell.Number == nil {
 			return fmt.Errorf("%s must be a number because column %q is %s", at, column.Key, column.Kind)
 		}
 	case "date":
@@ -609,7 +479,6 @@ func (v *validator) tableCell(at string, column TableColumn, cell TableCell) err
 		if cell.Text == nil {
 			return fmt.Errorf("%s must be text because column %q is %s", at, column.Key, column.Kind)
 		}
-		return optional(at, *cell.Text, MaxTableCellRunes)
 	}
 	return nil
 }
@@ -673,36 +542,9 @@ var (
 )
 
 func validateStatRow(_ *validator, c Component, _ string) error {
-	if c.StatRow == nil {
-		return errors.New("stat_row payload is required")
-	}
-	stats := c.StatRow.Stats
-	if len(stats) == 0 || len(stats) > maxStats {
-		return fmt.Errorf("stat_row.stats needs 1-%d stats (got %d)", maxStats, len(stats))
-	}
-	for index, stat := range stats {
-		at := fmt.Sprintf("stat_row.stats[%d]", index)
-		for _, check := range []error{
-			required(at+".label", stat.Label, maxStatLabelRunes), optional(at+".unit", stat.Unit, maxUnitRunes), optional(at+".delta", stat.Delta, maxStatDeltaRunes),
-		} {
-			if check != nil {
-				return check
-			}
-		}
-		if math.IsNaN(stat.Value) || math.IsInf(stat.Value, 0) {
-			return fmt.Errorf("%s.value must be a finite number", at)
-		}
-		if err := validateFormat(at, stat.Format, stat.Currency); err != nil {
+	for index, stat := range c.StatRow.Stats {
+		if err := validateFormat(fmt.Sprintf("stat_row.stats[%d]", index), stat.Format, stat.Currency); err != nil {
 			return err
-		}
-		if stat.Trend != "" && !contains(Trends, stat.Trend) {
-			return fmt.Errorf("%s.trend %q is not one of up, down, flat", at, stat.Trend)
-		}
-		if stat.GoodDirection != "" && !contains(GoodDirections, stat.GoodDirection) {
-			return fmt.Errorf("%s.goodDirection %q is not one of up, down", at, stat.GoodDirection)
-		}
-		if len(stat.Sparkline) > maxSparkline {
-			return fmt.Errorf("%s.sparkline allows at most %d values (got %d)", at, maxSparkline, len(stat.Sparkline))
 		}
 	}
 	return nil

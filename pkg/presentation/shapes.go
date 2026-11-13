@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"regexp"
-	"strings"
 
 	"golang.org/x/text/currency"
 )
@@ -33,16 +31,7 @@ func (f ImageResolverFunc) ResolveImage(ctx context.Context, ref ImageRef) error
 }
 
 func (v *validator) image(path string, ref *ImageRef) error {
-	if ref == nil {
-		return nil
-	}
-	if !opaqueID.MatchString(ref.ArtifactID) {
-		return fmt.Errorf("%s.artifactId %q must be the id of an image in this chat", path, ref.ArtifactID)
-	}
-	if ref.Version < 1 {
-		return fmt.Errorf("%s.version must be 1 or more", path)
-	}
-	if v.opts.SkipHostChecks {
+	if ref == nil || v.opts.SkipHostChecks {
 		return nil
 	}
 	if v.opts.Images == nil {
@@ -72,26 +61,16 @@ type Amount struct {
 }
 
 func validateAmount(at string, amount Amount) error {
-	if math.IsNaN(amount.Value) || math.IsInf(amount.Value, 0) {
-		return fmt.Errorf("%s.value must be a finite number", at)
-	}
-	if err := optional(at+".unit", amount.Unit, maxUnitRunes); err != nil {
-		return err
-	}
 	return validateFormat(at, amount.Format, amount.Currency)
 }
 
 // validateFormat checks a number format and its currency.
 func validateFormat(at string, format StatFormat, code string) error {
-	switch format {
-	case "", StatNumber, StatPercent, StatDuration:
-		if code != "" {
-			return fmt.Errorf("%s.currency is only used with format currency", at)
-		}
-	case StatCurrency:
+	if format == StatCurrency {
 		return validateCurrency(at, code)
-	default:
-		return fmt.Errorf("%s.format %q is not one of number, currency, percent, duration", at, format)
+	}
+	if code != "" {
+		return fmt.Errorf("%s.currency is only used with format currency", at)
 	}
 	return nil
 }
@@ -108,17 +87,12 @@ func validateCurrency(at, code string) error {
 	return nil
 }
 
-// Item ids name the items of a component (steps, options, chips) and are
-// unique within it.
-var itemID = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
-
+// itemIDPattern is the id of an item inside a component (steps, options,
+// chips).
 const itemIDPattern = `^[a-z0-9][a-z0-9_-]{0,39}$`
 
 // itemIDs checks one item id and records it in seen.
 func itemIDs(seen map[string]bool, at, id string) error {
-	if !itemID.MatchString(id) {
-		return fmt.Errorf("%s.id %q must match %s (lowercase letters, digits, - and _)", at, id, itemIDPattern)
-	}
 	if seen[id] {
 		return fmt.Errorf("%s.id %q is used twice", at, id)
 	}
@@ -133,10 +107,7 @@ var (
 
 // markdown checks a markdown field: GFM without HTML or images. $…$ math is
 // allowed.
-func markdown(field, value string, minimum, maximum int) error {
-	if err := boundedText(value, minimum, maximum); err != nil {
-		return fmt.Errorf("%s %w", field, err)
-	}
+func markdown(field, value string) error {
 	if markdownHTML.MatchString(value) {
 		return fmt.Errorf("%s must not contain HTML tags; use markdown", field)
 	}
@@ -146,26 +117,4 @@ func markdown(field, value string, minimum, maximum int) error {
 	return nil
 }
 
-// bounded checks a list length.
-func bounded(field string, length, minimum, maximum int) error {
-	if length < minimum || length > maximum {
-		if minimum == 0 {
-			return fmt.Errorf("%s allows at most %d (got %d)", field, maximum, length)
-		}
-		return fmt.Errorf("%s needs %d-%d (got %d)", field, minimum, maximum, length)
-	}
-	return nil
-}
-
-func oneOf(field, value string, allowed []string) error {
-	if value != "" && !contains(allowed, value) {
-		return fmt.Errorf("%s %q is not one of %s", field, value, strings.Join(allowed, ", "))
-	}
-	return nil
-}
-
 var errPayloadMissing = errors.New("payload is required")
-
-func payloadRequired(name string) error {
-	return fmt.Errorf("%s %w", name, errPayloadMissing)
-}

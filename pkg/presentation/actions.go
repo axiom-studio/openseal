@@ -45,22 +45,14 @@ const (
 )
 
 func validateActions(v *validator, c Component, _ string) error {
-	if len(c.Actions) == 0 || len(c.Actions) > MaxActions {
-		return fmt.Errorf("actions needs 1-%d actions (got %d)", MaxActions, len(c.Actions))
-	}
 	ids := map[string]bool{}
 	for index, action := range c.Actions {
 		at := fmt.Sprintf("actions[%d]", index)
-		if !opaqueID.MatchString(action.ID) || ids[action.ID] {
-			return fmt.Errorf("%s.id %q must be a unique id matching %s", at, action.ID, opaqueIDPattern)
+		if ids[action.ID] {
+			return fmt.Errorf("%s.id %q is used twice", at, action.ID)
 		}
 		ids[action.ID] = true
-		if err := required(at+".label", action.Label, maxActionLabelRunes); err != nil {
-			return err
-		}
-		if err := v.icon(at+".icon", c.ID, action.Icon); err != nil {
-			return err
-		}
+		v.icon(at+".icon", c.ID, action.Icon)
 		if err := v.action(c, action, at); err != nil {
 			return err
 		}
@@ -81,9 +73,6 @@ func (v *validator) action(c Component, action Action, at string) error {
 	}
 	switch action.Kind {
 	case ActionRespond:
-		if err := optional(at+".value", action.Value, maxActionValueRunes); err != nil {
-			return err
-		}
 		return firstError(only("target", action.Target != ""), only("decision", action.Decision != ""), only("command", action.Command != ""), only("binding", action.Binding != nil))
 	case ActionEdit:
 		if err := firstError(only("value", action.Value != ""), only("decision", action.Decision != ""), only("command", action.Command != ""), only("binding", action.Binding != nil)); err != nil {
@@ -101,8 +90,8 @@ func (v *validator) action(c Component, action Action, at string) error {
 		if binding == nil || binding.Kind != BindingApproval {
 			return fmt.Errorf("%s is an approval action and needs an approval binding (on the action or the component)", at)
 		}
-		if action.Decision != "approve" && action.Decision != "reject" {
-			return fmt.Errorf("%s.decision must be approve or reject", at)
+		if action.Decision == "" {
+			return fmt.Errorf("%s.decision is required: approve or reject", at)
 		}
 	case ActionEntity:
 		if err := firstError(only("value", action.Value != ""), only("target", action.Target != ""), only("decision", action.Decision != "")); err != nil {
@@ -118,8 +107,6 @@ func (v *validator) action(c Component, action Action, at string) error {
 			}
 			return fmt.Errorf("%s.command %q is not one of %s for a %s binding", at, action.Command, strings.Join(commands, ", "), binding.Kind)
 		}
-	default:
-		return fmt.Errorf("%s.kind %q is not one of respond, edit, approval, entity", at, action.Kind)
 	}
 	if action.Binding != nil {
 		if err := v.binding(*action.Binding); err != nil {

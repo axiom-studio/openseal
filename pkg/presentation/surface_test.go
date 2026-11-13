@@ -55,7 +55,7 @@ func TestValidate(t *testing.T) {
 		{"valid chart", one(chart("c")), ValidateOptions{}, ""},
 		{"wrong schema", Surface{Schema: "openseal.dev/presentation/v1", Title: "x", State: StateReady, Components: []Component{note("a")}}, ValidateOptions{}, "schema"},
 		{"no components", one(), ValidateOptions{}, "at least one component"},
-		{"bad state", Surface{Schema: Schema, Title: "x", State: "done", Components: []Component{note("a")}}, ValidateOptions{}, "streaming or ready"},
+		{"bad state", Surface{Schema: Schema, Title: "x", State: "done", Components: []Component{note("a")}}, ValidateOptions{}, `"done" is not one of streaming, ready`},
 		{"unknown type", one(Component{ID: "x", Type: "html", Text: "<b>"}), ValidateOptions{}, `unsupported type "html"`},
 		{"canvas is gone", one(Component{ID: "x", Type: "canvas"}), ValidateOptions{}, `unsupported type "canvas"`},
 		{"metric is gone", one(Component{ID: "x", Type: "metric"}), ValidateOptions{}, `unsupported type "metric"`},

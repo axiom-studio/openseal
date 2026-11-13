@@ -1,7 +1,6 @@
 package presentation
 
 import (
-	"fmt"
 	"regexp"
 )
 
@@ -47,15 +46,9 @@ func KnownIcon(name string) bool {
 	return iconSet[name]
 }
 
-func (v *validator) icon(path, componentID, name string) error {
-	if name == "" {
-		return nil
-	}
-	if len(name) > maxIconRunes || !iconPattern.MatchString(name) {
-		return fmt.Errorf("%s %q must be a lowercase Lucide icon name such as \"circle-check\"", path, name)
-	}
-	if !KnownIcon(name) {
+// icon warns about an icon outside the curated set; it renders as a dot.
+func (v *validator) icon(path, componentID, name string) {
+	if name != "" && !KnownIcon(name) {
 		v.warn("unknown_icon", path, componentID, "icon %q is not in the curated set and renders as a dot", name)
 	}
-	return nil
 }

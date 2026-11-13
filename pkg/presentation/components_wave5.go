@@ -42,29 +42,18 @@ const (
 )
 
 func validateMap(v *validator, c Component, _ string) error {
-	pins := c.Map
-	if pins == nil {
-		return payloadRequired("map")
-	}
-	if err := bounded("map.pins", len(pins.Pins), 1, MaxMapPins); err != nil {
-		return err
-	}
 	ids := map[string]bool{}
 	places := map[string]int{}
-	for index, pin := range pins.Pins {
+	for index, pin := range c.Map.Pins {
 		at := fmt.Sprintf("map.pins[%d]", index)
-		if err := firstError(itemIDs(ids, at, pin.ID), optional(at+".label", pin.Label, MaxMapPinLabelRunes), optional(at+".detail", pin.Detail, MaxMapPinDetail)); err != nil {
+		if err := itemIDs(ids, at, pin.ID); err != nil {
 			return err
-		}
-		if pin.Place == "" {
-			return fmt.Errorf("%s.place is required: a place id returned by find_place", at)
 		}
 		if earlier, pinned := places[pin.Place]; pinned {
 			return fmt.Errorf("%s.place %s is already pinned by map.pins[%d]; pin each place once", at, pin.Place, earlier)
 		}
 		places[pin.Place] = index
-		if err := firstError(v.placeRef(at+".place", pin.Place), v.stampedText(at+".address", pin.Address, maxStampedAddressRunes),
-			v.stampedPoint(at, pin.Place, pin.Lat, pin.Lon)); err != nil {
+		if err := firstError(v.placeRef(at+".place", pin.Place), v.stampedPoint(at, pin.Place, pin.Lat, pin.Lon)); err != nil {
 			return err
 		}
 	}

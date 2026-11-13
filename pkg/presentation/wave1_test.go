@@ -344,7 +344,8 @@ func TestTableCellJSON(t *testing.T) {
 	if err != nil || string(encoded) != raw {
 		t.Fatalf("encoded = %s, %v", encoded, err)
 	}
-	for _, bad := range []string{`{"a":null}`, `{"a":true}`, `{"a":{"url":"https://x.example"}}`} {
+	// A cell object with other keys decodes; the schema rejects it.
+	for _, bad := range []string{`{"a":null}`, `{"a":true}`} {
 		var row map[string]TableCell
 		if err := json.Unmarshal([]byte(bad), &row); err == nil {
 			t.Fatalf("%s decoded", bad)
