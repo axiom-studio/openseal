@@ -254,7 +254,7 @@ func planSQLiteAppend(ctx context.Context, conn *sql.Conn, req models.AppendAgen
 	}
 	if run != nil && *req.ConsumeInterventionsThrough != run.ConsumedInterventions {
 		updated := models.CloneAgentRun(run)
-		updated.ConsumedInterventions = *req.ConsumeInterventionsThrough
+		updated.ConsumeInterventions(*req.ConsumeInterventionsThrough, req.Now)
 		updated.Revision++
 		updated.UpdatedAt = req.Now
 		plan.run = updated

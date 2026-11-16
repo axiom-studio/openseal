@@ -218,6 +218,10 @@ type AgentRunIntervention struct {
 	// AgentTrial is the reply of a try_agent trial child, delivered to the
 	// builder Run that waits on it (ActionCallID is the try_agent call).
 	AgentTrial *AgentTrialReceipt `json:"agentTrial,omitempty"`
+	// ConsumedAt is when the Run's loop appended this intervention to its
+	// session, so a UI can tell output made after it was read from output
+	// made before.
+	ConsumedAt *time.Time `json:"consumedAt,omitempty"`
 }
 
 // AgentTrialReceipt is how a try_agent trial child ended: Status is
@@ -731,6 +735,17 @@ func CloneAgentRun(in *AgentRun) *AgentRun {
 	_ = json.Unmarshal(data, &out)
 	out.Kind = NormalizeRunKind(out.Kind)
 	return &out
+}
+
+// ConsumeInterventions moves the Run's cursor to through and stamps
+// ConsumedAt on the interventions it passes. Session stores call it inside
+// the step's context append, so the stamp commits with the entries.
+func (r *AgentRun) ConsumeInterventions(through int, now time.Time) {
+	for i := max(r.ConsumedInterventions, 0); i < through && i < len(r.PendingInterventions); i++ {
+		consumedAt := now
+		r.PendingInterventions[i].ConsumedAt = &consumedAt
+	}
+	r.ConsumedInterventions = through
 }
 
 func SummarizeAgentRunOwners(runs []*AgentRun, owners []ObjectiveOwner) []AgentRunOwnerSummary {

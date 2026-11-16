@@ -145,7 +145,7 @@ func (s *Store) appendAgentSessionEntriesCoreTx(ctx context.Context, tx *sql.Tx,
 	}
 	if run != nil && *req.ConsumeInterventionsThrough != run.ConsumedInterventions {
 		updated := models.CloneAgentRun(run)
-		updated.ConsumedInterventions = *req.ConsumeInterventionsThrough
+		updated.ConsumeInterventions(*req.ConsumeInterventionsThrough, req.Now)
 		updated.Revision = run.Revision + 1
 		updated.UpdatedAt = req.Now
 		if err := s.updatePostgresAgentRunTx(ctx, tx, updated, run.Revision); err != nil {

@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
 )
@@ -44,16 +45,21 @@ func conformCursorAdvancesWithAppend(f *SessionFixture) {
 		}
 	})
 	before := f.Run(run.ID)
+	firstAt, secondAt := f.Now.Add(time.Second), f.Now.Add(2*time.Second)
 	steer := &models.SessionEntry{ID: "s1", Type: models.SessionEntryUser, SourceKey: models.InterventionSourceKey("iv1"), User: &models.UserEntry{
 		Origin: models.UserEntryIntervention, InterventionID: "iv1", Author: models.SessionAuthor{Type: "user", ID: "u1"}, Content: []models.ContentPart{TextPart("steer iv1")},
 	}}
 	one := 1
 	req := f.AppendRequest(session.ID, run.ID, steer)
 	req.ConsumeInterventionsThrough = &one
+	req.Now = firstAt
 	if _, err := f.Store.AppendAgentSessionEntries(f.Ctx, req); err != nil {
 		f.T.Fatal(err)
 	}
 	after := f.Run(run.ID)
+	if after.PendingInterventions[1].ConsumedAt != nil {
+		f.T.Fatalf("unconsumed intervention stamped %v", after.PendingInterventions[1].ConsumedAt)
+	}
 	if after.ConsumedInterventions != 1 || after.Revision != before.Revision+1 {
 		f.T.Fatalf("run after cursor append: consumed=%d revision=%d (was %d)", after.ConsumedInterventions, after.Revision, before.Revision)
 	}
@@ -61,11 +67,19 @@ func conformCursorAdvancesWithAppend(f *SessionFixture) {
 	two := 2
 	cursorOnly := f.AppendRequest(session.ID, run.ID)
 	cursorOnly.ConsumeInterventionsThrough = &two
+	cursorOnly.Now = secondAt
 	if _, err := f.Store.AppendAgentSessionEntries(f.Ctx, cursorOnly); err != nil {
 		f.T.Fatal(err)
 	}
 	if got := f.Run(run.ID); got.ConsumedInterventions != 2 || got.Revision != after.Revision+1 {
 		f.T.Fatalf("cursor-only append: consumed=%d revision=%d", got.ConsumedInterventions, got.Revision)
+	}
+	// Each intervention is stamped by the append that consumed it; a later
+	// append never restamps an earlier one.
+	for i, want := range []time.Time{firstAt, secondAt} {
+		if got := f.Run(run.ID).PendingInterventions[i].ConsumedAt; got == nil || !got.Equal(want) {
+			f.T.Fatalf("intervention %d consumedAt = %v, want %v", i, got, want)
+		}
 	}
 	revision := f.Run(run.ID).Revision
 	// Backwards or past the end fails and writes nothing.
