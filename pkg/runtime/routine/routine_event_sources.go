@@ -101,10 +101,13 @@ type EventSourceChannel struct {
 }
 
 // EventSourceView is one event_sources entry: the host option plus the
-// endpoint channels of a Slack or Telegram connection.
+// endpoint channels of a Slack or Telegram connection. AllChannels is set
+// when the umbrella has a workspace-wide endpoint on the connection: it is
+// in every conversation the app is in, so any channel may be named.
 type EventSourceView struct {
 	EventSourceOption
-	Channels []EventSourceChannel `json:"channels,omitempty"`
+	Channels    []EventSourceChannel `json:"channels,omitempty"`
+	AllChannels bool                 `json:"allChannels,omitempty"`
 }
 
 // routineEventActions is what the event routine actions need from the host.
@@ -212,8 +215,15 @@ func routineConversationSources(ctx context.Context, store interface{}, scope mo
 				sourceRef := models.RoutineConversationSourceRef(endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID, endpoint.InstallationID)
 				view := add(kind, sourceRef, "")
 				// Direct conversations never feed routines (E14).
+				if endpoint.Mode != capability.ConversationEndpointChannel {
+					continue
+				}
+				if endpoint.InstallationWide {
+					view.AllChannels = true
+					continue
+				}
 				address := strings.TrimSpace(endpoint.Address)
-				if endpoint.Mode != capability.ConversationEndpointChannel || address == "" || endpoint.InstallationWide {
+				if address == "" {
 					continue
 				}
 				if !slices.ContainsFunc(view.Channels, func(channel EventSourceChannel) bool { return channel.ID == address }) {
@@ -422,6 +432,9 @@ func (c *routineEventSourceChecker) SourceExists(ctx context.Context, subscripti
 		if index < 0 {
 			return false, nil
 		}
+		if views[index].AllChannels {
+			return true, nil
+		}
 		for _, channel := range subscription.Channels {
 			if !slices.ContainsFunc(views[index].Channels, func(endpoint EventSourceChannel) bool {
 				return strings.EqualFold(endpoint.ID, channel)
@@ -478,6 +491,7 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 		trigger.Calendar = &calendar
 	}
 	var channels []EventSourceChannel
+	allChannels := false
 	if args.Kind == models.RoutineEventWebhook {
 		if source != EventSourceNew {
 			return nil, errors.New("a webhook routine's source must be \"new\"")
@@ -512,13 +526,13 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 		if (args.Kind == models.RoutineEventGmailMessage || args.Kind == models.RoutineEventCalendar) && !routineGoogleSourceOf(option.Source, run.ActingUser) {
 			return nil, errors.New("Gmail and Calendar routines use only your own Google sign-in")
 		}
-		trigger.SourceRef, trigger.SourceLabel, channels = option.Source, option.Label, option.Channels
+		trigger.SourceRef, trigger.SourceLabel, channels, allChannels = option.Source, option.Label, option.Channels, option.AllChannels
 	}
 	if err := trigger.Validate(); err != nil {
 		return nil, err
 	}
 	if field := models.RoutineEventPlaceField(trigger.Kind); field != "" {
-		if err := pinRoutineEventChannels(trigger, field, channels); err != nil {
+		if err := pinRoutineEventChannels(trigger, field, channels, allChannels); err != nil {
 			return nil, err
 		}
 	}
@@ -528,8 +542,10 @@ func resolveRoutineEventTrigger(ctx context.Context, store interface{}, events r
 // pinRoutineEventChannels requires every channel or chat a Slack or Telegram
 // routine names to be a conversation the umbrella has an active endpoint in
 // on that connection (E14), and labels unlabeled conditions with the
-// endpoint's name.
-func pinRoutineEventChannels(trigger *models.RoutineEventTrigger, field string, channels []EventSourceChannel) error {
+// endpoint's name. A workspace-wide endpoint is in every conversation, so
+// allChannels accepts any channel; only those with their own endpoint get a
+// label.
+func pinRoutineEventChannels(trigger *models.RoutineEventTrigger, field string, channels []EventSourceChannel, allChannels bool) error {
 	find := func(value string) *EventSourceChannel {
 		value = strings.TrimSpace(value)
 		for index := range channels {
@@ -551,6 +567,10 @@ func pinRoutineEventChannels(trigger *models.RoutineEventTrigger, field string, 
 		names := make([]string, 0, len(values))
 		for _, value := range values {
 			channel := find(value)
+			if channel == nil && allChannels {
+				names = append(names, "")
+				continue
+			}
 			if channel == nil {
 				return fmt.Errorf("%s %q is not a conversation this chat's Agent or Team is set up in on that connection; use a channel from event_sources", field, strings.TrimSpace(value))
 			}
