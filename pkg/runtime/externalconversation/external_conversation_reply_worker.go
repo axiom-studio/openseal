@@ -189,12 +189,15 @@ func (w *ReplyWorker) projectReply(
 	if conversationrun.ExternalInboxItemIsFollowUp(item, run) {
 		return nil, nil // The Run's own trigger item delivers its single reply.
 	}
-	if run.Status != models.AgentRunStatusCompleted && run.Status != models.AgentRunStatusFailed {
-		return nil, errExternalReplyPending
-	}
 	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, item.Scope, item.EndpointID)
 	if err != nil {
 		return nil, err
+	}
+	if err := w.projectRunMessages(ctx, item, endpoint, run); err != nil {
+		return nil, err
+	}
+	if run.Status != models.AgentRunStatusCompleted && run.Status != models.AgentRunStatusFailed {
+		return nil, errExternalReplyPending
 	}
 	// Pausing or retiring an endpoint intentionally cancels any response that
 	// has not yet crossed the external delivery boundary. Applied inbox items
@@ -612,4 +615,71 @@ func (w *ReplyWorker) failureSuperseded(
 		}
 		filter.AfterSequence = messages[len(messages)-1].Sequence
 	}
+}
+
+// projectRunMessages sends what the Run posted before its reply (a
+// clarification question, a progress update) to the thread the request came
+// from. People who wrote in Slack only see Slack, so a question left in the
+// web channel would park the Run until someone happened to open HelloSeal.
+// The final answer keeps its own path above; approval requests have theirs
+// in the approval notification worker.
+func (w *ReplyWorker) projectRunMessages(
+	ctx context.Context,
+	item *models.ExternalConversationInboxItem,
+	endpoint *models.ExternalConversationEndpoint,
+	run *models.AgentRun,
+) error {
+	if endpoint == nil || endpoint.Status != models.ExternalConversationEndpointActive {
+		return nil
+	}
+	trigger, err := w.conversations.GetChannelMessage(ctx, item.Scope, item.ConversationID, item.ChannelMessageID)
+	if err != nil {
+		return err
+	}
+	filter := models.ChannelMessageFilter{Scope: item.Scope, ConversationID: item.ConversationID, AfterSequence: trigger.Sequence, Limit: 100}
+	for {
+		messages, err := w.store.ListChannelMessages(ctx, filter)
+		if err != nil {
+			return err
+		}
+		for _, message := range messages {
+			if !externalRunInterimMessage(message, run) {
+				continue
+			}
+			if _, err := w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+				Scope: item.Scope, EndpointID: endpoint.ID,
+				Operation:      capability.ConversationDeliveryMessageSend,
+				ConversationID: item.ConversationID, ChannelMessageID: message.ID,
+				ExternalConversationID: item.Event.ExternalConversationID,
+				ExternalThreadID:       externalConversationReplyThread(item, endpoint),
+				IdempotencyKey:         "external-conversation-run-message:" + message.ID,
+			}); err != nil {
+				return err
+			}
+		}
+		if len(messages) < filter.Limit {
+			return nil
+		}
+		last := messages[len(messages)-1]
+		if last == nil || last.Sequence <= filter.AfterSequence {
+			return models.ErrExternalConversationConflict
+		}
+		filter.AfterSequence = last.Sequence
+	}
+}
+
+// externalRunInterimMessage reports whether an Agent message the Run posted
+// is one projectRunMessages sends: anything but its answer and approvals.
+func externalRunInterimMessage(message *models.ChannelMessage, run *models.AgentRun) bool {
+	if message == nil || message.Historical || message.Sender.Type != models.ConversationParticipantAgent ||
+		message.Intent == models.MessageIntentAnswer || message.Intent == models.MessageIntentApprovalRequest ||
+		message.Audience.Kind != models.ConversationAudienceChannel || strings.TrimSpace(message.Content) == "" {
+		return false
+	}
+	for _, reference := range message.References {
+		if reference.Kind == models.ConversationReferenceRun && reference.ID == run.ID {
+			return true
+		}
+	}
+	return false
 }
