@@ -385,6 +385,11 @@ type (
 	ConversationAudience                 = models.ConversationAudience
 	ConversationReferenceKind            = models.ConversationReferenceKind
 	ConversationReference                = models.ConversationReference
+	ArtifactAnchor                       = models.ArtifactAnchor
+	ArtifactAnchorType                   = models.ArtifactAnchorType
+	AnchorRect                           = models.AnchorRect
+	AnchorPoint                          = models.AnchorPoint
+	AnchorAppState                       = models.AnchorAppState
 	ConversationArchiveSource            = conversation.ArchiveSource
 	ConversationArchiveMessage           = conversation.ArchiveMessage
 	ImportConversationArchiveRequest     = conversation.ImportConversationArchiveRequest
@@ -1825,6 +1830,13 @@ const (
 	ConversationReferenceArtifact       = models.ConversationReferenceArtifact
 	ConversationReferenceActivity       = models.ConversationReferenceActivity
 	ConversationReferenceExternalSource = models.ConversationReferenceExternalSource
+
+	ArtifactAnchorText      = models.ArtifactAnchorText
+	ArtifactAnchorParagraph = models.ArtifactAnchorParagraph
+	ArtifactAnchorLayout    = models.ArtifactAnchorLayout
+	ArtifactAnchorCell      = models.ArtifactAnchorCell
+	ArtifactAnchorElement   = models.ArtifactAnchorElement
+	ArtifactAnchorPoint     = models.ArtifactAnchorPoint
 
 	ConversationPresenceTyping   = models.ConversationPresenceTyping
 	ConversationPresenceThinking = models.ConversationPresenceThinking

@@ -2,7 +2,10 @@ package runloop_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun/conversationruntest"
 	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop/runlooptest"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 )
@@ -388,5 +392,60 @@ func TestTeamFollowUpAppendsToEveryMemberSession(t *testing.T) {
 func runHasFollowUp(run *models.AgentRun, messageID string) bool {
 	return slices.ContainsFunc(models.ConversationRunFollowUps(run), func(delivery models.ConversationMessageDelivery) bool {
 		return delivery.MessageID == messageID
+	})
+}
+
+// A comment posted while its chat's Run is working is steered into that Run
+// and reaches the session once, at the next step, with its comment block.
+func TestConversationFollowUpAnchoredCommentIngestedOnce(t *testing.T) {
+	runlooptest.ForChatStores(t, runlooptest.ChatOptions{}, func(t *testing.T, f *runlooptest.ChatFixture) {
+		page := &models.Artifact{
+			ID: "file-ab12", Version: 1, Scope: f.Conversation.Scope, Name: "Pricing page", MediaType: "text/html",
+			ContentRef: "object-store:file-ab12", SizeBytes: 4, Digest: fmt.Sprintf("sha256:%x", sha256.Sum256([]byte("page"))),
+			Classification: models.ArtifactClassificationInternal, Metadata: map[string]any{"path": "pricing/index.html"},
+			Provenance: models.ArtifactProvenance{Producer: models.ActivityActor{Type: "user", ID: "owner"}},
+		}
+		if err := f.Store.CreateArtifactVersion(f.Ctx, page, 0); err != nil {
+			t.Fatal(err)
+		}
+		f.Runner = f.NewRunner(conversationrun.TurnRunnerConfig{AttachmentContent: modelsteptest.RenderContent{page.ContentRef: []byte("page")}})
+		trigger := f.Post("first", "user-1", "Draft the pricing page")
+		run := f.StartRun(trigger)
+		binding := f.Bind(run, &runlooptest.ChatProducer{})
+		prepareChatStep(f, run, binding, 1)
+
+		current, err := f.Service.GetConversation(f.Ctx, f.Conversation.Scope, f.Conversation.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		anchor := &models.ArtifactAnchor{Type: models.ArtifactAnchorElement, Selector: "section.tiers > div:nth-child(2)", Label: "Pro tier card"}
+		posted, err := f.Service.PostChannelMessage(f.Ctx, conversation.PostChannelMessageRequest{
+			Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
+			Sender: models.ConversationParticipant{Type: models.ConversationParticipantUser, ID: "user-1"}, Intent: models.MessageIntentQuestion,
+			Content: "Make this card stand out", RequiresResponse: true, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
+			References:     []models.ConversationReference{{Kind: models.ConversationReferenceArtifact, ID: page.ID, Version: 1, Anchor: anchor}},
+			IdempotencyKey: "comment",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		comment := posted.Message
+		if delivered := f.Schedule(comment); delivered.ID != run.ID {
+			t.Fatalf("comment started a parallel Run %s", delivered.ID)
+		}
+
+		prepareChatStep(f, run, binding, 2)
+		prepareChatStep(f, run, binding, 3)
+		path := f.Path(binding.Session.ID)
+		runlooptest.ExpectChatShape(t, path, "user:"+trigger.ID, "note:run_context:"+run.ID, "user:"+comment.ID)
+		last := path[len(path)-1].User
+		body := last.Content[0].Text
+		if !strings.Contains(body, "Comment on \"Pricing page\" (artifact file-ab12, commented on v1, file pricing/index.html):\n<comment-anchor") ||
+			!strings.Contains(body, "where: element \"Pro tier card\"") || len(last.Content) != 1 {
+			t.Fatalf("comment entry = %q", body)
+		}
+		if consumed := f.Run(run.ID); consumed.ConsumedInterventions != 1 || consumed.PendingInterventions[0].ConsumedAt == nil {
+			t.Fatalf("comment not consumed once: %#v", consumed.PendingInterventions)
+		}
 	})
 }

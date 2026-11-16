@@ -271,7 +271,11 @@ func CloneConversationParticipants(in []ConversationParticipant) []ConversationP
 }
 
 func CloneConversationReferences(in []ConversationReference) []ConversationReference {
-	return append([]ConversationReference(nil), in...)
+	out := append([]ConversationReference(nil), in...)
+	for i := range out {
+		out[i].Anchor = out[i].Anchor.Clone()
+	}
+	return out
 }
 
 func CloneConversationCursor(in *ConversationCursor) *ConversationCursor {

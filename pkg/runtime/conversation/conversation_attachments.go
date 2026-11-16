@@ -66,6 +66,13 @@ type conversationAttachedArtifact struct {
 	ID      string
 	Version int64
 	Name    string
+	// Anchor, Path, Latest and Kind are set for a comment (an anchored
+	// reference): the header renders a <comment-anchor> block instead of
+	// naming it on the "Attached:" line.
+	Anchor *models.ArtifactAnchor
+	Path   string
+	Latest int64
+	Kind   string
 }
 
 // parts returns the attachment parts of one message within the per-message
@@ -85,7 +92,7 @@ func (r *AttachmentReader) parts(ctx context.Context, conversation *models.Conve
 		if ref.Kind != models.ConversationReferenceArtifact {
 			continue
 		}
-		key := fmt.Sprintf("%s:%d", ref.ID, ref.Version)
+		key := fmt.Sprintf("%s:%d:%t", ref.ID, ref.Version, ref.Anchor != nil)
 		if seen[key] {
 			continue
 		}
@@ -93,14 +100,22 @@ func (r *AttachmentReader) parts(ctx context.Context, conversation *models.Conve
 		if len(result.Attached) == conversationAttachmentsPerMessage {
 			break
 		}
-		attached := conversationAttachedArtifact{ID: ref.ID, Version: ref.Version}
+		attached := conversationAttachedArtifact{ID: ref.ID, Version: ref.Version, Anchor: ref.Anchor}
 		status, text := "unavailable", ""
 		var image *models.ContentPart
+		// The Agent reads a commented chat file with its workspace tools;
+		// several comments must not each inline the whole file.
+		workspaceFile := false
 		if artifact := r.artifact(ctx, conversation.Scope, ref); artifact != nil {
 			attached.Name = artifact.Name
+			if ref.Anchor != nil {
+				r.describeCommented(ctx, artifact, &attached)
+				workspaceFile = attached.Kind == commentedFile && attached.Path != ""
+			}
 			wrapper := len(renderConversationAttachment(attached, "supplied", "x"))
 			mediaType, _, _ := mime.ParseMediaType(artifact.MediaType)
 			switch {
+			case workspaceFile:
 			case isConversationAppArtifact(artifact):
 				status, text = readConversationApp(ctx, r.content, artifact, min(appRemaining, textBudget-wrapper))
 				appRemaining -= len(text)
@@ -123,6 +138,9 @@ func (r *AttachmentReader) parts(ctx context.Context, conversation *models.Conve
 		result.Attached = append(result.Attached, attached)
 		if image != nil {
 			result.Parts = append(result.Parts, *image)
+			continue
+		}
+		if workspaceFile {
 			continue
 		}
 		part := renderConversationAttachment(attached, status, text)

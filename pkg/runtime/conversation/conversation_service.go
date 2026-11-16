@@ -889,5 +889,6 @@ func cloneConversationReference(in *models.ConversationReference) *models.Conver
 		return nil
 	}
 	out := *in
+	out.Anchor = in.Anchor.Clone()
 	return &out
 }

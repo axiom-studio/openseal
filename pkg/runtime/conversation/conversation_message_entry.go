@@ -126,8 +126,8 @@ func MessageTime(at time.Time) string {
 }
 
 // renderConversationMessageBody is the header, the quote line, the content,
-// the builder parameters lines and, when files are attached, the "Attached:"
-// line.
+// the builder parameters lines, the "Attached:" line when files are attached
+// and a comment block per anchored reference.
 func renderConversationMessageBody(message *models.ChannelMessage, attribution string, attached []conversationAttachedArtifact) string {
 	lines := []string{renderConversationMessageHeader(message, attribution)}
 	if quote := message.Quote; quote != nil && !quote.Unavailable {
@@ -144,17 +144,22 @@ func renderConversationMessageBody(message *models.ChannelMessage, attribution s
 		lines = append(lines, conversationMessageNoText)
 	}
 	lines = append(lines, renderAgentBuilderParameters(message.BuilderParameters)...)
-	if len(attached) > 0 {
-		names := make([]string, 0, len(attached))
-		for _, file := range attached {
-			name := models.TruncateUTF8(file.Name, conversationAttachedNameBytes)
-			if name == "" {
-				name = file.ID
-			}
-			names = append(names, fmt.Sprintf("%s (artifact %s v%d)", name, file.ID, file.Version))
+	var names, comments []string
+	for _, file := range attached {
+		if file.Anchor != nil {
+			comments = append(comments, renderCommentAnchor(file))
+			continue
 		}
+		name := models.TruncateUTF8(file.Name, conversationAttachedNameBytes)
+		if name == "" {
+			name = file.ID
+		}
+		names = append(names, fmt.Sprintf("%s (artifact %s v%d)", name, file.ID, file.Version))
+	}
+	if len(names) > 0 {
 		lines = append(lines, "Attached: "+strings.Join(names, ", "))
 	}
+	lines = append(lines, comments...)
 	return strings.Join(lines, "\n")
 }
 
@@ -193,8 +198,8 @@ func readConversationMessageEntry(ctx context.Context, reader *AttachmentReader,
 	return conversationMessageEntry(session.ID, runID, message, attribution, attachments)
 }
 
-// conversationAttachedLineReserve bounds the "Attached:" line the message's
-// artifact references can add.
+// conversationAttachedLineReserve bounds the "Attached:" line and the comment
+// blocks the message's artifact references can add.
 func conversationAttachedLineReserve(message *models.ChannelMessage) int {
 	reserve, count := len("\nAttached: "), 0
 	for _, ref := range message.References {
@@ -202,6 +207,10 @@ func conversationAttachedLineReserve(message *models.ChannelMessage) int {
 			continue
 		}
 		count++
+		if ref.Anchor != nil {
+			reserve += commentAnchorReserve(ref)
+			continue
+		}
 		reserve += 2*len(ref.ID) + conversationAttachedNameBytes + len(" (artifact  v)") + 20 + len(", ")
 	}
 	return reserve

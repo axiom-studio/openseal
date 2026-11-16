@@ -301,6 +301,9 @@ type ConversationReference struct {
 	Kind    ConversationReferenceKind `json:"kind"`
 	ID      string                    `json:"id"`
 	Version int64                     `json:"version,omitempty"`
+	// Anchor makes the reference a comment on one spot of that artifact
+	// version (artifact_anchor.go).
+	Anchor *ArtifactAnchor `json:"anchor,omitempty"`
 }
 
 func (r ConversationReference) Validate() error {
@@ -315,7 +318,13 @@ func (r ConversationReference) Validate() error {
 	if !IsValidOpaqueIdentifier(r.ID, 256) || r.Version < 0 {
 		return fmt.Errorf("%w: reference id must be portable and version cannot be negative", ErrInvalidConversation)
 	}
-	return nil
+	if r.Anchor == nil {
+		return nil
+	}
+	if r.Kind != ConversationReferenceArtifact || r.Version <= 0 {
+		return fmt.Errorf("%w: only an artifact reference with a version can carry an anchor", ErrInvalidConversation)
+	}
+	return r.Anchor.Validate()
 }
 
 // ChannelMessage is a durable, user-visible collaboration fact. It never
@@ -736,10 +745,20 @@ func (m *ChannelMessage) Validate() error {
 		}
 		seenMentions[mention] = struct{}{}
 	}
+	anchored := 0
 	for _, reference := range m.References {
 		if err := reference.Validate(); err != nil {
 			return err
 		}
+		if reference.Anchor != nil {
+			anchored++
+		}
+	}
+	if anchored > 1 {
+		return fmt.Errorf("%w: a message can comment on one spot only", ErrInvalidConversation)
+	}
+	if anchored == 1 && strings.TrimSpace(m.Content) == "" {
+		return fmt.Errorf("%w: a comment needs text", ErrInvalidConversation)
 	}
 	if strings.ContainsAny(m.IdempotencyKey, "\r\n") || len(m.IdempotencyKey) > 256 {
 		return fmt.Errorf("%w: idempotency key cannot exceed 256 characters or contain line breaks", ErrInvalidConversation)
