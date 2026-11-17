@@ -115,16 +115,7 @@ func newChildFixture(t *testing.T, store models.KernelStore, opts ...looptest.Op
 		f.Control.Tasks = conversationrun.NewConversationTaskService(tasks, models.WithClock(f.Clock.Now))
 	}
 	f.Control.Forks = c.forks
-	// The task completion review reads the task through the portfolio.
 	f.Control.Portfolio = f.Raw
-	// A task's completion review: approve (Purpose acknowledgement).
-	review := &looptest.ModelRule{Name: "task-review", When: func(v looptest.StepView) bool { return v.Purpose() == models.ModelStepPurposeAcknowledgement },
-		Reply: func(looptest.StepView) models.ModelStepResult {
-			return looptest.Say(`{"decision":"approve","reason":"The report answers the accepted goal."}`)
-		}}
-	f.Model.Mu.Lock()
-	f.Model.Rules = append([]*looptest.ModelRule{review}, f.Model.Rules...)
-	f.Model.Mu.Unlock()
 	f.Control.Collaboration = collab
 	return c
 }

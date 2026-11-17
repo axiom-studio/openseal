@@ -12,7 +12,7 @@ import (
 )
 
 func TestTerminalFailureReplyUsesOnlyFixedSafeReasons(t *testing.T) {
-	for _, code := range []string{"", "unknown", "provider_access_denied: TOKEN_SECRET", "task_completion_rejected\nVERDICT_SECRET", strings.Repeat("x", 100000)} {
+	for _, code := range []string{"", "unknown", "provider_access_denied: TOKEN_SECRET", "action_failed\nVERDICT_SECRET", strings.Repeat("x", 100000)} {
 		if got, want := TerminalFailureReply(code), TerminalFailureReply("execution_failed"); got != want {
 			t.Fatalf("unclassified input entered the reply: %q", got)
 		}
@@ -21,7 +21,6 @@ func TestTerminalFailureReplyUsesOnlyFixedSafeReasons(t *testing.T) {
 		"provider_access_denied":    "denied access to the configured model",
 		"gateway_credits_exhausted": "no model credits available",
 		"provider_output_truncated": "stopped before completing its response",
-		"task_completion_rejected":  "did not meet the task's completion requirements after a revision",
 	} {
 		if reply := TerminalFailureReply(code); !strings.Contains(reply, reason) || strings.Contains(reply, code) {
 			t.Fatalf("missing bounded explanation for %s: %q", code, reply)
@@ -50,9 +49,9 @@ func TestTerminalFailureCodeOfRecordedFailure(t *testing.T) {
 	}{
 		{nil, "execution_failed"},
 		{&models.RunFailureExplanation{Kind: "execution", Code: "gateway_credits_exhausted"}, "workspace_credits_exhausted"},
-		{&models.RunFailureExplanation{Kind: "task_completion", Code: "task_completion_rejected"}, "task_completion_rejected"},
+		{&models.RunFailureExplanation{Kind: "execution", Code: "dependency_failed"}, "dependency_failed"},
 		{&models.RunFailureExplanation{Kind: "repeat_limit", Code: modelstep.RunFailureCodeErrorStreak}, "execution_failed"},
-		{&models.RunFailureExplanation{Kind: "execution", Code: "task_completion_rejected TOKEN_SECRET"}, "execution_failed"},
+		{&models.RunFailureExplanation{Kind: "execution", Code: "dependency_failed TOKEN_SECRET"}, "execution_failed"},
 		{&models.RunFailureExplanation{Kind: "workspace"}, "workspace_operation_failed"},
 		{&models.RunFailureExplanation{Kind: "execution", Code: "action_failed"}, "action_failed"},
 		// Kinds outside SPEC §2.2 carry no class of their own.
@@ -165,9 +164,6 @@ func TestTerminalRunFailureReplyReadsTheNewestFailedToolEntry(t *testing.T) {
 	}
 	rateLimited := &failureReplyLog{calls: map[string]*models.ActionCall{"rl": typed("source_rate_limited", nil)}}
 	rateLimited.entries = []*models.SessionEntry{entry("r1", models.ToolEntryError, "rl")}
-	if got := TerminalRunFailureReply(ctx, rateLimited, rateLimited, failedRun(&models.RunFailureExplanation{Code: "task_completion_rejected"})); got != TerminalFailureReply("task_completion_rejected")+" Some sources rate-limited requests (HTTP 429). Try those sources again later." {
-		t.Fatalf("task review reply lost the rate-limit hint: %q", got)
-	}
 	if got := TerminalRunFailureReply(ctx, rateLimited, rateLimited, failedRun(execution)); !strings.HasPrefix(got, "I couldn't finish this request because one or more sources rate-limited") {
 		t.Fatalf("rate-limit reply = %q", got)
 	}

@@ -365,7 +365,7 @@ type AgentRun struct {
 // RunFailureExplanation is the failure of a stopped attempt. Only the kernel
 // writes it. Explained is true only after a model explanation was posted.
 type RunFailureExplanation struct {
-	// Kind is execution, workspace, routine_script, task_completion,
+	// Kind is execution, workspace, routine_script,
 	// agent_behavior_fixed, repeat_limit, context_overflow, budget or credits.
 	Kind          string `json:"kind"`
 	Code          string `json:"code"`

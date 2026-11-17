@@ -700,16 +700,6 @@ func TestFinalOutputPublisherValidatesExtensionFields(t *testing.T) {
 	}
 }
 
-func TestBuiltinFinalAnswerChecksRunCompletionBeforeTaskReview(t *testing.T) {
-	var names []string
-	for _, check := range builtinFinalAnswerChecks() {
-		names = append(names, check.Name)
-	}
-	if !reflect.DeepEqual(names, []string{"completion", "task_completion_review"}) {
-		t.Fatalf("checks = %v", names)
-	}
-}
-
 func TestFinalAnswerChecksRunInOrderAndMayFail(t *testing.T) {
 	var order []string
 	completion := finalAnswerCheck{Name: "completion", Check: func(ctx context.Context, x *Executor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
@@ -723,17 +713,17 @@ func TestFinalAnswerChecksRunInOrderAndMayFail(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		if prior["task_completion_revise"] > 0 {
-			return &finalAnswerRejection{Code: "task_completion_rejected", Message: "Still not done.",
-				Failure: &agentrun.LoopFailure{Kind: conversation.RunFailureKindTaskCompletion, Code: "task_completion_rejected", Message: "The task result was rejected."}}, nil
+		if prior["example_revise"] > 0 {
+			return &finalAnswerRejection{Code: "example_rejected", Message: "Still not done.",
+				Failure: &agentrun.LoopFailure{Kind: conversation.RunFailureKindExecution, Code: "example_rejected", Message: "The result was rejected."}}, nil
 		}
-		return &finalAnswerRejection{Code: "task_completion_revise", Message: "The task result needs more work: add the totals."}, nil
+		return &finalAnswerRejection{Code: "example_revise", Message: "The result needs more work: add the totals."}, nil
 	}}
 	f := newFinalFixture(t, finalCall("first", `{"answer":"x"}`), finalCall("second", `{"answer":"x"}`))
 	f.exec.finalChecks = []finalAnswerCheck{completion, review}
-	requireRejected(t, f, f.settleFinal("first", agentrun.ControlAuthority{}), "first", "task_completion_revise")
+	requireRejected(t, f, f.settleFinal("first", agentrun.ControlAuthority{}), "first", "example_revise")
 	result := f.settleFinal("second", agentrun.ControlAuthority{})
-	if result.Kind != Failed || result.Failure.Code != "task_completion_rejected" || result.Entry.State != models.ToolEntryError {
+	if result.Kind != Failed || result.Failure.Code != "example_rejected" || result.Entry.State != models.ToolEntryError {
 		t.Fatalf("second = %#v", result)
 	}
 	if !reflect.DeepEqual(order, []string{"completion", "review", "completion", "review"}) {

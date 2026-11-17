@@ -82,8 +82,6 @@ func TerminalFailureReply(code string) string {
 		reason = "an operation failed"
 	case "dependency_failed":
 		reason = "work this request depended on failed"
-	case "task_completion_rejected":
-		reason = "the result did not meet the task's completion requirements after a revision"
 	}
 	return "I couldn't finish this request because " + reason + ". I stopped this attempt. Ask me to try again when you're ready."
 }
@@ -113,7 +111,7 @@ func terminalFailureCode(code string) string {
 		return "budget_exhausted"
 	case "workspace_operation_failed", "workspace_host_unavailable":
 		return "workspace_operation_failed"
-	case "action_admission_failed", "action_failed", "dependency_failed", "task_completion_rejected", "agent_behavior_fixed", "model_image_input_unsupported",
+	case "action_admission_failed", "action_failed", "dependency_failed", "agent_behavior_fixed", "model_image_input_unsupported",
 		RunFailureCodeFinalAnswerRejected:
 		return strings.TrimSpace(code)
 	default:
@@ -137,24 +135,15 @@ func terminalFailureCodeOf(f *models.RunFailureExplanation) string {
 }
 
 // terminalFailureReplyOf is the kernel's reply for a recorded failure.
-// stoppingCall is the failed governed call that stopped the attempt, and
-// latestFailedCall the Run's newest failed governed call; either may be nil.
-func terminalFailureReplyOf(f *models.RunFailureExplanation, stoppingCall, latestFailedCall *models.ActionCall) string {
+// stoppingCall is the failed governed call that stopped the attempt; it may be nil.
+func terminalFailureReplyOf(f *models.RunFailureExplanation, stoppingCall *models.ActionCall) string {
 	code := terminalFailureCodeOf(f)
-	reply := TerminalFailureReply(code)
-	switch code {
-	case "action_failed":
+	if code == "action_failed" {
 		if cause := failedActionCause(stoppingCall); cause != "" {
 			return "I couldn't finish this request because " + cause + ". I stopped this attempt. Ask me to try again when you're ready."
 		}
-	case "task_completion_rejected":
-		// Report a bounded contributing cause without presenting it as the
-		// completion review's verdict or copying tool output into the reply.
-		if failure := typedActionFailure(latestFailedCall); failure != nil && failure.HasRateLimitedSource() {
-			return reply + " Some sources rate-limited requests (HTTP 429). Try those sources again later."
-		}
 	}
-	return reply
+	return TerminalFailureReply(code)
 }
 
 // TerminalRunFailureReply is the kernel's reply for a failed Run. A failed
@@ -167,7 +156,7 @@ func TerminalRunFailureReply(ctx context.Context, sessions LoopSessionEntryListe
 		return TerminalFailureReply("execution_failed")
 	}
 	code := terminalFailureCodeOf(run.FailureExplanation)
-	var stopping, latest *models.ActionCall
+	var stopping *models.ActionCall
 	if run.Status == models.AgentRunStatusFailed && (code == "action_failed" || code == "execution_failed") {
 		stopping = stoppingFailedRunActionCall(ctx, sessions, actions, run)
 		if failure := typedActionFailure(stopping); failure != nil {
@@ -184,33 +173,14 @@ func TerminalRunFailureReply(ctx context.Context, sessions LoopSessionEntryListe
 			}
 		}
 	}
-	if code == "task_completion_rejected" {
-		latest = latestFailedRunActionCall(ctx, sessions, actions, run)
-	}
-	return terminalFailureReplyOf(run.FailureExplanation, stopping, latest)
+	return terminalFailureReplyOf(run.FailureExplanation, stopping)
 }
 
 const latestFailedCallScanLimit = 50
 
-// latestFailedRunActionCall is the call of the Run's newest error tool entry
-// that carries an action call, when that call is this Run's and failed.
-func latestFailedRunActionCall(ctx context.Context, sessions LoopSessionEntryLister, actions models.ActionCallReader, run *models.AgentRun) *models.ActionCall {
-	if sessions == nil || actions == nil || run.ID == "" {
-		return nil
-	}
-	entries, err := sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
-		Scope: run.Scope, RunID: run.ID, Types: []models.SessionEntryType{models.SessionEntryTool},
-		States: []models.ToolEntryState{models.ToolEntryError}, Descending: true, Limit: latestFailedCallScanLimit,
-	})
-	if err != nil {
-		return nil
-	}
-	return firstFailedRunActionCall(ctx, actions, run, entries, "")
-}
-
-// stoppingFailedRunActionCall is like latestFailedRunActionCall, but only
-// looks at the Run's last step with tool entries: a failure in an earlier
-// step was followed by more work, so it did not stop the attempt.
+// stoppingFailedRunActionCall is the failed call of the Run's last step with
+// tool entries: a failure in an earlier step was followed by more work, so it
+// did not stop the attempt.
 func stoppingFailedRunActionCall(ctx context.Context, sessions LoopSessionEntryLister, actions models.ActionCallReader, run *models.AgentRun) *models.ActionCall {
 	if sessions == nil || actions == nil || run.ID == "" {
 		return nil

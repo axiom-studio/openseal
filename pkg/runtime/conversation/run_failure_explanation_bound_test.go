@@ -14,7 +14,7 @@ func TestBeginRunFailureExplanationClassifiesAndBounds(t *testing.T) {
 		"provider_model_unavailable":        "provider_unavailable",
 		modelstep.RunFailureCodeErrorStreak: modelstep.RunFailureCodeErrorStreak,
 		modelstep.TurnHostContextExceeded:   modelstep.TurnHostContextExceeded,
-		"task_completion_rejected":          "task_completion_rejected",
+		"dependency_failed":                 "dependency_failed",
 		"":                                  "execution_failed",
 		"provider said: TOKEN=SECRET":       "execution_failed",
 		strings.Repeat("x", 100):            "execution_failed",

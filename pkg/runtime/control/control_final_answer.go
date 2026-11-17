@@ -412,12 +412,10 @@ type finalAnswerCheck struct {
 
 // builtinFinalAnswerChecks are the checks every final answer passes, in the
 // order they run: CTL-15 completion checks (§11.4 1-3: URLs, external
-// claims, approval claims; control_final_checks.go), then CTL-16 task
-// completion review (§11.6; control_task_review.go).
+// claims, approval claims; control_final_checks.go).
 func builtinFinalAnswerChecks() []finalAnswerCheck {
 	return []finalAnswerCheck{
 		{Name: "completion", Check: checkFinalAnswerCompletion},
-		{Name: "task_completion_review", Check: taskCompletionReviewCheck},
 	}
 }
 

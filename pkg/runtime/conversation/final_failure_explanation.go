@@ -18,7 +18,6 @@ const (
 	RunFailureKindExecution          = "execution"
 	RunFailureKindWorkspace          = "workspace"
 	RunFailureKindRoutineScript      = "routine_script"
-	RunFailureKindTaskCompletion     = "task_completion"
 	RunFailureKindAgentBehaviorFixed = "agent_behavior_fixed"
 	RunFailureKindBudget             = "budget"
 	RunFailureKindCredits            = "credits"
