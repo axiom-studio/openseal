@@ -54,7 +54,7 @@ func TestLoopInvalidVisualDeliversTheAnswerWithoutIt(t *testing.T) {
 				t.Fatalf("final entries = %v", f.EntryTypes(run.ID))
 			}
 			answers := portAgentMessages(f, conversation.ID)
-			if len(answers) != 1 || answers[0].Content != "Spring is cheapest." || len(answers[0].References) != 1 || content.Puts != 0 {
+			if len(answers) != 1 || !portVisualNotShown(answers[0].Content, "Spring is cheapest.") || len(answers[0].References) != 1 || content.Puts != 0 {
 				t.Fatalf("answers = %#v (%d visual puts), want the answer without the visual", answers, content.Puts)
 			}
 			events := f.Events(run.ID, "turn.visual_rejected")
@@ -82,4 +82,10 @@ func TestLoopAnswerRejectedThreeTimesSaysSo(t *testing.T) {
 			t.Fatalf("reply = %q", reply.Content)
 		}
 	})
+}
+
+// portVisualNotShown: the posted answer is the model's text followed by the
+// line saying its visual could not be shown.
+func portVisualNotShown(posted, answer string) bool {
+	return strings.HasPrefix(posted, answer+"\n\n") && strings.Contains(posted, "couldn't be shown")
 }

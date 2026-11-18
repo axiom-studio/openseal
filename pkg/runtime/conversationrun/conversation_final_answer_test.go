@@ -534,7 +534,7 @@ func TestVisualFailingHostChecksPostsWithout(t *testing.T) {
 		first, _ := f.finalEntry("Revenue is up.", map[string]interface{}{FinalOutputSummaryKey: "Revenue is up.", agentrun.FinalOutputVisualKey: bound})
 		f.mustDeliver(first, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
-		if len(answers) != 1 || len(answers[0].References) != 1 {
+		if len(answers) != 1 || len(answers[0].References) != 1 || answers[0].Content != "Revenue is up.\n\n"+conversationVisualNotShownText {
 			t.Fatalf("answers = %#v", answers)
 		}
 		events, err := f.store.ListActivity(f.ctx, models.ActivityFilter{Scope: f.run.Scope, RunID: f.run.ID, Limit: 100})

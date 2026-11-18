@@ -25,6 +25,7 @@ const (
 	conversationEmptyAnswerText     = "The reply is empty. Write the user-visible answer."
 	conversationEmptyAnswerFailure  = "Agent channel response did not contain user-visible output"
 	conversationEmptyAnswerCode     = "empty_answer"
+	conversationVisualNotShownText  = "_The visual for this answer couldn't be shown._"
 )
 
 // conversationFinalHandler is the FinalAnswerHandler of an Agent chat Run
@@ -176,7 +177,9 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 
 	// 9 (second part). The visual, after the host checks. A visual that
 	// fails them never costs the answer, which has already streamed to the
-	// person: it is posted without the visual, and the Run records why.
+	// person: it is posted without the visual and says so, because the text
+	// may point at it or the person may have asked for it, and the Run
+	// records why.
 	visualRejection, _ := answer.Output[FinalOutputVisualRejectionKey].(string)
 	if visual != nil {
 		checked, checkErr := r.checkAnswerVisual(ctx, run, visual)
@@ -197,7 +200,11 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	}
 
 	// 10. Post under the reply guard.
-	message, replayed, err := r.postAgentResponseWithReferences(ctx, run, conversation, trigger, content, references, answer.BroadcastToChannel(), &guard)
+	posted := content
+	if visualRejection != "" {
+		posted += "\n\n" + conversationVisualNotShownText
+	}
+	message, replayed, err := r.postAgentResponseWithReferences(ctx, run, conversation, trigger, posted, references, answer.BroadcastToChannel(), &guard)
 	if errors.Is(err, errConversationParticipationStopped) {
 		return participationStoppedDelivery(), nil
 	}

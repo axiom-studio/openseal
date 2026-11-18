@@ -323,7 +323,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 				t.Fatalf("final entries = %v", f.EntryTypes(run.ID))
 			}
 			answers := portAgentMessages(f, conversation.ID)
-			if len(answers) != 1 || answers[0].Content != "Revenue is up." || len(answers[0].References) != 1 || content.Puts != 0 {
+			if len(answers) != 1 || !portVisualNotShown(answers[0].Content, "Revenue is up.") || len(answers[0].References) != 1 || content.Puts != 0 {
 				t.Fatalf("answers = %#v (%d visual puts), want the answer without the visual", answers, content.Puts)
 			}
 			if events := f.Events(run.ID, "turn.visual_rejected"); len(events) != 1 || events[0].Severity != models.ActivitySeverityWarning {
