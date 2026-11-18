@@ -57,13 +57,10 @@ type AgendaFreeSlot struct {
 
 // Agenda limits.
 const (
-	maxTimezoneRunes  = 64
-	maxAgendaDays     = 7
-	maxDayLabelRunes  = 40 // agenda and itinerary days
-	maxDayItems       = 12 // agenda and itinerary days
-	maxPlanTitleRunes = 80 // agenda and itinerary items
-	maxPlanPlaceRunes = 80 // agenda and itinerary items
-	maxFreeSlots      = 12
+	maxTimezoneRunes = 64
+	maxAgendaDays    = 7
+	maxDayItems      = 12 // agenda and itinerary days
+	maxFreeSlots     = 12
 )
 
 const (
@@ -155,9 +152,8 @@ var TravelModes = []string{"walk", "drive", "transit", "bike", "flight", "boat"}
 // MaxTravelMinutes bounds one travel leg (a day).
 // Itinerary limits.
 const (
-	MaxTravelMinutes        = 1440
-	maxItineraryDays        = 10
-	maxItineraryDetailRunes = 200
+	MaxTravelMinutes = 1440
+	maxItineraryDays = 10
 )
 
 const ruleItineraryTravel = "travel is the leg into an item from the one before, never on a day's first item"
@@ -208,7 +204,6 @@ type Place struct {
 const (
 	maxPriceLevel = 4
 	maxHours      = 7
-	maxHoursRunes = 40
 )
 
 const rulePlaceName = "name is required unless location names a place"
@@ -244,7 +239,6 @@ var BreakdownKinds = []string{"treemap", "waffle", "stacked_bar"}
 const (
 	minBreakdownItems = 2
 	maxBreakdownItems = 12
-	maxPartLabelRunes = 40 // breakdown and progress items
 	maxProgressItems  = 6
 )
 
@@ -318,10 +312,8 @@ type PollOption struct {
 
 // Poll limits.
 const (
-	maxPollQuestionRunes = 200
-	minPollOptions       = 2
-	maxPollOptions       = 8
-	maxPollLabelRunes    = 60
+	minPollOptions = 2
+	maxPollOptions = 8
 )
 
 const rulePollClosesAt = "RFC 3339 time voting ends"
@@ -409,22 +401,19 @@ const (
 	// value sits on a step.
 	explorerStepTolerance = 1e-9
 
-	maxExplorerInputs      = 4
-	maxExplorerOutputs     = 4
-	maxExplorerLabelRunes  = 40
-	maxExplorerUnitRunes   = 16
-	maxExplorerSeries      = 3
-	maxExplorerSeriesRunes = 30 // series and t labels
+	maxExplorerInputs  = 4
+	maxExplorerOutputs = 4
+	maxExplorerSeries  = 3
 )
 
 const explorerNamePattern = `^[a-z][a-z0-9_]{0,39}$`
 
 const (
 	ruleExplorerReserved = "input ids are not t or a function name"
-	ruleExplorerInputs   = "slider and stepper: min below max, default on a step; toggle: default 0 or 1, no min, max or step"
+	ruleExplorerInputs   = "slider and stepper: min below max, default on a step; toggle: default 0 or 1, and min, max and step are ignored"
 	ruleExplorerExpr     = "every expr gives a number and can be worked out at the inputs' defaults"
 	ruleExplorerX        = "the id of a slider or stepper input (swept min to max), or t"
-	ruleExplorerT        = "required when x is t, with from below to, and only then; series may use t"
+	ruleExplorerT        = "required when x is t, with from below to, and ignored otherwise; series may use t"
 )
 
 func validateExplorer(_ *validator, c Component, _ string) error {
@@ -467,9 +456,6 @@ func validateExplorer(_ *validator, c Component, _ string) error {
 
 func validateExplorerInput(at string, input ExplorerInput) error {
 	if input.Kind == "toggle" {
-		if input.Min != nil || input.Max != nil || input.Step != nil {
-			return fmt.Errorf("%s is a toggle and takes no min, max or step", at)
-		}
 		if *input.Default != 0 && *input.Default != 1 {
 			return fmt.Errorf("%s.default must be 0 (off) or 1 (on) for a toggle", at)
 		}
@@ -543,9 +529,6 @@ func validateExplorerChart(explorer *Explorer, types map[string]expr.Type, env m
 			seriesEnv[name] = env[name]
 		}
 	} else {
-		if chart.T != nil {
-			return errors.New(`explorer.chart.t is only used when x is "t"`)
-		}
 		var swept *ExplorerInput
 		for index := range explorer.Inputs {
 			if explorer.Inputs[index].ID == chart.X {
@@ -607,13 +590,9 @@ type RoutineItem struct {
 
 // Routine, tasks and agent card limits.
 const (
-	maxRoutineItems      = 14
-	maxRoutineLabelRunes = 40
-	maxRoutineTextRunes  = 300
-	maxTaskRows          = 12
-	maxTaskLabelRunes    = 80
-	maxAgentPoints       = 4
-	maxAgentLineRunes    = 80 // headline and points
+	maxRoutineItems = 14
+	maxTaskRows     = 12
+	maxAgentPoints  = 4
 )
 
 // Tasks points at work handed to helpers in this chat. Each row is bound to

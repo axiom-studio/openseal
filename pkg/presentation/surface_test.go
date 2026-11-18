@@ -56,21 +56,21 @@ func TestValidate(t *testing.T) {
 		{"wrong schema", Surface{Schema: "openseal.dev/presentation/v1", Title: "x", State: StateReady, Components: []Component{note("a")}}, ValidateOptions{}, "schema"},
 		{"no components", one(), ValidateOptions{}, "at least one component"},
 		{"bad state", Surface{Schema: Schema, Title: "x", State: "done", Components: []Component{note("a")}}, ValidateOptions{}, `"done" is not one of streaming, ready`},
-		{"unknown type", one(Component{ID: "x", Type: "html", Text: "<b>"}), ValidateOptions{}, `unsupported type "html"`},
-		{"canvas is gone", one(Component{ID: "x", Type: "canvas"}), ValidateOptions{}, `unsupported type "canvas"`},
-		{"metric is gone", one(Component{ID: "x", Type: "metric"}), ValidateOptions{}, `unsupported type "metric"`},
+		{"only an unknown type", one(Component{ID: "x", Type: "html", Text: "<b>"}), ValidateOptions{}, "at least one component with a type from the list"},
+		{"unknown type left out", one(note("a"), Component{ID: "x", Type: "canvas"}), ValidateOptions{}, ""},
+		{"missing type left out", one(note("a"), Component{ID: "a", Text: "same id, never read"}), ValidateOptions{}, ""},
 		{"duplicate id", one(note("a"), note("a")), ValidateOptions{}, "already used"},
 		{"duplicate nested id", one(Component{ID: "s", Type: "section", Children: []Component{note("s")}}), ValidateOptions{}, "already used"},
 		{"bad id", one(note("-a")), ValidateOptions{}, `id "-a" must match`},
-		{"wrong payload", one(Component{ID: "x", Type: "text", Text: "hi", Chart: chart("c").Chart}), ValidateOptions{}, `text cannot carry a "chart" payload`},
-		{"children on a leaf", one(Component{ID: "x", Type: "text", Text: "hi", Children: []Component{note("y")}}), ValidateOptions{}, "cannot have children"},
+		{"other payload ignored", one(Component{ID: "x", Type: "text", Text: "hi", Chart: &Chart{Kind: "radar"}}), ValidateOptions{}, ""},
+		{"children on a leaf ignored", one(Component{ID: "x", Type: "text", Text: "hi", Children: []Component{{ID: "x", Type: "chart"}}}), ValidateOptions{}, ""},
 		// summary, title, tone
-		{"summary required", one(Component{ID: "c", Type: "chart", Chart: chart("c").Chart}), ValidateOptions{}, "summary is required for chart"},
-		{"summary too long", one(Component{ID: "c", Type: "chart", Summary: strings.Repeat("a", 281), Chart: chart("c").Chart}), ValidateOptions{}, "summary must contain between 1 and 280 characters (got 281)"},
+		{"summary optional on chart", one(Component{ID: "c", Type: "chart", Chart: chart("c").Chart}), ValidateOptions{}, ""},
+		{"long summary", one(Component{ID: "c", Type: "chart", Summary: strings.Repeat("a", 281), Chart: chart("c").Chart}), ValidateOptions{}, ""},
 		{"summary optional on text", one(note("a")), ValidateOptions{}, ""},
 		{"tone ok", one(Component{ID: "a", Type: "text", Text: "x", Tone: ToneWarning}), ValidateOptions{}, ""},
 		{"tone hex rejected", one(Component{ID: "a", Type: "text", Text: "x", Tone: "#ff0000"}), ValidateOptions{}, "tone"},
-		{"title too long", one(Component{ID: "a", Type: "text", Text: "x", Title: strings.Repeat("t", 301)}), ValidateOptions{}, "title"},
+		{"long title", one(Component{ID: "a", Type: "text", Text: "x", Title: strings.Repeat("t", 301)}), ValidateOptions{}, ""},
 		// limits and nesting
 		{"depth 3 ok", one(nested(3)), ValidateOptions{}, ""},
 		{"depth 4 rejected", one(nested(4)), ValidateOptions{}, "at most 3 levels"},
@@ -85,7 +85,8 @@ func TestValidate(t *testing.T) {
 			return list
 		}()...), ValidateOptions{}, "bytes of JSON"},
 		// text-like
-		{"text too long", one(Component{ID: "a", Type: "text", Text: strings.Repeat("a", 1201)}), ValidateOptions{}, "text must contain between 1 and 1200"},
+		{"long text", one(Component{ID: "a", Type: "text", Text: strings.Repeat("a", 1201)}), ValidateOptions{}, ""},
+		{"empty text", one(Component{ID: "a", Type: "text"}), ValidateOptions{}, "text must contain at least 1 characters"},
 		{"caption", one(Component{ID: "a", Type: "caption", Text: "Source: ONS"}), ValidateOptions{}, ""},
 		{"empty caption", one(Component{ID: "a", Type: "caption"}), ValidateOptions{}, "text must contain"},
 		{"bare divider", one(Component{ID: "a", Type: "divider"}), ValidateOptions{}, ""},
@@ -101,7 +102,8 @@ func TestValidate(t *testing.T) {
 		{"one tab", one(Component{ID: "t", Type: "tabs", Tabs: []Tab{{Label: "Simple", Children: []Component{note("a")}}}}), ValidateOptions{}, "tabs needs 2-5"},
 		{"duplicate tab label", one(Component{ID: "t", Type: "tabs", Tabs: []Tab{{Label: "A", Children: []Component{note("a")}}, {Label: "A", Children: []Component{note("b")}}}}), ValidateOptions{}, "used twice"},
 		{"tab child validated", one(Component{ID: "t", Type: "tabs", Tabs: []Tab{{Label: "A", Children: []Component{note("a")}}, {Label: "B", Children: []Component{{ID: "c", Type: "chart"}}}}}), ValidateOptions{}, `components[0].tabs[1].children[0] (component "c")`},
-		{"tabs use tabs not children", one(Component{ID: "t", Type: "tabs", Children: []Component{note("a")}}), ValidateOptions{}, "cannot have children"},
+		{"tabs use tabs not children", one(Component{ID: "t", Type: "tabs", Children: []Component{note("a")}}), ValidateOptions{}, "tabs needs 2-5 (got 0)"},
+		{"section of unknown types", one(Component{ID: "s", Type: "section", Children: []Component{{ID: "x", Type: "html"}}}), ValidateOptions{}, "section needs 1-12 children with a type from the list (got 0)"},
 		// chart
 		{"chart kind", one(Component{ID: "c", Type: "chart", Summary: "x", Chart: &Chart{Kind: "radar", Series: chart("c").Chart.Series}}), ValidateOptions{}, `chart.kind "radar"`},
 		{"chart no series", one(Component{ID: "c", Type: "chart", Summary: "x", Chart: &Chart{Kind: "bar"}}), ValidateOptions{}, "chart.series needs"},
@@ -112,19 +114,19 @@ func TestValidate(t *testing.T) {
 		// form
 		{"form", one(Component{ID: "f", Type: "form", Summary: "x", Form: &Form{Fields: []FormField{{ID: "n", Type: "number", Label: "N", Min: float(0), Max: float(5)}}}}), ValidateOptions{}, ""},
 		{"form select without options", one(Component{ID: "f", Type: "form", Summary: "x", Form: &Form{Fields: []FormField{{ID: "s", Type: "select", Label: "S"}}}}), ValidateOptions{}, "needs 1-100 options"},
-		{"form min on text", one(Component{ID: "f", Type: "form", Summary: "x", Form: &Form{Fields: []FormField{{ID: "s", Type: "text", Label: "S", Min: float(1)}}}}), ValidateOptions{}, "only allowed on number"},
+		{"form min on text ignored", one(Component{ID: "f", Type: "form", Summary: "x", Form: &Form{Fields: []FormField{{ID: "s", Type: "text", Label: "S", Min: float(5), Max: float(1)}}}}), ValidateOptions{}, ""},
 		{"form field type", one(Component{ID: "f", Type: "form", Summary: "x", Form: &Form{Fields: []FormField{{ID: "s", Type: "file", Label: "S"}}}}), ValidateOptions{}, `form.fields[0].type "file"`},
 		// stat_row
 		{"stat_row", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "Saving", Value: 96, Format: StatCurrency, Currency: "GBP", Unit: "/yr", Delta: "+12%", Trend: "up", GoodDirection: "up", Sparkline: []float64{1, 2, 3}}}}}), ValidateOptions{}, ""},
-		{"stat_row five stats", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: make([]Stat, 5)}}), ValidateOptions{}, "stat_row.stats needs 1-4"},
+		{"stat_row five stats", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a"}, {Label: "b"}, {Label: "c"}, {Label: "d"}, {Label: "e"}}}}), ValidateOptions{}, ""},
 		{"stat_row trend", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Trend: "sideways"}}}}), ValidateOptions{}, "trend"},
 		{"stat_row percent", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 12.5, Format: StatPercent}, {Label: "b", Value: 60, Format: StatDuration}, {Label: "c", Value: -3, Format: StatNumber}}}}), ValidateOptions{}, ""},
 		{"stat_row currency missing", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Format: StatCurrency}}}}), ValidateOptions{}, "currency is required"},
 		{"stat_row currency unknown", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Format: StatCurrency, Currency: "ABC"}}}}), ValidateOptions{}, "not an ISO 4217 code"},
 		{"stat_row currency lowercase", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Format: StatCurrency, Currency: "gbp"}}}}), ValidateOptions{}, "not an ISO 4217 code"},
-		{"stat_row currency without format", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Currency: "GBP"}}}}), ValidateOptions{}, "only used with format currency"},
+		{"stat_row currency without format ignored", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Currency: "GBP"}}}}), ValidateOptions{}, ""},
 		{"stat_row format", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Format: "money"}}}}), ValidateOptions{}, `format "money"`},
-		{"stat_row sparkline", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Sparkline: make([]float64, 31)}}}}), ValidateOptions{}, "sparkline"},
+		{"stat_row long sparkline", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Sparkline: make([]float64, 31)}}}}), ValidateOptions{}, ""},
 		// actions
 		{"respond", one(Component{ID: "a", Type: "actions", Actions: []Action{{ID: "y", Label: "Yes", Kind: ActionRespond, Icon: "check"}}}), ValidateOptions{}, ""},
 		{"five actions", one(Component{ID: "a", Type: "actions", Actions: make([]Action, 5)}), ValidateOptions{}, "actions needs 1-4"},
@@ -319,8 +321,13 @@ func TestDecodeRoundTripAndFindNested(t *testing.T) {
 	if component, ok := decoded.Find("dates"); !ok || component.Type != "timeline" {
 		t.Fatalf("Find(dates) = %#v", component)
 	}
-	if _, err := Decode([]byte(`{"schema":"` + Schema + `","title":"x","state":"ready","components":[{"id":"a","type":"text","text":"x","color":"#f00"}]}`)); err == nil {
-		t.Fatal("unknown colour field decoded")
+	// Keys the format does not have are ignored and never stored.
+	colored, err := Decode([]byte(`{"schema":"` + Schema + `","title":"x","state":"ready","components":[{"id":"a","type":"text","text":"x","color":"#f00"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encoded, _ := json.Marshal(colored); strings.Contains(string(encoded), "#f00") {
+		t.Fatalf("unknown colour field kept: %s", encoded)
 	}
 }
 
@@ -397,7 +404,7 @@ func TestModelFacingTextAvoidsInternalWords(t *testing.T) {
 
 func TestSkillDefinitionRegisters(t *testing.T) {
 	definition := SkillDefinition()
-	if definition.ID != SkillID || definition.Version != "6.0.1" || !definition.Requirements.AlwaysAvailable {
+	if definition.ID != SkillID || definition.Version != "6.1.0" || !definition.Requirements.AlwaysAvailable {
 		t.Fatalf("definition = %#v", definition)
 	}
 	if err := skill.NewCatalog().Register(context.Background(), definition); err != nil {
@@ -454,7 +461,7 @@ func TestLooseSchemaListsEveryTypeAndPayload(t *testing.T) {
 		component := schema["items"].(map[string]interface{})
 		properties := component["properties"].(map[string]interface{})
 		types := properties["type"].(map[string]interface{})["enum"].([]interface{})
-		if len(types) != len(catalogue) || component["additionalProperties"] != false {
+		if len(types) != len(catalogue) || component["additionalProperties"] != nil {
 			t.Fatalf("%s: types %v, component %v", name, types, component)
 		}
 		for key := range payloadSchemas() {

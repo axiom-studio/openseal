@@ -12,11 +12,12 @@ import (
 // The compact notation renders a JSON Schema as dense text a model reads in
 // a fraction of the tokens of the JSON form, keeping every constraint:
 //
-//	{a:T, b?:T}     object with exactly these keys; b is optional
-//	{a:T, ...}      object that also allows other keys
+//	{a:T, b?:T}     object with these keys, b optional; other keys are
+//	                ignored, and a key whose schema is false is not listed
 //	{*:T}           object mapping any key to T
 //	object          any object
-//	[T]1..12        list of 1 to 12 T
+//	[T]1..12        list of 1 to 12 T (for a list with contains, the
+//	                bounds count the items that match it)
 //	str..40         text of at most 40 characters; str1..40 at least 1
 //	str/re/         text matching the regular expression re
 //	int1..24 num>0  numbers in an inclusive (or, with < and >, exclusive) range
@@ -27,7 +28,7 @@ import (
 //
 // A keyword the notation does not know is kept as <keyword=json>, so nothing
 // is ever dropped silently.
-const compactLegend = "Notation: {a:T, b?:T} is an object with exactly these keys, b optional; {*:T} maps any key to T; [T]1..12 is a list of 1-12 T; " +
+const compactLegend = "Notation: {a:T, b?:T} is an object with these keys, b optional, and other keys are ignored; {*:T} maps any key to T; [T]1..12 is a list of 1-12 T; " +
 	"a..b is an inclusive range (characters for str, the value for int and num, items for lists) and a missing end is open; str1.. is never only spaces; " +
 	"x|y is one of these values; A | B is any of these; (…) is a note on the field."
 
@@ -199,6 +200,12 @@ func (r compactRenderer) typed(kind string, schema map[string]interface{}, mark 
 		if schema["items"] != nil {
 			items = r.render(schema["items"])
 		}
+		if _, counted := schema["contains"]; counted {
+			// The items contains matches are the ones that count, which
+			// the format names where it uses such a list.
+			mark("contains", "minContains", "maxContains")
+			return "[" + items + "]" + compactRange(schema, "minContains", "maxContains", "", "")
+		}
 		return "[" + items + "]" + compactRange(schema, "minItems", "maxItems", "", "")
 	case "string":
 		mark("pattern", "minLength", "maxLength")
@@ -231,9 +238,8 @@ func (r compactRenderer) object(schema map[string]interface{}, mark func(...stri
 	mark("properties", "required", "additionalProperties")
 	properties, _ := schema["properties"].(map[string]interface{})
 	additional, hasAdditional := schema["additionalProperties"]
-	closed := hasAdditional && additional == false
-	open := !hasAdditional || additional == true
-	if len(properties) == 0 && open {
+	listed := !hasAdditional || additional == true || additional == false
+	if len(properties) == 0 && schema["required"] == nil && (!hasAdditional || additional == true) {
 		return "object"
 	}
 	required := map[string]bool{}
@@ -246,8 +252,8 @@ func (r compactRenderer) object(schema map[string]interface{}, mark func(...stri
 		}
 	}
 	var optional []string
-	for key := range properties {
-		if !required[key] {
+	for key, property := range properties {
+		if !required[key] && property != false {
 			optional = append(optional, key)
 		}
 	}
@@ -266,11 +272,7 @@ func (r compactRenderer) object(schema map[string]interface{}, mark func(...stri
 		}
 		entries = append(entries, compactKey(key)+marker+value)
 	}
-	switch {
-	case closed:
-	case open:
-		entries = append(entries, "...")
-	default:
+	if !listed {
 		entries = append(entries, "*:"+r.render(additional))
 	}
 	return "{" + strings.Join(entries, ", ") + "}"

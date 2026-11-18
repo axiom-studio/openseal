@@ -252,7 +252,7 @@ func recipeStepsThin(steps []RecipeStep) bool {
 func longTextColumns(table *Table) int {
 	count := 0
 	for _, column := range table.Columns {
-		if column.Kind != "text" {
+		if column.ColumnKind() != "text" {
 			continue
 		}
 		for _, row := range table.Rows {

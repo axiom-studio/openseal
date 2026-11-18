@@ -52,26 +52,18 @@ const (
 	MaxDiagramNodes  = 30
 	MaxDiagramEdges  = 40
 	MaxDiagramGroups = 6
-
-	maxNodeLabelRunes  = 40
-	maxNodeDetailRunes = 300
-	maxEdgeLabelRunes  = 30
-	maxGroupLabelRunes = 30
 )
 
 const (
 	ruleDiagramLayouts = "flow: steps with arrows; cycle: nodes in order around a ring (at least 3; edges optional); " +
 		"hierarchy: parent to child edges, one parent each, no loops; mindmap: the first node is the centre and every node connects to it; network: any links"
-	ruleDiagramDirection = "flow and hierarchy only; down by default"
+	ruleDiagramDirection = "flow and hierarchy only, other layouts ignore it; down by default"
 	ruleDiagramGroup     = "the id of one of groups"
 	ruleDiagramEdges     = "edges join node ids"
 )
 
 func validateDiagram(v *validator, c Component, _ string) error {
 	d := c.Diagram
-	if d.Direction != "" && d.Layout != "flow" && d.Layout != "hierarchy" {
-		return fmt.Errorf("diagram.direction is only used by flow and hierarchy layouts")
-	}
 	groups := map[string]bool{}
 	for index, group := range d.Groups {
 		if err := itemIDs(groups, fmt.Sprintf("diagram.groups[%d]", index), group.ID); err != nil {
@@ -189,9 +181,7 @@ type ImageMarker struct {
 
 // Labeled image limits.
 const (
-	maxMarkers           = 12
-	maxMarkerLabelRunes  = 40
-	maxMarkerDetailRunes = 300
+	maxMarkers = 12
 )
 
 func validateLabeledImage(v *validator, c Component, _ string) error {
@@ -275,20 +265,12 @@ type ScaleItem struct {
 // QuantityKinds lists the values of QuantityVisual.Kind.
 var QuantityKinds = []string{"fraction_bars", "number_line", "unit_blocks", "percent_waffle", "scale_compare"}
 
-// quantityKindFields are the fields each quantity kind takes.
-var quantityKindFields = map[string][]string{
-	"fraction_bars": {"fractions"}, "number_line": {"min", "max", "ticks", "points", "ranges"},
-	"unit_blocks": {"groups"}, "percent_waffle": {"parts"}, "scale_compare": {"items"},
-}
-
 // Quantity visual limits.
 const (
 	MaxQuantitySteps     = 4
 	MaxDenominator       = 24
 	MaxUnitBlocks        = 100
 	MaxNumberLineTicks   = 100
-	quantityLabelRunes   = 40
-	quantityStepRunes    = 60
 	maxNumberLinePoints  = 6
 	maxNumberLineRanges  = 3
 	maxQuantityGroupings = 4
@@ -298,7 +280,7 @@ const (
 // Quantity rules the schema cannot state. The tick limit is
 // MaxNumberLineTicks.
 const (
-	ruleQuantityFields     = "each kind takes only its own fields: fraction_bars fractions; number_line min and max (required), ticks, points, ranges; unit_blocks groups; percent_waffle parts; scale_compare items"
+	ruleQuantityFields     = "each kind reads only its own fields and ignores the rest: fraction_bars fractions; number_line min and max (required), ticks, points, ranges; unit_blocks groups; percent_waffle parts; scale_compare items"
 	ruleQuantityNumerator  = "at most the denominator"
 	ruleQuantityNumberLine = "a number_line has min below max, at most 100 ticks between them, points and ranges inside them, and each range's from below its to"
 	ruleQuantityPercent    = "percent_waffle parts total at most 100"
@@ -318,19 +300,9 @@ func validateQuantityVisual(_ *validator, c Component, _ string) error {
 	return nil
 }
 
-// quantityValues checks the fields of one kind and that no other kind's
-// fields are set.
+// quantityValues checks the fields of one kind; other kinds' fields are
+// ignored.
 func quantityValues(at, kind string, q QuantityValues) error {
-	used := map[string]bool{
-		"fractions": len(q.Fractions) > 0, "min": q.Min != nil, "max": q.Max != nil, "ticks": q.Ticks != nil, "points": len(q.Points) > 0,
-		"ranges": len(q.Ranges) > 0, "groups": len(q.Groups) > 0, "parts": len(q.Parts) > 0, "items": len(q.Items) > 0,
-	}
-	fields := quantityKindFields[kind]
-	for _, name := range []string{"fractions", "min", "max", "ticks", "points", "ranges", "groups", "parts", "items"} {
-		if used[name] && !contains(fields, name) {
-			return fmt.Errorf("%s.%s is not used by %s (it takes %s)", at, name, kind, strings.Join(fields, ", "))
-		}
-	}
 	switch kind {
 	case "fraction_bars":
 		if len(q.Fractions) == 0 {
@@ -427,9 +399,8 @@ var MathReveals = []string{"all", "stepwise"}
 // MaxLaTeXRunes bounds one math step.
 // Math limits.
 const (
-	MaxLaTeXRunes    = 300
-	maxMathSteps     = 12
-	maxMathNoteRunes = 200
+	MaxLaTeXRunes = 300
+	maxMathSteps  = 12
 )
 
 // deniedLaTeX lists macros that could fetch, embed or define code. KaTeX
@@ -488,15 +459,6 @@ type Definition struct {
 	Image        *ImageRef `json:"image,omitempty"`
 }
 
-// Definition limits.
-const (
-	maxTermRunes         = 60
-	maxPhoneticRunes     = 60
-	maxPartOfSpeechRunes = 20
-	maxMeaningRunes      = 300
-	maxExampleRunes      = 200
-)
-
 func validateDefinition(v *validator, c Component, _ string) error {
 	return v.image("definition.image", c.Definition.Image)
 }
@@ -517,10 +479,8 @@ type Flashcard struct {
 
 // Flashcard limits.
 const (
-	minFlashcards     = 2
-	maxFlashcards     = 30
-	maxCardFrontRunes = 200
-	maxCardBackRunes  = 400
+	minFlashcards = 2
+	maxFlashcards = 30
 )
 
 func validateFlashcards(v *validator, c Component, _ string) error {
@@ -556,12 +516,6 @@ type BeforeAfterLabels struct {
 // BeforeAfterModes lists the values of BeforeAfter.Mode: diff (texts, with
 // changed words highlighted), split (side by side) and slider (images).
 var BeforeAfterModes = []string{"diff", "split", "slider"}
-
-// Before and after limits.
-const (
-	maxSideTextRunes  = 4000
-	maxSideLabelRunes = 20
-)
 
 const (
 	ruleBeforeAfterSides = "text or an image, not both; both sides the same kind"
@@ -616,12 +570,6 @@ type Draft struct {
 // DraftChannels lists the values of Draft.Channel.
 var DraftChannels = []string{"email", "message", "post", "note"}
 
-// Draft limits.
-const (
-	maxDraftHeaderRunes = 200 // to and subject
-	maxDraftBodyRunes   = 4000
-)
-
 func validateDraft(_ *validator, c Component, _ string) error {
 	return markdown("draft.body", c.Draft.Body)
 }
@@ -660,14 +608,10 @@ type RecipeStep struct {
 // MaxRecipeMinutes bounds a recipe's prep and cook times (a week).
 // Recipe limits.
 const (
-	MaxRecipeMinutes        = 7 * 24 * 60
-	maxServings             = 24
-	maxIngredients          = 30
-	maxRecipeSteps          = 15
-	maxIngredientUnitRunes  = 16
-	maxIngredientNameRunes  = 60
-	maxIngredientGroupRunes = 30
-	maxRecipeStepRunes      = 300
+	MaxRecipeMinutes = 7 * 24 * 60
+	maxServings      = 24
+	maxIngredients   = 30
+	maxRecipeSteps   = 15
 )
 
 func validateRecipe(v *validator, c Component, _ string) error {
@@ -707,9 +651,7 @@ type ItemRating struct {
 
 // Item limits.
 const (
-	maxItemNameRunes = 80
-	maxFacts         = 4 // facts of an item or a place
-	maxFactRunes     = 60
+	maxFacts = 4 // facts of an item or a place
 )
 
 func validateItem(v *validator, c Component, _ string) error {
@@ -743,9 +685,7 @@ type AnalogyMapping struct {
 
 // Analogy limits.
 const (
-	maxAnalogyLabelRunes = 40
-	maxAnalogyPairs      = 5
-	maxAnalogyPartRunes  = 60
+	maxAnalogyPairs = 5
 )
 
 func validateAnalogy(v *validator, c Component, _ string) error {

@@ -32,7 +32,6 @@ type MapPin struct {
 const (
 	MaxMapPins          = 20
 	MaxMapPinLabelRunes = 60
-	MaxMapPinDetail     = 300
 	// maxStampedAddressRunes bounds an address the host fills in, as for a
 	// place card.
 	maxStampedAddressRunes = 160

@@ -215,7 +215,7 @@ func checkItems(component Component) []checkItem {
 			items = append(items, checkItem{item.ID, item.Label})
 		}
 	case component.Type == "steps" && component.Steps != nil:
-		for _, step := range component.Steps.Items {
+		for _, step := range shownItems(component.Steps.Items, maxSteps) {
 			items = append(items, checkItem{step.ID, step.Title})
 		}
 	case component.Type == "recipe" && component.Recipe != nil:

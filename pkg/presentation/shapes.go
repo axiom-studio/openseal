@@ -45,9 +45,7 @@ func (v *validator) image(path string, ref *ImageRef) error {
 
 // Limits shared by several payloads.
 const (
-	maxUnitRunes  = 24 // the unit of an amount, stat, chart, breakdown or progress item
-	maxBadgeRunes = 24
-	maxRating     = 5
+	maxRating = 5
 )
 
 // Amount is a number the host formats in the viewer's locale, with the same
@@ -64,13 +62,11 @@ func validateAmount(at string, amount Amount) error {
 	return validateFormat(at, amount.Format, amount.Currency)
 }
 
-// validateFormat checks a number format and its currency.
+// validateFormat checks a number format and its currency. A currency with
+// any other format is ignored.
 func validateFormat(at string, format StatFormat, code string) error {
 	if format == StatCurrency {
 		return validateCurrency(at, code)
-	}
-	if code != "" {
-		return fmt.Errorf("%s.currency is only used with format currency", at)
 	}
 	return nil
 }
@@ -91,7 +87,7 @@ func validateCurrency(at, code string) error {
 const (
 	ruleUniqueItemIDs = "ids within one list of a component (steps, options, fields, chips...) are unique"
 	ruleMarkdown      = "markdown fields are GFM without HTML or images; $…$ maths is allowed"
-	ruleCurrency      = "currency is set exactly when format is currency and is a real ISO 4217 code"
+	ruleCurrency      = "format currency needs a currency that is a real ISO 4217 code; with any other format a currency is ignored"
 	ruleImagesInChat  = "an image is one already in this chat (generated, uploaded or a screenshot), by the id and version it was shown with; never a URL"
 )
 

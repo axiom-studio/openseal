@@ -2,6 +2,7 @@ package presentation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -86,15 +87,15 @@ func TestValidateWave2(t *testing.T) {
 		err       string
 	}{
 		// every new type needs a summary and its payload
-		{"diagram summary", Component{ID: "a", Type: "diagram", Diagram: diagramOf("flow", nodes("a", "b")).Diagram}, ValidateOptions{}, "summary is required for diagram"},
+		{"diagram summary", Component{ID: "a", Type: "diagram", Diagram: diagramOf("flow", nodes("a", "b")).Diagram}, ValidateOptions{}, ""},
 		{"math payload", Component{ID: "a", Type: "math", Summary: "x"}, ValidateOptions{}, "math payload is required"},
-		{"foreign payload", Component{ID: "a", Type: "definition", Summary: "x", Definition: &Definition{Term: "a", Meaning: "b"}, Math: mathOf("x").Math}, ValidateOptions{}, `definition cannot carry a "math" payload`},
+		{"foreign payload", Component{ID: "a", Type: "definition", Summary: "x", Definition: &Definition{Term: "a", Meaning: "b"}, Math: mathOf("x").Math}, ValidateOptions{}, ""},
 		// diagram
 		{"flow", diagramOf("flow", nodes("a", "b", "c"), edge("a", "b"), edge("b", "c")), ValidateOptions{}, ""},
 		{"layout required", diagramOf("", nodes("a", "b")), ValidateOptions{}, `diagram.layout "" is not one of flow, cycle, hierarchy, mindmap, network`},
 		{"v1 coordinates are gone", Component{ID: "d", Type: "diagram", Summary: "x"}, ValidateOptions{}, "diagram payload is required"},
 		{"direction", Component{ID: "d", Type: "diagram", Summary: "x", Diagram: &Diagram{Layout: "hierarchy", Direction: "right", Nodes: nodes("a", "b"), Edges: []DiagramEdge{edge("a", "b")}}}, ValidateOptions{}, ""},
-		{"direction on network", Component{ID: "d", Type: "diagram", Summary: "x", Diagram: &Diagram{Layout: "network", Direction: "right", Nodes: nodes("a", "b")}}, ValidateOptions{}, "diagram.direction is only used by flow and hierarchy"},
+		{"direction on network", Component{ID: "d", Type: "diagram", Summary: "x", Diagram: &Diagram{Layout: "network", Direction: "right", Nodes: nodes("a", "b")}}, ValidateOptions{}, ""},
 		{"direction value", Component{ID: "d", Type: "diagram", Summary: "x", Diagram: &Diagram{Layout: "flow", Direction: "up", Nodes: nodes("a", "b")}}, ValidateOptions{}, `diagram.direction "up"`},
 		{"one node", diagramOf("flow", nodes("a")), ValidateOptions{}, "diagram.nodes needs 2-30 (got 1)"},
 		{"31 nodes", diagramOf("network", manyNodes(31)), ValidateOptions{}, "diagram.nodes needs 2-30 (got 31)"},
@@ -106,14 +107,14 @@ func TestValidateWave2(t *testing.T) {
 			return list
 		}()...), ValidateOptions{}, "diagram.edges allows at most 40 (got 41)"},
 		{"node id", diagramOf("flow", []DiagramNode{{ID: "A", Label: "a"}, {ID: "b", Label: "b"}}), ValidateOptions{}, `diagram.nodes[0].id "A" must match`},
-		{"node label", diagramOf("flow", []DiagramNode{{ID: "a", Label: strings.Repeat("l", 41)}, {ID: "b", Label: "b"}}), ValidateOptions{}, "diagram.nodes[0].label must contain between 1 and 40"},
+		{"node label", diagramOf("flow", []DiagramNode{{ID: "a", Label: strings.Repeat("l", 41)}, {ID: "b", Label: "b"}}), ValidateOptions{}, ""},
 		{"node detail", diagramOf("flow", []DiagramNode{{ID: "a", Label: "a", Detail: "<i>x</i>"}, {ID: "b", Label: "b"}}), ValidateOptions{}, "diagram.nodes[0].detail must not contain HTML"},
 		{"node group", diagramOf("flow", []DiagramNode{{ID: "a", Label: "a", Group: "g"}, {ID: "b", Label: "b"}}), ValidateOptions{}, `diagram.nodes[0].group "g" is not the id of a group`},
 		{"groups", Component{ID: "d", Type: "diagram", Summary: "x", Diagram: &Diagram{Layout: "network", Groups: []DiagramGroup{{ID: "g", Label: "Plants"}},
 			Nodes: []DiagramNode{{ID: "a", Label: "a", Group: "g", Icon: "leaf"}, {ID: "b", Label: "b"}}, Edges: []DiagramEdge{{From: "a", To: "b", Label: "eats"}}}}, ValidateOptions{}, ""},
 		{"seven groups", Component{ID: "d", Type: "diagram", Summary: "x", Diagram: &Diagram{Layout: "network", Nodes: nodes("a", "b"), Groups: make([]DiagramGroup, 7)}}, ValidateOptions{}, "diagram.groups allows at most 6 (got 7)"},
 		{"edge from", diagramOf("flow", nodes("a", "b"), edge("x", "b")), ValidateOptions{}, `diagram.edges[0].from "x" is not the id of a node`},
-		{"edge label", diagramOf("flow", nodes("a", "b"), DiagramEdge{From: "a", To: "b", Label: strings.Repeat("l", 31)}), ValidateOptions{}, "diagram.edges[0].label must be at most 30"},
+		{"edge label", diagramOf("flow", nodes("a", "b"), DiagramEdge{From: "a", To: "b", Label: strings.Repeat("l", 31)}), ValidateOptions{}, ""},
 		{"cycle of two", diagramOf("cycle", nodes("a", "b")), ValidateOptions{}, "a cycle diagram needs at least 3 nodes (got 2)"},
 		{"cycle without edges", diagramOf("cycle", nodes("a", "b", "c")), ValidateOptions{}, ""},
 		{"hierarchy forest", diagramOf("hierarchy", nodes("a", "b", "c", "d"), edge("a", "b"), edge("a", "c")), ValidateOptions{}, ""},
@@ -129,15 +130,15 @@ func TestValidateWave2(t *testing.T) {
 		{"labeled_image no markers", Component{ID: "l", Type: "labeled_image", Summary: "x", LabeledImage: &LabeledImage{Image: *img("img-1")}}, images("img-1"), "labeled_image.markers needs 1-12 (got 0)"},
 		{"labeled_image 13 markers", Component{ID: "l", Type: "labeled_image", Summary: "x", LabeledImage: &LabeledImage{Image: *img("img-1"), Markers: make([]ImageMarker, 13)}}, images("img-1"), "labeled_image.markers needs 1-12 (got 13)"},
 		{"marker x", Component{ID: "l", Type: "labeled_image", Summary: "x", LabeledImage: &LabeledImage{Image: *img("img-1"), Markers: []ImageMarker{{ID: "n", X: 1.2, Label: "N"}}}}, images("img-1"), "labeled_image.markers[0].x must be 0-1 (got 1.2)"},
-		{"marker label", Component{ID: "l", Type: "labeled_image", Summary: "x", LabeledImage: &LabeledImage{Image: *img("img-1"), Markers: []ImageMarker{{ID: "n", Label: strings.Repeat("l", 41)}}}}, images("img-1"), "labeled_image.markers[0].label"},
+		{"marker label", Component{ID: "l", Type: "labeled_image", Summary: "x", LabeledImage: &LabeledImage{Image: *img("img-1"), Markers: []ImageMarker{{ID: "n", Label: strings.Repeat("l", 41)}}}}, images("img-1"), ""},
 		// quantity_visual
 		{"fraction bars with steps", quantity("fraction_bars", QuantityValues{Fractions: fractions(3, 4, 2, 3)}, QuantityStep{Label: "Twelfths", QuantityValues: QuantityValues{Fractions: fractions(9, 12, 8, 12)}}), ValidateOptions{}, ""},
 		{"quantity kind", quantity("pie", QuantityValues{}), ValidateOptions{}, `quantity_visual.kind "pie" is not one of fraction_bars`},
 		{"denominator", quantity("fraction_bars", QuantityValues{Fractions: fractions(1, 25)}), ValidateOptions{}, "quantity_visual.fractions[0].denominator must be 1-24 (got 25)"},
 		{"numerator", quantity("fraction_bars", QuantityValues{Fractions: fractions(5, 4)}), ValidateOptions{}, "quantity_visual.fractions[0].numerator must be 0-4"},
 		{"five fractions", quantity("fraction_bars", QuantityValues{Fractions: fractions(1, 2, 1, 2, 1, 2, 1, 2, 1, 2)}), ValidateOptions{}, "quantity_visual.fractions needs 1-4 (got 5)"},
-		{"fields of another kind", quantity("fraction_bars", QuantityValues{Fractions: fractions(1, 2), Groups: []UnitGroup{{Count: 1}}}), ValidateOptions{}, "quantity_visual.groups is not used by fraction_bars (it takes fractions)"},
-		{"step fields of another kind", quantity("fraction_bars", QuantityValues{Fractions: fractions(1, 2)}, QuantityStep{Label: "s", QuantityValues: QuantityValues{Parts: []WafflePart{{Value: 1, Label: "a"}}}}), ValidateOptions{}, "quantity_visual.steps[0].parts is not used by fraction_bars"},
+		{"fields of another kind", quantity("fraction_bars", QuantityValues{Fractions: fractions(1, 2), Groups: []UnitGroup{{Count: 1}}}), ValidateOptions{}, ""},
+		{"step fields of another kind", quantity("fraction_bars", QuantityValues{Fractions: fractions(1, 2)}, QuantityStep{Label: "s", QuantityValues: QuantityValues{Fractions: fractions(1, 2), Parts: []WafflePart{{Value: 1, Label: "a"}}}}), ValidateOptions{}, ""},
 		{"step needs values", quantity("fraction_bars", QuantityValues{Fractions: fractions(1, 2)}, QuantityStep{Label: "s"}), ValidateOptions{}, "quantity_visual.steps[0].fractions needs 1-4 (got 0)"},
 		{"step label", quantity("fraction_bars", QuantityValues{Fractions: fractions(1, 2)}, QuantityStep{QuantityValues: QuantityValues{Fractions: fractions(1, 2)}}), ValidateOptions{}, "quantity_visual.steps[0].label"},
 		{"five steps", quantity("unit_blocks", QuantityValues{Groups: []UnitGroup{{Count: 1}}}, make([]QuantityStep, 5)...), ValidateOptions{}, "quantity_visual.steps allows at most 4 (got 5)"},
@@ -164,17 +165,17 @@ func TestValidateWave2(t *testing.T) {
 		{"math reveal", Component{ID: "m", Type: "math", Summary: "x", Math: &Math{Steps: []MathStep{{LaTeX: "x"}}, Reveal: "slow"}}, ValidateOptions{}, `math.reveal "slow"`},
 		{"latex length", mathOf(strings.Repeat("x", 301)), ValidateOptions{}, "math.steps[0].latex must contain between 1 and 300"},
 		{"latex href", mathOf("x", `\href{https://x.example}{y}`), ValidateOptions{}, `math.steps[1].latex must not use \href`},
-		{"math note", Component{ID: "m", Type: "math", Summary: "x", Math: &Math{Steps: []MathStep{{LaTeX: "x", Note: strings.Repeat("n", 201)}}}}, ValidateOptions{}, "math.steps[0].note"},
+		{"math note", Component{ID: "m", Type: "math", Summary: "x", Math: &Math{Steps: []MathStep{{LaTeX: "x", Note: strings.Repeat("n", 201)}}}}, ValidateOptions{}, ""},
 		// definition
 		{"definition", Component{ID: "d", Type: "definition", Summary: "x", Definition: &Definition{Term: "Osmosis", Phonetic: "/ɒzˈməʊsɪs/", PartOfSpeech: "noun", Meaning: "Water moving through a membrane.", Example: "Roots take up water by osmosis.", Image: img("img-1")}}, images("img-1"), ""},
-		{"definition meaning", Component{ID: "d", Type: "definition", Summary: "x", Definition: &Definition{Term: "Osmosis"}}, ValidateOptions{}, "definition.meaning must contain between 1 and 300"},
-		{"definition term", Component{ID: "d", Type: "definition", Summary: "x", Definition: &Definition{Term: strings.Repeat("t", 61), Meaning: "m"}}, ValidateOptions{}, "definition.term"},
-		{"definition part of speech", Component{ID: "d", Type: "definition", Summary: "x", Definition: &Definition{Term: "t", Meaning: "m", PartOfSpeech: strings.Repeat("p", 21)}}, ValidateOptions{}, "definition.partOfSpeech"},
+		{"definition meaning", Component{ID: "d", Type: "definition", Summary: "x", Definition: &Definition{Term: "Osmosis"}}, ValidateOptions{}, "definition.meaning must contain at least 1 characters (got 0)"},
+		{"definition term", Component{ID: "d", Type: "definition", Summary: "x", Definition: &Definition{Term: strings.Repeat("t", 61), Meaning: "m"}}, ValidateOptions{}, ""},
+		{"definition part of speech", Component{ID: "d", Type: "definition", Summary: "x", Definition: &Definition{Term: "t", Meaning: "m", PartOfSpeech: strings.Repeat("p", 21)}}, ValidateOptions{}, ""},
 		// flashcards
 		{"flashcards", deck(30), ValidateOptions{}, ""},
 		{"flashcards of one", deck(1), ValidateOptions{}, "flashcards.cards needs 2-30 (got 1)"},
 		{"flashcards 31", deck(31), ValidateOptions{}, "flashcards.cards needs 2-30 (got 31)"},
-		{"flashcard back", Component{ID: "f", Type: "flashcards", Summary: "x", Flashcards: &Flashcards{Cards: []Flashcard{{ID: "a", Front: "a", Back: strings.Repeat("b", 401)}, {ID: "b", Front: "b", Back: "b"}}}}, ValidateOptions{}, "flashcards.cards[0].back must contain between 1 and 400"},
+		{"flashcard back", Component{ID: "f", Type: "flashcards", Summary: "x", Flashcards: &Flashcards{Cards: []Flashcard{{ID: "a", Front: "a", Back: strings.Repeat("b", 401)}, {ID: "b", Front: "b", Back: "b"}}}}, ValidateOptions{}, ""},
 		{"flashcard id twice", Component{ID: "f", Type: "flashcards", Summary: "x", Flashcards: &Flashcards{Cards: []Flashcard{{ID: "a", Front: "a", Back: "b"}, {ID: "a", Front: "c", Back: "d"}}}}, ValidateOptions{}, `flashcards.cards[1].id "a" is used twice`},
 		// before_after
 		{"text diff", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "diff", Before: text("a"), After: text("b"), Labels: &BeforeAfterLabels{Before: "Yours", After: "Mine"}}}, ValidateOptions{}, ""},
@@ -185,11 +186,11 @@ func TestValidateWave2(t *testing.T) {
 		{"both on one side", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "split", Before: BeforeAfterSide{Text: "a", Image: img("a")}, After: text("b")}}, images("a"), "before_after.before takes text or image, not both"},
 		{"empty side", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "split", Before: text("a")}}, ValidateOptions{}, "before_after.after needs text or an image"},
 		{"before_after mode", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "wipe", Before: text("a"), After: text("b")}}, ValidateOptions{}, `before_after.mode "wipe"`},
-		{"before_after label", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "split", Before: text("a"), After: text("b"), Labels: &BeforeAfterLabels{After: strings.Repeat("l", 21)}}}, ValidateOptions{}, "before_after.labels.after"},
+		{"before_after label", Component{ID: "b", Type: "before_after", Summary: "x", BeforeAfter: &BeforeAfter{Mode: "split", Before: text("a"), After: text("b"), Labels: &BeforeAfterLabels{After: strings.Repeat("l", 21)}}}, ValidateOptions{}, ""},
 		// draft
 		{"draft", draftOf(nil), ValidateOptions{}, ""},
 		{"draft channel", Component{ID: "d", Type: "draft", Summary: "x", Draft: &Draft{Channel: "fax", Body: "x"}}, ValidateOptions{}, `draft.channel "fax" is not one of email, message, post, note`},
-		{"draft body", Component{ID: "d", Type: "draft", Summary: "x", Draft: &Draft{Channel: "note", Body: strings.Repeat("b", 4001)}}, ValidateOptions{}, "draft.body must contain between 1 and 4000"},
+		{"draft body", Component{ID: "d", Type: "draft", Summary: "x", Draft: &Draft{Channel: "note", Body: strings.Repeat("b", 4001)}}, ValidateOptions{}, ""},
 		{"draft html", Component{ID: "d", Type: "draft", Summary: "x", Draft: &Draft{Channel: "note", Body: "<script>x</script>"}}, ValidateOptions{}, "draft.body must not contain HTML"},
 		{"draft bound", draftOf(approval), ValidateOptions{Bindings: BindingResolverFunc(allow)}, ""},
 		{"draft bound to a run", draftOf(&Binding{Kind: BindingRun, ID: "r1"}), ValidateOptions{Bindings: BindingResolverFunc(allow)}, `binding.kind "run" is not allowed on draft; use approval`},
@@ -215,16 +216,16 @@ func TestValidateWave2(t *testing.T) {
 			c := recipeOf(false)
 			c.Recipe.Ingredients[0].Unit = strings.Repeat("u", 17)
 			return c
-		}(), ValidateOptions{}, "recipe.ingredients[0].unit"},
+		}(), ValidateOptions{}, ""},
 		// item
 		{"item", Component{ID: "i", Type: "item", Summary: "x", Item: &Item{Name: "Kettle", Image: img("a"), Price: &Price{Amount: Amount{Value: 35, Format: StatCurrency, Currency: "GBP"}, Per: "once"}, Rating: &ItemRating{Value: 4.5, Count: minutes(10)}, Facts: []string{"1.7 l"}, Badge: "Quiet"}}, images("a"), ""},
 		{"item rating", Component{ID: "i", Type: "item", Summary: "x", Item: &Item{Name: "Kettle", Rating: &ItemRating{Value: 6}}}, ValidateOptions{}, "item.rating.value must be 0-5"},
-		{"item facts", Component{ID: "i", Type: "item", Summary: "x", Item: &Item{Name: "Kettle", Facts: []string{"a", "b", "c", "d", "e"}}}, ValidateOptions{}, "item.facts allows at most 4 (got 5)"},
-		{"item fact length", Component{ID: "i", Type: "item", Summary: "x", Item: &Item{Name: "Kettle", Facts: []string{strings.Repeat("f", 61)}}}, ValidateOptions{}, "item.facts[0]"},
+		{"item facts", Component{ID: "i", Type: "item", Summary: "x", Item: &Item{Name: "Kettle", Facts: []string{"a", "b", "c", "d", "e"}}}, ValidateOptions{}, ""},
+		{"item fact length", Component{ID: "i", Type: "item", Summary: "x", Item: &Item{Name: "Kettle", Facts: []string{strings.Repeat("f", 61)}}}, ValidateOptions{}, ""},
 		{"item price per", Component{ID: "i", Type: "item", Summary: "x", Item: &Item{Name: "Kettle", Price: &Price{Amount: Amount{Value: 1}, Per: "week"}}}, ValidateOptions{}, `item.price.per "week"`},
 		// analogy
 		{"analogy", Component{ID: "a", Type: "analogy", Summary: "x", Analogy: &Analogy{From: AnalogySide{Label: "Cell", Icon: "dna"}, To: AnalogySide{Label: "Factory"}, Mapping: []AnalogyMapping{{A: "Nucleus", B: "Office"}}}}, ValidateOptions{}, ""},
-		{"analogy mapping", Component{ID: "a", Type: "analogy", Summary: "x", Analogy: &Analogy{From: AnalogySide{Label: "Cell"}, To: AnalogySide{Label: "Factory"}, Mapping: make([]AnalogyMapping, 6)}}, ValidateOptions{}, "analogy.mapping needs 1-5 (got 6)"},
+		{"analogy mapping", Component{ID: "a", Type: "analogy", Summary: "x", Analogy: &Analogy{From: AnalogySide{Label: "Cell"}, To: AnalogySide{Label: "Factory"}, Mapping: []AnalogyMapping{{A: "a", B: "b"}, {A: "a", B: "b"}, {A: "a", B: "b"}, {A: "a", B: "b"}, {A: "a", B: "b"}, {A: "a", B: "b"}}}}, ValidateOptions{}, ""},
 		{"analogy to", Component{ID: "a", Type: "analogy", Summary: "x", Analogy: &Analogy{From: AnalogySide{Label: "Cell"}, Mapping: []AnalogyMapping{{A: "a", B: "b"}}}}, ValidateOptions{}, "analogy.to.label"},
 		{"analogy pair", Component{ID: "a", Type: "analogy", Summary: "x", Analogy: &Analogy{From: AnalogySide{Label: "Cell"}, To: AnalogySide{Label: "Factory"}, Mapping: []AnalogyMapping{{A: "a"}}}}, ValidateOptions{}, "analogy.mapping[0].b"},
 	}
@@ -247,14 +248,20 @@ func TestValidateWave2(t *testing.T) {
 	}
 }
 
+// TestItemHasNoLink: a link or node coordinates the format does not have
+// are ignored and never stored.
 func TestItemHasNoLink(t *testing.T) {
-	raw := `{"schema":"` + Schema + `","title":"x","state":"ready","components":[{"id":"i","type":"item","summary":"x","item":{"name":"Kettle","link":"https://shop.example/k"}}]}`
-	if _, err := Decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), `unknown field "link"`) {
-		t.Fatalf("item link decoded: %v", err)
-	}
-	raw = `{"schema":"` + Schema + `","title":"x","state":"ready","components":[{"id":"d","type":"diagram","summary":"x","diagram":{"layout":"flow","nodes":[{"id":"a","label":"A","x":0,"y":0},{"id":"b","label":"B"}]}}]}`
-	if _, err := Decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), `unknown field "x"`) {
-		t.Fatalf("diagram coordinates decoded: %v", err)
+	for raw, dropped := range map[string]string{
+		`{"schema":"` + Schema + `","title":"x","state":"ready","components":[{"id":"i","type":"item","summary":"x","item":{"name":"Kettle","link":"https://shop.example/k"}}]}`:                                           "shop.example",
+		`{"schema":"` + Schema + `","title":"x","state":"ready","components":[{"id":"d","type":"diagram","summary":"x","diagram":{"layout":"flow","nodes":[{"id":"a","label":"A","x":0,"y":0},{"id":"b","label":"B"}]}}]}`: `"x":`,
+	} {
+		surface, err := Decode([]byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if encoded, _ := json.Marshal(surface); strings.Contains(string(encoded), dropped) {
+			t.Fatalf("decoded surface kept %s: %s", dropped, encoded)
+		}
 	}
 }
 
@@ -335,7 +342,7 @@ func TestWave2SchemaEntries(t *testing.T) {
 			t.Fatalf("schema has no %s payload", name)
 		}
 		spec := catalogue[name]
-		if spec.payload != name || !RequiresSummary(name) || spec.sentence == "" {
+		if spec.payload != name || spec.sentence == "" {
 			t.Fatalf("%s catalogue entry = %#v", name, spec)
 		}
 	}

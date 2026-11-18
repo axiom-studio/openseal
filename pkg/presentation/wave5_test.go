@@ -60,9 +60,9 @@ func TestValidateWave5(t *testing.T) {
 		{"place pinned twice", mapOf(MapPin{ID: "a", Place: "place:000000000001"}, MapPin{ID: "b", Place: "place:000000000001"}), places(), "already pinned by map.pins[0]"},
 		{"too many pins", Component{ID: "m", Type: "map", Summary: "s", Map: &Map{Pins: pins(21)}}, ValidateOptions{SkipHostChecks: true}, "map.pins needs 1-20"},
 		{"no pins", Component{ID: "m", Type: "map", Summary: "s", Map: &Map{}}, places(), "map.pins needs 1-20"},
-		{"long label", mapOf(MapPin{ID: "a", Place: "place:000000000001", Label: strings.Repeat("x", 61)}), places(), "map.pins[0].label"},
-		{"long detail", mapOf(MapPin{ID: "a", Place: "place:000000000001", Detail: strings.Repeat("x", 301)}), places(), "map.pins[0].detail"},
-		{"no summary", Component{ID: "m", Type: "map", Map: &Map{Pins: pins(1)}}, places(), "summary is required"},
+		{"long label", mapOf(MapPin{ID: "a", Place: "place:000000000001", Label: strings.Repeat("x", 61)}), places(), ""},
+		{"long detail", mapOf(MapPin{ID: "a", Place: "place:000000000001", Detail: strings.Repeat("x", 301)}), places(), ""},
+		{"no summary", Component{ID: "m", Type: "map", Map: &Map{Pins: pins(1)}}, places(), ""},
 		{"typed coordinates", mapOf(MapPin{ID: "a", Place: "place:000000000001", Lat: &lat, Lon: &lon}), places(), "map.pins[0].lat and .lon are filled in from find_place; leave them out"},
 		{"typed address", mapOf(MapPin{ID: "a", Place: "place:000000000001", Address: "Bengaluru"}), places(), "map.pins[0].address is filled in from find_place"},
 		{"no place checks", mapOf(MapPin{ID: "a", Place: "place:000000000001"}), ValidateOptions{}, "map.pins[0].place place:000000000001 cannot be checked here"},
@@ -196,7 +196,8 @@ func TestLintWave5(t *testing.T) {
 	}
 }
 
-// The model-facing format never offers the fields the host stamps in.
+// The model-facing format never offers the fields the host stamps in; the
+// schema refuses them (false) rather than ignoring them.
 func TestStampedFieldsAreNotModelFacing(t *testing.T) {
 	properties := strictPayloads()
 	pin := properties["map"].(map[string]interface{})["properties"].(map[string]interface{})["pins"].(map[string]interface{})["items"].(map[string]interface{})["properties"].(map[string]interface{})
@@ -204,16 +205,16 @@ func TestStampedFieldsAreNotModelFacing(t *testing.T) {
 	item := properties["itinerary"].(map[string]interface{})["properties"].(map[string]interface{})["days"].(map[string]interface{})["items"].(map[string]interface{})["properties"].(map[string]interface{})["items"].(map[string]interface{})["items"].(map[string]interface{})["properties"].(map[string]interface{})
 	for name, fields := range map[string]map[string]interface{}{"pin": pin, "place": place, "item": item} {
 		for _, key := range []string{"lat", "lon"} {
-			if fields[key] != nil {
-				t.Fatalf("%s offers %s", name, key)
+			if fields[key] != false {
+				t.Fatalf("%s does not refuse %s", name, key)
 			}
 		}
 	}
-	if pin["address"] != nil || pin["place"] == nil || place["location"] == nil || item["location"] == nil {
+	if pin["address"] != false || pin["place"] == nil || place["location"] == nil || item["location"] == nil {
 		t.Fatalf("pin %v, place %v, item %v", pin, place, item)
 	}
 	format := VisualFormat()
-	for _, want := range []string{"placeId = str/" + PlaceIDPattern + "/ (from find_place)", "\nmap*: Pins for 1-20 real places from find_place; tap a pin for its detail.", "location?:placeId"} {
+	for _, want := range []string{"placeId = str/" + PlaceIDPattern + "/ (from find_place)", "\nmap: Pins for 1-20 real places from find_place; tap a pin for its detail.", "location?:placeId"} {
 		if !strings.Contains(format, want) {
 			t.Fatalf("format lacks %q", want)
 		}

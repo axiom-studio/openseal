@@ -2,6 +2,7 @@ package presentation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -112,9 +113,9 @@ func TestValidateWave3(t *testing.T) {
 		opts      ValidateOptions
 		err       string
 	}{
-		{"summary", Component{ID: "a", Type: "agenda", Agenda: agendaOf(agendaDay("2026-11-02")).Agenda}, ValidateOptions{}, "summary is required for agenda"},
+		{"summary", Component{ID: "a", Type: "agenda", Agenda: agendaOf(agendaDay("2026-11-02")).Agenda}, ValidateOptions{}, ""},
 		{"payload", Component{ID: "a", Type: "poll", Summary: "x"}, ValidateOptions{}, "poll payload is required"},
-		{"foreign payload", Component{ID: "a", Type: "place", Summary: "x", Place: &Place{Name: "Cafe"}, Poll: pollOf(false, "a", "b").Poll}, ValidateOptions{}, `place cannot carry a "poll" payload`},
+		{"foreign payload", Component{ID: "a", Type: "place", Summary: "x", Place: &Place{Name: "Cafe"}, Poll: pollOf(false, "a", "b").Poll}, ValidateOptions{}, ""},
 		// agenda
 		{"agenda", agendaOf(agendaDay("2026-11-02", slot("gym", "07:00", "08:00"), slot("work", "09:00", "")), agendaDay("2026-11-03")), ValidateOptions{}, ""},
 		{"agenda timezone", func() Component {
@@ -187,7 +188,7 @@ func TestValidateWave3(t *testing.T) {
 			c := itineraryOf(stops("sat", "pier"))
 			c.Itinerary.Days[0].Items[0].Detail = strings.Repeat("d", 201)
 			return c
-		}(), ValidateOptions{}, "itinerary.days[0].items[0].detail must be at most 200"},
+		}(), ValidateOptions{}, ""},
 		{"itinerary image", func() Component {
 			c := itineraryOf(stops("sat", "pier"))
 			c.Itinerary.Days[0].Items[0].Image = img("pier")
@@ -199,8 +200,8 @@ func TestValidateWave3(t *testing.T) {
 		{"place name", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{}}, ValidateOptions{}, "place.name is required unless location names a place from find_place"},
 		{"place price level", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{Name: "Cafe", PriceLevel: 5}}, ValidateOptions{}, "place.priceLevel must be 1-4 (got 5)"},
 		{"place rating", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{Name: "Cafe", Rating: &ItemRating{Value: 6}}}, ValidateOptions{}, "place.rating.value must be 0-5"},
-		{"place hours", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{Name: "Cafe", Hours: make([]string, 8)}}, ValidateOptions{}, "place.hours allows at most 7 (got 8)"},
-		{"place facts", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{Name: "Cafe", Facts: []string{strings.Repeat("f", 61)}}}, ValidateOptions{}, "place.facts[0] must contain between 1 and 60"},
+		{"place hours", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{Name: "Cafe", Hours: []string{"1", "2", "3", "4", "5", "6", "7", "8"}}}, ValidateOptions{}, ""},
+		{"place facts", Component{ID: "p", Type: "place", Summary: "x", Place: &Place{Name: "Cafe", Facts: []string{strings.Repeat("f", 61)}}}, ValidateOptions{}, ""},
 		// breakdown
 		{"breakdown", breakdownOf(3, 0, 1), ValidateOptions{}, ""},
 		{"breakdown one item", breakdownOf(3), ValidateOptions{}, "breakdown.items needs 2-12 (got 1)"},
@@ -218,18 +219,18 @@ func TestValidateWave3(t *testing.T) {
 		{"progress target", progressOf(ProgressItem{ID: "a", Label: "A", Value: 1}), ValidateOptions{}, "progress.items[0].target must be above 0"},
 		{"progress value", progressOf(ProgressItem{ID: "a", Label: "A", Value: -1, Target: 1}), ValidateOptions{}, "progress.items[0].value must be 0 or more"},
 		{"progress items", progressOf(), ValidateOptions{}, "progress.items needs 1-6 (got 0)"},
-		{"progress currency", progressOf(ProgressItem{ID: "a", Label: "A", Target: 1, Currency: "GBP"}), ValidateOptions{}, "progress.items[0].currency is only used with format currency"},
+		{"progress currency", progressOf(ProgressItem{ID: "a", Label: "A", Target: 1, Currency: "GBP"}), ValidateOptions{}, ""},
 		// poll
 		{"poll", pollOf(false, "thai", "pizza"), ValidateOptions{}, ""},
 		{"poll one option", pollOf(false, "thai"), ValidateOptions{}, "poll.options needs 2-8 (got 1)"},
 		{"poll nine options", pollOf(false, "a", "b", "c", "d", "e", "f", "g", "h", "i"), ValidateOptions{}, "poll.options needs 2-8 (got 9)"},
 		{"poll closes", func() Component { c := pollOf(false, "a", "b"); c.Poll.ClosesAt = "2026-11-01T18:00:00Z"; return c }(), ValidateOptions{}, ""},
 		{"poll closes format", func() Component { c := pollOf(false, "a", "b"); c.Poll.ClosesAt = "Saturday 6pm"; return c }(), ValidateOptions{}, `poll.closesAt "Saturday 6pm" must be an RFC 3339 time`},
-		{"poll question", func() Component { c := pollOf(false, "a", "b"); c.Poll.Question = strings.Repeat("q", 201); return c }(), ValidateOptions{}, "poll.question must contain between 1 and 200"},
+		{"poll question", func() Component { c := pollOf(false, "a", "b"); c.Poll.Question = strings.Repeat("q", 201); return c }(), ValidateOptions{}, ""},
 		// explorer
 		{"explorer", interest(), ValidateOptions{}, ""},
 		{"explorer toggle", explorerOf([]ExplorerInput{slider("price", 1, 10, 1, 5), {ID: "member", Label: "Member", Kind: "toggle", Default: num(1)}}, output("total", "if(member, price * 0.9, price)")), ValidateOptions{}, ""},
-		{"explorer toggle range", explorerOf([]ExplorerInput{{ID: "member", Label: "Member", Kind: "toggle", Default: num(1), Max: num(1)}}, output("total", "if(member, 1, 2)")), ValidateOptions{}, "explorer.inputs[0] is a toggle and takes no min, max or step"},
+		{"explorer toggle range", explorerOf([]ExplorerInput{{ID: "member", Label: "Member", Kind: "toggle", Default: num(1), Max: num(1)}}, output("total", "if(member, 1, 2)")), ValidateOptions{}, ""},
 		{"explorer toggle default", explorerOf([]ExplorerInput{{ID: "member", Label: "Member", Kind: "toggle", Default: num(2)}}, output("total", "if(member, 1, 2)")), ValidateOptions{}, "explorer.inputs[0].default must be 0 (off) or 1 (on)"},
 		{"explorer no inputs", explorerOf(nil, output("total", "1")), ValidateOptions{}, "explorer.inputs needs 1-4 (got 0)"},
 		{"explorer five outputs", explorerOf([]ExplorerInput{slider("x", 0, 1, 1, 0)}, output("a", "x"), output("b", "x"), output("c", "x"), output("d", "x"), output("e", "x")), ValidateOptions{}, "explorer.outputs needs 1-4 (got 5)"},
@@ -256,7 +257,7 @@ func TestValidateWave3(t *testing.T) {
 		{"explorer chart input", withChart(&ExplorerChart{X: "years", Points: minutes(40), Series: []ExplorerSeries{{Label: "Balance", Expr: "deposit * (1 + rate / 100) ^ years"}}}), ValidateOptions{}, ""},
 		{"explorer chart t missing", withChart(&ExplorerChart{X: "t", Series: []ExplorerSeries{{Label: "B", Expr: "t"}}}), ValidateOptions{}, `explorer.chart.t {from, to} is required when x is "t"`},
 		{"explorer chart t range", withChart(&ExplorerChart{X: "t", T: &ExplorerRange{From: 5, To: 5}, Series: []ExplorerSeries{{Label: "B", Expr: "t"}}}), ValidateOptions{}, "explorer.chart.t.from must be below to"},
-		{"explorer chart t unused", withChart(&ExplorerChart{X: "years", T: &ExplorerRange{From: 0, To: 5}, Series: []ExplorerSeries{{Label: "B", Expr: "years"}}}), ValidateOptions{}, `explorer.chart.t is only used when x is "t"`},
+		{"explorer chart t unused", withChart(&ExplorerChart{X: "years", T: &ExplorerRange{From: 0, To: 5}, Series: []ExplorerSeries{{Label: "B", Expr: "years"}}}), ValidateOptions{}, ""},
 		{"explorer chart t without t", withChart(&ExplorerChart{X: "years", Series: []ExplorerSeries{{Label: "B", Expr: "t"}}}), ValidateOptions{}, `explorer.chart.series[0].expr: type error at 0: unknown name "t"`},
 		{"explorer chart x", withChart(&ExplorerChart{X: "month", Series: []ExplorerSeries{{Label: "B", Expr: "1"}}}), ValidateOptions{}, `explorer.chart.x "month" must be the id of an input or "t"`},
 		{"explorer chart toggle", func() Component {
@@ -272,7 +273,13 @@ func TestValidateWave3(t *testing.T) {
 		{"routine unbound", routineOf(nil), bindings, "binding is required: {kind: runbook, id} names the routine this card shows"},
 		{"routine wrong kind", routineOf(&Binding{Kind: BindingAgent, ID: "a"}), bindings, `binding.kind "agent" is not allowed on routine; use runbook`},
 		{"routine not visible", routineOf(&Binding{Kind: BindingRunbook, ID: "elsewhere"}), bindings, "binding: runbook/elsewhere: is not part of this conversation"},
-		{"routine items", routineOf(&Binding{Kind: BindingRunbook, ID: "act-1"}, make([]RoutineItem, 15)...), bindings, "routine.items allows at most 14 (got 15)"},
+		{"routine items", routineOf(&Binding{Kind: BindingRunbook, ID: "act-1"}, func() []RoutineItem {
+			items := make([]RoutineItem, 15)
+			for index := range items {
+				items[index] = RoutineItem{Label: "Run", Text: "Done"}
+			}
+			return items
+		}()...), bindings, ""},
 		{"routine item text", routineOf(&Binding{Kind: BindingRunbook, ID: "act-1"}, RoutineItem{Label: "A"}), bindings, "routine.items[0].text"},
 		// tasks
 		{"tasks", tasksOf("task-1", "task-2"), bindings, ""},
@@ -293,7 +300,7 @@ func TestValidateWave3(t *testing.T) {
 		{"agent unbound", agentOf(nil), bindings, "binding is required: {kind: agent, id} names the agent this card shows"},
 		{"agent wrong kind", agentOf(&Binding{Kind: BindingRun, ID: "r"}), bindings, `binding.kind "run" is not allowed on agent; use agent`},
 		{"agent headline", Component{ID: "g", Type: "agent", Summary: "x", Binding: &Binding{Kind: BindingAgent, ID: "a"}, Agent: &AgentCard{}}, bindings, "agent.headline"},
-		{"agent points", Component{ID: "g", Type: "agent", Summary: "x", Binding: &Binding{Kind: BindingAgent, ID: "a"}, Agent: &AgentCard{Headline: "h", Points: make([]string, 5)}}, bindings, "agent.points allows at most 4 (got 5)"},
+		{"agent points", Component{ID: "g", Type: "agent", Summary: "x", Binding: &Binding{Kind: BindingAgent, ID: "a"}, Agent: &AgentCard{Headline: "h", Points: []string{"a", "b", "c", "d", "e"}}}, bindings, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -339,8 +346,12 @@ func TestBindingKindsAreCheckedBeforeTheResolver(t *testing.T) {
 
 func TestPlaceHasNoLink(t *testing.T) {
 	raw := `{"schema":"` + Schema + `","title":"x","state":"ready","components":[{"id":"p","type":"place","summary":"x","place":{"name":"Cafe","link":"https://cafe.example"}}]}`
-	if _, err := Decode([]byte(raw)); err == nil || !strings.Contains(err.Error(), `unknown field "link"`) {
-		t.Fatalf("place link decoded: %v", err)
+	surface, err := Decode([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encoded, _ := json.Marshal(surface); strings.Contains(string(encoded), "cafe.example") {
+		t.Fatalf("place link kept: %s", encoded)
 	}
 	if place := strictPayloads()["place"].(map[string]interface{})["properties"].(map[string]interface{}); place["link"] != nil {
 		t.Fatal("place schema has a link")
@@ -390,15 +401,15 @@ func TestWave3SchemaEntries(t *testing.T) {
 			t.Fatalf("schema has no %s payload", name)
 		}
 		spec := catalogue[name]
-		if spec.payload != name || !RequiresSummary(name) || spec.sentence == "" {
+		if spec.payload != name || spec.sentence == "" {
 			t.Fatalf("%s catalogue entry = %#v", name, spec)
 		}
-		if !strings.Contains(format, "\n"+name+"*: ") {
+		if !strings.Contains(format, "\n"+name+": ") {
 			t.Fatalf("format has no line for %s", name)
 		}
 	}
 	for name, kind := range map[string]string{"routine": "runbook", "agent": "agent", "draft": "approval"} {
-		if !strings.Contains(format, "\n"+name+"*: ") || !strings.Contains(format[strings.Index(format, "\n"+name+"*: "):], "binding.kind:"+kind+"\n") &&
+		if !strings.Contains(format, "\n"+name+": ") || !strings.Contains(format[strings.Index(format, "\n"+name+": "):], "binding.kind:"+kind+"\n") &&
 			!strings.HasSuffix(format, "binding.kind:"+kind) {
 			t.Fatalf("format does not say %s binds %s", name, kind)
 		}

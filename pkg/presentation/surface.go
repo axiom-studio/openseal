@@ -5,7 +5,10 @@
 //
 // A Surface is a tree of typed components drawn from a closed catalogue. Every
 // component shares one envelope (id, type, summary, title, tone, binding,
-// children) and carries at most one payload whose JSON key equals its type.
+// children) and carries one payload whose JSON key equals its type. The
+// format ignores what it does not read: unknown keys, payloads of other
+// types, children of types that hold none, and components whose type is
+// missing or unknown.
 package presentation
 
 import (
@@ -16,7 +19,7 @@ import (
 
 const (
 	SkillID      = "openseal.presentation"
-	SkillVersion = "6.0.1"
+	SkillVersion = "6.1.0"
 	// UpdateVisual replaces a visual already shown in the chat with a newer
 	// version. Visuals that answer a turn ride on the answer instead.
 	UpdateVisual = "update_visual"
@@ -30,8 +33,6 @@ const (
 	MaxComponents   = 64        // every component, including nested ones
 	MaxDepth        = 3         // top-level components are depth 1
 	MaxSurfaceBytes = 64 * 1024 // encoded JSON
-	MaxSummaryRunes = 280
-	MaxTitleRunes   = 300
 )
 
 type State string
@@ -48,8 +49,8 @@ type Surface struct {
 	Components []Component `json:"components"`
 }
 
-// Component is a closed tagged union. Only the payload belonging to Type may
-// be populated; Validate is the exact semantic gate.
+// Component is a tagged union. Only the payload belonging to Type is read;
+// Validate is the exact semantic gate.
 type Component struct {
 	ID       string      `json:"id"`
 	Type     string      `json:"type"`
@@ -134,8 +135,18 @@ func Decode(raw []byte) (*Surface, error) {
 	if err := checkSchema(document); err != nil {
 		return nil, err
 	}
+	// The stamped fields the schema check set aside are part of the
+	// surface, so it is decoded from its full document.
+	full, err := surfaceDocument(raw, false)
+	if err != nil {
+		return nil, fmt.Errorf("decode presentation surface: %w", err)
+	}
+	fields, ok := full.(map[string]interface{})
+	if !ok {
+		return nil, &ValidationError{Message: "a presentation surface must be an object"}
+	}
 	var surface Surface
-	if err := json.Unmarshal(raw, &surface); err != nil {
+	if err := decodeDrawn(fields, &surface); err != nil {
 		return nil, fmt.Errorf("decode presentation surface: %w", err)
 	}
 	if _, err := Validate(context.Background(), surface, ValidateOptions{SkipHostChecks: true}); err != nil {
@@ -166,19 +177,27 @@ func (s Surface) Find(id string) (*Component, bool) {
 	return found, found != nil
 }
 
-// walk visits every component depth first, including tab children. visit
-// returns false to stop.
+// walk visits every drawn component depth first, including tab children:
+// a component of no known type is left out, and so are the children and
+// tabs of a type that holds none. visit returns false to stop.
 func walk(components []Component, visit func(component *Component, path string, depth int) bool) {
 	var recurse func(list []Component, prefix string, depth int) bool
 	recurse = func(list []Component, prefix string, depth int) bool {
 		for index := range list {
 			component := &list[index]
+			spec, known := catalogue[component.Type]
+			if !known {
+				continue
+			}
 			path := fmt.Sprintf("%s[%d]", prefix, index)
 			if !visit(component, path, depth) {
 				return false
 			}
-			if !recurse(component.Children, path+".children", depth+1) {
+			if spec.children.max > 0 && !recurse(component.Children, path+".children", depth+1) {
 				return false
+			}
+			if spec.payload != "tabs" {
+				continue
 			}
 			for tab := range component.Tabs {
 				if !recurse(component.Tabs[tab].Children, fmt.Sprintf("%s.tabs[%d].children", path, tab), depth+1) {

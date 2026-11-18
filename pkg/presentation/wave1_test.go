@@ -87,25 +87,25 @@ func TestValidateWave1(t *testing.T) {
 		err       string
 	}{
 		// every new type needs a summary
-		{"callout summary", Component{ID: "a", Type: "callout", Callout: &Callout{Body: "x"}}, ValidateOptions{}, "summary is required for callout"},
-		{"choices summary", Component{ID: "a", Type: "choices", Choices: &Choices{Chips: []Chip{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}}}, ValidateOptions{}, "summary is required for choices"},
+		{"callout without summary", Component{ID: "a", Type: "callout", Callout: &Callout{Body: "x"}}, ValidateOptions{}, ""},
+		{"choices without summary", Component{ID: "a", Type: "choices", Choices: &Choices{Chips: []Chip{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}}}, ValidateOptions{}, ""},
 		{"payload missing", Component{ID: "a", Type: "steps", Summary: "x"}, ValidateOptions{}, "steps payload is required"},
-		{"foreign payload", Component{ID: "a", Type: "callout", Summary: "x", Callout: &Callout{Body: "x"}, Checklist: checklistOf(1).Checklist}, ValidateOptions{}, `callout cannot carry a "checklist" payload`},
+		{"foreign payload ignored", Component{ID: "a", Type: "callout", Summary: "x", Callout: &Callout{Body: "x"}, Checklist: checklistOf(1).Checklist}, ValidateOptions{}, ""},
 		// callout
 		{"callout", Component{ID: "a", Type: "callout", Summary: "x", Tone: ToneWarning, Callout: &Callout{Icon: "lightbulb", Body: "Use **less** $x^2$ < 3"}}, ValidateOptions{}, ""},
-		{"callout empty", Component{ID: "a", Type: "callout", Summary: "x", Callout: &Callout{}}, ValidateOptions{}, "callout.body must contain between 1 and 300"},
-		{"callout long", Component{ID: "a", Type: "callout", Summary: "x", Callout: &Callout{Body: strings.Repeat("a", 301)}}, ValidateOptions{}, "callout.body must contain between 1 and 300"},
+		{"callout empty", Component{ID: "a", Type: "callout", Summary: "x", Callout: &Callout{}}, ValidateOptions{}, "callout.body must contain at least 1 characters (got 0)"},
+		{"callout long", Component{ID: "a", Type: "callout", Summary: "x", Callout: &Callout{Body: strings.Repeat("a", 301)}}, ValidateOptions{}, ""},
 		{"callout html", Component{ID: "a", Type: "callout", Summary: "x", Callout: &Callout{Body: "<b>hi</b>"}}, ValidateOptions{}, "callout.body must not contain HTML"},
 		{"callout md image", Component{ID: "a", Type: "callout", Summary: "x", Callout: &Callout{Body: "![x](https://x.example/a.png)"}}, ValidateOptions{}, "must not contain markdown images"},
 		{"callout icon shape", Component{ID: "a", Type: "callout", Summary: "x", Callout: &Callout{Icon: "Bad Icon", Body: "x"}}, ValidateOptions{}, "callout.icon"},
 		// steps
 		{"steps", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: stepsOf(10), Checkable: true}}, ValidateOptions{}, ""},
-		{"one step", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: stepsOf(1)}}, ValidateOptions{}, "steps.items needs 2-10 (got 1)"},
-		{"eleven steps", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: stepsOf(11)}}, ValidateOptions{}, "steps.items needs 2-10 (got 11)"},
+		{"one step", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: stepsOf(1)}}, ValidateOptions{}, "steps.items needs at least 2 (got 1)"},
+		{"eleven steps", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: stepsOf(11)}}, ValidateOptions{}, ""},
 		{"step id", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: []Step{{ID: "A", Title: "a"}, {ID: "b", Title: "b"}}}}, ValidateOptions{}, `steps.items[0].id "A" must match`},
 		{"step id twice", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: []Step{{ID: "a", Title: "a"}, {ID: "a", Title: "b"}}}}, ValidateOptions{}, `steps.items[1].id "a" is used twice`},
-		{"step title", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: []Step{{ID: "a", Title: strings.Repeat("t", 81)}, {ID: "b", Title: "b"}}}}, ValidateOptions{}, "steps.items[0].title"},
-		{"step detail", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: []Step{{ID: "a", Title: "a", Detail: strings.Repeat("d", 401)}, {ID: "b", Title: "b"}}}}, ValidateOptions{}, "steps.items[0].detail"},
+		{"step title", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: []Step{{ID: "a", Title: strings.Repeat("t", 81)}, {ID: "b", Title: "b"}}}}, ValidateOptions{}, ""},
+		{"step detail", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: []Step{{ID: "a", Title: "a", Detail: strings.Repeat("d", 401)}, {ID: "b", Title: "b"}}}}, ValidateOptions{}, ""},
 		{"step image", Component{ID: "a", Type: "steps", Summary: "x", Steps: &Steps{Items: []Step{{ID: "a", Title: "a", Image: img("img-1")}, {ID: "b", Title: "b"}}}}, images("img-1"), ""},
 		// images
 		{"image without resolver", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: *img("img-1")}}, ValidateOptions{}, "image.image: this host cannot show images yet; leave it out"},
@@ -115,9 +115,9 @@ func TestValidateWave1(t *testing.T) {
 		{"image version", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: ImageRef{ArtifactID: "img-1"}}}, images("img-1"), "image.image.version must be 1 or more"},
 		{"image url", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: ImageRef{ArtifactID: "https://x.example/a.png", Version: 1}}}, images(), `image.image.artifactId "https://x.example/a.png" must match`},
 		{"image aspect", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: *img("img-1"), Aspect: "wide"}}, images("img-1"), `image.aspect "wide"`},
-		{"image caption", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: *img("img-1"), Caption: strings.Repeat("c", 201)}}, images("img-1"), "image.caption"},
+		{"image caption", Component{ID: "a", Type: "image", Summary: "x", Image: &ImageBlock{Image: *img("img-1"), Caption: strings.Repeat("c", 201)}}, images("img-1"), ""},
 		{"gallery", Component{ID: "a", Type: "gallery", Summary: "x", Gallery: &Gallery{Layout: "strip", Images: []GalleryImage{{Image: *img("a")}, {Image: *img("b"), Caption: "B"}}}}, images("a", "b"), ""},
-		{"gallery of one", Component{ID: "a", Type: "gallery", Summary: "x", Gallery: &Gallery{Images: []GalleryImage{{Image: *img("a")}}}}, images("a"), "gallery.images needs 2-12 (got 1)"},
+		{"gallery of one", Component{ID: "a", Type: "gallery", Summary: "x", Gallery: &Gallery{Images: []GalleryImage{{Image: *img("a")}}}}, images("a"), "gallery.images needs at least 2 (got 1)"},
 		{"gallery second unknown", Component{ID: "a", Type: "gallery", Summary: "x", Gallery: &Gallery{Images: []GalleryImage{{Image: *img("a")}, {Image: *img("b")}}}}, images("a"), "gallery.images[1].image"},
 		{"gallery layout", Component{ID: "a", Type: "gallery", Summary: "x", Gallery: &Gallery{Layout: "masonry", Images: []GalleryImage{{Image: *img("a")}, {Image: *img("b")}}}}, images("a", "b"), `gallery.layout "masonry"`},
 		// comparison
@@ -159,7 +159,7 @@ func TestValidateWave1(t *testing.T) {
 			c := compare(option("a"), option("b"))
 			c.Comparison.Options[0].Pros = []string{"a", "b", "c", "d", "e"}
 			return c
-		}(), ValidateOptions{}, "comparison.options[0].pros allows at most 4"},
+		}(), ValidateOptions{}, ""},
 		{"comparison eleven attributes", func() Component {
 			c := compare(option("a"), option("b"))
 			for index := 0; index < 9; index++ {
@@ -203,7 +203,7 @@ func TestValidateWave1(t *testing.T) {
 			c := chartOf("bar", ChartSeries{Name: "a", Points: points(3)})
 			c.Chart.Currency = "EUR"
 			return c
-		}(), ValidateOptions{}, "chart.currency is only used with format currency"},
+		}(), ValidateOptions{}, ""},
 		{"annotation x", func() Component {
 			c := chartOf("bar", ChartSeries{Name: "a", Points: points(3)})
 			c.Chart.Annotations = []ChartAnnotation{{X: "nope", Label: "x"}}
@@ -211,9 +211,11 @@ func TestValidateWave1(t *testing.T) {
 		}(), ValidateOptions{}, `chart.annotations[0].x "nope" must be the label of a point`},
 		{"five annotations", func() Component {
 			c := chartOf("bar", ChartSeries{Name: "a", Points: points(3)})
-			c.Chart.Annotations = make([]ChartAnnotation, 5)
+			for range 5 {
+				c.Chart.Annotations = append(c.Chart.Annotations, ChartAnnotation{X: c.Chart.Series[0].Points[0].Label, Label: "x"})
+			}
 			return c
-		}(), ValidateOptions{}, "chart.annotations allows at most 4"},
+		}(), ValidateOptions{}, ""},
 		{"highlight series", func() Component {
 			c := chartOf("bar", ChartSeries{Name: "a", Points: points(3)})
 			c.Chart.Highlight = &ChartHighlight{Series: "b"}
@@ -236,20 +238,20 @@ func TestValidateWave1(t *testing.T) {
 			}
 			return list
 		}()), ValidateOptions{}, "table.columns needs 1-8 (got 9)"},
-		{"table 51 rows", tableOf([]TableColumn{textColumn}, manyRows...), ValidateOptions{}, "table.rows allows at most 50 (got 51)"},
+		{"table 51 rows", tableOf([]TableColumn{textColumn}, manyRows...), ValidateOptions{}, ""},
 		{"table column kind", tableOf([]TableColumn{{Key: "a", Label: "A", Kind: "link"}}), ValidateOptions{}, `table.columns[0].kind "link"`},
 		{"table currency column", tableOf([]TableColumn{{Key: "a", Label: "A", Kind: "currency"}}), ValidateOptions{}, "table.columns[0].currency is required"},
-		{"table currency on text", tableOf([]TableColumn{{Key: "a", Label: "A", Kind: "text", Currency: "GBP"}}), ValidateOptions{}, "only used by currency columns"},
+		{"table currency on text ignored", tableOf([]TableColumn{{Key: "a", Label: "A", Kind: "text", Currency: "GBP"}}), ValidateOptions{}, ""},
 		{"table key twice", tableOf([]TableColumn{textColumn, textColumn}), ValidateOptions{}, `table.columns[1].key "name" is used twice`},
 		{"table unknown cell", tableOf([]TableColumn{textColumn}, map[string]TableCell{"price": NumberCell(1)}), ValidateOptions{}, `table.rows[0].price: no column has key "price"`},
 		{"table number as text", tableOf([]TableColumn{{Key: "n", Label: "N", Kind: "number"}}, map[string]TableCell{"n": TextCell("10")}), ValidateOptions{}, `table.rows[0].n must be a number because column "n" is number`},
 		{"table text as number", tableOf([]TableColumn{textColumn}, map[string]TableCell{"name": NumberCell(1)}), ValidateOptions{}, `table.rows[0].name must be text`},
 		{"table date", tableOf([]TableColumn{{Key: "d", Label: "D", Kind: "date"}}, map[string]TableCell{"d": TextCell("2026-02-30")}), ValidateOptions{}, "must be a date as YYYY-MM-DD"},
-		{"table long text", tableOf([]TableColumn{textColumn}, map[string]TableCell{"name": TextCell(strings.Repeat("x", 121))}), ValidateOptions{}, "table.rows[0].name must be at most 120"},
+		{"table long text", tableOf([]TableColumn{textColumn}, map[string]TableCell{"name": TextCell(strings.Repeat("x", 121))}), ValidateOptions{}, ""},
 		{"table image needs resolver", tableOf([]TableColumn{{Key: "p", Label: "P", Kind: "image"}}, map[string]TableCell{"p": ImageCell(*img("a"))}), ValidateOptions{}, "table.rows[0].p: this host cannot show images yet"},
 		// timeline
 		{"timeline", Component{ID: "a", Type: "timeline", Summary: "x", Timeline: &Timeline{Events: []TimelineEvent{{ID: "a", When: "Mon 3 Nov", Date: "2026-11-03", Title: "A", Detail: "x", Icon: "flag"}, {ID: "b", When: "Week 2", Title: "B"}}}}, ValidateOptions{}, ""},
-		{"timeline one", Component{ID: "a", Type: "timeline", Summary: "x", Timeline: &Timeline{Events: []TimelineEvent{{ID: "a", When: "1", Title: "A"}}}}, ValidateOptions{}, "timeline.events needs 2-20 (got 1)"},
+		{"timeline one", Component{ID: "a", Type: "timeline", Summary: "x", Timeline: &Timeline{Events: []TimelineEvent{{ID: "a", When: "1", Title: "A"}}}}, ValidateOptions{}, "timeline.events needs at least 2 (got 1)"},
 		{"timeline date", Component{ID: "a", Type: "timeline", Summary: "x", Timeline: &Timeline{Events: []TimelineEvent{{ID: "a", When: "1", Title: "A", Date: "3 Nov"}, {ID: "b", When: "2", Title: "B"}}}}, ValidateOptions{}, `timeline.events[0].date "3 Nov"`},
 		{"timeline when", Component{ID: "a", Type: "timeline", Summary: "x", Timeline: &Timeline{Events: []TimelineEvent{{ID: "a", Title: "A"}, {ID: "b", When: "2", Title: "B"}}}}, ValidateOptions{}, "timeline.events[0].when"},
 		// choices
@@ -260,7 +262,7 @@ func TestValidateWave1(t *testing.T) {
 			}
 			return list
 		}()}}, ValidateOptions{}, "choices.chips needs 2-5 (got 6)"},
-		{"chip label", Component{ID: "a", Type: "choices", Summary: "x", Choices: &Choices{Chips: []Chip{{ID: "a", Label: strings.Repeat("l", 41)}, {ID: "b", Label: "B"}}}}, ValidateOptions{}, "choices.chips[0].label"},
+		{"chip label", Component{ID: "a", Type: "choices", Summary: "x", Choices: &Choices{Chips: []Chip{{ID: "a", Label: strings.Repeat("l", 41)}, {ID: "b", Label: "B"}}}}, ValidateOptions{}, ""},
 		// checklist
 		{"checklist 40", checklistOf(40), ValidateOptions{}, ""},
 		{"checklist 41", checklistOf(41), ValidateOptions{}, "checklist.items needs 1-40 (got 41)"},
@@ -269,7 +271,7 @@ func TestValidateWave1(t *testing.T) {
 			c := checklistOf(1)
 			c.Checklist.Items[0].Group = strings.Repeat("g", 41)
 			return c
-		}(), ValidateOptions{}, "checklist.items[0].group"},
+		}(), ValidateOptions{}, ""},
 		// quiz
 		{"quiz", quizOf(false, "mito"), ValidateOptions{}, ""},
 		{"quiz multiple", quizOf(true, "mito", "wall"), ValidateOptions{}, ""},
@@ -293,7 +295,7 @@ func TestValidateWave1(t *testing.T) {
 			c := quizOf(false, "mito")
 			c.Quiz.AnswerKey.Explanation = strings.Repeat("e", 401)
 			return c
-		}(), ValidateOptions{}, "quiz.answerKey.explanation"},
+		}(), ValidateOptions{}, ""},
 		{"quiz question", func() Component {
 			c := quizOf(false, "mito")
 			c.Quiz.Question = ""

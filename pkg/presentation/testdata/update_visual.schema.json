@@ -4,7 +4,6 @@
     "components": {
       "description": "Components in exactly the format described on your answer's visual field.",
       "items": {
-        "additionalProperties": false,
         "properties": {
           "actions": {
             "items": {
@@ -25,7 +24,6 @@
             "type": "object"
           },
           "binding": {
-            "additionalProperties": false,
             "properties": {
               "id": {
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
@@ -148,8 +146,7 @@
             "type": "object"
           },
           "summary": {
-            "description": "Required unless type is actions, caption, carousel, divider, grid, section, tabs, text.",
-            "maxLength": 280,
+            "description": "one plain sentence for screen readers and voice; when left out, the title stands in, or else the first sentence of the component's main text",
             "type": "string"
           },
           "table": {
@@ -165,15 +162,13 @@
             "type": "object"
           },
           "text": {
-            "description": "Characters: caption 1-300, divider 0-80, text 1-1200.",
-            "maxLength": 1200,
+            "description": "Not blank, except that divider may leave it out.",
             "type": "string"
           },
           "timeline": {
             "type": "object"
           },
           "title": {
-            "maxLength": 300,
             "type": "string"
           },
           "tone": {
@@ -266,7 +261,6 @@
       "type": "string"
     },
     "title": {
-      "maxLength": 300,
       "minLength": 1,
       "pattern": "\\S",
       "type": "string"

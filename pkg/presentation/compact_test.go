@@ -42,7 +42,10 @@ func TestCompactRenderer(t *testing.T) {
 		{"closed object", compactRenderer{}, closedObject([]interface{}{"b", "a"}, map[string]interface{}{"a": number(), "b": boolean(), "d": str(0), "c": str(0)}),
 			"{b:bool, a:num, c?:str, d?:str}"},
 		{"open object", compactRenderer{}, map[string]interface{}{"type": "object"}, "object"},
-		{"open object with keys", compactRenderer{}, map[string]interface{}{"type": "object", "properties": map[string]interface{}{"a": number()}}, "{a?:num, ...}"},
+		{"open object with keys", compactRenderer{}, map[string]interface{}{"type": "object", "properties": map[string]interface{}{"a": number()}}, "{a?:num}"},
+		{"refused key", compactRenderer{}, objectOf(nil, map[string]interface{}{"a": number(), "lat": false}), "{a?:num}"},
+		{"counted list", compactRenderer{}, childrenSchema(componentRef(), 2, 10), "[Component]2..10"},
+		{"shown list", compactRenderer{}, shownList(number(), 1, 4), "[num]1.. (Only the first 4 are shown.)"},
 		{"empty closed object", compactRenderer{}, closedObject(nil, map[string]interface{}{}), "{}"},
 		{"map", compactRenderer{}, map[string]interface{}{"type": "object", "additionalProperties": str(80)}, "{*:str..80}"},
 		{"quoted key", compactRenderer{}, closedObject([]interface{}{"a b"}, map[string]interface{}{"a b": number()}), `{"a b":num}`},
@@ -140,7 +143,7 @@ func TestVisualFormatKeepsEverything(t *testing.T) {
 			if pattern, ok := schema["pattern"].(string); ok && pattern != notBlankPattern && !strings.Contains(format, "/"+pattern+"/") {
 				t.Errorf("%s pattern %s is missing", path, pattern)
 			}
-			for _, keyword := range []string{"minimum", "maximum", "exclusiveMinimum", "minLength", "maxLength", "minItems", "maxItems"} {
+			for _, keyword := range []string{"minimum", "maximum", "exclusiveMinimum", "minLength", "maxLength", "minItems", "maxItems", "minContains", "maxContains"} {
 				if value, ok := compactNumber(schema[keyword]); ok && !strings.Contains(format, value) {
 					t.Errorf("%s %s %s is missing", path, keyword, value)
 				}
@@ -152,6 +155,10 @@ func TestVisualFormatKeepsEverything(t *testing.T) {
 			}
 			sort.Strings(keys)
 			for _, key := range keys {
+				if properties[key] == false {
+					// A refused key (one the host fills in) is not listed.
+					continue
+				}
 				if !strings.Contains(format, key+":") && !strings.Contains(format, key+"?:") {
 					t.Errorf("%s.%s is missing", path, key)
 				}
@@ -182,7 +189,7 @@ var compactKeywords = map[string]bool{
 	"type": true, "properties": true, "required": true, "additionalProperties": true, "items": true,
 	"minItems": true, "maxItems": true, "minLength": true, "maxLength": true, "pattern": true,
 	"minimum": true, "maximum": true, "exclusiveMinimum": true, "enum": true, "anyOf": true,
-	"description": true, "$ref": true,
+	"description": true, "$ref": true, "contains": true, "minContains": true, "maxContains": true,
 }
 
 // TestModelFacingVisualBudget bounds what every turn sends: the answer's

@@ -15,9 +15,10 @@ import (
 )
 
 // Every rule a JSON Schema can state (lengths, counts, ranges, enums,
-// patterns, required and unknown keys) lives only in the strict schema the
-// visual format is rendered from; Validate checks a surface against it here
-// and keeps Go code for the rules a schema cannot state.
+// patterns and required keys) lives only in the schema the visual format is
+// rendered from; Validate checks a surface against it here and keeps Go code
+// for the rules a schema cannot state. Keys the format does not list are
+// ignored, as are components whose type is missing or unknown.
 
 // notBlankPattern is the pattern of every text with a minimum length: at
 // least one character that is not a space. The compact notation shows it
@@ -26,9 +27,10 @@ const notBlankPattern = `\S`
 
 const surfaceSchemaURL = "openseal-surface.json"
 
-// surfaceSchema is the strict schema of a stored surface: the model's visual
-// (title and components) with its schema and state, each component checked
-// against the strict schema of its type.
+// surfaceSchema is the schema of a stored surface: the model's visual (title
+// and components) with its schema and state, each component checked against
+// the schema of its type. A component of no known type matches no branch and
+// is left out.
 func surfaceSchema() map[string]interface{} {
 	branches := make([]interface{}, 0, len(catalogue))
 	for _, name := range TypeNames() {
@@ -38,17 +40,23 @@ func surfaceSchema() map[string]interface{} {
 		})
 	}
 	component := map[string]interface{}{
-		"type": "object", "required": []interface{}{"id", "type"},
-		"properties": map[string]interface{}{"type": enum(TypeNames())}, "allOf": branches,
+		"type": "object", "properties": map[string]interface{}{"type": map[string]interface{}{"type": "string"}}, "allOf": branches,
 	}
-	root := closedObject([]interface{}{"schema", "title", "state", "components"}, map[string]interface{}{
-		"schema": map[string]interface{}{"const": Schema}, "title": strRange(1, MaxTitleRunes),
-		// The count of components includes nested ones, which Validate
-		// checks itself.
-		"state": enum([]string{string(StateStreaming), string(StateReady)}), "components": map[string]interface{}{"type": "array", "minItems": 1, "items": componentRef()},
+	root := objectOf([]interface{}{"schema", "title", "state", "components"}, map[string]interface{}{
+		"schema": map[string]interface{}{"const": Schema}, "title": filledText(),
+		"state": enum([]string{string(StateStreaming), string(StateReady)}), "components": drawnComponentsSchema(),
 	})
 	root["$defs"] = map[string]interface{}{"Component": component}
 	return root
+}
+
+// drawnComponentsSchema is the top-level component list of a surface: at
+// least one component of a known type. The count of components includes
+// nested ones, which Validate checks itself.
+func drawnComponentsSchema() map[string]interface{} {
+	schema := childrenSchema(componentRef(), 1, MaxComponents)
+	delete(schema, "maxContains")
+	return schema
 }
 
 type compiledSurface struct {
@@ -79,8 +87,9 @@ var compiledSurfaceSchema = sync.OnceValues(func() (*compiledSurface, error) {
 })
 
 // DecodeVisual decodes a visual the model sent. Its JSON is checked against
-// the schema first, so a key the format does not have or a value of the
-// wrong type is named by its path. Validate still checks the decoded visual.
+// the schema first, so a value of the wrong type is named by its path; keys
+// the format does not have are ignored. Validate still checks the decoded
+// visual.
 func DecodeVisual(raw []byte) (*Visual, error) {
 	document, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 	if err != nil {
@@ -92,20 +101,61 @@ func DecodeVisual(raw []byte) (*Visual, error) {
 	}
 	surface := map[string]interface{}{"schema": Schema, "state": string(StateReady)}
 	for key, value := range fields {
-		if key == "schema" || key == "state" {
-			return nil, &ValidationError{Path: key, Message: "is not part of a visual; send only title and components"}
+		// The host sets schema and state; a visual that sends them has
+		// them ignored like any other key it does not have.
+		if key != "schema" && key != "state" {
+			surface[key] = value
 		}
-		surface[key] = value
 	}
 	dropNulls(surface)
 	if err := checkSchema(surface); err != nil {
 		return nil, err
 	}
 	var visual Visual
-	if err := json.Unmarshal(raw, &visual); err != nil {
+	if err := decodeDrawn(surface, &visual); err != nil {
 		return nil, fmt.Errorf("decode the visual: %w", err)
 	}
 	return &visual, nil
+}
+
+// decodeDrawn decodes a checked surface document into out as the format
+// reads it: components of no known type are left out, and each component
+// keeps only its own payload and, for a layout, its children.
+func decodeDrawn(document map[string]interface{}, out interface{}) error {
+	document["components"] = drawnComponents(document["components"])
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(encoded, out)
+}
+
+func drawnComponents(value interface{}) []interface{} {
+	list, _ := value.([]interface{})
+	drawn := make([]interface{}, 0, len(list))
+	for _, entry := range list {
+		component, _ := entry.(map[string]interface{})
+		name, _ := component["type"].(string)
+		spec, known := catalogue[name]
+		if !known {
+			continue
+		}
+		for key := range component {
+			if key != spec.payload && isPayloadKey(key) {
+				delete(component, key)
+			}
+		}
+		if children, ok := component["children"]; ok && spec.children.max > 0 {
+			component["children"] = drawnComponents(children)
+		} else {
+			delete(component, "children")
+		}
+		for _, tab := range objectsAt(component, "tabs") {
+			tab["children"] = drawnComponents(tab["children"])
+		}
+		drawn = append(drawn, component)
+	}
+	return drawn
 }
 
 // surfaceDocument is a surface's JSON as the schema checks it. A stored
@@ -249,6 +299,12 @@ func checkSchema(document interface{}) error {
 // those of the value's own type are kept, so a long text cell is reported
 // as too long rather than also as "not a number".
 func schemaLeaves(failure *jsonschema.ValidationError) []*jsonschema.ValidationError {
+	switch failure.ErrorKind.(type) {
+	case *kind.MinContains, *kind.Contains:
+		// The causes say why each item is not counted; the count is the
+		// failure.
+		return []*jsonschema.ValidationError{failure}
+	}
 	if len(failure.Causes) == 0 {
 		return []*jsonschema.ValidationError{failure}
 	}
@@ -395,7 +451,6 @@ func wordSchemaError(leaf *jsonschema.ValidationError, schemaDocument, document 
 	place := placeOf(leaf.InstanceLocation, document)
 	schema := schemaAt(schemaDocument, leaf.SchemaURL)
 	field := place.field
-	componentRoot := place.componentPath != "" && field == ""
 	switch failure := leaf.ErrorKind.(type) {
 	case *kind.Required:
 		var out []*ValidationError
@@ -403,33 +458,9 @@ func wordSchemaError(leaf *jsonschema.ValidationError, schemaDocument, document 
 			out = append(out, place.missing(missing, propertySchema(schema, missing)))
 		}
 		return out
-	case *kind.AdditionalProperties:
-		var out []*ValidationError
-		for _, extra := range failure.Properties {
-			switch {
-			case componentRoot && extra == "children":
-				out = append(out, place.at("", place.componentType()+" cannot have children; only section, grid and carousel can"))
-			case componentRoot && isPayloadKey(extra):
-				out = append(out, place.at("", fmt.Sprintf("%s cannot carry a %q payload", place.componentType(), extra)))
-			case componentRoot && extra == "binding":
-				out = append(out, place.at("", place.componentType()+" takes no component binding"))
-			case extra == "lat" || extra == "lon":
-				out = append(out, place.at(join(field, "lat"), "and .lon are filled in from find_place; leave them out and never type coordinates"))
-			case extra == "address":
-				out = append(out, place.at(join(field, "address"), "is filled in from find_place; leave it out"))
-			default:
-				subject := field
-				if subject == "" && place.componentPath == "" {
-					subject = "the visual"
-				}
-				out = append(out, place.at(subject, fmt.Sprintf("has no field %q (unknown field %q); leave it out", extra, extra)))
-			}
-		}
-		return out
+	case *kind.FalseSchema:
+		return []*ValidationError{place.forbidden(field)}
 	case *kind.Enum:
-		if componentRoot || field == "type" && place.componentPath != "" {
-			return []*ValidationError{place.at("", fmt.Sprintf("unsupported type %q; use one of %s", fmt.Sprint(failure.Got), strings.Join(TypeNames(), ", ")))}
-		}
 		if field == "binding.kind" && place.componentPath != "" {
 			return []*ValidationError{place.at(field, fmt.Sprintf("%q is not allowed on %s; use %s", fmt.Sprint(failure.Got), place.componentType(), joinValues(failure.Want)))}
 		}
@@ -450,6 +481,10 @@ func wordSchemaError(leaf *jsonschema.ValidationError, schemaDocument, document 
 		return []*ValidationError{place.at(field, lengthMessage(schema, failure.Got))}
 	case *kind.MaxLength:
 		return []*ValidationError{place.at(field, lengthMessage(schema, failure.Got))}
+	case *kind.MinContains:
+		return []*ValidationError{place.count(field, schema, len(failure.Got))}
+	case *kind.MaxContains:
+		return []*ValidationError{place.count(field, schema, len(failure.Got))}
 	case *kind.MinItems:
 		return []*ValidationError{place.count(field, schema, failure.Got)}
 	case *kind.MaxItems:
@@ -482,8 +517,6 @@ func (p schemaPlace) missing(key string, schema map[string]interface{}) *Validat
 		name := p.componentType()
 		spec := catalogue[name]
 		switch {
-		case key == "summary":
-			return p.at("", fmt.Sprintf("summary is required for %s: one plain sentence saying what it shows", name))
 		case key == "binding" && len(spec.bindings) > 0:
 			return p.at("", fmt.Sprintf("binding is required: {kind: %s, id} names the %s this card shows", joinBindingKinds(spec.bindings), bindingNoun(spec.bindings[0])))
 		case key == spec.payload && schema["type"] == "object":
@@ -502,15 +535,35 @@ func (p schemaPlace) missing(key string, schema map[string]interface{}) *Validat
 	return p.at(field, "is required")
 }
 
-// count words a list length outside its bounds, as bounded does.
+// forbidden words a field the format refuses outright: one the host fills
+// in, or a binding on a type that takes none.
+func (p schemaPlace) forbidden(field string) *ValidationError {
+	key := field[strings.LastIndex(field, ".")+1:]
+	switch {
+	case p.componentPath != "" && field == "binding":
+		return p.at("", p.componentType()+" takes no component binding")
+	case key == "lat" || key == "lon":
+		return p.at(strings.TrimSuffix(field, key)+"lat", "and .lon are filled in from find_place; leave them out and never type coordinates")
+	case key == "address":
+		return p.at(field, "is filled in from find_place; leave it out")
+	}
+	return p.at(field, "is not allowed here; leave it out")
+}
+
+// count words a list length outside its bounds, as bounded does. Lists of
+// components count only those of a known type.
 func (p schemaPlace) count(field string, schema map[string]interface{}, got int) *ValidationError {
 	minimum, hasMinimum := schemaInt(schema, "minItems")
 	maximum, hasMaximum := schemaInt(schema, "maxItems")
+	if _, drawn := schema["contains"]; drawn {
+		minimum, hasMinimum = schemaInt(schema, "minContains")
+		maximum, hasMaximum = schemaInt(schema, "maxContains")
+	}
 	if p.componentPath != "" && field == "children" {
-		return p.at("", fmt.Sprintf("%s needs %d-%d children (got %d)", p.componentType(), minimum, maximum, got))
+		return p.at("", fmt.Sprintf("%s needs %d-%d children with a type from the list (got %d)", p.componentType(), minimum, maximum, got))
 	}
 	if p.componentPath == "" && field == "components" && got == 0 {
-		return p.at(field, "at least one component is required")
+		return p.at(field, "at least one component with a type from the list is required")
 	}
 	switch {
 	case hasMinimum && hasMaximum && minimum > 0:

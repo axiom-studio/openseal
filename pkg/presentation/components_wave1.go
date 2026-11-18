@@ -7,46 +7,27 @@ import (
 
 // Limits of the wave 1 payloads.
 const (
-	maxCalloutBodyRunes = 300
-
-	minSteps           = 2
-	maxSteps           = 10
-	maxStepTitleRunes  = 80
-	maxStepDetailRunes = 400
+	minSteps = 2
+	maxSteps = 10
 
 	maxComparisonAttributes = 10
-	maxAttributeLabelRunes  = 40
 	minComparisonOptions    = 2
 	maxComparisonOptions    = 4
-	maxOptionNameRunes      = 60
-	maxOptionValueRunes     = 80
 	maxProsCons             = 4
-	maxProConRunes          = 80
 
-	minTimelineEvents   = 2
-	maxTimelineEvents   = 20
-	maxEventWhenRunes   = 40
-	maxEventTitleRunes  = 80
-	maxEventDetailRunes = 300
+	minTimelineEvents = 2
+	maxTimelineEvents = 20
 
-	maxImageCaptionRunes   = 200
-	minGalleryImages       = 2
-	maxGalleryImages       = 12
-	maxGalleryCaptionRunes = 120
+	minGalleryImages = 2
+	maxGalleryImages = 12
 
-	minChips          = 2
-	maxChips          = 5
-	maxChipLabelRunes = 40
+	minChips = 2
+	maxChips = 5
 
-	maxChecklistItems      = 40
-	maxChecklistLabelRunes = 100
-	maxChecklistGroupRunes = 40
+	maxChecklistItems = 40
 
-	maxQuizQuestionRunes    = 300
-	minQuizOptions          = 2
-	maxQuizOptions          = 6
-	maxQuizOptionLabelRunes = 120
-	maxQuizExplanationRunes = 400
+	minQuizOptions = 2
+	maxQuizOptions = 6
 )
 
 // Callout is a key takeaway, tip or warning. Its tone comes from the

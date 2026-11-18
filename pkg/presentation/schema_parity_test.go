@@ -121,6 +121,7 @@ var parityExceptions = []struct {
 		"a slider needs min, max and step, and a chart over t needs t; the descriptions say so"},
 	{regexp.MustCompile(`^form:form\.fields\[0\]\.options:left out$`), "select and radio fields need options; other fields take none"},
 	{regexp.MustCompile(`^diagram:diagram\.groups:left out$`), "a node's group must name one of groups"},
+	{regexp.MustCompile(`^table:table\.columns\[1\]\.kind:left out$`), "a column's kind decides its cells; one left out is text, so a number cell no longer fits"},
 }
 
 // TestSchemaMatchesValidator checks that the schema the model is given and
@@ -258,6 +259,10 @@ func (p *parityProbe) object(schema map[string]interface{}, path []step, field s
 	for _, key := range keys {
 		at := joinField(field, key)
 		child := append(append([]step{}, path...), key)
+		if properties[key] == false {
+			p.refused(key, child, at)
+			continue
+		}
 		_, present := node[key]
 		if required[key] {
 			p.check(at, "missing", func(root interface{}) { remove(root, child) }, false, "")
@@ -281,21 +286,60 @@ func (p *parityProbe) object(schema map[string]interface{}, path []step, field s
 		}
 		return
 	}
-	if schema["additionalProperties"] == false {
-		p.check(joinField(field, "unknown_key"), "added", func(root interface{}) {
-			set(root, append(append([]step{}, path...), "unknown_key"), "x")
-		}, false, `unknown field "unknown_key"`)
-	}
+	// Keys the format does not list are ignored.
+	p.check(joinField(field, "unknown_key"), "added", func(root interface{}) {
+		set(root, append(append([]step{}, path...), "unknown_key"), "x")
+	}, true, "")
 }
 
-// absent probes an optional field the seed leaves out: the struct must
-// know the key, and a plain string must take the schema's lengths.
+// refused probes a key whose schema is false. A binding on a type that
+// takes none is refused. The fields the host fills in from find_place are
+// set aside when a stored surface is decoded, so the wave 5 tests check
+// them through Validate instead.
+func (p *parityProbe) refused(key string, path []step, field string) {
+	if key != "binding" {
+		return
+	}
+	p.check(field, "added", func(root interface{}) {
+		set(root, path, map[string]interface{}{"kind": "agent", "id": "x"})
+	}, false, "takes no component binding")
+}
+
+// absent probes an optional field the seed leaves out: Go must keep the
+// key, and a plain string must take the schema's lengths.
 func (p *parityProbe) absent(schema map[string]interface{}, path []step, field string) {
-	p.check(field, "known key", func(root interface{}) { set(root, path, sampleValue(schema)) }, true, `unknown field "`+lastKey(path)+`"`)
+	p.known(schema, path, field)
 	if schema["type"] == "string" && schema["pattern"] == nil && schema["enum"] == nil {
 		set(p.seed, path, "x")
 		defer remove(p.seed, path)
 		p.str(schema, path, field)
+	}
+}
+
+// known checks that Go keeps a key the schema lists. Keys the format does
+// not list are ignored, so a listed key the Go types lack would vanish
+// without an error. Only scalar samples are checked: Go leaves out empty
+// lists and maps.
+func (p *parityProbe) known(schema map[string]interface{}, path []step, field string) {
+	p.t.Helper()
+	sample := sampleValue(schema)
+	switch sample.(type) {
+	case []interface{}, map[string]interface{}:
+		return
+	}
+	root := deepCopy(p.seed)
+	set(root, path, sample)
+	raw, err := json.Marshal(map[string]interface{}{"schema": Schema, "title": "T", "state": "ready", "components": []interface{}{root}})
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	surface, err := Decode(raw)
+	if err != nil {
+		return
+	}
+	var decoded interface{} = deepCopy(surface.Components[0])
+	if get(decoded, path) == nil {
+		p.t.Errorf("%s:%s: the schema lists the key but Go drops it", p.name, field)
 	}
 }
 
@@ -318,11 +362,19 @@ func (p *parityProbe) array(schema map[string]interface{}, path []step, field st
 			set(root, path, out)
 		}
 	}
-	if maximum, ok := intKeyword(schema, "maxItems"); ok {
+	minimumKey, maximumKey := "minItems", "maxItems"
+	if _, counted := schema["contains"]; counted {
+		minimumKey, maximumKey = "minContains", "maxContains"
+	}
+	if maximum, ok := intKeyword(schema, maximumKey); ok {
 		p.check(field, fmt.Sprintf("%d items", maximum), resize(maximum), true, fmt.Sprintf("(got %d)", maximum))
 		p.check(field, fmt.Sprintf("%d items", maximum+1), resize(maximum+1), false, fmt.Sprintf("(got %d)", maximum+1))
 	}
-	if minimum, ok := intKeyword(schema, "minItems"); ok && minimum > 0 && len(list) >= minimum {
+	// A list that shows only its first items takes more without error.
+	if shown, ok := shownLimit(schema); ok {
+		p.check(field, fmt.Sprintf("%d items", shown+1), resize(shown+1), true, "")
+	}
+	if minimum, ok := intKeyword(schema, minimumKey); ok && minimum > 0 && len(list) >= minimum {
 		p.check(field, fmt.Sprintf("%d items", minimum-1), resize(minimum-1), false, "")
 	}
 	items := schema["items"].(map[string]interface{})
@@ -400,25 +452,45 @@ func sampleValue(schema map[string]interface{}) interface{} {
 }
 
 // renameIDs makes a copied list item distinct from the original: every
-// id, key and label gets a suffix that every id pattern admits.
+// id, key, label and name, and every text in a list of texts, gets a suffix
+// that every id pattern admits. Other values, such as a component's type or
+// a format, stay as they are.
 func renameIDs(value interface{}, index int) interface{} {
 	switch node := value.(type) {
 	case map[string]interface{}:
 		for key, child := range node {
-			if text, ok := child.(string); ok && (key == "id" || key == "key" || key == "label" || key == "name") {
-				node[key] = fmt.Sprintf("%s_%d", text, index)
+			if text, ok := child.(string); ok {
+				if key == "id" || key == "key" || key == "label" || key == "name" {
+					node[key] = fmt.Sprintf("%s_%d", text, index)
+				}
 				continue
 			}
 			node[key] = renameIDs(child, index)
 		}
 	case []interface{}:
 		for position, child := range node {
+			if text, ok := child.(string); ok {
+				node[position] = fmt.Sprintf("%s_%d", text, index)
+				continue
+			}
 			node[position] = renameIDs(child, index)
 		}
 	case string:
 		return fmt.Sprintf("%s_%d", node, index)
 	}
 	return value
+}
+
+var shownPattern = regexp.MustCompile(`Only the first (\d+) are shown\.`)
+
+func shownLimit(schema map[string]interface{}) (int, bool) {
+	description, _ := schema["description"].(string)
+	match := shownPattern.FindStringSubmatch(description)
+	if match == nil {
+		return 0, false
+	}
+	shown, err := strconv.Atoi(match[1])
+	return shown, err == nil
 }
 
 func joinField(field, key string) string {
