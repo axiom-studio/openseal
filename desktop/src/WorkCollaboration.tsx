@@ -22,8 +22,6 @@ export type CollaborationRequest = {
   response?: string;
   completionSummary?: string;
   resolutionReason?: string;
-  completionReviewSummary?: string;
-  reviewDisagreement?: boolean;
 };
 export default function WorkCollaboration({
   run,
@@ -210,9 +208,8 @@ export default function WorkCollaboration({
                 </button>
               )}
               <p className="muted">
-                Requests sent by this run. Agents handle acceptance,
-                clarification, and completion review. You can guide the lead
-                while work is active.
+                Requests sent by this run. Agents handle acceptance and
+                clarification. You can guide the lead while work is active.
               </p>
               <button
                 className="button"
@@ -282,20 +279,9 @@ export default function WorkCollaboration({
                         </p>
                       </>
                     )}
-                    {request.completionReviewSummary && (
-                      <p className="collaboration-text">
-                        Review: {request.completionReviewSummary}
-                      </p>
-                    )}
                     {request.resolutionReason && (
                       <p className="collaboration-text">
                         Resolution: {request.resolutionReason}
-                      </p>
-                    )}
-                    {request.reviewDisagreement && (
-                      <p className="inline-help">
-                        Reviewers disagree. The team’s saved escalation policy
-                        determines what happens next.
                       </p>
                     )}
                     {request.status === "clarification_requested" && (

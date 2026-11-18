@@ -129,16 +129,6 @@ func TestDecisionRunOffersOnlyDecisionTool(t *testing.T) {
 	assertOnlyFinalTool(t, authority, agentrun.FinalModeDecision, models.ControlToolRequestDecision)
 }
 
-func TestReviewRunOffersOnlyReviewTool(t *testing.T) {
-	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
-	run := controlAuthorityTeamRun(scope, map[string]interface{}{agentrun.AgentRequestCompletionReviewContextKey: map[string]interface{}{"requestId": "request"}})
-	authority := resolveControlAuthorityForTest(t, AuthorityInput{
-		Run: run, DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope),
-		SkillPromptRefs: []string{"skill:prompt"}, Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
-	})
-	assertOnlyFinalTool(t, authority, agentrun.FinalModeReview, models.ControlToolCompletionReview)
-}
-
 func TestTaskWorkerForksSelfOnlyAndCannotDelegateOrStartTasks(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "control-authority"}
 	catalog := controlAuthorityTeamCatalog(scope)

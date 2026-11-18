@@ -55,10 +55,10 @@ func (s *Store) CreateAgentRequest(ctx context.Context, record models.AgentReque
 	if record.MaximumConcurrent > 0 {
 		var active int
 		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_requests
-			WHERE scope_kind = ? AND scope_id = ? AND status IN (?, ?, ?, ?)
+			WHERE scope_kind = ? AND scope_id = ? AND status IN (?, ?, ?)
 			AND json_extract(payload, '$.delegationPolicy.teamDeploymentId') = ?`,
 			record.Request.Scope.Kind, record.Request.Scope.ID, models.AgentRequestStatusPending,
-			models.AgentRequestStatusClarificationRequested, models.AgentRequestStatusAccepted, models.AgentRequestStatusCompletionReview,
+			models.AgentRequestStatusClarificationRequested, models.AgentRequestStatusAccepted,
 			record.DelegationTeamID).Scan(&active); err != nil {
 			return nil, err
 		}

@@ -699,7 +699,7 @@ Open **Delegation and requests** in Work details to inspect that run's outgoing
 requests; it starts expanded when opening a run waiting for another agent. The
 scoped list loads lazily, shows 20 requests with one lookahead, and polls every
 three seconds while open. It shows clarification, distinct latest response,
-completion/review summaries, resolution, and review disagreement. Identical
+completion summary, and resolution. Identical
 question/response text is shown once. Agent names and **This team** identify
 participants, with original IDs in tooltips. Parent/delegated-work links open the
 matching run and ignore late responses after leaving.

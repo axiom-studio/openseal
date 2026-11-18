@@ -13,12 +13,10 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 )
 
-// agent_request_decision and agent_request_review (section 04 §11.7): the
-// typed final tools of AgentRequest decision and completion-review Runs. They
-// replace runOutput.agentRequestDecision /
-// runOutput.agentRequestCompletionReviewDecision of the old Turn form. The
-// settle validates the call with the same parsers ResolveDecisionRun and
-// ResolveCompletionReviewRun use, then hands the loop a FinalAnswer whose
+// agent_request_decision (section 04 §11.7): the typed final tool of
+// AgentRequest decision Runs. It replaces runOutput.agentRequestDecision of
+// the old Turn form. The settle validates the call with the same parser
+// ResolveDecisionRun uses, then hands the loop a FinalAnswer whose
 // Output is exactly the structured decision; the loop completes the Run with
 // that Output through the binding's (non-conversation) final handler.
 
@@ -71,29 +69,6 @@ func (requestDecisionHandler) Run(ctx context.Context, x *Executor, cc agentrun.
 	}
 	output := requestFinalOutput(collaboration.AgentRequestDecisionOutputKey, args)
 	_, message, err := collaboration.ParseAgentRequestDecisionOutput(output)
-	return x.acceptRequestFinal(ctx, cc, output, message, err)
-}
-
-type completionReviewHandler struct{}
-
-func (completionReviewHandler) Spec(agentrun.ControlAuthority) ToolSpec {
-	return ToolSpec{
-		Description: "Record your review of the delegated work and finish this run. Call it alone.",
-		InputSchema: requestFinalSchema([]string{"approve", "reject"}, "A concise evidence-based reason."),
-	}
-}
-
-func (completionReviewHandler) Decode(raw json.RawMessage) (interface{}, error) {
-	return models.DecodeControlInto[requestFinalArgs](raw)
-}
-
-func (completionReviewHandler) Run(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Result, error) {
-	args, ok := cc.Arguments.(*requestFinalArgs)
-	if !ok || args == nil {
-		return Result{}, errors.New("agent_request_review arguments were not decoded")
-	}
-	output := requestFinalOutput(collaboration.AgentRequestCompletionReviewOutputKey, args)
-	_, message, err := collaboration.ParseAgentRequestCompletionReviewOutput(output)
 	return x.acceptRequestFinal(ctx, cc, output, message, err)
 }
 

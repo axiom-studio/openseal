@@ -175,12 +175,10 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 			}
 		})
 	}
-	// Decision and review Runs never get turn_final_answer.
-	for _, mode := range []agentrun.FinalAnswerMode{agentrun.FinalModeDecision, agentrun.FinalModeReview} {
-		for _, spec := range builtinControlSpecs(agentrun.ControlAuthority{FinalMode: mode}) {
-			if spec.Name == models.ControlToolFinalAnswer {
-				t.Fatalf("%s offers turn_final_answer", mode)
-			}
+	// Decision Runs never get turn_final_answer.
+	for _, spec := range builtinControlSpecs(agentrun.ControlAuthority{FinalMode: agentrun.FinalModeDecision}) {
+		if spec.Name == models.ControlToolFinalAnswer {
+			t.Fatal("decision Run offers turn_final_answer")
 		}
 	}
 }
@@ -503,12 +501,6 @@ func TestDecisionRunPlainTextGetsNoteThenFails(t *testing.T) {
 	g := newFinalFixture(t, finalCall("final", `{"answer":"x"}`))
 	result = g.settleFinal("final", decision)
 	requireControlError(t, g.stored("final").Tool.Result, models.ToolResultRefused, "tool_not_available")
-	// Review Runs name their own tool.
-	h := newFinalFixture(t)
-	note := requireRejectionNote(t, h.plain("step-2", 2, agentrun.ControlAuthority{FinalMode: agentrun.FinalModeReview}, "ok"), "step-2", finalToolRequiredCode)
-	if !strings.HasPrefix(note.Note.Text, "Finish with agent_request_review (") {
-		t.Fatalf("review note = %q", note.Note.Text)
-	}
 }
 
 // governedEntry turns the fixture's pending call into a finished governed

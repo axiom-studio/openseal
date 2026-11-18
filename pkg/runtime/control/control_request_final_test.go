@@ -7,21 +7,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration"
 	"github.com/axiom-studio/openseal/pkg/runtime/collaboration/collaborationtest"
 	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
-	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
-	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
-// newRequestFinalFixture claims run (a queued decision or review Run in store)
-// and gives it a session whose one finished step made call. The executor runs
-// the real decision and review handlers.
+// newRequestFinalFixture claims run (a queued decision Run in store) and gives
+// it a session whose one finished step made call. The executor runs the real
+// decision handler.
 func newRequestFinalFixture(t *testing.T, store *sqlite.Store, run *models.AgentRun, call agentrun.LoopToolCall) *controlFixture {
 	t.Helper()
 	ctx := context.Background()
@@ -78,17 +75,12 @@ func newRequestFinalFixture(t *testing.T, store *sqlite.Store, run *models.Agent
 	}
 	registry := Registry{}
 	registry.register(models.ControlToolRequestDecision, requestDecisionHandler{})
-	registry.register(models.ControlToolCompletionReview, completionReviewHandler{})
 	f.exec = &Executor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
 	return f
 }
 
 func requestDecisionCall(id, args string) agentrun.LoopToolCall {
 	return agentrun.LoopToolCall{ID: id, Name: string(models.ControlToolRequestDecision), Arguments: json.RawMessage(args)}
-}
-
-func completionReviewCall(id, args string) agentrun.LoopToolCall {
-	return agentrun.LoopToolCall{ID: id, Name: string(models.ControlToolCompletionReview), Arguments: json.RawMessage(args)}
 }
 
 // completeWithFinal ends the claimed Run as the loop's final chain does for a
@@ -218,116 +210,6 @@ func TestClarificationDecisionRequiresQuestion(t *testing.T) {
 	}
 }
 
-func TestReviewToolResolvesCompletionReview(t *testing.T) {
-	scope := models.Scope{Kind: "tenant", ID: "inbox"}
-	store := &collaborationtest.TeamStore{
-		Store: kerneltest.NewStore(t),
-		Deployment: &kernelteam.Deployment{
-			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
-			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
-			Roster: []kernelteam.RosterAssignment{
-				{ID: "coordinator", AgentDeploymentID: "coordinator-agent"},
-				{ID: "reviewer", AgentDeploymentID: "reviewer-agent", Approver: true},
-				{ID: "specialist", AgentDeploymentID: "specialist-agent"},
-			},
-		},
-		Definition: &kernelteam.Definition{
-			ID: "release-team", Version: "1",
-			Delegation: kernelteam.DelegationPolicy{
-				MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true,
-				RequireAcceptance: true, RequireCompletionReview: true,
-			},
-		},
-	}
-	source, err := portfolio.NewService(store).CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
-		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "coordinator-agent",
-		Goal: "Coordinate a reviewed release", Source: models.RunSourceManual,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	service := collaboration.NewService(store)
-	created, err := service.CreateAgentRequest(t.Context(), collaboration.CreateAgentRequestRequest{
-		Scope: scope, Kind: models.AgentRequestKindHandoff,
-		Requester:   models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "release-team"},
-		Recipient:   models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "specialist-agent"},
-		SourceRunID: source.ID, Goal: "Prepare release evidence", SemanticRole: "specialist",
-		AcceptanceCriteria: map[string]interface{}{"evidenceRequired": true}, IdempotencyKey: "prepare-release-evidence",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	accepted, err := service.RespondAgentRequest(t.Context(), collaboration.RespondAgentRequestRequest{
-		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: collaboration.AgentRequestDecisionAccept, Principal: created.Request.Recipient,
-		Actor: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "specialist-agent"}, AssignedAgentID: "specialist-agent",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	completed, err := service.CompleteAgentRequest(t.Context(), collaboration.CompleteAgentRequestRequest{
-		Scope: scope, RequestID: accepted.Request.ID, ExpectedRevision: accepted.Request.Revision,
-		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
-		Summary: "Release evidence prepared", AcceptanceEvidence: map[string]interface{}{"checks": "passed"},
-		CompletionKey: "release-evidence-complete",
-	})
-	if err != nil || completed.Request.Status != models.AgentRequestStatusCompletionReview {
-		t.Fatalf("completion submission = %#v, %v", completed, err)
-	}
-	reconciler, err := collaboration.NewAgentRequestInboxReconciler(store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result, err := reconciler.Reconcile(t.Context(), scope, "reviewer-agent"); err != nil || result.CompletionReviewsCreated != 1 {
-		t.Fatalf("reconcile = %#v, %v", result, err)
-	}
-	run := onlyRunWithSource(t, store.Store, scope, source.ID, models.RunSourceCompletionReview)
-	if want := (&models.BudgetPolicy{
-		MaxAttempts: 5, MaxTurns: 12, MaxInputTokens: 256000, MaxOutputTokens: 4096,
-		MaxTotalTokens: 272384, MaxDurationMS: 180000,
-	}); !reflect.DeepEqual(run.Budget, want) {
-		t.Fatalf("review budget = %#v", run.Budget)
-	}
-
-	f := newRequestFinalFixture(t, store.Store, run,
-		completionReviewCall("review", `{"decision":"approve","message":"The evidence meets the criteria."}`))
-	authority := agentrun.ControlAuthority{AgentID: "reviewer-agent", FinalMode: agentrun.FinalModeReview}
-	// The decision tool is not offered in a review Run.
-	if specs := builtinControlSpecs(authority); len(specs) != 1 || specs[0].Name != models.ControlToolCompletionReview {
-		t.Fatalf("review specs = %#v", specs)
-	}
-	result, err := f.exec.Settle(f.ctx, f.context("review", authority))
-	if err != nil {
-		t.Fatal(err)
-	}
-	final := requireFinal(t, result)
-	want := map[string]interface{}{collaboration.AgentRequestCompletionReviewOutputKey: map[string]interface{}{"decision": "approve", "message": "The evidence meets the criteria."}}
-	if !reflect.DeepEqual(final.Output, want) {
-		t.Fatalf("output = %#v", final.Output)
-	}
-	resolved, err := reconciler.ResolveCompletionReviewRun(t.Context(), f.completeWithFinal(final))
-	if err != nil || !resolved {
-		t.Fatalf("resolve = %v, %v", resolved, err)
-	}
-	current, err := service.GetAgentRequest(t.Context(), scope, created.Request.ID)
-	if err != nil || current.Status != models.AgentRequestStatusCompleted || current.CompletionReviewer == nil ||
-		current.CompletionReviewer.ID != "reviewer-agent" {
-		t.Fatalf("request = %#v, %v", current, err)
-	}
-
-	// A review needs an evidence-based reason and a known verdict.
-	for _, args := range []string{`{"decision":"approve","message":" "}`, `{"decision":"accept","message":"fine"}`} {
-		other := newControlFixture(t, []agentrun.LoopToolCall{completionReviewCall("review", args)})
-		registry := Registry{}
-		registry.register(models.ControlToolCompletionReview, completionReviewHandler{})
-		other.exec.handlers = registry
-		if _, err := other.exec.Settle(other.ctx, other.context("review", authority)); err != nil {
-			t.Fatal(err)
-		}
-		requireControlError(t, other.stored("review").Tool.Result, models.ToolResultFailed, requestDecisionInvalidCode)
-	}
-}
-
 func TestDecisionBudgetIsTwelveSteps(t *testing.T) {
 	_, _, _, run := reconcileDecisionRun(t)
 	want := &models.BudgetPolicy{
@@ -351,11 +233,6 @@ func TestRequestFinalToolSchemas(t *testing.T) {
 	enum := properties["decision"].(map[string]interface{})["enum"]
 	if !reflect.DeepEqual(enum, []string{"accept", "reject", "request_clarification"}) {
 		t.Fatalf("decision enum = %#v", enum)
-	}
-	review := builtinControlSpecs(agentrun.ControlAuthority{FinalMode: agentrun.FinalModeReview})
-	properties, _ = schemaProperties(t, review[0].InputSchema)
-	if enum := properties["decision"].(map[string]interface{})["enum"]; !reflect.DeepEqual(enum, []string{"approve", "reject"}) {
-		t.Fatalf("review enum = %#v", enum)
 	}
 	// The plain-text note names the tool's required fields.
 	if got := NewRegistry(BuiltinTools()...).finalToolRequiredFields(models.ControlToolRequestDecision, agentrun.ControlAuthority{FinalMode: agentrun.FinalModeDecision}); got != "decision, message" {

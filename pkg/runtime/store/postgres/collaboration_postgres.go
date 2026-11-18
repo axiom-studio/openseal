@@ -74,7 +74,7 @@ func (s *Store) CreateAgentRequest(ctx context.Context, record models.AgentReque
 			WHERE scope_kind = $1 AND scope_id = $2 AND status = ANY($3)
 			AND payload->'delegationPolicy'->>'teamDeploymentId' = $4`,
 			record.Request.Scope.Kind, record.Request.Scope.ID,
-			pq.Array([]string{string(models.AgentRequestStatusPending), string(models.AgentRequestStatusClarificationRequested), string(models.AgentRequestStatusAccepted), string(models.AgentRequestStatusCompletionReview)}),
+			pq.Array([]string{string(models.AgentRequestStatusPending), string(models.AgentRequestStatusClarificationRequested), string(models.AgentRequestStatusAccepted)}),
 			record.DelegationTeamID).Scan(&active); err != nil {
 			return nil, err
 		}

@@ -154,41 +154,6 @@ func (s *Server) handleCompleteAgentRequest(w http.ResponseWriter, r *http.Reque
 	s.respondJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) handleReviewAgentRequestCompletion(w http.ResponseWriter, r *http.Request) {
-	service, ok := s.collaborationService(w)
-	if !ok {
-		return
-	}
-	scope, err := scopeFromQuery(r)
-	if err != nil {
-		s.respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	var payload kernelapi.ReviewAgentRequestCompletionRequest
-	if err := decodeStrictJSON(r, &payload); err != nil {
-		s.respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	actor := payload.Actor
-	if actor.Type == "" && strings.TrimSpace(actor.ID) == "" {
-		actor = payload.Principal
-	}
-	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if idempotencyKey == "" {
-		idempotencyKey = strings.TrimSpace(payload.IdempotencyKey)
-	}
-	result, err := service.ReviewAgentRequestCompletion(r.Context(), collaboration.ReviewAgentRequestCompletionRequest{
-		Scope: scope, RequestID: strings.TrimSpace(r.PathValue("id")), ExpectedRevision: payload.ExpectedRevision,
-		ExpectedChildRevision: payload.ExpectedChildRevision, Principal: payload.Principal, Actor: actor,
-		Approve: payload.Approve, Summary: strings.TrimSpace(payload.Summary), IdempotencyKey: idempotencyKey,
-	})
-	if err != nil {
-		s.respondAgentRequestError(w, err)
-		return
-	}
-	s.respondJSON(w, http.StatusOK, result)
-}
-
 func agentRequestFilterFromQuery(r *http.Request) (models.AgentRequestFilter, error) {
 	scope, err := scopeFromQuery(r)
 	if err != nil {
@@ -245,7 +210,7 @@ func collaborationPartyFromQuery(r *http.Request, prefix string) (*models.Collab
 func validAgentRequestStatus(status models.AgentRequestStatus) bool {
 	switch status {
 	case models.AgentRequestStatusPending, models.AgentRequestStatusClarificationRequested, models.AgentRequestStatusAccepted,
-		models.AgentRequestStatusCompletionReview, models.AgentRequestStatusCompleted, models.AgentRequestStatusFailed,
+		models.AgentRequestStatusCompleted, models.AgentRequestStatusFailed,
 		models.AgentRequestStatusRejected, models.AgentRequestStatusCanceled:
 		return true
 	default:

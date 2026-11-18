@@ -477,20 +477,6 @@ func (f *fakeKernelClient) CompleteAgentRequest(_ context.Context, _ models.Scop
 	return &collaboration.AgentRequestResult{Request: request}, nil
 }
 
-func (f *fakeKernelClient) ReviewAgentRequestCompletion(_ context.Context, _ models.Scope, id string, review kernelapi.ReviewAgentRequestCompletionRequest, _ string) (*collaboration.AgentRequestResult, error) {
-	request, err := f.GetAgentRequest(context.Background(), models.Scope{}, id)
-	if err != nil {
-		return nil, err
-	}
-	request.Revision++
-	request.CompletionReviewSummary = review.Summary
-	request.Status = models.AgentRequestStatusFailed
-	if review.Approve {
-		request.Status = models.AgentRequestStatusCompleted
-	}
-	return &collaboration.AgentRequestResult{Request: request}, nil
-}
-
 func (f *fakeKernelClient) ListActionCalls(_ context.Context, filter models.ActionFilter) ([]*models.ActionCall, error) {
 	f.actionCallFilters = append(f.actionCallFilters, filter)
 	calls := make([]*models.ActionCall, 0, len(f.actionCalls))

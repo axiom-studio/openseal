@@ -78,13 +78,10 @@ type ManifestMember struct {
 }
 
 type ManifestDelegationPolicy struct {
-	MaximumDepth            int   `json:"maximumDepth,omitempty" yaml:"maximumDepth,omitempty"`
-	MaximumConcurrent       int   `json:"maximumConcurrent,omitempty" yaml:"maximumConcurrent,omitempty"`
-	AllowPeerDelegation     *bool `json:"allowPeerDelegation,omitempty" yaml:"allowPeerDelegation,omitempty"`
-	RequireAcceptance       *bool `json:"requireAcceptance,omitempty" yaml:"requireAcceptance,omitempty"`
-	RequireCompletionReview *bool `json:"requireCompletionReview,omitempty" yaml:"requireCompletionReview,omitempty"`
-	CompletionReviewQuorum  int   `json:"completionReviewQuorum,omitempty" yaml:"completionReviewQuorum,omitempty"`
-	EscalateOnDisagreement  *bool `json:"escalateOnDisagreement,omitempty" yaml:"escalateOnDisagreement,omitempty"`
+	MaximumDepth        int   `json:"maximumDepth,omitempty" yaml:"maximumDepth,omitempty"`
+	MaximumConcurrent   int   `json:"maximumConcurrent,omitempty" yaml:"maximumConcurrent,omitempty"`
+	AllowPeerDelegation *bool `json:"allowPeerDelegation,omitempty" yaml:"allowPeerDelegation,omitempty"`
+	RequireAcceptance   *bool `json:"requireAcceptance,omitempty" yaml:"requireAcceptance,omitempty"`
 }
 
 type ManifestSharedContextPolicy struct {
@@ -166,16 +163,10 @@ func CompileManifest(manifest *Manifest, definitionID string, provenance workfor
 		maximumBytes = defaultSharedContextBytes
 	}
 	delegation := DelegationPolicy{
-		MaximumDepth:            manifest.Spec.Delegation.MaximumDepth,
-		MaximumConcurrent:       manifest.Spec.Delegation.MaximumConcurrent,
-		AllowPeerDelegation:     booleanDefault(manifest.Spec.Delegation.AllowPeerDelegation, false),
-		RequireAcceptance:       booleanDefault(manifest.Spec.Delegation.RequireAcceptance, true),
-		RequireCompletionReview: booleanDefault(manifest.Spec.Delegation.RequireCompletionReview, true),
-		CompletionReviewQuorum:  manifest.Spec.Delegation.CompletionReviewQuorum,
-		EscalateOnDisagreement:  booleanDefault(manifest.Spec.Delegation.EscalateOnDisagreement, false),
-	}
-	if delegation.RequireCompletionReview && delegation.CompletionReviewQuorum == 0 {
-		delegation.CompletionReviewQuorum = 1
+		MaximumDepth:        manifest.Spec.Delegation.MaximumDepth,
+		MaximumConcurrent:   manifest.Spec.Delegation.MaximumConcurrent,
+		AllowPeerDelegation: booleanDefault(manifest.Spec.Delegation.AllowPeerDelegation, false),
+		RequireAcceptance:   booleanDefault(manifest.Spec.Delegation.RequireAcceptance, true),
 	}
 	if delegation.MaximumDepth == 0 {
 		delegation.MaximumDepth = 2

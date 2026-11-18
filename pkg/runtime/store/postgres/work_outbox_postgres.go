@@ -308,7 +308,7 @@ func (s *Store) ListPendingWork(ctx context.Context, rebuild bool) ([]models.Wor
 			MIN(CASE WHEN status='running' THEN COALESCE(lease_expires_at, now()) WHEN status='queued' THEN available_at ELSE now() END)
 			FROM ` + s.table("agent_runs") + ` WHERE status IN ('queued','running','sleeping') GROUP BY scope_kind, scope_id`,
 		`SELECT 'run', scope_kind, scope_id, now() FROM ` + s.table("agent_requests") +
-			` WHERE status IN ('pending','accepted','clarification_requested','completion_review') GROUP BY scope_kind, scope_id`,
+			` WHERE status IN ('pending','accepted','clarification_requested') GROUP BY scope_kind, scope_id`,
 		`SELECT 'maintenance', scope_kind, scope_id, now() FROM ` + s.table("skill_runtime_maintenance") + ` WHERE active GROUP BY scope_kind, scope_id`,
 		`SELECT 'external-due', scope_kind, scope_id, MIN(COALESCE(expires_at, now())) FROM ` + s.table("approval_checkpoints") +
 			` WHERE status='pending' GROUP BY scope_kind, scope_id`,

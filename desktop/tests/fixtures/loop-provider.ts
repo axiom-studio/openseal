@@ -49,7 +49,6 @@ export type Reply = {
 export const FINAL_TOOL = "turn_final_answer";
 export const DELEGATE_TOOL = "agent_delegate";
 export const REQUEST_DECISION_TOOL = "agent_request_decision";
-export const COMPLETION_REVIEW_TOOL = "agent_request_review";
 // The desktop Team router's forced tool (internal/daemon/conversation_provider.go).
 export const ROUTE_TOOL = "route_message";
 export const LOAD_TOOL = "load_capabilities";

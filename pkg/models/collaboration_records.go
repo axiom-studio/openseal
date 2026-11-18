@@ -120,18 +120,13 @@ func ValidateAgentRequestCompletionRecord(record AgentRequestCompletionRecord) e
 	if record.Request == nil || record.ChildRun == nil || record.SourceEvent == nil || record.ChildEvent == nil {
 		return errors.New("agent request completion requires request, source run, child run, and both events")
 	}
-	reviewPending := record.Request != nil && record.Request.Status == AgentRequestStatusCompletionReview
-	if reviewPending {
-		if record.SourceRun != nil || record.DependencyResolution != nil {
-			return errors.New("completion awaiting review cannot wake its source")
-		}
-	} else if (record.SourceRun == nil) == (record.DependencyResolution == nil) {
+	if (record.SourceRun == nil) == (record.DependencyResolution == nil) {
 		return errors.New("agent request completion requires exactly one direct source update or dependency resolution")
 	}
 	if err := record.Request.Validate(); err != nil {
 		return err
 	}
-	if record.Request.Status != AgentRequestStatusCompleted && record.Request.Status != AgentRequestStatusCompletionReview && record.Request.Status != AgentRequestStatusFailed {
+	if record.Request.Status != AgentRequestStatusCompleted && record.Request.Status != AgentRequestStatusFailed {
 		return ErrInvalidAgentRequestState
 	}
 	for _, run := range []*AgentRun{record.SourceRun, record.ChildRun} {

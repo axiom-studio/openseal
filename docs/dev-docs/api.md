@@ -65,7 +65,7 @@ when it can execute team-owned work. Use the same create route with
 `assignedAgentId` belonging to that team's roster. New work requires an active
 team and active roster members. The host constructs the execution budget and
 actor; renderer-supplied policy, context, parent linkage, and checkpoints are
-rejected. Delegation, acceptance, completion review, and child budgets remain
+rejected. Delegation, acceptance, and child budgets remain
 kernel-owned. Team work can be listed with `ownerType=team&ownerId=<ID>`.
 
 Retain the `Idempotency-Key` and exact request after uncertain delivery. The

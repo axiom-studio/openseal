@@ -51,12 +51,12 @@ type handoffCommandFixture struct {
 	requestID     string
 }
 
-func newHandoffCommandFixture(t *testing.T, store handoffCommandTestStore, kind models.AgentRequestKind, teamOwned, review bool) *handoffCommandFixture {
+func newHandoffCommandFixture(t *testing.T, store handoffCommandTestStore, kind models.AgentRequestKind, teamOwned bool) *handoffCommandFixture {
 	t.Helper()
-	return newHandoffCommandFixtureWithParent(t, store, kind, teamOwned, review, "", true)
+	return newHandoffCommandFixtureWithParent(t, store, kind, teamOwned, "", true)
 }
 
-func newHandoffCommandFixtureWithParent(t *testing.T, store handoffCommandTestStore, kind models.AgentRequestKind, teamOwned, review bool, parentID string, accept bool) *handoffCommandFixture {
+func newHandoffCommandFixtureWithParent(t *testing.T, store handoffCommandTestStore, kind models.AgentRequestKind, teamOwned bool, parentID string, accept bool) *handoffCommandFixture {
 	t.Helper()
 	f := &handoffCommandFixture{
 		t: t, store: store, scope: models.Scope{Kind: "tenant", ID: "handoff-ownership"},
@@ -74,7 +74,7 @@ func newHandoffCommandFixtureWithParent(t *testing.T, store handoffCommandTestSt
 			},
 			definition: &kernelteam.Definition{ID: owner.ID, Version: "1", Delegation: kernelteam.DelegationPolicy{
 				MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true,
-				RequireAcceptance: true, RequireCompletionReview: review,
+				RequireAcceptance: true,
 			}},
 		}
 	}
@@ -242,7 +242,7 @@ func TestRunCommandsHandoffTransfersCancellationOwnershipAndCompletes(t *testing
 		}
 		t.Run(name, func(t *testing.T) {
 			forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-				f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
+				f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false)
 				if running {
 					f.claimChild()
 				}
@@ -303,7 +303,7 @@ func TestRunCommandsHandoffTransfersCancellationOwnershipAndCompletes(t *testing
 
 func TestRunCommandsHandoffDirectCancellationStillOwnsSubtree(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false)
 		child := f.claimChild()
 		grandchild := f.childOf(child.ID, "marketing-helper")
 		source := f.run(f.sourceID)
@@ -351,12 +351,6 @@ func TestRunCommandsHandoffRequiresExactDurableTransferProof(t *testing.T) {
 		{name: "group owned", request: func(r *models.AgentRequest) {
 			r.DependencyGroupID, r.DependencyID = "owned-group", "owned-edge"
 		}},
-		{name: "review policy", request: func(r *models.AgentRequest) {
-			r.DelegationPolicy = &models.AgentRequestDelegationPolicy{
-				TeamDeploymentID: "team", TeamDefinitionID: "team", TeamDefinitionVersion: "1",
-				DelegationDepth: 1, RequireCompletionReview: true,
-			}
-		}},
 		{name: "missing request", source: func(r *models.AgentRun) { r.Output["handoffRequestId"] = "missing-request" }},
 		{name: "wrong output child", source: func(r *models.AgentRun) { r.Output["childRunId"] = "another-child" }},
 		{name: "non-handoff child", child: func(r *models.AgentRun) { r.Source = models.RunSourceRequest }},
@@ -368,7 +362,7 @@ func TestRunCommandsHandoffRequiresExactDurableTransferProof(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-				f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
+				f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false)
 				grandchild := f.childOf(f.childID, "marketing-helper")
 				if tc.request != nil {
 					f.mutateRequest(tc.request)
@@ -396,7 +390,7 @@ func TestRunCommandsHandoffRequiresExactDurableTransferProof(t *testing.T) {
 
 func TestRunCommandsHandoffIgnoresForgedCallerFacts(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false)
 		child := f.run(f.childID)
 		// A stale caller can omit the receipt or supply another status; neither
 		// changes the authoritative completed source's transferred ownership.
@@ -420,7 +414,7 @@ func TestRunCommandsHandoffIgnoresForgedCallerFacts(t *testing.T) {
 
 func TestRunCommandsHandoffCannotForgeTerminalParentOrForeignScope(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false)
 		transferredBefore := f.run(f.childID)
 		live := f.childOf(f.sourceID, "live-owner")
 		owned := f.childOf(live.ID, "owned-agent")
@@ -444,36 +438,28 @@ func TestRunCommandsHandoffCannotForgeTerminalParentOrForeignScope(t *testing.T)
 	})
 }
 
-func TestRunCommandsHandoffOrdinaryDelegationAndReviewRemainOwned(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		kind   models.AgentRequestKind
-		review bool
-	}{{"ordinary request", models.AgentRequestKindRequest, false}, {"handoff awaiting review", models.AgentRequestKindHandoff, true}} {
-		t.Run(tc.name, func(t *testing.T) {
-			forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-				f := newHandoffCommandFixture(t, store, tc.kind, tc.review, tc.review)
-				grandchild := f.childOf(f.childID, "marketing-helper")
-				if source := f.run(f.sourceID); source.Status != models.AgentRunStatusWaitingForDependency {
-					t.Fatalf("source should retain ownership while waiting: %#v", source)
-				}
-				f.transition(f.sourceID, models.AgentRunStatusCanceled, nil)
-				forged := f.run(f.sourceID)
-				forged.Status = models.AgentRunStatusCompleted
-				forged.Output = map[string]interface{}{"handoffRequestId": f.requestID, "childRunId": f.childID}
-				if err := f.commands.CascadeTerminalRun(t.Context(), forged); err != nil {
-					t.Fatal(err)
-				}
-				f.assertCanceled(f.childID)
-				f.assertCanceled(grandchild.ID)
-			})
-		})
-	}
+func TestRunCommandsHandoffOrdinaryDelegationRemainsOwned(t *testing.T) {
+	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindRequest, false)
+		grandchild := f.childOf(f.childID, "marketing-helper")
+		if source := f.run(f.sourceID); source.Status != models.AgentRunStatusWaitingForDependency {
+			t.Fatalf("source should retain ownership while waiting: %#v", source)
+		}
+		f.transition(f.sourceID, models.AgentRunStatusCanceled, nil)
+		forged := f.run(f.sourceID)
+		forged.Status = models.AgentRunStatusCompleted
+		forged.Output = map[string]interface{}{"handoffRequestId": f.requestID, "childRunId": f.childID}
+		if err := f.commands.CascadeTerminalRun(t.Context(), forged); err != nil {
+			t.Fatal(err)
+		}
+		f.assertCanceled(f.childID)
+		f.assertCanceled(grandchild.ID)
+	})
 }
 
 func TestRunCommandsHandoffRecognizesTeamAssignedRequester(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, true, false)
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, true)
 		source, child := f.run(f.sourceID), f.run(f.childID)
 		grandchild := f.childOf(child.ID, "marketing-helper")
 		if source.Owner.Type != models.OwnerTypeTeam || f.request().Requester.Type != models.OwnerTypeAgent {
@@ -490,7 +476,7 @@ func TestRunCommandsHandoffRecognizesTeamAssignedRequester(t *testing.T) {
 
 func TestRunCommandsHandoffReceiptIsScopeBound(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false)
 		foreignScope := models.Scope{Kind: f.scope.Kind, ID: "another-tenant"}
 		foreignSource, err := f.portfolio.CreateAgentRun(t.Context(), models.CreateAgentRunRequest{
 			Scope: foreignScope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "developer"},
@@ -580,7 +566,7 @@ func TestRunCommandsHandoffAcceptanceDuringRecursiveDiscoveryUsesCanonicalSource
 		if err != nil {
 			t.Fatal(err)
 		}
-		f := newHandoffCommandFixtureWithParent(t, store, models.AgentRequestKindHandoff, false, false, outer.ID, false)
+		f := newHandoffCommandFixtureWithParent(t, store, models.AgentRequestKindHandoff, false, outer.ID, false)
 		if f.run(f.sourceID).Status != models.AgentRunStatusWaitingForAgent {
 			t.Fatal("unaccepted handoff source must be waiting for its recipient")
 		}
@@ -699,7 +685,7 @@ type handoffRunCommandStoreOnly struct{ models.RunCommandStore }
 
 func TestRunCommandsHandoffUnavailableReceiptReaderFailsClosed(t *testing.T) {
 	forHandoffCommandStores(t, func(t *testing.T, store handoffCommandTestStore) {
-		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false, false)
+		f := newHandoffCommandFixture(t, store, models.AgentRequestKindHandoff, false)
 		source, child := f.run(f.sourceID), f.run(f.childID)
 		grandchild := f.childOf(child.ID, "marketing-helper")
 		receipt := f.request()

@@ -278,7 +278,7 @@ func BuildAgentRun(ctx context.Context, store models.PortfolioStore, req models.
 		source = models.RunSourceManual
 	}
 	switch source {
-	case models.RunSourceManual, models.RunSourceChat, models.RunSourceSchedule, models.RunSourceEvent, models.RunSourceWebhook, models.RunSourceRequest, models.RunSourceRequestDecision, models.RunSourceCompletionReview, models.RunSourceHandoff, models.RunSourceEscalation, models.RunSourceObjective, models.RunSourceFork:
+	case models.RunSourceManual, models.RunSourceChat, models.RunSourceSchedule, models.RunSourceEvent, models.RunSourceWebhook, models.RunSourceRequest, models.RunSourceRequestDecision, models.RunSourceHandoff, models.RunSourceEscalation, models.RunSourceObjective, models.RunSourceFork:
 	default:
 		return nil, fmt.Errorf("%w: unsupported run source %q", models.ErrInvalidAgentRun, source)
 	}

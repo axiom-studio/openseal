@@ -57,7 +57,6 @@ type KernelClient interface {
 	GetAgentRequest(context.Context, models.Scope, string) (*models.AgentRequest, error)
 	RespondAgentRequest(context.Context, models.Scope, string, kernelapi.RespondAgentRequestRequest) (*collaboration.AgentRequestResult, error)
 	CompleteAgentRequest(context.Context, models.Scope, string, kernelapi.CompleteAgentRequestRequest, string) (*collaboration.AgentRequestResult, error)
-	ReviewAgentRequestCompletion(context.Context, models.Scope, string, kernelapi.ReviewAgentRequestCompletionRequest, string) (*collaboration.AgentRequestResult, error)
 	ListActionCalls(context.Context, models.ActionFilter) ([]*models.ActionCall, error)
 	GetActionCall(context.Context, models.Scope, string) (*models.ActionCall, error)
 	ListActionApprovals(context.Context, models.ApprovalFilter) ([]*models.ApprovalCheckpoint, error)
@@ -892,15 +891,6 @@ func (c *KernelHTTPClient) RespondAgentRequest(ctx context.Context, scope models
 func (c *KernelHTTPClient) CompleteAgentRequest(ctx context.Context, scope models.Scope, requestID string, request kernelapi.CompleteAgentRequestRequest, idempotencyKey string) (*collaboration.AgentRequestResult, error) {
 	var result collaboration.AgentRequestResult
 	path := "/api/v1/agent-requests/" + url.PathEscape(strings.TrimSpace(requestID)) + "/completions?" + scopeQuery(scope).Encode()
-	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func (c *KernelHTTPClient) ReviewAgentRequestCompletion(ctx context.Context, scope models.Scope, requestID string, request kernelapi.ReviewAgentRequestCompletionRequest, idempotencyKey string) (*collaboration.AgentRequestResult, error) {
-	var result collaboration.AgentRequestResult
-	path := "/api/v1/agent-requests/" + url.PathEscape(strings.TrimSpace(requestID)) + "/completion-review?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &result); err != nil {
 		return nil, err
 	}

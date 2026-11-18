@@ -324,8 +324,7 @@ func acceptedSourceRun(source *models.AgentRun, request *models.AgentRequest, no
 	updated.UpdatedAt = now
 	updated.LeaseOwner = ""
 	updated.LeaseExpiresAt = nil
-	requiresCompletionReview := request.DelegationPolicy != nil && request.DelegationPolicy.RequireCompletionReview
-	if request.Kind == models.AgentRequestKindHandoff && !requiresCompletionReview {
+	if request.Kind == models.AgentRequestKindHandoff {
 		updated.Status = models.AgentRunStatusCompleted
 		updated.WakeCondition = nil
 		updated.Output = map[string]interface{}{"handoffRequestId": request.ID, "childRunId": request.ChildRunID}

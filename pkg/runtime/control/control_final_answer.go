@@ -877,11 +877,8 @@ func (x *Executor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContex
 // finalToolRequired names the final tool a plain reply cannot replace in
 // mode ("" when plain text is a final answer).
 func finalToolRequired(mode agentrun.FinalAnswerMode) models.ControlToolName {
-	switch mode {
-	case agentrun.FinalModeDecision:
+	if mode == agentrun.FinalModeDecision {
 		return models.ControlToolRequestDecision
-	case agentrun.FinalModeReview:
-		return models.ControlToolCompletionReview
 	}
 	return ""
 }

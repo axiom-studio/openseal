@@ -11,7 +11,6 @@ type FinalAnswerMode string
 const (
 	FinalModeDefault  FinalAnswerMode = "default"
 	FinalModeDecision FinalAnswerMode = "decision" // Run.Context[AgentRequestInboxContextKey]
-	FinalModeReview   FinalAnswerMode = "review"   // Run.Context[AgentRequestCompletionReviewContextKey]
 )
 
 // ControlAuthority is resolved once per claim
@@ -84,9 +83,8 @@ func (cc ControlContext) LeaseGuard(now time.Time) models.AgentRunLeaseGuard {
 	return models.AgentRunLeaseGuard{WorkerID: cc.WorkerID, Now: now}
 }
 
-// OffersCapabilities is false for decision and review Runs: they are offered
-// only their own final tool, no capability, host or governed tool.
+// OffersCapabilities is false for decision Runs: they are offered only their
+// own final tool, no capability, host or governed tool.
 func (a ControlAuthority) OffersCapabilities() bool {
-	mode := a.EffectiveFinalMode()
-	return mode != FinalModeDecision && mode != FinalModeReview
+	return a.EffectiveFinalMode() != FinalModeDecision
 }

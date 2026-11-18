@@ -167,18 +167,17 @@ const (
 type RunSource string
 
 const (
-	RunSourceManual           RunSource = "manual"
-	RunSourceChat             RunSource = "chat"
-	RunSourceSchedule         RunSource = "schedule"
-	RunSourceEvent            RunSource = "event"
-	RunSourceWebhook          RunSource = "webhook"
-	RunSourceRequest          RunSource = "agent_request"
-	RunSourceRequestDecision  RunSource = "agent_request_decision"
-	RunSourceCompletionReview RunSource = "agent_request_completion_review"
-	RunSourceHandoff          RunSource = "handoff"
-	RunSourceEscalation       RunSource = "escalation"
-	RunSourceObjective        RunSource = "objective"
-	RunSourceFork             RunSource = "fork"
+	RunSourceManual          RunSource = "manual"
+	RunSourceChat            RunSource = "chat"
+	RunSourceSchedule        RunSource = "schedule"
+	RunSourceEvent           RunSource = "event"
+	RunSourceWebhook         RunSource = "webhook"
+	RunSourceRequest         RunSource = "agent_request"
+	RunSourceRequestDecision RunSource = "agent_request_decision"
+	RunSourceHandoff         RunSource = "handoff"
+	RunSourceEscalation      RunSource = "escalation"
+	RunSourceObjective       RunSource = "objective"
+	RunSourceFork            RunSource = "fork"
 )
 
 // RunKind identifies the execution contract a durable Run requires. Ownership

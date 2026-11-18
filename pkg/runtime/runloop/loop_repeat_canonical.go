@@ -61,7 +61,6 @@ var (
 	repeatKernelControlTools = map[string]bool{
 		"turn_final_answer":      true,
 		"agent_request_decision": true,
-		"agent_request_review":   true,
 		"turn_report_progress":   true,
 		"wait":                   true,
 		"load_capabilities":      true,

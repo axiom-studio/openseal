@@ -59,7 +59,7 @@ func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t
 	}
 }
 
-func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *testing.T) {
+func TestAgentRequestConversationProjectionShowsHandoffAndCompletion(t *testing.T) {
 	scope := models.Scope{Kind: "tenant", ID: "conversation-projection"}
 	store := &collaborationtest.TeamStore{
 		Store: kerneltest.NewStore(t),
@@ -67,7 +67,7 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
 			Roster: []kernelteam.RosterAssignment{
-				{ID: "reviewer", AgentDeploymentID: "reviewer-agent", Approver: true},
+				{ID: "reviewer", AgentDeploymentID: "reviewer-agent"},
 				{ID: "specialist", AgentDeploymentID: "specialist-agent"},
 			},
 		},
@@ -75,7 +75,7 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 			ID: "release-team", Version: "1",
 			Delegation: kernelteam.DelegationPolicy{
 				MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true,
-				RequireAcceptance: true, RequireCompletionReview: true,
+				RequireAcceptance: true,
 			},
 		},
 	}
@@ -136,17 +136,8 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 	if _, err = projector.Reconcile(t.Context(), scope); err != nil {
 		t.Fatal(err)
 	}
-	reviewed, err := service.ReviewAgentRequestCompletion(t.Context(), collaboration.ReviewAgentRequestCompletionRequest{
-		Scope: scope, RequestID: completed.Request.ID, ExpectedRevision: completed.Request.Revision,
-		ExpectedChildRevision: completed.Child.Revision, Principal: completed.Request.Requester,
-		Actor: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "reviewer-agent"}, Approve: true,
-		Summary: "Evidence satisfies the review criteria", IdempotencyKey: "release-evidence-review",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = projector.Reconcile(t.Context(), scope); err != nil {
-		t.Fatal(err)
+	if completed.Request.Status != models.AgentRequestStatusCompleted {
+		t.Fatalf("completed request = %#v", completed.Request)
 	}
 	// Reconciliation is replay-safe after every lifecycle transition.
 	if _, err = projector.Reconcile(t.Context(), scope); err != nil {
@@ -158,23 +149,19 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 4 {
+	if len(messages) != 3 {
 		t.Fatalf("messages = %#v", messages)
 	}
-	root, acceptance, completion, decision := messages[0], messages[1], messages[2], messages[3]
+	root, acceptance, completion := messages[0], messages[1], messages[2]
 	if root.Intent != models.MessageIntentHandoff || !root.RequiresResponse || len(root.References) != 2 ||
-		root.References[0] != (models.ConversationReference{Kind: models.ConversationReferenceRequest, ID: reviewed.Request.ID}) {
+		root.References[0] != (models.ConversationReference{Kind: models.ConversationReferenceRequest, ID: completed.Request.ID}) {
 		t.Fatalf("handoff = %#v", root)
 	}
 	if acceptance.Intent != models.MessageIntentAcknowledgment || acceptance.ResolvesMessageID != root.ID || acceptance.ThreadRootID != root.ID {
 		t.Fatalf("acceptance = %#v", acceptance)
 	}
-	if completion.Intent != models.MessageIntentProposal || !completion.RequiresResponse || completion.ThreadRootID != root.ID {
+	if completion.Intent != models.MessageIntentUpdate || completion.RequiresResponse || completion.ThreadRootID != root.ID {
 		t.Fatalf("completion = %#v", completion)
-	}
-	if decision.Intent != models.MessageIntentDecision || decision.ResolvesMessageID != completion.ID ||
-		decision.ThreadRootID != root.ID || decision.Sender.ID != "reviewer-agent" {
-		t.Fatalf("decision = %#v", decision)
 	}
 	resolved := map[string]bool{}
 	for _, message := range messages {

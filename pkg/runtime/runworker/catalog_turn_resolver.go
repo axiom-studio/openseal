@@ -84,8 +84,8 @@ func (f SkillHostCapabilityResolverFunc) ResolveSkillHostCapabilities(ctx contex
 // definition and activated Skills, and gives it the run loop seams of its
 // kind (SPEC §2.4):
 //
-//   - AgentRequest decision and completion review Runs: a model producer
-//     offered only their typed final tool; no Skill is activated.
+//   - AgentRequest decision Runs: a model producer offered only their
+//     typed final tool; no Skill is activated.
 //   - Typed capability invocations: their deterministic producer,
 //     executing their tool calls through the claim's executor.
 //   - Pinned runbook entrypoints: the runbook runner.
@@ -148,19 +148,13 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 		r.explaining = true
 		return r.model(ctx, r.identity(deployment.ID), nil, agentrun.PromptContribution{}, false)
 	}
-	for _, structured := range []struct{ key, instruction string }{
-		{agentrun.AgentRequestCompletionReviewContextKey, collaboration.AgentRequestCompletionReviewSystemInstruction},
-		{agentrun.AgentRequestInboxContextKey, collaboration.AgentRequestDecisionSystemInstruction},
-	} {
-		if _, requested := run.Context[structured.key]; !requested {
-			continue
-		}
-		// Decision and review Runs act for the request, not the Agent's
-		// catalog: no Skill is activated, and they are offered only their
-		// typed final tool (ResolveControlAuthority).
+	if _, requested := run.Context[agentrun.AgentRequestInboxContextKey]; requested {
+		// Decision Runs act for the request, not the Agent's catalog: no
+		// Skill is activated, and they are offered only their typed final
+		// tool (ResolveControlAuthority).
 		binding := r.identity(deployment.ID)
-		binding.InputContextRefs = []string{"run:" + structured.key}
-		return r.model(ctx, binding, nil, agentrun.PromptContribution{AgentInstructions: []string{structured.instruction}}, false)
+		binding.InputContextRefs = []string{"run:" + agentrun.AgentRequestInboxContextKey}
+		return r.model(ctx, binding, nil, agentrun.PromptContribution{AgentInstructions: []string{collaboration.AgentRequestDecisionSystemInstruction}}, false)
 	}
 	skillHost := config.SkillHost
 	if config.SkillHosts != nil {

@@ -2,7 +2,7 @@
 
 OpenSeal coordinates Team work through the same durable primitives used by an
 individual Agent. There is no second Team executor. A Team request, its child
-Run, review Runs, channel projection, activity, budget, and artifacts all refer
+Run, channel projection, activity, budget, and artifacts all refer
 to one collaboration fact.
 
 ```mermaid
@@ -12,10 +12,7 @@ flowchart LR
     C --> B[Accept or decline bids]
     B --> D[Deterministic assignment]
     D --> R[Child Run]
-    R --> Q[Independent review quorum]
-    Q -->|agreement| J[Join source Run]
-    Q -->|disagreement| E[Escalation reviewer]
-    E --> J
+    R --> J[Join source Run]
 ```
 
 ## Work offers and assignment
@@ -35,22 +32,14 @@ a different worker.
 The public Go facade exposes `SubmitAgentRequestBid`; request inspection returns
 the candidate evidence, bids, and final assignment decision.
 
-## Independent completion review
+## Completion
 
-The Team delegation policy can require completion review, set a review quorum,
-and require escalation when reviewers disagree. Reviewers must be Agents other
-than the worker. Each decision is a durable, idempotent fact with a concise
-evidence-based reason.
-
-Review Runs are keyed by the immutable completion key, not by the collaboration
-record's changing revision. That permits several reviewers and remains stable
-across retries, restarts, and replicas. Agreement at quorum completes or rejects
-the request. Conflicting decisions create an explicit disagreement checkpoint;
-an additional independent reviewer resolves it.
+A member's finished work completes the request directly and wakes the source
+Run. Nobody reviews an Agent's answer before it is delivered.
 
 ## Channel behavior
 
-Conversation projection reports offers, decisions, child work, reviews, and
+Conversation projection reports offers, decisions, child work, and
 completion without making chat the executor. Existing Team coordination policy
 limits speakers, requires role relevance, suppresses duplicate content, and can
 keep observers quiet by default. The durable request and Runs remain the source
@@ -63,7 +52,6 @@ of truth even when no participant needs to speak.
 - Budgets are allocated to the child Run and cannot exceed the source Run.
 - Request, source Run, child Run, dependency resolution, and activity changes
   use transactional compare-and-swap storage operations.
-- Idempotency suppresses duplicate requests, bids, decisions, child Runs, and
-  completion reviews.
+- Idempotency suppresses duplicate requests, bids, decisions, and child Runs.
 - Every decision retains the exact Team policy snapshot that governed it.
 

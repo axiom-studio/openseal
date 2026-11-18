@@ -604,7 +604,7 @@ func (x *Executor) delegationOutcome(ctx context.Context, cc agentrun.ControlCon
 			Status: models.AgentRunStatusWaitingForAgent, Wake: &models.WakeCondition{Type: "agent_request_decision", Reference: request.ID},
 			Summary: "Waiting for Agent " + agentID,
 		}}, nil
-	case models.AgentRequestStatusAccepted, models.AgentRequestStatusCompletionReview:
+	case models.AgentRequestStatusAccepted:
 		return Resume{Park: &agentrun.LoopPark{
 			Status: models.AgentRunStatusWaitingForDependency, Wake: &models.WakeCondition{Type: "agent_request", Reference: request.ID},
 			Summary: "Waiting for Agent " + agentID,

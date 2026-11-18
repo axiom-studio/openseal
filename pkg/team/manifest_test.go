@@ -31,7 +31,7 @@ func TestCompileManifestBuildsPortableTeamWithCalmDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if definition.ID != "catalog-market-research" ||
-		!definition.Delegation.RequireAcceptance || !definition.Delegation.RequireCompletionReview ||
+		!definition.Delegation.RequireAcceptance ||
 		definition.SharedContext.Retention != 7*24*time.Hour || definition.SharedContext.MaximumBytes != 1<<20 ||
 		!definition.SharedContext.AllowMemberRead || !definition.SharedContext.AllowMemberWrite ||
 		definition.Approvals.MaximumRisk != capability.RiskLevelRead {
@@ -99,7 +99,7 @@ func TestCompileManifestPreservesExplicitCollaborationPolicy(t *testing.T) {
 			Routing: RoutingPolicy{Notes: "  Reviewer owns release notes  "},
 			Delegation: ManifestDelegationPolicy{
 				MaximumDepth: 5, MaximumConcurrent: 8, AllowPeerDelegation: &yes,
-				RequireAcceptance: &no, RequireCompletionReview: &no,
+				RequireAcceptance: &no,
 			},
 			SharedContext: ManifestSharedContextPolicy{
 				Retention: "24h", MaximumBytes: 2048, AllowMemberRead: &yes, AllowMemberWrite: &no,
@@ -112,7 +112,7 @@ func TestCompileManifestPreservesExplicitCollaborationPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if definition.Routing.Notes != "Reviewer owns release notes" || !definition.Delegation.AllowPeerDelegation ||
-		definition.Delegation.RequireAcceptance || definition.Delegation.RequireCompletionReview ||
+		definition.Delegation.RequireAcceptance ||
 		definition.SharedContext.AllowMemberWrite || definition.SharedContext.Retention != 24*time.Hour {
 		t.Fatalf("explicit policy was not preserved: %#v", definition)
 	}

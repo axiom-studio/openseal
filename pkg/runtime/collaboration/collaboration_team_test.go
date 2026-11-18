@@ -87,7 +87,7 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 		definition: &kernelteam.Definition{
 			ID: "delivery", Version: "3", Delegation: kernelteam.DelegationPolicy{
 				MaximumDepth: 3, MaximumConcurrent: 2, AllowPeerDelegation: true,
-				RequireAcceptance: true, RequireCompletionReview: true,
+				RequireAcceptance: true,
 			},
 		},
 	}
@@ -105,7 +105,7 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 	policy := created.Request.DelegationPolicy
 	if policy == nil || policy.TeamDeploymentID != "delivery-team" || policy.TeamDefinitionID != "delivery" || policy.DelegationDepth != 1 ||
 		policy.TeamDefinitionVersion != "3" || policy.MaximumDepth != 3 || policy.MaximumConcurrent != 2 ||
-		!policy.AllowPeerDelegation || !policy.RequireAcceptance || !policy.RequireCompletionReview {
+		!policy.AllowPeerDelegation || !policy.RequireAcceptance {
 		t.Fatalf("delegation policy snapshot = %#v", policy)
 	}
 	replayed, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
@@ -123,7 +123,7 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	submitted, err := service.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+	completed, err := service.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
 		Scope: scope, RequestID: accepted.Request.ID, ExpectedRevision: accepted.Request.Revision,
 		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
 		Summary: "Release review completed", CompletionKey: "completion-v1",
@@ -131,103 +131,10 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if submitted.Request.Status != models.AgentRequestStatusCompletionReview || submitted.Request.CompletionSubmittedAt == nil ||
-		submitted.Source.Status != models.AgentRunStatusWaitingForDependency || submitted.Child.Status != models.AgentRunStatusCompleted {
-		t.Fatalf("completion review checkpoint = %#v / %#v / %#v", submitted.Request, submitted.Source, submitted.Child)
-	}
-	if _, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
-		Scope: scope, RequestID: submitted.Request.ID, ExpectedRevision: submitted.Request.Revision,
-		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Recipient,
-		Approve: true, Summary: "self review", IdempotencyKey: "review-self",
-	}); !errors.Is(err, ErrAgentRequestUnauthorized) {
-		t.Fatalf("recipient self-review error = %v", err)
-	}
-	reviewed, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
-		Scope: scope, RequestID: submitted.Request.ID, ExpectedRevision: submitted.Request.Revision,
-		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
-		Approve: true, Summary: "Independent review passed", IdempotencyKey: "review-v1",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reviewed.Request.Status != models.AgentRequestStatusCompleted || reviewed.Request.ReviewedAt == nil || reviewed.Request.CompletedAt == nil ||
-		reviewed.Source.Status != models.AgentRunStatusQueued || reviewed.Request.CompletionReviewer == nil || *reviewed.Request.CompletionReviewer != submitted.Request.Requester {
-		t.Fatalf("reviewed completion = %#v / %#v", reviewed.Request, reviewed.Source)
-	}
-}
-
-func TestTeamCompletionReviewQuorumEscalatesAndResolvesDisagreement(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	scope := models.Scope{Kind: "tenant", ID: "review-quorum"}
-	store := kerneltest.NewStore(t)
-	source, err := portfolio.NewService(store).CreateAgentRun(ctx, models.CreateAgentRunRequest{
-		Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "lead",
-		Goal: "Coordinate reviewed delivery", Source: models.RunSourceManual,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	service := NewService(store)
-	service.teams = collaborationTeamStoreStub{
-		deployment: &kernelteam.Deployment{
-			ID: "delivery-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
-			DefinitionID: "delivery", ActiveVersion: "1", Revision: 1,
-		},
-		definition: &kernelteam.Definition{ID: "delivery", Version: "1", Delegation: kernelteam.DelegationPolicy{
-			MaximumDepth: 2, MaximumConcurrent: 2, AllowPeerDelegation: true, RequireAcceptance: true,
-			RequireCompletionReview: true, CompletionReviewQuorum: 2, EscalateOnDisagreement: true,
-		}},
-	}
-	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		Scope: scope, Kind: models.AgentRequestKindRequest, Requester: models.CollaborationParty{Type: models.OwnerTypeTeam, ID: "delivery-team"},
-		Recipient: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "worker"}, SourceRunID: source.ID, Goal: "Produce reviewed evidence",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
-		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
-		Decision: AgentRequestDecisionAccept, Principal: created.Request.Recipient,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	submitted, err := service.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
-		Scope: scope, RequestID: accepted.Request.ID, ExpectedRevision: accepted.Request.Revision,
-		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
-		Summary: "Evidence ready", CompletionKey: "reviewed-evidence-v1",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	first, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
-		Scope: scope, RequestID: submitted.Request.ID, ExpectedRevision: submitted.Request.Revision,
-		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
-		Actor: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "reviewer-a"}, Approve: true,
-		Summary: "Evidence is complete", IdempotencyKey: "review-a",
-	})
-	if err != nil || first.Request.Status != models.AgentRequestStatusCompletionReview || len(first.Request.CompletionReviews) != 1 {
-		t.Fatalf("first quorum decision = %#v, %v", first, err)
-	}
-	second, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
-		Scope: scope, RequestID: first.Request.ID, ExpectedRevision: first.Request.Revision,
-		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
-		Actor: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "reviewer-b"}, Approve: false,
-		Summary: "Evidence misses one criterion", IdempotencyKey: "review-b",
-	})
-	if err != nil || !second.Request.ReviewDisagreement || second.Request.Status != models.AgentRequestStatusCompletionReview {
-		t.Fatalf("disagreement = %#v, %v", second, err)
-	}
-	resolved, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
-		Scope: scope, RequestID: second.Request.ID, ExpectedRevision: second.Request.Revision,
-		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
-		Actor: models.CollaborationParty{Type: models.OwnerTypeAgent, ID: "reviewer-c"}, Approve: true, ResolveDisagreement: true,
-		Summary: "Escalation review confirms the evidence", IdempotencyKey: "review-c",
-	})
-	if err != nil || resolved.Request.Status != models.AgentRequestStatusCompleted || resolved.Request.ReviewDisagreement ||
-		len(resolved.Request.CompletionReviews) != 3 || resolved.Source.Status != models.AgentRunStatusQueued {
-		t.Fatalf("resolved disagreement = %#v, %v", resolved, err)
+	// A Team member's finished work completes directly and wakes the source.
+	if completed.Request.Status != models.AgentRequestStatusCompleted || completed.Request.CompletedAt == nil ||
+		completed.Source.Status != models.AgentRunStatusQueued || completed.Child.Status != models.AgentRunStatusCompleted {
+		t.Fatalf("completion = %#v / %#v / %#v", completed.Request, completed.Source, completed.Child)
 	}
 }
 

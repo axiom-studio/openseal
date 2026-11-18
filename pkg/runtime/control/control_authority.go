@@ -55,8 +55,8 @@ func ResolveControlAuthority(ctx context.Context, in AuthorityInput) (agentrun.C
 		return authority, nil
 	}
 	mode := authority.FinalMode
-	if mode == agentrun.FinalModeDecision || mode == agentrun.FinalModeReview {
-		// Decision and review Runs get only their typed final tool.
+	if mode == agentrun.FinalModeDecision {
+		// Decision Runs get only their typed final tool.
 		return authority, nil
 	}
 	scope := in.Scope
@@ -124,9 +124,6 @@ func ResolveControlAuthority(ctx context.Context, in AuthorityInput) (agentrun.C
 func controlFinalMode(run *models.AgentRun) agentrun.FinalAnswerMode {
 	if _, ok := run.Context[agentrun.AgentRequestInboxContextKey]; ok {
 		return agentrun.FinalModeDecision
-	}
-	if _, ok := run.Context[agentrun.AgentRequestCompletionReviewContextKey]; ok {
-		return agentrun.FinalModeReview
 	}
 	if run.Context["responseMode"] == "spoken" {
 		return conversationrun.FinalModeSpoken

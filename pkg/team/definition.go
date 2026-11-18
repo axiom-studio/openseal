@@ -36,13 +36,10 @@ type RoutingPolicy struct {
 const MaximumRoutingNotesBytes = 4000
 
 type DelegationPolicy struct {
-	MaximumDepth            int  `json:"maximumDepth,omitempty"`
-	MaximumConcurrent       int  `json:"maximumConcurrent,omitempty"`
-	AllowPeerDelegation     bool `json:"allowPeerDelegation,omitempty"`
-	RequireAcceptance       bool `json:"requireAcceptance,omitempty"`
-	RequireCompletionReview bool `json:"requireCompletionReview,omitempty"`
-	CompletionReviewQuorum  int  `json:"completionReviewQuorum,omitempty"`
-	EscalateOnDisagreement  bool `json:"escalateOnDisagreement,omitempty"`
+	MaximumDepth        int  `json:"maximumDepth,omitempty"`
+	MaximumConcurrent   int  `json:"maximumConcurrent,omitempty"`
+	AllowPeerDelegation bool `json:"allowPeerDelegation,omitempty"`
+	RequireAcceptance   bool `json:"requireAcceptance,omitempty"`
 }
 
 type ApprovalPolicy struct {
@@ -81,12 +78,9 @@ func (d *Definition) Validate() error {
 		return errors.New("team definition id, valid version, display name, and purpose are required")
 	}
 	if len(d.Routing.Notes) > MaximumRoutingNotesBytes ||
-		d.Delegation.MaximumDepth < 0 || d.Delegation.MaximumConcurrent < 0 || d.Delegation.CompletionReviewQuorum < 0 ||
+		d.Delegation.MaximumDepth < 0 || d.Delegation.MaximumConcurrent < 0 ||
 		d.SharedContext.Retention < 0 || d.SharedContext.MaximumBytes < 0 || !validRisk(d.Approvals.MaximumRisk) {
 		return errors.New("team definition policies are invalid")
-	}
-	if !d.Delegation.RequireCompletionReview && (d.Delegation.CompletionReviewQuorum > 0 || d.Delegation.EscalateOnDisagreement) {
-		return errors.New("Team completion review quorum and disagreement escalation require completion review")
 	}
 	if d.Amendments.RequiresApproval && len(d.Amendments.ApproverPrincipals) == 0 {
 		return errors.New("team definition amendment approval requires eligible principals")

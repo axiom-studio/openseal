@@ -9,7 +9,4 @@ const (
 	// AgentRequestInboxContextKey is kernel-authored input for a bounded
 	// recipient decision Run. It is model-visible but never model-writable.
 	AgentRequestInboxContextKey = "agentRequestInbox"
-	// AgentRequestCompletionReviewContextKey is kernel-authored input for the
-	// requester-side independent review of completed delegated work.
-	AgentRequestCompletionReviewContextKey = "agentRequestCompletionReview"
 )

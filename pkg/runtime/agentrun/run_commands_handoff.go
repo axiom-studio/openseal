@@ -35,8 +35,7 @@ func (s *RunCommandService) acceptedHandoffTransfer(ctx context.Context, source 
 		request.Kind != models.AgentRequestKindHandoff || request.SourceRunID != source.ID || request.ChildRunID != childID ||
 		request.DependencyGroupID != "" || request.DependencyID != "" ||
 		request.AcceptedAt == nil || request.AcceptedAt.IsZero() || !models.RequesterControlsRun(request.Requester, source) ||
-		(request.Status != models.AgentRequestStatusAccepted && request.Status != models.AgentRequestStatusCompleted) ||
-		(request.DelegationPolicy != nil && request.DelegationPolicy.RequireCompletionReview) {
+		(request.Status != models.AgentRequestStatusAccepted && request.Status != models.AgentRequestStatusCompleted) {
 		return nil, nil
 	}
 	return request, nil

@@ -47,8 +47,7 @@ type childTestStore interface {
 }
 
 // childTeamCatalog is the Team catalog of the fixture's "crew": finn
-// coordinates, scout is the specialist and rhea the reviewer. Delegated
-// completions need review.
+// coordinates and scout is the specialist.
 type childTeamCatalog struct {
 	scope capability.ScopeReference
 }
@@ -61,7 +60,6 @@ func (c childTeamCatalog) GetTeamDeployment(_ context.Context, scope capability.
 		ID: childTeam, Scope: c.scope, DefinitionID: childTeam, ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
 		Roster: []kernelteam.RosterAssignment{
 			{ID: "coordinator", AgentDeploymentID: looptest.FixtureAgent},
-			{ID: "reviewer", AgentDeploymentID: childReviewer, Approver: true},
 			{ID: "specialist", AgentDeploymentID: childScout},
 		},
 	}, nil
@@ -75,7 +73,7 @@ func (c childTeamCatalog) GetTeamDefinition(_ context.Context, id, version strin
 		ID: childTeam, Version: "1",
 		Delegation: kernelteam.DelegationPolicy{
 			MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true,
-			RequireAcceptance: true, RequireCompletionReview: true,
+			RequireAcceptance: true,
 		},
 	}, nil
 }
@@ -239,7 +237,7 @@ func (c *childFixture) reconcileInbox() {
 }
 
 // resolveTerminal is the worker pool after a terminal claim: terminal
-// reporting, the fork edge, the AgentRequest decision/review/child.
+// reporting, the fork edge, the AgentRequest decision and child.
 func (c *childFixture) resolveTerminal(run *models.AgentRun) {
 	c.T.Helper()
 	if !models.IsTerminalAgentRunStatus(run.Status) {
@@ -258,9 +256,6 @@ func (c *childFixture) resolveTerminal(run *models.AgentRun) {
 	}
 	if _, err := c.inbox.ResolveDecisionRun(c.Ctx, run); !tolerable(err) {
 		c.T.Fatalf("resolve decision %s: %v", run.ID, err)
-	}
-	if _, err := c.inbox.ResolveCompletionReviewRun(c.Ctx, run); !tolerable(err) {
-		c.T.Fatalf("resolve review %s: %v", run.ID, err)
 	}
 	if _, err := c.collab.ResolveTerminalAgentRequestChild(c.Ctx, run); !tolerable(err) {
 		c.T.Fatalf("resolve request child %s: %v", run.ID, err)
@@ -311,9 +306,7 @@ func (c *childFixture) bindingFor(run *models.AgentRun) *agentrun.TurnRunnerBind
 		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(c.Store.(models.AgentSessionStore), c.Store)},
 		Tools:     c.Dispatcher.ForClaim(runloop.LoopToolClaim{}),
 	}
-	_, decision := run.Context[agentrun.AgentRequestInboxContextKey]
-	_, review := run.Context[agentrun.AgentRequestCompletionReviewContextKey]
-	if !decision && !review {
+	if _, decision := run.Context[agentrun.AgentRequestInboxContextKey]; !decision {
 		binding.ModelActions = append([]capability.ModelAction(nil), c.Offered...)
 	}
 	if run.Kind == models.RunKindConversation && conversationID != "" && triggerID != "" {

@@ -5,20 +5,17 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
-// ControlToolOffered is the authority rule for each tool. Decision and review
-// Runs are offered only their own final tool, whatever else is set.
+// ControlToolOffered is the authority rule for each tool. Decision Runs are
+// offered only their own final tool, whatever else is set.
 func ControlToolOffered(name models.ControlToolName, a agentrun.ControlAuthority) bool {
 	mode := a.EffectiveFinalMode()
 	if mode == agentrun.FinalModeDecision {
 		return name == models.ControlToolRequestDecision
 	}
-	if mode == agentrun.FinalModeReview {
-		return name == models.ControlToolCompletionReview
-	}
 	switch name {
 	case models.ControlToolFinalAnswer:
 		return true
-	case models.ControlToolRequestDecision, models.ControlToolCompletionReview:
+	case models.ControlToolRequestDecision:
 		return false
 	case models.ControlToolReportProgress:
 		return a.CanReportProgress

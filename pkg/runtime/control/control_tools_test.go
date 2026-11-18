@@ -112,7 +112,6 @@ func TestControlToolSpecsStableOrderAndPresence(t *testing.T) {
 			a.DelegateTargets = nil
 		}, []string{"turn_final_answer", "turn_report_progress", "wait", "ask_user", "react", "control_fork"}},
 		{"decision Run offers only its tool", func(a *agentrun.ControlAuthority) { a.FinalMode = agentrun.FinalModeDecision }, []string{"agent_request_decision"}},
-		{"review Run offers only its tool", func(a *agentrun.ControlAuthority) { a.FinalMode = agentrun.FinalModeReview }, []string{"agent_request_review"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -192,38 +192,13 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 		}
 	}
 
-	completionKey := "agent-request:" + request.ID + ":completion-submitted"
-	completionID := models.StableConversationID(request.Scope, completionKey, "message")
 	if request.CompletionSubmittedAt != nil {
-		requiresReview := request.DelegationPolicy != nil && request.DelegationPolicy.RequireCompletionReview
-		completionIntent := models.MessageIntentUpdate
-		if requiresReview {
-			completionIntent = models.MessageIntentProposal
-		}
 		current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
 			Sender: participantForAssignedAgent(request), SenderDisplayName: displayNameForAssignedAgent(request),
-			Intent: completionIntent, Content: "Completed delegated work: " + request.CompletionSummary,
+			Intent: models.MessageIntentUpdate, Content: "Completed delegated work: " + request.CompletionSummary,
 			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: rootID,
-			Mentions: completionReviewMentions(request, requiresReview), References: requestConversationReferences(request, true),
-			RequiresResponse: requiresReview, IdempotencyKey: completionKey,
-		})
-		if err != nil {
-			return err
-		}
-	}
-
-	if request.ReviewedAt != nil && request.CompletionReviewer != nil {
-		content := "Approved completed work: " + request.CompletionReviewSummary
-		if request.Status == models.AgentRequestStatusFailed {
-			content = "Rejected completed work: " + request.CompletionReviewSummary
-		}
-		current, err = p.post(ctx, current, runtimeconversation.PostChannelMessageRequest{
-			Sender:            participantForCollaborationParty(*request.CompletionReviewer),
-			SenderDisplayName: displayNameForCollaborationParty(*request.CompletionReviewer),
-			Intent:            models.MessageIntentDecision, Content: content,
-			Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, ReplyToMessageID: completionID,
-			References: requestConversationReferences(request, true), ResolvesMessageID: completionID,
-			IdempotencyKey: "agent-request:" + request.ID + ":completion-reviewed",
+			References:     requestConversationReferences(request, true),
+			IdempotencyKey: "agent-request:" + request.ID + ":completion-submitted",
 		})
 		if err != nil {
 			return err
@@ -314,13 +289,6 @@ func requestConversationReferences(request *models.AgentRequest, includeChild bo
 		references = append(references, models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: artifact.ID, Version: int64(artifact.Version)})
 	}
 	return references
-}
-
-func completionReviewMentions(request *models.AgentRequest, required bool) []models.ConversationParticipant {
-	if !required || request == nil {
-		return nil
-	}
-	return []models.ConversationParticipant{participantForCollaborationParty(request.Requester)}
 }
 
 func collaborationTerminalContent(request *models.AgentRequest) string {

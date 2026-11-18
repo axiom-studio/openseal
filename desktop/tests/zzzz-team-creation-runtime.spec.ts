@@ -8,7 +8,6 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
 import {
-  COMPLETION_REVIEW_TOOL,
   CREATE_AGENT_ACTION,
   CREATE_AGENT_TOOL,
   CREATE_TEAM_ACTION,
@@ -157,18 +156,6 @@ async function respond(r: ChatRequest): Promise<Reply> {
         {
           name: REQUEST_DECISION_TOOL,
           args: { decision: "accept", message: "The request is clear." },
-        },
-      ],
-    };
-  if (hasTool(r, COMPLETION_REVIEW_TOOL))
-    return {
-      toolCalls: [
-        {
-          name: COMPLETION_REVIEW_TOOL,
-          args: {
-            decision: "approve",
-            message: "The result addresses the delegated goal.",
-          },
         },
       ],
     };

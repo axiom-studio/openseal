@@ -16,8 +16,7 @@ import (
 )
 
 // CompleteAgentRequest atomically records the recipient's result and completes
-// the child run. It wakes the source immediately unless the snapshotted Team
-// policy requires an independent completion review. The
+// the child run, and wakes the source. The
 // Principal is the authorized recipient; Actor is the agent or Team member
 // that actually performed the completion and is retained in the audit trail.
 func (s *Service) CompleteAgentRequest(ctx context.Context, req CompleteAgentRequestRequest) (*AgentRequestResult, error) {
@@ -41,7 +40,7 @@ func (s *Service) CompleteAgentRequest(ctx context.Context, req CompleteAgentReq
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", models.ErrInvalidArtifact, err)
 	}
-	if request.Status == models.AgentRequestStatusCompleted || request.Status == models.AgentRequestStatusCompletionReview {
+	if request.Status == models.AgentRequestStatusCompleted {
 		if request.CompletionKey != strings.TrimSpace(req.CompletionKey) || request.CompletionKey == "" {
 			return nil, models.ErrInvalidAgentRequestState
 		}
@@ -99,11 +98,7 @@ func (s *Service) CompleteAgentRequest(ctx context.Context, req CompleteAgentReq
 	}
 	now := s.now()
 	updatedRequest := models.CloneAgentRequest(request)
-	requiresReview := updatedRequest.DelegationPolicy != nil && updatedRequest.DelegationPolicy.RequireCompletionReview
 	updatedRequest.Status = models.AgentRequestStatusCompleted
-	if requiresReview {
-		updatedRequest.Status = models.AgentRequestStatusCompletionReview
-	}
 	updatedRequest.CompletionSummary = strings.TrimSpace(req.Summary)
 	updatedRequest.AcceptanceEvidence = maps.Clone(req.AcceptanceEvidence)
 	updatedRequest.Artifacts = artifacts
@@ -111,18 +106,14 @@ func (s *Service) CompleteAgentRequest(ctx context.Context, req CompleteAgentReq
 	updatedRequest.CompletionSubmittedAt = &now
 	updatedRequest.Revision++
 	updatedRequest.UpdatedAt = now
-	if !requiresReview {
-		updatedRequest.CompletedAt = &now
-		updatedRequest.ResolvedAt = &now
-	}
+	updatedRequest.CompletedAt = &now
+	updatedRequest.ResolvedAt = &now
 
 	sharedChildOutput := maps.Clone(child.Output)
 	updatedChild := completedCollaborationChildRun(child, updatedRequest, now)
 	var updatedSource *models.AgentRun
 	var dependencyResolution *models.RunDependencyResolutionRecord
-	if requiresReview {
-		updatedSource = models.CloneAgentRun(source)
-	} else if updatedRequest.DependencyGroupID != "" {
+	if updatedRequest.DependencyGroupID != "" {
 		edge, edgeErr := s.groupedRequestDependency(ctx, updatedRequest, source, true)
 		if edgeErr != nil {
 			return nil, edgeErr
@@ -145,33 +136,18 @@ func (s *Service) CompleteAgentRequest(ctx context.Context, req CompleteAgentReq
 		}
 	}
 	eventType := "collaboration.completed"
-	if requiresReview {
-		eventType = "collaboration.completion_review_requested"
-	}
 	if request.Kind == models.AgentRequestKindHandoff {
 		eventType = "handoff.completed"
-		if requiresReview {
-			eventType = "handoff.completion_review_requested"
-		}
 	} else if request.Kind == models.AgentRequestKindEscalation {
 		eventType = "escalation.completed"
-		if requiresReview {
-			eventType = "escalation.completion_review_requested"
-		}
 	}
 	summary := fmt.Sprintf("%s %s completed the work", actor.Type, actor.ID)
-	if requiresReview {
-		summary = fmt.Sprintf("%s %s submitted completed work for independent review", actor.Type, actor.ID)
-	}
 	record := models.AgentRequestCompletionRecord{
 		Request: updatedRequest, ExpectedRequestRevision: request.Revision,
-		ExpectedSourceRevision: source.Revision, DependencyResolution: dependencyResolution,
+		SourceRun: updatedSource, ExpectedSourceRevision: source.Revision, DependencyResolution: dependencyResolution,
 		ChildRun: updatedChild, ExpectedChildRevision: child.Revision,
 		SourceEvent: collaborationCompletionEvent(source, updatedRequest, eventType, summary, actor, now),
 		ChildEvent:  collaborationCompletionEvent(child, updatedRequest, eventType, summary, actor, now),
-	}
-	if !requiresReview {
-		record.SourceRun = updatedSource
 	}
 	events, err := s.store.CompleteAgentRequest(ctx, record)
 	if err != nil {
@@ -186,193 +162,6 @@ func (s *Service) CompleteAgentRequest(ctx context.Context, req CompleteAgentReq
 	return &AgentRequestResult{
 		Request: models.CloneAgentRequest(updatedRequest), Source: models.CloneAgentRun(updatedSource), Child: models.CloneAgentRun(updatedChild), Events: events,
 	}, nil
-}
-
-// ReviewAgentRequestCompletion resolves the independent review checkpoint
-// required by the snapshotted Team policy. The requester reviews the result;
-// the recipient that performed the work cannot approve its own completion.
-func (s *Service) ReviewAgentRequestCompletion(ctx context.Context, req ReviewAgentRequestCompletionRequest) (*AgentRequestResult, error) {
-	if s == nil || s.store == nil || s.runs == nil {
-		return nil, errors.New("collaboration store is not configured")
-	}
-	if err := req.Scope.Validate(); err != nil {
-		return nil, err
-	}
-	request, err := s.store.GetAgentRequest(ctx, req.Scope, strings.TrimSpace(req.RequestID))
-	if err != nil {
-		return nil, err
-	}
-	if request == nil {
-		return nil, models.ErrAgentRequestNotFound
-	}
-	key := strings.TrimSpace(req.IdempotencyKey)
-	if request.CompletionReviewKey != "" {
-		if request.CompletionReviewKey != key || key == "" {
-			return nil, models.ErrInvalidAgentRequestState
-		}
-		source, sourceErr := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
-		if sourceErr != nil {
-			return nil, sourceErr
-		}
-		child, childErr := s.runs.GetAgentRun(ctx, req.Scope, request.ChildRunID)
-		if childErr != nil {
-			return nil, childErr
-		}
-		return &AgentRequestResult{Request: request, Source: source, Child: child}, nil
-	}
-	if request.Revision != req.ExpectedRevision {
-		return nil, models.ErrRevisionConflict
-	}
-	if request.Status != models.AgentRequestStatusCompletionReview || request.DelegationPolicy == nil || !request.DelegationPolicy.RequireCompletionReview {
-		return nil, models.ErrInvalidAgentRequestState
-	}
-	if req.ResolveDisagreement != request.ReviewDisagreement {
-		return nil, fmt.Errorf("%w: disagreement resolution must match the durable review state", models.ErrInvalidAgentRequestState)
-	}
-	if req.Principal != request.Requester || req.Principal == request.Recipient {
-		return nil, ErrAgentRequestUnauthorized
-	}
-	actor := req.Actor
-	if strings.TrimSpace(actor.ID) == "" {
-		actor = req.Principal
-	}
-	if err := actor.Validate(); err != nil {
-		return nil, fmt.Errorf("actor: %w", err)
-	}
-	if actor.Type != models.OwnerTypeAgent || actor.ID == request.AssignedAgentID {
-		return nil, fmt.Errorf("%w: completed work requires an independent Agent reviewer", ErrAgentRequestUnauthorized)
-	}
-	for _, decision := range request.CompletionReviews {
-		if decision.IdempotencyKey == key && key != "" {
-			if decision.Reviewer == actor && decision.Approve == req.Approve && decision.Summary == strings.TrimSpace(req.Summary) {
-				return &AgentRequestResult{Request: request}, nil
-			}
-			return nil, models.ErrAgentRequestIdempotency
-		}
-		if decision.Reviewer == actor {
-			return nil, fmt.Errorf("%w: reviewer already submitted a completion decision", models.ErrInvalidAgentRequestState)
-		}
-	}
-	summary := strings.TrimSpace(req.Summary)
-	if summary == "" || key == "" {
-		return nil, errors.New("completion review summary and idempotency key are required")
-	}
-	source, err := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
-	if err != nil {
-		return nil, err
-	}
-	child, err := s.runs.GetAgentRun(ctx, req.Scope, request.ChildRunID)
-	if err != nil {
-		return nil, err
-	}
-	if source == nil || child == nil || child.Status != models.AgentRunStatusCompleted || child.ParentRunID != source.ID || req.ExpectedChildRevision != child.Revision {
-		return nil, models.ErrInvalidAgentRequestState
-	}
-	now := s.now()
-	updatedRequest := models.CloneAgentRequest(request)
-	updatedRequest.Revision++
-	updatedRequest.UpdatedAt = now
-	updatedRequest.CompletionReviews = append(updatedRequest.CompletionReviews, models.AgentRequestCompletionReviewDecision{
-		Reviewer: actor, Approve: req.Approve, Summary: summary, IdempotencyKey: key, DecidedAt: now,
-	})
-	quorum := completionReviewQuorum(updatedRequest.DelegationPolicy)
-	approvals, rejections := models.CompletionReviewCounts(updatedRequest.CompletionReviews)
-	disagreement := approvals > 0 && rejections > 0 && updatedRequest.DelegationPolicy.EscalateOnDisagreement && !req.ResolveDisagreement
-	if disagreement || approvals < quorum && rejections < quorum {
-		updatedRequest.ReviewDisagreement = disagreement
-		eventType := "collaboration.completion_review_recorded"
-		eventSummary := fmt.Sprintf("Agent %s recorded completion review %d of %d", actor.ID, len(updatedRequest.CompletionReviews), quorum)
-		if disagreement {
-			eventType = "collaboration.completion_review_disagreement"
-			eventSummary = fmt.Sprintf("Completion reviewers disagreed after %d decisions; escalation is required", len(updatedRequest.CompletionReviews))
-		}
-		event := collaborationCompletionEvent(source, updatedRequest, eventType, eventSummary, actor, now)
-		persisted, persistErr := s.store.CoordinateAgentRequest(ctx, models.AgentRequestCoordinationRecord{
-			Request: updatedRequest, ExpectedRequestRevision: request.Revision, Event: event,
-		})
-		if persistErr != nil {
-			return nil, persistErr
-		}
-		return &AgentRequestResult{Request: models.CloneAgentRequest(updatedRequest), Source: models.CloneAgentRun(source), Child: models.CloneAgentRun(child), Events: []*models.ActivityEvent{persisted}}, nil
-	}
-	updatedRequest.CompletionReviewer = &actor
-	updatedRequest.CompletionReviewSummary = summary
-	updatedRequest.CompletionReviewKey = key
-	updatedRequest.ReviewDisagreement = false
-	updatedRequest.ReviewedAt = &now
-	updatedRequest.ResolvedAt = &now
-	updatedChild := models.CloneAgentRun(child)
-	updatedChild.Revision++
-	updatedChild.UpdatedAt = now
-	var updatedSource *models.AgentRun
-	var dependencyResolution *models.RunDependencyResolutionRecord
-	eventType := "collaboration.completion_review_approved"
-	eventSummary := fmt.Sprintf("%s %s approved the completed work", actor.Type, actor.ID)
-	dependencyState := models.RunDependencyStateSatisfied
-	if req.ResolveDisagreement {
-		eventType = "collaboration.completion_review_disagreement_resolved"
-		eventSummary = fmt.Sprintf("Agent %s resolved the completion review disagreement", actor.ID)
-	}
-	if approvals >= quorum {
-		updatedRequest.Status = models.AgentRequestStatusCompleted
-		updatedRequest.CompletedAt = &now
-		updatedChild.Output = collaborationCompletionOutput(updatedChild.Output, updatedRequest, maps.Clone(child.Output))
-		if updatedRequest.DependencyGroupID == "" {
-			updatedSource, err = completedCollaborationSourceRun(source, updatedRequest, maps.Clone(child.Output), now)
-		}
-	} else {
-		updatedRequest.Status = models.AgentRequestStatusFailed
-		updatedRequest.ResolutionReason = summary
-		eventType = "collaboration.completion_review_rejected"
-		eventSummary = fmt.Sprintf("%s %s rejected the completed work", actor.Type, actor.ID)
-		dependencyState = models.RunDependencyStateFailed
-		if updatedRequest.DependencyGroupID == "" {
-			updatedSource, err = failedCollaborationSourceRun(source, updatedRequest, now)
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	if request.Kind == models.AgentRequestKindHandoff {
-		eventType = strings.Replace(eventType, "collaboration.", "handoff.", 1)
-	} else if request.Kind == models.AgentRequestKindEscalation {
-		eventType = strings.Replace(eventType, "collaboration.", "escalation.", 1)
-	}
-	if updatedRequest.DependencyGroupID != "" {
-		edge, edgeErr := s.groupedRequestDependency(ctx, updatedRequest, source, true)
-		if edgeErr != nil {
-			return nil, edgeErr
-		}
-		dependencyResolution = &models.RunDependencyResolutionRecord{
-			Scope: updatedRequest.Scope, GroupID: updatedRequest.DependencyGroupID, DependencyID: updatedRequest.DependencyID,
-			ExpectedDependencyRevision: edge.Revision, State: dependencyState,
-			Result: map[string]interface{}{
-				"requestId": updatedRequest.ID, "childRunId": updatedRequest.ChildRunID,
-				"summary": updatedRequest.CompletionSummary, "review": summary,
-				"acceptanceEvidence": maps.Clone(updatedRequest.AcceptanceEvidence), "output": maps.Clone(child.Output),
-			},
-			Error: updatedRequest.ResolutionReason, Artifacts: updatedRequest.Artifacts,
-			Actor: models.ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: models.ActivityVisibilityTeam, OccurredAt: now,
-		}
-	}
-	record := models.AgentRequestCompletionRecord{
-		Request: updatedRequest, ExpectedRequestRevision: request.Revision,
-		SourceRun: updatedSource, ExpectedSourceRevision: source.Revision, DependencyResolution: dependencyResolution,
-		ChildRun: updatedChild, ExpectedChildRevision: child.Revision,
-		SourceEvent: collaborationCompletionEvent(source, updatedRequest, eventType, eventSummary, actor, now),
-		ChildEvent:  collaborationCompletionEvent(child, updatedRequest, eventType, eventSummary, actor, now),
-	}
-	events, err := s.store.CompleteAgentRequest(ctx, record)
-	if err != nil {
-		return nil, err
-	}
-	if dependencyResolution != nil {
-		updatedSource, err = s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return &AgentRequestResult{Request: models.CloneAgentRequest(updatedRequest), Source: models.CloneAgentRun(updatedSource), Child: models.CloneAgentRun(updatedChild), Events: events}, nil
 }
 
 // ResolveTerminalAgentRequestChild closes the collaboration lifecycle from an
@@ -398,7 +187,7 @@ func (s *Service) ResolveTerminalAgentRequestChild(ctx context.Context, child *m
 	if request.ChildRunID != child.ID {
 		return nil, models.ErrInvalidAgentRequestState
 	}
-	if request.Status == models.AgentRequestStatusCompletionReview || request.Status == models.AgentRequestStatusCompleted || request.Status == models.AgentRequestStatusFailed || request.Status == models.AgentRequestStatusCanceled {
+	if request.Status == models.AgentRequestStatusCompleted || request.Status == models.AgentRequestStatusFailed || request.Status == models.AgentRequestStatusCanceled {
 		return &AgentRequestResult{Request: request, Child: child}, nil
 	}
 	if request.Status != models.AgentRequestStatusAccepted {

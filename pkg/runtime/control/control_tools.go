@@ -28,7 +28,7 @@ import (
 // start and child work. Capability search/load and host tools follow in the
 // harness group; they are not control tools.
 var controlToolOrder = []models.ControlToolName{
-	models.ControlToolFinalAnswer, models.ControlToolRequestDecision, models.ControlToolCompletionReview,
+	models.ControlToolFinalAnswer, models.ControlToolRequestDecision,
 	models.ControlToolReportProgress,
 	models.ControlToolWait, models.ControlToolAskUser, models.ControlToolReact,
 	models.ControlToolStartTask,
@@ -54,20 +54,19 @@ type controlToolRule struct {
 }
 
 var controlToolRules = map[models.ControlToolName]controlToolRule{
-	models.ControlToolFinalAnswer:      {Phase: PhaseSettle, Alone: true},
-	models.ControlToolRequestDecision:  {Phase: PhaseSettle, Alone: true},
-	models.ControlToolCompletionReview: {Phase: PhaseSettle, Alone: true},
-	models.ControlToolReportProgress:   {Phase: PhaseInline},
-	models.ControlToolWait:             {Phase: PhaseSettle},
-	models.ControlToolAskUser:          {Phase: PhaseSettle},
-	models.ControlToolReact:            {Phase: PhaseInline},
-	models.ControlToolStartTask:        {Phase: PhaseSettle, Alone: true}, // A4
-	models.ControlToolFork:             {Phase: PhaseSettle},
-	models.ControlToolRunOperation:     {Phase: PhaseSettle},
-	models.ControlToolDelegate:         {Phase: PhaseSettle},
-	models.ControlToolDelegateReply:    {Phase: PhaseSettle},
-	models.ControlToolRunbookFork:      {Phase: PhaseSettle, Alone: true},
-	models.ControlToolRunbookDelegate:  {Phase: PhaseSettle, Alone: true},
+	models.ControlToolFinalAnswer:     {Phase: PhaseSettle, Alone: true},
+	models.ControlToolRequestDecision: {Phase: PhaseSettle, Alone: true},
+	models.ControlToolReportProgress:  {Phase: PhaseInline},
+	models.ControlToolWait:            {Phase: PhaseSettle},
+	models.ControlToolAskUser:         {Phase: PhaseSettle},
+	models.ControlToolReact:           {Phase: PhaseInline},
+	models.ControlToolStartTask:       {Phase: PhaseSettle, Alone: true}, // A4
+	models.ControlToolFork:            {Phase: PhaseSettle},
+	models.ControlToolRunOperation:    {Phase: PhaseSettle},
+	models.ControlToolDelegate:        {Phase: PhaseSettle},
+	models.ControlToolDelegateReply:   {Phase: PhaseSettle},
+	models.ControlToolRunbookFork:     {Phase: PhaseSettle, Alone: true},
+	models.ControlToolRunbookDelegate: {Phase: PhaseSettle, Alone: true},
 }
 
 // IsControlTool reports whether name is a kernel control tool.
@@ -84,7 +83,7 @@ func ToolPhase(name string) (Phase, bool) {
 }
 
 func IsFinalTool(name models.ControlToolName) bool {
-	return name == models.ControlToolFinalAnswer || name == models.ControlToolRequestDecision || name == models.ControlToolCompletionReview
+	return name == models.ControlToolFinalAnswer || name == models.ControlToolRequestDecision
 }
 
 type ToolSpec struct {
@@ -274,7 +273,6 @@ func BuiltinTools() []Tool {
 		{name: models.ControlToolRunOperation, handler: operationHandler{}},
 		{name: models.ControlToolReportProgress, handler: reportProgressHandler{}},
 		{name: models.ControlToolRequestDecision, handler: requestDecisionHandler{}},
-		{name: models.ControlToolCompletionReview, handler: completionReviewHandler{}},
 		{name: models.ControlToolStartTask, handler: startTaskHandler{}},
 	}
 }

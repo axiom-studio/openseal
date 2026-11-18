@@ -79,7 +79,6 @@ The agent-turns routes list the model steps of a Run (agent-turns v2): each reco
 | GET | `/api/v1/agent-requests/{id}` |
 | POST | `/api/v1/agent-requests/{id}/responses` |
 | POST | `/api/v1/agent-requests/{id}/completions` |
-| POST | `/api/v1/agent-requests/{id}/completion-review` |
 
 ## Action Calls and Approvals
 

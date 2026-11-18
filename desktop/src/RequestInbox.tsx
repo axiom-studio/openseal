@@ -181,7 +181,6 @@ export default function RequestInbox({
             </option>
             <option value="pending">Awaiting acceptance</option>
             <option value="accepted">Accepted</option>
-            <option value="completion_review">Completion review</option>
             <option value="completed">Completed</option>
             <option value="failed">Failed</option>
             <option value="rejected">Rejected</option>
@@ -202,8 +201,7 @@ export default function RequestInbox({
       </div>
       <p className="inline-help">
         Requests between agents across this workspace. Open the parent task to
-        inspect the conversation and guide its lead. Agents handle acceptance
-        and completion review.
+        inspect the conversation and guide its lead. Agents handle acceptance.
       </p>
       {!canInspect && (
         <p className="inline-help">

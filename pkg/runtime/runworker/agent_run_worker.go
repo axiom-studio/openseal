@@ -426,12 +426,6 @@ func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run 
 		} else if applied {
 			p.Wake()
 		}
-		applied, err = p.requestInbox.ResolveCompletionReviewRun(ctx, run)
-		if err != nil && !errors.Is(err, models.ErrRevisionConflict) && !errors.Is(err, models.ErrInvalidAgentRequestState) {
-			p.logger.Warnw("failed to resolve AgentRequest completion review", "runId", run.ID, "error", err)
-		} else if applied {
-			p.Wake()
-		}
 	}
 	if p.collaboration == nil {
 		return
@@ -743,8 +737,7 @@ func (p *AgentRunWorkerPool) reconcileAgentRequestInbox(ctx context.Context) (*t
 	if err != nil {
 		p.logger.Warnw("AgentRequest inbox reconciliation completed with failures", "error", err)
 	}
-	if result != nil && (result.RequestsAccepted > 0 || result.DecisionRunsCreated > 0 || result.DecisionsApplied > 0 ||
-		result.CompletionReviewsCreated > 0 || result.CompletionReviewsApplied > 0) {
+	if result != nil && (result.RequestsAccepted > 0 || result.DecisionRunsCreated > 0 || result.DecisionsApplied > 0) {
 		p.Wake()
 	}
 	return p.requestInbox.DeferredProjectionAt(), err != nil

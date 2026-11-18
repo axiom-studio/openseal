@@ -225,9 +225,6 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 		{name: "decision", run: models.AgentRun{Goal: "Evaluate incoming work", Source: models.RunSourceRequestDecision, Context: map[string]interface{}{
 			agentrun.AgentRequestInboxContextKey: map[string]interface{}{"requestId": "request", "requestRevision": int64(1)},
 		}}, producer: "model", finalMode: agentrun.FinalModeDecision, instruction: collaboration.AgentRequestDecisionSystemInstruction, goalKind: "decision"},
-		{name: "review", run: models.AgentRun{Goal: "Review delegated work", Context: map[string]interface{}{
-			agentrun.AgentRequestCompletionReviewContextKey: map[string]interface{}{"requestId": "request"},
-		}}, producer: "model", finalMode: agentrun.FinalModeReview, instruction: collaboration.AgentRequestCompletionReviewSystemInstruction, goalKind: "review"},
 		{name: "runbook child", run: models.AgentRun{Goal: "Draft the summary", Source: models.RunSourceRequest, Entrypoint: "draft", Context: map[string]interface{}{
 			agentrun.DelegationModeContextKey: string(runbook.DelegateReason),
 		}}, producer: "model", fork: true, actions: 1, goalKind: "routine"},
@@ -279,7 +276,7 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 			if tc.instruction != "" && !slices.Contains(binding.Prompt.AgentInstructions, tc.instruction) {
 				t.Fatalf("prompt = %#v", binding.Prompt)
 			}
-			for _, other := range []string{collaboration.AgentRequestDecisionSystemInstruction, collaboration.AgentRequestCompletionReviewSystemInstruction, collaboration.AcceptedAgentRequestExecutionSystemInstruction} {
+			for _, other := range []string{collaboration.AgentRequestDecisionSystemInstruction, collaboration.AcceptedAgentRequestExecutionSystemInstruction} {
 				if other != tc.instruction && slices.Contains(binding.Prompt.AgentInstructions, other) {
 					t.Fatalf("instruction of another kind leaked: %#v", binding.Prompt)
 				}
@@ -350,7 +347,6 @@ func TestDecisionRunOffersOnlyDecisionToolViaBinding(t *testing.T) {
 		value                  map[string]interface{}
 	}{
 		{agentrun.AgentRequestInboxContextKey, string(models.ControlToolRequestDecision), collaboration.AgentRequestDecisionSystemInstruction, map[string]interface{}{"requestId": "request", "requestRevision": int64(1)}},
-		{agentrun.AgentRequestCompletionReviewContextKey, string(models.ControlToolCompletionReview), collaboration.AgentRequestCompletionReviewSystemInstruction, map[string]interface{}{"requestId": "request"}},
 	} {
 		t.Run(tc.tool, func(t *testing.T) {
 			catalog.activationDeployments = nil

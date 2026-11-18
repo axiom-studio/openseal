@@ -63,10 +63,10 @@ The repository carries a worked example at `examples/agents/rowan-greenwood/agen
 
 ## Agent Requests
 
-Agents ask each other for work through durable requests rather than direct calls. A request is created, answered with one or more responses, completed, and optionally passed through a completion review.
+Agents ask each other for work through durable requests rather than direct calls. A request is created, answered with one or more responses, and completed. The finished work completes the request directly; nobody reviews it first.
 
 ```text
-create → respond → complete → completion review
+create → respond → complete
 ```
 
 Each step is a durable record. Because the exchange is persisted rather than held in a process, a request outlives the Run that raised it and survives a daemon restart. Requests appear in the terminal client's **Inbox** destination.

@@ -70,7 +70,6 @@ FINAL_TOOL = 'turn_final_answer'
 DELEGATE_TOOL = 'agent_delegate'
 DELEGATE_REPLY_TOOL = 'agent_delegate_reply'
 REQUEST_DECISION_TOOL = 'agent_request_decision'
-COMPLETION_REVIEW_TOOL = 'agent_request_review'
 AUTHORING_TOOL = 'submit_authoring_intent'
 # The desktop Team router's forced tool (internal/daemon/conversation_provider.go).
 ROUTE_TOOL = 'route_message'
@@ -202,7 +201,7 @@ class Fixture:
 
     def coordinate(self, r):
         # T1-T5: the lead delegates, answers the recipient's question once
-        # the human has guided it, and finishes once the result is reviewed.
+        # the human has guided it, and finishes once the result arrives.
         assert Fixture.has_tool(r, DELEGATE_TOOL), 'coordinator step does not offer agent_delegate'
         delegation = self.latest_delegation(r)
         if delegation is None:
@@ -248,9 +247,6 @@ class Fixture:
                 self.intake_seen.add(key)
             decision = {'decision': 'accept', 'message': 'Scope is clear.'} if answered else {'decision': 'request_clarification', 'message': CLARIFICATION_QUESTION}
             return self.reply(calls=[(REQUEST_DECISION_TOOL, decision)])
-        # T4: the coordinator's review of the delegated result.
-        if Fixture.has_tool(r, COMPLETION_REVIEW_TOOL):
-            return self.reply(calls=[(COMPLETION_REVIEW_TOOL, {'decision': 'approve', 'message': 'The result meets the stated scope.'})])
         # The desktop Team router picks the member for a channel message.
         if Fixture.has_tool(r, ROUTE_TOOL):
             members = Fixture.tool(r, ROUTE_TOOL)['function']['parameters']['properties']['agentId']['enum']
@@ -763,7 +759,6 @@ def main():
             until("return document.querySelector('.work-guidance')?.innerText.includes('Guidance saved in this task')")
             fixture.release_clarification.set()
             until("return document.querySelector('.inspector')?.innerText.includes('Native task completed with uncertainty noted.')")
-            assert any(r for r in fixture.calls if Fixture.has_tool(r, COMPLETION_REVIEW_TOOL)), 'delegated result was never reviewed'
             assert not fixture.errors, fixture.errors
             close_and_wait()
             print('Native smoke passed: collaboration question, human guidance, resumed delegation and result; team-owned work start and result; reviewed roster edit; team proposal, approval, installation, member inspection, pause/resume and audited reasons; scoped Teams catalog, roles and native rendering; artifact text preview, native Save As and cancellation, binary checksum verified export; provider form, private key storage, inactive installation, reviewed activation, task execution, result, cancellation and retry draft, scoped action approval, owned-daemon shutdown, and settings plus installed agent and completed task restored after reopening.')

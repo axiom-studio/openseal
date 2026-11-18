@@ -31,16 +31,6 @@ const (
 	AgentRequestDecisionProvideClarification AgentRequestDecision = "provide_clarification"
 )
 
-func completionReviewQuorum(policy *models.AgentRequestDelegationPolicy) int {
-	if policy == nil || !policy.RequireCompletionReview {
-		return 0
-	}
-	if policy.CompletionReviewQuorum > 0 {
-		return policy.CompletionReviewQuorum
-	}
-	return 1
-}
-
 type CreateAgentRequestRequest struct {
 	ID                   string
 	Scope                models.Scope
@@ -142,19 +132,6 @@ type CompleteAgentRequestRequest struct {
 	CompletionKey         string
 }
 
-type ReviewAgentRequestCompletionRequest struct {
-	Scope                 models.Scope
-	RequestID             string
-	ExpectedRevision      int64
-	ExpectedChildRevision int64
-	Principal             models.CollaborationParty
-	Actor                 models.CollaborationParty
-	Approve               bool
-	ResolveDisagreement   bool
-	Summary               string
-	IdempotencyKey        string
-}
-
 type AgentRequestResult struct {
 	Request *models.AgentRequest    `json:"request"`
 	Source  *models.AgentRun        `json:"sourceRun,omitempty"`
@@ -220,8 +197,6 @@ func (s *Service) resolveSourceDelegationPolicy(ctx context.Context, source *mod
 		DelegationDepth: depth + 1,
 		MaximumDepth:    definition.Delegation.MaximumDepth, MaximumConcurrent: definition.Delegation.MaximumConcurrent,
 		AllowPeerDelegation: definition.Delegation.AllowPeerDelegation, RequireAcceptance: definition.Delegation.RequireAcceptance,
-		RequireCompletionReview: definition.Delegation.RequireCompletionReview, CompletionReviewQuorum: definition.Delegation.CompletionReviewQuorum,
-		EscalateOnDisagreement: definition.Delegation.EscalateOnDisagreement,
 	}, nil
 }
 

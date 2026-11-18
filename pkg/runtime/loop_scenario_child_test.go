@@ -1,14 +1,14 @@
 package runtime
 
 // Run-loop scenarios, child sessions (run-loop section 12 §5.8, A3/A4): forks,
-// delegation through decision/execution/review Runs, conversation tasks,
+// delegation through decision/execution Runs, conversation tasks,
 // foreground promotion and runbook operations, driven through the real
 // runloop.Loop by the loop fixture plus a small worker: the claim of the next
 // queued Run, the binding the worker's resolver gives it (ResolveLoopBinding
 // shape: a Run bound to a session keeps it, any other Run gets its run session
 // at first claim, seeded with its brief), and the terminal-child resolution
 // the worker pool runs after a claim (fork edges, AgentRequest decisions,
-// reviews and children, terminal reporting).
+// and children, terminal reporting).
 //
 // The runbook scenarios read the runbook Run's engine state, so this file is
 // exempt from TestLoopTestkitHasNoCheckpointAccess by name.
@@ -35,9 +35,8 @@ import (
 // Child fixture
 
 const (
-	childScout    = "scout"
-	childReviewer = "rhea"
-	childTeam     = "crew"
+	childScout = "scout"
+	childTeam  = "crew"
 )
 
 // ---------------------------------------------------------------------------
@@ -285,18 +284,14 @@ func TestLoopChildFailureIsAToolError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Delegation: decision, execution and review Runs
+// Delegation: decision and execution Runs
 
-func TestLoopDelegationRunsDecisionExecutionAndReviewInChildSessions(t *testing.T) {
+func TestLoopDelegationRunsDecisionAndExecutionInChildSessions(t *testing.T) {
 	looptest.EachStore(t, "child_delegation", func(t *testing.T, store models.KernelStore) {
 		c := newChildFixture(t, store, looptest.WithRules(
 			&looptest.ModelRule{Name: "decision", When: func(v looptest.StepView) bool { return v.HasTool(string(models.ControlToolRequestDecision)) },
 				Reply: func(looptest.StepView) models.ModelStepResult {
 					return looptest.Act("", looptest.Call(string(models.ControlToolRequestDecision), map[string]any{"decision": "accept", "message": "I can check the release."}))
-				}},
-			&looptest.ModelRule{Name: "review", When: func(v looptest.StepView) bool { return v.HasTool(string(models.ControlToolCompletionReview)) },
-				Reply: func(looptest.StepView) models.ModelStepResult {
-					return looptest.Act("", looptest.Call(string(models.ControlToolCompletionReview), map[string]any{"decision": "approve", "message": "The check lists every open issue."}))
 				}},
 			&looptest.ModelRule{Name: "execution", When: func(v looptest.StepView) bool {
 				for _, text := range v.UserTexts() {
@@ -339,38 +334,33 @@ func TestLoopDelegationRunsDecisionExecutionAndReviewInChildSessions(t *testing.
 			t.Fatalf("request = %s", request.Status)
 		}
 		// Every claimed Run but the parent is one of the request's Runs.
-		var decision, execution, review *models.AgentRun
+		var decision, execution *models.AgentRun
 		for _, id := range order {
 			run := c.MustRun(id)
 			switch run.Source {
 			case models.RunSourceRequestDecision:
 				decision = run
-			case models.RunSourceCompletionReview:
-				review = run
 			case models.RunSourceRequest:
 				execution = run
 			}
 		}
-		if decision == nil || execution == nil || review == nil {
-			t.Fatalf("claimed runs %v lack a decision/execution/review Run", order)
+		if decision == nil || execution == nil {
+			t.Fatalf("claimed runs %v lack a decision/execution Run", order)
 		}
-		if decision.AssignedAgentID != childScout || execution.AssignedAgentID != childScout || review.AssignedAgentID != childReviewer ||
-			execution.ID != request.ChildRunID {
-			t.Fatalf("assignments: decision %s execution %s review %s (request child %s)",
-				decision.AssignedAgentID, execution.AssignedAgentID, review.AssignedAgentID, request.ChildRunID)
+		if decision.AssignedAgentID != childScout || execution.AssignedAgentID != childScout || execution.ID != request.ChildRunID {
+			t.Fatalf("assignments: decision %s execution %s (request child %s)",
+				decision.AssignedAgentID, execution.AssignedAgentID, request.ChildRunID)
 		}
-		for _, run := range []*models.AgentRun{decision, review} {
-			if run.Budget == nil || run.Budget.MaxTurns != 12 {
-				t.Fatalf("%s budget = %#v, want 12 turns", run.Source, run.Budget)
-			}
-			if run.Status != models.AgentRunStatusCompleted {
-				t.Fatalf("%s = %s", run.Source, run.Status)
-			}
+		if decision.Budget == nil || decision.Budget.MaxTurns != 12 {
+			t.Fatalf("decision budget = %#v, want 12 turns", decision.Budget)
+		}
+		if decision.Status != models.AgentRunStatusCompleted {
+			t.Fatalf("decision = %s", decision.Status)
 		}
 		// One session per Run. Cross-Agent Runs get fresh parentless
 		// sessions (A3): another Agent never sees the requester's context.
 		seen := map[string]string{}
-		for _, run := range []*models.AgentRun{parent, decision, execution, review} {
+		for _, run := range []*models.AgentRun{parent, decision, execution} {
 			if run.SessionID == "" {
 				t.Fatalf("%s %s has no session", run.Source, run.ID)
 			}
@@ -388,22 +378,16 @@ func TestLoopDelegationRunsDecisionExecutionAndReviewInChildSessions(t *testing.
 				}
 			}
 		}
-		// Decision and review Runs are offered only their typed final tool.
-		for _, run := range []*models.AgentRun{decision, review} {
-			for _, req := range c.requestsFor(run.ID) {
-				for _, tool := range req.Tools {
-					if tool.Name != string(models.ControlToolRequestDecision) && tool.Name != string(models.ControlToolCompletionReview) {
-						t.Fatalf("%s offered %s", run.Source, tool.Name)
-					}
+		// A decision Run is offered only its typed final tool.
+		for _, req := range c.requestsFor(decision.ID) {
+			for _, tool := range req.Tools {
+				if tool.Name != string(models.ControlToolRequestDecision) {
+					t.Fatalf("decision offered %s", tool.Name)
 				}
 			}
 		}
-		// The review's verdict is on the request; the parent resumes only
-		// after it, and its tool result is the execution's final text.
-		if len(request.CompletionReviews) != 1 || !request.CompletionReviews[0].Approve ||
-			request.CompletionReviews[0].Reviewer.ID != childReviewer || !strings.Contains(request.CompletionReviews[0].Summary, "every open issue") {
-			t.Fatalf("completion reviews = %#v", request.CompletionReviews)
-		}
+		// The finished work completes the request directly; the parent's
+		// tool result is the execution's final text.
 		entry := c.toolEntry(parent.ID, string(models.ControlToolDelegate))
 		value := childResultJSON(t, entry)
 		if entry.State != models.ToolEntryCompleted || value["status"] != "completed" || value["answer"] != "Release 7 has 2 open issues." ||
