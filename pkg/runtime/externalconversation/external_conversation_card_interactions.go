@@ -163,6 +163,13 @@ func (w *InboxWorker) applyCardInteraction(ctx context.Context, item *models.Ext
 	if err != nil {
 		return err
 	}
+	// The answer is imported like an inbound message, so it carries the same
+	// import proof: Core bills its Run to the endpoint owner only when that
+	// proof exists. A provider card message takes many answers, so the
+	// answer is keyed by its interaction, not the card's provider message.
+	if err := w.ensureInboundMessageMapping(ctx, endpoint, cardAnswerExternalMessageID(recorded.Interaction.ID), commit.Message); err != nil {
+		return err
+	}
 	dispatch, err := w.dispatcher.DispatchExternalConversation(ctx, DispatchRequest{
 		Endpoint: endpoint, Conversation: commit.Conversation, Message: commit.Message,
 		IdempotencyKey: "external-conversation-dispatch:" + item.ID,
@@ -174,6 +181,12 @@ func (w *InboxWorker) applyCardInteraction(ctx context.Context, item *models.Ext
 		return errors.New("external conversation dispatcher did not return a canonical Run")
 	}
 	return w.complete(ctx, item, conversation.ID, commit.Message.ID, dispatch.RunID)
+}
+
+// cardAnswerExternalMessageID is the endpoint-scoped inbound message ID of
+// one card answer.
+func cardAnswerExternalMessageID(interactionID string) string {
+	return "card-interaction:" + interactionID
 }
 
 // cardVersion is the newest version of a visual that a message carries, or 0.

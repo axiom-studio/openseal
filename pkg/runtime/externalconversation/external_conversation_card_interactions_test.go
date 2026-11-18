@@ -187,6 +187,15 @@ func TestCardAnswerFromAChannelIsPostedAsThePersonAndWakesTheAgent(t *testing.T)
 	if len(f.dispatcher.requests) != 1 || f.dispatcher.requests[0].Message.ID != answer.ID {
 		t.Fatalf("dispatches = %#v", f.dispatcher.requests)
 	}
+	// Core bills the answer's Run to the endpoint owner on this import proof.
+	interactions, err := f.store.ListSurfaceInteractions(t.Context(), models.SurfaceInteractionFilter{Scope: f.endpoint.Scope, ConversationID: f.conversation.ID, Limit: 10})
+	if err != nil || len(interactions) != 1 {
+		t.Fatalf("interactions = %#v, %v", interactions, err)
+	}
+	imported, err := f.store.GetExternalMessageMapping(t.Context(), f.endpoint.Scope, f.endpoint.ID, models.ExternalMessageInbound, "card-interaction:"+interactions[0].ID)
+	if err != nil || imported == nil || imported.ConversationID != f.conversation.ID || imported.ChannelMessageID != answer.ID {
+		t.Fatalf("inbound mapping = %#v, %v", imported, err)
+	}
 	refreshes := f.cardRefreshes()
 	if len(refreshes) != 1 || refreshes[0].Parameters["providerMessageId"] != "card-ts" || refreshes[0].ExternalThreadID != "card-ts" {
 		t.Fatalf("card refreshes = %#v", refreshes)
