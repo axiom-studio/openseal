@@ -514,10 +514,12 @@ func TestSessionEntryJSONRoundTripKeepsNativeVerbatim(t *testing.T) {
 	thinking := json.RawMessage(`{"type":"thinking","thinking":"z first","signature":"EuYBCkQ","a":[3,1,2]}`)
 	redacted := json.RawMessage(`{"type":"redacted_thinking","data":"ZZZ"}`)
 	reasoning := json.RawMessage(`{"type":"reasoning","encrypted_content":"gAAAA","summary":[],"id":"rs_1"}`)
+	extra := json.RawMessage(`{"google":{"thought_signature":"CiQB"}}`)
 	entry := testAssistantEntry("a1", "s1", "c1")
 	entry.Assistant.Native = &AssistantNative{
 		Anthropic: []json.RawMessage{thinking, redacted}, Responses: []json.RawMessage{reasoning},
 		ChatReasoningField: "reasoning_content", ChatReasoning: "  spaced\nreasoning ",
+		ChatToolCallExtras: map[string]json.RawMessage{"c1": extra},
 	}
 	entry.Assistant.Limits = &AssistantModelLimits{ContextTokens: 200000}
 	encoded, err := json.Marshal(entry)
@@ -535,6 +537,9 @@ func TestSessionEntryJSONRoundTripKeepsNativeVerbatim(t *testing.T) {
 	if native.ChatReasoning != entry.Assistant.Native.ChatReasoning || native.ChatReasoningField != "reasoning_content" {
 		t.Fatal("chat reasoning changed")
 	}
+	if !bytes.Equal(native.ChatToolCallExtras["c1"], extra) {
+		t.Fatalf("chat tool call extra changed: %s", native.ChatToolCallExtras["c1"])
+	}
 	reencoded, err := json.Marshal(&decoded)
 	if err != nil {
 		t.Fatal(err)
@@ -546,6 +551,10 @@ func TestSessionEntryJSONRoundTripKeepsNativeVerbatim(t *testing.T) {
 	cloned.Assistant.Native.Anthropic[0][2] = 'X'
 	if !bytes.Equal(decoded.Assistant.Native.Anthropic[0], thinking) {
 		t.Fatal("clone shares native bytes")
+	}
+	cloned.Assistant.Native.ChatToolCallExtras["c1"][2] = 'X'
+	if !bytes.Equal(decoded.Assistant.Native.ChatToolCallExtras["c1"], extra) {
+		t.Fatal("clone shares chat tool call extra bytes")
 	}
 }
 

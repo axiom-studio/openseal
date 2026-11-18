@@ -154,6 +154,12 @@ func CloneSessionEntry(in *SessionEntry) *SessionEntry {
 			native := *in.Assistant.Native
 			native.Anthropic = cloneRawList(in.Assistant.Native.Anthropic)
 			native.Responses = cloneRawList(in.Assistant.Native.Responses)
+			if in.Assistant.Native.ChatToolCallExtras != nil {
+				native.ChatToolCallExtras = make(map[string]json.RawMessage, len(in.Assistant.Native.ChatToolCallExtras))
+				for id, raw := range in.Assistant.Native.ChatToolCallExtras {
+					native.ChatToolCallExtras[id] = CloneRawMessage(raw)
+				}
+			}
 			assistant.Native = &native
 		}
 		if in.Assistant.Limits != nil {

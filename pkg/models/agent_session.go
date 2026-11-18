@@ -398,6 +398,10 @@ type AssistantNative struct {
 	Responses          []json.RawMessage `json:"responses,omitempty"`
 	ChatReasoningField string            `json:"chatReasoningField,omitempty"`
 	ChatReasoning      string            `json:"chatReasoning,omitempty"`
+	// ChatToolCallExtras holds a Chat Completions tool call's extra_content
+	// by call id. Gemini returns its thought signature there and rejects a
+	// replayed call without it.
+	ChatToolCallExtras map[string]json.RawMessage `json:"chatToolCallExtras,omitempty"`
 }
 
 type ModelStepUsage struct {

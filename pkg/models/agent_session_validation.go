@@ -257,6 +257,11 @@ func (a *AssistantEntry) Validate() error {
 				return InvalidSessionEntryf("native responses item %d is not JSON", i)
 			}
 		}
+		for id, raw := range a.Native.ChatToolCallExtras {
+			if !json.Valid(raw) {
+				return InvalidSessionEntryf("native chat tool call %q extra content is not JSON", id)
+			}
+		}
 	}
 	return nil
 }

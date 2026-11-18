@@ -122,6 +122,11 @@ func checkProducedAssistant(a *models.AssistantEntry) error {
 				return fmt.Errorf("native responses item %d is not JSON", i)
 			}
 		}
+		for id, raw := range a.Native.ChatToolCallExtras {
+			if !json.Valid(raw) {
+				return fmt.Errorf("native chat tool call %q extra content is not JSON", id)
+			}
+		}
 	}
 	return nil
 }
