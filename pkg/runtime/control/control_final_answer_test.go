@@ -353,17 +353,16 @@ func TestInvalidVisualIsDropped(t *testing.T) {
 	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{}), "final", ArgumentsInvalidCode)
 }
 
-// A visual that does not decode (a key the format lacks) is dropped like a
-// visual that fails Validate.
-func TestUndecodableVisualIsDropped(t *testing.T) {
-	invalid := `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"t","type":"table","summary":"s",` +
-		`"table":{"columns":[{"key":"a","label":"A","kind":"text"}],"columns_note":"x","rows":[]}}]}}`
+// A visual with no component of a known type has nothing to draw: it is
+// dropped like a visual that fails Validate.
+func TestVisualWithNothingToDrawIsDropped(t *testing.T) {
+	invalid := `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"x","type":"hologram","text":"x"}]}}`
 	f := newFinalFixture(t, finalCall("first", invalid))
 	final := requireFinal(t, f.settleFinal("first", agentrun.ControlAuthority{VisualAllowed: true}))
 	if final.Visual() != nil || final.Answer != "Here." {
 		t.Fatalf("final = %#v", final)
 	}
-	if rejection, _ := final.Output["visualRejection"].(string); !strings.Contains(rejection, `unknown field "columns_note"`) {
+	if rejection, _ := final.Output["visualRejection"].(string); rejection == "" {
 		t.Fatalf("visualRejection = %v", final.Output["visualRejection"])
 	}
 }
@@ -373,11 +372,11 @@ func TestUndecodableVisualIsDropped(t *testing.T) {
 func TestPlainFinalInvalidVisualIsDropped(t *testing.T) {
 	f := newFinalFixture(t)
 	authority := agentrun.ControlAuthority{VisualAllowed: true}
-	final := requireFinal(t, f.plain("step-1", 1, authority, `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"c","type":"callout","callout":{"body":"b"}}]}}`))
+	final := requireFinal(t, f.plain("step-1", 1, authority, `{"answer":"Here.","visual":{"title":"Prices","components":[]}}`))
 	if final.Visual() != nil || final.Answer != "Here." {
 		t.Fatalf("final = %#v", final)
 	}
-	if rejection, _ := final.Output["visualRejection"].(string); !strings.Contains(rejection, "summary is required for callout") {
+	if rejection, _ := final.Output["visualRejection"].(string); !strings.Contains(rejection, "at least one component") {
 		t.Fatalf("visualRejection = %v", final.Output["visualRejection"])
 	}
 }

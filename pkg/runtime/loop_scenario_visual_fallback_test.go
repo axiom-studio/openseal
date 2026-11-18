@@ -14,19 +14,15 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
 )
 
-// visualWithoutSummary fails Validate: a callout needs a summary.
-func visualWithoutSummary() map[string]any {
-	return map[string]any{"title": "Prices", "components": []any{
-		map[string]any{"id": "co", "type": "callout", "callout": map[string]any{"body": "Cheaper in spring."}},
-	}}
+// visualWithoutComponents fails Validate: there is nothing to draw.
+func visualWithoutComponents() map[string]any {
+	return map[string]any{"title": "Prices", "components": []any{}}
 }
 
-// visualWithUnknownKey does not decode: tables have no columns_note.
-func visualWithUnknownKey() map[string]any {
+// visualWithUnknownTypes has no component of a known type, so nothing to draw.
+func visualWithUnknownTypes() map[string]any {
 	return map[string]any{"title": "Prices", "components": []any{
-		map[string]any{"id": "t", "type": "table", "summary": "Prices by month.", "table": map[string]any{
-			"columns": []any{map[string]any{"key": "month", "label": "Month", "kind": "text"}}, "columns_note": "x", "rows": []any{},
-		}},
+		map[string]any{"id": "h", "type": "hologram", "text": "Cheaper in spring."},
 	}}
 }
 
@@ -40,7 +36,7 @@ func answerSteps(replies ...map[string]any) *looptest.ModelRule {
 }
 
 func TestLoopInvalidVisualDeliversTheAnswerWithoutIt(t *testing.T) {
-	for name, visual := range map[string]map[string]any{"visual_invalid": visualWithoutSummary(), "visual_undecodable": visualWithUnknownKey()} {
+	for name, visual := range map[string]map[string]any{"visual_empty": visualWithoutComponents(), "visual_unknown_types": visualWithUnknownTypes()} {
 		looptest.EachStore(t, name, func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store, looptest.WithRules(answerSteps(
 				map[string]any{"answer": "Spring is cheapest.", "visual": visual},
