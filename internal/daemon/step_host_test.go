@@ -320,7 +320,7 @@ func TestStepHostTruncatedToolCallFailsWithoutRetry(t *testing.T) {
 		chatReply(w, "length", map[string]interface{}{"content": "", "tool_calls": []interface{}{chatCall("c1", "lookup", `{"q":"unfinish`)}}, nil)
 	})
 	_, err := provider.host(t, 0).ExecuteModelStep(context.Background(), stepRequest(stepTool("lookup")))
-	if failure := failureOf(t, err); failure.Code != stepHostOutputTruncated || failure.Retryable {
+	if failure := failureOf(t, err); failure.Code != modelstep.TurnHostOutputTruncated || failure.Retryable {
 		t.Fatalf("failure: %+v", failure)
 	}
 	if provider.n.Load() != 1 {

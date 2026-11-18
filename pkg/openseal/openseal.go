@@ -1087,6 +1087,7 @@ type (
 const (
 	DeploymentChangeConfigurationUpdated    = workforce.DeploymentChangeConfigurationUpdated
 	TurnHostContextExceeded                 = modelstep.TurnHostContextExceeded
+	TurnHostOutputTruncated                 = modelstep.TurnHostOutputTruncated
 	KernelAPIVersion                        = kernelapi.APIVersion
 	ChannelsCapabilityID                    = kernelapi.ChannelsCapabilityID
 	ChannelsCapabilityVersion               = kernelapi.ChannelsCapabilityVersion

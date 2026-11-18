@@ -41,7 +41,6 @@ const (
 	stepHostUnavailable        = "provider_unavailable"
 	stepHostHTTP               = "provider_http"
 	stepHostInvalidResponse    = "invalid_response"
-	stepHostOutputTruncated    = "provider_output_truncated"
 	stepHostEmptyResponse      = "provider_empty_response"
 )
 
@@ -145,7 +144,7 @@ func (h *ProviderStepHost) ExecuteModelStep(ctx context.Context, req models.Mode
 		if step.hasMalformed() {
 			if step.truncated {
 				// Cut off mid-arguments: a re-send produces the same cut.
-				return models.ModelStepResult{}, stepFailure(stepHostOutputTruncated, "The model's answer was cut off by its output limit before its tool call was complete.", false)
+				return models.ModelStepResult{}, stepFailure(modelstep.TurnHostOutputTruncated, "The model's answer was cut off by its output limit before its tool call was complete.", false)
 			}
 			if malformedLeft > 0 {
 				malformedLeft--

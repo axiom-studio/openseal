@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
 
@@ -38,7 +39,7 @@ func TerminalFailureReply(code string) string {
 		reason = "the model requested an operation that was not offered for this attempt"
 	case "provider_invalid_response":
 		reason = "the model returned a response that could not be safely executed"
-	case "provider_output_truncated":
+	case modelstep.TurnHostOutputTruncated:
 		reason = "the model provider stopped before completing its response"
 	case "tool_arguments_invalid":
 		reason = "the model supplied operation arguments that did not match the required format"
@@ -91,7 +92,7 @@ func terminalFailureCode(code string) string {
 	switch strings.TrimSpace(code) {
 	case "cap_lookup_not_available", "cap_lookup_duplicate", "cap_lookup_already_loaded", "tool_call_cardinality", "tool_call_identity_missing", "tool_call_not_authorized":
 		return strings.TrimSpace(code)
-	case "provider_output_truncated", "tool_arguments_invalid", "action_review_invalid", "action_external_identity_invalid", "final_skill_identity_invalid", "conversation_task_review_invalid", "conversation_task_review_failed":
+	case modelstep.TurnHostOutputTruncated, "tool_arguments_invalid", "action_review_invalid", "action_external_identity_invalid", "final_skill_identity_invalid", "conversation_task_review_invalid", "conversation_task_review_failed":
 		return strings.TrimSpace(code)
 	case "provider_invalid_turn_outcome", "provider_invalid_response":
 		return "provider_invalid_response"

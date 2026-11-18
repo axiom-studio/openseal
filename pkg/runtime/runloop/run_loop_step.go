@@ -445,7 +445,8 @@ func (d *drive) afterCompaction(ctx context.Context, st *stepState) error {
 }
 
 // produce is phases 5 and 6. On a context-length rejection of the first
-// attempt it compacts (force) and retries once.
+// attempt it compacts (force) and retries once. An output cutoff discards
+// the step and continues the Run (outputCutoff).
 func (d *drive) produce(ctx context.Context, st *stepState) (agentrun.StepOutput, stepResult, bool) {
 	var out agentrun.StepOutput
 	var err error
@@ -486,6 +487,9 @@ func (d *drive) produce(ctx context.Context, st *stepState) (agentrun.StepOutput
 	if stepDurationExpired(st.stepCtx, st.durCtx) {
 		return out, d.durationExpired(ctx, st, elapsed), true
 	}
+	if failure, ok := outputCutoffFailure(err); ok && st.mode == agentrun.StepModeNormal && d.session != nil {
+		return out, d.outputCutoff(ctx, st, failure, err), true
+	}
 	if err != nil {
 		return out, d.stepError(ctx, st, err, StepFailureProducerFailed), true
 	}
@@ -497,6 +501,16 @@ func (d *drive) produce(ctx context.Context, st *stepState) (agentrun.StepOutput
 	}
 	st.produced = true
 	return out, stepResult{}, false
+}
+
+// outputCutoffFailure is err's TurnHostFailure when the provider cut the
+// model call off at its output cap.
+func outputCutoffFailure(err error) (*modelstep.TurnHostFailure, bool) {
+	var failure *modelstep.TurnHostFailure
+	if !errors.As(err, &failure) || failure.Code != modelstep.TurnHostOutputTruncated {
+		return nil, false
+	}
+	return failure, true
 }
 
 // checkRunAfterProduce re-reads the Run (phase 6). A terminal Run discards

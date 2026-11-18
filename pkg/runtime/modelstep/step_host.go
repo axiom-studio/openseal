@@ -148,11 +148,21 @@ type TurnHostFailure struct {
 	// input does not fit the model's context. The host made no call, so the
 	// loop compacts the session and sends the step once more.
 	ContextPressure *HostedContextPressure
+	// OutputLimitTokens is set with TurnHostOutputTruncated to the output
+	// cap that cut the call off, when the host knows it. The loop names it
+	// in the note that asks the model to work in smaller pieces.
+	OutputLimitTokens int64
 }
 
 // TurnHostContextExceeded is the TurnHostFailure code for a step whose input
 // does not fit the model's context.
 const TurnHostContextExceeded = "model_context_exceeded"
+
+// TurnHostOutputTruncated is the TurnHostFailure code for a model call the
+// provider cut off at its output cap. The response is incomplete (its tool
+// calls cannot be parsed), so the host returns no result; the loop discards
+// the step and asks the model to continue in smaller pieces.
+const TurnHostOutputTruncated = "provider_output_truncated"
 
 // HostedContextPressure compares a host's estimate of a step's model input
 // with the input the model accepts, both in tokens.

@@ -176,6 +176,7 @@ func RunContextSourceKey(runID string) string            { return "run-context:"
 func GoalSourceKey(ownerRunID string) string             { return "goal:" + ownerRunID }
 func FailureNoteSourceKey(runID, stepID string) string   { return "failure-note:" + runID + ":" + stepID }
 func FinalRejectionEntryKey(stepID string) string        { return "final-rejection:" + stepID }
+func OutputCutoffEntryKey(stepID string) string          { return "output-cutoff:" + stepID }
 func TaskPromotedSourceKey(runID string) string          { return "task-promoted:" + runID }
 func RoutineEventEntrySourceKey(runID string) string     { return "routine-event:" + runID }
 
@@ -556,6 +557,9 @@ const (
 	NoteHistoryOmitted     NoteKind = "history_omitted"
 	NoteRateLimitedSource  NoteKind = "rate_limited_source"
 	NoteBrowserWaitingCode NoteKind = "browser_waiting_code"
+	// NoteOutputCutoff tells the model its previous response hit the output
+	// cap and was discarded, so it continues in smaller pieces.
+	NoteOutputCutoff NoteKind = "output_cutoff"
 	// NoteCapabilities lists what the Agent can load and use: the catalog
 	// (or its directory), delegation targets, operations and the guidance
 	// that depends on them. Appended in full once per compaction window, then
@@ -567,7 +571,7 @@ func (k NoteKind) Valid() bool {
 	switch k {
 	case NoteRunContext, NoteRepeat, NoteHost, NoteFailureExplanation, NoteRunFailed, NoteTaskPromoted,
 		NoteFinalRejection, NoteSetupPending, NoteHistoryOmitted, NoteRateLimitedSource,
-		NoteBrowserWaitingCode, NoteCapabilities:
+		NoteBrowserWaitingCode, NoteCapabilities, NoteOutputCutoff:
 		return true
 	}
 	return false
