@@ -142,10 +142,7 @@ type EntryMeta struct {
 	WorkRunID         string                 `json:"workRunId,omitempty"`
 	QuestionMessageID string                 `json:"questionMessageId,omitempty"`
 	WakeAt            *time.Time             `json:"wakeAt,omitempty"`
-	ErrorCode         string                 `json:"errorCode,omitempty"` // e.g. visual_invalid
-	// OptionalOnly marks a final answer rejected only for an optional part
-	// (its visual); the run loop does not count it as a rejected answer.
-	OptionalOnly bool `json:"optionalOnly,omitempty"`
+	ErrorCode         string                 `json:"errorCode,omitempty"` // e.g. answer_empty
 }
 
 // DecodeControlEntryMeta reads an entry's kernel control metadata (nil when
@@ -329,9 +326,6 @@ type Executor struct {
 	// NewStepToolDispatcher gives an executor without its own the run loop's
 	// tools (UseTools). Tests set their own.
 	handlers Registry
-	// finalChecks run on every accepted final answer, in order; nil runs
-	// builtinFinalAnswerChecks. Tests set their own.
-	finalChecks []finalAnswerCheck
 }
 
 func (x *Executor) registry() Registry {
@@ -346,13 +340,6 @@ func (x *Executor) UseTools(tools Registry) {
 	if x.handlers == nil {
 		x.handlers = tools
 	}
-}
-
-func (x *Executor) finalAnswerChecks() []finalAnswerCheck {
-	if x.finalChecks != nil {
-		return x.finalChecks
-	}
-	return builtinFinalAnswerChecks()
 }
 
 func (x *Executor) now() time.Time {

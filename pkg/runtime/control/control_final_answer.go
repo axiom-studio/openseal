@@ -24,10 +24,11 @@ import (
 // no tool calls) and the acceptance pipeline that turns either into the
 // FinalAnswer the loop delivers. A failed check is an is_error tool result (or,
 // for plain text, a final_rejection note) and the loop continues; the loop owns
-// the bound of 3 consecutive rejections (A9) and the delivery.
+// the bound of 3 consecutive rejections (A9) and the delivery. Nothing reviews
+// what the answer says: the checks only refuse an answer that cannot be
+// delivered at all.
 //
-// Pipeline order: decode → silent → content → skills → visual → registered
-// checks (completion checks, evidence review, task review: CTL-15/16) →
+// Pipeline order: decode → silent → content → skills → visual →
 // FinalOutputPublisher.ValidateFinalAnswer → finalAnswerPark.
 
 // Final answer error codes (stable; the model sees them in the tool result).
@@ -36,7 +37,6 @@ const (
 	finalSilentAfterChangeCode  = "silent_after_change"
 	finalAnswerEmptyCode        = "answer_empty"
 	finalSkillIdentityCode      = "final_skill_identity_invalid"
-	finalVisualInvalidCode      = "visual_invalid"
 	finalOutputInvalidCode      = "final_output_invalid"
 	finalToolRequiredCode       = "final_tool_required"
 	finalEmptyReplyCode         = "empty_answer"
@@ -393,30 +393,12 @@ func (d *finalAnswerDraft) content() string {
 
 // finalAnswerRejection is a check's verdict: an is_error result the model
 // can correct (Failure nil), or a failure of the Run (Failure set; the
-// rejection is still recorded on the entry or as the note). OptionalOnly
-// marks a rejection of an optional part the model may also leave out; the
-// loop does not count it toward the consecutive rejections that fail a Run.
+// rejection is still recorded on the entry or as the note).
 type finalAnswerRejection struct {
-	Code         string
-	Message      string
-	Extra        map[string]interface{}
-	Failure      *agentrun.LoopFailure
-	OptionalOnly bool
-}
-
-// finalAnswerCheck is one completion check of an accepted final answer.
-type finalAnswerCheck struct {
-	Name  string
-	Check func(ctx context.Context, x *Executor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error)
-}
-
-// builtinFinalAnswerChecks are the checks every final answer passes, in the
-// order they run: CTL-15 completion checks (§11.4 1-3: URLs, external
-// claims, approval claims; control_final_checks.go).
-func builtinFinalAnswerChecks() []finalAnswerCheck {
-	return []finalAnswerCheck{
-		{Name: "completion", Check: checkFinalAnswerCompletion},
-	}
+	Code    string
+	Message string
+	Extra   map[string]interface{}
+	Failure *agentrun.LoopFailure
 }
 
 // acceptFinalAnswer runs the pipeline on a decoded final. It returns
@@ -469,37 +451,19 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 	d.SkillSelections = selections
 	// 5. Visual: decode and structure here; the host's binding/link/image/
 	// place checks and place stamping run where the visual is stored
-	// (delivery), which answers retry_final when they fail.
+	// (delivery). An invalid visual never costs the answer, which has
+	// already streamed to the person: it goes without one, and delivery
+	// records why.
 	if d.sentVisual() {
 		visual, err := checkFinalVisual(ctx, d)
 		if err != nil {
-			prior, countErr := x.priorFinalErrorCodes(ctx, cc)
-			if countErr != nil {
-				return Result{}, countErr
-			}
-			if prior[finalVisualInvalidCode] == 0 {
-				return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalVisualInvalidCode, OptionalOnly: true,
-					Message: fmt.Sprintf("visual: %v. Fix the visual or leave it out.", err)})
-			}
-			// The second invalid visual in the Run never costs the answer:
-			// it goes without one, and delivery records why.
 			d.VisualRejection = "visual: " + err.Error()
 		} else {
 			d.Visual = visual
 		}
 	}
 	d.Output = d.output(mode)
-	// 6-8. Completion checks, evidence review, task review.
-	for _, check := range x.finalAnswerChecks() {
-		rejection, err := check.Check(ctx, x, cc, d)
-		if err != nil {
-			return Result{}, fmt.Errorf("final answer check %s: %w", check.Name, err)
-		}
-		if rejection != nil {
-			return x.rejectFinal(ctx, cc, d, rejection)
-		}
-	}
-	// 9. Host extension fields.
+	// 6. Host extension fields.
 	if len(d.Extra) > 0 {
 		var publisher agentrun.FinalOutputPublisher
 		if cc.Binding != nil {
@@ -610,7 +574,7 @@ func (x *Executor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, 
 		recorded = note
 	} else {
 		entry, err := x.transitionControlEntry(ctx, cc, models.ToolEntryError, nil,
-			ErrorResult(models.ToolResultFailed, r.Code, r.Message, r.Extra), &EntryMeta{ErrorCode: r.Code, OptionalOnly: r.OptionalOnly})
+			ErrorResult(models.ToolResultFailed, r.Code, r.Message, r.Extra), &EntryMeta{ErrorCode: r.Code})
 		if err != nil {
 			return Result{}, err
 		}
@@ -624,28 +588,7 @@ func (x *Executor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, 
 
 // finalRejectionNoteData is the kernel data of a final_rejection note.
 type finalRejectionNoteData struct {
-	ErrorCode    string `json:"errorCode"`
-	OptionalOnly bool   `json:"optionalOnly,omitempty"`
-}
-
-// CountsAsRejectedAnswer reports whether a rejected final attempt counts
-// toward the consecutive rejections that fail a Run. entry is what the
-// rejection recorded: the final tool entry or the final_rejection note.
-// Every rejection counts except one of an optional part only (a visual the
-// model may fix or leave out, and which is dropped the second time).
-func CountsAsRejectedAnswer(entry *models.SessionEntry) bool {
-	if entry == nil {
-		return true
-	}
-	if entry.Note != nil {
-		var data finalRejectionNoteData
-		if len(entry.Note.Data) > 0 && json.Unmarshal(entry.Note.Data, &data) == nil {
-			return !data.OptionalOnly
-		}
-		return true
-	}
-	meta, err := DecodeControlEntryMeta(entry)
-	return err != nil || meta == nil || !meta.OptionalOnly
+	ErrorCode string `json:"errorCode"`
 }
 
 // appendFinalRejectionNote appends the step's final_rejection note (one per
@@ -659,7 +602,7 @@ func (x *Executor) appendFinalRejectionNote(ctx context.Context, cc agentrun.Con
 	if sessionID == "" || cc.Step == nil || cc.Step.ID == "" {
 		return nil, errors.New("plain-text final needs the Run's session and step")
 	}
-	data, err := json.Marshal(finalRejectionNoteData{ErrorCode: code, OptionalOnly: r.OptionalOnly})
+	data, err := json.Marshal(finalRejectionNoteData{ErrorCode: code})
 	if err != nil {
 		return nil, err
 	}
@@ -687,8 +630,8 @@ func (x *Executor) appendFinalRejectionNote(ctx context.Context, cc agentrun.Con
 
 // priorFinalErrorCodes counts the rejection codes of this Run's earlier final
 // attempts: final tool entries (EntryMeta.ErrorCode) and final_rejection
-// notes. The current entry and the current step's note are not counted. CTL-15/16 use it for their
-// "second time" rules.
+// notes. The current entry and the current step's note are not counted. The
+// plain-text attempt limits use it.
 func (x *Executor) priorFinalErrorCodes(ctx context.Context, cc agentrun.ControlContext) (map[string]int, error) {
 	counts := map[string]int{}
 	tools, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{

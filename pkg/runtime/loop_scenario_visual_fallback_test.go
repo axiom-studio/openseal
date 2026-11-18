@@ -1,16 +1,14 @@
 package runtime
 
-// Run-loop scenarios for an answer whose optional visual is wrong: the model
-// gets one chance to fix the visual or leave it out, then the answer goes
-// without it. A visual never costs the answer or counts toward the three
-// rejected answers that fail a Run.
+// Run-loop scenarios for an answer whose optional visual is wrong: the answer
+// has already streamed to the person, so it goes without the visual and the
+// Run records why. A visual never costs the answer.
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
@@ -41,72 +39,30 @@ func answerSteps(replies ...map[string]any) *looptest.ModelRule {
 	}}
 }
 
-func TestLoopInvalidVisualTwiceDeliversTheAnswerWithoutIt(t *testing.T) {
-	looptest.EachStore(t, "visual_dropped", func(t *testing.T, store models.KernelStore) {
-		f := looptest.NewFixture(t, store, looptest.WithRules(answerSteps(
-			map[string]any{"answer": "Spring is cheapest.", "visual": visualWithoutSummary()},
-			map[string]any{"answer": "Spring is cheapest.", "visual": visualWithUnknownKey()},
-		)))
-		content := &looptest.AnswerVisualContent{}
-		convRunner(f, conversationrun.TurnRunnerConfig{AttachmentContent: content})
-		conversation, run := f.StartChat("when is it cheapest?")
-		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, models.AgentRunStatusCompleted)
-		finals := portFinalEntries(f, run.ID)
-		if len(finals) != 2 || finals[0].State != models.ToolEntryError || !strings.Contains(portEntryText(finals[0]), "summary is required for callout") ||
-			control.CountsAsRejectedAnswer(finals[0]) {
-			t.Fatalf("final entries = %v (%q)", f.EntryTypes(run.ID), portEntryText(finals[0]))
-		}
-		answers := portAgentMessages(f, conversation.ID)
-		if len(answers) != 1 || answers[0].Content != "Spring is cheapest." || len(answers[0].References) != 1 || content.Puts != 0 {
-			t.Fatalf("answers = %#v (%d visual puts), want the answer without the visual", answers, content.Puts)
-		}
-		events := f.Events(run.ID, "turn.visual_rejected")
-		if len(events) != 1 || events[0].Severity != models.ActivitySeverityWarning || !strings.Contains(events[0].Summary, `unknown field "columns_note"`) {
-			t.Fatalf("visual rejected events = %#v", events)
-		}
-	})
-}
-
-func TestLoopInvalidVisualFixedOnRetryIsDelivered(t *testing.T) {
-	looptest.EachStore(t, "visual_fixed", func(t *testing.T, store models.KernelStore) {
-		f := looptest.NewFixture(t, store, looptest.WithRules(answerSteps(
-			map[string]any{"answer": "Revenue is up.", "visual": visualWithUnknownKey()},
-			map[string]any{"answer": "Revenue is up.", "visual": failurePortVisual()},
-		)))
-		content := &looptest.AnswerVisualContent{}
-		convRunner(f, conversationrun.TurnRunnerConfig{AttachmentContent: content})
-		conversation, run := f.StartChat("how is revenue?")
-		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, models.AgentRunStatusCompleted)
-		answers := portAgentMessages(f, conversation.ID)
-		if len(answers) != 1 || answers[0].Content != "Revenue is up." || len(answers[0].References) != 2 || content.Puts != 1 {
-			t.Fatalf("answers = %#v (%d visual puts), want the answer with its visual", answers, content.Puts)
-		}
-		if events := f.Events(run.ID, "turn.visual_rejected"); len(events) != 0 {
-			t.Fatalf("visual rejected events = %#v", events)
-		}
-	})
-}
-
-// A visual rejection neither counts toward nor resets the rejected answers:
-// two bad answers around it leave the Run one more try.
-func TestLoopVisualRejectionDoesNotCountAsARejectedAnswer(t *testing.T) {
-	looptest.EachStore(t, "visual_not_counted", func(t *testing.T, store models.KernelStore) {
-		f := looptest.NewFixture(t, store, looptest.WithRules(answerSteps(
-			map[string]any{"answer": 42},
-			map[string]any{"answer": "Revenue is up.", "visual": visualWithoutSummary()},
-			map[string]any{"answer": 42},
-			map[string]any{"answer": "Revenue is up."},
-		)))
-		convRunner(f, conversationrun.TurnRunnerConfig{})
-		conversation, run := f.StartChat("how is revenue?")
-		done := f.DriveToRest(run.ID, 3)
-		f.MustStatus(done, models.AgentRunStatusCompleted)
-		if answers := portAgentMessages(f, conversation.ID); len(answers) != 1 || answers[0].Content != "Revenue is up." {
-			t.Fatalf("answers = %#v", answers)
-		}
-	})
+func TestLoopInvalidVisualDeliversTheAnswerWithoutIt(t *testing.T) {
+	for name, visual := range map[string]map[string]any{"visual_invalid": visualWithoutSummary(), "visual_undecodable": visualWithUnknownKey()} {
+		looptest.EachStore(t, name, func(t *testing.T, store models.KernelStore) {
+			f := looptest.NewFixture(t, store, looptest.WithRules(answerSteps(
+				map[string]any{"answer": "Spring is cheapest.", "visual": visual},
+			)))
+			content := &looptest.AnswerVisualContent{}
+			convRunner(f, conversationrun.TurnRunnerConfig{AttachmentContent: content})
+			conversation, run := f.StartChat("when is it cheapest?")
+			done := f.DriveToRest(run.ID, 3)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
+			if finals := portFinalEntries(f, run.ID); len(finals) != 1 || finals[0].State == models.ToolEntryError {
+				t.Fatalf("final entries = %v", f.EntryTypes(run.ID))
+			}
+			answers := portAgentMessages(f, conversation.ID)
+			if len(answers) != 1 || answers[0].Content != "Spring is cheapest." || len(answers[0].References) != 1 || content.Puts != 0 {
+				t.Fatalf("answers = %#v (%d visual puts), want the answer without the visual", answers, content.Puts)
+			}
+			events := f.Events(run.ID, "turn.visual_rejected")
+			if len(events) != 1 || events[0].Severity != models.ActivitySeverityWarning {
+				t.Fatalf("visual rejected events = %#v", events)
+			}
+		})
+	}
 }
 
 // Three rejected answers still fail the Run, and the chat is told the answer

@@ -25,10 +25,6 @@ const (
 	conversationEmptyAnswerText     = "The reply is empty. Write the user-visible answer."
 	conversationEmptyAnswerFailure  = "Agent channel response did not contain user-visible output"
 	conversationEmptyAnswerCode     = "empty_answer"
-	// conversationVisualRejectedText starts the retry_final text of a visual
-	// that failed the host checks; a second such rejection in the Run posts
-	// the answer without the visual.
-	conversationVisualRejectedText = "The visual failed its checks: "
 )
 
 // conversationFinalHandler is the FinalAnswerHandler of an Agent chat Run
@@ -178,7 +174,9 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: conversationEmptyAnswerText}, nil
 	}
 
-	// 9 (second part). The visual, after the host checks.
+	// 9 (second part). The visual, after the host checks. A visual that
+	// fails them never costs the answer, which has already streamed to the
+	// person: it is posted without the visual, and the Run records why.
 	visualRejection, _ := answer.Output[FinalOutputVisualRejectionKey].(string)
 	if visual != nil {
 		checked, checkErr := r.checkAnswerVisual(ctx, run, visual)
@@ -194,19 +192,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 			if !errors.Is(checkErr, errInvalidAnswerVisual) {
 				return agentrun.FinalDeliveryResult{}, checkErr
 			}
-			prior, err := h.priorDeliveryRejections(ctx, run, answer, func(text string) bool {
-				return strings.HasPrefix(text, conversationVisualRejectedText)
-			})
-			if err != nil {
-				return agentrun.FinalDeliveryResult{}, err
-			}
-			reason := strings.TrimSpace(strings.TrimPrefix(checkErr.Error(), errInvalidAnswerVisual.Error()+":"))
-			if prior == 0 {
-				return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, OptionalOnly: true,
-					RejectionText: conversationVisualRejectedText + reason + ". Fix the visual or leave it out."}, nil
-			}
-			// The second rejected visual in the Run never costs the answer.
-			visualRejection = reason
+			visualRejection = strings.TrimSpace(strings.TrimPrefix(checkErr.Error(), errInvalidAnswerVisual.Error()+":"))
 		}
 	}
 

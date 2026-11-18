@@ -520,7 +520,7 @@ func TestVisualStoredPerFollowUp(t *testing.T) {
 	})
 }
 
-func TestVisualFailingHostChecksRetriesOnceThenPostsWithout(t *testing.T) {
+func TestVisualFailingHostChecksPostsWithout(t *testing.T) {
 	refuse := func(*models.AgentRun) presentation.ValidateOptions {
 		return presentation.ValidateOptions{Bindings: presentation.BindingResolverFunc(func(context.Context, presentation.Binding) error {
 			return errors.New("not in this chat")
@@ -531,14 +531,8 @@ func TestVisualFailingHostChecksRetriesOnceThenPostsWithout(t *testing.T) {
 		bound.Components = append(bound.Components, presentation.Component{ID: "next", Type: "actions", Actions: []presentation.Action{
 			{ID: "stop", Label: "Stop", Kind: presentation.ActionEntity, Command: "stop", Binding: &presentation.Binding{Kind: presentation.BindingRunbook, ID: "rb-1"}},
 		}})
-		first, entry := f.finalEntry("Revenue is up.", map[string]interface{}{FinalOutputSummaryKey: "Revenue is up.", agentrun.FinalOutputVisualKey: bound})
-		result := f.mustDeliver(first, agentrun.FinalDeliveryRetryFinal)
-		if !strings.HasPrefix(result.RejectionText, conversationVisualRejectedText) || len(f.answers()) != 0 {
-			t.Fatalf("result = %#v", result)
-		}
-		f.settle(entry, models.ToolEntryError, "", result.RejectionText)
-		second, _ := f.finalEntry("Revenue is up.", map[string]interface{}{FinalOutputSummaryKey: "Revenue is up.", agentrun.FinalOutputVisualKey: bound})
-		f.mustDeliver(second, agentrun.FinalDeliveryComplete)
+		first, _ := f.finalEntry("Revenue is up.", map[string]interface{}{FinalOutputSummaryKey: "Revenue is up.", agentrun.FinalOutputVisualKey: bound})
+		f.mustDeliver(first, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 || len(answers[0].References) != 1 {
 			t.Fatalf("answers = %#v", answers)

@@ -8,7 +8,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
@@ -153,22 +152,29 @@ func (t imageGenerationTarget) isImageGeneration() bool {
 	return t.SkillID == builtin.SkillID && t.Action == builtin.GenerateImage
 }
 
+// actionCallPageSize pages a Run's failed action calls.
+const actionCallPageSize = 200
+
+type actionCallLister interface {
+	ListActionCalls(ctx context.Context, filter models.ActionFilter) ([]*models.ActionCall, error)
+}
+
 // priorImageProviderRejection returns this Run's earlier generate_image call
 // on target's binding (same binding revision) that the image provider
 // rejected, or nil. Rewording the prompt still selects the same provider, so
 // the rejection holds for the rest of the Run; a binding revision is a
 // configuration change and starts clean. Calls of every origin count.
-func priorImageProviderRejection(ctx context.Context, actions control.ActionCallLister, scope models.Scope, runID string, target imageGenerationTarget) (*models.ActionCall, error) {
+func priorImageProviderRejection(ctx context.Context, actions actionCallLister, scope models.Scope, runID string, target imageGenerationTarget) (*models.ActionCall, error) {
 	if !target.isImageGeneration() {
 		return nil, nil
 	}
 	if actions == nil || runID == "" {
 		return nil, errors.New("image rejection guard needs an action store and Run")
 	}
-	for offset := 0; ; offset += control.ActionCallPageSize {
+	for offset := 0; ; offset += actionCallPageSize {
 		page, err := actions.ListActionCalls(ctx, models.ActionFilter{
 			Scope: scope, RunID: runID, Status: []models.ActionCallStatus{models.ActionCallStatusFailed},
-			Limit: control.ActionCallPageSize, Offset: offset,
+			Limit: actionCallPageSize, Offset: offset,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("load image rejections: %w", err)
@@ -181,7 +187,7 @@ func priorImageProviderRejection(ctx context.Context, actions control.ActionCall
 				return call, nil
 			}
 		}
-		if len(page) < control.ActionCallPageSize {
+		if len(page) < actionCallPageSize {
 			return nil, nil
 		}
 	}

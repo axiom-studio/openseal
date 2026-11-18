@@ -256,52 +256,6 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Final answer checks
-
-// TestLoopCompletionChecksReturnToolErrors: a final answer the checks refuse
-// is an error result on its turn_final_answer entry; the model repairs it in
-// the next step and only the accepted answer is delivered.
-func TestLoopCompletionChecksReturnToolErrors(t *testing.T) {
-	chatCheck := func(t *testing.T, prefix, claim, code string) {
-		looptest.EachStore(t, prefix, func(t *testing.T, store models.KernelStore) {
-			var rejection string
-			f := looptest.NewFixture(t, store, looptest.WithRules(
-				&looptest.ModelRule{Name: "claim", Times: 1, Reply: func(looptest.StepView) models.ModelStepResult {
-					return looptest.FinalAnswer(map[string]any{"answer": claim})
-				}},
-				&looptest.ModelRule{Name: "repair", When: portLastToolFailed, Reply: func(v looptest.StepView) models.ModelStepResult {
-					rejection, _, _ = v.ToolResult(string(models.ControlToolFinalAnswer))
-					return looptest.FinalAnswer(map[string]any{"answer": "I have not done that yet; nothing was sent or submitted."})
-				}},
-			))
-			conversation, run := f.StartChat("please email Ana the report")
-			done := f.DriveToRest(run.ID, 3)
-			f.MustStatus(done, models.AgentRunStatusCompleted)
-			finals := portFinalEntries(f, run.ID)
-			if len(finals) != 2 || finals[0].State != models.ToolEntryError || !finals[0].Tool.Result.IsError || finals[1].State != models.ToolEntryCompleted {
-				t.Fatalf("final entries = %v", f.EntryTypes(run.ID))
-			}
-			if text := portEntryText(finals[0]); !strings.Contains(text, code) || text != rejection {
-				t.Fatalf("rejection = %q (model saw %q), want code %s", text, rejection, code)
-			}
-			answers := portAgentMessages(f, conversation.ID)
-			if len(answers) != 1 || !strings.HasPrefix(answers[0].Content, "I have not done that yet") {
-				t.Fatalf("channel = %s, want only the repaired answer", looptest.DescribeMessages(f.Messages(conversation.ID)))
-			}
-		})
-	}
-	t.Run("unevidenced_completion_claim", func(t *testing.T) {
-		// The claim vocabulary is claimsExternalMutation's; "I updated the
-		// status" (spec 12 §5.1) is not in it.
-		chatCheck(t, "port_unevidenced", "Done: I sent the email to Ana.", "unevidenced_external_claim")
-	})
-	t.Run("unverified_approval_claim", func(t *testing.T) {
-		chatCheck(t, "port_approval_claim", "Your approval request has been submitted.", "approval_claim")
-	})
-
-}
-
-// ---------------------------------------------------------------------------
 // Final answer fields
 
 // TestLoopFinalAnswerToolCarriesVisualSilentAndFiles: what the final answer
@@ -365,8 +319,8 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			done := f.DriveToRest(run.ID, 3)
 			f.MustStatus(done, models.AgentRunStatusCompleted)
 			finals := portFinalEntries(f, run.ID)
-			if len(finals) != 2 || finals[0].State != models.ToolEntryError || !strings.HasPrefix(portEntryText(finals[0]), "The visual failed its checks: ") {
-				t.Fatalf("final entries = %v (%q)", f.EntryTypes(run.ID), portEntryText(finals[0]))
+			if len(finals) != 1 || finals[0].State != models.ToolEntryCompleted {
+				t.Fatalf("final entries = %v", f.EntryTypes(run.ID))
 			}
 			answers := portAgentMessages(f, conversation.ID)
 			if len(answers) != 1 || answers[0].Content != "Revenue is up." || len(answers[0].References) != 1 || content.Puts != 0 {

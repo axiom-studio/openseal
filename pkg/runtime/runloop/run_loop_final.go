@@ -220,8 +220,7 @@ func (d *drive) supersedeFinal(ctx context.Context, st *stepState, final *agentr
 
 // rejectDeliveredFinal records a delivery-time rejection (retry_final): an
 // error result on the final tool entry, or a final_rejection note for plain
-// text. It counts toward maximumFinalRejections unless it rejects only an
-// optional part.
+// text. It counts toward maximumFinalRejections.
 func (d *drive) rejectDeliveredFinal(ctx context.Context, st *stepState, final *agentrun.FinalAnswer, result agentrun.FinalDeliveryResult) stepResult {
 	text := strings.TrimSpace(result.RejectionText)
 	if text == "" {
@@ -251,9 +250,6 @@ func (d *drive) rejectDeliveredFinal(ctx context.Context, st *stepState, final *
 		if err != nil {
 			return d.stepError(ctx, st, err, "")
 		}
-	}
-	if result.OptionalOnly {
-		return d.continueAfter(ctx, st, stepFinalPartRejected)
 	}
 	return d.continueAfter(ctx, st, stepFinalRejected)
 }

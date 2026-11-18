@@ -336,18 +336,12 @@ func TestEmptyAnswerAfterReactionIsReactionsOnly(t *testing.T) {
 	}
 }
 
-func TestInvalidVisualOnceThenDropped(t *testing.T) {
+// An invalid visual never costs the answer: it is delivered without the
+// visual, and the output records why.
+func TestInvalidVisualIsDropped(t *testing.T) {
 	invalid := `{"answer":"Here.","visual":{"title":"Prices","components":[]}}`
-	f := newFinalFixture(t, finalCall("first", invalid), finalCall("second", invalid))
-	authority := agentrun.ControlAuthority{VisualAllowed: true}
-	value := requireRejected(t, f, f.settleFinal("first", authority), "first", finalVisualInvalidCode)
-	if !strings.Contains(value["message"].(string), "at least one component") {
-		t.Fatalf("message = %v", value["message"])
-	}
-	if CountsAsRejectedAnswer(f.stored("first")) {
-		t.Fatal("a visual-only rejection counts as a rejected answer")
-	}
-	final := requireFinal(t, f.settleFinal("second", authority))
+	f := newFinalFixture(t, finalCall("first", invalid))
+	final := requireFinal(t, f.settleFinal("first", agentrun.ControlAuthority{VisualAllowed: true}))
 	if final.Visual() != nil || final.Answer != "Here." {
 		t.Fatalf("final = %#v", final)
 	}
@@ -359,22 +353,13 @@ func TestInvalidVisualOnceThenDropped(t *testing.T) {
 	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{}), "final", ArgumentsInvalidCode)
 }
 
-// A visual that does not decode (a key the format lacks) is a visual
-// rejection like a visual that fails Validate: once a correctable error that
-// does not count as a rejected answer, then the answer goes without it.
-func TestUnknownFieldInsideVisualIsAVisualRejection(t *testing.T) {
+// A visual that does not decode (a key the format lacks) is dropped like a
+// visual that fails Validate.
+func TestUndecodableVisualIsDropped(t *testing.T) {
 	invalid := `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"t","type":"table","summary":"s",` +
 		`"table":{"columns":[{"key":"a","label":"A","kind":"text"}],"columns_note":"x","rows":[]}}]}}`
-	f := newFinalFixture(t, finalCall("first", invalid), finalCall("second", invalid))
-	authority := agentrun.ControlAuthority{VisualAllowed: true}
-	value := requireRejected(t, f, f.settleFinal("first", authority), "first", finalVisualInvalidCode)
-	if message := value["message"].(string); !strings.Contains(message, `unknown field "columns_note"`) || !strings.HasSuffix(message, "Fix the visual or leave it out.") {
-		t.Fatalf("message = %q", message)
-	}
-	if CountsAsRejectedAnswer(f.stored("first")) {
-		t.Fatal("a visual-only rejection counts as a rejected answer")
-	}
-	final := requireFinal(t, f.settleFinal("second", authority))
+	f := newFinalFixture(t, finalCall("first", invalid))
+	final := requireFinal(t, f.settleFinal("first", agentrun.ControlAuthority{VisualAllowed: true}))
 	if final.Visual() != nil || final.Answer != "Here." {
 		t.Fatalf("final = %#v", final)
 	}
@@ -383,34 +368,30 @@ func TestUnknownFieldInsideVisualIsAVisualRejection(t *testing.T) {
 	}
 }
 
-// A plain reply that repairs into a final with a bad visual leaves a note
-// that does not count as a rejected answer either.
-func TestPlainFinalVisualRejectionIsVisualOnly(t *testing.T) {
+// A plain reply that repairs into a final with a bad visual is delivered
+// without the visual too.
+func TestPlainFinalInvalidVisualIsDropped(t *testing.T) {
 	f := newFinalFixture(t)
 	authority := agentrun.ControlAuthority{VisualAllowed: true}
-	result := f.plain("step-1", 1, authority, `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"c","type":"callout","callout":{"body":"b"}}]}}`)
-	note := requireRejectionNote(t, result, "step-1", finalVisualInvalidCode)
-	if !strings.Contains(note.Note.Text, "summary is required for callout") || CountsAsRejectedAnswer(note) {
-		t.Fatalf("note = %q, counts = %v", note.Note.Text, CountsAsRejectedAnswer(note))
+	final := requireFinal(t, f.plain("step-1", 1, authority, `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"c","type":"callout","callout":{"body":"b"}}]}}`))
+	if final.Visual() != nil || final.Answer != "Here." {
+		t.Fatalf("final = %#v", final)
+	}
+	if rejection, _ := final.Output["visualRejection"].(string); !strings.Contains(rejection, "summary is required for callout") {
+		t.Fatalf("visualRejection = %v", final.Output["visualRejection"])
 	}
 }
 
-// Errors outside the visual still refuse the whole call and count.
-func TestArgumentErrorOutsideVisualIsNotVisualOnly(t *testing.T) {
+// Errors outside the visual still refuse the whole call.
+func TestArgumentErrorOutsideVisualRefusesTheCall(t *testing.T) {
 	visual := `{"title":"Status","components":[{"id":"note","type":"text","text":"All good"}]}`
 	f := newFinalFixture(t,
 		finalCall("typed", `{"answer":42,"visual":`+visual+`}`),
 		finalCall("offered", `{"answer":"Done.","visual":`+visual+`}`),
 	)
 	requireRejected(t, f, f.settleFinal("typed", agentrun.ControlAuthority{VisualAllowed: true}), "typed", ArgumentsInvalidCode)
-	if !CountsAsRejectedAnswer(f.stored("typed")) {
-		t.Fatal("a refused answer does not count")
-	}
 	// visual is a top-level key this claim does not offer.
 	requireRejected(t, f, f.settleFinal("offered", agentrun.ControlAuthority{}), "offered", ArgumentsInvalidCode)
-	if !CountsAsRejectedAnswer(f.stored("offered")) {
-		t.Fatal("a refused answer does not count")
-	}
 }
 
 func TestValidVisualRidesOnOutput(t *testing.T) {
@@ -697,37 +678,6 @@ func TestFinalOutputPublisherValidatesExtensionFields(t *testing.T) {
 	g := newFinalFixture(t, finalCall("final", `{"answer":"x","generatedFiles":[]}`))
 	if dropped := requireFinal(t, g.settleFinal("final", agentrun.ControlAuthority{})); dropped.Output["generatedFiles"] != nil {
 		t.Fatalf("an unknown field reached the output: %#v", dropped.Output)
-	}
-}
-
-func TestFinalAnswerChecksRunInOrderAndMayFail(t *testing.T) {
-	var order []string
-	completion := finalAnswerCheck{Name: "completion", Check: func(ctx context.Context, x *Executor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
-		order = append(order, "completion")
-		d.Output["checked"] = true
-		return nil, nil
-	}}
-	review := finalAnswerCheck{Name: "review", Check: func(ctx context.Context, x *Executor, cc agentrun.ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
-		order = append(order, "review")
-		prior, err := x.priorFinalErrorCodes(ctx, cc)
-		if err != nil {
-			return nil, err
-		}
-		if prior["example_revise"] > 0 {
-			return &finalAnswerRejection{Code: "example_rejected", Message: "Still not done.",
-				Failure: &agentrun.LoopFailure{Kind: conversation.RunFailureKindExecution, Code: "example_rejected", Message: "The result was rejected."}}, nil
-		}
-		return &finalAnswerRejection{Code: "example_revise", Message: "The result needs more work: add the totals."}, nil
-	}}
-	f := newFinalFixture(t, finalCall("first", `{"answer":"x"}`), finalCall("second", `{"answer":"x"}`))
-	f.exec.finalChecks = []finalAnswerCheck{completion, review}
-	requireRejected(t, f, f.settleFinal("first", agentrun.ControlAuthority{}), "first", "example_revise")
-	result := f.settleFinal("second", agentrun.ControlAuthority{})
-	if result.Kind != Failed || result.Failure.Code != "example_rejected" || result.Entry.State != models.ToolEntryError {
-		t.Fatalf("second = %#v", result)
-	}
-	if !reflect.DeepEqual(order, []string{"completion", "review", "completion", "review"}) {
-		t.Fatalf("order = %v", order)
 	}
 }
 
