@@ -9,8 +9,8 @@ import (
 func TestBindingConfigurationFieldsAreTypedBoundedAndSecretFree(t *testing.T) {
 	clusterID := int64(7)
 	fields := []BindingConfigurationFieldChoice{{
-		CatalogSkillID: "openseal.kubernetes",
-		Skill:          NewSkillIdentity("openseal.kubernetes", "1.1.0", "builtin:openseal.kubernetes"),
+		CatalogSkillID: "example.clusters",
+		Skill:          NewSkillIdentity("example.clusters", "1.1.0", "builtin:example.clusters"),
 		Key:            "clusterId", Type: "integer", Required: true, Prompt: "Which Kubernetes cluster should this Agent operate?",
 		Options: []BindingConfigurationOption{{Label: "Development", Description: "Tenant development cluster", Value: BindingConfigurationValue{Integer: &clusterID}}},
 	}}

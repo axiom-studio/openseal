@@ -296,8 +296,8 @@ func TestContextualCredentialBindingsExposeOnlyOpaqueOperatorChoices(t *testing.
 func TestContextualBindingConfigurationFieldsExposeTypedAuthorizedChoices(t *testing.T) {
 	clusterID := int64(7)
 	context := CapabilityContext{BindingConfigurationFields: []kernelcapability.BindingConfigurationFieldChoice{{
-		CatalogSkillID: "openseal.kubernetes",
-		Skill:          kernelcapability.NewSkillIdentity("openseal.kubernetes", "1.1.0", "builtin:openseal.kubernetes"),
+		CatalogSkillID: "example.clusters",
+		Skill:          kernelcapability.NewSkillIdentity("example.clusters", "1.1.0", "builtin:example.clusters"),
 		Key:            "clusterId", Type: "integer", Required: true, Prompt: "Which Kubernetes cluster should this Agent operate?",
 		Options: []kernelcapability.BindingConfigurationOption{{Label: "Development", Value: kernelcapability.BindingConfigurationValue{Integer: &clusterID}}},
 	}}}
