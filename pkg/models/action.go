@@ -52,8 +52,6 @@ const (
 	// LoopActionLease is the call lease the loop holds while it executes a
 	// call inline; the loop renews it every LoopActionLease/3.
 	LoopActionLease = time.Minute
-	// GovernedMaxConcurrentReads bounds concurrent inline reads of one step.
-	GovernedMaxConcurrentReads = 4
 )
 
 // ActionErrorCodeInterrupted is the ErrorCode of a write recovered from a

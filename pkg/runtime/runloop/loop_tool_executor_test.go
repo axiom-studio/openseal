@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -280,17 +281,17 @@ func (h *scriptedHost) orderNow() []string {
 	return append([]string(nil), h.order...)
 }
 
-func TestReadAfterWriteSeesWrite(t *testing.T) {
+func TestWriteDoesNotHoldBackLaterCalls(t *testing.T) {
 	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	step := f.step("step-1", models.AgentTurnStatusRunning,
 		toolCall("call-w", "workspace_write_file", `{"path":"notes.md","content":"fresh"}`),
-		toolCall("call-r", "workspace_read_file", `{"path":"notes.md"}`),
+		toolCall("call-r", "workspace_read_file", `{"path":"other.md"}`),
 	)
 	if step.entries[0].Tool.SideEffect != models.ToolSideEffectWrite || step.entries[1].Tool.SideEffect != models.ToolSideEffectRead ||
 		step.entries[0].Tool.RepeatEffect != string(RepeatEffectStateful) || step.entries[1].Tool.ArgumentsDigest == "" {
 		t.Fatalf("planned = %#v / %#v", step.entries[0].Tool, step.entries[1].Tool)
 	}
-	// Hold the write: the read must not start until it finished.
+	// Hold the write: the read of the same step still runs.
 	f.host.gate, f.host.gateOp = make(chan struct{}), workspace.OperationWriteFile
 	done := make(chan struct{})
 	var out agentrun.StepToolsOutcome
@@ -300,15 +301,11 @@ func TestReadAfterWriteSeesWrite(t *testing.T) {
 		out, err = f.binding.Tools.ExecuteStepTools(f.ctx, f.input(step))
 	}()
 	deadline := time.Now().Add(5 * time.Second)
-	for f.host.activeNow() < 1 {
+	for len(f.host.orderNow()) < 2 || f.host.activeNow() != 1 {
 		if time.Now().After(deadline) {
-			t.Fatal("the write never started")
+			t.Fatalf("while the write is blocked the host saw %v", f.host.orderNow())
 		}
 		time.Sleep(time.Millisecond)
-	}
-	time.Sleep(20 * time.Millisecond)
-	if order := f.host.orderNow(); len(order) != 1 || order[0] != "workspace.write_file notes.md" {
-		t.Fatalf("while the write is blocked the host saw %v", order)
 	}
 	close(f.host.gate)
 	<-done
@@ -318,23 +315,23 @@ func TestReadAfterWriteSeesWrite(t *testing.T) {
 	if out.Park != nil || out.Failure != nil || out.SettlePending || out.HostToolCalls != 2 {
 		t.Fatalf("outcome = %#v", out)
 	}
-	if strings.Join(f.host.order, ",") != "workspace.write_file notes.md,workspace.read_file notes.md" {
-		t.Fatalf("host order = %v", f.host.order)
-	}
-	read := f.entry(step.entries[1])
-	if read.State != models.ToolEntryCompleted || resultValue(t, read)["content"] != "fresh" || read.Tool.ResultDigest == "" {
-		t.Fatalf("read = %s %#v", read.State, read.Tool.Result)
-	}
-	if write := f.entry(step.entries[0]); write.State != models.ToolEntryCompleted {
-		t.Fatalf("write = %s", write.State)
+	for _, entry := range step.entries {
+		if stored := f.entry(entry); stored.State != models.ToolEntryCompleted {
+			t.Fatalf("%s = %s", entry.ToolCallID, stored.State)
+		}
 	}
 }
 
-func TestReadsRunConcurrentlyBound4(t *testing.T) {
+func TestStepCallsRunConcurrentlyBound8(t *testing.T) {
 	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	f.host.gate = make(chan struct{})
 	var calls []models.ModelToolCall
-	for i := 0; i < 6; i++ {
+	// Reads and writes alike.
+	for i := 0; i < 10; i++ {
+		if i%2 == 0 {
+			calls = append(calls, toolCall(fmt.Sprintf("call-%d", i), "workspace_write_file", fmt.Sprintf(`{"path":"f%d.md","content":"x"}`, i)))
+			continue
+		}
 		calls = append(calls, toolCall(fmt.Sprintf("call-%d", i), "workspace_read_file", fmt.Sprintf(`{"path":"f%d.md"}`, i)))
 	}
 	step := f.step("step-1", models.AgentTurnStatusRunning, calls...)
@@ -346,23 +343,23 @@ func TestReadsRunConcurrentlyBound4(t *testing.T) {
 		out, err = f.binding.Tools.ExecuteStepTools(f.ctx, f.input(step))
 	}()
 	deadline := time.Now().Add(5 * time.Second)
-	for f.host.activeNow() < 4 {
+	for f.host.activeNow() < 8 {
 		if time.Now().After(deadline) {
-			t.Fatalf("only %d reads started concurrently", f.host.activeNow())
+			t.Fatalf("only %d calls started concurrently", f.host.activeNow())
 		}
 		time.Sleep(time.Millisecond)
 	}
-	// Give a fifth read the chance to start if the bound were broken.
+	// Give a ninth call the chance to start if the bound were broken.
 	time.Sleep(20 * time.Millisecond)
-	if active := f.host.activeNow(); active != 4 {
-		t.Fatalf("%d reads ran at once, want 4", active)
+	if active := f.host.activeNow(); active != 8 {
+		t.Fatalf("%d calls ran at once, want 8", active)
 	}
 	close(f.host.gate)
 	<-done
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.HostToolCalls != 6 || f.host.maxActive != 4 {
+	if out.HostToolCalls != 10 || f.host.maxActive != 8 {
 		t.Fatalf("host calls = %d, max concurrency = %d", out.HostToolCalls, f.host.maxActive)
 	}
 	for _, entry := range step.entries {
@@ -560,15 +557,25 @@ func governedToolExecutor(t *testing.T, f *governedFixture) (agentrun.LoopToolEx
 	return dispatcher.ForClaim(LoopToolClaim{CapabilityConfig: modelstep.CapabilitySetConfig{PinnedSkillIDs: []string{"release"}}}), sessions
 }
 
-func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
+func TestHeldApprovalDoesNotHoldBackOtherCalls(t *testing.T) {
 	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := newGovernedFixture(t, store)
 		f.requireApprovalFor("deploy")
+		var mu sync.Mutex
 		var deployed []string
 		f.dispatch = func(input agentrun.ActionDispatchInput) (map[string]interface{}, error) {
 			environment, _ := input.Arguments["environment"].(string)
+			mu.Lock()
 			deployed = append(deployed, environment)
+			mu.Unlock()
 			return map[string]interface{}{"providerResult": "delivered"}, nil
+		}
+		dispatched := func() string {
+			mu.Lock()
+			defer mu.Unlock()
+			sorted := append([]string(nil), deployed...)
+			sort.Strings(sorted)
+			return strings.Join(sorted, ",")
 		}
 		tools, sessions := governedToolExecutor(t, f)
 		f.binding.Tools = tools
@@ -578,7 +585,6 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 		}{sessions, f.store}, f.run, f.binding, governedWorker, governedStep, models.AgentTurnStatusCompleted, f.clock,
 			models.ModelToolCall{ID: "call-prod", Name: governedDeploy, Arguments: deployArguments("production")},
 			models.ModelToolCall{ID: "call-staging", Name: governedDeploy, Arguments: deployArguments("staging")},
-			// A read after the skipped write must not overtake it.
 			models.ModelToolCall{ID: "call-check", Name: governedStatus, Arguments: json.RawMessage(`{"environment":"check"}`)},
 		)
 		in := agentrun.StepToolsInput{Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker, Assistant: step.assistant, Entries: step.entries}
@@ -600,14 +606,15 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 		if prod.State != models.ToolEntryAwaitingApproval || prod.ActionCallID == "" || prod.Tool.Wait == nil || prod.Tool.Wait.ApprovalID == "" {
 			t.Fatalf("held write = %s %#v", prod.State, prod.Tool.Wait)
 		}
-		if staging.State != models.ToolEntryPending || staging.ActionCallID != "" || len(deployed) != 0 {
-			t.Fatalf("later write = %s (call %q), deployed %v", staging.State, staging.ActionCallID, deployed)
+		// The other calls of the step ran while the first waits for approval.
+		if staging.State != models.ToolEntryCompleted || dispatched() != "check,staging" {
+			t.Fatalf("other write = %s, dispatched %s", staging.State, dispatched())
 		}
-		if check := get(step.entries[2]); check.State != models.ToolEntryPending || check.ActionCallID != "" {
-			t.Fatalf("read after the skipped write = %s (call %q)", check.State, check.ActionCallID)
+		if check := get(step.entries[2]); check.State != models.ToolEntryCompleted {
+			t.Fatalf("read = %s", check.State)
 		}
 		calls, err := f.store.ListActionCalls(f.ctx, models.ActionFilter{Scope: f.scope, RunID: f.run.ID})
-		if err != nil || len(calls) != 1 {
+		if err != nil || len(calls) != 3 {
 			t.Fatalf("action calls = %d, %v", len(calls), err)
 		}
 		// The loop parks at step end; the reviewer approves; a new claim resumes.
@@ -631,8 +638,8 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 		if resumed.Park != nil || resumed.Failure != nil {
 			t.Fatalf("resume = %#v", resumed)
 		}
-		if strings.Join(deployed, ",") != "production,staging,check" {
-			t.Fatalf("dispatched %v, want production, staging, then the read", deployed)
+		if dispatched() != "check,production,staging" {
+			t.Fatalf("dispatched %s, want production after the approval", dispatched())
 		}
 		for _, entry := range step.entries {
 			if stored := get(entry); stored.State != models.ToolEntryCompleted {

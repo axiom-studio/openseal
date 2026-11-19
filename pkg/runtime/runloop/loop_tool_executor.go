@@ -143,12 +143,6 @@ func (t resolvedLoopTool) settle() bool {
 	return t.Route == loopRouteControl && t.Phase == control.PhaseSettle
 }
 
-// concurrent reports a call that may run beside its neighbours (§5.2):
-// side effect none or read.
-func (t resolvedLoopTool) concurrent() bool {
-	return t.SideEffect == models.ToolSideEffectNone || t.SideEffect == models.ToolSideEffectRead
-}
-
 // resolveLoopTool routes a call by name: control tools, then capability
 // tools, then host tools, then the binding's governed actions.
 func (x *ClaimToolExecutor) resolveLoopTool(binding *agentrun.TurnRunnerBinding, name string, arguments json.RawMessage, directive *agentrun.ToolCallDirective) (resolvedLoopTool, error) {
@@ -403,12 +397,6 @@ func (r *stepToolRun) stopped() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.failure != nil || r.budget != nil || r.final != nil || r.ended
-}
-
-func (r *stepToolRun) isHeld() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.held
 }
 
 func (r *stepToolRun) setEntry(i int, entry *models.SessionEntry) {

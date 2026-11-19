@@ -16,56 +16,27 @@ import (
 // Execution order inside a step (SPEC §5.2) and the four LoopToolExecutor
 // phases built on it.
 //
-//   - Calls run in model order. A maximal run of consecutive none/read calls
-//     runs concurrently, at most loopToolMaxConcurrent at a time; a
-//     write/stateful call is a barrier: it waits for the calls before it and
-//     blocks the calls after it.
-//   - Once a call reaches awaiting_approval/awaiting_event (or waits for a
-//     foreign call lease), later reads may still run, but the first later
-//     non-read call stays pending and is a standing barrier: it and every
-//     call after it (reads included) wait; ResumeOpenTools runs them in order
-//     after the earlier call settled.
+//   - Every call of a step starts at once, at most loopToolMaxConcurrent at a
+//     time, whatever its side effect. The model is told that calls in one
+//     response run together and may finish in any order, so it puts a call
+//     that needs another's result in a later step.
+//   - A call that waits (awaiting_approval/awaiting_event or a foreign call
+//     lease) does not hold back the others; the step parks once they ended.
 //   - Settle-phase control calls run only in SettleStep (phase 10).
 
-// loopToolMaxConcurrent bounds the concurrent calls of one step (host reads
-// and governed reads share it).
-const loopToolMaxConcurrent = models.GovernedMaxConcurrentReads
+// loopToolMaxConcurrent bounds the concurrent calls of one step.
+const loopToolMaxConcurrent = 8
 
-// dispatchInOrder runs entries indexes (in model order) with run, applying
-// the ordering rules. A non-read call reached while an earlier call is held
-// stops the dispatch: it and every later call stay as they are.
-func (r *stepToolRun) dispatchInOrder(ctx context.Context, indexes []int, run func(context.Context, int) error) error {
-	for k := 0; k < len(indexes); {
-		if r.stopped() {
-			return nil
-		}
-		i := indexes[k]
-		if r.tools[i].concurrent() {
-			var batch []int
-			for k < len(indexes) && r.tools[indexes[k]].concurrent() {
-				batch = append(batch, indexes[k])
-				k++
-			}
-			if err := r.runConcurrent(ctx, batch, run); err != nil {
-				return err
-			}
-			continue
-		}
-		k++
-		if r.isHeld() {
-			// A held call before it: this non-read call waits for its decision
-			// and blocks every later call, reads included.
-			return nil
-		}
-		if err := run(ctx, i); err != nil {
-			return err
-		}
+// dispatchAll runs the entries indexes concurrently with run.
+func (r *stepToolRun) dispatchAll(ctx context.Context, indexes []int, run func(context.Context, int) error) error {
+	if len(indexes) == 0 || r.stopped() {
+		return nil
 	}
-	return nil
+	return r.runConcurrent(ctx, indexes, run)
 }
 
-// runConcurrent runs a batch of none/read calls, at most
-// loopToolMaxConcurrent at once. The Run writes they make are adopted
+// runConcurrent runs a batch of calls, at most loopToolMaxConcurrent at
+// once. The Run writes they make are adopted
 // together (loopRunChain.adoptBatch).
 func (r *stepToolRun) runConcurrent(ctx context.Context, batch []int, run func(context.Context, int) error) error {
 	if len(batch) == 1 {
@@ -123,7 +94,7 @@ func (x *ClaimToolExecutor) ExecuteStepTools(ctx context.Context, in agentrun.St
 			indexes = append(indexes, i)
 		}
 	}
-	if err := r.dispatchInOrder(ctx, indexes, r.runCall); err != nil {
+	if err := r.dispatchAll(ctx, indexes, r.runCall); err != nil {
 		return agentrun.StepToolsOutcome{}, err
 	}
 	return r.endOfToolWork(ctx)
@@ -424,7 +395,7 @@ func (x *ClaimToolExecutor) resumeStep(ctx context.Context, in agentrun.StepTool
 		}
 		indexes = append(indexes, i)
 	}
-	if err := r.dispatchInOrder(ctx, indexes, r.resumeCall); err != nil {
+	if err := r.dispatchAll(ctx, indexes, r.resumeCall); err != nil {
 		return agentrun.StepToolsOutcome{}, err
 	}
 	out := r.outcome()
