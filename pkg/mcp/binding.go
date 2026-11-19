@@ -34,6 +34,9 @@ const (
 	// owns the grant, refresh and rotation; this package never calls a token
 	// endpoint.
 	AuthOAuth AuthKind = "oauth"
+	// AuthSigned signs every request with Auth.Signing's scheme, for servers
+	// that take no fixed token (the AWS MCP Server takes only SigV4).
+	AuthSigned AuthKind = "signed"
 )
 
 // Secret fields the authentication kinds read from a call's Secrets.
@@ -95,10 +98,12 @@ type BindingConfig struct {
 
 // Auth is how a request authenticates. Header and Prefix apply to api-key
 // only; bearer and oauth always send "Authorization: Bearer <access>".
+// Signing applies to signed only.
 type Auth struct {
-	Kind   AuthKind `json:"kind"`
-	Header string   `json:"header,omitempty"`
-	Prefix string   `json:"prefix,omitempty"`
+	Kind    AuthKind `json:"kind"`
+	Header  string   `json:"header,omitempty"`
+	Prefix  string   `json:"prefix,omitempty"`
+	Signing *Signing `json:"signing,omitempty"`
 }
 
 // SecretHeader sends Secrets[Field] as header Name on every request.
@@ -223,6 +228,13 @@ func (c *BindingConfig) Validate() error {
 		authFields[SecretAccess] = true
 	case AuthBasic:
 		authFields[SecretUsername], authFields[SecretPassword] = true, true
+	case AuthSigned:
+		if err := c.Auth.Signing.validate(); err != nil {
+			return err
+		}
+		for _, field := range c.Auth.Fields() {
+			authFields[field.Name] = true
+		}
 	case AuthAPIKey:
 		if !headerName.MatchString(c.Auth.Header) || reservedHeader(c.Auth.Header) {
 			return errors.New("MCP API key header is invalid or protocol-owned")
@@ -235,6 +247,9 @@ func (c *BindingConfig) Validate() error {
 	if c.Auth.Kind != AuthAPIKey && (c.Auth.Header != "" || c.Auth.Prefix != "") {
 		return errors.New("MCP auth header and prefix apply only to api-key")
 	}
+	if c.Auth.Kind != AuthSigned && c.Auth.Signing != nil {
+		return errors.New("MCP auth signing applies only to signed")
+	}
 	if strings.ContainsAny(c.Auth.Prefix, "\r\n\x00") || len(c.Auth.Prefix) > 64 {
 		return errors.New("invalid MCP API key prefix")
 	}
@@ -244,7 +259,8 @@ func (c *BindingConfig) Validate() error {
 	seenHeaders := map[string]bool{}
 	for _, h := range c.SecretHeaders {
 		key := strings.ToLower(h.Name)
-		if !headerName.MatchString(h.Name) || reservedHeader(h.Name) || key == authHeader || seenHeaders[key] {
+		signed := c.Auth.Kind == AuthSigned && c.Auth.Signing.ownsHeader(key)
+		if !headerName.MatchString(h.Name) || reservedHeader(h.Name) || key == authHeader || signed || seenHeaders[key] {
 			return fmt.Errorf("MCP secret header %q is invalid, duplicate, protocol-owned or the auth header", h.Name)
 		}
 		if !fieldName.MatchString(h.Field) || authFields[h.Field] {

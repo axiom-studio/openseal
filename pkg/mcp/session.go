@@ -33,6 +33,8 @@ var ErrSessionExpired = errors.New("MCP session expired; open a new session")
 type Session struct {
 	client  *Client
 	headers http.Header
+	// sign, for signed auth, signs each request after its headers are set.
+	sign    func(*http.Request, []byte) error
 	redact  redactor
 	version string
 	id      string
@@ -76,7 +78,7 @@ func (c *Client) Open(ctx context.Context, secrets Secrets) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Session{client: c, headers: headers, redact: redact}
+	s := &Session{client: c, headers: headers, sign: c.config.Auth.Signing.signer(secrets), redact: redact}
 	if c.config.Transport == TransportSSE {
 		if err := s.startSSE(ctx); err != nil {
 			return nil, err
@@ -530,6 +532,11 @@ func (s *Session) do(ctx context.Context, method, target string, body []byte, he
 	req.Header = headers
 	for k, v := range s.headers {
 		req.Header[k] = v
+	}
+	if s.sign != nil {
+		if err := s.sign(req, body); err != nil {
+			return nil, err
+		}
 	}
 	resp, err := s.client.http.Do(req)
 	if err != nil {

@@ -230,6 +230,17 @@ func (c *Client) authHeaders(secrets Secrets) (http.Header, redactor, error) {
 		encoded := base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
 		values = append(values, encoded)
 		h.Set("Authorization", "Basic "+encoded)
+	case AuthSigned:
+		// The fields sign each request (Signing.signer); fetching them here
+		// checks they are present and redacts them.
+		for _, field := range c.config.CredentialSlots() {
+			if field == CredentialHeaders {
+				continue
+			}
+			if _, err := get(field); err != nil {
+				return nil, nil, err
+			}
+		}
 	}
 	return h, newRedactor(values...), nil
 }

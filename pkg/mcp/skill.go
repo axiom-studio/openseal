@@ -9,7 +9,7 @@ import (
 
 const (
 	SkillID      = "openseal.mcp"
-	SkillVersion = "1.3.0"
+	SkillVersion = "1.4.0"
 	// Read calls a binding tool whose effect is read, Call one whose effect
 	// is write. The model reaches them only as binding tools
 	// mcp.<bindingSlug>.<tool>.
@@ -40,26 +40,32 @@ const (
 )
 
 // Credentials are the credential requirements of the read, call and
-// refresh_tools actions.
+// refresh_tools actions: the header-auth slots, headers, then every field of
+// every signing scheme.
 func Credentials() []skill.CredentialRequirement {
-	return []skill.CredentialRequirement{
+	requirements := []skill.CredentialRequirement{
 		{Name: CredentialAccess, Kind: CredentialKind, Optional: true},
 		{Name: CredentialUsername, Kind: CredentialKind, Optional: true},
 		{Name: CredentialPassword, Kind: CredentialKind, Optional: true},
 		{Name: CredentialHeaders, Kind: CredentialKind, Optional: true},
 	}
+	for _, scheme := range SigningSchemes {
+		for _, field := range signingScheme(scheme).fields() {
+			requirements = append(requirements, skill.CredentialRequirement{Name: field.Name, Kind: CredentialKind, Optional: true})
+		}
+	}
+	return requirements
 }
 
 // CredentialSlots names the credential slots a binding with this config must
-// fill, and only those: the slots of its Auth kind, then headers when it has
-// SecretHeaders.
+// fill, and only those: its Auth fields (optional signing fields only when
+// Signing.Optional lists them), then headers when it has SecretHeaders.
 func (c *BindingConfig) CredentialSlots() []string {
 	var slots []string
-	switch c.Auth.Kind {
-	case AuthOAuth, AuthBearer, AuthAPIKey:
-		slots = []string{CredentialAccess}
-	case AuthBasic:
-		slots = []string{CredentialUsername, CredentialPassword}
+	for _, field := range c.Auth.Fields() {
+		if !field.Optional || c.Auth.Signing.fills(field.Name) {
+			slots = append(slots, field.Name)
+		}
 	}
 	if len(c.SecretHeaders) > 0 {
 		slots = append(slots, CredentialHeaders)
@@ -156,8 +162,13 @@ func bindingConfigSchema() map[string]interface{} {
 		"protocolVersion": enum(versions...),
 		"timeoutSeconds":  map[string]interface{}{"type": "integer", "minimum": 1, "maximum": MaxTimeoutSeconds},
 		"auth": object([]interface{}{"kind"}, map[string]interface{}{
-			"kind":   enum(string(AuthNone), string(AuthBearer), string(AuthAPIKey), string(AuthBasic), string(AuthOAuth)),
+			"kind":   enum(string(AuthNone), string(AuthBearer), string(AuthAPIKey), string(AuthBasic), string(AuthOAuth), string(AuthSigned)),
 			"header": text(1, 128), "prefix": text(0, 64),
+			"signing": object([]interface{}{"scheme"}, map[string]interface{}{
+				"scheme":   enum(schemeNames()...),
+				"params":   map[string]interface{}{"type": "object", "maxProperties": 16, "additionalProperties": text(1, 128)},
+				"optional": map[string]interface{}{"type": "array", "maxItems": 16, "items": text(1, 64)},
+			}),
 		}),
 		"secretHeaders": map[string]interface{}{"type": "array", "maxItems": MaxSecretHeaders, "items": object([]interface{}{"name", "field"}, map[string]interface{}{
 			"name": text(1, 128), "field": text(1, 64),
