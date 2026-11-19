@@ -40,7 +40,7 @@ type bounds struct{ min, max int }
 // sharedRules are the rules only Go checks that hold for every type; the
 // visual format lists them once.
 var sharedRules = []string{
-	ruleUniqueComponentIDs, ruleUniqueItemIDs, ruleMarkdown, ruleCurrency, ruleCalendarDates, ruleBindings, rulePlaces,
+	ruleUniqueComponentIDs, ruleUniqueItemIDs, ruleMarkdown, ruleCurrency, ruleCalendarDates, ruleBindings, rulePlaces, ruleSources,
 }
 
 // Layout and text limits. The type specs below carry them so the schema
@@ -57,7 +57,7 @@ const (
 
 var catalogue = map[string]typeSpec{
 	"text":            {payload: "text", sentence: "Short markdown block (GFM, no HTML)."},
-	"caption":         {payload: "text", sentence: "Small print under a visual (sources, assumptions)."},
+	"caption":         {payload: "text", sentence: "Small print under a visual (assumptions, caveats)."},
 	"divider":         {payload: "text", payloadOptional: true, sentence: "Visual break, optionally labelled."},
 	"section":         {children: bounds{1, maxChildren}, sentence: "Group of children under the component title."},
 	"grid":            {payload: "grid", children: bounds{1, maxChildren}, sentence: "Children side by side in 2-4 columns."},
@@ -98,6 +98,8 @@ var catalogue = map[string]typeSpec{
 	"tasks":           {payload: "tasks", bindings: []BindingKind{}, validate: validateTasks, rules: []string{ruleTaskRows}, sentence: "Work handed to helpers in this chat, each row bound to its task; status is live."},
 	"agent":           {payload: "agent", bindings: []BindingKind{BindingAgent}, bindingRequired: true, sentence: "Introduces an agent people can start chatting with."},
 	"map":             {payload: "map", validate: validateMap, rules: []string{ruleMapPins}, sentence: "Pins for 1-20 real places from find_place; tap a pin for its detail."},
+	"cards":           {payload: "cards", validate: validateCards, sentence: "1-8 things, each with an optional photo, one headline value, a line, a detail and a status chip (weather by city, stocks, people, plans)."},
+	"converter":       {payload: "converter", validate: validateConverter, sentence: "Two units and a rate; people type in either box and it converts both ways (currencies, km/mi, kg/lb)."},
 	"actions":         {payload: "actions", validate: validateActions, sentence: "Up to 4 buttons: respond sends a reply to you; approval and entity act on the bound item."},
 }
 

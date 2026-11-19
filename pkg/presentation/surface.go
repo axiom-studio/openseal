@@ -5,7 +5,7 @@
 //
 // A Surface is a tree of typed components drawn from a closed catalogue. Every
 // component shares one envelope (id, type, summary, title, tone, binding,
-// children) and carries one payload whose JSON key equals its type. The
+// sources, children) and carries one payload whose JSON key equals its type. The
 // format ignores what it does not read: unknown keys, payloads of other
 // types, children of types that hold none, and components whose type is
 // missing or unknown.
@@ -19,7 +19,7 @@ import (
 
 const (
 	SkillID      = "openseal.presentation"
-	SkillVersion = "6.1.0"
+	SkillVersion = "6.2.0"
 	// UpdateVisual replaces a visual already shown in the chat with a newer
 	// version. Visuals that answer a turn ride on the answer instead.
 	UpdateVisual = "update_visual"
@@ -59,6 +59,8 @@ type Component struct {
 	Tone     Tone        `json:"tone,omitempty"`
 	Binding  *Binding    `json:"binding,omitempty"`
 	Children []Component `json:"children,omitempty"`
+	// Sources name the pages the component's facts came from.
+	Sources []Source `json:"sources,omitempty"`
 
 	// Text is the payload of text, caption and (optionally) divider.
 	Text       string      `json:"text,omitempty"`
@@ -103,6 +105,9 @@ type Component struct {
 	Agent     *AgentCard `json:"agent,omitempty"`
 
 	Map *Map `json:"map,omitempty"`
+
+	Cards     *Cards     `json:"cards,omitempty"`
+	Converter *Converter `json:"converter,omitempty"`
 }
 
 type Tone string
@@ -332,6 +337,9 @@ func (v *validator) component(c Component, path string) error {
 		if err := v.binding(*c.Binding); err != nil {
 			return fmt.Errorf("binding: %w", err)
 		}
+	}
+	if err := validateSources(c.Sources); err != nil {
+		return err
 	}
 	if spec.validate == nil {
 		return nil

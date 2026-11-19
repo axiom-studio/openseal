@@ -52,6 +52,9 @@
           "callout": {
             "type": "object"
           },
+          "cards": {
+            "type": "object"
+          },
           "chart": {
             "type": "object"
           },
@@ -70,6 +73,9 @@
             "type": "object"
           },
           "comparison": {
+            "type": "object"
+          },
+          "converter": {
             "type": "object"
           },
           "definition": {
@@ -139,6 +145,31 @@
           "routine": {
             "type": "object"
           },
+          "sources": {
+            "items": {
+              "properties": {
+                "title": {
+                  "maxLength": 80,
+                  "minLength": 1,
+                  "pattern": "\\S",
+                  "type": "string"
+                },
+                "url": {
+                  "maxLength": 2048,
+                  "pattern": "^https?://\\S+$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url",
+                "title"
+              ],
+              "type": "object"
+            },
+            "maxItems": 6,
+            "minItems": 1,
+            "type": "array"
+          },
           "stat_row": {
             "type": "object"
           },
@@ -193,11 +224,13 @@
               "breakdown",
               "callout",
               "caption",
+              "cards",
               "carousel",
               "chart",
               "checklist",
               "choices",
               "comparison",
+              "converter",
               "definition",
               "diagram",
               "divider",

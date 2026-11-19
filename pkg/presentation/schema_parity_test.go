@@ -100,6 +100,10 @@ var paritySeeds = []string{
 	`{"id":"a","type":"routine","summary":"s","binding":{"kind":"runbook","id":"rb1"},"routine":{"items":[{"label":"L","text":"T"}]}}`,
 	`{"id":"a","type":"tasks","summary":"s","tasks":{"rows":[{"binding":{"kind":"conversation_task","id":"t1"},"label":"L"}]}}`,
 	`{"id":"a","type":"agent","summary":"s","binding":{"kind":"agent","id":"ag1"},"agent":{"headline":"H","points":["p"]}}`,
+	`{"id":"a","type":"cards","summary":"s","sources":[{"url":"https://wttr.in/Tokyo","title":"wttr.in"}],"cards":{"items":[{"title":"Tokyo","image":{"artifactId":"img","version":1},
+		"value":"14°C","line":"Clear","detail":"High 19°C","chip":{"text":"14% rain","tone":"positive"}}]}}`,
+	`{"id":"a","type":"converter","summary":"s","converter":{"from":{"code":"USD","label":"US dollar","symbol":"$"},"to":{"code":"EUR","label":"Euro","symbol":"€"},
+		"rate":0.9117,"amount":100,"asOf":"2026-11-19","note":"n"}}`,
 	`{"id":"a","type":"map","summary":"s","map":{"pins":[{"id":"x","place":"place:4b2f9c0e1a77","label":"L","detail":"d"}],"connect":true}}`,
 }
 

@@ -215,8 +215,10 @@ func TestModelFacingVisualBudget(t *testing.T) {
 	// schema too (a caption was rejected for a limit the schema did not
 	// state) took it to 26,920, so the ceiling moved to 27 KB. Telling the
 	// model every rule that only Go checks (unique ids, references between
-	// fields, per-kind rules) took it to 28,732, so the ceiling is 29 KB.
-	const ceiling = 29 * 1024
+	// fields, per-kind rules) took it to 28,732, so the ceiling moved to
+	// 29 KB. The cards and converter types and the sources every component
+	// takes (6.2.0) took it from 28,861 to 30,647, so the ceiling is 30 KB.
+	const ceiling = 30 * 1024
 	if total := len(encodedField) + len(encodedUpdate); total > ceiling {
 		t.Fatalf("visual field %d + update_visual %d = %d bytes; the ceiling is %d", len(encodedField), len(encodedUpdate), total, ceiling)
 	}

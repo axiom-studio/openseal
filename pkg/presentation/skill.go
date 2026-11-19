@@ -26,10 +26,12 @@ var rubric = []struct {
 	{"A process, cycle or hierarchy → %s.", []string{"diagram"}},
 	{"A new term or idea → %s.", []string{"definition", "analogy"}},
 	{"Things over time → %s.", []string{"timeline", "agenda", "itinerary"}},
+	{"A few things, each with one headline number → %s.", []string{"cards"}},
 	{"Headline numbers → %s.", []string{"stat_row"}},
 	{"Progress toward a target → %s.", []string{"progress"}},
 	{"A trend or distribution → %s.", []string{"chart"}},
 	{"Exact values → %s.", []string{"table"}},
+	{"Unit or currency conversion → %s.", []string{"converter"}},
 	{"Parts of a whole → %s.", []string{"breakdown"}},
 	{"Maths for learners → %s.", []string{"quantity_visual", "math"}},
 	{"Learning → finish with %s.", []string{"quiz", "flashcards"}},
@@ -69,6 +71,7 @@ func VisualRubric() string {
 	b.WriteString("Stay with text for: conversation and small talk; feelings, worries and sensitive topics; nuanced advice, opinions and reasoning; " +
 		"writing where the words are the deliverable (emails, stories, essays); short facts and one-line answers; " +
 		"and whenever the user asked for text or you are in a quick back-and-forth.\n")
+	b.WriteString("Cite pages you fetched in the component's sources instead of a caption line; only real URLs from this chat.\n")
 	b.WriteString("Never restate in prose what the visual already shows.")
 	return b.String()
 }
@@ -93,7 +96,7 @@ func SkillDefinition() *skill.Definition {
 		}},
 		Prompt: &capability.PromptModule{
 			Instructions: "Visuals go on your answer. Use update_visual only to replace a visual you already showed with a newer version, e.g. as long work progresses. " +
-				"Give each visual component a one-sentence summary for screen readers and voice. Never write HTML, scripts, colours, URLs or coordinates; images must already be in this chat and places come from find_place.",
+				"Give each visual component a one-sentence summary for screen readers and voice. Never write HTML, scripts, colours or coordinates, and no URLs except the pages you fetched in a component's sources; images must already be in this chat and places come from find_place.",
 			UserInvocable: true, AllowedTools: []string{UpdateVisual},
 		},
 		Requirements: capability.Requirements{AlwaysAvailable: true},
@@ -250,6 +253,7 @@ func envelopeProperties(component map[string]interface{}) map[string]interface{}
 	return map[string]interface{}{
 		"id": idSchema(), "type": enum(TypeNames()), "summary": describe(freeText(), summaryNote), "title": freeText(),
 		"tone": enum(toneNames()), "binding": bindingSchema(BindingKinds), "children": array(component, 1, maxChildren),
+		"sources": array(sourceSchema(), 1, maxSources),
 	}
 }
 
@@ -330,7 +334,7 @@ func payloadSchemas() map[string]map[string]interface{} {
 		"item": itemSchema(), "analogy": analogySchema(),
 		"agenda": agendaSchema(), "itinerary": itinerarySchema(), "place": placeSchema(), "breakdown": breakdownSchema(),
 		"progress": progressSchema(), "poll": pollSchema(), "explorer": explorerSchema(), "routine": routineSchema(),
-		"tasks": tasksSchema(), "agent": agentCardSchema(), "map": mapSchema(),
+		"tasks": tasksSchema(), "agent": agentCardSchema(), "map": mapSchema(), "cards": cardsSchema(), "converter": converterSchema(),
 		"grid": objectOf([]interface{}{"columns"}, map[string]interface{}{"columns": integer(minGridColumns, maxGridColumns)}),
 		"tabs": array(objectOf([]interface{}{"label", "children"}, map[string]interface{}{
 			"label": filledText(), "children": childrenSchema(componentRef(), 1, maxChildren),
@@ -689,6 +693,40 @@ func statRowSchema() map[string]interface{} {
 	})
 	return objectOf([]interface{}{"stats"}, map[string]interface{}{
 		"stats": shownList(stat, 1, maxStats),
+	})
+}
+
+func cardsSchema() map[string]interface{} {
+	chip := objectOf([]interface{}{"text"}, map[string]interface{}{
+		"text": strRange(1, maxCardChipRunes), "tone": enum(toneNames()),
+	})
+	card := objectOf([]interface{}{"title"}, map[string]interface{}{
+		"title": strRange(1, maxCardTitleRunes), "image": imageRefSchema(),
+		"value": describe(str(maxCardValueRunes), "The one headline value, as shown, e.g. 14°C."),
+		"line":  str(maxCardLineRunes), "detail": str(maxCardLineRunes), "chip": chip,
+	})
+	return objectOf([]interface{}{"items"}, map[string]interface{}{"items": array(card, 1, maxCards)})
+}
+
+func converterSchema() map[string]interface{} {
+	positive := map[string]interface{}{"type": "number", "exclusiveMinimum": 0}
+	unit := objectOf([]interface{}{"code", "label"}, map[string]interface{}{
+		"code":  describe(strRange(1, maxConverterCode), "ISO 4217 for a currency, else a unit such as km."),
+		"label": strRange(1, maxConverterLabel), "symbol": str(maxConverterSymbol),
+	})
+	return objectOf([]interface{}{"from", "to", "rate"}, map[string]interface{}{
+		"from": unit, "to": unit,
+		"rate":   describe(positive, "1 from is rate to."),
+		"amount": describe(map[string]interface{}{"type": "number", "exclusiveMinimum": 0}, "Default 1."),
+		"asOf":   map[string]interface{}{"type": "string", "pattern": isoDate.String()},
+		"note":   str(maxConverterNote),
+	})
+}
+
+func sourceSchema() map[string]interface{} {
+	return objectOf([]interface{}{"url", "title"}, map[string]interface{}{
+		"url":   map[string]interface{}{"type": "string", "maxLength": MaxLinkBytes, "pattern": sourceURLPattern},
+		"title": strRange(1, maxSourceTitleRunes),
 	})
 }
 

@@ -168,6 +168,12 @@ func componentFacts(c Component) []string {
 		for _, row := range c.Tasks.Rows {
 			add(row.Label)
 		}
+	case c.Cards != nil:
+		for _, card := range c.Cards.Items {
+			add(card.Title+":", card.Value, card.Line, parenthesized(chipText(card.Chip)))
+		}
+	case c.Converter != nil:
+		add("1", c.Converter.From.Code, "=", strconv.FormatFloat(c.Converter.Rate, 'f', -1, 64), c.Converter.To.Code, parenthesized(c.Converter.AsOf))
 	case c.Map != nil:
 		for _, pin := range c.Map.Pins {
 			add(firstText(pin.Label, pin.Place))
@@ -304,6 +310,13 @@ func priceText(price *Price) string {
 		text += "/" + price.Per
 	}
 	return text
+}
+
+func chipText(chip *CardChip) string {
+	if chip == nil {
+		return ""
+	}
+	return chip.Text
 }
 
 func ratingText(rating *ItemRating) string {
