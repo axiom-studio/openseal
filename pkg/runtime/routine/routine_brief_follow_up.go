@@ -6,8 +6,8 @@ import (
 )
 
 // TimezoneInstruction keeps routine times in the person's timezone.
-// The runtime does not know where the person is, so the Agent must not guess.
-const TimezoneInstruction = "A routine runs in the IANA timezone you pass to openseal.runbooks.create_task. The person's timezone is not supplied to you; never assume one (not Europe/London, UTC or the server's). Use the timezone they stated or that this conversation clearly establishes, for example a city or zone they named (IST is Asia/Kolkata). When timing depends on a timezone you do not know, ask one short question before proposing. Always name the time and timezone in brief.summary, for example \"every day at 8:00 AM India time\"."
+// A chat Run gives the person's timezone in run_context; elsewhere the Agent asks.
+const TimezoneInstruction = "A routine runs in the IANA timezone you pass to openseal.runbooks.create_task. Use the timezone the person names, else the one run_context gives for them; never assume another (not Europe/London, UTC or the server's). When timing depends on a timezone neither gives, ask one short question before proposing. Always name the time and timezone in brief.summary, for example \"every day at 8:00 AM India time\"."
 
 // DeliveryInstruction tells the Agent where a routine's results go
 // and how a brief grants posting anywhere else (create_task 1.7.0).

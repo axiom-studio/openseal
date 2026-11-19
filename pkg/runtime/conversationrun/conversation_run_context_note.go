@@ -44,7 +44,10 @@ func (r *TurnRunner) conversationContextSections(ctx context.Context, in runtime
 	if err != nil {
 		return nil, err
 	}
-	sections := []runtimeconversation.ContextSection{{Name: runtimeconversation.ContextSectionRespondTo, Always: true, Text: runtimeconversation.RunContextRespondTo(in)}}
+	sections := []runtimeconversation.ContextSection{
+		{Name: runtimeconversation.ContextSectionRespondTo, Always: true, Text: runtimeconversation.RunContextRespondTo(in)},
+		{Name: runtimeconversation.ContextSectionPerson, Always: true, Text: r.runContextPerson(ctx, in)},
+	}
 
 	replyParent, err := r.runContextReplyParent(ctx, in, path)
 	if err != nil {
@@ -121,6 +124,15 @@ func (r *TurnRunner) conversationContextSections(ctx context.Context, in runtime
 		runtimeconversation.ContextSection{Name: runtimeconversation.ContextSectionThreadBackdrop, Always: true, Text: runtimeconversation.RunContextBackdrop(in, backdrop)},
 	)
 	return sections, nil
+}
+
+// runContextPerson is the person section: what the host knows about the
+// person the Run acts for, with their local time now.
+func (r *TurnRunner) runContextPerson(ctx context.Context, in runtimeconversation.ContextInput) string {
+	if r.config.Person == nil {
+		return ""
+	}
+	return runtimeconversation.RunContextPerson(r.config.Person(ctx, in.Run), r.now())
 }
 
 // runContextReplyParent shows the message the trigger replies to when the

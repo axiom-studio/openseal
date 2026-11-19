@@ -428,6 +428,7 @@ type (
 	ConversationRunSchedulerConfig      = conversationrun.SchedulerConfig
 	ConversationRunTurnRunnerConfig     = conversationrun.TurnRunnerConfig
 	ConversationPlace                   = conversation.Place
+	ConversationPerson                  = conversation.Person
 	ConversationRunReconcilerConfig     = conversationrun.ReconcilerConfig
 	ConversationRunReconcileResult      = conversationrun.ReconcileResult
 	ConversationChangeRequest           = conversation.ChangeRequest

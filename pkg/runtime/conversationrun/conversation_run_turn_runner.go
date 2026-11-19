@@ -46,6 +46,12 @@ type TurnRunnerConfig struct {
 	// when none is saved. A non-empty style reaches the Agent as imageStyle
 	// in its turn context. Nil leaves it out.
 	ImageStyle func(ctx context.Context, run *models.AgentRun) string
+	// Person returns what is known about the person this Run acts for
+	// (resolved like ImageStyle: the trigger's sender, else the routine's
+	// creator): their account email, saved profile and timezone. A zero
+	// Person, as for a Slack or Telegram sender, leaves the person section
+	// of run_context out. Nil leaves it out too.
+	Person func(ctx context.Context, run *models.AgentRun) runtimeconversation.Person
 	// WorkMachine says where this Run works on files and commands when the
 	// person chose a machine other than the chat's secure VM, such as their own
 	// computer: a sentence or two for the run_context note, "" for the VM.

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
@@ -31,6 +32,7 @@ import (
 // Section names, in the fixed order of the note text.
 const (
 	ContextSectionRespondTo         = "respond_to"
+	ContextSectionPerson            = "person"
 	ContextSectionReplyParent       = "reply_parent"
 	ContextSectionChannel           = "channel"
 	ContextSectionExternalContext   = "external_context"
@@ -353,6 +355,52 @@ func RunContextRespondTo(in ContextInput) string {
 		lines = append(lines, fmt.Sprintf("Work handed to you by %s (%s): %s", from, assignment.Kind, models.TruncateRunes(strings.TrimSpace(assignment.Work), runContextAssignmentRunes)))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// Person is what the Agent knows about the person a Run acts for: their
+// account email and the "About you" profile they saved. Every field may be
+// empty; Timezone is an IANA name such as Asia/Kolkata.
+type Person struct {
+	Email    string
+	Name     string
+	Username string
+	Phone    string
+	Country  string
+	Company  string
+	Timezone string
+}
+
+// personFieldRunes bounds each profile value in the note.
+const personFieldRunes = 200
+
+// RunContextPerson is the person section: who "me" is, their profile, and,
+// from their timezone, their local date and time now. Without a timezone it
+// says so, and the Agent asks when timing depends on it. An empty person
+// (nobody behind the Run, as in a Slack chat) has no section.
+func RunContextPerson(person Person, now time.Time) string {
+	if person == (Person{}) {
+		return ""
+	}
+	var lines []string
+	for _, field := range []struct{ label, value string }{
+		{"Name", person.Name}, {"Username", person.Username}, {"Account email", person.Email},
+		{"Phone", person.Phone}, {"Country", person.Country}, {"Company", person.Company},
+	} {
+		if value := strings.TrimSpace(field.value); value != "" {
+			lines = append(lines, field.label+": "+models.TruncateRunes(strings.Join(strings.Fields(value), " "), personFieldRunes))
+		}
+	}
+	text := "About the person you act for (from their account; use it when they mean themselves, as in \"email me\" or \"my company\"):"
+	if len(lines) > 0 {
+		text += "\n" + strings.Join(lines, "\n")
+	}
+	location, err := time.LoadLocation(person.Timezone)
+	if person.Timezone == "" || person.Timezone == "Local" || err != nil {
+		return text + "\nTimezone: not known; when timing depends on it, ask."
+	}
+	local := now.In(location)
+	return text + fmt.Sprintf("\nTimezone: %s; it is %s there now. Read times they give, like \"at 2pm\", in this timezone unless they name another.",
+		person.Timezone, local.Format("Monday 2 January 2006, 3:04 PM (UTC-07:00)"))
 }
 
 // RunContextMessage is a message's header line and content, the content cut
