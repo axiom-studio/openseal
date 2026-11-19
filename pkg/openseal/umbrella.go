@@ -31,9 +31,9 @@ func (e *Engine) ResolveUmbrella(ctx context.Context, scope skill.ScopeReference
 	return ObjectiveOwner{}, fmt.Errorf("deployment ID %s has unknown kind %q", id, kind)
 }
 
-// checkUmbrella verifies that owner is the Agent or Team holding deployment
-// ID owner.ID in scope, and that it is neither retired nor archived.
-func (e *Engine) checkUmbrella(ctx context.Context, scope skill.ScopeReference, owner ObjectiveOwner) error {
+// checkUmbrellaOwner verifies that owner is the Agent or Team holding
+// deployment ID owner.ID in scope, whatever its state.
+func (e *Engine) checkUmbrellaOwner(ctx context.Context, scope skill.ScopeReference, owner ObjectiveOwner) error {
 	if err := owner.Validate(); err != nil {
 		return err
 	}
@@ -43,6 +43,15 @@ func (e *Engine) checkUmbrella(ctx context.Context, scope skill.ScopeReference, 
 	}
 	if resolved != owner {
 		return fmt.Errorf("deployment %s is not a %s", owner.ID, owner.Type)
+	}
+	return nil
+}
+
+// checkUmbrella verifies that owner is the Agent or Team holding deployment
+// ID owner.ID in scope, and that it is neither retired nor archived.
+func (e *Engine) checkUmbrella(ctx context.Context, scope skill.ScopeReference, owner ObjectiveOwner) error {
+	if err := e.checkUmbrellaOwner(ctx, scope, owner); err != nil {
+		return err
 	}
 	switch owner.Type {
 	case models.OwnerTypeAgent:
@@ -117,7 +126,10 @@ func (e *Engine) DeleteOwnerSkillBinding(ctx context.Context, owner ObjectiveOwn
 	if request.DeploymentID != owner.ID {
 		return nil, errors.New("Skill binding must belong to its Agent or Team")
 	}
-	if err := e.checkUmbrella(ctx, request.Scope, owner); err != nil {
+	// Removing a grant only narrows what the umbrella may do, so it is allowed
+	// on a retired Agent or archived Team too: retiring a Skill must reach
+	// every binding to it.
+	if err := e.checkUmbrellaOwner(ctx, request.Scope, owner); err != nil {
 		return nil, err
 	}
 	binding, err := e.skills.DeleteBinding(ctx, request)

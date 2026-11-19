@@ -104,6 +104,46 @@ func TestEngineExposesCanonicalSkillBindingManagement(t *testing.T) {
 	}
 }
 
+// Retiring a Skill must reach every binding to it, so a retired Agent's
+// binding can still be deleted; it can no longer be changed or added to.
+func TestRetiredAgentBindingCanOnlyBeDeleted(t *testing.T) {
+	engine, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { engine.Close() })
+	ctx := context.Background()
+	if err := engine.RegisterSkill(ctx, &SkillDefinition{ID: "reader", Version: "1", Name: "Reader", Transport: SkillTransportReference{Kind: "local"}, Actions: map[string]SkillAction{
+		"read": {Name: "read", Description: "Read", Risk: SkillRiskRead, SideEffect: SkillSideEffectRead, Idempotency: SkillIdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	scope := SkillScope{Kind: "tenant", ID: "one"}
+	owner := ensureTestAgent(t, engine, scope, "agent")
+	binding := func(id string) *SkillBinding {
+		return &SkillBinding{ID: id, Scope: scope, DeploymentID: "agent", SkillID: "reader", SkillVersion: "1", AllowedActions: []string{"read"}, MaximumRisk: SkillRiskRead}
+	}
+	actor := SkillBindingActor{Type: "system", ID: "reconciler"}
+	if _, err := engine.UpsertOwnerSkillBinding(ctx, owner, UpsertSkillBindingRequest{Binding: binding("reader"), Actor: actor, Reason: "assign"}); err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := engine.GetAgentDeployment(ctx, scope, "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired := *deployment
+	retired.RolloutStatus = AgentRolloutRetired
+	if _, _, err := engine.UpdateAgentDeployment(ctx, &retired, deployment.Revision, "user", "admin", "retire"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.UpsertOwnerSkillBinding(ctx, owner, UpsertSkillBindingRequest{Binding: binding("other"), Actor: actor, Reason: "assign"}); err == nil {
+		t.Fatal("a retired Agent was given a new binding")
+	}
+	if _, err := engine.DeleteOwnerSkillBinding(ctx, owner, DeleteSkillBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "reader", ExpectedRevision: 1, Actor: actor, Reason: "Skill retired"}); err != nil {
+		t.Fatalf("delete on a retired Agent: %v", err)
+	}
+}
+
 func TestEngineExposesGovernedActionAndApprovalLifecycle(t *testing.T) {
 	engine, err := New(WithActionWorkers(ActionWorkerConfig{Scope: Scope{Kind: "local", ID: "governance"}, Concurrency: 1, PollInterval: time.Second, LeaseDuration: time.Second}, nil,
 		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
