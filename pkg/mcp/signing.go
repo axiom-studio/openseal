@@ -29,6 +29,8 @@ type Signing struct {
 // scheme is one request-signing method. Each lives in its own file.
 type scheme interface {
 	fields() []CredentialField
+	// hint tells a person where to get the fields, in one or two sentences.
+	hint() string
 	checkParams(params map[string]string) error
 	// ownsHeader reports whether the scheme sets the lowercase header name,
 	// so no secret header may.
@@ -83,6 +85,14 @@ func SigningFields(name string) ([]CredentialField, bool) {
 		return nil, false
 	}
 	return s.fields(), true
+}
+
+// SigningHint tells a person where to get a scheme's fields, or "".
+func SigningHint(name string) string {
+	if s := signingScheme(name); s != nil {
+		return s.hint()
+	}
+	return ""
 }
 
 // SuggestSigning returns the signing an endpoint needs when a scheme

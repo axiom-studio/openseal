@@ -102,7 +102,7 @@ func TestSigningConfigValidation(t *testing.T) {
 		}
 	}
 	suggested, ok := SuggestSigning(base.Endpoint)
-	if !ok || suggested.Scheme != SigningAWSSigV4 || suggested.Params["region"] != "us-east-1" || suggested.Params["service"] != "aws-mcp" {
+	if SigningHint(SigningAWSSigV4) == "" || !ok || suggested.Scheme != SigningAWSSigV4 || suggested.Params["region"] != "us-east-1" || suggested.Params["service"] != "aws-mcp" {
 		t.Errorf("SuggestSigning = %+v, %v", suggested, ok)
 	}
 	if _, ok := SuggestSigning("https://mcp.linear.app/mcp"); ok {

@@ -39,6 +39,11 @@ func (awsSigV4) fields() []CredentialField {
 	}
 }
 
+func (awsSigV4) hint() string {
+	return "Create an IAM access key in your AWS account: IAM → Users → a user for your agents → Security credentials → Create access key. " +
+		"Give that user only the permissions agents need, such as ReadOnlyAccess. Leave the session token empty unless the key is temporary."
+}
+
 func (awsSigV4) checkParams(params map[string]string) error {
 	if len(params) != 2 || !awsScope.MatchString(params["region"]) || !awsScope.MatchString(params["service"]) {
 		return fmt.Errorf("MCP %s signing needs exactly a region and a service", SigningAWSSigV4)
