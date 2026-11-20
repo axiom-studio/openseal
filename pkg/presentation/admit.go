@@ -88,9 +88,18 @@ func Admit(ctx context.Context, visual Visual, opts ValidateOptions) (*Visual, [
 	return admitted(admit(ctx, fields, opts))
 }
 
-// admitted adds the drop of the whole visual when there is no visual.
+// admitted adds the drop of the whole visual when there is no visual. When
+// it is gone because every component was left out, the error names why each
+// was, so whoever sent it can fix them.
 func admitted(visual *Visual, drops []Drop, warnings []Warning, err error) (*Visual, []Drop, []Warning, error) {
 	if err != nil {
+		if len(drops) > 0 {
+			reasons := make([]string, 0, len(drops))
+			for _, drop := range drops {
+				reasons = append(reasons, strings.TrimSpace(drop.Path+" "+drop.Reason))
+			}
+			err = fmt.Errorf("%w; every component was left out: %s", err, strings.Join(reasons, "; "))
+		}
 		return nil, append(drops, Drop{Reason: err.Error()}), nil, err
 	}
 	return visual, drops, warnings, nil
