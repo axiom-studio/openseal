@@ -90,6 +90,10 @@ func SkillDefinition() *skill.Definition {
 			InputSchema: UpdateVisualInputSchema(),
 			OutputSchema: closedObject([]interface{}{"artifactRefs", "state"}, map[string]interface{}{
 				"artifactRefs": artifactRefs, "state": enum([]string{string(StateStreaming), string(StateReady)}),
+				// The components left out (Drop), each with its reason, so the next version can fix them.
+				"leftOut": map[string]interface{}{"type": "array", "items": closedObject([]interface{}{"reason"}, map[string]interface{}{
+					"path": freeText(), "componentId": freeText(), "reason": freeText(),
+				})},
 			}),
 			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
 			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{ArtifactType},
