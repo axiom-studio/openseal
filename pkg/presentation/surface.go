@@ -296,39 +296,52 @@ func Validate(ctx context.Context, surface Surface, opts ValidateOptions) ([]War
 	if err := checkSchema(document); err != nil {
 		return nil, err
 	}
+	warnings, failures := inspect(ctx, surface, opts)
+	if len(failures) > 0 {
+		return nil, failures[0].err
+	}
+	return warnings, nil
+}
+
+// componentFailure is a component that failed a check only Go makes. path
+// is the component's own path; err may name a field below it.
+type componentFailure struct {
+	path string
+	err  *ValidationError
+}
+
+// inspect makes the checks only Go makes on every drawn component and
+// returns each component that fails them: the tree checks (count, depth,
+// unique ids) first, then each component's own checks.
+func inspect(ctx context.Context, surface Surface, opts ValidateOptions) ([]Warning, []componentFailure) {
 	v := &validator{ctx: ctx, opts: opts, surface: surface, ids: map[string]*Component{}}
+	var failures []componentFailure
 	count := 0
-	var failure error
 	walk(surface.Components, func(component *Component, path string, depth int) bool {
 		count++
+		at, message := path, ""
 		switch {
 		case count > MaxComponents:
-			failure = &ValidationError{Path: path, ComponentID: component.ID, Message: fmt.Sprintf("a visual can hold at most %d components including nested ones", MaxComponents)}
+			message = fmt.Sprintf("a visual can hold at most %d components including nested ones", MaxComponents)
 		case depth > MaxDepth:
-			failure = &ValidationError{Path: path, ComponentID: component.ID, Message: fmt.Sprintf("components can nest at most %d levels deep", MaxDepth)}
+			message = fmt.Sprintf("components can nest at most %d levels deep", MaxDepth)
 		case v.ids[component.ID] != nil:
-			failure = &ValidationError{Path: path + ".id", ComponentID: component.ID, Message: "id is already used by another component"}
+			at, message = path+".id", "id is already used by another component"
 		}
-		if failure != nil {
-			return false
+		if message != "" {
+			failures = append(failures, componentFailure{path: path, err: &ValidationError{Path: at, ComponentID: component.ID, Message: message}})
+			return true
 		}
 		v.ids[component.ID] = component
 		return true
 	})
-	if failure != nil {
-		return nil, failure
-	}
 	walk(surface.Components, func(component *Component, path string, _ int) bool {
 		if err := v.component(*component, path); err != nil {
-			failure = &ValidationError{Path: path, ComponentID: component.ID, Message: err.Error()}
-			return false
+			failures = append(failures, componentFailure{path: path, err: &ValidationError{Path: path, ComponentID: component.ID, Message: err.Error()}})
 		}
 		return true
 	})
-	if failure != nil {
-		return nil, failure
-	}
-	return v.warnings, nil
+	return v.warnings, failures
 }
 
 func (v *validator) component(c Component, path string) error {

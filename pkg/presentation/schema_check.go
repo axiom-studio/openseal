@@ -86,38 +86,6 @@ var compiledSurfaceSchema = sync.OnceValues(func() (*compiledSurface, error) {
 	return &compiledSurface{schema: schema, document: document}, nil
 })
 
-// DecodeVisual decodes a visual the model sent. Its JSON is checked against
-// the schema first, so a value of the wrong type is named by its path; keys
-// the format does not have are ignored. Validate still checks the decoded
-// visual.
-func DecodeVisual(raw []byte) (*Visual, error) {
-	document, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
-	if err != nil {
-		return nil, fmt.Errorf("the visual is not valid JSON: %w", err)
-	}
-	fields, ok := document.(map[string]interface{})
-	if !ok {
-		return nil, &ValidationError{Message: "the visual must be an object {title, components}"}
-	}
-	surface := map[string]interface{}{"schema": Schema, "state": string(StateReady)}
-	for key, value := range fields {
-		// The host sets schema and state; a visual that sends them has
-		// them ignored like any other key it does not have.
-		if key != "schema" && key != "state" {
-			surface[key] = value
-		}
-	}
-	dropNulls(surface)
-	if err := checkSchema(surface); err != nil {
-		return nil, err
-	}
-	var visual Visual
-	if err := decodeDrawn(surface, &visual); err != nil {
-		return nil, fmt.Errorf("decode the visual: %w", err)
-	}
-	return &visual, nil
-}
-
 // decodeDrawn decodes a checked surface document into out as the format
 // reads it: components of no known type are left out, and each component
 // keeps only its own payload and, for a layout, its children.

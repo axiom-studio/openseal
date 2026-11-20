@@ -71,13 +71,14 @@ var finalAnswerKernelFields = map[string]bool{
 }
 
 // finalAnswerCall is the decoded call: the strict kernel arguments, which
-// keys were present, and the remaining (host extension) fields. VisualErr
-// is why the visual did not decode; Args.Visual is then nil.
+// keys were present, and the remaining (host extension) fields.
+// VisualDrops are the parts of the visual left out; when the whole visual
+// is left out, Args.Visual is nil.
 type finalAnswerCall struct {
-	Args      finalAnswerArgs
-	Present   map[string]bool
-	Extra     map[string]json.RawMessage
-	VisualErr error
+	Args        finalAnswerArgs
+	Present     map[string]bool
+	Extra       map[string]json.RawMessage
+	VisualDrops []presentation.Drop
 }
 
 // decodeFinalAnswerCall decodes raw as one JSON object. Kernel fields are
@@ -99,7 +100,7 @@ func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 	for key, value := range fields {
 		if key == "visual" {
 			call.Present[key] = true
-			call.Args.Visual, call.VisualErr = decodeFinalVisual(value)
+			call.Args.Visual, call.VisualDrops = decodeFinalVisual(value)
 			continue
 		}
 		if finalAnswerKernelFields[key] {
@@ -122,13 +123,15 @@ func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 	return call, nil
 }
 
-// decodeFinalVisual decodes the visual argument against the visual schema;
-// null is no visual.
-func decodeFinalVisual(raw json.RawMessage) (*presentation.Visual, error) {
+// decodeFinalVisual reads the visual argument as the host reads every
+// visual (presentation.DecodeVisual): slips are read, and a part that fails
+// is left out and listed in the drops. null is no visual.
+func decodeFinalVisual(raw json.RawMessage) (*presentation.Visual, []presentation.Drop) {
 	if trimmed := strings.TrimSpace(string(raw)); trimmed == "" || trimmed == "null" {
 		return nil, nil
 	}
-	return presentation.DecodeVisual(raw)
+	visual, drops, _ := presentation.DecodeVisual(raw)
+	return visual, drops
 }
 
 // finalSkillRefsList takes one Skill ref sent as a bare string as a list of
@@ -321,7 +324,7 @@ func (finalAnswerHandler) Run(ctx context.Context, x *Executor, cc agentrun.Cont
 	if message := checkFinalAnswerFields(call, cc); message != "" {
 		return x.refuse(ctx, cc, controlArgumentsInvalid(message))
 	}
-	draft := &finalAnswerDraft{Args: call.Args, Extra: call.Extra, VisualErr: call.VisualErr}
+	draft := &finalAnswerDraft{Args: call.Args, Extra: call.Extra, VisualDrops: call.VisualDrops}
 	return x.acceptFinalAnswer(ctx, cc, draft)
 }
 
@@ -363,23 +366,22 @@ func checkFinalAnswerFields(call *finalAnswerCall, cc agentrun.ControlContext) s
 // Acceptance pipeline (§11.3)
 
 // finalAnswerDraft is a final answer under validation. Checks may change
-// Output (evidence grounding adds its review) and Visual. VisualErr is why
-// the sent visual did not decode.
+// Output (evidence grounding adds its review) and Visual. VisualDrops are
+// the parts of the sent visual left out when it was read.
 type finalAnswerDraft struct {
 	Args            finalAnswerArgs
 	Extra           map[string]json.RawMessage
-	VisualErr       error
+	VisualDrops     []presentation.Drop
 	PlainText       bool
 	ReactionsOnly   bool
 	Visual          *presentation.Visual
-	VisualRejection string
 	SkillSelections []models.HostedSkillSelection
 	Output          map[string]interface{}
 }
 
-// sentVisual reports whether the call carried a visual, decoded or not.
+// sentVisual reports whether the call carried a visual, left out or not.
 func (d *finalAnswerDraft) sentVisual() bool {
-	return d.Args.Visual != nil || d.VisualErr != nil
+	return d.Args.Visual != nil || len(d.VisualDrops) > 0
 }
 
 // content is the user-visible text: the trimmed report when present, else the
@@ -449,19 +451,12 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 		return x.rejectFinal(ctx, cc, d, rejection)
 	}
 	d.SkillSelections = selections
-	// 5. Visual: decode and structure here; the host's binding/link/image/
-	// place checks and place stamping run where the visual is stored
-	// (delivery). An invalid visual never costs the answer, which has
-	// already streamed to the person: it goes without one, and delivery
-	// records why.
-	if d.sentVisual() {
-		visual, err := checkFinalVisual(ctx, d)
-		if err != nil {
-			d.VisualRejection = "visual: " + err.Error()
-		} else {
-			d.Visual = visual
-		}
-	}
+	// 5. Visual: read when the call was decoded; the host's binding/link/
+	// image/place checks and place stamping run where the visual is stored
+	// (delivery). A part that fails never costs the answer, which has
+	// already streamed to the person, nor the rest of the visual: delivery
+	// records each part left out.
+	d.Visual = conversation.CloneVisual(d.Args.Visual)
 	d.Output = d.output(mode)
 	// 6. Host extension fields.
 	if len(d.Extra) > 0 {
@@ -495,19 +490,6 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 	return Result{Kind: Final, Run: cc.Run, Entry: cc.Entry, Final: final}, nil
 }
 
-// checkFinalVisual returns the sent visual once it decodes and passes the
-// structural checks.
-func checkFinalVisual(ctx context.Context, d *finalAnswerDraft) (*presentation.Visual, error) {
-	if d.VisualErr != nil {
-		return nil, d.VisualErr
-	}
-	visual := conversation.CloneVisual(d.Args.Visual)
-	if _, err := presentation.Validate(ctx, visual.Surface(presentation.StateReady), presentation.ValidateOptions{SkipHostChecks: true}); err != nil {
-		return nil, err
-	}
-	return visual, nil
-}
-
 // output is FinalAnswer.Output (§11.3 RunOutput).
 func (d *finalAnswerDraft) output(mode agentrun.FinalAnswerMode) map[string]interface{} {
 	if d.Args.Silent {
@@ -529,8 +511,8 @@ func (d *finalAnswerDraft) output(mode agentrun.FinalAnswerMode) map[string]inte
 	if d.Visual != nil {
 		output[agentrun.FinalOutputVisualKey] = d.Visual
 	}
-	if d.VisualRejection != "" {
-		output[conversationrun.FinalOutputVisualRejectionKey] = d.VisualRejection
+	if len(d.VisualDrops) > 0 {
+		output[conversationrun.FinalOutputVisualDropsKey] = d.VisualDrops
 	}
 	if len(d.SkillSelections) > 0 {
 		output[finalOutputSkillSelectionsKey] = d.SkillSelections
@@ -827,7 +809,7 @@ func (x *Executor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContex
 	if finalOffered && strings.HasPrefix(trimmed, "{") {
 		if call, err := decodeFinalAnswerCall(json.RawMessage(trimmed)); err == nil && call.Present["answer"] &&
 			len(call.Extra) == 0 && checkFinalAnswerFields(call, cc) == "" {
-			return x.acceptFinalAnswer(ctx, cc, &finalAnswerDraft{Args: call.Args, Extra: call.Extra, VisualErr: call.VisualErr, PlainText: true})
+			return x.acceptFinalAnswer(ctx, cc, &finalAnswerDraft{Args: call.Args, Extra: call.Extra, VisualDrops: call.VisualDrops, PlainText: true})
 		}
 	}
 	// 2. Modes that need a structured final tool.

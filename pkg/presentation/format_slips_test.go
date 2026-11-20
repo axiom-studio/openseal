@@ -18,9 +18,9 @@ import (
 // path. It returns the visual as stored.
 func acceptVisual(t *testing.T, raw string) *Surface {
 	t.Helper()
-	visual, err := DecodeVisual([]byte(raw))
-	if err != nil {
-		t.Fatalf("DecodeVisual: %v", err)
+	visual, drops, err := DecodeVisual([]byte(raw))
+	if err != nil || len(drops) > 0 {
+		t.Fatalf("DecodeVisual: %v, drops %+v", err, drops)
 	}
 	surface := visual.Surface(StateReady)
 	if _, err := Validate(context.Background(), surface, ValidateOptions{SkipHostChecks: true}); err != nil {
@@ -39,6 +39,22 @@ func acceptVisual(t *testing.T, raw string) *Surface {
 		t.Fatalf("Decode: %v", err)
 	}
 	return stored
+}
+
+// rejectVisual decodes raw as the model's visual and checks that nothing
+// of it is left to show, and that want is among the reasons.
+func rejectVisual(t *testing.T, raw, want string) {
+	t.Helper()
+	visual, drops, err := DecodeVisual([]byte(raw))
+	if err == nil || visual != nil {
+		t.Fatalf("%s was accepted", raw)
+	}
+	for _, drop := range drops {
+		if strings.Contains(drop.Path+": "+drop.Reason, want) {
+			return
+		}
+	}
+	t.Fatalf("%s: drops %+v do not say %q", raw, drops, want)
 }
 
 func visualJSON(components ...string) string {
@@ -83,9 +99,7 @@ func TestLongProseIsKept(t *testing.T) {
 	if stored.Components[0].Callout.Body != body || stored.Components[1].Text != text {
 		t.Fatal("long prose was changed")
 	}
-	if _, err := DecodeVisual([]byte(visualJSON(`{"id":"c","type":"callout","summary":"s","callout":{"body":" "}}`))); err == nil || !strings.Contains(err.Error(), "callout.body must not be blank") {
-		t.Fatalf("blank body: %v", err)
-	}
+	rejectVisual(t, visualJSON(`{"id":"c","type":"callout","summary":"s","callout":{"body":" "}}`), "callout.body must not be blank")
 }
 
 // Rule 3: a display list longer than it shows is kept whole; only its
@@ -120,21 +134,13 @@ func TestTableColumnKindDefaultsToText(t *testing.T) {
 			t.Fatalf("column %s kind = %q", column.Key, column.ColumnKind())
 		}
 	}
-	if _, err := DecodeVisual([]byte(visualJSON(`{"id":"t","type":"table","summary":"s","table":{"columns":[{"key":"n","label":"N","kind":"money"}]}}`))); err == nil {
-		t.Fatal("an unknown kind was accepted")
-	}
+	rejectVisual(t, visualJSON(`{"id":"t","type":"table","summary":"s","table":{"columns":[{"key":"n","label":"N","kind":"money"}]}}`), `"money" is not one of`)
 }
 
 // Rule 5: a currency without format currency is ignored.
 func TestCurrencyWithoutCurrencyFormatIsIgnored(t *testing.T) {
 	acceptVisual(t, visualJSON(`{"id":"c","type":"chart","summary":"s","chart":{"kind":"bar","currency":"EUR","series":[{"name":"S","points":[{"label":"a","value":1}]}]}}`))
-	visual, err := DecodeVisual([]byte(visualJSON(`{"id":"c","type":"chart","summary":"s","chart":{"kind":"bar","format":"currency","series":[{"name":"S","points":[{"label":"a","value":1}]}]}}`)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Validate(context.Background(), visual.Surface(StateReady), ValidateOptions{SkipHostChecks: true}); err == nil {
-		t.Fatal("format currency without a currency was accepted")
-	}
+	rejectVisual(t, visualJSON(`{"id":"c","type":"chart","summary":"s","chart":{"kind":"bar","format":"currency","series":[{"name":"S","points":[{"label":"a","value":1}]}]}}`), "currency")
 }
 
 // Rule 6: options on a field that is not select or radio are ignored.
@@ -154,10 +160,7 @@ func TestOtherTypesPayloadIsIgnored(t *testing.T) {
 	}
 	// A binding is still checked against the host, so one on a type that
 	// takes none is refused.
-	if _, err := DecodeVisual([]byte(visualJSON(`{"id":"t","type":"tasks","summary":"s","binding":{"kind":"run","id":"r"},"tasks":{"rows":[{"binding":{"kind":"conversation_task","id":"t1"},"label":"L"}]}}`))); err == nil ||
-		!strings.Contains(err.Error(), "tasks takes no component binding") {
-		t.Fatalf("binding on tasks: %v", err)
-	}
+	rejectVisual(t, visualJSON(`{"id":"t","type":"tasks","summary":"s","binding":{"kind":"run","id":"r"},"tasks":{"rows":[{"binding":{"kind":"conversation_task","id":"t1"},"label":"L"}]}}`), "tasks takes no component binding")
 }
 
 // Rule 8: keys the format does not have are ignored everywhere.
@@ -174,10 +177,7 @@ func TestUnknownKeysAreIgnored(t *testing.T) {
 		t.Fatalf("the visual set its own state: %s", stored.State)
 	}
 	// The host fills coordinates in; the model may not type them.
-	if _, err := DecodeVisual([]byte(visualJSON(`{"id":"p","type":"place","summary":"s","place":{"name":"Cafe","lat":1,"lon":2}}`))); err == nil ||
-		!strings.Contains(err.Error(), "place.lat and .lon are filled in from find_place") {
-		t.Fatalf("typed coordinates: %v", err)
-	}
+	rejectVisual(t, visualJSON(`{"id":"p","type":"place","summary":"s","place":{"name":"Cafe","lat":1,"lon":2}}`), "place.lat and .lon are filled in from find_place")
 }
 
 // Rule 9: a component whose type is missing or unknown is left out; the
@@ -197,8 +197,6 @@ func TestComponentsOfNoKnownTypeAreLeftOut(t *testing.T) {
 		visualJSON(`{"id":"s","type":"section","children":[{"id":"cmp","type":""}]}`): "section needs 1-12 children with a type from the list (got 0)",
 		`{"title":"Answer","components":[]}`:                                          "at least one component",
 	} {
-		if _, err := DecodeVisual([]byte(raw)); err == nil || !strings.Contains(err.Error(), want) {
-			t.Fatalf("%s: error = %v, want %q", raw, err, want)
-		}
+		rejectVisual(t, raw, want)
 	}
 }

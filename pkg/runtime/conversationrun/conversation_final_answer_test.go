@@ -520,35 +520,52 @@ func TestVisualStoredPerFollowUp(t *testing.T) {
 	})
 }
 
-func TestVisualFailingHostChecksPostsWithout(t *testing.T) {
+// A component that fails the host checks is left out on its own and
+// recorded; the rest of the visual is stored and shown. When nothing is
+// left, the answer is posted without the visual, says so, and each part
+// and the whole visual are recorded.
+func TestVisualFailingHostChecksIsLeftOutByPart(t *testing.T) {
 	refuse := func(*models.AgentRun) presentation.ValidateOptions {
 		return presentation.ValidateOptions{Bindings: presentation.BindingResolverFunc(func(context.Context, presentation.Binding) error {
 			return errors.New("not in this chat")
 		})}
 	}
+	stop := presentation.Component{ID: "next", Type: "actions", Actions: []presentation.Action{
+		{ID: "stop", Label: "Stop", Kind: presentation.ActionEntity, Command: "stop", Binding: &presentation.Binding{Kind: presentation.BindingRunbook, ID: "rb-1"}},
+	}}
+	rejections := func(f *finalDeliveryFixture) []*models.ActivityEvent {
+		events, err := f.store.ListActivity(f.ctx, models.ActivityFilter{Scope: f.run.Scope, RunID: f.run.ID, EventTypes: []string{answerVisualRejectedEvent}, Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return events
+	}
 	forFinalDeliveryStores(t, finalDeliveryOptions{visualChecks: refuse}, func(t *testing.T, f *finalDeliveryFixture) {
 		bound := finalDeliveryVisual()
-		bound.Components = append(bound.Components, presentation.Component{ID: "next", Type: "actions", Actions: []presentation.Action{
-			{ID: "stop", Label: "Stop", Kind: presentation.ActionEntity, Command: "stop", Binding: &presentation.Binding{Kind: presentation.BindingRunbook, ID: "rb-1"}},
-		}})
+		bound.Components = append(bound.Components, stop)
 		first, _ := f.finalEntry("Revenue is up.", map[string]interface{}{FinalOutputSummaryKey: "Revenue is up.", agentrun.FinalOutputVisualKey: bound})
+		f.mustDeliver(first, agentrun.FinalDeliveryComplete)
+		answers := f.answers()
+		if len(answers) != 1 || len(answers[0].References) != 2 || answers[0].Content != "Revenue is up." {
+			t.Fatalf("answers = %#v", answers)
+		}
+		events := rejections(f)
+		if len(events) != 1 || events[0].ID == "" || events[0].Payload["componentId"] != "next" || events[0].Payload["path"] != "components[1]" ||
+			!strings.Contains(events[0].Summary, "not in this chat") {
+			t.Fatalf("visual_rejected events = %#v", events)
+		}
+	})
+	forFinalDeliveryStores(t, finalDeliveryOptions{visualChecks: refuse}, func(t *testing.T, f *finalDeliveryFixture) {
+		only := &presentation.Visual{Title: "Stop it", Components: []presentation.Component{stop}}
+		first, _ := f.finalEntry("Revenue is up.", map[string]interface{}{FinalOutputSummaryKey: "Revenue is up.", agentrun.FinalOutputVisualKey: only})
 		f.mustDeliver(first, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 || len(answers[0].References) != 1 || answers[0].Content != "Revenue is up.\n\n"+conversationVisualNotShownText {
 			t.Fatalf("answers = %#v", answers)
 		}
-		events, err := f.store.ListActivity(f.ctx, models.ActivityFilter{Scope: f.run.Scope, RunID: f.run.ID, Limit: 100})
-		if err != nil {
-			t.Fatal(err)
-		}
-		rejected := 0
-		for _, event := range events {
-			if event.EventType == answerVisualRejectedEvent {
-				rejected++
-			}
-		}
-		if rejected != 1 {
-			t.Fatalf("visual_rejected events = %d", rejected)
+		// Two events in one scope: each has its own id.
+		if events := rejections(f); len(events) != 2 || events[0].ID == events[1].ID {
+			t.Fatalf("visual_rejected events = %#v", events)
 		}
 	})
 }

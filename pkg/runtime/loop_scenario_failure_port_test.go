@@ -322,11 +322,12 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			if len(finals) != 1 || finals[0].State != models.ToolEntryCompleted {
 				t.Fatalf("final entries = %v", f.EntryTypes(run.ID))
 			}
+			// Only the component that fails the host checks is left out.
 			answers := portAgentMessages(f, conversation.ID)
-			if len(answers) != 1 || !portVisualNotShown(answers[0].Content, "Revenue is up.") || len(answers[0].References) != 1 || content.Puts != 0 {
-				t.Fatalf("answers = %#v (%d visual puts), want the answer without the visual", answers, content.Puts)
+			if len(answers) != 1 || answers[0].Content != "Revenue is up." || len(answers[0].References) != 2 || content.Puts != 1 {
+				t.Fatalf("answers = %#v (%d visual puts), want the answer with the rest of the visual", answers, content.Puts)
 			}
-			if events := f.Events(run.ID, "turn.visual_rejected"); len(events) != 1 || events[0].Severity != models.ActivitySeverityWarning {
+			if events := f.Events(run.ID, "turn.visual_rejected"); len(events) != 1 || events[0].Severity != models.ActivitySeverityWarning || events[0].Payload["componentId"] != "next" {
 				t.Fatalf("visual rejected events = %#v", events)
 			}
 		})

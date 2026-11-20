@@ -30,6 +30,10 @@ type typeSpec struct {
 	rules []string
 	// validate checks the payload; nil when the spec's bounds say it all.
 	validate func(v *validator, c Component, path string) error
+	// coerce reads the values of the payload's JSON whose type only Go
+	// knows as that type, through coerceScalar, before the payload is
+	// checked (Admit); nil when the schema states every type.
+	coerce func(payload map[string]interface{})
 	// sentence is the type's one-line purpose in the visual format.
 	sentence string
 }
@@ -66,7 +70,7 @@ var catalogue = map[string]typeSpec{
 	"chart":           {payload: "chart", validate: validateChart, rules: []string{ruleChartSeriesNames, ruleChartScatter, ruleChartPie, ruleChartBars, ruleChartReferences}, sentence: "Trend or distribution of numbers."},
 	"diagram":         {payload: "diagram", validate: validateDiagram, rules: []string{ruleDiagramEdges}, sentence: "How 2-30 ideas connect; the app places the nodes by layout; tap a node for its detail."},
 	"form":            {payload: "form", validate: validateForm, rules: []string{ruleFormOptions, ruleFormRange}, sentence: "Structured input the user submits once."},
-	"table":           {payload: "table", validate: validateTable, rules: []string{ruleTableColumns}, sentence: "Exact values in rows and columns."},
+	"table":           {payload: "table", validate: validateTable, coerce: coerceTableCells, rules: []string{ruleTableColumns}, sentence: "Exact values in rows and columns."},
 	"stat_row":        {payload: "stat_row", validate: validateStatRow, sentence: "1-4 headline numbers."},
 	"callout":         {payload: "callout", validate: validateCallout, sentence: "Key takeaway, tip or warning (markdown body); tone sets its colour, info by default."},
 	"steps":           {payload: "steps", validate: validateSteps, sentence: "2-10 steps in order; checkable lets people tick them off."},
@@ -516,16 +520,16 @@ func validateTable(v *validator, c Component, _ string) error {
 
 func (v *validator) tableCell(at string, column TableColumn, cell TableCell) error {
 	kind := column.ColumnKind()
-	switch kind {
-	case "number", "currency", "percent":
+	switch {
+	case cellType(kind) == "number":
 		if cell.Number == nil {
 			return fmt.Errorf("%s must be a number because column %q is %s", at, column.Key, kind)
 		}
-	case "date":
+	case kind == "date":
 		if cell.Text == nil || !validDate(*cell.Text) {
 			return fmt.Errorf("%s must be a date as YYYY-MM-DD because column %q is date", at, column.Key)
 		}
-	case "image":
+	case kind == "image":
 		if cell.Image == nil {
 			return fmt.Errorf("%s must be an image reference {artifactId, version} because column %q is image", at, column.Key)
 		}
@@ -536,6 +540,42 @@ func (v *validator) tableCell(at string, column TableColumn, cell TableCell) err
 		}
 	}
 	return nil
+}
+
+// cellType is the JSON type of the cells of a column kind: number for
+// number, currency and percent, object (an image reference) for image, and
+// string otherwise.
+func cellType(kind string) string {
+	switch kind {
+	case "number", "currency", "percent":
+		return "number"
+	case "image":
+		return "object"
+	}
+	return "string"
+}
+
+// coerceTableCells reads each cell of a table as its column's kind, so a
+// number in a text column is its text and a numeric string in a number
+// column its number.
+func coerceTableCells(payload map[string]interface{}) {
+	kinds := map[string]string{}
+	for _, column := range objectsAt(payload, "columns") {
+		key, _ := column["key"].(string)
+		kind, _ := column["kind"].(string)
+		kinds[key] = TableColumn{Kind: kind}.ColumnKind()
+	}
+	for _, row := range objectsAt(payload, "rows") {
+		for key, cell := range row {
+			kind, known := kinds[key]
+			if !known {
+				continue
+			}
+			if value, ok := coerceScalar(cell, cellType(kind)); ok {
+				row[key] = value
+			}
+		}
+	}
 }
 
 func validDate(value string) bool {

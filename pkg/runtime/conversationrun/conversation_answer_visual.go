@@ -17,6 +17,9 @@ const (
 	answerVisualNotShownSummary = "The agent's visual was not shown: a visual can only go with a reply in a chat."
 	answerVisualRejectedEvent   = "turn.visual_rejected"
 	answerVisualRejectedSummary = "The agent's visual failed its checks and was left off the answer:"
+	// answerVisualPartRejectedSummary leads the event of one component
+	// left out of a visual that was still shown.
+	answerVisualPartRejectedSummary = "A part of the agent's visual failed its checks and was left out:"
 )
 
 // errInvalidAnswerVisual marks a visual rejected by validation, as opposed

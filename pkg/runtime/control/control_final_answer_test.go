@@ -336,6 +336,14 @@ func TestEmptyAnswerAfterReactionIsReactionsOnly(t *testing.T) {
 
 // An invalid visual never costs the answer: it is delivered without the
 // visual, and the output records why.
+
+// finalVisualDropped reports whether the output lists the drop of the
+// whole visual with a reason containing want.
+func finalVisualDropped(final *agentrun.FinalAnswer, want string) bool {
+	drops, _ := final.Output[conversationrun.FinalOutputVisualDropsKey].([]presentation.Drop)
+	return len(drops) > 0 && drops[len(drops)-1].Path == "" && strings.Contains(drops[len(drops)-1].Reason, want)
+}
+
 func TestInvalidVisualIsDropped(t *testing.T) {
 	invalid := `{"answer":"Here.","visual":{"title":"Prices","components":[]}}`
 	f := newFinalFixture(t, finalCall("first", invalid))
@@ -343,12 +351,27 @@ func TestInvalidVisualIsDropped(t *testing.T) {
 	if final.Visual() != nil || final.Answer != "Here." {
 		t.Fatalf("final = %#v", final)
 	}
-	if rejection, _ := final.Output["visualRejection"].(string); !strings.Contains(rejection, "at least one component") {
-		t.Fatalf("visualRejection = %v", final.Output["visualRejection"])
+	if !finalVisualDropped(final, "at least one component") {
+		t.Fatalf("visual drops = %v", final.Output[conversationrun.FinalOutputVisualDropsKey])
 	}
 	// visual is not offered without VisualAllowed.
 	g := newFinalFixture(t, finalCall("final", invalid))
 	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{}), "final", ArgumentsInvalidCode)
+}
+
+// A component that fails costs only itself: the rest of the visual rides on
+// the answer, and the output lists the part left out.
+func TestVisualPartIsDroppedOnItsOwn(t *testing.T) {
+	call := `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"ok","type":"text","text":"Fine"},{"id":"bad","type":"callout","callout":{"body":" "}}]}}`
+	f := newFinalFixture(t, finalCall("first", call))
+	final := requireFinal(t, f.settleFinal("first", agentrun.ControlAuthority{VisualAllowed: true}))
+	if visual := final.Visual(); visual == nil || len(visual.Components) != 1 || visual.Components[0].ID != "ok" {
+		t.Fatalf("visual = %#v", final.Visual())
+	}
+	drops, _ := final.Output[conversationrun.FinalOutputVisualDropsKey].([]presentation.Drop)
+	if len(drops) != 1 || drops[0].ComponentID != "bad" || drops[0].Path != "components[1]" || !strings.Contains(drops[0].Reason, "callout.body must not be blank") {
+		t.Fatalf("drops = %+v", drops)
+	}
 }
 
 // A visual with no component of a known type has nothing to draw: it is
@@ -360,8 +383,8 @@ func TestVisualWithNothingToDrawIsDropped(t *testing.T) {
 	if final.Visual() != nil || final.Answer != "Here." {
 		t.Fatalf("final = %#v", final)
 	}
-	if rejection, _ := final.Output["visualRejection"].(string); rejection == "" {
-		t.Fatalf("visualRejection = %v", final.Output["visualRejection"])
+	if !finalVisualDropped(final, "") {
+		t.Fatalf("visual drops = %v", final.Output[conversationrun.FinalOutputVisualDropsKey])
 	}
 }
 
@@ -374,8 +397,8 @@ func TestPlainFinalInvalidVisualIsDropped(t *testing.T) {
 	if final.Visual() != nil || final.Answer != "Here." {
 		t.Fatalf("final = %#v", final)
 	}
-	if rejection, _ := final.Output["visualRejection"].(string); !strings.Contains(rejection, "at least one component") {
-		t.Fatalf("visualRejection = %v", final.Output["visualRejection"])
+	if !finalVisualDropped(final, "at least one component") {
+		t.Fatalf("visual drops = %v", final.Output[conversationrun.FinalOutputVisualDropsKey])
 	}
 }
 
@@ -405,7 +428,7 @@ func TestValidVisualRidesOnOutput(t *testing.T) {
 	if got := final.Visual(); got == nil || got.Title != "Status" || len(got.Components) != 1 {
 		t.Fatalf("visual = %#v", got)
 	}
-	if _, rejected := final.Output["visualRejection"]; rejected {
+	if _, rejected := final.Output[conversationrun.FinalOutputVisualDropsKey]; rejected {
 		t.Fatal("valid visual rejected")
 	}
 }
