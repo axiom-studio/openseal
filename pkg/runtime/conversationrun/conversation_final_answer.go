@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/google/uuid"
 )
 
 // Final answer delivery for Agent chat Runs (run-loop section 05 §8, SPEC
@@ -290,7 +291,9 @@ func (r *TurnRunner) checkAnswerVisual(ctx context.Context, run *models.AgentRun
 }
 
 // visualRejected records that the answer went out without its visual. The
-// answer is already posted; a lost warning is not retried.
+// answer is already posted; a lost warning is not retried. The store takes
+// the event as given, so it gets its id and time here: events without an
+// id collide on the scope's unique event id after the first one.
 func (h *conversationFinalHandler) visualRejected(ctx context.Context, run *models.AgentRun, step *models.AgentTurn, workerID, reason string) {
 	if h.activity == nil {
 		return
@@ -299,6 +302,7 @@ func (h *conversationFinalHandler) visualRejected(ctx context.Context, run *mode
 		reason = string(runes[:400]) + "…"
 	}
 	event := &models.ActivityEvent{
+		ID: uuid.NewString(), CreatedAt: h.runner.now(),
 		Scope: run.Scope, RunID: run.ID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: models.TeamIDForRun(run),
 		EventType: answerVisualRejectedEvent, Severity: models.ActivitySeverityWarning,
 		Summary: answerVisualRejectedSummary + " " + reason, Actor: models.ActivityActor{Type: "worker", ID: workerID},
