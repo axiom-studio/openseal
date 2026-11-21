@@ -345,6 +345,10 @@ func resolveScheduledTaskCreate(ctx context.Context, store RunbookActionStore, f
 			messageID = request.ID
 		}
 	}
+	messageID, err := routineRequestMessageID(ctx, store, run.Scope, conversationID, messageID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	task := &models.ScheduledAgentTask{Goal: a.Goal, ConversationID: conversationID, SourceMessageID: messageID, AppID: strings.TrimSpace(a.AppID), CreatedBy: run.ActingUser}
 	// A routine always carries the brief the user approved.
 	brief, err := normalizeRoutineBrief(a.Brief, false)
@@ -662,4 +666,35 @@ func validateScheduledTaskApp(ctx context.Context, store RunbookActionStore, run
 		return errors.New("scheduled task app must be an app from this chat")
 	}
 	return nil
+}
+
+// routineRequestMessageID returns the person's message a routine reports to.
+// A Run woken by a host notice (an account connected from a setup card) has
+// that notice as its trigger; the routine's source is the request the notice
+// answers: its reply chain, through host notices only, back to a channel
+// message the notice's initiator sent. Any other trigger is returned as is
+// and admission decides.
+func routineRequestMessageID(ctx context.Context, store models.TeamHandoffMessageReader, scope models.Scope, conversationID, messageID string) (string, error) {
+	message, err := store.GetChannelMessage(ctx, scope, conversationID, messageID)
+	if err != nil || message == nil || message.Sender.Type != models.ConversationParticipantService || message.Initiator == nil {
+		return messageID, err
+	}
+	initiator := *message.Initiator
+	for depth := 0; depth < 16 && message.ReplyToMessageID != ""; depth++ {
+		next, err := store.GetChannelMessage(ctx, scope, conversationID, message.ReplyToMessageID)
+		if err != nil {
+			return "", err
+		}
+		if next == nil || next.Scope != scope || next.ConversationID != conversationID || next.Sequence >= message.Sequence {
+			break
+		}
+		if next.Sender == initiator && next.Audience.Kind == models.ConversationAudienceChannel {
+			return next.ID, nil
+		}
+		if next.Sender.Type != models.ConversationParticipantService {
+			break
+		}
+		message = next
+	}
+	return messageID, nil
 }
