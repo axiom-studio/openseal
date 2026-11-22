@@ -37,6 +37,7 @@ type TurnRunnerBinding struct {
 	Compactor   StepCompactor        // G3
 	Final       FinalAnswerHandler   // CONV-08 for chats, runOutputFinalHandler otherwise
 	FinalOutput FinalOutputPublisher // nil = none
+	FinalGuard  FinalGuard           // nil = none
 	Host        StepHost
 	Authority   ControlAuthority   // section 04 §4, incl. the conversation flags of section 05 §7
 	Prompt      PromptContribution // kernel-authored system parts from the owning section

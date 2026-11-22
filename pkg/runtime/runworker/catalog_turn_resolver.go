@@ -389,6 +389,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 	}
 	if script != nil {
 		preparerConfig.RoutineScript = script.Section().Text
+		binding.FinalGuard = script
 	}
 	if r.config.Media.ImageInput != nil {
 		preparerConfig.ImageInput = r.config.Media.ImageInput(ctx, agentrun.StepInput{Run: r.run, Session: session, Binding: binding}, models.ModelStepRequest{

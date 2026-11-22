@@ -321,6 +321,11 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 			if routineSection != (tc.name == "routine") {
 				t.Fatalf("routine script section = %v: %#v", routineSection, req.System.Sections)
 			}
+			// Only a script routine's final answer is checked against its
+			// run_command entries.
+			if (binding.FinalGuard != nil) != (tc.name == "routine") {
+				t.Fatalf("final guard = %#v", binding.FinalGuard)
+			}
 			if !slices.Contains(req.System.AgentInstructions, "Be truthful.") {
 				t.Fatalf("agent instructions = %#v", req.System.AgentInstructions)
 			}

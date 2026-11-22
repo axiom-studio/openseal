@@ -71,6 +71,11 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.
 	if len(unconsumedInterventions(run)) > 0 {
 		return d.supersedeFinal(ctx, st, final)
 	}
+	if !explaining && status != models.AgentRunStatusFailed && d.binding.FinalGuard != nil {
+		if res, refused := d.guardFinal(ctx, st, final); refused {
+			return res
+		}
+	}
 	count := len(run.PendingInterventions)
 	// 3. Deliver.
 	result := agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: final.Output}
@@ -194,6 +199,54 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.
 		return exitResult(Exit{Run: run, Reason: ExitFinal})
 	}
 	return exitResultPtr(d.statusExit(run))
+}
+
+// guardFinal asks the binding's FinalGuard about the answer before it is
+// delivered. A refusal closes the final tool entry with the failure and
+// fails the Run through fail, so the model explains first when it can;
+// refused is then true.
+func (d *drive) guardFinal(ctx context.Context, st *stepState, final *agentrun.FinalAnswer) (stepResult, bool) {
+	entries, err := d.runToolEntries(ctx)
+	if err != nil {
+		return d.stepError(ctx, st, err, ""), true
+	}
+	failure := d.binding.FinalGuard.RefuseFinal(entries)
+	if failure == nil {
+		return stepResult{}, false
+	}
+	if err := d.closeFinalEntry(ctx, final, models.ToolEntryError, &models.ToolResult{
+		Status: models.ToolResultFailed, IsError: true, Content: []models.ContentPart{{Type: models.ContentPartText, Text: failure.Message}},
+	}); err != nil {
+		return d.stepError(ctx, st, err, ""), true
+	}
+	return d.fail(ctx, st, *failure, nil, ""), true
+}
+
+// runToolEntries are the tool entries of the Run's session, oldest first.
+func (d *drive) runToolEntries(ctx context.Context) ([]*models.SessionEntry, error) {
+	if d.session == nil {
+		return nil, nil
+	}
+	var entries []*models.SessionEntry
+	after := int64(0)
+	for {
+		page, err := d.l.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+			Scope: d.run.Scope, SessionID: d.session.ID, RunID: d.run.ID,
+			Types: []models.SessionEntryType{models.SessionEntryTool}, AfterSequence: after, Limit: models.MaxSessionEntryListLimit,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("load the Run's tool entries: %w", err)
+		}
+		entries = append(entries, page...)
+		if len(page) < models.MaxSessionEntryListLimit {
+			return entries, nil
+		}
+		next := page[len(page)-1].Sequence
+		if next <= after {
+			return nil, errors.New("load the Run's tool entries: session entries are not in sequence order")
+		}
+		after = next
+	}
 }
 
 // finishLoopFinal ends the Run with a deterministic producer's (or a

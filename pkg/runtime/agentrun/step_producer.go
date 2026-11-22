@@ -117,6 +117,17 @@ type LoopPark struct {
 
 // LoopFailure fails the Run. Kind includes
 // execution|tool|budget|repeat_limit|context_overflow.
+// FinalGuard refuses a final answer the Run's own tool entries show it has
+// not earned, such as a script routine whose approved script did not run
+// cleanly. It never judges the answer text. The loop asks it before it
+// delivers a final answer; a refusal fails the Run instead, after the model
+// explains when the failure is Explainable.
+type FinalGuard interface {
+	// RefuseFinal is the failure that replaces the final answer, or nil.
+	// entries are the Run's tool entries, oldest first.
+	RefuseFinal(entries []*models.SessionEntry) *LoopFailure
+}
+
 type LoopFailure struct {
 	Kind        string
 	Code        string

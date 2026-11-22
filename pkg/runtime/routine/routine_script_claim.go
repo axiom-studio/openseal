@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -147,13 +148,13 @@ func (s *PreparedRoutineScript) CompletionFailure(entries []*models.SessionEntry
 	return message
 }
 
-// FinalFailure is the FailureExplanation that replaces a final answer of a
-// script routine whose approved script did not run cleanly, or nil when the
-// Run may complete. The caller stores it with TransitionRun (the Run stays
-// running in explain mode), appends failureExplanationNote, and the Run
-// fails after the tool-free explanation step. The full message, with the
-// output tail's line breaks, is StepError's source too, bounded like it.
-func (s *PreparedRoutineScript) FinalFailure(run *models.AgentRun, entries []*models.SessionEntry) *models.RunFailureExplanation {
+var _ agentrun.FinalGuard = (*PreparedRoutineScript)(nil)
+
+// RefuseFinal is the routine_script failure that replaces a final answer of
+// a script routine whose approved script did not run cleanly, or nil when
+// the Run may complete. The loop records it (the Run stays running in
+// explain mode), and the Run fails after the tool-free explanation step.
+func (s *PreparedRoutineScript) RefuseFinal(entries []*models.SessionEntry) *agentrun.LoopFailure {
 	if s == nil {
 		return nil
 	}
@@ -161,7 +162,7 @@ func (s *PreparedRoutineScript) FinalFailure(run *models.AgentRun, entries []*mo
 	if message == "" {
 		return nil
 	}
-	return conversation.BeginRunFailureExplanation(run, conversation.RunFailureKindRoutineScript, RunFailureCodeRoutineScript, message, "", "")
+	return &agentrun.LoopFailure{Kind: conversation.RunFailureKindRoutineScript, Code: RunFailureCodeRoutineScript, Message: message, Explainable: true}
 }
 
 // routineScriptAttempt is one run_command tool entry of the Run: its pinned

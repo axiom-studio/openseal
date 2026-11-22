@@ -115,7 +115,7 @@ func TestLoopRoutineScriptPreparesPinsAndSection(t *testing.T) {
 		t.Fatal("CommandPins shares the claim's pins")
 	}
 	var nilRoutine *PreparedRoutineScript
-	if nilRoutine.CommandPins() != nil || nilRoutine.FinalFailure(routineScriptRun(), nil) != nil {
+	if nilRoutine.CommandPins() != nil || nilRoutine.RefuseFinal(nil) != nil {
 		t.Fatal("a non-routine claim pins or fails")
 	}
 
@@ -246,7 +246,7 @@ func TestLoopRoutineScriptCompletionCheckReadsToolEntries(t *testing.T) {
 				if message != "" {
 					t.Fatalf("message = %q, want none", message)
 				}
-				if routine.FinalFailure(routineScriptRun(), entries) != nil {
+				if routine.RefuseFinal(entries) != nil {
 					t.Fatal("a clean run fails the Run")
 				}
 				return
@@ -262,7 +262,7 @@ func TestLoopRoutineScriptCompletionCheckReadsToolEntries(t *testing.T) {
 
 // A failed script puts the Run in explain mode with a routine_script
 // FailureExplanation; the first recorded failure stays the reported one.
-func TestLoopRoutineScriptFinalFailureExplainsAndFails(t *testing.T) {
+func TestLoopRoutineScriptRefusesFinalAndExplains(t *testing.T) {
 	const failureTextLimit = 1024 // the bound of a Run failure message
 	routine := loopRoutineScriptFixture(t)
 	output := strings.Repeat("line of output\n", 400) + "KeyError: 'signup_date'"
@@ -270,10 +270,15 @@ func TestLoopRoutineScriptFinalFailureExplainsAndFails(t *testing.T) {
 	if message := routine.CompletionFailure(entries); len(message) > 4000 || !strings.HasSuffix(message, "KeyError: 'signup_date'") {
 		t.Fatalf("message (%d bytes) = %q", len(message), message)
 	}
+	refusal := routine.RefuseFinal(entries)
+	if refusal == nil || refusal.Kind != "routine_script" || refusal.Code != RunFailureCodeRoutineScript || !refusal.Explainable {
+		t.Fatalf("refusal = %#v", refusal)
+	}
+	// The loop records the refusal as the Run's FailureExplanation (fail).
 	run := routineScriptRun()
 	run.Status = models.AgentRunStatusRunning
-	failure := routine.FinalFailure(run, entries)
-	if failure == nil || failure.Kind != "routine_script" || failure.Code != RunFailureCodeRoutineScript || failure.Explained {
+	failure := conversation.BeginRunFailureExplanation(run, refusal.Kind, refusal.Code, refusal.Message, "", "")
+	if failure == nil || failure.Explained {
 		t.Fatalf("failure = %#v", failure)
 	}
 	if !strings.HasPrefix(failure.Message, "The routine's script exited with status 1: python3 scripts/weekly.py") ||
@@ -291,7 +296,7 @@ func TestLoopRoutineScriptFinalFailureExplainsAndFails(t *testing.T) {
 
 	earlier := &models.RunFailureExplanation{Kind: conversation.RunFailureKindExecution, Code: "execution_failed", Message: "The model provider failed."}
 	run.FailureExplanation = earlier
-	if kept := routine.FinalFailure(run, entries); kept == nil || *kept != *earlier {
+	if kept := conversation.BeginRunFailureExplanation(run, refusal.Kind, refusal.Code, refusal.Message, "", ""); kept == nil || *kept != *earlier {
 		t.Fatalf("kept = %#v", kept)
 	}
 }
