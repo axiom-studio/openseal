@@ -259,8 +259,8 @@ func NewRegistry(tools ...Tool) Registry {
 	return r
 }
 
-// BuiltinTools are the control tools every Run kind shares. The
-// kernel-only runbook tools are added by the run loop (loopControlRegistry).
+// BuiltinTools are the control tools every Run kind shares. Kernel-only
+// tools come with the producer that calls them (ProducerTools).
 func BuiltinTools() []Tool {
 	return []Tool{
 		{name: models.ControlToolAskUser, handler: askUserHandler{}},
@@ -320,9 +320,8 @@ type Executor struct {
 	Reporting     models.ConversationStore // conversationrun.ProjectConversationRunbookStart / runbookSourceMessage
 	Now           func() time.Time
 
-	// handlers are the tools x runs; nil runs BuiltinTools.
-	// NewStepToolDispatcher gives an executor without its own the run loop's
-	// tools (UseTools). Tests set their own.
+	// handlers are the tools x runs; nil runs BuiltinTools. Tests set
+	// their own (UseTools).
 	handlers Registry
 }
 
@@ -331,6 +330,34 @@ func (x *Executor) registry() Registry {
 		return x.handlers
 	}
 	return NewRegistry(BuiltinTools()...)
+}
+
+// ProducerTools is a deterministic StepProducer that brings the handlers of
+// the kernel-origin control calls it makes, such as a runbook's fork and
+// delegate nodes. Only Runs that producer drives can run those tools.
+type ProducerTools interface {
+	ControlTools() []Tool
+}
+
+// handler is the handler of name under cc: the executor's own tool, else
+// one the claim's producer brings.
+func (x *Executor) handler(cc agentrun.ControlContext, name models.ControlToolName) (Handler, bool) {
+	if h, ok := x.registry()[name]; ok {
+		return h, true
+	}
+	if cc.Binding == nil {
+		return nil, false
+	}
+	producer, ok := cc.Binding.Producer.(ProducerTools)
+	if !ok {
+		return nil, false
+	}
+	for _, tool := range producer.ControlTools() {
+		if tool.name == name {
+			return tool.handler, true
+		}
+	}
+	return nil, false
 }
 
 // UseTools makes x run tools when it was built without its own.
@@ -390,7 +417,7 @@ func (x *Executor) dispatch(ctx context.Context, cc agentrun.ControlContext, pha
 			return Result{}, fmt.Errorf("%w: settle needs the finished and applied step", ErrControlEntryState)
 		}
 	}
-	h, registered := x.registry()[name]
+	h, registered := x.handler(cc, name)
 	// Rule 1: a tool the claim does not offer. Kernel-origin calls are
 	// preauthorized by their producer.
 	if !registered || (cc.Origin != OriginKernel && !modelstep.ControlToolOffered(name, cc.Authority)) {
@@ -429,7 +456,7 @@ func (x *Executor) Resume(ctx context.Context, cc agentrun.ControlContext) (Resu
 	if cc.Entry.State != models.ToolEntryAwaitingChild && cc.Entry.State != models.ToolEntryAwaitingEvent {
 		return Resume{}, fmt.Errorf("%w: resume of %s in state %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
 	}
-	h, ok := x.registry()[name]
+	h, ok := x.handler(cc, name)
 	if !ok {
 		return Resume{}, fmt.Errorf("control tool %s has no handler", name)
 	}

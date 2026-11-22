@@ -25,8 +25,11 @@ type runbookForkHandler struct{}
 
 type runbookDelegateHandler struct{}
 
-// RunbookControlTools are the kernel-only control tools of runbook Runs.
-func RunbookControlTools() []control.Tool {
+var _ control.ProducerTools = (*RunbookStepProducer)(nil)
+
+// ControlTools are the kernel-only control tools of runbook Runs: the fork
+// and delegation nodes the producer calls.
+func (*RunbookStepProducer) ControlTools() []control.Tool {
 	return []control.Tool{
 		control.NewTool(models.ControlToolRunbookFork, runbookForkHandler{}),
 		control.NewTool(models.ControlToolRunbookDelegate, runbookDelegateHandler{}),

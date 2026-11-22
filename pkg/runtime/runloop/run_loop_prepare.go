@@ -14,7 +14,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
-	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 )
 
 // CatalogModelStepPreparer builds the model request of one step of a catalog
@@ -74,10 +73,11 @@ func NewCatalogModelStepPreparer(config CatalogModelStepPreparerConfig) *Catalog
 	return &CatalogModelStepPreparer{config: config, controls: loopControlRegistry()}
 }
 
-// loopControlRegistry is every control tool a Run loop runs: the built-in
-// tools and the kernel-only runbook tools.
+// loopControlRegistry is every control tool a Run loop offers the model:
+// the built-in tools. Kernel-only tools come with their producer
+// (control.ProducerTools) and are never offered.
 func loopControlRegistry() control.Registry {
-	return control.NewRegistry(append(control.BuiltinTools(), routine.RunbookControlTools()...)...)
+	return control.NewRegistry(control.BuiltinTools()...)
 }
 
 // ModelCredential is a copy of the model credential the prepared steps send
