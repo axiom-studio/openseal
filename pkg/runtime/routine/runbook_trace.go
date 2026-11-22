@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 )
 
 const (
@@ -313,6 +314,32 @@ func pendingRunbookStepTrace(checkpoint map[string]interface{}, stepID string) (
 		}
 	}
 	return 0, errors.New("pending Runbook trace entry is not found")
+}
+
+var _ agentrun.KernelStateReporter = (*RunbookStepProducer)(nil)
+
+// KernelStatePayload is the activity payload of an applied runbook step: the
+// step the runbook is at and the trace entries the step added or changed.
+func (*RunbookStepProducer) KernelStatePayload(before, after map[string]interface{}) map[string]interface{} {
+	payload := map[string]interface{}{}
+	if current := runbookCurrentStep(after); current != "" {
+		payload["runbookStep"] = current
+	}
+	if delta := RunbookTraceDelta(before, after); len(delta) > 0 {
+		payload["runbookTraceDelta"] = delta
+	}
+	return payload
+}
+
+// runbookCurrentStep is the current runbook step named by the producer's
+// kernel state.
+func runbookCurrentStep(state map[string]interface{}) string {
+	runbookState, ok := state["runbook"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	current, _ := runbookState["current"].(string)
+	return strings.TrimSpace(current)
 }
 
 func RunbookTraceDelta(before, after map[string]interface{}) []RunbookStepTrace {

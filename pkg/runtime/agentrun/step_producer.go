@@ -20,6 +20,15 @@ type StepProducer interface {
 	Produce(ctx context.Context, in StepInput) (StepOutput, error)
 }
 
+// KernelStateReporter is a deterministic StepProducer whose kernel state the
+// Run's activity shows: the loop adds KernelStatePayload to the payload of
+// each applied step that carries kernel state.
+type KernelStateReporter interface {
+	// KernelStatePayload describes a step that moved the kernel state from
+	// before (the Run's checkpoint) to after; empty adds nothing.
+	KernelStatePayload(before, after map[string]interface{}) map[string]interface{}
+}
+
 type StepMode string
 
 const (

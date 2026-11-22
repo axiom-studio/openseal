@@ -15,7 +15,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
-	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
 )
@@ -356,11 +355,10 @@ func (d *drive) fillStepApplication(req *runtimeactivity.RunTransitionRequest, r
 	}
 	if st.kernelState != nil {
 		req.Checkpoint = st.kernelState
-		if current := runbookCurrentStep(st.kernelState); current != "" {
-			req.Payload["runbookStep"] = current
-		}
-		if delta := routine.RunbookTraceDelta(run.Checkpoint, st.kernelState); len(delta) > 0 {
-			req.Payload["runbookTraceDelta"] = delta
+		if reporter, ok := d.binding.Producer.(agentrun.KernelStateReporter); ok {
+			for name, value := range reporter.KernelStatePayload(run.Checkpoint, st.kernelState) {
+				req.Payload[name] = value
+			}
 		}
 	}
 	if req.Summary == "" {
@@ -389,17 +387,6 @@ func subtractCompactionUsage(usage, compaction models.TurnUsage) models.TurnUsag
 	usage.OutputTokens = max(usage.OutputTokens-compaction.OutputTokens, 0)
 	usage.Cost = max(usage.Cost-compaction.Cost, 0)
 	return usage
-}
-
-// runbookCurrentStep is the current runbook step named by a deterministic
-// producer's kernel state.
-func runbookCurrentStep(state map[string]interface{}) string {
-	runbookState, ok := state["runbook"].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	current, _ := runbookState["current"].(string)
-	return strings.TrimSpace(current)
 }
 
 func (d *drive) reloadRun(ctx context.Context) (*models.AgentRun, error) {
