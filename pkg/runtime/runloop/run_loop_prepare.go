@@ -55,7 +55,7 @@ type CatalogModelStepPreparerConfig struct {
 	// media section and makes the renderer resolve image bytes.
 	ImageInput bool
 	// RoutineScript is the routine_script section text when the Run executes
-	// a pinned routine command (run_loop_routine_script.go), "" otherwise.
+	// a pinned routine command (routine/routine_script_claim.go), "" otherwise.
 	RoutineScript string
 	Capabilities  modelstep.CapabilitySetConfig
 	// Render sources for image parts; ImageInput above is authoritative.

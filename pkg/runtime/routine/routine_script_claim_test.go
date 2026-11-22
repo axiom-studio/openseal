@@ -1,4 +1,4 @@
-package runloop
+package routine
 
 import (
 	"context"
@@ -13,14 +13,17 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
-	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
+
+func loopScriptDigest(seed string) string {
+	return "sha256:" + strings.Repeat(seed, 64)[:64]
+}
 
 func routineScriptRun() *models.AgentRun {
 	return &models.AgentRun{ID: "occurrence", Scope: models.Scope{Kind: "tenant", ID: "one"}, AssignedAgentID: "agent", Context: map[string]interface{}{
 		models.ConversationRunConversationIDContextKey: "chat",
-		routine.ScriptContextKey: map[string]interface{}{"path": "scripts/weekly.py", "digest": loopScriptDigest("a"), "filesVersion": float64(2),
+		ScriptContextKey: map[string]interface{}{"path": "scripts/weekly.py", "digest": loopScriptDigest("a"), "filesVersion": float64(2),
 			"command": "python3 scripts/weekly.py", "timeoutSeconds": float64(120)},
 	}}
 }
@@ -86,7 +89,7 @@ func TestLoopRoutineScriptPreparesPinsAndSection(t *testing.T) {
 		t.Fatalf("nil Run = %#v, %v", routine, err)
 	}
 	invalid := routineScriptRun()
-	invalid.Context[routine.ScriptContextKey] = map[string]interface{}{"path": "scripts/weekly.py", "command": "rm -rf /"}
+	invalid.Context[ScriptContextKey] = map[string]interface{}{"path": "scripts/weekly.py", "command": "rm -rf /"}
 	if _, err := PrepareRoutineScript(invalid, tools); err == nil || !strings.Contains(err.Error(), "invalid") {
 		t.Fatalf("invalid script err = %v", err)
 	}

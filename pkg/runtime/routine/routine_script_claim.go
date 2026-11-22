@@ -1,4 +1,4 @@
-package runloop
+package routine
 
 import (
 	"encoding/json"
@@ -11,11 +11,10 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
-	"github.com/axiom-studio/openseal/pkg/runtime/routine"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
-// Script routines on the loop. A script routine's occurrence is an ordinary
+// Script routines on the run loop. A script routine's occurrence is an ordinary
 // agent Run: the model runs the approved script itself with
 // workspace_run_command and then reports. Two kernel guards keep it to the
 // approved script:
@@ -57,11 +56,11 @@ func PrepareRoutineScript(run *models.AgentRun, hostTools []modelstep.HostToolSp
 	if run == nil || run.Context == nil {
 		return nil, nil
 	}
-	raw, ok := run.Context[routine.ScriptContextKey]
+	raw, ok := run.Context[ScriptContextKey]
 	if !ok || raw == nil {
 		return nil, nil
 	}
-	script, err := routine.DecodeScript(raw)
+	script, err := DecodeScript(raw)
 	if err != nil {
 		return nil, fmt.Errorf("routine script in Run context is invalid: %w", err)
 	}

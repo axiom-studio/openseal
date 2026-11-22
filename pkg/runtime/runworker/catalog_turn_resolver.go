@@ -357,7 +357,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 		chat = r.workspace(ctx)
 	}
 	hostTools := modelstep.HostToolSpecs(chat)
-	script, err := runloop.PrepareRoutineScript(r.run, hostTools)
+	script, err := routine.PrepareRoutineScript(r.run, hostTools)
 	if err != nil {
 		return nil, err
 	}

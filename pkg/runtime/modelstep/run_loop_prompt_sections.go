@@ -17,7 +17,7 @@ const (
 	// The binding can take images.
 	LoopSectionMedia = "media"
 	// A pinned routine command; the text is the routine-script rules from
-	// runloop/run_loop_routine_script.go.
+	// routine/routine_script_claim.go.
 	LoopSectionRoutineScript = "routine_script"
 )
 

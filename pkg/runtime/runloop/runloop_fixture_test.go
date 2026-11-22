@@ -15,7 +15,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -35,10 +34,6 @@ const loopModelName = "fake-model"
 // loopGovernedToolPrefix starts every governed tool name the model is offered.
 // The tests spell it out so they pin the names the model sees.
 const loopGovernedToolPrefix = "action_"
-
-func loopScriptDigest(seed string) string {
-	return "sha256:" + strings.Repeat(seed, 64)[:64]
-}
 
 var loopSessionScope = models.Scope{Kind: "org", ID: "o1"}
 
