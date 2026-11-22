@@ -11,6 +11,13 @@ import (
 const unfinishedSkillActionSQL = "'ready','waiting_for_approval','running','compensating'"
 const UnfinishedSkillRunSQL = "'queued','planning','running','paused','sleeping','waiting_for_dependency','waiting_for_agent','waiting_for_approval','waiting_for_event'"
 
+// A Run's earlier receipts hold an upgrade only while it executes a step:
+// that step may still act on tools resolved from the old binding. A parked
+// Run (waiting for a reply, an approval, an event or a timer) resolves its
+// tools again when it resumes, and the old version is refused by then, so
+// holding the upgrade for it only stops every other Run of the Agent.
+const ExecutingSkillRunSQL = "'planning','running'"
+
 // Indexed EXISTS probes inspect metadata only. The receipt probe begins
 // with active Runs, so completed receipt history does not become a growing
 // payload scan on every reconciliation pass.
@@ -36,7 +43,7 @@ func SkillRuntimeUsageQuery(filter models.SkillRuntimeUsageFilter, actions, runs
 		args = append(args, filter.DeploymentID, filter.BindingID)
 	}
 	first := "SELECT 1 FROM " + actions + " a WHERE " + identity() + " AND a.status IN (" + unfinishedSkillActionSQL + ") LIMIT 1"
-	second := "SELECT 1 FROM " + runs + " r WHERE r.scope_kind=" + parameter(1) + " AND r.scope_id=" + parameter(2) + " AND r.status IN (" + UnfinishedSkillRunSQL + ") AND EXISTS (SELECT 1 FROM " + actions + " a WHERE " + identity() + " AND a.run_id=r.id AND a.status='succeeded' LIMIT 1) LIMIT 1"
+	second := "SELECT 1 FROM " + runs + " r WHERE r.scope_kind=" + parameter(1) + " AND r.scope_id=" + parameter(2) + " AND r.status IN (" + ExecutingSkillRunSQL + ") AND EXISTS (SELECT 1 FROM " + actions + " a WHERE " + identity() + " AND a.run_id=r.id AND a.status='succeeded' LIMIT 1) LIMIT 1"
 	dependency := "SELECT 1 FROM " + skillRuntimeDependencyTable(runs) + " d WHERE d.scope_kind=" + parameter(1) + " AND d.scope_id=" + parameter(2) + " AND d.skill_id=" + parameter(3) + " AND d.skill_version=" + parameter(4)
 	if filter.DeploymentID != "" {
 		dependency += " AND d.deployment_id IN (" + parameter(5) + ",'')"

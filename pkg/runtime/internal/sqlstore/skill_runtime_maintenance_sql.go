@@ -20,7 +20,7 @@ func LogicalSkillRuntimeUsage(ctx context.Context, q RowQuerier, scope models.Sc
 		return "?"
 	}
 	identity := "a.scope_kind=" + parameter(1) + " AND a.scope_id=" + parameter(2) + " AND a.skill_id=" + parameter(3)
-	query := "SELECT EXISTS (SELECT 1 FROM " + actions + " a WHERE " + identity + " AND a.status IN (" + unfinishedSkillActionSQL + ") LIMIT 1) OR EXISTS (SELECT 1 FROM " + runs + " r WHERE r.scope_kind=" + parameter(1) + " AND r.scope_id=" + parameter(2) + " AND r.status IN (" + UnfinishedSkillRunSQL + ") AND EXISTS (SELECT 1 FROM " + actions + " a WHERE " + identity + " AND a.run_id=r.id AND a.status='succeeded' LIMIT 1) LIMIT 1)"
+	query := "SELECT EXISTS (SELECT 1 FROM " + actions + " a WHERE " + identity + " AND a.status IN (" + unfinishedSkillActionSQL + ") LIMIT 1) OR EXISTS (SELECT 1 FROM " + runs + " r WHERE r.scope_kind=" + parameter(1) + " AND r.scope_id=" + parameter(2) + " AND r.status IN (" + ExecutingSkillRunSQL + ") AND EXISTS (SELECT 1 FROM " + actions + " a WHERE " + identity + " AND a.run_id=r.id AND a.status='succeeded' LIMIT 1) LIMIT 1)"
 	args := []interface{}{scope.Kind, scope.ID, skillID}
 	if !postgres {
 		args = append(args, scope.Kind, scope.ID, scope.Kind, scope.ID, skillID)

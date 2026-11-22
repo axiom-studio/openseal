@@ -39,10 +39,14 @@ func TestSkillUpgradeDrainQueriesUseIndexedMetadataWithoutPayloads(t *testing.T)
 		if selected.BindingID != "" {
 			activeIndex = "idx_action_calls_skill_binding_active"
 		}
-		for _, index := range []string{activeIndex, "idx_agent_runs_skill_runtime_active", "idx_action_calls_skill_run_receipt"} {
+		for _, index := range []string{activeIndex, "idx_action_calls_skill_run_receipt"} {
 			if !strings.Contains(plan, index) {
 				t.Fatalf("missing %s: %s", index, plan)
 			}
+		}
+		// Only executing Runs hold the drain; any status index bounds that probe.
+		if !strings.Contains(plan, "SEARCH r USING") {
+			t.Fatalf("executing Run probe is not an index search: %s", plan)
 		}
 		if strings.Contains(plan, "SCAN a") || strings.Contains(plan, "SCAN r") {
 			t.Fatalf("unbounded action/run scan: %s", plan)

@@ -309,7 +309,9 @@ func TestSkillRuntimeUsageStatusesAcrossStores(t *testing.T) {
 				call.Status = status
 				seedSkillUsageMetadata(t, fixture, run, call)
 				unfinished := status == models.ActionCallStatusReady || status == models.ActionCallStatusWaitingApproval || status == models.ActionCallStatusRunning || status == models.ActionCallStatusCompensating
-				want := unfinished || (status == models.ActionCallStatusSucceeded && !models.IsTerminalAgentRunStatus(runStatus))
+				// A parked Run resolves its tools again on resume, so only an
+				// executing Run's receipts hold the upgrade.
+				want := unfinished || (status == models.ActionCallStatusSucceeded && runStatus == models.AgentRunStatusRunning)
 				busy, err := store.(models.SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), filter)
 				if err != nil || busy != want {
 					t.Fatalf("%s action / %s run: busy=%v want=%v error=%v", status, runStatus, busy, want, err)
