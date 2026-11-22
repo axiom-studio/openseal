@@ -8,7 +8,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
-	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/skillbinding"
 )
@@ -17,20 +16,44 @@ import (
 // the pending card a terminal call opened, the approval park at step end, and
 // the re-plan after a failed park CAS. The governed executor embeds it.
 type governedParker struct {
-	actions models.ActionStore
-	// runs reads (and at the deadline cancels) try_agent trial children.
-	runs        models.RunCommandStore
+	actions     models.ActionStore
 	setups      models.SkillSetupRequestStore
 	credentials models.CredentialRequestStore
 	approvals   *action.ApprovalCoordinator
+	children    []ChildRunCall
 	now         func() time.Time
 }
 
-func newGovernedParker(store models.KernelStore, approvals *action.ApprovalCoordinator, now func() time.Time) governedParker {
+// ChildRunCall is a governed action whose succeeded call starts a child Run
+// that answers it, like try_agent: the parent waits on the child, and the
+// child's reply is the tool result. The feature that owns the action
+// implements it; the wiring passes it in GovernedToolExecutorConfig.
+type ChildRunCall interface {
+	// Claims reports whether call is one of this action's succeeded calls.
+	Claims(call *models.ActionCall) bool
+	// Wait is the card the parent parks on while the child runs, or nil
+	// when it must not park (the child ended or its deadline passed).
+	Wait(ctx context.Context, call *models.ActionCall) (*models.WakeCondition, string, error)
+	// Output is the tool output of a settled call; settled are the
+	// interventions the resume consumed.
+	Output(ctx context.Context, run *models.AgentRun, call *models.ActionCall, settled []models.AgentRunIntervention) (map[string]interface{}, error)
+}
+
+func newGovernedParker(store models.KernelStore, approvals *action.ApprovalCoordinator, now func() time.Time, children []ChildRunCall) governedParker {
 	if now == nil {
 		now = time.Now
 	}
-	return governedParker{actions: store, runs: store, setups: store, credentials: store, approvals: approvals, now: now}
+	return governedParker{actions: store, setups: store, credentials: store, approvals: approvals, children: children, now: now}
+}
+
+// childRunCall is the ChildRunCall that claims call, or nil.
+func (p *governedParker) childRunCall(call *models.ActionCall) ChildRunCall {
+	for _, child := range p.children {
+		if child.Claims(call) {
+			return child
+		}
+	}
+	return nil
 }
 
 // GovernedParkPlan is the step-end park of a Run's governed tool entries.
@@ -60,7 +83,7 @@ const governedHumanInterventionWakeType = "human_intervention"
 
 // governedCardWait returns the pending card the terminal call opened, if
 // any: a human intervention, a credential request, a connect app card, a
-// running try_agent trial, or a connect account card of a parked call. Every check reads the durable
+// running child Run (ChildRunCall), or a connect account card of a parked call. Every check reads the durable
 // record, so a card settled before this point never parks the Run.
 func (p *governedParker) governedCardWait(ctx context.Context, run *models.AgentRun, call *models.ActionCall) (*models.WakeCondition, string, error) {
 	if call == nil {
@@ -82,8 +105,8 @@ func (p *governedParker) governedCardWait(ctx context.Context, run *models.Agent
 		if request := skillbinding.PendingConnectAppRequestFromAction(ctx, p.setups, call); request != nil {
 			return &models.WakeCondition{Type: skillbinding.ConnectAppWakeType, Reference: request.ID}, "Waiting for the user to connect " + request.SkillName, nil
 		}
-		if agentbuilder.IsAgentTrialCall(call) {
-			return p.agentTrialWait(ctx, call)
+		if child := p.childRunCall(call); child != nil {
+			return child.Wait(ctx, call)
 		}
 	case models.ActionCallStatusFailed:
 		if request := skillbinding.PendingConnectAccountRequestFromAction(ctx, p.setups, call); request != nil {

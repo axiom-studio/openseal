@@ -18,7 +18,8 @@ func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
 	f := agentbuildertest.NewDispatchFixture(t)
 	call, child := agentbuildertest.StartTrial(t, f, "trial-call")
 	now := child.CreatedAt.Add(time.Minute)
-	parker := newGovernedParker(f.Store, nil, func() time.Time { return now })
+	clock := func() time.Time { return now }
+	parker := newGovernedParker(f.Store, nil, clock, []ChildRunCall{mustTrialCalls(t, f.Store, clock)})
 
 	wake, summary, err := parker.governedCardWait(context.Background(), f.Run, call)
 	if err != nil {
@@ -141,7 +142,7 @@ func TestAgentTrialTimerWakeCancelsRunningChild(t *testing.T) {
 func settleAgentTrialCall(t *testing.T, f *agentbuildertest.TrialFinalizerFixture, parent *models.AgentRun, settled []models.AgentRunIntervention, now time.Time) GovernedToolOutcome {
 	t.Helper()
 	clock := func() time.Time { return now }
-	executor := &GovernedToolExecutor{governedParker: newGovernedParker(f.Store, nil, clock), store: f.Store, now: clock}
+	executor := &GovernedToolExecutor{governedParker: newGovernedParker(f.Store, nil, clock, []ChildRunCall{mustTrialCalls(t, f.Store, clock)}), store: f.Store, now: clock}
 	call := GovernedToolCall{Run: parent, ToolCallID: "tool-1", chain: &governedRunChain{known: parent}}
 	outcome, err := executor.settle(context.Background(), call, f.Call, settled, false)
 	if err != nil {
@@ -165,4 +166,13 @@ func agentTrialResultOutput(t *testing.T, outcome GovernedToolOutcome) map[strin
 		t.Fatal(err)
 	}
 	return value.Output
+}
+
+func mustTrialCalls(t *testing.T, runs models.RunCommandStore, now func() time.Time) *agentbuilder.TrialCalls {
+	t.Helper()
+	trials, err := agentbuilder.NewTrialCalls(runs, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return trials
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/activity"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	runtimeconversation "github.com/axiom-studio/openseal/pkg/runtime/conversation"
@@ -433,8 +434,13 @@ func (f *Fixture) Build() {
 	f.Actions = action.NewCoordinator(f.Store, f.Store, f.Catalog, policy, nil, clock)
 	f.Approve = action.NewApprovalCoordinator(f.Store, f.Store, action.ApprovalAuthorizerFunc(func(context.Context, models.ApprovalPrincipal, *models.ApprovalCheckpoint) error { return nil }), clock)
 	f.Executor = action.NewWorker(f.Store, f.Catalog, f.Config.credentials, action.DispatcherFunc(f.Dispatch.Dispatch), clock)
+	trials, err := agentbuilder.NewTrialCalls(f.Store, f.Clock.Now)
+	if err != nil {
+		f.T.Fatal(err)
+	}
 	governed, err := runloop.NewGovernedToolExecutor(runloop.GovernedToolExecutorConfig{
 		Actions: f.Actions, Approvals: f.Approve, Worker: f.Executor, Store: f.Store, Now: f.Clock.Now,
+		ChildRunCalls: []runloop.ChildRunCall{trials},
 	})
 	if err != nil {
 		f.T.Fatal(err)

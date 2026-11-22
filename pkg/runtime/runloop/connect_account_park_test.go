@@ -70,7 +70,7 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 	if stored.Status != models.AgentRunStatusRunning || stored.FailureExplanation != nil {
 		t.Fatalf("a parked call changed its Run: %s %#v", stored.Status, stored.FailureExplanation)
 	}
-	parker := newGovernedParker(store, nil, nil)
+	parker := newGovernedParker(store, nil, nil, nil)
 	wake, summary, err := parker.governedCardWait(context.Background(), stored, call)
 	if err != nil || wake == nil || wake.Type != models.ConnectAccountWakeType || wake.Reference != card.ID || summary != skillbinding.ConnectAccountWaitSummary(card) {
 		t.Fatalf("card wait = %#v %q %v", wake, summary, err)

@@ -293,7 +293,7 @@ func TestPlanParkSupersedesHeldApprovalsOnNewMessage(t *testing.T) {
 		firstCall, first := f.ProposeLoopApproval("first", actiontest.LoopApprovalOptions{})
 		secondCall, second := f.ProposeLoopApproval("second", actiontest.LoopApprovalOptions{})
 		at := f.Now.Add(time.Second)
-		p := newGovernedParker(store, f.ApprovalCoordinator(at), func() time.Time { return at })
+		p := newGovernedParker(store, f.ApprovalCoordinator(at), func() time.Time { return at }, nil)
 		before := f.CurrentRun()
 		run := withSteeringMessage(before, "message-1", at)
 		cardCall := &models.ActionCall{ID: "card"}
@@ -325,7 +325,7 @@ func TestPlanParkKeepsApprovalCreatedAfterMessage(t *testing.T) {
 	actiontest.RunLoopStoreScenario(t, func(t *testing.T, store models.KernelStore) {
 		f := actiontest.NewLoopStore(t, store)
 		call, approval := f.ProposeLoopApproval("later", actiontest.LoopApprovalOptions{})
-		p := newGovernedParker(store, f.ApprovalCoordinator(f.Now), nil)
+		p := newGovernedParker(store, f.ApprovalCoordinator(f.Now), nil, nil)
 		run := withSteeringMessage(f.CurrentRun(), "message-1", f.Now) // not before: same instant
 		plan, err := p.PlanPark(f.Ctx, run, []GovernedToolOutcome{governedApprovalOutcome("tool-later", call, approval)})
 		if err != nil {
@@ -356,7 +356,7 @@ func TestReplanParkSupersedesHeldApprovalOnNewMessage(t *testing.T) {
 		f := actiontest.NewLoopStore(t, store)
 		call, approval := f.ProposeLoopApproval("held", actiontest.LoopApprovalOptions{})
 		at := f.Now.Add(time.Second)
-		p := newGovernedParker(store, f.ApprovalCoordinator(at), func() time.Time { return at })
+		p := newGovernedParker(store, f.ApprovalCoordinator(at), func() time.Time { return at }, nil)
 		// A host-tool entry with no action call is not the governed executor's.
 		other := &models.SessionEntry{Type: models.SessionEntryTool, State: models.ToolEntryAwaitingEvent, ToolCallID: "tool-host", Tool: &models.ToolEntry{Name: "host", Wait: &models.ToolEntryWait{EventWaitID: "x"}}}
 		run := withSteeringMessage(f.CurrentRun(), "message-1", at)
@@ -382,7 +382,7 @@ func TestReplanParkNilWhenApprovalDecided(t *testing.T) {
 		secondCall, second := f.ProposeLoopApproval("second", actiontest.LoopApprovalOptions{})
 		at := f.Now.Add(time.Second)
 		coordinator := f.ApprovalCoordinator(at)
-		p := newGovernedParker(store, coordinator, func() time.Time { return at })
+		p := newGovernedParker(store, coordinator, func() time.Time { return at }, nil)
 		entries := []*models.SessionEntry{awaitingApprovalEntry("tool-first", firstCall, first.ID), awaitingApprovalEntry("tool-second", secondCall, second.ID)}
 
 		plan, err := p.ReplanPark(f.Ctx, f.CurrentRun(), entries)

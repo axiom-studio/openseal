@@ -2,6 +2,7 @@ package openseal
 
 import (
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/runloop"
 )
@@ -32,9 +33,13 @@ func (e *Engine) buildGovernedToolExecutor() error {
 		return nil
 	}
 	worker.SetCredentialAvailabilityChecker(e.credentialAvailability)
+	trials, err := agentbuilder.NewTrialCalls(e.store, nil)
+	if err != nil {
+		return err
+	}
 	executor, err := runloop.NewGovernedToolExecutor(runloop.GovernedToolExecutorConfig{
 		Actions: e.actions, Approvals: e.approvals, Worker: worker, Store: e.store,
-		Logger: e.logger,
+		Logger: e.logger, ChildRunCalls: []runloop.ChildRunCall{trials},
 	})
 	if err != nil {
 		return err

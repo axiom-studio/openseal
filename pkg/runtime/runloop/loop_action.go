@@ -12,7 +12,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
 	runtimeaction "github.com/axiom-studio/openseal/pkg/runtime/action"
-	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"go.uber.org/zap"
@@ -91,7 +90,10 @@ type GovernedToolExecutorConfig struct {
 	Observer ActionProposalObserver
 	// Logger reports observer failures (optional).
 	Logger *zap.SugaredLogger
-	Now    func() time.Time
+	// ChildRunCalls are the actions whose calls the parent waits on as a
+	// child Run (agentbuilder.TrialCalls for try_agent).
+	ChildRunCalls []ChildRunCall
+	Now           func() time.Time
 }
 
 // GovernedToolExecutor proposes, executes inline and resumes the governed
@@ -129,7 +131,7 @@ func NewGovernedToolExecutor(config GovernedToolExecutorConfig) (*GovernedToolEx
 		logger = zap.NewNop().Sugar()
 	}
 	return &GovernedToolExecutor{
-		governedParker: newGovernedParker(config.Store, config.Approvals, now),
+		governedParker: newGovernedParker(config.Store, config.Approvals, now, config.ChildRunCalls),
 		actions:        config.Actions, worker: config.Worker, store: config.Store,
 		observer: config.Observer, logger: logger, now: now,
 	}, nil
@@ -410,9 +412,9 @@ func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall
 	if wake != nil {
 		return governedCardOutcome(call.ToolCallID, current, wake, summary), nil
 	}
-	if agentbuilder.IsAgentTrialCall(current) {
-		// The trial's reply is the tool result, not the started-trial output.
-		output, err := x.agentTrialOutput(ctx, run, current, settled)
+	if child := x.childRunCall(current); child != nil {
+		// The child's reply is the tool result, not the started-child output.
+		output, err := child.Output(ctx, run, current, settled)
 		if err != nil {
 			return GovernedToolOutcome{}, err
 		}

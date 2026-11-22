@@ -278,3 +278,107 @@ func ChildRunAnswer(child *models.AgentRun) string {
 	}
 	return ""
 }
+
+// TrialCalls is how the run loop waits on try_agent calls: the parent parks
+// on the agent_trial card while the child runs, and the tool result is the
+// child's reply. It is the run loop's ChildRunCall for try_agent.
+type TrialCalls struct {
+	runs models.RunCommandStore
+	now  func() time.Time
+}
+
+// NewTrialCalls reads (and at the deadline cancels) trial children in runs;
+// now nil is time.Now.
+func NewTrialCalls(runs models.RunCommandStore, now func() time.Time) (*TrialCalls, error) {
+	if runs == nil {
+		return nil, errors.New("try_agent trial calls need a run store")
+	}
+	if now == nil {
+		now = time.Now
+	}
+	return &TrialCalls{runs: runs, now: now}, nil
+}
+
+// Claims reports a succeeded try_agent call.
+func (t *TrialCalls) Claims(call *models.ActionCall) bool { return IsAgentTrialCall(call) }
+
+// Wait is the agent_trial card of a succeeded try_agent call while its
+// child runs and its deadline has not passed. Past the deadline it returns
+// nil: the resume cancels the child and reports timed_out.
+func (t *TrialCalls) Wait(ctx context.Context, call *models.ActionCall) (*models.WakeCondition, string, error) {
+	childID := AgentTrialCallRunID(call)
+	if childID == "" {
+		return nil, "", nil
+	}
+	child, err := AgentTrialChild(ctx, t.runs, call.Scope, childID)
+	if err != nil || child == nil || models.IsTerminalAgentRunStatus(child.Status) {
+		return nil, "", err
+	}
+	deadline := AgentTrialDeadline(child)
+	if !t.now().Before(deadline) {
+		return nil, "", nil
+	}
+	return &models.WakeCondition{Type: agentrun.AgentTrialWakeType, Reference: child.ID, WakeAt: &deadline}, AgentTrialWaitSummary, nil
+}
+
+// Output is the tool output of a settled try_agent call: the receipt the
+// finalizer delivered, else the child read directly (the finalizer missed
+// it). A child still running past its deadline is canceled and reported
+// timed_out.
+func (t *TrialCalls) Output(ctx context.Context, run *models.AgentRun, call *models.ActionCall, settled []models.AgentRunIntervention) (map[string]interface{}, error) {
+	childID := AgentTrialCallRunID(call)
+	if childID == "" {
+		return nil, fmt.Errorf("try_agent call %s has no trial Run", call.ID)
+	}
+	if receipt := AgentTrialReceiptFor(call.ID, childID, settled); receipt != nil {
+		return AgentTrialToolOutput(*receipt), nil
+	}
+	if run != nil {
+		if receipt := AgentTrialReceiptFor(call.ID, childID, run.PendingInterventions); receipt != nil {
+			return AgentTrialToolOutput(*receipt), nil
+		}
+	}
+	child, err := AgentTrialChild(ctx, t.runs, call.Scope, childID)
+	if err != nil {
+		return nil, err
+	}
+	if child == nil {
+		return AgentTrialToolOutput(models.AgentTrialReceipt{RunID: childID, Status: AgentTrialStatusFailed, FailureMessage: "The trial Run is missing."}), nil
+	}
+	if !models.IsTerminalAgentRunStatus(child.Status) {
+		ended, canceled, err := t.cancel(ctx, child)
+		if err != nil {
+			return nil, err
+		}
+		if canceled {
+			return AgentTrialToolOutput(AgentTrialTimedOut(child.ID)), nil
+		}
+		child = ended
+	}
+	return AgentTrialToolOutput(AgentTrialReceiptFromRun(child, t.now())), nil
+}
+
+// cancel cancels a trial child that outlived its deadline; canceled reports
+// that this call stopped it. A child that ended meanwhile is returned as it
+// ended.
+func (t *TrialCalls) cancel(ctx context.Context, child *models.AgentRun) (*models.AgentRun, bool, error) {
+	result, err := agentrun.NewRunCommandService(t.runs, models.WithClock(t.now)).CommandAgentRun(ctx, agentrun.CommandRequest{
+		Scope: child.Scope, RunID: child.ID, ExpectedRevision: child.Revision, Kind: agentrun.CommandCancel,
+		Actor:   models.ActivityActor{Type: "runtime", ID: "agent-trial"},
+		Summary: "Canceled: the trial did not answer in time", Visibility: models.ActivityVisibilityScope,
+	})
+	if err == nil && result != nil && result.Run != nil && result.Run.Status == models.AgentRunStatusCanceled {
+		return result.Run, true, nil
+	}
+	reloaded, getErr := AgentTrialChild(ctx, t.runs, child.Scope, child.ID)
+	if getErr != nil {
+		return nil, false, errors.Join(err, getErr)
+	}
+	if reloaded != nil && models.IsTerminalAgentRunStatus(reloaded.Status) {
+		return reloaded, false, nil
+	}
+	if err == nil {
+		err = fmt.Errorf("trial Run %s did not stop", child.ID)
+	}
+	return nil, false, err
+}
