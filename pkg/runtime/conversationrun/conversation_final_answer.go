@@ -394,8 +394,6 @@ func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, 
 	return count, nil
 }
 
-const FinalModeSpoken agentrun.FinalAnswerMode = "spoken" // conversation responseMode == "spoken"
-
 // FinalOutputSummaryKey is the final output field that holds the answer text.
 const FinalOutputSummaryKey = "summary"
 

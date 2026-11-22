@@ -11,6 +11,7 @@ type FinalAnswerMode string
 const (
 	FinalModeDefault  FinalAnswerMode = "default"
 	FinalModeDecision FinalAnswerMode = "decision" // Run.Context[AgentRequestInboxContextKey]
+	FinalModeSpoken   FinalAnswerMode = "spoken"   // conversation responseMode == "spoken"
 )
 
 // ControlAuthority is resolved once per claim

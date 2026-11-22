@@ -12,7 +12,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/kerneltest"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
@@ -100,7 +99,7 @@ func TestControlToolSpecsStableOrderAndPresence(t *testing.T) {
 		}},
 		{"zero authority offers only the final answer", func(a *agentrun.ControlAuthority) { *a = agentrun.ControlAuthority{} }, []string{"turn_final_answer"}},
 		{"spoken and evidence keep the default final tool", func(a *agentrun.ControlAuthority) {
-			*a = agentrun.ControlAuthority{FinalMode: conversationrun.FinalModeSpoken, CanReact: true}
+			*a = agentrun.ControlAuthority{FinalMode: agentrun.FinalModeSpoken, CanReact: true}
 		}, []string{"turn_final_answer", "react"}},
 		{"voice call hides task start", func(a *agentrun.ControlAuthority) { a.VoiceCallStarted = true }, []string{
 			"turn_final_answer", "turn_report_progress", "wait", "ask_user", "react",

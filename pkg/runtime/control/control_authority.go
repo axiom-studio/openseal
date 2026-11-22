@@ -126,7 +126,7 @@ func controlFinalMode(run *models.AgentRun) agentrun.FinalAnswerMode {
 		return agentrun.FinalModeDecision
 	}
 	if run.Context["responseMode"] == "spoken" {
-		return conversationrun.FinalModeSpoken
+		return agentrun.FinalModeSpoken
 	}
 	return agentrun.FinalModeDefault
 }

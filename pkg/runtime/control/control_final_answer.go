@@ -172,7 +172,7 @@ func finalFieldOffered(field string, a agentrun.ControlAuthority) bool {
 	case "report":
 		return mode == agentrun.FinalModeDefault
 	case "silent":
-		return mode == conversationrun.FinalModeSpoken || mode == agentrun.FinalModeDefault && a.RoutineOccurrence
+		return mode == agentrun.FinalModeSpoken || mode == agentrun.FinalModeDefault && a.RoutineOccurrence
 	case "files":
 		return mode == agentrun.FinalModeDefault
 	}
@@ -186,7 +186,7 @@ func finalRequiredFields(a agentrun.ControlAuthority) []string {
 		required = append(required, "appliedSkillRefs")
 	}
 	switch a.EffectiveFinalMode() {
-	case conversationrun.FinalModeSpoken:
+	case agentrun.FinalModeSpoken:
 		required = append(required, "silent")
 	}
 	return required
@@ -194,7 +194,7 @@ func finalRequiredFields(a agentrun.ControlAuthority) []string {
 
 func finalAnswerSchema(a agentrun.ControlAuthority) map[string]interface{} {
 	answer := map[string]interface{}{"type": "string", "description": "The user-facing answer."}
-	if a.EffectiveFinalMode() == conversationrun.FinalModeSpoken {
+	if a.EffectiveFinalMode() == agentrun.FinalModeSpoken {
 		answer["description"] = "Only the words to speak; empty when silent is true."
 	}
 	properties := map[string]interface{}{"answer": answer}
@@ -234,7 +234,7 @@ func finalAnswerSchema(a agentrun.ControlAuthority) map[string]interface{} {
 	}
 	if finalFieldOffered("silent", a) {
 		description := "Write before answer. True when ambient speech needs no response; answer must then be empty. Do not announce silence."
-		if a.EffectiveFinalMode() != conversationrun.FinalModeSpoken {
+		if a.EffectiveFinalMode() != agentrun.FinalModeSpoken {
 			description = "Set true, with an empty answer, when nothing needs the person's attention; nothing is posted."
 		}
 		properties["silent"] = map[string]interface{}{"type": "boolean", "description": description}
@@ -414,7 +414,7 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 	// something always reports it.
 	if d.Args.Silent {
 		routine := mode == agentrun.FinalModeDefault && cc.Authority.RoutineOccurrence
-		if (mode != conversationrun.FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.sentVisual() ||
+		if (mode != agentrun.FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.sentVisual() ||
 			len(d.Args.Files) > 0 || len(d.Extra) > 0 {
 			message := "silent is only for a spoken reply that needs no response: leave answer empty and send no visual or files."
 			if routine {
@@ -829,7 +829,7 @@ func (x *Executor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContex
 	draft := &finalAnswerDraft{Args: finalAnswerArgs{Answer: trimmed}, PlainText: true}
 	// 4. Empty text.
 	if trimmed == "" {
-		if mode == conversationrun.FinalModeSpoken {
+		if mode == agentrun.FinalModeSpoken {
 			draft.Args.Silent = true
 			return x.acceptFinalAnswer(ctx, cc, draft)
 		}

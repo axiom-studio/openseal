@@ -38,7 +38,7 @@ type ConversationLoopAuthority struct {
 	ExternalChannelReply       bool // answer-preview streaming for connector chats
 	CanReact                   bool // react tool offered (true for every Agent chat Run)
 	ApprovalMode               models.ConversationApprovalMode
-	Spoken                     bool // the spoken system section; FinalModeSpoken comes from ResolveControlAuthority
+	Spoken                     bool // the spoken system section; agentrun.FinalModeSpoken comes from ResolveControlAuthority
 }
 
 // conversationLoopAuthority computes the §7 flags of an Agent chat Run.
@@ -74,7 +74,7 @@ func (r *TurnRunner) conversationLoopAuthority(ctx context.Context, run *models.
 func (a ConversationLoopAuthority) apply(authority agentrun.ControlAuthority) agentrun.ControlAuthority {
 	authority.CanAskUser = authority.CanAskUser && a.CanAskConversationQuestion
 	authority.CanReact = authority.CanReact && a.CanReact
-	if mode := authority.EffectiveFinalMode(); mode != agentrun.FinalModeDefault && mode != FinalModeSpoken {
+	if mode := authority.EffectiveFinalMode(); mode != agentrun.FinalModeDefault && mode != agentrun.FinalModeSpoken {
 		return authority
 	}
 	authority.ExternalChannelReply = authority.ExternalChannelReply || a.ExternalChannelReply

@@ -12,7 +12,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/control"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
-	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
@@ -299,7 +298,7 @@ func (p *CatalogModelStepPreparer) stream(ctx context.Context, binding *agentrun
 	stream := models.ModelStepStream{
 		AnswerPreview:        models.HasTurnAnswerPreview(ctx),
 		ExternalChannelReply: binding.Authority.ExternalChannelReply,
-		Spoken:               binding.Authority.EffectiveFinalMode() == conversationrun.FinalModeSpoken,
+		Spoken:               binding.Authority.EffectiveFinalMode() == agentrun.FinalModeSpoken,
 	}
 	for _, tool := range tools {
 		if tool.Name == string(models.ControlToolFinalAnswer) {
