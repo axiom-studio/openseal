@@ -24,7 +24,7 @@ func TestAgentBuilderCreatePreviewGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentbuildertest.AssertJSON(t, preview, `{
-		"skillId": "openseal.agents", "skillVersion": "1.6.0", "action": "create_agent",
+		"skillId": "openseal.agents", "skillVersion": "1.7.0", "action": "create_agent",
 		"risk": "write", "sideEffect": "write",
 		"resourceType": "agent_profile", "operation": "create_agent",
 		"agent": {
@@ -207,7 +207,7 @@ func TestAgentBuilderUpdatePreviewListsOnlyChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentbuildertest.AssertJSON(t, preview, `{
-		"skillId": "openseal.agents", "skillVersion": "1.6.0", "action": "update_agent",
+		"skillId": "openseal.agents", "skillVersion": "1.7.0", "action": "update_agent",
 		"risk": "write", "sideEffect": "write",
 		"resourceType": "agent_profile", "operation": "update_agent",
 		"agent": {"deploymentId": "researcher", "displayName": "Researcher", "purpose": "Research competitors weekly.",

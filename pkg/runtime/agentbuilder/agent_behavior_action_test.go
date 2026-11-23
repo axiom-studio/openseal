@@ -26,17 +26,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-func TestAgentBehaviorAmendmentSchemaRequiresAnActualChange(t *testing.T) {
+func TestAgentBehaviorAmendmentSchemaAcceptsAChange(t *testing.T) {
 	action := models.AgentManagementSkill().Actions[models.AgentActionAmendBehavior]
-	controlOnly := map[string]interface{}{
+	withChange := map[string]interface{}{
 		"expectedDeploymentRevision": float64(1),
 		"rationale":                  "Update the persona heritage",
+		"personality":                "Utah-native engineer with Black heritage.",
 	}
-	if err := runbook.ValidateInterfaceInput(action.InputSchema, controlOnly); err == nil {
-		t.Fatal("amend_behavior accepted rationale without a changed behavior field")
-	}
-	withChange := maps.Clone(controlOnly)
-	withChange["personality"] = "Utah-native engineer with Black heritage."
 	if err := runbook.ValidateInterfaceInput(action.InputSchema, withChange); err != nil {
 		t.Fatalf("amend_behavior rejected an actual personality change: %v", err)
 	}
@@ -442,6 +438,9 @@ func TestAgentBehaviorActionRejectsForeignStaleAndInvalidChanges(t *testing.T) {
 			mutateRun: func(run *models.AgentRun) { run.AssignedAgentID = "another-agent" },
 			arguments: map[string]interface{}{"expectedDeploymentRevision": 1, "personality": "Curious", "rationale": "Improve"},
 		},
+		"no changed field": {
+			arguments: map[string]interface{}{"expectedDeploymentRevision": 1, "rationale": "Improve"},
+		},
 		"stale revision": {
 			arguments: map[string]interface{}{"expectedDeploymentRevision": 9, "personality": "Curious", "rationale": "Improve"},
 		},
@@ -731,7 +730,7 @@ func TestAgentChannelActionRefusesRemovedTrigger(t *testing.T) {
 
 func TestAgentManagementSkillHasNoChannelTrigger(t *testing.T) {
 	definition := models.AgentManagementSkill()
-	if definition.Version != "1.6.0" {
+	if definition.Version != "1.7.0" {
 		t.Fatalf("version = %s", definition.Version)
 	}
 	properties := definition.Actions[models.AgentActionConfigureChannel].InputSchema["properties"].(map[string]interface{})

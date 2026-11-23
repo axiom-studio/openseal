@@ -22,7 +22,7 @@ import (
 // before update_member (2.1.0) and before create_team (2.0.0) keep matching
 // it until the host reconcile upgrades them.
 func IsSupportedTeamManagementSkillVersion(version string) bool {
-	return version == models.TeamManagementSkillVersion || version == "2.1.0" || version == "2.0.0"
+	return version == models.TeamManagementSkillVersion || version == "2.2.0" || version == "2.1.0" || version == "2.0.0"
 }
 
 // TeamManagementSkill exposes bounded Team behavior changes to the current
@@ -38,7 +38,7 @@ func TeamManagementSkill() *skill.Definition {
 			models.TeamActionCreateTeam: agentbuilder.CreateTeamAction(),
 			models.TeamActionUpdateProfile: {
 				Name:        models.TeamActionUpdateProfile,
-				Description: "Change the current Team's name or description when the user asks the Team to rename or describe itself. Supply only the changed fields; each replaces the current value in full. The user approves the change before it applies.",
+				Description: "Change the current Team's name or description when the user asks the Team to rename or describe itself. Supply only the changed fields, at least one of displayName and purpose; each replaces the current value in full. The user approves the change before it applies.",
 				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways,
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 				InputSchema: map[string]interface{}{
@@ -49,10 +49,6 @@ func TeamManagementSkill() *skill.Definition {
 						"rationale":   map[string]interface{}{"type": "string", "minLength": 1},
 					},
 					"required": []interface{}{"rationale"},
-					"anyOf": []interface{}{
-						map[string]interface{}{"required": []interface{}{"displayName"}},
-						map[string]interface{}{"required": []interface{}{"purpose"}},
-					},
 				},
 				OutputSchema: map[string]interface{}{
 					"type": "object", "additionalProperties": false,
@@ -346,5 +342,5 @@ func teamMemberActionResult(deployment *kernelteam.Deployment, activation *workf
 
 func isTeamMemberAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == models.TeamManagementSkillID &&
-		bound.Definition.Version == models.TeamManagementSkillVersion && bound.Action.Name == models.TeamActionUpdateMember
+		(bound.Definition.Version == models.TeamManagementSkillVersion || bound.Definition.Version == "2.2.0") && bound.Action.Name == models.TeamActionUpdateMember
 }

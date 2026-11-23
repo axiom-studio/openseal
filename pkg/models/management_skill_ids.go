@@ -39,7 +39,7 @@ const (
 // TeamManagementEndpoint its kernel transport endpoint.
 const (
 	TeamManagementSkillID      = "openseal.teams"
-	TeamManagementSkillVersion = "2.2.0"
+	TeamManagementSkillVersion = "2.3.0"
 	TeamActionUpdateMember     = "update_member"
 	TeamActionUpdateProfile    = "update_profile"
 	TeamActionCreateTeam       = "create_team"

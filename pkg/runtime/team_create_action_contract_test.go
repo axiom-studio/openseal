@@ -17,7 +17,7 @@ import (
 func TestTeamCreateIsOnlyInTheCurrentContract(t *testing.T) {
 	ctx := context.Background()
 	definition := collaboration.TeamManagementSkill()
-	if definition.Version != "2.2.0" {
+	if definition.Version != "2.3.0" {
 		t.Fatalf("version = %s", definition.Version)
 	}
 	action, ok := definition.Actions[models.TeamActionCreateTeam]

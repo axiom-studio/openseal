@@ -60,11 +60,11 @@ func routineScriptDigestOf(seed string) string {
 	return "sha256:" + strings.Repeat(seed, 64)[:64]
 }
 
-// The 1.9.0 definition is immutable once published (it is not yet): any
+// The 1.10.0 definition is immutable once published (it is not yet): any
 // change to its descriptions or schemas after release needs a new version. Its create_task runs saved
 // scripts, documents testing before scheduling and starts routines on a schedule or an event.
 func TestRoutineScriptContractVersions(t *testing.T) {
-	if routine.RunbookManagementSkillVersion != "1.9.0" {
+	if routine.RunbookManagementSkillVersion != "1.10.0" {
 		t.Fatalf("version=%s", routine.RunbookManagementSkillVersion)
 	}
 	current := routine.RunbookManagementSkill()
@@ -72,13 +72,13 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const published190SHA256 = "db7540c0cbf02cf684c40c955ccb75dc37d6b44d73294d82b654bdb368d51082"
-	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published190SHA256 {
-		t.Fatalf("published 1.9.0 definition changed: got %s", got)
+	const published1100SHA256 = "997f07945a7bf524dcad7a582d6b84bab8ae2c54d44f7a80618c101a03bb1a87"
+	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published1100SHA256 {
+		t.Fatalf("published 1.10.0 definition changed: got %s", got)
 	}
 	for _, action := range []string{models.RunbookActionCreateTask, routine.RunbookActionEventSources, routine.RunbookActionSendTestEvent, models.RunbookActionSetScript, models.RunbookActionList, models.RunbookActionSetStatus, routine.RunbookActionStart, routine.RunbookActionReplaceSchedule} {
 		if _, ok := current.Actions[action]; !ok {
-			t.Fatalf("1.9.0 lacks %s", action)
+			t.Fatalf("1.10.0 lacks %s", action)
 		}
 	}
 	if len(current.Actions) != 8 || current.Name != "Routines" {

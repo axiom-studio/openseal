@@ -8,7 +8,8 @@ import (
 
 const (
 	AgentManagementSkillID        = "openseal.agents"
-	AgentManagementSkillVersion   = "1.6.0"
+	AgentManagementSkillVersion   = "1.7.0"
+	agentManagementSkillVersionV9 = "1.6.0" // still bound until the 1.7.0 upgrade is approved
 	agentManagementSkillVersionV8 = "1.5.0" // still bound until the 1.6.0 upgrade is approved
 	agentManagementSkillVersionV7 = "1.4.0" // still bound until the reconcile upgrades bindings
 	agentManagementSkillVersionV6 = "1.3.2"
@@ -80,15 +81,6 @@ func AgentManagementSkill() *skill.Definition {
 						"rationale":             map[string]interface{}{"type": "string", "minLength": 1},
 					},
 					"required": []interface{}{"expectedDeploymentRevision", "rationale"},
-					"anyOf": []interface{}{
-						map[string]interface{}{"required": []interface{}{"displayName"}},
-						map[string]interface{}{"required": []interface{}{"purpose"}},
-						map[string]interface{}{"required": []interface{}{"systemPrompt"}},
-						map[string]interface{}{"required": []interface{}{"personality"}},
-						map[string]interface{}{"required": []interface{}{"operatingPrinciples"}},
-						map[string]interface{}{"required": []interface{}{"approvalTimeout"}},
-						map[string]interface{}{"required": []interface{}{"removeApprovalTimeout"}},
-					},
 				},
 				OutputSchema: map[string]interface{}{
 					"type": "object", "additionalProperties": false,
@@ -182,5 +174,5 @@ func CanonicalActionReview(definition *skill.Definition, action skill.Action) sk
 // the Agent action dispatcher still executes. Hosts use it instead of keeping
 // their own copy of the version list.
 func IsSupportedAgentManagementSkillVersion(version string) bool {
-	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV8 || version == agentManagementSkillVersionV7 || version == agentManagementSkillVersionV6 || version == agentManagementSkillVersionV5 || version == agentManagementSkillVersionV4 || version == agentManagementSkillVersionV3 || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
+	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV9 || version == agentManagementSkillVersionV8 || version == agentManagementSkillVersionV7 || version == agentManagementSkillVersionV6 || version == agentManagementSkillVersionV5 || version == agentManagementSkillVersionV4 || version == agentManagementSkillVersionV3 || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
 }

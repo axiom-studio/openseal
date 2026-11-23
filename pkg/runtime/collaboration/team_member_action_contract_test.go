@@ -10,9 +10,9 @@ import (
 )
 
 // Earlier bindings keep matching update_profile in hosts until the reconcile
-// upgrades them; update_member exists only in the current version.
+// upgrades them; update_member exists only in 2.2.0 and later.
 func TestTeamMemberActionIsOnlyInTheCurrentContract(t *testing.T) {
-	for version, want := range map[string]bool{"2.2.0": true, "2.1.0": false, "2.0.0": false, "1.0.0": false} {
+	for version, want := range map[string]bool{"2.3.0": true, "2.2.0": true, "2.1.0": false, "2.0.0": false, "1.0.0": false} {
 		if got := IsSupportedTeamManagementSkillVersion(version); got != (version != "1.0.0") {
 			t.Errorf("IsSupportedTeamManagementSkillVersion(%s) = %v", version, got)
 		}

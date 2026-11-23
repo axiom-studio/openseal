@@ -18,7 +18,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func TestRunbookScheduleReplacementContractRequiresTimingChange(t *testing.T) {
+func TestRunbookScheduleReplacementContractChecksCron(t *testing.T) {
 	ctx := context.Background()
 	catalog := skill.NewCatalog()
 	definition := routine.RunbookManagementSkill()
@@ -36,9 +36,6 @@ func TestRunbookScheduleReplacementContractRequiresTimingChange(t *testing.T) {
 	bound, err := catalog.Resolve(ctx, binding.Scope, binding.DeploymentID, definition.ID, definition.Version, routine.RunbookActionReplaceSchedule)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"reason": "resume hourly work"}); err == nil {
-		t.Fatal("replacement without a timing change must fail schema validation")
 	}
 	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"reason": "hourly", "cron": "0 * * * *"}); err == nil {
 		t.Fatal("replacement with a five-field cron must fail schema validation")

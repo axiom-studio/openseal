@@ -183,7 +183,7 @@ func TestTeamCreatePreview(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentbuildertest.AssertJSON(t, preview, fmt.Sprintf(`{
-		"skillId": "openseal.teams", "skillVersion": "2.2.0", "action": "create_team", "risk": "write", "sideEffect": "write",
+		"skillId": "openseal.teams", "skillVersion": "2.3.0", "action": "create_team", "risk": "write", "sideEffect": "write",
 		"resourceType": "team", "operation": "create_team",
 		"team": {"displayName": "Launch Crew", "purpose": "Ship product launches."},
 		"approvals": {"maximumRisk": "write"},

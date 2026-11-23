@@ -13,7 +13,7 @@ import (
 
 func TestAgentBuilderActionsExistOnlyInCurrentContract(t *testing.T) {
 	definition := models.AgentManagementSkill()
-	if definition.Version != "1.6.0" {
+	if definition.Version != "1.7.0" {
 		t.Fatalf("version = %s", definition.Version)
 	}
 	for _, name := range []string{models.AgentActionListAgents, models.AgentActionCreateAgent, models.AgentActionUpdateAgent, models.AgentActionTryAgent} {

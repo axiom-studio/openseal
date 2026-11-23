@@ -54,6 +54,10 @@ func TestCreateTaskEventTriggerResolves(t *testing.T) {
 		t.Fatalf("replay=%#v, %v", again, err)
 	}
 
+	// replace_schedule needs a timing change; its schema leaves that rule to the handler.
+	if _, _, _, _, err := routine.ResolveRunbookScheduleReplacement(t.Context(), f.Store, f.Run, map[string]interface{}{"activationId": activation.ID, "reason": "hourly"}); err == nil || !strings.Contains(err.Error(), "at least one timing change") {
+		t.Fatalf("replace_schedule without a timing change: %v", err)
+	}
 	// replace_schedule never applies to an event routine.
 	if _, _, _, _, err := routine.ResolveRunbookScheduleReplacement(t.Context(), f.Store, f.Run, map[string]interface{}{"activationId": activation.ID, "cron": "0 0 * * * *", "reason": "hourly"}); err == nil || !strings.Contains(err.Error(), "starts on an event") {
 		t.Fatalf("replace_schedule on an event routine: %v", err)

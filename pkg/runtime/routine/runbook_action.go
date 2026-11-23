@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	RunbookManagementSkillVersion = "1.9.0"
+	RunbookManagementSkillVersion = "1.10.0"
 	RunbookActionStart            = "start"
 	RunbookActionReplaceSchedule  = "replace_schedule"
 	RunbookManagementEndpoint     = "kernel://runbooks"
@@ -69,17 +69,11 @@ func RunbookManagementSkill() *skill.Definition {
 			},
 			RunbookActionReplaceSchedule: {
 				Name:        RunbookActionReplaceSchedule,
-				Description: "Replace one retired scheduled Runbook with a fresh reviewed activation. Omit activationId when the current Objective has one Runbook lineage. Only schedule timing changes; the definition, authority, inputs, budget, and reporting remain unchanged.",
+				Description: "Replace one retired scheduled Runbook with a fresh reviewed activation. Omit activationId when the current Objective has one Runbook lineage. Supply at least one of cron, timezone, jitterSeconds and maximumOccurrences. Only schedule timing changes; the definition, authority, inputs, budget, and reporting remain unchanged.",
 				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 				InputSchema: map[string]interface{}{
 					"type": "object", "additionalProperties": false,
-					"anyOf": []interface{}{
-						map[string]interface{}{"required": []interface{}{"cron"}},
-						map[string]interface{}{"required": []interface{}{"timezone"}},
-						map[string]interface{}{"required": []interface{}{"jitterSeconds"}},
-						map[string]interface{}{"required": []interface{}{"maximumOccurrences"}},
-					},
 					"properties": map[string]interface{}{
 						"activationId":       map[string]interface{}{"type": "string", "minLength": 1},
 						"cron":               map[string]interface{}{"type": "string", "pattern": `^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+$`, "description": "Optional six-field cron expression including seconds, for example 0 0 * * * *; omit to preserve the reviewed cadence."},
@@ -541,7 +535,7 @@ func resolveRunbookStart(ctx context.Context, store RunbookActionStore, run *mod
 
 func isRunbookAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == models.RunbookManagementSkillID &&
-		bound.Definition.Version == RunbookManagementSkillVersion &&
+		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.9.0") &&
 		slices.Contains(runbookManagementActions, bound.Action.Name)
 }
 

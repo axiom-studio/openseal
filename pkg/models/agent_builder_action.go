@@ -198,19 +198,14 @@ func agentUpdateAgentAction() skill.Action {
 		"items": map[string]interface{}{"type": "string", "minLength": 1},
 	}
 	properties["rationale"] = map[string]interface{}{"type": "string", "minLength": 1}
-	anyOf := make([]interface{}, 0, 8)
-	for _, field := range []string{"displayName", "purpose", "systemPrompt", "personality", "operatingPrinciples", "model", "addSkills", "removeSkillBindingIds"} {
-		anyOf = append(anyOf, map[string]interface{}{"required": []interface{}{field}})
-	}
 	return skill.Action{
 		Name:        AgentActionUpdateAgent,
-		Description: "Change another Agent's profile, model or Skills, after the person reviews it. Use list_agents for the exact agentId. String and list values replace the field in full.",
+		Description: "Change another Agent's profile, model or Skills, after the person reviews it. Use list_agents for the exact agentId. Supply at least one change. String and list values replace the field in full.",
 		Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways,
 		Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "properties": properties,
 			"required": []interface{}{"agentId", "expectedDeploymentRevision", "rationale"},
-			"anyOf":    anyOf,
 		},
 		OutputSchema: agentProfileOutputSchema(AgentActionUpdateAgent),
 	}
