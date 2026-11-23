@@ -49,22 +49,28 @@ func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
 	}
 	title := "Renamed chat"
 	renamed, err := service.UpdateConversation(ctx, runtimeconversation.UpdateConversationRequest{
-		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Title: &title,
+		Scope: scope, ConversationID: conversation.ID, Title: &title,
 	})
 	if err != nil || renamed.Title != title || renamed.Revision != conversation.Revision+1 {
 		t.Fatalf("renamed = %#v, err = %v", renamed, err)
 	}
+	// A message landing after the person last read the chat doesn't stop
+	// them deleting it.
+	posted, err := service.PostChannelMessage(ctx, runtimeconversation.PostChannelMessageRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: renamed.Revision,
+		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: "researcher"}, Intent: models.MessageIntentUpdate,
+		Content: "Done", Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, IdempotencyKey: "reply",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	archivedStatus := models.ConversationStatusArchived
 	archived, err := service.UpdateConversation(ctx, runtimeconversation.UpdateConversationRequest{
-		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: renamed.Revision, Status: &archivedStatus,
+		Scope: scope, ConversationID: conversation.ID, Status: &archivedStatus,
 	})
-	if err != nil || archived.Status != models.ConversationStatusArchived || archived.ArchivedAt == nil || archived.Revision != renamed.Revision+1 {
+	if err != nil || archived.Status != models.ConversationStatusArchived || archived.ArchivedAt == nil ||
+		archived.Revision != posted.Conversation.Revision+1 || archived.LastSequence != posted.Conversation.LastSequence {
 		t.Fatalf("archived = %#v, err = %v", archived, err)
-	}
-	if _, err := service.UpdateConversation(ctx, runtimeconversation.UpdateConversationRequest{
-		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: renamed.Revision, Title: &title,
-	}); !errors.Is(err, models.ErrRevisionConflict) {
-		t.Fatalf("stale update error = %v", err)
 	}
 }
 

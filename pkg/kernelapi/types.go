@@ -867,7 +867,6 @@ type CreateConversationRequest struct {
 type UpdateConversationRequest struct {
 	ParticipationEnabled *bool                      `json:"participationEnabled,omitempty"`
 	Scope                models.Scope               `json:"scope"`
-	ExpectedRevision     int64                      `json:"expectedRevision"`
 	Title                *string                    `json:"title,omitempty"`
 	Status               *models.ConversationStatus `json:"status,omitempty"`
 }

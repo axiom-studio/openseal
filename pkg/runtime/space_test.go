@@ -187,7 +187,7 @@ func exerciseSpaceStore(t *testing.T, store storetest.SpaceConversationStore) {
 	}
 
 	title := "Renamed"
-	updated, err := conversations.UpdateConversation(ctx, conversation.UpdateConversationRequest{Scope: scope, ConversationID: inWork.ID, ExpectedRevision: inWork.Revision, Title: &title})
+	updated, err := conversations.UpdateConversation(ctx, conversation.UpdateConversationRequest{Scope: scope, ConversationID: inWork.ID, Title: &title})
 	if err != nil || updated.SpaceID != work.ID {
 		t.Fatalf("update keeps space: %+v %v", updated, err)
 	}

@@ -226,7 +226,7 @@ func (f *ChatFixture) SetParticipation(enabled bool) {
 		f.T.Fatal(err)
 	}
 	f.Conversation, err = f.Service.UpdateConversation(f.Ctx, conversation.UpdateConversationRequest{
-		Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision, ParticipationEnabled: &enabled,
+		Scope: current.Scope, ConversationID: current.ID, ParticipationEnabled: &enabled,
 	})
 	if err != nil {
 		f.T.Fatal(err)

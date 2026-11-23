@@ -192,12 +192,8 @@ func TestAgentBuilderListDraftsKeepsRequesterActiveConversations(t *testing.T) {
 	first := start(ana, "a1", "Scout")
 	start(bo, "b1", "Other")
 	archived := start(ana, "a2", "Gone")
-	current, err := engine.GetConversation(ctx, scope, archived.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := engine.UpdateConversation(ctx, conversation.UpdateConversationRequest{
-		Scope: scope, ConversationID: archived.ID, ExpectedRevision: current.Revision, Status: ptr(models.ConversationStatusArchived),
+		Scope: scope, ConversationID: archived.ID, Status: ptr(models.ConversationStatusArchived),
 	}); err != nil {
 		t.Fatal(err)
 	}

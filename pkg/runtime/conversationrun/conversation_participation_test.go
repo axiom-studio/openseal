@@ -24,7 +24,7 @@ func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	enabled := true
-	channel, err = service.UpdateConversation(t.Context(), conversation.UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision, ParticipationEnabled: &enabled})
+	channel, err = service.UpdateConversation(t.Context(), conversation.UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ParticipationEnabled: &enabled})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		channel, err = service.UpdateConversation(t.Context(), conversation.UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision, Status: &status})
+		channel, err = service.UpdateConversation(t.Context(), conversation.UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, Status: &status})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -42,7 +42,7 @@ func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
 			t.Fatal("archive/restore re-enabled participation")
 		}
 	}
-	channel, err = service.UpdateConversation(t.Context(), conversation.UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision, ParticipationEnabled: &enabled})
+	channel, err = service.UpdateConversation(t.Context(), conversation.UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ParticipationEnabled: &enabled})
 	if err != nil {
 		t.Fatal(err)
 	}

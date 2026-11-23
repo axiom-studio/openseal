@@ -141,10 +141,6 @@ func (s *Server) handleUpdateConversation(w http.ResponseWriter, r *http.Request
 			s.respondConversationError(w, err)
 			return
 		}
-		if current.Revision != payload.ExpectedRevision {
-			s.respondConversationError(w, models.ErrRevisionConflict)
-			return
-		}
 		if *payload.ParticipationEnabled {
 			if err := s.channelParticipationAuthorizer(r.Context(), current); err != nil {
 				s.respondError(w, http.StatusUnprocessableEntity, err.Error())
@@ -153,7 +149,7 @@ func (s *Server) handleUpdateConversation(w http.ResponseWriter, r *http.Request
 		}
 	}
 	result, err := service.UpdateConversation(r.Context(), conversation.UpdateConversationRequest{
-		Scope: payload.Scope, ConversationID: conversationID, ExpectedRevision: payload.ExpectedRevision, Title: payload.Title, Status: payload.Status, ParticipationEnabled: payload.ParticipationEnabled,
+		Scope: payload.Scope, ConversationID: conversationID, Title: payload.Title, Status: payload.Status, ParticipationEnabled: payload.ParticipationEnabled,
 	})
 	if err != nil {
 		s.respondConversationError(w, err)

@@ -29,10 +29,12 @@ type CreateConversationRequest struct {
 	IdempotencyKey string
 }
 
+// UpdateConversationRequest renames, archives or toggles participation. It
+// carries no expected revision: a message arriving in the chat must not make
+// a rename or a delete fail, and these settings are plain last-write-wins.
 type UpdateConversationRequest struct {
 	Scope                models.Scope
 	ConversationID       string
-	ExpectedRevision     int64
 	Title                *string
 	Status               *models.ConversationStatus
 	ParticipationEnabled *bool
@@ -178,15 +180,23 @@ func (s *Service) UpdateConversation(ctx context.Context, req UpdateConversation
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	if req.ExpectedRevision <= 0 {
-		return nil, fmt.Errorf("%w: expected revision must be positive", models.ErrInvalidConversation)
+	// The store write is still compare-and-swap on the revision just read, so
+	// a message committed in between is never lost; the change is then applied
+	// again to the newer chat.
+	for attempt := 0; ; attempt++ {
+		updated, err := s.updateConversationOnce(ctx, req)
+		if !errors.Is(err, models.ErrRevisionConflict) || attempt == updateConversationAttempts-1 {
+			return updated, err
+		}
 	}
+}
+
+const updateConversationAttempts = 4
+
+func (s *Service) updateConversationOnce(ctx context.Context, req UpdateConversationRequest) (*models.Conversation, error) {
 	conversation, err := s.GetConversation(ctx, req.Scope, req.ConversationID)
 	if err != nil {
 		return nil, err
-	}
-	if conversation.Revision != req.ExpectedRevision {
-		return nil, models.ErrRevisionConflict
 	}
 	updated := models.CloneConversation(conversation)
 	if req.Title != nil {

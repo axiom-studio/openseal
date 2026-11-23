@@ -195,13 +195,13 @@ returns the saved result, even when the conversation revision has advanced.
 A stale revision with a new key returns a conflict; clients must refresh before
 explicitly retrying.
 
-`PATCH /conversations/{id}` accepts `scope`, a positive `expectedRevision`, and
-at least one of `title`, `status` (`active` or `archived`), or
-`participationEnabled` (boolean). It updates the existing
-channel without replacing messages or its identity. Archiving stops new messages;
-restoring enables posting again. Existing team runs are not canceled. Stale
-revisions return 409 and this update endpoint has no idempotency replay contract:
-after an uncertain response, read the current channel before making another edit.
+`PATCH /conversations/{id}` accepts `scope` and at least one of `title`,
+`status` (`active` or `archived`), or `participationEnabled` (boolean). It
+updates the existing channel without replacing messages or its identity. It
+takes no expected revision: these settings are last-write-wins, so a message
+arriving in the channel never makes a rename or archive fail. Archiving stops
+new messages; restoring enables posting again. Existing team runs are not
+canceled.
 
 In `--desktop-operator` mode, conversation creation and updates are restricted to the configured
 local scope, and message posts must name `user:local-operator` as sender. The
@@ -219,12 +219,10 @@ capability exposes `configure-participation` even without a provider so disablin
 remains possible; `coordinate-automatically` is advertised only with the provider
 backed dispatcher. Desktop manual participation-proposal submissions return 403.
 
-`participationEnabled` requires host configuration authority and the expected
-channel revision. Enabling also checks provider/team eligibility; disabling does
+`participationEnabled` requires host configuration authority. Enabling also checks provider/team eligibility; disabling does
 not require a provider. Enabling records the current sequence, skipping old
 messages. Archive disables participation; restore does not re-enable it. The
-setting persists across restart. Uncertain PATCH delivery must be checked with
-GET before another edit; it has no automatic replay contract.
+setting persists across restart.
 
 Every conversation carries `approvalMode`: `manual`, `auto` (the default for
 new and existing conversations), or `skip`. The kernel action policy applies it

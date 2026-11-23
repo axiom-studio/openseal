@@ -377,7 +377,7 @@ func TestRoutineEventArchivedChatPausesOnlyThatRoutine(t *testing.T) {
 	}
 	archived := models.ConversationStatusArchived
 	if _, err := conversations.UpdateConversation(h.Ctx, conversation.UpdateConversationRequest{
-		Scope: h.Scope, ConversationID: chat.ID, ExpectedRevision: chat.Revision, Status: &archived,
+		Scope: h.Scope, ConversationID: chat.ID, Status: &archived,
 	}); err != nil {
 		t.Fatal(err)
 	}

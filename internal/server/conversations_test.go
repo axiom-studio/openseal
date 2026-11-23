@@ -213,7 +213,7 @@ func TestDesktopChannelAuthorshipAndHistoryWindow(t *testing.T) {
 	}
 }
 
-func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) {
+func TestDesktopChannelLifecyclePreservesHistory(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	seedSpace(t, store, models.Scope{Kind: "local", ID: "default"}, localOperatorID)
 	server := NewServer(store, zap.NewNop().Sugar())
@@ -229,7 +229,7 @@ func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) 
 	if posted.Code != http.StatusCreated {
 		t.Fatal(posted.Body.String())
 	}
-	update := `{"scope":{"kind":"local","id":"default"},"expectedRevision":2,"title":"July evidence"}`
+	update := `{"scope":{"kind":"local","id":"default"},"title":"July evidence"}`
 	forbidden := performAgentRunRequest(t, server.Handler(), http.MethodPatch, path, strings.Replace(update, `"default"`, `"foreign"`, 1), "")
 	if forbidden.Code != http.StatusForbidden {
 		t.Fatalf("scope: %d", forbidden.Code)
@@ -238,15 +238,11 @@ func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) 
 	if renamed.Code != http.StatusOK || !strings.Contains(renamed.Body.String(), `"title":"July evidence"`) {
 		t.Fatal(renamed.Body.String())
 	}
-	stale := performAgentRunRequest(t, server.Handler(), http.MethodPatch, path, update, "")
-	if stale.Code != http.StatusConflict {
-		t.Fatalf("stale revision: %d", stale.Code)
-	}
-	invalid := performAgentRunRequest(t, server.Handler(), http.MethodPatch, path, `{"scope":{"kind":"local","id":"default"},"expectedRevision":3,"status":"deleted"}`, "")
+	invalid := performAgentRunRequest(t, server.Handler(), http.MethodPatch, path, `{"scope":{"kind":"local","id":"default"},"status":"deleted"}`, "")
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("invalid status: %d", invalid.Code)
 	}
-	archive := `{"scope":{"kind":"local","id":"default"},"expectedRevision":3,"status":"archived"}`
+	archive := `{"scope":{"kind":"local","id":"default"},"status":"archived"}`
 	archived := performAgentRunRequest(t, server.Handler(), http.MethodPatch, path, archive, "")
 	if archived.Code != http.StatusOK || !strings.Contains(archived.Body.String(), `"archivedAt"`) {
 		t.Fatal(archived.Body.String())
@@ -263,7 +259,7 @@ func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) 
 	if history.Code != http.StatusOK || !strings.Contains(history.Body.String(), "Preserve this evidence") {
 		t.Fatal(history.Body.String())
 	}
-	restored := performAgentRunRequest(t, server.Handler(), http.MethodPatch, path, `{"scope":{"kind":"local","id":"default"},"expectedRevision":4,"status":"active"}`, "")
+	restored := performAgentRunRequest(t, server.Handler(), http.MethodPatch, path, `{"scope":{"kind":"local","id":"default"},"status":"active"}`, "")
 	if restored.Code != http.StatusOK || strings.Contains(restored.Body.String(), `"archivedAt"`) {
 		t.Fatal(restored.Body.String())
 	}
@@ -271,7 +267,7 @@ func TestDesktopChannelLifecyclePreservesHistoryAndChecksRevision(t *testing.T) 
 	if after.Code != http.StatusCreated {
 		t.Fatal(after.Body.String())
 	}
-	empty := performAgentRunRequest(t, server.Handler(), http.MethodPatch, path, `{"scope":{"kind":"local","id":"default"},"expectedRevision":6}`, "")
+	empty := performAgentRunRequest(t, server.Handler(), http.MethodPatch, path, `{"scope":{"kind":"local","id":"default"}}`, "")
 	if empty.Code != http.StatusBadRequest {
 		t.Fatalf("empty patch: %d", empty.Code)
 	}

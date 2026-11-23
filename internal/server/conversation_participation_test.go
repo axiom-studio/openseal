@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.T) {
+func TestChannelParticipationRequiresHostAuthority(t *testing.T) {
 	store := kerneltest.NewStore(t)
 	service := conversation.NewService(store)
 	scope := models.Scope{Kind: "local", ID: "default"}
@@ -26,11 +26,11 @@ func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.
 	}
 	server := NewServer(store, zap.NewNop().Sugar())
 	server.SetDesktopConversationScope(scope)
-	patch := func(revision int64, enabled bool, scopeID string) int {
-		body := fmt.Sprintf(`{"scope":{"kind":"local","id":%q},"expectedRevision":%d,"participationEnabled":%t}`, scopeID, revision, enabled)
+	patch := func(enabled bool, scopeID string) int {
+		body := fmt.Sprintf(`{"scope":{"kind":"local","id":%q},"participationEnabled":%t}`, scopeID, enabled)
 		return performAgentRunRequest(t, server.Handler(), http.MethodPatch, "/api/v1/conversations/"+channel.ID, body, "").Code
 	}
-	if got := patch(1, true, "default"); got != http.StatusForbidden {
+	if got := patch(true, "default"); got != http.StatusForbidden {
 		t.Fatalf("unconfigured host: %d", got)
 	}
 	allowed := true
@@ -45,20 +45,17 @@ func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.
 		}
 		return nil
 	}, nil)
-	if got := patch(1, true, "foreign"); got != http.StatusForbidden || checks != 0 {
+	if got := patch(true, "foreign"); got != http.StatusForbidden || checks != 0 {
 		t.Fatalf("foreign scope admitted: %d", got)
 	}
-	if got := patch(1, true, "default"); got != http.StatusOK {
+	if got := patch(true, "default"); got != http.StatusOK {
 		t.Fatalf("enable: %d", got)
 	}
-	if got := patch(1, false, "default"); got != http.StatusConflict {
-		t.Fatalf("stale disable: %d", got)
-	}
 	allowed = false
-	if got := patch(2, false, "default"); got != http.StatusOK || checks != 1 {
+	if got := patch(false, "default"); got != http.StatusOK || checks != 1 {
 		t.Fatalf("disable required provider access: %d checks=%d", got, checks)
 	}
-	if got := patch(3, true, "default"); got != http.StatusUnprocessableEntity {
+	if got := patch(true, "default"); got != http.StatusUnprocessableEntity {
 		t.Fatalf("missing provider enabled: %d", got)
 	}
 	saved, err := service.GetConversation(t.Context(), scope, channel.ID)

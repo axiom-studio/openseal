@@ -723,12 +723,8 @@ func TestNewSessionForExistingChatSeedsTheLast30Messages(t *testing.T) {
 // convParticipation turns the chat's participation opt-in on or off.
 func convParticipation(f *looptest.Fixture, conversationID string, enabled bool) {
 	f.T.Helper()
-	conversation, err := f.Convs.GetConversation(f.Ctx, f.Scope, conversationID)
-	if err != nil {
-		f.T.Fatal(err)
-	}
 	if _, err := f.Convs.UpdateConversation(f.Ctx, runtimeconversation.UpdateConversationRequest{
-		Scope: f.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision, ParticipationEnabled: &enabled,
+		Scope: f.Scope, ConversationID: conversationID, ParticipationEnabled: &enabled,
 	}); err != nil {
 		f.T.Fatal(err)
 	}

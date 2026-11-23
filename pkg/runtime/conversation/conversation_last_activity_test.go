@@ -50,7 +50,7 @@ func TestLastConversationActivityMatchesTheOwnerList(t *testing.T) {
 			archived := create(scope, models.OwnerTypeAgent, "scout", "scout-archived", true)
 			status := models.ConversationStatusArchived
 			if _, err := service.UpdateConversation(ctx, runtimeconversation.UpdateConversationRequest{
-				Scope: scope, ConversationID: archived.ID, ExpectedRevision: archived.Revision, Status: &status,
+				Scope: scope, ConversationID: archived.ID, Status: &status,
 			}); err != nil {
 				t.Fatal(err)
 			}
