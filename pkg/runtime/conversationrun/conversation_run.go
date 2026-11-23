@@ -179,6 +179,13 @@ func (s *Scheduler) scheduleLoadedMessage(
 func (s *Scheduler) conversationAgentRunRequest(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage) (models.CreateAgentRunRequest, error) {
 	request := runtimeconversation.AgentRunRequest(conversation, message)
 	request.Budget = models.CloneBudgetPolicy(s.config.Budget)
+	model, err := s.conversationModel(ctx, conversation, message)
+	if err != nil {
+		return models.CreateAgentRunRequest{}, err
+	}
+	if model != "" {
+		request.Context[models.ConversationRunModelContextKey] = model
+	}
 	if s.sessionContext == nil {
 		return request, nil
 	}
@@ -193,6 +200,38 @@ func (s *Scheduler) conversationAgentRunRequest(ctx context.Context, conversatio
 		request.Context[agentrun.RunContextSessionKey] = session
 	}
 	return request, nil
+}
+
+// conversationModelScanPage is how many messages one read of the
+// conversation's history takes while looking for the composer's model.
+const conversationModelScanPage = 50
+
+// conversationModel is the newest model a person set in the composer of a
+// builder conversation, at or before message. Only builder conversations
+// carry form fields, so other conversations are never read. Reading up to
+// message keeps the request the same when the scheduler replays it.
+func (s *Scheduler) conversationModel(ctx context.Context, conversation *models.Conversation, message *models.ChannelMessage) (string, error) {
+	if conversation.Origin == nil || conversation.Origin.Kind != models.ConversationReferenceAgentBuilder {
+		return "", nil
+	}
+	before := message.Sequence + 1
+	for {
+		page, err := s.conversationStore.ListChannelMessages(ctx, models.ChannelMessageFilter{
+			Scope: conversation.Scope, ConversationID: conversation.ID, BeforeSequence: before, Limit: conversationModelScanPage, Descending: true,
+		})
+		if err != nil {
+			return "", err
+		}
+		for _, candidate := range page {
+			if candidate.Sender.Type == models.ConversationParticipantUser && candidate.BuilderParameters != nil && candidate.BuilderParameters.Model != "" {
+				return candidate.BuilderParameters.Model, nil
+			}
+			before = candidate.Sequence
+		}
+		if len(page) < conversationModelScanPage {
+			return "", nil
+		}
+	}
 }
 
 func (s *Scheduler) ReconcileScope(ctx context.Context, scope models.Scope) (*ReconcileResult, error) {

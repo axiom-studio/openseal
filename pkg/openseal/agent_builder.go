@@ -24,8 +24,9 @@ type (
 )
 
 const (
-	AgentTrialModelContextKey = agentbuilder.AgentTrialModelContextKey
-	AgentBuilderDeploymentID  = conversationrun.AgentBuilderDeploymentID
+	AgentTrialModelContextKey      = agentbuilder.AgentTrialModelContextKey
+	ConversationRunModelContextKey = models.ConversationRunModelContextKey
+	AgentBuilderDeploymentID       = conversationrun.AgentBuilderDeploymentID
 )
 
 var ErrAgentBuilderApprovalForbidden = action.ErrAgentBuilderApprovalForbidden

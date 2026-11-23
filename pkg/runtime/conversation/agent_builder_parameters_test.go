@@ -160,7 +160,7 @@ func TestAgentBuilderParametersConversationMessageEntryLine(t *testing.T) {
 		want    string
 	}{
 		{"first message", "Build me a press desk agent", &models.AgentBuilderParameters{Kind: models.AgentBuilderKindAgent, Name: "Press Desk", Model: "openai/gpt-5"},
-			header + "Build me a press desk agent\nBuilder parameters (set in the form): kind agent; name “Press Desk”; model openai/gpt-5"},
+			header + "Build me a press desk agent\nBuilder parameters (set in the form): kind agent; name “Press Desk”"},
 		{"rename reply", "", &models.AgentBuilderParameters{Kind: models.AgentBuilderKindTeam, Name: "Launch crew"},
 			header + "Builder parameters (set in the form): kind team; name “Launch crew”"},
 		{"migrated draft", "Help with press", &models.AgentBuilderParameters{Kind: models.AgentBuilderKindAgent, Name: "Press Desk", Draft: &models.AgentBuilderDraftProfile{

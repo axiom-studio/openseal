@@ -486,9 +486,12 @@ const (
 // AgentBuilderParameters are the structured fields of a person's message in a
 // builder conversation (D7): what the form set, never message text.
 type AgentBuilderParameters struct {
-	Kind  string `json:"kind"`            // "agent" | "team"
-	Name  string `json:"name,omitempty"`  // trimmed, at most 80 bytes
-	Model string `json:"model,omitempty"` // "" is the default; the host validates it when the builder proposes
+	Kind string `json:"kind"`           // "agent" | "team"
+	Name string `json:"name,omitempty"` // trimmed, at most 80 bytes
+	// Model is the model the builder's own Runs use from this message on
+	// ("" keeps the previous choice); the host validates it when it resolves
+	// the Run's model.
+	Model string `json:"model,omitempty"`
 	// Draft is the drafted profile of a migrated change-set draft (cutover only).
 	Draft *AgentBuilderDraftProfile `json:"draft,omitempty"`
 }

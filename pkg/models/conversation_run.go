@@ -46,6 +46,10 @@ const (
 	ConversationRunConversationIDContextKey = "conversationId"
 	ConversationRunTriggerIDContextKey      = "triggerMessageId"
 	ConversationRunSchedulerParticipant     = "conversation-run-scheduler"
+	// ConversationRunModelContextKey is the model the person picked in the
+	// conversation's composer. The host runs the Run's model steps on it
+	// instead of the Agent's saved model.
+	ConversationRunModelContextKey = "conversationModel"
 )
 
 func ValidateConversationRun(run *AgentRun) error {

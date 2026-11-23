@@ -227,7 +227,8 @@ func nonEmptyStrings(values []string) []string {
 }
 
 // renderAgentBuilderParameters is the model's view of a builder message's form
-// fields (D7): "Builder parameters (set in the form): …" and, for a migrated
+// fields (D7). The model field is left out: it picks the model the builder
+// itself runs on, not the new Agent's: "Builder parameters (set in the form): …" and, for a migrated
 // draft, "Started draft: …". People never see these lines.
 func renderAgentBuilderParameters(parameters *models.AgentBuilderParameters) []string {
 	if parameters == nil {
@@ -236,9 +237,6 @@ func renderAgentBuilderParameters(parameters *models.AgentBuilderParameters) []s
 	fields := []string{"kind " + parameters.Kind}
 	if parameters.Name != "" {
 		fields = append(fields, "name \u201c"+parameters.Name+"\u201d")
-	}
-	if parameters.Model != "" {
-		fields = append(fields, "model "+parameters.Model)
 	}
 	lines := []string{"Builder parameters (set in the form): " + strings.Join(fields, "; ")}
 	if draft := parameters.Draft; draft != nil && !draft.IsEmpty() {
