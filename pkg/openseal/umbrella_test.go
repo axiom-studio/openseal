@@ -201,7 +201,7 @@ func teamRequestFixture(t *testing.T) (context.Context, *sqlite.Store, *Engine, 
 	}
 	now := time.Now().UTC()
 	request := &CredentialRequest{ID: "credential-request:call", Scope: scope, Owner: crew, DeploymentID: crew.ID, AgentID: "member", ConversationID: "team-chat", TriggerMessageID: "message",
-		RunID: run.ID, ActionCallID: "call", Kind: CredentialRequestKindWebsiteLogin, Website: "https://www.amazon.in", Reason: "Add the login",
+		RunID: run.ID, ActionCallID: "call", CredentialType: "http_basic_auth", Website: "https://www.amazon.in", Reason: "Add the login",
 		Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := store.SaveCredentialRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
@@ -222,10 +222,10 @@ func teamRequestFixture(t *testing.T) (context.Context, *sqlite.Store, *Engine, 
 
 func TestTeamRequestResumesTheExactMemberRun(t *testing.T) {
 	ctx, store, engine, run, request, crew := teamRequestFixture(t)
-	if _, err := engine.ResolveCredentialRequest(ctx, run.Scope, agentOwner("member"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, false); err == nil {
+	if _, err := engine.ResolveCredentialRequest(ctx, run.Scope, agentOwner("member"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, savedLogin); err == nil {
 		t.Fatal("a Team request was resolved under the member's own umbrella")
 	}
-	result, err := engine.ResolveCredentialRequest(ctx, run.Scope, crew, request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, false)
+	result, err := engine.ResolveCredentialRequest(ctx, run.Scope, crew, request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, savedLogin)
 	if err != nil || !result.Continued {
 		t.Fatalf("resolution = %#v, %v", result, err)
 	}
@@ -245,7 +245,7 @@ func TestTeamRequestDoesNotResumeAfterTheMemberLeft(t *testing.T) {
 	if _, _, err := engine.UpdateTeamDeployment(ctx, team, team.Revision, "user", "operator", "replace member"); err != nil {
 		t.Fatal(err)
 	}
-	result, err := engine.ResolveCredentialRequest(ctx, run.Scope, crew, request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, false)
+	result, err := engine.ResolveCredentialRequest(ctx, run.Scope, crew, request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, savedLogin)
 	if err != nil || result.Continued || result.Request.Status != CredentialRequestStatusResolved {
 		t.Fatalf("resolution = %#v, %v", result, err)
 	}

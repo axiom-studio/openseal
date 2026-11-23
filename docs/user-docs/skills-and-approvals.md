@@ -37,9 +37,13 @@ An upgrade that requires review before it can be applied is refused with `428 Pr
 
 ### Credentials from a conversation
 
-`request_credential` asks the user to save one credential in the host vault through a durable in-chat card. It is not Skill setup: built-in Skills such as the live browser are always installed, and nothing about a binding changes. Its input is `kind` (`website_login` with `website` set to the exact page origin, or `payment_card`) and a `reason` shown to the user. It never accepts or returns secret values.
+`request_credential` asks the user to save one credential in the host vault through a durable in-chat card: an API key, token, key pair, cloud or database credentials, a website login or a payment card. It is not Skill setup: built-in Skills such as the live browser are always installed, and nothing about a binding changes. Agents use it whenever work needs a secret for a service that no connected app or Skill covers; they never ask for secrets in chat or write them into workspace or sandbox files.
 
-A pending request parks the Run with wake condition `credential_request`. The host verifies that a matching credential was saved after the request (or that the user dismissed the card), then calls `ResolveCredentialRequest`, which resumes the Run with guidance to retry the blocked step. When the Run has already ended, the result reports `continued: false` and the host starts a new reply. Requests appear on conversation change sets as `credentialRequests`.
+Its input is `type`, one of the host's requestable credential types, an optional `service` shown to the user (for example `Alpaca`), an optional `website` (the exact page origin, required by types that are saved per website), `fields` for a type whose fields the request names (each `{name, secure}`), and a `reason` shown to the user. When no specific type fits, agents request the host's key-value type with named fields. It never accepts or returns secret values.
+
+The host supplies its requestable types with `Engine.SetCredentialTypes`: each has an `id`, a `label`, and whether it is saved per `website` or takes `namedFields`. The kernel knows no credential types of its own; without the host list every request is refused with an explanation.
+
+A pending request parks the Run with wake condition `credential_request`. The host verifies the credential the user saved or picked (or that the user dismissed the card), then calls `ResolveCredentialRequest` with that credential's id and name, which resumes the Run with guidance naming it. When the Run has already ended, the result reports `continued: false` and the host starts a new reply. Requests appear on conversation change sets as `credentialRequests`.
 
 ### Connecting an app from a conversation
 

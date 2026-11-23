@@ -2199,6 +2199,7 @@ type Engine struct {
 	skillManagementActions        bool
 	skillDiscovery                skill.DiscoveryProvider
 	appCatalog                    *skillbinding.AppCatalogRef
+	credentialTypes               *skillbinding.CredentialTypesRef
 	approvalAuth                  action.ApprovalAuthorizer
 	skillSources                  *sourceartifact.Service
 	agentPoolSpecs                []agentRunWorkerSpec
@@ -2970,12 +2971,16 @@ func (e *Engine) configureSkillManagementActions() error {
 	if e.appCatalog == nil {
 		e.appCatalog = &skillbinding.AppCatalogRef{}
 	}
+	if e.credentialTypes == nil {
+		e.credentialTypes = &skillbinding.CredentialTypesRef{}
+	}
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := skillbinding.NewActionDispatcher(e.store, e.skills, e.actionPoolSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
 		dispatcher.UseAppCatalog(e.appCatalog)
+		dispatcher.UseCredentialTypes(e.credentialTypes)
 		dispatcher.UseAgentRegistry(e.agents)
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
@@ -2985,6 +2990,7 @@ func (e *Engine) configureSkillManagementActions() error {
 			return dispatchErr
 		}
 		dispatcher.UseAppCatalog(e.appCatalog)
+		dispatcher.UseCredentialTypes(e.credentialTypes)
 		dispatcher.UseAgentRegistry(e.agents)
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}

@@ -102,7 +102,7 @@ func humanCardCall(id string) *models.ActionCall {
 func (f *fakeGovernedCards) addCredential(call *models.ActionCall, status string) {
 	f.credentials["credential-"+call.ID] = &models.CredentialRequest{
 		ID: "credential-" + call.ID, Scope: governedCardScope, RunID: call.RunID, ActionCallID: call.ID,
-		Kind: models.CredentialRequestKindPaymentCard, Status: status, Revision: 1,
+		CredentialType: "payment_card", Status: status, Revision: 1,
 	}
 }
 

@@ -230,7 +230,10 @@ func migrate(db *sql.DB) error {
 	if err := migrateTeamMembersSQLite(db); err != nil {
 		return err
 	}
-	return migrateRemoveKernelProjectsSQLite(db)
+	if err := migrateRemoveKernelProjectsSQLite(db); err != nil {
+		return err
+	}
+	return migrateCredentialRequestTypesSQLite(db)
 }
 
 // Close closes the underlying database. An in-memory database is freed.

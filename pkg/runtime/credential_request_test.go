@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ import (
 func credentialRequestFixture() *models.CredentialRequest {
 	now := time.Now().UTC()
 	return &models.CredentialRequest{ID: "credential-request:call", Scope: models.Scope{Kind: "tenant", ID: "a"}, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat",
-		TriggerMessageID: "message", RunID: "run", ActionCallID: "call", Kind: models.CredentialRequestKindWebsiteLogin, Website: "https://www.amazon.in",
+		TriggerMessageID: "message", RunID: "run", ActionCallID: "call", CredentialType: "http_basic_auth", Website: "https://www.amazon.in",
 		Reason: "Add your amazon.in login", Status: models.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
 }
 
@@ -53,11 +54,12 @@ func TestCredentialRequestStoresScopeCASAndTerminalState(t *testing.T) {
 			if err := store.SaveCredentialRequest(ctx, r, 0); !errors.Is(err, models.ErrCredentialRequestConflict) {
 				t.Fatalf("duplicate request not rejected: %v", err)
 			}
+			r.Credential = &models.CredentialRequestCredential{ID: "41", Name: "Visa card"}
 			r.Status, r.ResolvedBy, r.Revision, r.UpdatedAt = models.CredentialRequestStatusResolved, "user:5", 2, time.Now().UTC()
 			if err := store.SaveCredentialRequest(ctx, r, 1); err != nil {
 				t.Fatal(err)
 			}
-			r.Status, r.ResolvedBy, r.Revision = models.CredentialRequestStatusPending, "", 3
+			r.Status, r.ResolvedBy, r.Revision, r.Credential = models.CredentialRequestStatusPending, "", 3, nil
 			if err := store.SaveCredentialRequest(ctx, r, 2); !errors.Is(err, models.ErrCredentialRequestConflict) {
 				t.Fatalf("settled request reopened: %v", err)
 			}
@@ -111,7 +113,7 @@ func assertRunNotParkedByCall(t *testing.T, f *actiontest.LoopProposalFixture) *
 func TestRequestCredentialParksRunUntilTheUserSavesIt(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
-		"kind": "website_login", "website": "https://www.amazon.in/", "reason": "Add your amazon.in login so I can finish the order"})
+		"type": "http_basic_auth", "website": "https://www.amazon.in/", "reason": "Add your amazon.in login so I can finish the order"})
 	executed := f.Execute(runtimeaction.NewWorker(store, catalog, nil, dispatcher), call.ID)
 	if executed.Call.Status != models.ActionCallStatusSucceeded || executed.Call.Output["credentialRequest"] == nil {
 		t.Fatalf("credential action: %#v", executed.Call)
@@ -121,7 +123,7 @@ func TestRequestCredentialParksRunUntilTheUserSavesIt(t *testing.T) {
 		t.Fatalf("requests: %#v %v", requests, err)
 	}
 	request := requests[0]
-	if request.Kind != models.CredentialRequestKindWebsiteLogin || request.Website != "https://www.amazon.in" || request.Status != models.CredentialRequestStatusPending || request.ActionCallID != executed.Call.ID {
+	if request.CredentialType != "http_basic_auth" || request.Website != "https://www.amazon.in" || request.Status != models.CredentialRequestStatusPending || request.ActionCallID != executed.Call.ID {
 		t.Fatalf("request: %#v", request)
 	}
 	// The call's output names the card the loop parks the Run on.
@@ -143,8 +145,15 @@ func TestFailedInteractionRequestsAreExplainedInsteadOfFailingTheRun(t *testing.
 	}{
 		// The production failure: a bundled Skill is not in the installable
 		// catalog, so this setup request cannot be created.
-		"setup for a bundled Skill":  {agentrun.SkillActionRequestSetup, map[string]interface{}{"kind": "configure", "skillId": "skill-live-browser", "skillVersion": "latest", "reason": "Add your amazon.in login"}},
-		"credential with a page URL": {agentrun.SkillActionRequestCredential, map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in/ap/signin?x=1", "reason": "Add your amazon.in login"}},
+		"setup for a bundled Skill":    {agentrun.SkillActionRequestSetup, map[string]interface{}{"kind": "configure", "skillId": "skill-live-browser", "skillVersion": "latest", "reason": "Add your amazon.in login"}},
+		"credential with a page URL":   {agentrun.SkillActionRequestCredential, map[string]interface{}{"type": "http_basic_auth", "website": "https://www.amazon.in/ap/signin?x=1", "reason": "Add your amazon.in login"}},
+		"type the host does not offer": {agentrun.SkillActionRequestCredential, map[string]interface{}{"type": "openai_api", "reason": "Add your OpenAI key"}},
+		"login without a website":      {agentrun.SkillActionRequestCredential, map[string]interface{}{"type": "http_basic_auth", "reason": "Add your login"}},
+		"generic without fields":       {agentrun.SkillActionRequestCredential, map[string]interface{}{"type": "generic", "service": "Alpaca", "reason": "Add your Alpaca keys"}},
+		"fields for a fixed type": {agentrun.SkillActionRequestCredential, map[string]interface{}{"type": "integration_access", "service": "Alpaca",
+			"fields": []interface{}{map[string]interface{}{"name": "Key", "secure": true}}, "reason": "Add your Alpaca key"}},
+		"repeated field names": {agentrun.SkillActionRequestCredential, map[string]interface{}{"type": "generic", "service": "Alpaca",
+			"fields": []interface{}{map[string]interface{}{"name": "Key", "secure": true}, map[string]interface{}{"name": "key", "secure": false}}, "reason": "Add your Alpaca keys"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
@@ -163,6 +172,37 @@ func TestFailedInteractionRequestsAreExplainedInsteadOfFailingTheRun(t *testing.
 				t.Fatalf("refused request persisted: %#v", requests)
 			}
 		})
+	}
+}
+
+func TestRequestCredentialForKeysTheModelNames(t *testing.T) {
+	ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
+	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
+		"type": "generic", "service": " Alpaca ", "reason": "Add your Alpaca keys so I can pull market data",
+		"fields": []interface{}{map[string]interface{}{"name": "API Key ID", "secure": true}, map[string]interface{}{"name": " Secret Key ", "secure": true}}})
+	executed := f.Execute(runtimeaction.NewWorker(store, catalog, nil, dispatcher), call.ID)
+	if executed.Call.Status != models.ActionCallStatusSucceeded || executed.Call.Output["credentialRequest"] == nil {
+		t.Fatalf("credential action: %#v", executed.Call)
+	}
+	requests, err := store.ListCredentialRequests(ctx, scope, "agent", "chat")
+	if err != nil || len(requests) != 1 {
+		t.Fatalf("requests: %#v %v", requests, err)
+	}
+	request := requests[0]
+	if request.CredentialType != "generic" || request.Service != "Alpaca" || len(request.Fields) != 2 || request.Fields[1] != (models.CredentialRequestField{Name: "Secret Key", Secure: true}) {
+		t.Fatalf("request: %#v", request)
+	}
+}
+
+func TestRequestCredentialIsRefusedWithoutHostTypes(t *testing.T) {
+	ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
+	dispatcher.UseCredentialTypes(&skillbinding.CredentialTypesRef{})
+	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
+		"type": "payment_card", "reason": "Add your card"})
+	executed := f.Execute(runtimeaction.NewWorker(store, catalog, nil, dispatcher), call.ID)
+	refused, _ := executed.Call.Output["refused"].(map[string]interface{})
+	if executed.Call.Status != models.ActionCallStatusSucceeded || refused == nil || !strings.Contains(refused["message"].(string), "no credential types") {
+		t.Fatalf("refusal: %#v", executed.Call)
 	}
 }
 
@@ -209,7 +249,7 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	validator, _ := skillbinding.NewActionValidator(catalog, store)
 	proposal, err := runtimeaction.NewCoordinator(store, store, catalog, runtimeaction.NewDefaultActionPolicy(), []runtimeaction.ProposalValidator{validator}).Propose(ctx, f.Request(runtimeaction.ProposeActionRequest{
 		DeploymentID: "agent", SkillID: models.SkillManagementSkillID, SkillVersion: skillbinding.SkillManagementSkillVersion, Action: agentrun.SkillActionRequestCredential,
-		Arguments: map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in", "reason": "Add the login"}, Summary: "Ask the user"}, "request-credential"))
+		Arguments: map[string]interface{}{"type": "http_basic_auth", "website": "https://www.amazon.in", "reason": "Add the login"}, Summary: "Ask the user"}, "request-credential"))
 	if err != nil {
 		t.Fatal(err)
 	}

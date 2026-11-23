@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 88
+const currentPostgresSchemaVersion int64 = 89
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *Store) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -38,6 +38,8 @@ func (s *Store) RollbackPostgresMigrations(ctx context.Context, target int64) er
 	if _, err := s.acquireMigrationLock(ctx, tx); err != nil {
 		return err
 	}
+	// Rolling back 89 gives credential requests their kind again and deletes
+	// the requests for other credential types.
 	// Rolling back 88 does not restore Team completion review.
 	// Rolling back 87 makes the spaces no person owns "owner" again.
 	// Rolling back 86 leaves one default space per scope, the oldest.
@@ -82,6 +84,11 @@ func (s *Store) RollbackPostgresMigrations(ctx context.Context, target int64) er
 		2:  {"agent_runs", "objectives"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
+		if version == credentialRequestTypeMigrationVersion {
+			if err := s.rollbackCredentialRequestTypes(ctx, tx); err != nil {
+				return err
+			}
+		}
 		if version == completionReviewRemovalMigrationVersion {
 			if err := s.rollbackCompletionReviewRemoval(ctx, tx); err != nil {
 				return err

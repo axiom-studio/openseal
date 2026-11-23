@@ -48,7 +48,7 @@ func runningCredentialRequestFixture(t *testing.T) (context.Context, *sqlite.Sto
 	}
 	now := time.Now().UTC()
 	request := &CredentialRequest{ID: "credential-request:call", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message",
-		RunID: run.ID, ActionCallID: "call", Kind: CredentialRequestKindWebsiteLogin, Website: "https://www.amazon.in", Reason: "Add your amazon.in login",
+		RunID: run.ID, ActionCallID: "call", CredentialType: "http_basic_auth", Website: "https://www.amazon.in", Reason: "Add your amazon.in login",
 		Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := store.SaveCredentialRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
@@ -62,16 +62,16 @@ func runningCredentialRequestFixture(t *testing.T) (context.Context, *sqlite.Sto
 
 func TestSavedCredentialResumesTheWaitingRunWithGuidance(t *testing.T) {
 	ctx, store, e, run, request := waitingCredentialRequestFixture(t)
-	if _, err := e.ResolveCredentialRequest(ctx, Scope{Kind: "tenant", ID: "other"}, agentOwner("agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, false); err == nil {
+	if _, err := e.ResolveCredentialRequest(ctx, Scope{Kind: "tenant", ID: "other"}, agentOwner("agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, savedLogin); err == nil {
 		t.Fatal("cross-tenant resolution")
 	}
-	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("other-agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, false); err == nil {
+	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("other-agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, savedLogin); err == nil {
 		t.Fatal("cross-agent resolution")
 	}
-	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 7, InteractionResolver{UserID: "5", CanManage: true}, false); !errors.Is(err, ErrCredentialRequestConflict) {
+	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 7, InteractionResolver{UserID: "5", CanManage: true}, savedLogin); !errors.Is(err, ErrCredentialRequestConflict) {
 		t.Fatalf("stale revision: %v", err)
 	}
-	result, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, false)
+	result, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, savedLogin)
 	if err != nil || !result.Continued || result.Request.Status != CredentialRequestStatusResolved || result.Request.Revision != 2 {
 		t.Fatalf("resolution: %#v %v", result, err)
 	}
@@ -79,18 +79,18 @@ func TestSavedCredentialResumesTheWaitingRunWithGuidance(t *testing.T) {
 	if err != nil || resumed.Status != models.AgentRunStatusQueued || resumed.WakeCondition != nil || len(resumed.PendingInterventions) != 1 {
 		t.Fatalf("run not resumed: %#v %v", resumed, err)
 	}
-	if instruction := resumed.PendingInterventions[0].Instruction; instruction == "" || !contains(instruction, "live-browser-sign-in") {
+	if instruction := resumed.PendingInterventions[0].Instruction; instruction == "" || !contains(instruction, `"amazon.in login" (credential id 41)`) {
 		t.Fatalf("instruction: %q", instruction)
 	}
 	// A repeated confirmation from the card is idempotent and does not wake twice.
-	again, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, false)
+	again, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, savedLogin)
 	if err != nil || again.Request.Revision != 2 {
 		t.Fatalf("repeat: %#v %v", again, err)
 	}
 	if latest, _ := store.GetAgentRun(ctx, run.Scope, run.ID); len(latest.PendingInterventions) != 1 {
 		t.Fatalf("woken twice: %#v", latest.PendingInterventions)
 	}
-	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 2, InteractionResolver{UserID: "5", CanManage: true}, true); !errors.Is(err, ErrCredentialRequestConflict) {
+	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 2, InteractionResolver{UserID: "5", CanManage: true}, CredentialRequestOutcome{Dismiss: true}); !errors.Is(err, ErrCredentialRequestConflict) {
 		t.Fatalf("resolved request dismissed: %v", err)
 	}
 }
@@ -103,7 +103,7 @@ func TestCredentialRequestForAnEndedRunAsksTheHostToReply(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, true)
+	result, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, CredentialRequestOutcome{Dismiss: true})
 	if err != nil || result.Continued || result.Request.Status != CredentialRequestStatusDismissed {
 		t.Fatalf("dismissal: %#v %v", result, err)
 	}
@@ -124,7 +124,7 @@ func TestInteractionSettleCarriesActionCallID(t *testing.T) {
 	}
 	t.Run("credential request", func(t *testing.T) {
 		ctx, store, e, run, request := waitingCredentialRequestFixture(t)
-		if result, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, resolver, false); err != nil || !result.Continued {
+		if result, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, resolver, savedLogin); err != nil || !result.Continued {
 			t.Fatalf("resolution: %#v %v", result, err)
 		}
 		assertCarried(t, store, run, "credential-request-result:")
@@ -160,7 +160,7 @@ func TestInteractionSettleCarriesActionCallID(t *testing.T) {
 func TestCardSettleWhileRunningBumpsRevision(t *testing.T) {
 	ctx, store, e, run, request := runningCredentialRequestFixture(t)
 	resolver := InteractionResolver{UserID: "5", CanManage: true}
-	result, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, resolver, false)
+	result, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, resolver, savedLogin)
 	if err != nil || !result.Continued {
 		t.Fatalf("resolution: %#v %v", result, err)
 	}
@@ -183,7 +183,7 @@ func TestCardSettleWhileRunningBumpsRevision(t *testing.T) {
 		t.Fatalf("stale park on a settled card: %v", err)
 	}
 	// A repeated confirmation neither appends the result again nor bumps.
-	if again, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, resolver, false); err != nil || !again.Continued {
+	if again, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, resolver, savedLogin); err != nil || !again.Continued {
 		t.Fatalf("repeat: %#v %v", again, err)
 	}
 	if latest, _ := store.GetAgentRun(ctx, run.Scope, run.ID); latest.Revision != held.Revision || len(latest.PendingInterventions) != 1 {
@@ -198,4 +198,24 @@ func contains(value, part string) bool {
 		}
 	}
 	return false
+}
+
+// savedLogin is the vault login a host verified before resolving.
+var savedLogin = CredentialRequestOutcome{Credential: &CredentialRequestCredential{ID: "41", Name: "amazon.in login"}}
+
+func TestCredentialRequestOutcomeNamesACredentialOrDismisses(t *testing.T) {
+	ctx, _, e, run, request := waitingCredentialRequestFixture(t)
+	resolver := InteractionResolver{UserID: "5", CanManage: true}
+	for name, outcome := range map[string]CredentialRequestOutcome{
+		"neither": {},
+		"both":    {Dismiss: true, Credential: savedLogin.Credential},
+	} {
+		if _, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, resolver, outcome); !errors.Is(err, ErrInvalidCredentialRequest) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	result, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, resolver, savedLogin)
+	if err != nil || result.Request.Credential == nil || result.Request.Credential.ID != "41" {
+		t.Fatalf("resolution: %#v %v", result, err)
+	}
 }

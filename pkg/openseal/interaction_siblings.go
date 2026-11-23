@@ -68,7 +68,7 @@ func (e *Engine) settleSkillSetupSiblings(ctx context.Context, settled *models.S
 }
 
 // settleCredentialRequestSiblings settles the pending credential requests of
-// the same conversation, kind and website as settled and resumes their runs.
+// the same conversation asking for the same credential as settled and resumes their runs.
 func (e *Engine) settleCredentialRequestSiblings(ctx context.Context, settled *models.CredentialRequest) {
 	if settled == nil || settled.Status == models.CredentialRequestStatusPending {
 		return
@@ -79,11 +79,15 @@ func (e *Engine) settleCredentialRequestSiblings(ctx context.Context, settled *m
 	}
 	for _, sibling := range requests {
 		if sibling == nil || sibling.ID == settled.ID || sibling.Status != models.CredentialRequestStatusPending ||
-			sibling.Kind != settled.Kind || sibling.Website != settled.Website {
+			!models.SameCredentialAsked(sibling, settled) {
 			continue
 		}
 		expected := sibling.Revision
 		sibling.Status, sibling.ResolvedBy = settled.Status, settled.ResolvedBy
+		if settled.Credential != nil {
+			credential := *settled.Credential
+			sibling.Credential = &credential
+		}
 		sibling.Revision++
 		sibling.UpdatedAt = time.Now().UTC()
 		if e.store.SaveCredentialRequest(ctx, sibling, expected) != nil {

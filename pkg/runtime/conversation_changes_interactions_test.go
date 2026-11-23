@@ -300,7 +300,7 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := store.SaveCredentialRequest(ctx, &models.CredentialRequest{ID: "credential-" + deployment, Scope: scope, Owner: owner, DeploymentID: owner.ID, AgentID: deployment,
-			ConversationID: conversation.ID, TriggerMessageID: posted.Message.ID, RunID: "run", ActionCallID: "secret-" + deployment, Kind: models.CredentialRequestKindPaymentCard, Reason: "Pay",
+			ConversationID: conversation.ID, TriggerMessageID: posted.Message.ID, RunID: "run", ActionCallID: "secret-" + deployment, CredentialType: "payment_card", Reason: "Pay",
 			Status: models.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
 			t.Fatal(err)
 		}

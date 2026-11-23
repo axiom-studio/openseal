@@ -44,7 +44,7 @@ func interactionCall(scope models.Scope, runID, id, action, key, requestID strin
 func TestCanceledRunDismissesItsOpenInteractionRequests(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope := skillbindingtest.CredentialRequestDispatchFixture(t)
 	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, agentrun.SkillActionRequestCredential, map[string]interface{}{
-		"kind": "payment_card", "reason": "Add your card so I can pay 319.00 INR on amazon.in"})
+		"type": "payment_card", "reason": "Add your card so I can pay 319.00 INR on amazon.in"})
 	run := f.Run
 	executed := f.Execute(action.NewWorker(store, catalog, nil, dispatcher), call.ID)
 	card, _ := executed.Call.Output["credentialRequest"].(map[string]interface{})
@@ -109,7 +109,7 @@ func testFinishedRunKeepsSetupForms(t *testing.T, status models.AgentRunStatus) 
 		t.Fatal(err)
 	}
 	credential := &models.CredentialRequest{ID: "credential-1", Scope: scope, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: run.ID, ActionCallID: "c1",
-		Kind: models.CredentialRequestKindPaymentCard, Reason: "Add your card", Status: models.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
+		CredentialType: "payment_card", Reason: "Add your card", Status: models.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := store.SaveCredentialRequest(ctx, credential, 0); err != nil {
 		t.Fatal(err)
 	}

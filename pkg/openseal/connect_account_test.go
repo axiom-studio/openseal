@@ -162,10 +162,10 @@ func TestConnectAppAndManagerCardAuthority(t *testing.T) {
 	}
 
 	credentialCtx, _, credentialEngine, credentialRun, credential := waitingCredentialRequestFixture(t)
-	if _, err := credentialEngine.ResolveCredentialRequest(credentialCtx, credentialRun.Scope, agentOwner("agent"), credential.ID, 1, InteractionResolver{UserID: "7"}, false); !errors.Is(err, ErrInteractionNotAuthorized) {
+	if _, err := credentialEngine.ResolveCredentialRequest(credentialCtx, credentialRun.Scope, agentOwner("agent"), credential.ID, 1, InteractionResolver{UserID: "7"}, savedLogin); !errors.Is(err, ErrInteractionNotAuthorized) {
 		t.Fatalf("non-manager resolved a credential card: %v", err)
 	}
-	if _, err := credentialEngine.ResolveCredentialRequest(credentialCtx, credentialRun.Scope, agentOwner("agent"), credential.ID, 1, InteractionResolver{UserID: "7"}, true); !errors.Is(err, ErrInteractionNotAuthorized) {
+	if _, err := credentialEngine.ResolveCredentialRequest(credentialCtx, credentialRun.Scope, agentOwner("agent"), credential.ID, 1, InteractionResolver{UserID: "7"}, CredentialRequestOutcome{Dismiss: true}); !errors.Is(err, ErrInteractionNotAuthorized) {
 		t.Fatalf("non-manager dismissed a credential card: %v", err)
 	}
 }

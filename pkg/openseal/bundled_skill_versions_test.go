@@ -31,7 +31,7 @@ func TestBundledSkillVersionsForAgentBuilder(t *testing.T) {
 				models.AgentActionListAgents, models.AgentActionCreateAgent, models.AgentActionUpdateAgent, models.AgentActionTryAgent}},
 		{collaboration.TeamManagementSkill(), TeamManagementSkillVersion, "2.3.0",
 			[]string{TeamActionUpdateMember, TeamActionUpdateProfile, TeamActionCreateTeam}},
-		{skillbinding.SkillManagementSkill(), SkillManagementSkillVersion, "1.7.0",
+		{skillbinding.SkillManagementSkill(), SkillManagementSkillVersion, "1.8.0",
 			[]string{SkillActionDiscover, SkillActionUpsertBinding, SkillActionDisableBinding, SkillActionRequestSetup, SkillActionRequestConnection}},
 	} {
 		if tc.definition.Version != tc.version || tc.alias != tc.version {

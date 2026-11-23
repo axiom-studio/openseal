@@ -13,6 +13,16 @@ func migrateCredentialRequests(db *sql.DB) error {
 	return err
 }
 
+// migrateCredentialRequestTypesSQLite renames a stored request's kind to the
+// vault credential type it asks for, as PostgreSQL migration 89 does:
+// website_login is http_basic_auth, payment_card keeps its name.
+func migrateCredentialRequestTypesSQLite(db *sql.DB) error {
+	_, err := db.Exec(`UPDATE credential_requests SET payload = json_set(json_remove(payload, '$.kind'), '$.credentialType',
+		CASE json_extract(payload, '$.kind') WHEN 'website_login' THEN 'http_basic_auth' ELSE json_extract(payload, '$.kind') END)
+		WHERE json_type(payload, '$.kind') IS NOT NULL`)
+	return err
+}
+
 func (s *Store) GetCredentialRequest(ctx context.Context, scope models.Scope, id string) (*models.CredentialRequest, error) {
 	return sqlstore.GetCredentialRequest(ctx, s.db, "credential_requests", scope, id)
 }
