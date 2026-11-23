@@ -247,6 +247,10 @@ func (c *Coordinator) Propose(ctx context.Context, req ProposeActionRequest) (*m
 		}
 		return nil, RejectProposal(ProposalRejectionCapabilityUnavailable, err)
 	}
+	if bound.Action.HostOnly && req.Execution != models.ActionExecutionHost {
+		// Only its host proposes a host-only action; the model never sees it.
+		return nil, RejectProposal(ProposalRejectionCapabilityUnavailable, fmt.Errorf("%s %s is performed only by its host", req.SkillID, req.Action))
+	}
 	if canonical := models.CanonicalActionReview(bound.Definition, bound.Action); canonical.Review != bound.Action.Review {
 		reviewed := *bound
 		reviewed.Action = canonical

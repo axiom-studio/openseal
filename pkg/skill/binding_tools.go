@@ -357,14 +357,15 @@ func validateBindingToolInput(definition *Definition, binding *Binding, actionNa
 
 // bindingModelActions projects the model actions one binding exposes:
 // each allowed definition action except BindingTools base actions, which are
-// reachable only through the binding's declared tools. include filters
+// reachable only through the binding's declared tools, and host-only
+// actions, which only the host proposes. include filters
 // definition actions that the host cannot run.
 func bindingModelActions(definition *Definition, binding *Binding, include func(Action) bool) []ModelAction {
 	spec := definition.BindingTools
 	actions := make([]ModelAction, 0, len(binding.AllowedActions)+len(binding.Tools))
 	for _, name := range binding.AllowedActions {
 		action := definition.Actions[name]
-		if spec.RoutesAction(name) || (include != nil && !include(action)) {
+		if spec.RoutesAction(name) || action.HostOnly || (include != nil && !include(action)) {
 			continue
 		}
 		actions = append(actions, ModelAction{

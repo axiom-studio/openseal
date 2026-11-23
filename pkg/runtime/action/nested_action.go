@@ -159,7 +159,7 @@ func (c *Coordinator) ProposeNested(ctx context.Context, req NestedActionRequest
 	return c.proposeNested(ctx, req, "", nil)
 }
 
-func (c *Coordinator) proposeNested(ctx context.Context, req NestedActionRequest, execution models.ActionExecution, choose func(*agentrun.TurnRunnerBinding) (*capability.ModelAction, error)) (*NestedActionResult, error) {
+func (c *Coordinator) proposeNested(ctx context.Context, req NestedActionRequest, execution models.ActionExecution, choose func(*nestedActionAuthority) (*capability.ModelAction, error)) (*NestedActionResult, error) {
 	if c == nil {
 		return nil, errors.New("action coordinator is not configured")
 	}
@@ -183,7 +183,7 @@ func (c *Coordinator) proposeNested(ctx context.Context, req NestedActionRequest
 	var selected *capability.ModelAction
 	var err error
 	if choose != nil {
-		selected, err = choose(binding)
+		selected, err = choose(authority)
 	} else {
 		selected, err = SelectTurnModelAction(binding.ModelActions, activity.TurnAction{Capability: req.Capability})
 	}
