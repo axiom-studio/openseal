@@ -195,9 +195,9 @@ func TestTargetAgentHiddenFromNonBuilders(t *testing.T) {
 	}
 }
 
-func TestSkillManagementSkillVersionIs170(t *testing.T) {
-	if skillbinding.SkillManagementSkillVersion != "1.7.0" {
-		t.Fatalf("openseal.skills = %s, want 1.7.0", skillbinding.SkillManagementSkillVersion)
+func TestSkillManagementSkillVersionIs180(t *testing.T) {
+	if skillbinding.SkillManagementSkillVersion != "1.8.0" {
+		t.Fatalf("openseal.skills = %s, want 1.8.0", skillbinding.SkillManagementSkillVersion)
 	}
 	definition := skillbinding.SkillManagementSkill()
 	for _, name := range []string{skillbinding.SkillActionDiscoverBinding, skillbinding.SkillActionUpsertBinding, skillbinding.SkillActionDisableBinding, agentrun.SkillActionRequestSetup, agentrun.SkillActionRequestConnection} {

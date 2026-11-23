@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	SkillManagementSkillVersion = "1.7.0"
+	SkillManagementSkillVersion = "1.8.0"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
@@ -162,6 +162,8 @@ type ActionDispatcher struct {
 	fallback  agentrun.ActionDispatcher
 	apps      *AppCatalogRef
 	agents    *kernelagent.Registry
+	// credentialTypes are the host's types request_credential may ask for.
+	credentialTypes *CredentialTypesRef
 }
 
 // UseAgentRegistry lets a builder act for another Agent (targetAgentId).

@@ -70,7 +70,7 @@ func TestRequestsAreListedByTheConversationUmbrella(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := store.SaveCredentialRequest(ctx, &models.CredentialRequest{ID: "credential-" + chat, Scope: scope, Owner: owner, DeploymentID: owner.ID, AgentID: "member",
-			ConversationID: chat, TriggerMessageID: "ask", RunID: "run", ActionCallID: "secret-" + chat, Kind: models.CredentialRequestKindPaymentCard, Reason: "Pay",
+			ConversationID: chat, TriggerMessageID: "ask", RunID: "run", ActionCallID: "secret-" + chat, CredentialType: "payment_card", Reason: "Pay",
 			Status: models.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
 			t.Fatal(err)
 		}

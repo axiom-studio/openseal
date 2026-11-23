@@ -55,7 +55,18 @@ func CredentialRequestDispatchFixture(t *testing.T) (context.Context, *sqlite.St
 	if err != nil {
 		t.Fatal(err)
 	}
+	types := &skillbinding.CredentialTypesRef{}
+	types.Set(CredentialTypes)
+	dispatcher.UseCredentialTypes(types)
 	return ctx, store, catalog, dispatcher, scope
+}
+
+// CredentialTypes are the requestable credential types a test host offers.
+var CredentialTypes = []skillbinding.RequestableCredentialType{
+	{ID: "generic", Label: "Generic Key-Value", NamedFields: true},
+	{ID: "integration_access", Label: "API access token"},
+	{ID: "http_basic_auth", Label: "Website login", Website: true},
+	{ID: "payment_card", Label: "Payment card"},
 }
 
 // LinearLogo is the logo digest of the Linear app in ConnectAppFixture.

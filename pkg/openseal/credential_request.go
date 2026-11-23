@@ -16,12 +16,16 @@ type CredentialRequest = models.CredentialRequest
 const SkillActionRequestCredential = agentrun.SkillActionRequestCredential
 const CredentialRequestWakeType = skillbinding.CredentialRequestWakeType
 
+type (
+	CredentialRequestField      = models.CredentialRequestField
+	CredentialRequestCredential = models.CredentialRequestCredential
+	RequestableCredentialType   = skillbinding.RequestableCredentialType
+)
+
 const (
-	CredentialRequestKindWebsiteLogin = models.CredentialRequestKindWebsiteLogin
-	CredentialRequestKindPaymentCard  = models.CredentialRequestKindPaymentCard
-	CredentialRequestStatusPending    = models.CredentialRequestStatusPending
-	CredentialRequestStatusResolved   = models.CredentialRequestStatusResolved
-	CredentialRequestStatusDismissed  = models.CredentialRequestStatusDismissed
+	CredentialRequestStatusPending   = models.CredentialRequestStatusPending
+	CredentialRequestStatusResolved  = models.CredentialRequestStatusResolved
+	CredentialRequestStatusDismissed = models.CredentialRequestStatusDismissed
 )
 
 var ErrCredentialRequestConflict = models.ErrCredentialRequestConflict
@@ -35,6 +39,26 @@ type CredentialRequestResolution struct {
 	// and will see the saved credential. False means the Run already ended;
 	// the host should start a new reply for the conversation.
 	Continued bool `json:"continued"`
+}
+
+// SetCredentialTypes installs the host's credential types a person saves by
+// hand, the only types request_credential may ask for. Without them every
+// request is refused. Hosts set them once at startup.
+func (e *Engine) SetCredentialTypes(types []RequestableCredentialType) {
+	if e == nil {
+		return
+	}
+	if e.credentialTypes == nil {
+		e.credentialTypes = &skillbinding.CredentialTypesRef{}
+	}
+	e.credentialTypes.Set(types)
+}
+
+// CredentialRequestOutcome is how the person settled a credential request:
+// the saved credential the host verified, or a dismissal.
+type CredentialRequestOutcome struct {
+	Dismiss    bool
+	Credential *CredentialRequestCredential
 }
 
 func (e *Engine) credentialRequestStore() (models.CredentialRequestStore, error) {
@@ -73,16 +97,19 @@ func (e *Engine) GetCredentialRequest(ctx context.Context, scope models.Scope, o
 	return r, nil
 }
 
-// ResolveCredentialRequest records that the user saved the requested
-// credential (or dismissed the card) and resumes the Run waiting for it.
+// ResolveCredentialRequest records the credential the user saved or picked
+// (or that they dismissed the card) and resumes the Run waiting for it.
 // Only a manager of the request's umbrella (or a system reconciliation)
 // settles it. Hosts verify the saved credential first; the kernel never sees
 // credential values. Settling it settles the same request of other runs in
 // the conversation.
-func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope models.Scope, owner ObjectiveOwner, id string, expected int64, resolver InteractionResolver, dismiss bool) (*CredentialRequestResolution, error) {
+func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope models.Scope, owner ObjectiveOwner, id string, expected int64, resolver InteractionResolver, outcome CredentialRequestOutcome) (*CredentialRequestResolution, error) {
 	store, err := e.credentialRequestStore()
 	if err != nil {
 		return nil, err
+	}
+	if outcome.Dismiss != (outcome.Credential == nil) {
+		return nil, models.ErrInvalidCredentialRequest
 	}
 	actor, err := resolver.actor()
 	if err != nil {
@@ -96,7 +123,7 @@ func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope models.Scop
 		return nil, err
 	}
 	want := models.CredentialRequestStatusResolved
-	if dismiss {
+	if outcome.Dismiss {
 		want = models.CredentialRequestStatusDismissed
 	}
 	if r.Status == models.CredentialRequestStatusPending {
@@ -104,6 +131,10 @@ func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope models.Scop
 			return nil, models.ErrCredentialRequestConflict
 		}
 		r.Status, r.ResolvedBy = want, actor
+		if outcome.Credential != nil {
+			credential := *outcome.Credential
+			r.Credential = &credential
+		}
 		r.Revision++
 		r.UpdatedAt = time.Now().UTC()
 		if err := store.SaveCredentialRequest(ctx, r, expected); err != nil {

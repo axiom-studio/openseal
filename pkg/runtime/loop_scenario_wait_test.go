@@ -184,14 +184,14 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 				now := f.Clock.Now()
 				request := &models.CredentialRequest{ID: "credential-request:" + in.Call.ID, Scope: in.Run.Scope, Owner: in.Run.Owner, DeploymentID: in.Run.Owner.ID,
 					AgentID: in.Run.AssignedAgentID, ConversationID: conversationID, TriggerMessageID: triggerID, RunID: in.Run.ID, ActionCallID: in.Call.ID,
-					Kind: models.CredentialRequestKindPaymentCard, Reason: "Add your card so I can pay", Status: models.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
+					CredentialType: "payment_card", Reason: "Add your card so I can pay", Status: models.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
 				if err := f.Raw.(models.CredentialRequestStore).SaveCredentialRequest(f.Ctx, request, 0); err != nil {
 					return nil, err
 				}
 				return waitCredentialRequestOutput(request)
 			})
 			f.Model.Add(waitCardRules(t, agentrun.SkillActionRequestCredential, func(v looptest.StepView) models.ModelStepResult {
-				return looptest.Act("I need your card.", looptest.Call(waitTool(t, v, agentrun.SkillActionRequestCredential), map[string]any{"kind": models.CredentialRequestKindPaymentCard, "reason": "Add your card so I can pay"}))
+				return looptest.Act("I need your card.", looptest.Call(waitTool(t, v, agentrun.SkillActionRequestCredential), map[string]any{"type": "payment_card", "reason": "Add your card so I can pay"}))
 			})...)
 			conversation, run := f.StartChat("Pay the invoice")
 			steerToRest(f, run.ID, 4)
@@ -210,6 +210,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			request.Credential = &models.CredentialRequestCredential{ID: "41", Name: "Visa card"}
 			request.Status, request.ResolvedBy, request.Revision, request.UpdatedAt = models.CredentialRequestStatusResolved, looptest.FixtureUser, request.Revision+1, f.Clock.Now()
 			if err := credentials.SaveCredentialRequest(f.Ctx, request, request.Revision-1); err != nil {
 				t.Fatal(err)
@@ -217,7 +218,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 			waitSettleCard(f, run.ID, skillbinding.CredentialRequestWakeType, requestID, entry.ActionCallID, skillbinding.CredentialRequestResolutionInstruction(request))
 			done := convDrive(f, run.ID)
 			_, result := waitCompleted(f, done.ID, entry.Tool.Name, 0)
-			if !strings.Contains(result, "The user saved or updated their card in the vault.") {
+			if !strings.Contains(result, "(credential id 41)") {
 				t.Fatalf("credential outcome = %q", result)
 			}
 			if answer := convAgentAnswer(f, conversation.ID); !strings.HasPrefix(answer.Content, "Done after the card: ") || len(steerAgentMessages(f, conversation.ID)) != 1 {
