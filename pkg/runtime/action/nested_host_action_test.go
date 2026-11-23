@@ -350,3 +350,109 @@ func TestNestedHostCallEndsWithItsTurn(t *testing.T) {
 		})
 	}
 }
+
+// withHostOnlySkill registers a Skill whose actions only a host performs and
+// supplies its binding to the fixture's Run as a host binding.
+func (f *nestedActionFixture) withHostOnlySkill(t *testing.T) {
+	t.Helper()
+	repository := map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"owner", "repository"},
+		"properties": map[string]interface{}{"owner": map[string]interface{}{"type": "string"}, "repository": map[string]interface{}{"type": "string"}}}
+	access := []skill.CredentialRequirement{{Name: "access", Kind: "connection"}}
+	definition := &skill.Definition{
+		ID: "host.git", Version: "1.0.0", Name: "Git", Transport: skill.TransportReference{Kind: "tool", Endpoint: "host.git"},
+		Actions: map[string]skill.Action{
+			"fetch": {Name: "fetch", Description: "Fetch a repository", SideEffect: skill.SideEffectRead, Risk: skill.RiskLevelRead, InputSchema: repository,
+				Idempotency: skill.IdempotencySupported, Credentials: access, HostOnly: true},
+			"push": {Name: "push", Description: "Push a branch", SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, InputSchema: repository,
+				Idempotency: skill.IdempotencyRequired, Credentials: access, HostOnly: true},
+		},
+	}
+	if err := f.catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	f.catalog.SetHostBindingProvider(func(_ context.Context, scope skill.ScopeReference, deploymentID string, _ skill.RunActor) (*skill.HostBindingSet, error) {
+		return &skill.HostBindingSet{Fingerprint: "git", Bindings: []*skill.Binding{{
+			ID: "git:one", Revision: 1, Scope: scope, DeploymentID: deploymentID, SkillID: "host.git", SkillVersion: "1.0.0",
+			AllowedActions: []string{"fetch"}, MaximumRisk: skill.RiskLevelWrite,
+			Credentials: map[string]skill.CredentialReference{"access": {Kind: "connection", ID: "credential://connection"}},
+		}}}, nil
+	})
+}
+
+func TestNestedHostOnlyActionIsResolvedFromTheRunsHostBindingsOnly(t *testing.T) {
+	for _, testCase := range actiontest.Stores(t) {
+		t.Run(testCase.Name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newNestedActionFixture(t, testCase.Open(t))
+			f.withHostOnlySkill(t)
+			fetch := action.NestedHostActionRequest{
+				Scope: f.scope, RunID: f.run.ID, TurnID: f.turn.ID, SkillID: "host.git", SkillVersion: "1.0.0", Action: "fetch",
+				Arguments: map[string]interface{}{"owner": "acme", "repository": "widgets"}, IdempotencyKey: "fetch-1", Summary: "git fetch acme/widgets",
+			}
+
+			// Host-only actions are never offered to the model.
+			offered, err := f.catalog.ListModelActions(skill.WithRunActor(ctx, models.RunSkillActor(f.run)), skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}, "agent")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, offer := range offered {
+				if offer.SkillID == "host.git" {
+					t.Fatalf("host-only action offered to the model: %#v", offer)
+				}
+			}
+			if _, err := f.coordinator.ProposeNested(ctx, f.request("host.git.fetch", "model-1")); !errors.Is(err, action.ErrNestedActionNotAuthorized) {
+				t.Fatalf("nested model call of a host-only action err = %v", err)
+			}
+			named := fetch
+			named.SkillVersion = ""
+			if _, err := f.coordinator.ProposeNestedHost(ctx, named); !errors.Is(err, action.ErrNestedActionNotAuthorized) {
+				t.Fatalf("host-only action named as offered err = %v", err)
+			}
+
+			proposed, err := f.coordinator.ProposeNestedHost(ctx, fetch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if call := proposed.Call; call.Status != models.ActionCallStatusReady || call.Execution != models.ActionExecutionHost || call.BindingID != "git:one" ||
+				call.DeploymentID != "agent" || call.CredentialRefs["access"].ID != "credential://connection" {
+				t.Fatalf("host-only proposal = %#v", proposed.Call)
+			}
+
+			// An action the host binding does not allow is not authorized.
+			push := fetch
+			push.Action, push.IdempotencyKey = "push", "push-1"
+			if _, err := f.coordinator.ProposeNestedHost(ctx, push); !errors.Is(err, action.ErrNestedActionNotAuthorized) {
+				t.Fatalf("push without the binding allowing it err = %v", err)
+			}
+			// Only the host proposes a host-only action.
+			if _, err := f.coordinator.Propose(ctx, action.ProposeActionRequest{
+				Scope: f.scope, RunID: f.run.ID, TurnID: f.turn.ID, WorkerID: "agent-worker", DeploymentID: "agent", SkillID: "host.git", SkillVersion: "1.0.0", Action: "fetch",
+				Arguments: map[string]interface{}{"owner": "acme", "repository": "widgets"}, IdempotencyKey: "direct-1", Actor: models.ActivityActor{Type: "worker", ID: "agent-worker"},
+				Origin: models.ActionOriginVM,
+			}); err == nil || !strings.Contains(err.Error(), "only by its host") {
+				t.Fatalf("direct proposal of a host-only action err = %v", err)
+			}
+		})
+	}
+}
+
+func TestNestedHostOnlyActionOfAStoredBindingIsRefused(t *testing.T) {
+	ctx := context.Background()
+	f := newNestedActionFixture(t, actiontest.Stores(t)[0].Open(t))
+	f.withHostOnlySkill(t)
+	f.catalog.SetHostBindingProvider(nil)
+	if err := f.catalog.Bind(ctx, &skill.Binding{
+		ID: "stored-git", Revision: 1, Scope: skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}, DeploymentID: "agent", SkillID: "host.git", SkillVersion: "1.0.0",
+		AllowedActions: []string{"fetch"}, MaximumRisk: skill.RiskLevelRead,
+		Credentials: map[string]skill.CredentialReference{"access": {Kind: "connection", ID: "credential://connection"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.coordinator.ProposeNestedHost(ctx, action.NestedHostActionRequest{
+		Scope: f.scope, RunID: f.run.ID, TurnID: f.turn.ID, SkillID: "host.git", SkillVersion: "1.0.0", Action: "fetch",
+		Arguments: map[string]interface{}{"owner": "acme", "repository": "widgets"}, IdempotencyKey: "fetch-1",
+	})
+	if !errors.Is(err, action.ErrNestedActionNotAuthorized) {
+		t.Fatalf("host-only action of a stored binding err = %v", err)
+	}
+}

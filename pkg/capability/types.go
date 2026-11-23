@@ -175,6 +175,11 @@ type Action struct {
 	// keys. Only sideEffect write may set it; external and destructive actions
 	// (payments, sends, deletions) always stay strict.
 	Repeatable bool `json:"repeatable,omitempty"`
+	// HostOnly marks an action the host performs as a nested host call
+	// (NestedHostActionRequest with SkillVersion) and that is never offered
+	// to the model. It is governed, approved and grantable in a routine's
+	// brief like any other action.
+	HostOnly bool `json:"hostOnly,omitempty"`
 }
 
 // ActionReview is a manifest-declared review floor for one Action. Empty

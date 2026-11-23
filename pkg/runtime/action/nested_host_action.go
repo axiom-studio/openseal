@@ -10,7 +10,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -32,17 +31,21 @@ var (
 )
 
 // NestedHostActionRequest asks to govern work the host performs during an
-// in-flight Turn with the authority of one Skill action the Turn offers.
-// SkillID and Action name that action; the Turn must offer it from exactly
-// one binding, as the model would see it. Arguments are that action's input
-// and are validated, governed and shown for approval as such.
+// in-flight Turn with the authority of one Skill action. SkillID and Action
+// name that action. Without SkillVersion it is an action the Turn offers,
+// from exactly one binding, as the model would see it. With SkillVersion it
+// is a host-only action (Action.HostOnly), which the Turn never offers the
+// model: it must come from exactly one binding the host supplies to the Run
+// (a host binding) for the Turn's action deployment. Arguments are that
+// action's input and are validated, governed and shown for approval as such.
 type NestedHostActionRequest struct {
-	Scope     models.Scope           `json:"scope"`
-	RunID     string                 `json:"runId"`
-	TurnID    string                 `json:"turnId"`
-	SkillID   string                 `json:"skillId"`
-	Action    string                 `json:"action"`
-	Arguments map[string]interface{} `json:"arguments,omitempty"`
+	Scope        models.Scope           `json:"scope"`
+	RunID        string                 `json:"runId"`
+	TurnID       string                 `json:"turnId"`
+	SkillID      string                 `json:"skillId"`
+	SkillVersion string                 `json:"skillVersion,omitempty"`
+	Action       string                 `json:"action"`
+	Arguments    map[string]interface{} `json:"arguments,omitempty"`
 	// OriginRef groups calls in activity, such as the command they ran under.
 	OriginRef string `json:"originRef,omitempty"`
 	// IdempotencyKey identifies this request within the Turn.
@@ -83,12 +86,43 @@ func (c *Coordinator) ProposeNestedHost(ctx context.Context, req NestedHostActio
 	if skillID == "" || action == "" {
 		return nil, errors.New("a host call names the offered Skill action it acts as")
 	}
+	version := strings.TrimSpace(req.SkillVersion)
 	return c.proposeNested(ctx, NestedActionRequest{
 		Scope: req.Scope, RunID: req.RunID, TurnID: req.TurnID, Capability: skillID + "/" + action, Arguments: req.Arguments,
 		Origin: models.ActionOriginVM, OriginRef: req.OriginRef, IdempotencyKey: req.IdempotencyKey, Summary: req.Summary,
-	}, models.ActionExecutionHost, func(binding *agentrun.TurnRunnerBinding) (*capability.ModelAction, error) {
-		return selectOfferedSkillAction(binding.ModelActions, skillID, action)
+	}, models.ActionExecutionHost, func(authority *nestedActionAuthority) (*capability.ModelAction, error) {
+		if version == "" {
+			return selectOfferedSkillAction(authority.binding.ModelActions, skillID, action)
+		}
+		return c.selectHostOnlyAction(ctx, req.Scope, authority, skillID, version, action)
 	})
+}
+
+// selectHostOnlyAction resolves a host-only action from the Run's host
+// bindings for the Turn's action deployment, as the action the call is
+// governed as.
+func (c *Coordinator) selectHostOnlyAction(ctx context.Context, scope models.Scope, authority *nestedActionAuthority, skillID, version, action string) (*capability.ModelAction, error) {
+	deploymentID := DeploymentForSelection(authority.binding, nil)
+	bound, err := c.catalog.Resolve(skill.WithRunActor(ctx, models.RunSkillActor(authority.run)), skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+		deploymentID, skillID, version, action)
+	switch {
+	case errors.Is(err, skill.ErrBindingAmbiguous):
+		return nil, fmt.Errorf("%w: more than one binding offers %s %s", ErrNestedActionNotAuthorized, skillID, action)
+	case err != nil:
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: the run has no binding for %s %s", ErrNestedActionNotAuthorized, skillID, action)
+	case bound == nil || bound.Binding == nil || bound.Definition == nil:
+		return nil, fmt.Errorf("%w: the run has no binding for %s %s", ErrNestedActionNotAuthorized, skillID, action)
+	case !bound.Action.HostOnly || !bound.Host:
+		return nil, fmt.Errorf("%w: %s %s is not a host-only action of a host binding", ErrNestedActionNotAuthorized, skillID, action)
+	}
+	return &capability.ModelAction{
+		Name: skillID + "." + action, Description: bound.Action.Description, BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
+		DeploymentID: deploymentID, SkillID: skillID, Version: version, Action: action, InputSchema: bound.Action.InputSchema,
+		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, ExternalOperationPolicy: bound.Action.ExternalOperationPolicy,
+	}, nil
 }
 
 // selectOfferedSkillAction finds the one definition action a Turn offers as
