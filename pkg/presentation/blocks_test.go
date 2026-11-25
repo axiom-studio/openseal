@@ -262,3 +262,10 @@ func blockSamples(t *testing.T) []Component {
 	}
 	return samples
 }
+
+func TestPreviewBlocksSkipOpenAndHostBlocks(t *testing.T) {
+	blocks := PreviewBlocks(context.Background(), ":::text{#a}\nShown.\n:::\n\n:::callout{#b}\nbody: Cited.\nsources:\n  - {url: \"https://example.com\", title: E}\n:::\n\n:::text{#c}\nstill writing")
+	if len(blocks) != 1 || blocks[0].ID != "a" {
+		t.Fatalf("blocks = %+v", blocks)
+	}
+}
