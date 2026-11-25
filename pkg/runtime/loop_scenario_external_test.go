@@ -388,17 +388,17 @@ func previewRule(name, attempt, text string, reply func(looptest.StepView) model
 	}}
 }
 
-// TestLoopRejectedAnswerKeepsItsPreview: a step whose only call is the final
-// answer previews that answer, so a rejection does not clear it; the next
-// attempt streams over it in place and the chat never blanks.
+// TestLoopRejectedAnswerKeepsItsPreview: a plain reply previews itself, so a
+// rejection does not clear it; the next attempt streams over it in place and
+// the chat never blanks.
 func TestLoopRejectedAnswerKeepsItsPreview(t *testing.T) {
 	looptest.EachStore(t, "external_preview_retry", func(t *testing.T, store models.KernelStore) {
 		f := looptest.NewFixture(t, store, looptest.WithRules(
 			previewRule("step-1", "attempt-1", "Issue 7 is open", func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": 42})
+				return looptest.Say("")
 			}, nil),
 			previewRule("step-2", "attempt-2", "Issue 7 is open", func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Issue 7 is open."})
+				return looptest.Say("Issue 7 is open.")
 			}, nil),
 		))
 		_, run := f.StartChat("Is issue 7 open?")

@@ -83,9 +83,9 @@ func (fakeStepRequests) PrepareModelStep(_ context.Context, in agentrun.StepInpu
 		RunID: in.Run.ID, StepID: in.Step.ID, Attempt: in.Attempt, SessionID: in.Path.Session.ID,
 		AgentID: in.Run.AssignedAgentID, DefinitionID: "def", DefinitionVersion: "1", Model: "claude-x",
 		System:  models.ModelStepSystem{AgentInstructions: []string{"Be useful."}, Sections: []models.ModelStepSystemSection{{ID: "rules", Title: "Rules", Text: "Follow them."}}},
-		Tools:   []models.ModelStepTool{{Name: "turn_final_answer", Description: "answer", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness}},
+		Tools:   []models.ModelStepTool{{Name: "ask_user", Description: "ask", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness}},
 		Entries: views, MaxOutputTokens: 4000,
-		Stream: models.ModelStepStream{AnswerPreview: true, FinalAnswerTool: "turn_final_answer"},
+		Stream: models.ModelStepStream{AnswerPreview: true},
 	}, nil
 }
 

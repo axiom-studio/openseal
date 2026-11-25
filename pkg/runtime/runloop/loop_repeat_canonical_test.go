@@ -163,7 +163,6 @@ func TestRepeatEffectOf(t *testing.T) {
 		{"kernel search_capabilities", LoopToolKernel, "", false, "search_capabilities", RepeatEffectRead},
 		{"kernel load_capabilities", LoopToolKernel, "", false, "load_capabilities", RepeatEffectControl},
 		{"kernel wait", LoopToolKernel, "", false, "wait", RepeatEffectControl},
-		{"kernel final", LoopToolKernel, "", false, "turn_final_answer", RepeatEffectControl},
 		{"kernel decision final", LoopToolKernel, "", false, "agent_request_decision", RepeatEffectControl},
 		{"kernel progress", LoopToolKernel, "", false, "turn_report_progress", RepeatEffectControl},
 		{"kernel unknown is a write", LoopToolKernel, "", false, "new_tool", RepeatEffectWrite},

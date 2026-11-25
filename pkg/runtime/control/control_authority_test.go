@@ -123,7 +123,7 @@ func TestDecisionRunOffersOnlyDecisionTool(t *testing.T) {
 	run := controlAuthorityTeamRun(scope, map[string]interface{}{agentrun.AgentRequestInboxContextKey: map[string]interface{}{"requestId": "request"}})
 	authority := resolveControlAuthorityForTest(t, AuthorityInput{
 		Run: run, DeploymentID: "lead", Catalog: controlAuthorityTeamCatalog(scope),
-		SkillPromptRefs: []string{"skill:prompt"}, Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
+		Operations: []agentrun.HostedRunbookOperation{{Name: "op"}},
 	})
 	assertOnlyFinalTool(t, authority, agentrun.FinalModeDecision, models.ControlToolRequestDecision)
 }
@@ -152,7 +152,7 @@ func TestTaskWorkerForksSelfOnlyAndCannotDelegateOrStartTasks(t *testing.T) {
 		t.Fatalf("task worker may start tasks: %#v", worker.TaskStart)
 	}
 	got := offeredControlTools(worker)
-	if !reflect.DeepEqual(got, []string{"turn_final_answer", "turn_report_progress", "wait", "control_fork", "run_operation"}) {
+	if !reflect.DeepEqual(got, []string{"turn_report_progress", "wait", "control_fork", "run_operation"}) {
 		t.Fatalf("task worker offered = %v", got)
 	}
 }
@@ -207,12 +207,12 @@ func TestChatReplyCannotWait(t *testing.T) {
 	if chat.CanWait {
 		t.Fatal("a chat reply may wait")
 	}
-	// The answering Agent of the chat may react, ask the user and broadcast.
-	if !chat.CanReact || !chat.CanAskUser || !chat.BroadcastAllowed || chat.ApprovalMode != models.DefaultConversationApprovalMode || chat.ExternalChannelReply {
+	// The answering Agent of the chat may react and ask the user.
+	if !chat.CanReact || !chat.CanAskUser || chat.ApprovalMode != models.DefaultConversationApprovalMode || chat.ExternalChannelReply {
 		t.Fatalf("chat authority = %#v", chat)
 	}
 	got := offeredControlTools(chat)
-	if !reflect.DeepEqual(got, []string{"turn_final_answer", "turn_report_progress", "ask_user", "react", "conversation_start_task", "control_fork"}) {
+	if !reflect.DeepEqual(got, []string{"turn_report_progress", "ask_user", "react", "conversation_start_task", "control_fork"}) {
 		t.Fatalf("chat offered = %v", got)
 	}
 
@@ -228,7 +228,7 @@ func TestChatReplyCannotWait(t *testing.T) {
 		Run:          &models.AgentRun{ID: "routine", Scope: run.Scope, Kind: models.RunKindAgentWork, Owner: run.Owner, AssignedAgentID: "agent", Context: map[string]interface{}{}},
 		DeploymentID: "agent", Runs: store, Conversations: store, ConversationTasks: store,
 	})
-	if !background.CanWait || background.CanReact || background.CanAskUser || background.BroadcastAllowed {
+	if !background.CanWait || background.CanReact || background.CanAskUser {
 		t.Fatalf("background authority = %#v", background)
 	}
 }

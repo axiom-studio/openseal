@@ -33,19 +33,19 @@ func startSpokenChat(f *looptest.Fixture, text, mode string) (*models.Conversati
 	return conversation, f.ChatRun(conversation, posted.Message)
 }
 
-// A spoken chat may end silently: turn_final_answer{silent:true} completes the
-// Run and posts nothing. A text chat is never offered silent, so the same call
-// is refused and the model has to write the answer, which is then posted.
+// A spoken chat may end silently: an empty reply completes the Run and posts
+// nothing. In a text chat an empty reply is refused and the model has to
+// write the answer, which is then posted.
 func TestSilentConversationCompletionRequiresSpokenChannel(t *testing.T) {
 	for _, mode := range []string{"spoken", ""} {
 		t.Run("mode="+mode, func(t *testing.T) {
 			looptest.EachStore(t, "spoken_silent", func(t *testing.T, store models.KernelStore) {
 				f := looptest.NewFixture(t, store, looptest.WithRules(
 					&looptest.ModelRule{Name: "silent", Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
-						return looptest.FinalAnswer(map[string]any{"answer": "", "silent": true})
+						return looptest.Say("")
 					}},
 					&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
-						return looptest.FinalAnswer(map[string]any{"answer": "I heard you."})
+						return looptest.Say("I heard you.")
 					}},
 				))
 				conversation, run := startSpokenChat(f, "Ambient speech", mode)
@@ -66,14 +66,8 @@ func TestSilentConversationCompletionRequiresSpokenChannel(t *testing.T) {
 				if len(steps) != 2 || len(replies) != 1 || !strings.Contains(replies[0], "I heard you.") {
 					t.Fatalf("text reply was not written after silent: steps=%d replies=%q", len(steps), replies)
 				}
-				var refused bool
-				for _, entry := range f.ToolEntries(run.ID) {
-					if entry.State == models.ToolEntryError && strings.Contains(toolEntryText(entry), "silent") {
-						refused = true
-					}
-				}
-				if !refused {
-					t.Fatal("silent final in a text chat was not refused with a tool error")
+				if notes := f.EntriesOfType(run.ID, "note:"+string(models.NoteFinalRejection)); len(notes) != 1 {
+					t.Fatalf("final_rejection notes = %d, want the empty reply refused once", len(notes))
 				}
 			})
 		})

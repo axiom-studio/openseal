@@ -5,319 +5,37 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
-	"sort"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/presentation"
-	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// turn_final_answer (section 04 §11, SPEC §3.3 step 1). This file owns the
-// tool schema, the strict decode, the plain-text final (an assistant entry with
-// no tool calls) and the acceptance pipeline that turns either into the
-// FinalAnswer the loop delivers. A failed check is an is_error tool result (or,
-// for plain text, a final_rejection note) and the loop continues; the loop owns
-// the bound of 3 consecutive rejections (A9) and the delivery. Nothing reviews
-// what the answer says: the checks only refuse an answer that cannot be
-// delivered at all.
+// The final answer of a Run is its plain reply: an assistant entry with no
+// tool calls (section 04 §11, SPEC §3.3 step 1). This file turns that text
+// into the FinalAnswer the loop delivers, or refuses it. A refusal is a
+// final_rejection note and the loop continues; the loop owns the bound of 3
+// consecutive rejections (A9) and the delivery. Nothing reviews what the
+// answer says: the checks only refuse a reply that cannot be delivered at
+// all. Decision Runs finish with request_decision instead.
 //
-// Pipeline order: decode → silent → content → skills → finalAnswerPark.
+// Order: mode → empty (silent, reactions, routine rule) → finalAnswerPark.
 
-// Final answer error codes (stable; the model sees them in the tool result).
+// Final answer error codes (stable; the model sees them in the rejection).
 const (
-	finalSilentInvalidCode      = "silent_invalid"
 	finalSilentAfterChangeCode  = "silent_after_change"
-	finalAnswerEmptyCode        = "answer_empty"
-	finalSkillIdentityCode      = "final_skill_identity_invalid"
 	finalToolRequiredCode       = "final_tool_required"
 	finalEmptyReplyCode         = "empty_answer"
 	finalPlainTextAttemptsLimit = 3 // the 3rd plain-text attempt where a final tool is required fails the Run
 	finalEmptyReplyAttemptLimit = 3 // the 3rd empty plain-text reply fails the Run
 )
 
-// Keys of FinalAnswer.Output written by this file. Delivery (CONV-08 /
-// runOutputFinalHandler) reads them through the FinalAnswer accessors below.
-const (
-	finalOutputSkillSelectionsKey = "skillSelections"
-)
-
-// finalAnswerArgs are the fields of turn_final_answer.
-type finalAnswerArgs struct {
-	Answer             string            `json:"answer"`
-	AppliedSkillRefs   []string          `json:"appliedSkillRefs,omitempty"`
-	Repairs            map[string]string `json:"repairs,omitempty"`
-	BroadcastToChannel bool              `json:"broadcastToChannel,omitempty"`
-	Report             string            `json:"report,omitempty"`
-	Silent             bool              `json:"silent,omitempty"`
-	Files              []string          `json:"files,omitempty"`
-}
-
-// finalAnswerKernelFields are the property names the kernel owns, whether or
-// not a claim offers them. A publisher property with one of these names is
-// never offered or routed to the publisher.
-var finalAnswerKernelFields = map[string]bool{
-	"answer": true, "appliedSkillRefs": true, "repairs": true, "broadcastToChannel": true,
-	"report": true, "silent": true, "files": true,
-}
-
-// finalAnswerCall is the decoded call: the strict kernel arguments, which
-// keys were present, and the remaining (host extension) fields.
-type finalAnswerCall struct {
-	Args    finalAnswerArgs
-	Present map[string]bool
-	Extra   map[string]json.RawMessage
-}
-
-// decodeFinalAnswerCall decodes raw as one JSON object. Kernel fields are
-// decoded strictly by type; every other key is kept in Extra and checked
-// against the claim's offered fields when the call settles (the dispatcher's
-// decode does not see the Run).
-func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
-	var fields map[string]json.RawMessage
-	if err := models.DecodeControlArguments(raw, &fields); err != nil {
-		return nil, err
-	}
-	if fields == nil {
-		return nil, errors.New("arguments must be one JSON object")
-	}
-	call := &finalAnswerCall{Present: map[string]bool{}, Extra: map[string]json.RawMessage{}}
-	kernel := map[string]json.RawMessage{}
-	for key, value := range fields {
-		if finalAnswerKernelFields[key] {
-			if key == "appliedSkillRefs" {
-				value = finalSkillRefsList(value)
-			}
-			kernel[key] = value
-			call.Present[key] = true
-			continue
-		}
-		call.Extra[key] = value
-	}
-	encoded, err := json.Marshal(kernel)
-	if err != nil {
-		return nil, err
-	}
-	if err := models.DecodeControlArguments(encoded, &call.Args); err != nil {
-		return nil, err
-	}
-	return call, nil
-}
-
-// finalSkillRefsList takes one Skill ref sent as a bare string as a list of
-// one: models sometimes drop the brackets on a single ref, and failing the
-// whole final answer for that costs a step. Anything else is left for the
-// strict decode.
-func finalSkillRefsList(value json.RawMessage) json.RawMessage {
-	var single string
-	if json.Unmarshal(value, &single) != nil {
-		return value
-	}
-	refs := []string{}
-	if strings.TrimSpace(single) != "" {
-		refs = append(refs, single)
-	}
-	encoded, err := json.Marshal(refs)
-	if err != nil {
-		return value
-	}
-	return encoded
-}
-
-// ---------------------------------------------------------------------------
-// Schema (§11.1; constant per claim)
-
-// finalFieldOffered says whether the claim offers a kernel property.
-func finalFieldOffered(field string, a agentrun.ControlAuthority) bool {
-	mode := a.EffectiveFinalMode()
-	switch field {
-	case "answer":
-		return true
-	case "appliedSkillRefs":
-		return len(a.SkillPromptRefs) > 0
-	case "repairs":
-		return a.VisualAllowed
-	case "broadcastToChannel":
-		return a.BroadcastAllowed
-	case "report":
-		return mode == agentrun.FinalModeDefault
-	case "silent":
-		return mode == agentrun.FinalModeSpoken || mode == agentrun.FinalModeDefault && a.RoutineOccurrence
-	case "files":
-		return mode == agentrun.FinalModeDefault
-	}
-	return false
-}
-
-// finalRequiredFields lists the required kernel properties in schema order.
-func finalRequiredFields(a agentrun.ControlAuthority) []string {
-	required := []string{"answer"}
-	if len(a.SkillPromptRefs) > 0 {
-		required = append(required, "appliedSkillRefs")
-	}
-	switch a.EffectiveFinalMode() {
-	case agentrun.FinalModeSpoken:
-		required = append(required, "silent")
-	}
-	return required
-}
-
-func finalAnswerSchema(a agentrun.ControlAuthority) map[string]interface{} {
-	answer := map[string]interface{}{"type": "string", "description": "The user-facing answer."}
-	if a.VisualAllowed {
-		answer["description"] = "The user-facing answer, in markdown. " + presentation.BlocksDescription()
-	}
-	if a.EffectiveFinalMode() == agentrun.FinalModeSpoken {
-		answer["description"] = "Only the words to speak; empty when silent is true."
-	}
-	properties := map[string]interface{}{"answer": answer}
-	if finalFieldOffered("appliedSkillRefs", a) {
-		properties["appliedSkillRefs"] = map[string]interface{}{
-			"type": "array", "uniqueItems": true,
-			"description": "The references of the Skill prompts this answer actually used.",
-			// No enum: the refs change whenever a Skill is connected, and
-			// finalSkillSelections refuses an unknown ref.
-			"items": map[string]interface{}{"type": "string"},
-		}
-	}
-	if finalFieldOffered("repairs", a) {
-		properties["repairs"] = map[string]interface{}{
-			"type": "object", "additionalProperties": map[string]interface{}{"type": "string"},
-			"description": "Only when a reply asks you to repair visual blocks: each block id it names, mapped to the whole corrected block (its ::: lines included). " +
-				"Leave answer empty then; the rest of your answer stands.",
-		}
-	}
-	if finalFieldOffered("broadcastToChannel", a) {
-		properties["broadcastToChannel"] = map[string]interface{}{
-			"type":        "boolean",
-			"description": "Your reply goes to the thread. Set true only when it adds channel-wide information that should also appear in the main timeline.",
-		}
-	}
-	if finalFieldOffered("report", a) {
-		properties["report"] = map[string]interface{}{
-			"type":        "string",
-			"description": "The complete human-readable deliverable when it is longer than the answer; shown instead of answer.",
-		}
-	}
-	if finalFieldOffered("files", a) {
-		properties["files"] = map[string]interface{}{
-			"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string"},
-			"description": "The files this run saved that this answer hands over, by path or id: the finished result, such as the PDF or the final image. " +
-				"Leave out files made only to build another one (drafts, panels, intermediate images); they stay in the Library and are not shown. " +
-				"An app you saved with save_app and files you showed with present go out with the answer already; they need no entry here.",
-		}
-	}
-	if finalFieldOffered("silent", a) {
-		description := "Write before answer. True when ambient speech needs no response; answer must then be empty. Do not announce silence."
-		if a.EffectiveFinalMode() != agentrun.FinalModeSpoken {
-			description = "Set true, with an empty answer, when nothing needs the person's attention; nothing is posted."
-		}
-		properties["silent"] = map[string]interface{}{"type": "boolean", "description": description}
-	}
-	return map[string]interface{}{
-		"type": "object", "additionalProperties": false,
-		"required": finalRequiredFields(a), "properties": properties,
-	}
-}
-
-func finalAnswerDescription(a agentrun.ControlAuthority) string {
-	text := "Finish with the user-facing answer"
-	if a.VisualAllowed {
-		text += ", with any visuals as blocks inside it"
-	}
-	if len(a.SkillPromptRefs) > 0 {
-		text += ", and the prompt Skills used"
-	}
-	return text + ". Call it alone, after your other tools have returned."
-}
-
-type finalAnswerHandler struct{}
-
-func (finalAnswerHandler) Spec(a agentrun.ControlAuthority) ToolSpec {
-	return ToolSpec{Description: finalAnswerDescription(a), InputSchema: finalAnswerSchema(a)}
-}
-
-func (finalAnswerHandler) Decode(raw json.RawMessage) (interface{}, error) {
-	return decodeFinalAnswerCall(raw)
-}
-
-func (finalAnswerHandler) Run(ctx context.Context, x *Executor, cc agentrun.ControlContext) (Result, error) {
-	call, ok := cc.Arguments.(*finalAnswerCall)
-	if !ok || call == nil {
-		return Result{}, errors.New("turn_final_answer arguments were not decoded")
-	}
-	if message := checkFinalAnswerFields(call, cc); message != "" {
-		return x.refuse(ctx, cc, controlArgumentsInvalid(message))
-	}
-	draft := &finalAnswerDraft{Args: call.Args, Extra: call.Extra}
-	return x.acceptFinalAnswer(ctx, cc, draft)
-}
-
-// checkFinalAnswerFields: every present kernel field must be offered on this
-// claim and every required field present. It returns the decoder-style
-// message, or "". A key that is neither a kernel field nor a host extension
-// (a model adding "tone") is dropped instead: refusing it throws away a whole
-// written answer to have the model write it again.
-func checkFinalAnswerFields(call *finalAnswerCall, cc agentrun.ControlContext) string {
-	var unknown []string
-	for key := range call.Present {
-		if !finalFieldOffered(key, cc.Authority) {
-			unknown = append(unknown, key)
-		}
-	}
-	for key := range call.Extra {
-		delete(call.Extra, key)
-	}
-	if len(unknown) > 0 {
-		sort.Strings(unknown)
-		return fmt.Sprintf("json: unknown field %q", unknown[0])
-	}
-	for _, key := range finalRequiredFields(cc.Authority) {
-		if !call.Present[key] {
-			return fmt.Sprintf("missing required field %q", key)
-		}
-	}
-	return ""
-}
-
-// ---------------------------------------------------------------------------
-// Acceptance pipeline (§11.3)
-
-// finalAnswerDraft is a final answer under validation. Checks may change
-// Output (evidence grounding adds its review).
-type finalAnswerDraft struct {
-	Args            finalAnswerArgs
-	Extra           map[string]json.RawMessage
-	PlainText       bool
-	ReactionsOnly   bool
-	SkillSelections []models.HostedSkillSelection
-	Output          map[string]interface{}
-}
-
-// repairing reports a call that only repairs visual blocks of the answer
-// delivery asked about; delivery puts them into that answer.
-func (d *finalAnswerDraft) repairing() bool {
-	return len(d.Args.Repairs) > 0 && strings.TrimSpace(d.Args.Answer) == "" && strings.TrimSpace(d.Args.Report) == ""
-}
-
-// content is the user-visible text: the trimmed report when present, else the
-// trimmed answer (the precedence chat replies have always used).
-func (d *finalAnswerDraft) content() string {
-	if report := strings.TrimSpace(d.Args.Report); report != "" {
-		return report
-	}
-	return strings.TrimSpace(d.Args.Answer)
-}
-
-// finalAnswerRejection is a check's verdict: an is_error result the model
-// can correct (Failure nil), or a failure of the Run (Failure set; the
-// rejection is still recorded on the entry or as the note).
+// finalAnswerRejection is a check's verdict: a rejection the model can
+// correct (Failure nil), or a failure of the Run (Failure set; the rejection
+// is still recorded on the entry or as the note).
 type finalAnswerRejection struct {
 	Code    string
 	Message string
@@ -325,133 +43,12 @@ type finalAnswerRejection struct {
 	Failure *agentrun.LoopFailure
 }
 
-// acceptFinalAnswer runs the pipeline on a decoded final. It returns
-// Final with the FinalAnswer (the tool entry stays open; the loop marks
-// it delivered), Continue after a rejection, or Failed.
-func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlContext, d *finalAnswerDraft) (Result, error) {
-	mode := cc.Authority.EffectiveFinalMode()
-	answer := strings.TrimSpace(d.Args.Answer)
-	// 2. Silent: a spoken reply or a routine occurrence, with an empty
-	// answer and no repairs, report, files or extension fields. A routine occurrence that changed
-	// something always reports it.
-	if d.Args.Silent {
-		routine := mode == agentrun.FinalModeDefault && cc.Authority.RoutineOccurrence
-		if (mode != agentrun.FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || len(d.Args.Repairs) > 0 ||
-			len(d.Args.Files) > 0 || len(d.Extra) > 0 {
-			message := "silent is only for a spoken reply that needs no response: leave answer empty and send no files."
-			if routine {
-				message = "silent means nothing is posted: leave answer and report empty and send no files."
-			}
-			return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalSilentInvalidCode, Message: message})
-		}
-		if routine {
-			changed, err := x.runChangedSomething(ctx, cc)
-			if err != nil {
-				return Result{}, err
-			}
-			if changed {
-				return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalSilentAfterChangeCode,
-					Message: "This run changed something, so report what it did."})
-			}
-		}
-	}
-	// 3. Content, unless silent, reactions only or a repair of blocks.
-	if !d.Args.Silent && !d.repairing() && d.content() == "" {
-		reacted, err := x.runReacted(ctx, cc)
-		if err != nil {
-			return Result{}, err
-		}
-		if !reacted {
-			return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalAnswerEmptyCode,
-				Message: "The answer is empty; write the reply in answer."})
-		}
-		d.ReactionsOnly = true
-	}
-	// 4. Skills.
-	selections, rejection := finalSkillSelections(d.Args.AppliedSkillRefs, cc.Authority.SkillPromptRefs)
-	if rejection != nil {
-		return x.rejectFinal(ctx, cc, d, rejection)
-	}
-	d.SkillSelections = selections
-	// 5. Visual blocks are read where they are stored (delivery), with the
-	// host's checks: a block that fails costs only itself, and delivery asks
-	// once for a repair of just those blocks.
-	d.Output = d.output(mode)
-	final := &agentrun.FinalAnswer{PlainText: d.PlainText, Answer: d.content(), Output: d.Output}
-	if d.Args.Silent || d.ReactionsOnly {
-		final.Answer = ""
-	}
-	if cc.Step != nil {
-		final.StepID = cc.Step.ID
-	}
-	if !d.PlainText && cc.Entry != nil {
-		final.ToolEntryID, final.ToolCallID, final.StepID = cc.Entry.ID, cc.Entry.ToolCallID, cc.Entry.StepID
-	}
-	// 10. OTP wait or pending setup (section 07 §8).
-	park, err := x.finalPark(ctx, cc, final.Answer)
-	if err != nil {
-		return Result{}, err
-	}
-	final.Park = park
-	return Result{Kind: Final, Run: cc.Run, Entry: cc.Entry, Final: final}, nil
-}
-
-// output is FinalAnswer.Output (§11.3 RunOutput).
-func (d *finalAnswerDraft) output(mode agentrun.FinalAnswerMode) map[string]interface{} {
-	if d.Args.Silent {
-		return map[string]interface{}{agentrun.FinalOutputSilentKey: true}
-	}
-	if d.ReactionsOnly {
-		return map[string]interface{}{agentrun.FinalOutputReactedKey: true}
-	}
-	output := map[string]interface{}{conversationrun.FinalOutputSummaryKey: strings.TrimSpace(d.Args.Answer)}
-	if report := strings.TrimSpace(d.Args.Report); report != "" {
-		output[agentbuilder.FinalOutputReportKey] = report
-	}
-	if d.Args.BroadcastToChannel {
-		output[agentrun.FinalOutputBroadcastKey] = true
-	}
-	if files := conversation.HandedOverFileIDs(d.Args.Files); len(files) > 0 {
-		output[conversation.FinalOutputFilesKey] = files
-	}
-	if d.repairing() {
-		output[conversationrun.FinalOutputVisualRepairsKey] = maps.Clone(d.Args.Repairs)
-	}
-	if len(d.SkillSelections) > 0 {
-		output[finalOutputSkillSelectionsKey] = d.SkillSelections
-	}
-	return output
-}
-
-// finalSkillSelections builds the dispositions of the offered prompt Skills
-// (cortex hostedNativeFinalOutcome rule): each offered ref is applied when
-// cited, otherwise not applied; duplicates and unknown refs are refused.
-// A ref cited twice counts once, and a ref that names no Skill prompt loaded in
-// this Run is left out: the citations are bookkeeping about the answer, and
-// refusing them throws away a whole written answer to have it written again.
-func finalSkillSelections(applied, offered []string) ([]models.HostedSkillSelection, *finalAnswerRejection) {
-	cited := make(map[string]bool, len(applied))
-	for _, ref := range applied {
-		cited[ref] = true
-	}
-	selections := make([]models.HostedSkillSelection, 0, len(offered))
-	for _, ref := range offered {
-		selection := models.HostedSkillSelection{SkillRef: ref, Disposition: models.HostedSkillNotApplied, Summary: "Not used in this answer."}
-		if cited[ref] {
-			selection.Disposition, selection.Summary = models.HostedSkillApplied, "Used in this answer."
-			delete(cited, ref)
-		}
-		selections = append(selections, selection)
-	}
-	return selections, nil
-}
-
-// rejectFinal records a rejection: the tool entry → error with the code (and
-// EntryMeta.ErrorCode), or for plain text a final_rejection note. A
-// rejection with a Failure then fails the Run.
-func (x *Executor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, d *finalAnswerDraft, r *finalAnswerRejection) (Result, error) {
+// rejectFinal records a rejection: for a plain reply a final_rejection note,
+// for a final tool call (request_decision) an error result on its entry
+// (with EntryMeta.ErrorCode). A rejection with a Failure then fails the Run.
+func (x *Executor) rejectFinal(ctx context.Context, cc agentrun.ControlContext, plainText bool, r *finalAnswerRejection) (Result, error) {
 	var recorded *models.SessionEntry
-	if d.PlainText {
+	if plainText {
 		note, err := x.appendFinalRejectionNote(ctx, cc, r)
 		if err != nil {
 			return Result{}, err
@@ -513,30 +110,11 @@ func (x *Executor) appendFinalRejectionNote(ctx context.Context, cc agentrun.Con
 	return x.Sessions.GetSessionEntry(ctx, cc.Run.Scope, note.ID)
 }
 
-// priorFinalErrorCodes counts the rejection codes of this Run's earlier final
-// attempts: final tool entries (EntryMeta.ErrorCode) and final_rejection
-// notes. The current entry and the current step's note are not counted. The
-// plain-text attempt limits use it.
+// priorFinalErrorCodes counts the rejection codes of this Run's earlier plain
+// replies (final_rejection notes); the current step's note is not counted.
+// The plain-text attempt limits use it.
 func (x *Executor) priorFinalErrorCodes(ctx context.Context, cc agentrun.ControlContext) (map[string]int, error) {
 	counts := map[string]int{}
-	tools, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
-		Scope: cc.Run.Scope, RunID: cc.Run.ID, ToolNames: []string{string(models.ControlToolFinalAnswer)}, Limit: models.MaxSessionEntryListLimit,
-	})
-	if err != nil {
-		return nil, err
-	}
-	for _, entry := range tools {
-		if cc.Entry != nil && entry.ID == cc.Entry.ID {
-			continue
-		}
-		meta, err := DecodeControlEntryMeta(entry)
-		if err != nil {
-			return nil, err
-		}
-		if meta != nil && meta.ErrorCode != "" {
-			counts[meta.ErrorCode]++
-		}
-	}
 	notes, err := x.Sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 		Scope: cc.Run.Scope, RunID: cc.Run.ID, NoteKinds: []models.NoteKind{models.NoteFinalRejection}, Limit: models.MaxSessionEntryListLimit,
 	})
@@ -675,13 +253,12 @@ func (x *Executor) finalPark(ctx context.Context, cc agentrun.ControlContext, an
 // PlainTextFinal handles an assistant entry with no tool calls (SPEC §3.1
 // phase 8). cc.Entry is nil; cc.Assistant is that entry and cc.Step its step
 // (still running). Results:
-//   - Final: an accepted final (FinalAnswer.PlainText unless the text
-//     was a turn_final_answer JSON object, which is accepted as the tool's
-//     arguments);
-//   - Continue: a final_rejection note was appended (Entry is the
-//     note, not a tool entry); the loop counts it toward the rejection bound;
-//   - Failed: the 3rd plain reply where a final tool is required, or
-//     the 3rd empty reply.
+//   - Final: an accepted final answer (the text, or silent / reactions only
+//     for an empty reply where that is allowed);
+//   - Continue: a final_rejection note was appended (Entry is the note); the
+//     loop counts it toward the rejection bound;
+//   - Failed: the 3rd plain reply where a final tool is required, or the 3rd
+//     empty reply.
 func (x *Executor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContext, text string) (Result, error) {
 	if x == nil || x.Sessions == nil {
 		return Result{}, errors.New("control executor has no session store")
@@ -697,17 +274,7 @@ func (x *Executor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContex
 	}
 	cc.Entry = nil
 	mode := cc.Authority.EffectiveFinalMode()
-	finalOffered := modelstep.ControlToolOffered(models.ControlToolFinalAnswer, cc.Authority)
-	trimmed := strings.TrimSpace(text)
-	// 1. Repair: the text is the tool's arguments as one JSON object (kernel
-	// fields only: extension fields need a tool entry to be published from).
-	if finalOffered && strings.HasPrefix(trimmed, "{") {
-		if call, err := decodeFinalAnswerCall(json.RawMessage(trimmed)); err == nil && call.Present["answer"] &&
-			len(call.Extra) == 0 && checkFinalAnswerFields(call, cc) == "" {
-			return x.acceptFinalAnswer(ctx, cc, &finalAnswerDraft{Args: call.Args, Extra: call.Extra, PlainText: true})
-		}
-	}
-	// 2. Modes that need a structured final tool.
+	// 1. Modes that need a structured final tool.
 	if tool := finalToolRequired(mode); tool != "" {
 		prior, err := x.priorFinalErrorCodes(ctx, cc)
 		if err != nil {
@@ -719,36 +286,67 @@ func (x *Executor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContex
 			rejection.Failure = &agentrun.LoopFailure{Kind: conversation.RunFailureKindExecution, Code: finalToolRequiredCode,
 				Message: fmt.Sprintf("The agent replied without %s %d times, so the run stopped.", tool, finalPlainTextAttemptsLimit)}
 		}
-		return x.rejectFinal(ctx, cc, &finalAnswerDraft{PlainText: true}, rejection)
+		return x.rejectFinal(ctx, cc, true, rejection)
 	}
-	draft := &finalAnswerDraft{Args: finalAnswerArgs{Answer: trimmed}, PlainText: true}
-	// 4. Empty text.
-	if trimmed == "" {
-		if mode == agentrun.FinalModeSpoken {
-			draft.Args.Silent = true
-			return x.acceptFinalAnswer(ctx, cc, draft)
+	answer := strings.TrimSpace(text)
+	output := map[string]interface{}{conversationrun.FinalOutputSummaryKey: answer}
+	// 2. An empty reply: silent when spoken, the reactions when the Run
+	// reacted, nothing to report for a routine occurrence that changed
+	// nothing; otherwise refused.
+	if answer == "" {
+		empty, rejection, err := x.emptyReply(ctx, cc, mode)
+		if err != nil || rejection != nil {
+			if err != nil {
+				return Result{}, err
+			}
+			return x.rejectFinal(ctx, cc, true, rejection)
 		}
-		reacted, err := x.runReacted(ctx, cc)
-		if err != nil {
-			return Result{}, err
-		}
-		if reacted {
-			return x.acceptFinalAnswer(ctx, cc, draft)
-		}
-		prior, err := x.priorFinalErrorCodes(ctx, cc)
-		if err != nil {
-			return Result{}, err
-		}
-		rejection := &finalAnswerRejection{Code: finalEmptyReplyCode,
-			Message: "An empty reply is not an answer. Write the reply, or call turn_final_answer."}
-		if prior[finalEmptyReplyCode]+1 >= finalEmptyReplyAttemptLimit {
-			rejection.Failure = &agentrun.LoopFailure{Kind: conversation.RunFailureKindExecution, Code: finalEmptyReplyCode,
-				Message: "The agent sent an empty reply three times, so the run stopped."}
-		}
-		return x.rejectFinal(ctx, cc, draft, rejection)
+		output = empty
 	}
-	// 3. The text is the answer.
-	return x.acceptFinalAnswer(ctx, cc, draft)
+	final := &agentrun.FinalAnswer{PlainText: true, StepID: cc.Step.ID, Answer: answer, Output: output}
+	// 3. OTP wait or pending setup (section 07 §8).
+	park, err := x.finalPark(ctx, cc, answer)
+	if err != nil {
+		return Result{}, err
+	}
+	final.Park = park
+	return Result{Kind: Final, Run: cc.Run, Final: final}, nil
+}
+
+// emptyReply is the output of an empty reply that is allowed (silent or
+// reactions only), or the rejection of one that is not.
+func (x *Executor) emptyReply(ctx context.Context, cc agentrun.ControlContext, mode agentrun.FinalAnswerMode) (map[string]interface{}, *finalAnswerRejection, error) {
+	if mode == agentrun.FinalModeSpoken {
+		return map[string]interface{}{agentrun.FinalOutputSilentKey: true}, nil, nil
+	}
+	reacted, err := x.runReacted(ctx, cc)
+	if err != nil {
+		return nil, nil, err
+	}
+	if reacted {
+		return map[string]interface{}{agentrun.FinalOutputReactedKey: true}, nil, nil
+	}
+	if mode == agentrun.FinalModeDefault && cc.Authority.RoutineOccurrence {
+		// A routine occurrence that changed something always reports it.
+		changed, err := x.runChangedSomething(ctx, cc)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !changed {
+			return map[string]interface{}{agentrun.FinalOutputSilentKey: true}, nil, nil
+		}
+		return nil, &finalAnswerRejection{Code: finalSilentAfterChangeCode, Message: "This run changed something, so report what it did."}, nil
+	}
+	prior, err := x.priorFinalErrorCodes(ctx, cc)
+	if err != nil {
+		return nil, nil, err
+	}
+	rejection := &finalAnswerRejection{Code: finalEmptyReplyCode, Message: "An empty reply is not an answer. Write the reply."}
+	if prior[finalEmptyReplyCode]+1 >= finalEmptyReplyAttemptLimit {
+		rejection.Failure = &agentrun.LoopFailure{Kind: conversation.RunFailureKindExecution, Code: finalEmptyReplyCode,
+			Message: "The agent sent an empty reply three times, so the run stopped."}
+	}
+	return nil, rejection, nil
 }
 
 // finalToolRequired names the final tool a plain reply cannot replace in
@@ -761,9 +359,6 @@ func finalToolRequired(mode agentrun.FinalAnswerMode) models.ControlToolName {
 }
 
 func (r Registry) finalToolRequiredFields(tool models.ControlToolName, a agentrun.ControlAuthority) string {
-	if tool == models.ControlToolFinalAnswer {
-		return strings.Join(finalRequiredFields(a), ", ")
-	}
 	h, ok := r[tool]
 	if !ok {
 		return "its required fields"

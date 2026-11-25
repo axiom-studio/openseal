@@ -8,37 +8,20 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
-
-	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// finalFixture is a control fixture that runs the real turn_final_answer
-// handler.
+// newFinalFixture is a control fixture for plain replies: no tool handlers.
 func newFinalFixture(t *testing.T, calls ...agentrun.LoopToolCall) *controlFixture {
 	t.Helper()
 	f := newControlFixture(t, calls)
-	registry := Registry{}
-	registry.register(models.ControlToolFinalAnswer, finalAnswerHandler{})
-	f.exec.handlers = registry
+	f.exec.handlers = NewRegistry(BuiltinTools()...)
 	return f
-}
-
-func finalCall(id, args string) agentrun.LoopToolCall {
-	return agentrun.LoopToolCall{ID: id, Name: string(models.ControlToolFinalAnswer), Arguments: json.RawMessage(args)}
-}
-
-func (f *controlFixture) settleFinal(callID string, authority agentrun.ControlAuthority) Result {
-	f.t.Helper()
-	result, err := f.exec.Settle(f.ctx, f.context(callID, authority))
-	if err != nil {
-		f.t.Fatalf("settle %s: %v", callID, err)
-	}
-	return result
 }
 
 // plainContext is the context of a plain-text final on its own (running) step.
@@ -71,22 +54,6 @@ func requireFinal(t *testing.T, result Result) *agentrun.FinalAnswer {
 	return result.Final
 }
 
-func requireRejected(t *testing.T, f *controlFixture, result Result, callID, code string) map[string]interface{} {
-	t.Helper()
-	if result.Kind != Continue || result.Entry == nil || result.Entry.State != models.ToolEntryError {
-		t.Fatalf("result = %#v, want a rejection", result)
-	}
-	stored := f.stored(callID)
-	value := requireControlError(t, stored.Tool.Result, models.ToolResultFailed, code)
-	if code != ArgumentsInvalidCode {
-		meta, err := DecodeControlEntryMeta(stored)
-		if err != nil || meta == nil || meta.ErrorCode != code || meta.Kind != models.ControlToolFinalAnswer {
-			t.Fatalf("meta = %#v, %v", meta, err)
-		}
-	}
-	return value
-}
-
 func requireRejectionNote(t *testing.T, result Result, stepID, code string) *models.SessionEntry {
 	t.Helper()
 	note := result.Entry
@@ -101,100 +68,17 @@ func requireRejectionNote(t *testing.T, result Result, stepID, code string) *mod
 	return note
 }
 
-func schemaProperties(t *testing.T, schema map[string]interface{}) (map[string]interface{}, []string) {
-	t.Helper()
-	properties, _ := schema["properties"].(map[string]interface{})
-	required, _ := schema["required"].([]string)
-	return properties, required
-}
-
-func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
-	keys := func(m map[string]interface{}) []string {
-		var out []string
-		for _, field := range []string{"answer", "appliedSkillRefs", "repairs", "broadcastToChannel", "report", "silent", "evidenceClaims", "files"} {
-			if _, ok := m[field]; ok {
-				out = append(out, field)
+// The final answer is the plain reply: no control tool takes an answer.
+func TestNoFinalAnswerTool(t *testing.T) {
+	for _, authority := range []agentrun.ControlAuthority{{}, {VisualAllowed: true, CanAskUser: true, CanReact: true}, {FinalMode: agentrun.FinalModeSpoken}} {
+		for _, spec := range NewRegistry(BuiltinTools()...).Specs(authority) {
+			if spec.Name == "turn_final_answer" || spec.InputSchema["properties"].(map[string]interface{})["answer"] != nil {
+				t.Fatalf("%s takes an answer", spec.Name)
 			}
 		}
-		return out
 	}
-	cases := []struct {
-		name          string
-		authority     agentrun.ControlAuthority
-		wantFields    []string
-		wantRequired  []string
-		answerSpoken  bool
-		wantSkillEnum []string
-	}{
-		{"default", agentrun.ControlAuthority{}, []string{"answer", "report", "files"}, []string{"answer"}, false, nil},
-		{"chat with skills", agentrun.ControlAuthority{SkillPromptRefs: []string{"s1", "s2"}, VisualAllowed: true, BroadcastAllowed: true},
-			[]string{"answer", "appliedSkillRefs", "repairs", "broadcastToChannel", "report", "files"}, []string{"answer", "appliedSkillRefs"}, false, []string{"s1", "s2"}},
-		{"spoken", agentrun.ControlAuthority{FinalMode: agentrun.FinalModeSpoken}, []string{"answer", "silent"}, []string{"answer", "silent"}, true, nil},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			specs := builtinControlSpecs(tc.authority)
-			var spec *ToolSpec
-			for i := range specs {
-				if specs[i].Name == models.ControlToolFinalAnswer {
-					spec = &specs[i]
-				}
-			}
-			if spec == nil || spec.Phase != PhaseSettle {
-				t.Fatalf("final tool spec = %#v", spec)
-			}
-			properties, required := schemaProperties(t, spec.InputSchema)
-			if got := keys(properties); !reflect.DeepEqual(got, tc.wantFields) || len(properties) != len(tc.wantFields) {
-				t.Fatalf("properties = %v, want %v", got, tc.wantFields)
-			}
-			if !reflect.DeepEqual(required, tc.wantRequired) {
-				t.Fatalf("required = %v, want %v", required, tc.wantRequired)
-			}
-			if spec.InputSchema["additionalProperties"] != false {
-				t.Fatal("schema must be closed")
-			}
-			answer := properties["answer"].(map[string]interface{})
-			if spoken := strings.HasPrefix(answer["description"].(string), "Only the words to speak"); spoken != tc.answerSpoken {
-				t.Fatalf("answer description = %v", answer["description"])
-			}
-			if tc.wantSkillEnum != nil {
-				// The refs are validated when the answer is checked; the
-				// schema carries no enum, so connecting a Skill never
-				// changes the tool.
-				items := properties["appliedSkillRefs"].(map[string]interface{})["items"].(map[string]interface{})
-				if _, ok := items["enum"]; ok || items["type"] != "string" {
-					t.Fatalf("skill items = %v", items)
-				}
-			}
-			// Constant per claim (prompt cache).
-			again := builtinControlSpecs(tc.authority)
-			if !reflect.DeepEqual(specs, again) {
-				t.Fatal("specs differ between two listings")
-			}
-		})
-	}
-	// Decision Runs never get turn_final_answer.
-	for _, spec := range builtinControlSpecs(agentrun.ControlAuthority{FinalMode: agentrun.FinalModeDecision}) {
-		if spec.Name == models.ControlToolFinalAnswer {
-			t.Fatal("decision Run offers turn_final_answer")
-		}
-	}
-}
-
-func TestFinalAnswerToolAcceptedLeavesEntryForDelivery(t *testing.T) {
-	f := newFinalFixture(t, finalCall("final", `{"answer":"  Here it is.  "}`))
-	final := requireFinal(t, f.settleFinal("final", agentrun.ControlAuthority{}))
-	entry := f.entries["final"]
-	if final.PlainText || final.Answer != "Here it is." || final.StepID != entry.StepID ||
-		final.ToolEntryID != entry.ID || final.ToolCallID != "final" || final.Park != nil {
-		t.Fatalf("final = %#v", final)
-	}
-	if !reflect.DeepEqual(final.Output, map[string]interface{}{"summary": "Here it is."}) {
-		t.Fatalf("output = %#v", final.Output)
-	}
-	// The loop marks the entry delivered after posting.
-	if stored := f.stored("final"); stored.State != models.ToolEntryPending || stored.Tool.Result != nil {
-		t.Fatalf("entry = %s %#v", stored.State, stored.Tool.Result)
+	if IsControlTool("turn_final_answer") {
+		t.Fatal("turn_final_answer is still a control tool")
 	}
 }
 
@@ -222,42 +106,12 @@ func TestPlainTextIsFinalAnswer(t *testing.T) {
 	}
 }
 
-func TestPlainTextJSONFinalIsRepaired(t *testing.T) {
+// A reply that looks like the old tool's arguments is just text.
+func TestPlainTextJSONStaysText(t *testing.T) {
 	f := newFinalFixture(t)
-	authority := agentrun.ControlAuthority{BroadcastAllowed: true}
-	final := requireFinal(t, f.plain("step-2", 2, authority, ` {"answer":"Posted.","broadcastToChannel":true} `))
-	if !final.PlainText || final.Answer != "Posted." || final.Output["broadcastToChannel"] != true || final.Output["summary"] != "Posted." {
-		t.Fatalf("final = %#v", final)
-	}
-	// JSON that is not the tool's arguments stays text.
-	for _, text := range []string{`{"result":"ok"}`, `{"answer":"x","report":1}`, `{"answer":"x","silent":true}`} {
-		final := requireFinal(t, f.plain("step-3", 3, authority, text))
-		if final.Answer != text {
-			t.Fatalf("%s answer = %q", text, final.Answer)
-		}
-	}
-}
-
-func TestSilentOnlySpoken(t *testing.T) {
-	f := newFinalFixture(t,
-		finalCall("default", `{"answer":"","silent":true}`),
-		finalCall("spoken-text", `{"answer":"Hello","silent":true}`),
-		finalCall("spoken", `{"answer":"","silent":true}`),
-		finalCall("spoken-missing", `{"answer":"Hi"}`),
-	)
-	// silent is not offered outside spoken Runs.
-	value := requireRejected(t, f, f.settleFinal("default", agentrun.ControlAuthority{}), "default", ArgumentsInvalidCode)
-	if !strings.Contains(value["message"].(string), `"silent"`) {
-		t.Fatalf("message = %v", value["message"])
-	}
-	spoken := agentrun.ControlAuthority{FinalMode: agentrun.FinalModeSpoken}
-	requireRejected(t, f, f.settleFinal("spoken-text", spoken), "spoken-text", finalSilentInvalidCode)
-	value = requireRejected(t, f, f.settleFinal("spoken-missing", spoken), "spoken-missing", ArgumentsInvalidCode)
-	if value["message"] != `missing required field "silent"` {
-		t.Fatalf("message = %v", value["message"])
-	}
-	final := requireFinal(t, f.settleFinal("spoken", spoken))
-	if final.Answer != "" || !final.Silent() || !reflect.DeepEqual(final.Output, map[string]interface{}{"silent": true}) {
+	text := `{"answer":"Posted.","broadcastToChannel":true}`
+	final := requireFinal(t, f.plain("step-2", 2, agentrun.ControlAuthority{}, text))
+	if final.Answer != text || len(final.Output) != 1 || final.Output["summary"] != text {
 		t.Fatalf("final = %#v", final)
 	}
 }
@@ -312,131 +166,14 @@ func (f *controlFixture) completeEntry(callID string) {
 }
 
 func TestEmptyAnswerAfterReactionIsReactionsOnly(t *testing.T) {
-	f := newFinalFixture(t,
-		agentrun.LoopToolCall{ID: "react", Name: string(models.ControlToolReact), Arguments: json.RawMessage(`{}`)},
-		finalCall("empty", `{"answer":" "}`),
-		finalCall("after", `{"answer":""}`),
-	)
-	requireRejected(t, f, f.settleFinal("empty", agentrun.ControlAuthority{}), "empty", finalAnswerEmptyCode)
+	f := newFinalFixture(t, agentrun.LoopToolCall{ID: "react", Name: string(models.ControlToolReact), Arguments: json.RawMessage(`{}`)})
 	if result := f.plain("step-2", 2, agentrun.ControlAuthority{}, ""); result.Kind != Continue {
 		t.Fatalf("empty plain text before a reaction = %#v", result)
 	}
 	f.completeEntry("react")
-	final := requireFinal(t, f.settleFinal("after", agentrun.ControlAuthority{}))
-	if !final.ReactionsOnly() || final.Answer != "" {
-		t.Fatalf("final = %#v", final)
-	}
-	final = requireFinal(t, f.plain("step-3", 3, agentrun.ControlAuthority{}, ""))
-	if !final.ReactionsOnly() || !final.PlainText {
+	final := requireFinal(t, f.plain("step-3", 3, agentrun.ControlAuthority{}, ""))
+	if !final.ReactionsOnly() || !final.PlainText || final.Answer != "" {
 		t.Fatalf("plain final = %#v", final)
-	}
-}
-
-// Visual blocks travel in the answer text; the control reads none of them.
-// A call that only repairs blocks (repairs, no answer) is accepted and
-// carries the repairs to delivery.
-func TestRepairOnlyCallIsAccepted(t *testing.T) {
-	f := newFinalFixture(t, finalCall("repair", `{"answer":"","repairs":{"spend":":::chart{#spend kind=bar}\n| M | S |\n|---|---|\n| Jan | 3 |\n:::"}}`))
-	final := requireFinal(t, f.settleFinal("repair", agentrun.ControlAuthority{VisualAllowed: true}))
-	repairs, _ := final.Output[conversationrun.FinalOutputVisualRepairsKey].(map[string]string)
-	if final.Answer != "" || len(repairs) != 1 || !strings.HasPrefix(repairs["spend"], ":::chart") {
-		t.Fatalf("final = %#v", final)
-	}
-}
-
-// repairs is offered only where visuals are, and repairs with an answer is
-// a normal answer (the repairs are not carried).
-func TestRepairsNeedVisualsAndNoAnswer(t *testing.T) {
-	f := newFinalFixture(t,
-		finalCall("offered", `{"answer":"","repairs":{"a":":::text\nx\n:::"}}`),
-		finalCall("both", `{"answer":"Here.","repairs":{"a":":::text\nx\n:::"}}`),
-	)
-	requireRejected(t, f, f.settleFinal("offered", agentrun.ControlAuthority{}), "offered", ArgumentsInvalidCode)
-	final := requireFinal(t, f.settleFinal("both", agentrun.ControlAuthority{VisualAllowed: true}))
-	if _, carried := final.Output[conversationrun.FinalOutputVisualRepairsKey]; carried || final.Answer != "Here." {
-		t.Fatalf("final = %#v", final)
-	}
-}
-
-// The answer's description carries the block format only where visuals are
-// allowed.
-func TestAnswerDescriptionCarriesBlocks(t *testing.T) {
-	describe := func(a agentrun.ControlAuthority) string {
-		properties := finalAnswerSchema(a)["properties"].(map[string]interface{})
-		return properties["answer"].(map[string]interface{})["description"].(string)
-	}
-	if !strings.Contains(describe(agentrun.ControlAuthority{VisualAllowed: true}), "Visuals go inside the answer") {
-		t.Fatal("chat answer lacks the block format")
-	}
-	if strings.Contains(describe(agentrun.ControlAuthority{}), ":::") {
-		t.Fatal("answer without visuals describes blocks")
-	}
-}
-
-func TestReportTakesPrecedenceOverAnswer(t *testing.T) {
-	f := newFinalFixture(t, finalCall("final", `{"answer":"Short version.","report":"  The full report.  "}`))
-	final := requireFinal(t, f.settleFinal("final", agentrun.ControlAuthority{}))
-	if final.Answer != "The full report." || final.Output["summary"] != "Short version." || final.Output["report"] != "The full report." {
-		t.Fatalf("final = %#v", final)
-	}
-	// report is not offered on spoken Runs.
-	g := newFinalFixture(t, finalCall("final", `{"answer":"Hi","silent":false,"report":"x"}`))
-	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{FinalMode: agentrun.FinalModeSpoken}), "final", ArgumentsInvalidCode)
-}
-
-func TestBroadcastToChannelInOutput(t *testing.T) {
-	f := newFinalFixture(t, finalCall("on", `{"answer":"News.","broadcastToChannel":true}`), finalCall("off", `{"answer":"Reply.","broadcastToChannel":false}`))
-	authority := agentrun.ControlAuthority{BroadcastAllowed: true}
-	final := requireFinal(t, f.settleFinal("on", authority))
-	if !final.BroadcastToChannel() || final.Output["broadcastToChannel"] != true {
-		t.Fatalf("final = %#v", final)
-	}
-	final = requireFinal(t, f.settleFinal("off", authority))
-	if final.BroadcastToChannel() {
-		t.Fatalf("broadcast false = %#v", final.Output)
-	}
-	if _, ok := final.Output["broadcastToChannel"]; ok {
-		t.Fatal("false broadcast written to output")
-	}
-	g := newFinalFixture(t, finalCall("final", `{"answer":"x","broadcastToChannel":true}`))
-	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{}), "final", ArgumentsInvalidCode)
-}
-
-func TestFinalAnswerSkillSelections(t *testing.T) {
-	f := newFinalFixture(t,
-		finalCall("missing", `{"answer":"x"}`),
-		finalCall("dup", `{"answer":"x","appliedSkillRefs":["s1","s1"]}`),
-		finalCall("unknown", `{"answer":"x","appliedSkillRefs":["s9"]}`),
-		finalCall("ok", `{"answer":"x","appliedSkillRefs":["s2"]}`),
-	)
-	authority := agentrun.ControlAuthority{SkillPromptRefs: []string{"s1", "s2"}}
-	requireRejected(t, f, f.settleFinal("missing", authority), "missing", ArgumentsInvalidCode)
-	// A ref cited twice counts once; a ref no loaded Skill has is left out.
-	for _, id := range []string{"dup", "unknown"} {
-		got := requireFinal(t, f.settleFinal(id, authority))
-		applied := 0
-		for _, selection := range got.Output["skillSelections"].([]models.HostedSkillSelection) {
-			if selection.Disposition == models.HostedSkillApplied {
-				applied++
-			}
-		}
-		if want := map[string]int{"dup": 1, "unknown": 0}[id]; applied != want {
-			t.Fatalf("%s: applied = %d, want %d", id, applied, want)
-		}
-	}
-	final := requireFinal(t, f.settleFinal("ok", authority))
-	want := []models.HostedSkillSelection{
-		{SkillRef: "s1", Disposition: models.HostedSkillNotApplied, Summary: "Not used in this answer."},
-		{SkillRef: "s2", Disposition: models.HostedSkillApplied, Summary: "Used in this answer."},
-	}
-	if !reflect.DeepEqual(final.Output["skillSelections"], want) {
-		t.Fatalf("selections = %#v", final.Output["skillSelections"])
-	}
-	// Plain text cites nothing: every offered Skill is not applied.
-	plain := requireFinal(t, f.plain("step-2", 2, authority, "Answer."))
-	if selections := plain.Output["skillSelections"].([]models.HostedSkillSelection); len(selections) != 2 ||
-		selections[0].Disposition != models.HostedSkillNotApplied || selections[1].Disposition != models.HostedSkillNotApplied {
-		t.Fatalf("plain selections = %#v", selections)
 	}
 }
 
@@ -453,17 +190,12 @@ func TestDecisionRunPlainTextGetsNoteThenFails(t *testing.T) {
 			t.Fatalf("note = %q", note.Note.Text)
 		}
 	}
-	// The JSON repair is only for turn_final_answer, which decision Runs lack.
 	result := f.plain("step-4", 4, decision, `{"answer":"accept"}`)
 	if result.Kind != Failed || result.Failure == nil || result.Failure.Code != finalToolRequiredCode ||
 		result.Failure.Kind != conversation.RunFailureKindExecution {
 		t.Fatalf("third plain reply = %#v", result)
 	}
 	requireRejectionNote(t, result, "step-4", finalToolRequiredCode)
-	// The tool itself is not available in a decision Run.
-	g := newFinalFixture(t, finalCall("final", `{"answer":"x"}`))
-	result = g.settleFinal("final", decision)
-	requireControlError(t, g.stored("final").Tool.Result, models.ToolResultRefused, "tool_not_available")
 }
 
 // governedEntry turns the fixture's pending call into a finished governed
@@ -488,13 +220,9 @@ func (f *controlFixture) governedEntry(callID, skillID, action string, output ma
 }
 
 func TestFinalAnswerParksForOTPKeepsRunAlive(t *testing.T) {
-	f := newFinalFixture(t,
-		agentrun.LoopToolCall{ID: "browser", Name: "live_browser_submit", Arguments: json.RawMessage(`{}`)},
-		finalCall("final", `{"answer":"  What is the code the bank just sent you? "}`),
-		finalCall("cannot-ask", `{"answer":"What is the code?"}`),
-	)
+	f := newFinalFixture(t, agentrun.LoopToolCall{ID: "browser", Name: "live_browser_submit", Arguments: json.RawMessage(`{}`)})
 	f.governedEntry("browser", liveBrowserSkillID, "live-browser-submit", map[string]interface{}{"status": "otp_required"})
-	final := requireFinal(t, f.settleFinal("final", agentrun.ControlAuthority{CanAskUser: true}))
+	final := requireFinal(t, f.plain("step-2", 2, agentrun.ControlAuthority{CanAskUser: true}, "  What is the code the bank just sent you? "))
 	park := final.Park
 	if park == nil || !park.Deliver || park.Park.Status != models.AgentRunStatusWaitingForEvent || park.Park.Wake == nil ||
 		park.Park.Wake.Type != "user_message" || park.Park.Summary != "What is the code the bank just sent you?" {
@@ -509,28 +237,20 @@ func TestFinalAnswerParksForOTPKeepsRunAlive(t *testing.T) {
 		t.Fatalf("run = %#v, %v", run, err)
 	}
 	// A Run that cannot ask its conversation completes.
-	final = requireFinal(t, f.settleFinal("cannot-ask", agentrun.ControlAuthority{}))
+	final = requireFinal(t, f.plain("step-3", 3, agentrun.ControlAuthority{}, "What is the code?"))
 	if final.Park != nil {
 		t.Fatalf("park without ask = %#v", final.Park)
-	}
-	// Plain text gets the same park.
-	plain := requireFinal(t, f.plain("step-2", 2, agentrun.ControlAuthority{CanAskUser: true}, "Which code did you get?"))
-	if plain.Park == nil || !plain.Park.Deliver {
-		t.Fatalf("plain park = %#v", plain.Park)
 	}
 }
 
 func TestTaskFinalParksOnPendingSetup(t *testing.T) {
-	f := newFinalFixture(t,
-		agentrun.LoopToolCall{ID: "setup", Name: "openseal_skills_request_setup", Arguments: json.RawMessage(`{}`)},
-		finalCall("final", `{"answer":"I asked you to connect the account."}`),
-	)
+	f := newFinalFixture(t, agentrun.LoopToolCall{ID: "setup", Name: "openseal_skills_request_setup", Arguments: json.RawMessage(`{}`)})
 	f.run.Kind = models.RunKindAgentWork
 	f.run.Context = map[string]interface{}{models.ConversationTaskContextKey: "task-1"}
 	f.governedEntry("setup", models.SkillManagementSkillID, agentrun.SkillActionRequestSetup, map[string]interface{}{
 		"setupRequest": map[string]interface{}{"id": "setup-1", "status": "pending", "runId": f.run.ID, "actionCallId": "action-setup"},
 	})
-	final := requireFinal(t, f.settleFinal("final", agentrun.ControlAuthority{TaskWork: true, CanAskUser: true}))
+	final := requireFinal(t, f.plain("step-2", 2, agentrun.ControlAuthority{TaskWork: true, CanAskUser: true}, "I asked you to connect the account."))
 	park := final.Park
 	if park == nil || park.Deliver || park.Park.Status != models.AgentRunStatusWaitingForEvent || park.Park.Wake == nil ||
 		park.Park.Wake.Type != conversationrun.ConversationTaskSkillSetupWakeType || park.Park.Wake.Reference != "setup-1" ||
@@ -541,38 +261,12 @@ func TestTaskFinalParksOnPendingSetup(t *testing.T) {
 	f.run.PendingInterventions = []models.AgentRunIntervention{{ID: "i1", SkillSetupResolution: &models.SkillSetupResolutionReceipt{
 		Scope: f.run.Scope, RunID: f.run.ID, RequestID: "setup-1", ActionCallID: "action-setup", Status: "resolved",
 	}}}
-	final = requireFinal(t, f.plain("step-2", 2, agentrun.ControlAuthority{TaskWork: true}, "Connected; here is the report."))
+	final = requireFinal(t, f.plain("step-3", 3, agentrun.ControlAuthority{TaskWork: true}, "Connected; here is the report."))
 	if final.Park != nil {
 		t.Fatalf("park after resolution = %#v", final.Park)
 	}
 }
 
-func TestFinalAnswerDropsUnknownFields(t *testing.T) {
-	f := newFinalFixture(t, finalCall("final", `{"answer":"Done.","generatedFiles":[]}`))
-	final := requireFinal(t, f.settleFinal("final", agentrun.ControlAuthority{}))
-	if final.Output["generatedFiles"] != nil || final.Output["summary"] != "Done." {
-		t.Fatalf("output = %#v", final.Output)
-	}
-}
-
-func TestFinalAnswerTakesOneSkillRefSentAsAString(t *testing.T) {
-	call, err := decodeFinalAnswerCall(json.RawMessage(`{"answer":"Done.","appliedSkillRefs":"skill:meal"}`))
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(call.Args.AppliedSkillRefs) != 1 || call.Args.AppliedSkillRefs[0] != "skill:meal" {
-		t.Fatalf("appliedSkillRefs = %#v", call.Args.AppliedSkillRefs)
-	}
-	call, err = decodeFinalAnswerCall(json.RawMessage(`{"answer":"Done.","appliedSkillRefs":""}`))
-	if err != nil || len(call.Args.AppliedSkillRefs) != 0 {
-		t.Fatalf("empty string: %#v %v", call, err)
-	}
-	if _, err := decodeFinalAnswerCall(json.RawMessage(`{"answer":"Done.","appliedSkillRefs":7}`)); err == nil {
-		t.Fatal("a number must still be refused")
-	}
-}
-
-// addRunActionCall stores a finished action call of the fixture's Run.
 func (f *controlFixture) addRunActionCall(id string, status models.ActionCallStatus, sideEffect skill.SideEffect) {
 	f.t.Helper()
 	f.addActionCallFor(f.run.ID, id, status, sideEffect)
@@ -587,52 +281,37 @@ func (f *controlFixture) addActionCallFor(runID, id string, status models.Action
 	})
 }
 
-func TestFinalAnswerRoutineOccurrenceSilent(t *testing.T) {
-	f := newFinalFixture(t,
-		finalCall("text", `{"answer":"Nothing new","silent":true}`),
-		finalCall("report", `{"answer":"","report":"x","silent":true}`),
-		finalCall("files", `{"answer":"","files":["out.txt"],"silent":true}`),
-		finalCall("quiet", `{"answer":"","silent":true}`),
-	)
-	routine := agentrun.ControlAuthority{RoutineOccurrence: true}
-	properties, required := schemaProperties(t, finalAnswerSchema(routine))
-	silent, ok := properties["silent"].(map[string]interface{})
-	if !ok || !strings.Contains(silent["description"].(string), "nothing is posted") {
-		t.Fatalf("silent property = %#v", properties["silent"])
-	}
-	if !reflect.DeepEqual(required, []string{"answer"}) {
-		t.Fatalf("required = %v, silent must stay optional for routines", required)
-	}
-	requireRejected(t, f, f.settleFinal("text", routine), "text", finalSilentInvalidCode)
-	requireRejected(t, f, f.settleFinal("report", routine), "report", finalSilentInvalidCode)
-	requireRejected(t, f, f.settleFinal("files", routine), "files", finalSilentInvalidCode)
+// An empty reply of a routine occurrence that changed nothing is silent:
+// nothing is posted.
+func TestRoutineOccurrenceEmptyReplyIsSilent(t *testing.T) {
+	f := newFinalFixture(t)
 	// Reads and failed writes do not count as a change.
 	f.addRunActionCall("read", models.ActionCallStatusSucceeded, skill.SideEffectRead)
 	f.addRunActionCall("none", models.ActionCallStatusSucceeded, skill.SideEffectNone)
 	f.addRunActionCall("failed-write", models.ActionCallStatusFailed, skill.SideEffectWrite)
-	final := requireFinal(t, f.settleFinal("quiet", routine))
+	final := requireFinal(t, f.plain("step-2", 2, agentrun.ControlAuthority{RoutineOccurrence: true}, " "))
 	if final.Answer != "" || !final.Silent() || !reflect.DeepEqual(final.Output, map[string]interface{}{"silent": true}) {
 		t.Fatalf("final = %#v", final)
 	}
 }
 
-func TestRoutineOccurrenceSilentRefusedAfterWrite(t *testing.T) {
+func TestRoutineOccurrenceEmptyReplyRefusedAfterWrite(t *testing.T) {
 	for _, status := range []models.ActionCallStatus{models.ActionCallStatusSucceeded, models.ActionCallStatusCompensated} {
 		t.Run(string(status), func(t *testing.T) {
-			f := newFinalFixture(t, finalCall("quiet", `{"answer":"","silent":true}`))
+			f := newFinalFixture(t)
 			f.addRunActionCall("sent", status, skill.SideEffectExternal)
-			value := requireRejected(t, f, f.settleFinal("quiet", agentrun.ControlAuthority{RoutineOccurrence: true}), "quiet", finalSilentAfterChangeCode)
-			if value["message"] != "This run changed something, so report what it did." {
-				t.Fatalf("message = %v", value["message"])
+			note := requireRejectionNote(t, f.plain("step-2", 2, agentrun.ControlAuthority{RoutineOccurrence: true}, ""), "step-2", finalSilentAfterChangeCode)
+			if note.Note.Text != "This run changed something, so report what it did." {
+				t.Fatalf("note = %q", note.Note.Text)
 			}
 		})
 	}
 }
 
-func TestSilentStillRejectedForChatRuns(t *testing.T) {
-	f := newFinalFixture(t, finalCall("chat", `{"answer":"","silent":true}`))
-	// A chat reply in a routine's conversation is a conversation Run: it is
-	// not a routine occurrence and is not offered silent.
+// A chat reply in a routine's conversation is a conversation Run, not a
+// routine occurrence: an empty reply is refused there.
+func TestEmptyReplyStillRejectedForChatRuns(t *testing.T) {
+	f := newFinalFixture(t)
 	run := models.CloneAgentRun(f.run)
 	run.Kind = models.RunKindConversation
 	run.Context = map[string]interface{}{models.ScheduledTaskContextKey: true}
@@ -640,24 +319,18 @@ func TestSilentStillRejectedForChatRuns(t *testing.T) {
 	if err != nil || authority.RoutineOccurrence {
 		t.Fatalf("authority = %#v, %v", authority, err)
 	}
-	if finalFieldOffered("silent", authority) {
-		t.Fatal("silent offered to a chat Run")
-	}
-	value := requireRejected(t, f, f.settleFinal("chat", authority), "chat", ArgumentsInvalidCode)
-	if !strings.Contains(value["message"].(string), `"silent"`) {
-		t.Fatalf("message = %v", value["message"])
-	}
+	requireRejectionNote(t, f.plain("step-2", 2, authority, ""), "step-2", finalEmptyReplyCode)
 	occurrence := models.CloneAgentRun(f.run)
 	occurrence.Context = map[string]interface{}{models.ScheduledTaskContextKey: true}
 	authority, err = ResolveControlAuthority(f.ctx, AuthorityInput{Run: occurrence, DeploymentID: "agent-1", Deterministic: true})
-	if err != nil || !authority.RoutineOccurrence || !finalFieldOffered("silent", authority) {
+	if err != nil || !authority.RoutineOccurrence {
 		t.Fatalf("occurrence authority = %#v, %v", authority, err)
 	}
 }
 
 // A write by a delegated or forked child under the occurrence counts too.
-func TestRoutineOccurrenceSilentRefusedAfterChildWrite(t *testing.T) {
-	f := newFinalFixture(t, finalCall("quiet", `{"answer":"","silent":true}`))
+func TestRoutineOccurrenceEmptyReplyRefusedAfterChildWrite(t *testing.T) {
+	f := newFinalFixture(t)
 	rootID := f.run.RootRunID
 	if rootID == "" {
 		rootID = f.run.ID
@@ -668,20 +341,11 @@ func TestRoutineOccurrenceSilentRefusedAfterChildWrite(t *testing.T) {
 		t.Fatalf("create child run: %v", err)
 	}
 	f.addActionCallFor(child.ID, "child-sent", models.ActionCallStatusSucceeded, skill.SideEffectExternal)
-	requireRejected(t, f, f.settleFinal("quiet", agentrun.ControlAuthority{RoutineOccurrence: true}), "quiet", finalSilentAfterChangeCode)
+	requireRejectionNote(t, f.plain("step-2", 2, agentrun.ControlAuthority{RoutineOccurrence: true}, ""), "step-2", finalSilentAfterChangeCode)
 }
 
-func TestFinalAnswerSchemaStableAcrossSkillRefs(t *testing.T) {
-	one := agentrun.ControlAuthority{AgentID: "agent-1", SkillPromptRefs: []string{"skill-notion@1"}}
-	two := agentrun.ControlAuthority{AgentID: "agent-1", SkillPromptRefs: []string{"skill-notion@1", "skill-slack@1"}}
-	if controlJSON(t, finalAnswerSchema(one)) != controlJSON(t, finalAnswerSchema(two)) || finalAnswerDescription(one) != finalAnswerDescription(two) {
-		t.Fatal("the final answer tool changes with the Skill refs")
-	}
-	if selections, rejection := finalSkillSelections([]string{"skill-gone@1"}, two.SkillPromptRefs); rejection != nil || len(selections) != 2 ||
-		selections[0].Disposition != models.HostedSkillNotApplied || selections[1].Disposition != models.HostedSkillNotApplied {
-		t.Fatalf("an unknown ref must be left out: %#v %v", selections, rejection)
-	}
-	// Delegate, fork and operation tools carry no target list either.
+func TestControlToolsStableAcrossTargets(t *testing.T) {
+	// Delegate, fork and operation tools carry no target list.
 	targets := agentrun.ControlAuthority{AgentID: "agent-1", ForkAllowed: true,
 		DelegateTargets: []agentrun.HostedAgentTarget{{ID: "agent-2", DisplayName: "Ada"}}, ForkTargets: []agentrun.HostedAgentTarget{{ID: "agent-2"}},
 		Operations: []agentrun.HostedRunbookOperation{{Entrypoint: "report", Name: "Report"}}}

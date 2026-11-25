@@ -104,7 +104,7 @@ func TestRunLoopNarrationRecordedBeforeTools(t *testing.T) {
 				return looptest.Act("Checking issue 4 first.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "4"}))
 			}},
 			&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Issue 4 is open."})
+				return looptest.Say("Issue 4 is open.")
 			}},
 		))
 		run := f.StartRun(models.RunKindAgentWork, "Check issue 4")
@@ -162,7 +162,7 @@ func TestRunLoopPreviewResetOnToolStep(t *testing.T) {
 					return looptest.Act("Let me check.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "3"}))
 				}},
 			&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Issue 3 is open."})
+				return looptest.Say("Issue 3 is open.")
 			}},
 		))
 		run := f.StartRun(models.RunKindAgentWork, "Check issue 3")
@@ -198,7 +198,7 @@ func TestRunLoopFairnessYieldAfter50Steps(t *testing.T) {
 			lookupRule("lookup", 0, stepAtMost(runloop.MaxStepsPerClaim), nil),
 			&looptest.ModelRule{Name: "answer", When: func(v looptest.StepView) bool { return v.Step() == runloop.MaxStepsPerClaim+1 },
 				Reply: func(looptest.StepView) models.ModelStepResult {
-					return looptest.FinalAnswer(map[string]any{"answer": "All 50 issues are open."})
+					return looptest.Say("All 50 issues are open.")
 				}},
 		))
 		run := f.StartRun(models.RunKindAgentWork, "Check the 50 issues")
@@ -292,7 +292,7 @@ func TestRunLoopParkConflictReplansAndTransitionsOnce(t *testing.T) {
 					return looptest.Act("Closing it.", looptest.ReviewedCall(looptest.GovernedTool(v, "update_status"), map[string]any{"id": "8", "status": "closed"}, "Close issue 8"))
 				}},
 			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Closed issue 8."})
+				return looptest.Say("Closed issue 8.")
 			}},
 		))
 		run := f.StartRun(models.RunKindAgentWork, "Close issue 8")
@@ -389,26 +389,37 @@ func TestRunLoopParkReplanSupersededByMessage(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Final answers
 
-// Three rejected final tool calls in a row fail the Run final_answer_rejected.
-func TestRunLoopFinalToolRejectedThreeTimesFails(t *testing.T) {
+// Three rejected final answers in a row fail the Run final_answer_rejected:
+// here a routine occurrence that sent something keeps replying with nothing
+// to report.
+func TestRunLoopFinalRejectedThreeTimesFails(t *testing.T) {
 	looptest.EachStore(t, "rl_final_rejected", func(t *testing.T, store models.KernelStore) {
-		f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "bad final", Reply: func(looptest.StepView) models.ModelStepResult {
-			return looptest.FinalAnswer(map[string]any{"answer": 42})
-		}}))
-		run := f.StartRun(models.RunKindAgentWork, "Answer badly")
-		exit, failed := f.RunClaim(run.ID)
-		if exit.Reason != runloop.ExitFailed || exit.Err != nil || exit.Steps != 3 {
-			t.Fatalf("exit = %s after %d steps (%v), want failed after 3", exit.Reason, exit.Steps, exit.Err)
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "send", Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
+				return looptest.Act("Sending.", looptest.ReviewedCall(looptest.GovernedTool(v, "send"), map[string]any{"to": "bo", "text": "hi"}, "Send hi to bo"))
+			}},
+			&looptest.ModelRule{Name: "nothing to report", Reply: func(looptest.StepView) models.ModelStepResult {
+				return looptest.Say("")
+			}},
+		))
+		created, err := f.Portfolio.CreateAgentRun(f.Ctx, models.CreateAgentRunRequest{
+			Scope: f.Scope, Kind: models.RunKindAgentWork, Owner: models.ObjectiveOwner{Type: models.OwnerTypeAgent, ID: looptest.FixtureAgent},
+			AssignedAgentID: looptest.FixtureAgent, Goal: "Check in", Source: models.RunSourceObjective,
+			Context: map[string]interface{}{models.ScheduledTaskContextKey: true},
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
+		failed := f.DriveToRest(created.ID, 3)
 		f.MustStatus(failed, models.AgentRunStatusFailed)
 		if failed.FailureExplanation == nil || failed.FailureExplanation.Code != "final_answer_rejected" || failed.FailureExplanation.Explained {
 			t.Fatalf("failure = %#v, want unexplained final_answer_rejected", failed.FailureExplanation)
 		}
-		if got := strings.Join(f.EntryTypes(run.ID), ","); got != "user,assistant,tool:error,assistant,tool:error,assistant,tool:error" {
-			t.Fatalf("log = %s", got)
+		if notes := f.EntriesOfType(created.ID, "note:"+string(models.NoteFinalRejection)); len(notes) != 3 {
+			t.Fatalf("final_rejection notes = %d, want 3 (log %v)", len(notes), f.EntryTypes(created.ID))
 		}
-		if len(f.Model.Calls(models.ModelStepPurposeStep)) != 3 {
-			t.Fatalf("model steps = %d, want 3", len(f.Model.Calls(models.ModelStepPurposeStep)))
+		if f.Dispatch.Count("send") != 1 {
+			t.Fatalf("send dispatched %d times", f.Dispatch.Count("send"))
 		}
 	})
 }
@@ -515,7 +526,7 @@ func TestRunLoopContextExceededCompactsOnce(t *testing.T) {
 				if summary, ok := v.Compaction(); !ok || !strings.Contains(summary, "all are open") {
 					t.Errorf("retry does not start from the compaction: %s", v.Describe())
 				}
-				return looptest.FinalAnswer(map[string]any{"answer": "Issues 1 to 5 are open."})
+				return looptest.Say("Issues 1 to 5 are open.")
 			}},
 		))
 		f.Dispatch.On("lookup", bigLookup)

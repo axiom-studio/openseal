@@ -412,11 +412,6 @@ func Act(narration string, calls ...ToolCall) models.ModelStepResult {
 	return res
 }
 
-// FinalAnswer is one call to turn_final_answer.
-func FinalAnswer(args map[string]any) models.ModelStepResult {
-	return Act("", Call(string(models.ControlToolFinalAnswer), args))
-}
-
 func WithUsage(r models.ModelStepResult, in, out int) models.ModelStepResult {
 	r.Assistant.Usage.InputTokens = int64(in)
 	r.Assistant.Usage.OutputTokens = int64(out)

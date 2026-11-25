@@ -775,7 +775,7 @@ func TestCatalogTurnResolverSeparatesAcceptedRequestExecutionFromIntake(t *testi
 	tools := bindingToolNames(req)
 	if !slices.Contains(req.System.AgentInstructions, collaboration.AcceptedAgentRequestExecutionSystemInstruction) ||
 		slices.Contains(req.System.AgentInstructions, collaboration.AgentRequestDecisionSystemInstruction) ||
-		slices.Contains(tools, string(models.ControlToolRequestDecision)) || !slices.Contains(tools, string(models.ControlToolFinalAnswer)) ||
+		slices.Contains(tools, string(models.ControlToolRequestDecision)) ||
 		len(binding.ModelActions) != 1 {
 		t.Fatalf("accepted execution system=%#v tools=%v", req.System.AgentInstructions, tools)
 	}
@@ -984,7 +984,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 		t.Fatalf("authority = %#v", authority)
 	}
 	req := prepareBindingStep(t, binding, child)
-	if tools := bindingToolNames(req); !slices.Equal(tools, []string{string(models.ControlToolFinalAnswer)}) {
+	if tools := bindingToolNames(req); len(tools) != 0 {
 		t.Fatalf("tools = %v", tools)
 	}
 	if req.DefinitionID != "finn-definition" || req.DefinitionVersion != "7" || req.Model != "gpt-6-luna" {

@@ -13,8 +13,6 @@ func ControlToolOffered(name models.ControlToolName, a agentrun.ControlAuthority
 		return name == models.ControlToolRequestDecision
 	}
 	switch name {
-	case models.ControlToolFinalAnswer:
-		return true
 	case models.ControlToolRequestDecision:
 		return false
 	case models.ControlToolReportProgress:

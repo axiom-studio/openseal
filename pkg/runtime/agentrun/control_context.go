@@ -20,9 +20,7 @@ const (
 type ControlAuthority struct {
 	AgentID           string
 	FinalMode         FinalAnswerMode // "" = default
-	SkillPromptRefs   []string
 	VisualAllowed     bool
-	BroadcastAllowed  bool
 	ForkAllowed       bool
 	ForkTargets       []HostedAgentTarget // other Agents a branch may target; empty = self only
 	DelegateTargets   []HostedAgentTarget

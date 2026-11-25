@@ -4,8 +4,7 @@ package runtime
 // old hosted form refused an unauthorized capability or bad arguments by
 // rejecting the whole form and counting corrections. On the loop each bad call
 // is one tool entry in error that the model reads and answers on the next
-// step; the Run goes on. The completion checks of turn_final_answer work the
-// same way: the rejected final is an error tool result, never a posted answer.
+// step; the Run goes on. Control tools work the same way.
 
 import (
 	"encoding/json"
@@ -176,26 +175,23 @@ func TestLoopInvalidArgumentsAreAToolError(t *testing.T) {
 
 	t.Run("control_tool", func(t *testing.T) {
 		looptest.EachStore(t, "invalid_control_arguments", func(t *testing.T, store models.KernelStore) {
-			final := string(models.ControlToolFinalAnswer)
+			react := string(models.ControlToolReact)
 			f := looptest.NewFixture(t, store, looptest.WithRules(
-				&looptest.ModelRule{Name: "fixed", When: sawToolError(final), Reply: func(looptest.StepView) models.ModelStepResult {
-					return looptest.FinalAnswer(map[string]any{"answer": "All good."})
+				&looptest.ModelRule{Name: "fixed", When: sawToolError(react), Reply: func(looptest.StepView) models.ModelStepResult {
+					return looptest.Say("All good.")
 				}},
 				&looptest.ModelRule{Name: "bad", When: stepPurpose, Times: 1, Reply: func(looptest.StepView) models.ModelStepResult {
-					return looptest.FinalAnswer(map[string]any{"answer": 5})
+					return looptest.Act("", looptest.Call(react, map[string]any{"emoji": 5}))
 				}},
 			))
 			conversation, run := f.StartChat("how is it going?")
 			done := f.DriveToRest(run.ID, 3)
 			f.MustStatus(done, models.AgentRunStatusCompleted)
-			entries := toolErrorEntries(f, run.ID, final)
-			if len(entries) != 2 {
-				t.Fatalf("final entries = %d, want 2 (log %v)", len(entries), f.EntryTypes(run.ID))
+			entries := toolErrorEntries(f, run.ID, react)
+			if len(entries) != 1 {
+				t.Fatalf("react entries = %d, want 1 (log %v)", len(entries), f.EntryTypes(run.ID))
 			}
 			requireToolError(t, entries[0])
-			if entries[1].State != models.ToolEntryCompleted {
-				t.Fatalf("fixed final = %s: %q", entries[1].State, toolEntryText(entries[1]))
-			}
 			if replies := f.AgentReplies(conversation.ID); !slices.Equal(replies, []string{"All good."}) {
 				t.Fatalf("replies = %q", replies)
 			}

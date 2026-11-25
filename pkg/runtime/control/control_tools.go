@@ -28,7 +28,7 @@ import (
 // start and child work. Capability search/load and host tools follow in the
 // harness group; they are not control tools.
 var controlToolOrder = []models.ControlToolName{
-	models.ControlToolFinalAnswer, models.ControlToolRequestDecision,
+	models.ControlToolRequestDecision,
 	models.ControlToolReportProgress,
 	models.ControlToolWait, models.ControlToolAskUser, models.ControlToolReact,
 	models.ControlToolStartTask,
@@ -54,7 +54,6 @@ type controlToolRule struct {
 }
 
 var controlToolRules = map[models.ControlToolName]controlToolRule{
-	models.ControlToolFinalAnswer:     {Phase: PhaseSettle, Alone: true},
 	models.ControlToolRequestDecision: {Phase: PhaseSettle, Alone: true},
 	models.ControlToolReportProgress:  {Phase: PhaseInline},
 	models.ControlToolWait:            {Phase: PhaseSettle},
@@ -83,7 +82,7 @@ func ToolPhase(name string) (Phase, bool) {
 }
 
 func IsFinalTool(name models.ControlToolName) bool {
-	return name == models.ControlToolFinalAnswer || name == models.ControlToolRequestDecision
+	return name == models.ControlToolRequestDecision
 }
 
 type ToolSpec struct {
@@ -266,7 +265,6 @@ func BuiltinTools() []Tool {
 		{name: models.ControlToolAskUser, handler: askUserHandler{}},
 		{name: models.ControlToolDelegate, handler: delegateHandler{}},
 		{name: models.ControlToolDelegateReply, handler: delegateReplyHandler{}},
-		{name: models.ControlToolFinalAnswer, handler: finalAnswerHandler{}},
 		{name: models.ControlToolFork, handler: forkHandler{}},
 		{name: models.ControlToolReact, handler: reactControlHandler{}},
 		{name: models.ControlToolWait, handler: waitControlHandler{}},

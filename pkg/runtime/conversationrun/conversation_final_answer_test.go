@@ -254,18 +254,42 @@ func (f *finalDeliveryFixture) governed(callID string, status models.ActionCallS
 	return actionID
 }
 
-// finalEntry appends a pending turn_final_answer entry and returns the
-// FinalAnswer the control section would hand the loop for it.
-func (f *finalDeliveryFixture) finalEntry(answer string, output map[string]interface{}) (agentrun.FinalAnswer, *models.SessionEntry) {
+// finalEntry appends a plain reply (an assistant entry with no tool calls)
+// and returns the FinalAnswer the control section would hand the loop for it.
+func (f *finalDeliveryFixture) finalEntry(answer string, output map[string]interface{}) (agentrun.FinalAnswer, string) {
 	f.t.Helper()
-	callID := "final-" + uuid.NewString()[:6]
-	arguments, _ := json.Marshal(map[string]string{"answer": answer})
-	stepID, entries := f.step(agentrun.LoopToolCall{ID: callID, Name: string(models.ControlToolFinalAnswer), Arguments: arguments})
+	f.steps++
+	stepID := "step-" + string(rune('0'+f.steps))
+	reply := &models.SessionEntry{
+		ID: models.SessionEntryID(f.session.ID, models.AssistantEntryKey(stepID)), RunID: f.run.ID, StepID: stepID, Step: int64(f.steps),
+		Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{Provider: models.ModelStepProviderAnthropic, Model: "claude-x", Text: answer, StopReason: models.ModelStopEnd},
+	}
+	if _, err := f.store.AppendAgentSessionEntries(f.ctx, models.AppendAgentSessionEntriesRequest{
+		Scope: f.run.Scope, SessionID: f.session.ID, RunID: f.run.ID, Lease: f.lease(), Entries: []*models.SessionEntry{reply}, Now: f.now,
+	}); err != nil {
+		f.t.Fatalf("append reply: %v", err)
+	}
 	if output == nil {
 		output = map[string]interface{}{FinalOutputSummaryKey: answer}
 	}
-	entry := entries[callID]
-	return agentrun.FinalAnswer{StepID: stepID, ToolEntryID: entry.ID, ToolCallID: callID, Answer: answer, Output: output}, entry
+	return agentrun.FinalAnswer{PlainText: true, StepID: stepID, Answer: answer, Output: output}, stepID
+}
+
+// reject records a delivery rejection of the reply of stepID as the loop
+// does (rejectDeliveredFinal): a final_rejection note on that step.
+func (f *finalDeliveryFixture) reject(stepID, text string) {
+	f.t.Helper()
+	key := models.FinalRejectionEntryKey(stepID)
+	note := &models.SessionEntry{
+		ID: models.SessionEntryID(f.session.ID, key), Scope: f.run.Scope, SessionID: f.session.ID, RunID: f.run.ID,
+		StepID: stepID, Type: models.SessionEntryNote, SourceKey: key,
+		Note: &models.NoteEntry{Kind: models.NoteFinalRejection, Text: text},
+	}
+	if _, err := f.store.AppendAgentSessionEntries(f.ctx, models.AppendAgentSessionEntriesRequest{
+		Scope: f.run.Scope, SessionID: f.session.ID, RunID: f.run.ID, Lease: f.lease(), Entries: []*models.SessionEntry{note}, Now: f.now,
+	}); err != nil {
+		f.t.Fatalf("append rejection: %v", err)
+	}
 }
 
 func (f *finalDeliveryFixture) deliver(answer agentrun.FinalAnswer) (agentrun.FinalDeliveryResult, error) {
@@ -338,28 +362,6 @@ func finalDeliveryBlock() string {
 	}}})
 }
 
-// A final whose files name no saved file (a path, or a failed tool's file) goes
-// back to the model: posting it would silently attach nothing.
-func TestFinalAnswerSendsBackFilesThatAreNotSavedFileIDs(t *testing.T) {
-	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
-		ref := func(id string, version int) map[string]interface{} {
-			return map[string]interface{}{"id": id, "version": version}
-		}
-		f.governed("export", models.ActionCallStatusSucceeded, map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": "report-pdf", "version": 1, "path": "docs/report.pdf"}}})
-		f.governed("failed", models.ActionCallStatusFailed, map[string]interface{}{"artifactRefs": []interface{}{ref("failed-file", 1)}})
-		for _, files := range [][]interface{}{{"docs/draft.pdf"}, {"docs/report.pdf", "failed-file"}} {
-			answer, _ := f.finalEntry("Here is the report.", map[string]interface{}{FinalOutputSummaryKey: "Here is the report.", runtimeconversation.FinalOutputFilesKey: files})
-			result := f.mustDeliver(answer, agentrun.FinalDeliveryRetryFinal)
-			if !strings.Contains(result.RejectionText, files[len(files)-1].(string)) || !strings.Contains(result.RejectionText, "docs/report.pdf") {
-				t.Fatalf("files %v: rejection = %q", files, result.RejectionText)
-			}
-		}
-		if answers := f.answers(); len(answers) != 0 {
-			t.Fatalf("posted %#v", answers)
-		}
-	})
-}
-
 func TestFinalAnswerPostsThreadReplyWithRunAndArtifactRefs(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
 		ref := func(id string, version int) map[string]interface{} {
@@ -368,20 +370,15 @@ func TestFinalAnswerPostsThreadReplyWithRunAndArtifactRefs(t *testing.T) {
 		f.governed("export", models.ActionCallStatusSucceeded, map[string]interface{}{"artifactRefs": []interface{}{ref("report-pdf", 1), ref("report-csv", 2)}})
 		f.governed("again", models.ActionCallStatusSucceeded, map[string]interface{}{"artifactRefs": []interface{}{ref("report-pdf", 1), ref(strings.Repeat("x", 257), 1), ref("zero", 0)}})
 		f.governed("failed", models.ActionCallStatusFailed, map[string]interface{}{"artifactRefs": []interface{}{ref("failed-file", 1)}})
-		// The answer hands over the files it names; the Run's others stay in the Library.
-		answer, _ := f.finalEntry("Here is the quarterly report.", map[string]interface{}{
-			FinalOutputSummaryKey: "Here is the quarterly report.", runtimeconversation.FinalOutputFilesKey: []interface{}{"report-pdf", "report-csv"}})
+		// The Run's files stay in the Library unless the answer links them.
+		answer, _ := f.finalEntry("Here is the quarterly report.", nil)
 		result := f.mustDeliver(answer, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 {
 			t.Fatalf("answers = %#v", answers)
 		}
 		posted := answers[0]
-		want := []models.ConversationReference{
-			{Kind: models.ConversationReferenceRun, ID: f.run.ID},
-			{Kind: models.ConversationReferenceArtifact, ID: "report-pdf", Version: 1},
-			{Kind: models.ConversationReferenceArtifact, ID: "report-csv", Version: 2},
-		}
+		want := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: f.run.ID}}
 		if posted.Content != "Here is the quarterly report." || posted.Intent != models.MessageIntentAnswer || posted.Sender.ID != "agent-1" ||
 			posted.ReplyToMessageID != f.trigger.ID || posted.ResolvesMessageID != f.trigger.ID || posted.BroadcastToChannel ||
 			posted.IdempotencyKey != models.ConversationRunResponseKey(f.run, f.trigger.ID) || len(posted.References) != len(want) {
@@ -396,24 +393,10 @@ func TestFinalAnswerPostsThreadReplyWithRunAndArtifactRefs(t *testing.T) {
 			result.Output["messageId"] != posted.ID || result.Output["replayed"] != false || result.Output["summary"] != posted.Content {
 			t.Fatalf("output = %#v", result.Output)
 		}
-		if _, ok := result.Output[agentrun.FinalOutputBroadcastKey]; ok {
-			t.Fatalf("broadcastToChannel present without broadcast: %#v", result.Output)
-		}
 		// A re-delivery after a crash returns the stored reply.
 		replay := f.mustDeliver(answer, agentrun.FinalDeliveryComplete)
 		if replay.Output["messageId"] != posted.ID || replay.Output["replayed"] != true || len(f.answers()) != 1 {
 			t.Fatalf("replay = %#v, answers = %d", replay.Output, len(f.answers()))
-		}
-	})
-}
-
-func TestBroadcastToChannelFlagPosted(t *testing.T) {
-	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
-		answer, _ := f.finalEntry("Shipped to everyone.", map[string]interface{}{FinalOutputSummaryKey: "Shipped to everyone.", agentrun.FinalOutputBroadcastKey: true})
-		result := f.mustDeliver(answer, agentrun.FinalDeliveryComplete)
-		answers := f.answers()
-		if len(answers) != 1 || !answers[0].BroadcastToChannel || result.Output[agentrun.FinalOutputBroadcastKey] != true {
-			t.Fatalf("answers = %#v, output = %#v", answers, result.Output)
 		}
 	})
 }
@@ -467,13 +450,12 @@ func TestReactionOnlyCompletionPostsNoMessage(t *testing.T) {
 
 func TestEmptyAnswerRetriesOnceThenFails(t *testing.T) {
 	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
-		first, entry := f.finalEntry("  ", nil)
+		first, step := f.finalEntry("  ", nil)
 		result := f.mustDeliver(first, agentrun.FinalDeliveryRetryFinal)
 		if result.RejectionText != conversationEmptyAnswerText {
 			t.Fatalf("result = %#v", result)
 		}
-		// The loop records the rejection on the final entry (rejectDeliveredFinal).
-		f.settle(entry, models.ToolEntryError, "", result.RejectionText)
+		f.reject(step, result.RejectionText)
 		second, _ := f.finalEntry("", nil)
 		result = f.mustDeliver(second, agentrun.FinalDeliveryFail)
 		if result.Failure == nil || result.Failure.Message != conversationEmptyAnswerFailure || result.Failure.Code != conversationEmptyAnswerCode {
@@ -541,23 +523,26 @@ func TestFailingBlockIsRepairedOnceThenLeftOut(t *testing.T) {
 		}
 		return events
 	}
-	// askRepair delivers the answer and records the repair request on its
-	// entry, as the loop does with a retry_final.
+	// askRepair delivers the answer and records the repair request, as the
+	// loop does with a retry_final.
 	askRepair := func(f *finalDeliveryFixture) {
-		answer, entry := f.finalEntry(text, nil)
+		answer, step := f.finalEntry(text, nil)
 		result := f.mustDeliver(answer, agentrun.FinalDeliveryRetryFinal)
 		if !isVisualRepairRequest(result.RejectionText) || !strings.Contains(result.RejectionText, "- next: ") ||
 			!strings.Contains(result.RejectionText, "not in this chat") || strings.Contains(result.RejectionText, "revenue") {
 			t.Fatalf("repair request = %q", result.RejectionText)
 		}
-		f.settle(entry, models.ToolEntryError, "", result.RejectionText)
+		if !strings.Contains(result.RejectionText, "Reply with only the corrected blocks") || strings.Contains(result.RejectionText, "turn_final_answer") {
+			t.Fatalf("repair request = %q", result.RejectionText)
+		}
+		f.reject(step, result.RejectionText)
 		if len(f.answers()) != 0 {
 			t.Fatal("an answer was posted before its repair")
 		}
 	}
 	forFinalDeliveryStores(t, finalDeliveryOptions{visualChecks: refuse}, func(t *testing.T, f *finalDeliveryFixture) {
 		askRepair(f)
-		repair, _ := f.finalEntry("", map[string]interface{}{FinalOutputVisualRepairsKey: map[string]string{"next": ":::callout{#next}\nbody: Say stop to end it.\n:::"}})
+		repair, _ := f.finalEntry(":::callout{#next}\nbody: Say stop to end it.\n:::", nil)
 		f.mustDeliver(repair, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 || answers[0].Content != "Revenue is up.\n\n::visual{#revenue}\n\n::visual{#next}\n\nAsk me anything." || len(answers[0].References) != 2 {
@@ -569,7 +554,7 @@ func TestFailingBlockIsRepairedOnceThenLeftOut(t *testing.T) {
 	})
 	forFinalDeliveryStores(t, finalDeliveryOptions{visualChecks: refuse}, func(t *testing.T, f *finalDeliveryFixture) {
 		askRepair(f)
-		repair, _ := f.finalEntry("", map[string]interface{}{FinalOutputVisualRepairsKey: map[string]string{"next": stop}})
+		repair, _ := f.finalEntry(stop, nil)
 		f.mustDeliver(repair, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
 		if len(answers) != 1 || answers[0].Content != "Revenue is up.\n\n::visual{#revenue}\n\nAsk me anything.\n\n"+conversationVisualNotShownText || len(answers[0].References) != 2 {
@@ -580,11 +565,13 @@ func TestFailingBlockIsRepairedOnceThenLeftOut(t *testing.T) {
 			t.Fatalf("visual_rejected events = %#v", events)
 		}
 	})
-	// A repair with no answer asked about goes back to the model.
-	forFinalDeliveryStores(t, finalDeliveryOptions{}, func(t *testing.T, f *finalDeliveryFixture) {
-		repair, _ := f.finalEntry("", map[string]interface{}{FinalOutputVisualRepairsKey: map[string]string{"x": ":::text\nx\n:::"}})
-		if result := f.mustDeliver(repair, agentrun.FinalDeliveryRetryFinal); !strings.Contains(result.RejectionText, "write the whole answer") {
-			t.Fatalf("result = %#v", result)
+	// A reply of blocks nobody asked for is an answer of its own.
+	forFinalDeliveryStores(t, finalDeliveryOptions{visualChecks: refuse}, func(t *testing.T, f *finalDeliveryFixture) {
+		askRepair(f)
+		other, _ := f.finalEntry(finalDeliveryBlock(), nil)
+		f.mustDeliver(other, agentrun.FinalDeliveryComplete)
+		if answers := f.answers(); len(answers) != 1 || answers[0].Content != "::visual{#revenue}" {
+			t.Fatalf("answers = %#v", answers)
 		}
 	})
 }

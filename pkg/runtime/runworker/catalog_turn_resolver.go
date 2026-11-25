@@ -361,13 +361,9 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 	if err != nil {
 		return nil, err
 	}
-	refs := make([]string, 0, len(prompts))
-	for _, skillPrompt := range prompts {
-		refs = append(refs, skillPrompt.Reference)
-	}
 	binding.Authority, err = control.ResolveControlAuthority(ctx, control.AuthorityInput{
 		Run: r.run, DeploymentID: r.deployment.ID, Catalog: r.catalog, Scope: r.scope,
-		SkillPromptRefs: refs, Operations: binding.RunbookOperations,
+		Operations:        binding.RunbookOperations,
 		ConversationTasks: r.config.ConversationTasks, Runs: r.config.Store, Conversations: r.config.Conversations,
 		Deterministic: r.explaining || r.trial,
 	})
@@ -759,7 +755,7 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]models.Host
 	return prompts, actions, prepared, refs, nil
 }
 
-// skillPromptReference is the appliedSkillRefs handle of a Skill prompt:
+// skillPromptReference is the capability handle of a Skill prompt:
 // skill:<id>@<version>, plus #binding:<id>@<revision> for a bound prompt.
 func skillPromptReference(prompt models.HostedSkillPrompt) string {
 	reference := "skill:" + strings.TrimSpace(prompt.SkillID) + "@" + strings.TrimSpace(prompt.Version)

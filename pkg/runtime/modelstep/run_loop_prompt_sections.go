@@ -1,5 +1,7 @@
 package modelstep
 
+import "github.com/axiom-studio/openseal/pkg/presentation"
+
 // Kernel system sections of a loop model step (SPEC §6). The preparer
 // (runloop/run_loop_prepare.go) includes each section, in
 // LoopKernelSectionOrder, when its condition holds, then the binding's own
@@ -16,6 +18,9 @@ const (
 	LoopSectionWorkspace = "workspace"
 	// The binding can take images.
 	LoopSectionMedia = "media"
+	// The answer may carry visuals (ControlAuthority.VisualAllowed): how to
+	// write them, LoopAnswerFormatText.
+	LoopSectionAnswerFormat = "answer_format"
 	// A pinned routine command; the text is the routine-script rules from
 	// routine/routine_script_claim.go.
 	LoopSectionRoutineScript = "routine_script"
@@ -29,6 +34,7 @@ var LoopKernelSectionOrder = []string{
 	LoopSectionConversationTasks,
 	LoopSectionWorkspace,
 	LoopSectionMedia,
+	LoopSectionAnswerFormat,
 	LoopSectionRoutineScript,
 }
 
@@ -38,6 +44,7 @@ var LoopKernelSectionTitles = map[string]string{
 	LoopSectionConversationTasks: "Conversation tasks",
 	LoopSectionWorkspace:         "Chat files",
 	LoopSectionMedia:             "Images",
+	LoopSectionAnswerFormat:      "Your answer",
 	LoopSectionRoutineScript:     "Routine script",
 }
 
@@ -69,3 +76,10 @@ const LoopMediaText = "Images appear in messages and tool results in the order t
 // _reviewSummary field of governed write tools (section 03 §3.2). It depends
 // on the catalog, so it is guidance in the capabilities note.
 const LoopReviewSummariesText = "Tools that change something carry a summary for the person who approves them. When a tool's input has arguments and reviewContext, put the exact tool arguments in arguments and describe the effect in reviewContext: summary states exactly what will happen, content is the exact text or payload that will be sent or published, and target, audience, consequences and facts name what is affected. When a tool's input has _reviewSummary, set it to one sentence a reviewer reads on the approval card: what the call does and to what. Review fields are never passed to the tool, so put everything the tool needs in its own arguments. An action waiting for approval has not happened yet; never say it is done until its result says so."
+
+// LoopAnswerFormatText is the answer_format section: the visual block spec.
+// It is the same for every Run that may show visuals, so it stays in the
+// cached prefix.
+func LoopAnswerFormatText() string {
+	return presentation.BlocksDescription()
+}

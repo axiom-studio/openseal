@@ -96,7 +96,7 @@ func (x *Executor) acceptRequestFinal(ctx context.Context, cc agentrun.ControlCo
 		reason = fmt.Sprintf("message is longer than %d characters.", maximumRequestDecisionMessageRunes)
 	}
 	if reason != "" {
-		return x.rejectFinal(ctx, cc, &finalAnswerDraft{}, &finalAnswerRejection{Code: requestDecisionInvalidCode, Message: reason})
+		return x.rejectFinal(ctx, cc, false, &finalAnswerRejection{Code: requestDecisionInvalidCode, Message: reason})
 	}
 	final := &agentrun.FinalAnswer{
 		StepID: cc.Entry.StepID, ToolEntryID: cc.Entry.ID, ToolCallID: cc.Entry.ToolCallID,

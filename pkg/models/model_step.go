@@ -95,10 +95,9 @@ type ModelStepSystemSection struct {
 }
 
 type ModelStepStream struct {
-	AnswerPreview        bool   `json:"answerPreview,omitempty"`
-	ExternalChannelReply bool   `json:"externalChannelReply,omitempty"`
-	Spoken               bool   `json:"spoken,omitempty"`
-	FinalAnswerTool      string `json:"finalAnswerTool,omitempty"` // "" = no tool preview
+	AnswerPreview        bool `json:"answerPreview,omitempty"`
+	ExternalChannelReply bool `json:"externalChannelReply,omitempty"`
+	Spoken               bool `json:"spoken,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -315,9 +314,6 @@ func (r ModelStepRequest) validateTools() error {
 		if schemaType, _ := tool.InputSchema["type"].(string); schemaType != "object" {
 			return invalidModelStep("tool %q input schema must have type object", tool.Name)
 		}
-	}
-	if r.Stream.FinalAnswerTool != "" && !names[r.Stream.FinalAnswerTool] {
-		return invalidModelStep("stream finalAnswerTool %q is not a listed tool", r.Stream.FinalAnswerTool)
 	}
 	return nil
 }

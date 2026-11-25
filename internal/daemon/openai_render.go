@@ -40,8 +40,6 @@ const openAIStepHarnessPrompt = `You are an agent working on a person's request.
 - Only say something happened when a tool result shows it.
 - Never reveal credentials, and never ask anyone to type a password or card number in chat.`
 
-const openAIFinalAnswerToolLine = "Call %s instead of replying with plain text when your answer needs one of its fields: a visual, a report with evidence, files, staying silent, or the Skills you applied."
-
 const (
 	openAINotePrefix           = "Note from OpenSeal: "
 	openAIToolErrorPrefix      = "Error: "
@@ -140,7 +138,7 @@ func renderFailure(code, format string, args ...interface{}) error {
 // model is the configured provider model (reasoning is replayed only for
 // entries the same model wrote).
 func renderOpenAIStep(req models.ModelStepRequest, model string) (openAIStepRender, error) {
-	system := renderOpenAISystem(req.System, req.Stream.FinalAnswerTool)
+	system := renderOpenAISystem(req.System)
 	messages, info, err := renderOpenAIMessages(system, req.Entries, model)
 	if err != nil {
 		return openAIStepRender{}, err
@@ -167,13 +165,10 @@ func renderOpenAIStep(req models.ModelStepRequest, model string) (openAIStepRend
 
 // renderOpenAISystem builds the system text from the kernel's structured
 // system spec. Parts are joined with a blank line, empty parts skipped: the
-// harness, the final-answer tool line, the agent instructions, each skill
+// harness, the agent instructions, each skill
 // prompt, then each kernel section in order.
-func renderOpenAISystem(spec models.ModelStepSystem, finalAnswerTool string) string {
+func renderOpenAISystem(spec models.ModelStepSystem) string {
 	parts := []string{openAIStepHarnessPrompt}
-	if finalAnswerTool != "" {
-		parts = append(parts, fmt.Sprintf(openAIFinalAnswerToolLine, finalAnswerTool))
-	}
 	if instructions := nonEmpty(spec.AgentInstructions); len(instructions) > 0 {
 		parts = append(parts, "## Agent\n"+strings.Join(instructions, "\n\n"))
 	}

@@ -17,7 +17,6 @@ const (
 type ControlToolName string
 
 const (
-	ControlToolFinalAnswer     ControlToolName = "turn_final_answer"
 	ControlToolRequestDecision ControlToolName = "agent_request_decision"
 	ControlToolReportProgress  ControlToolName = "turn_report_progress"
 	ControlToolWait            ControlToolName = "wait"

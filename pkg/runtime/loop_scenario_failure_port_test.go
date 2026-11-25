@@ -3,9 +3,7 @@ package runtime
 // Run-loop scenarios ported from the old failure, evidence and answer-visual
 // tests (run-loop section 12 §5.1, tests-T17b): a tool failure goes back to
 // the model, a terminal failure is a typed Run.FailureExplanation with a
-// visible chat message, the final answer checks answer with tool errors the
-// model repairs, and the final answer tool carries visuals, silence,
-// broadcast and generated files. Every scenario drives the real runloop.Loop
+// visible chat message, and the plain reply carries visuals and silence. Every scenario drives the real runloop.Loop
 // through the loop fixture; only the model, the dispatcher, the host tools,
 // the visual host checks and the evidence reviewer are fakes.
 
@@ -48,12 +46,25 @@ func portAgentMessages(f *looptest.Fixture, conversationID string) []*models.Cha
 	return out
 }
 
-// portFinalEntries is the Run's turn_final_answer tool entries in log order.
-func portFinalEntries(f *looptest.Fixture, runID string) []*models.SessionEntry {
+// portFinalReplies is the Run's plain replies (assistant entries without
+// tool calls) in log order.
+func portFinalReplies(f *looptest.Fixture, runID string) []*models.SessionEntry {
 	f.T.Helper()
 	var out []*models.SessionEntry
 	for _, entry := range f.Entries(runID) {
-		if entry.Type == models.SessionEntryTool && entry.Tool != nil && entry.Tool.Name == string(models.ControlToolFinalAnswer) && entry.RunID == runID {
+		if entry.Type == models.SessionEntryAssistant && entry.Assistant != nil && len(entry.Assistant.ToolCalls) == 0 && entry.RunID == runID {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+// portFinalRejections is the Run's final_rejection notes in log order.
+func portFinalRejections(f *looptest.Fixture, runID string) []*models.SessionEntry {
+	f.T.Helper()
+	var out []*models.SessionEntry
+	for _, entry := range f.Entries(runID) {
+		if entry.Type == models.SessionEntryNote && entry.Note != nil && entry.Note.Kind == models.NoteFinalRejection && entry.RunID == runID {
 			out = append(out, entry)
 		}
 	}
@@ -258,14 +269,14 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Final answer fields
 
-// TestLoopFinalAnswerToolCarriesVisualSilentAndFiles: what the final answer
-// tool carries reaches the chat (ported from conversation_answer_visual_test.go
-// and the spoken and broadcast cases of the old runner).
-func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
+// TestLoopFinalReplyCarriesVisualAndSilence: what the plain reply carries
+// reaches the chat (ported from conversation_answer_visual_test.go and the
+// spoken case of the old runner).
+func TestLoopFinalReplyCarriesVisualAndSilence(t *testing.T) {
 	t.Run("visual", func(t *testing.T) {
 		looptest.EachStore(t, "port_visual", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": blocksAnswer("Revenue is up.", failurePortVisual())})
+				return looptest.Say(blocksAnswer("Revenue is up.", failurePortVisual()))
 			}}))
 			content := &looptest.AnswerVisualContent{}
 			convRunner(f, conversationrun.TurnRunnerConfig{AttachmentContent: content})
@@ -307,10 +318,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 				{ID: "stop", Label: "Stop", Kind: presentation.ActionEntity, Command: "stop", Binding: &presentation.Binding{Kind: presentation.BindingRunbook, ID: "rb-1"}},
 			}})
 			answer := blocksAnswer("Revenue is up.", bound)
-			f := looptest.NewFixture(t, store, looptest.WithRules(answerSteps(
-				map[string]any{"answer": answer},
-				map[string]any{"answer": "", "repairs": map[string]any{"next": presentation.FormatBlock(bound.Components[1])}},
-			)))
+			f := looptest.NewFixture(t, store, looptest.WithRules(answerSteps(answer, presentation.FormatBlock(bound.Components[1]))))
 			content := &looptest.AnswerVisualContent{}
 			convRunner(f, conversationrun.TurnRunnerConfig{AttachmentContent: content, VisualChecks: func(*models.AgentRun) presentation.ValidateOptions {
 				return presentation.ValidateOptions{Bindings: presentation.BindingResolverFunc(func(context.Context, presentation.Binding) error {
@@ -320,9 +328,8 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			conversation, run := f.StartChat("how is revenue?")
 			done := f.DriveToRest(run.ID, 4)
 			f.MustStatus(done, models.AgentRunStatusCompleted)
-			finals := portFinalEntries(f, run.ID)
-			if len(finals) != 2 || finals[1].State != models.ToolEntryCompleted {
-				t.Fatalf("final entries = %v", f.EntryTypes(run.ID))
+			if finals, rejections := portFinalReplies(f, run.ID), portFinalRejections(f, run.ID); len(finals) != 2 || len(rejections) != 1 {
+				t.Fatalf("final replies = %v", f.EntryTypes(run.ID))
 			}
 			// Only the block that fails the host checks is left out.
 			answers := portAgentMessages(f, conversation.ID)
@@ -338,7 +345,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 	t.Run("silent_spoken", func(t *testing.T) {
 		looptest.EachStore(t, "port_silent", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "silent", Reply: func(v looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "", "silent": true})
+				return looptest.Say("")
 			}}))
 			conversation := convChat(f, models.ObjectiveOwner{}, nil)
 			spoken := convPost(f, conversation.ID, "mm, nice weather", func(r *runtimeconversation.PostChannelMessageRequest) {
@@ -352,66 +359,8 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			if answers := portAgentMessages(f, conversation.ID); len(answers) != 0 {
 				t.Fatalf("a silent spoken answer posted %s", looptest.DescribeMessages(answers))
 			}
-			if finals := portFinalEntries(f, run.ID); len(finals) != 1 || finals[0].State != models.ToolEntryCompleted {
-				t.Fatalf("final entries = %v", f.EntryTypes(run.ID))
-			}
-		})
-	})
-
-	t.Run("generated_files", func(t *testing.T) {
-		looptest.EachStore(t, "port_files", func(t *testing.T, store models.KernelStore) {
-			f := looptest.NewFixture(t, store, looptest.WithRules(
-				&looptest.ModelRule{Name: "export", Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
-					return looptest.Act("Exporting the report.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "report"}))
-				}},
-				&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
-					return looptest.FinalAnswer(map[string]any{"answer": "Here is the quarterly report.", "files": []any{"report-pdf", "report-csv"}})
-				}},
-			))
-			f.Dispatch.On("lookup", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
-				return map[string]interface{}{"artifactRefs": []interface{}{
-					map[string]interface{}{"id": "report-pdf", "version": 1},
-					map[string]interface{}{"id": "report-csv", "version": 2},
-				}}, nil
-			})
-			conversation, run := f.StartChat("export the quarterly report")
-			done := f.DriveToRest(run.ID, 3)
-			f.MustStatus(done, models.AgentRunStatusCompleted)
-			answers := portAgentMessages(f, conversation.ID)
-			if len(answers) != 1 {
-				t.Fatalf("channel = %s", looptest.DescribeMessages(f.Messages(conversation.ID)))
-			}
-			want := []models.ConversationReference{
-				{Kind: models.ConversationReferenceRun, ID: run.ID},
-				{Kind: models.ConversationReferenceArtifact, ID: "report-pdf", Version: 1},
-				{Kind: models.ConversationReferenceArtifact, ID: "report-csv", Version: 2},
-			}
-			got := answers[0].References
-			if len(got) != len(want) {
-				t.Fatalf("references = %#v, want %#v", got, want)
-			}
-			for i := range want {
-				if got[i] != want[i] {
-					t.Fatalf("references = %#v, want %#v", got, want)
-				}
-			}
-		})
-	})
-
-	t.Run("broadcast", func(t *testing.T) {
-		looptest.EachStore(t, "port_broadcast", func(t *testing.T, store models.KernelStore) {
-			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
-				if !v.HasTool(string(models.ControlToolFinalAnswer)) {
-					t.Errorf("no final answer tool: %s", v.Describe())
-				}
-				return looptest.FinalAnswer(map[string]any{"answer": "Shipped to everyone.", "broadcastToChannel": true})
-			}}))
-			conversation, run := f.StartChat("ship it")
-			done := f.DriveToRest(run.ID, 3)
-			f.MustStatus(done, models.AgentRunStatusCompleted)
-			answers := portAgentMessages(f, conversation.ID)
-			if len(answers) != 1 || !answers[0].BroadcastToChannel || done.Output[agentrun.FinalOutputBroadcastKey] != true {
-				t.Fatalf("answers = %#v, output = %#v", answers, done.Output)
+			if finals, rejections := portFinalReplies(f, run.ID), portFinalRejections(f, run.ID); len(finals) != 1 || len(rejections) != 0 {
+				t.Fatalf("final replies = %v", f.EntryTypes(run.ID))
 			}
 		})
 	})

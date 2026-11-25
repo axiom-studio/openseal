@@ -151,7 +151,7 @@ func TestTeamMembersHaveTheirOwnSessionsAndTheRouterHasNone(t *testing.T) {
 	looptest.EachStore(t, "conv-team", func(t *testing.T, store models.KernelStore) {
 		f := looptest.NewFixture(t, store, looptest.WithTeam("finn", "scout"))
 		f.Model.Add(&looptest.ModelRule{Name: "member", Reply: func(v looptest.StepView) models.ModelStepResult {
-			return looptest.FinalAnswer(map[string]any{"answer": v.Request().AgentID + " checked the canary."})
+			return looptest.Say(v.Request().AgentID + " checked the canary.")
 		}})
 		team := models.ObjectiveOwner{Type: models.OwnerTypeTeam, ID: "team"}
 		conversation := convChat(f, team, nil)

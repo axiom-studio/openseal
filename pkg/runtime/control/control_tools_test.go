@@ -94,22 +94,22 @@ func TestControlToolSpecsStableOrderAndPresence(t *testing.T) {
 		want []string
 	}{
 		{"everything", func(*agentrun.ControlAuthority) {}, []string{
-			"turn_final_answer", "turn_report_progress", "wait", "ask_user", "react", "conversation_start_task",
+			"turn_report_progress", "wait", "ask_user", "react", "conversation_start_task",
 			"control_fork", "run_operation", "agent_delegate", "agent_delegate_reply",
 		}},
-		{"zero authority offers only the final answer", func(a *agentrun.ControlAuthority) { *a = agentrun.ControlAuthority{} }, []string{"turn_final_answer"}},
-		{"spoken and evidence keep the default final tool", func(a *agentrun.ControlAuthority) {
+		{"zero authority offers nothing", func(a *agentrun.ControlAuthority) { *a = agentrun.ControlAuthority{} }, []string{}},
+		{"spoken offers no final tool", func(a *agentrun.ControlAuthority) {
 			*a = agentrun.ControlAuthority{FinalMode: agentrun.FinalModeSpoken, CanReact: true}
-		}, []string{"turn_final_answer", "react"}},
+		}, []string{"react"}},
 		{"voice call hides task start", func(a *agentrun.ControlAuthority) { a.VoiceCallStarted = true }, []string{
-			"turn_final_answer", "turn_report_progress", "wait", "ask_user", "react",
+			"turn_report_progress", "wait", "ask_user", "react",
 			"control_fork", "run_operation", "agent_delegate", "agent_delegate_reply",
 		}},
 		{"task context that cannot start", func(a *agentrun.ControlAuthority) {
 			a.TaskStart = &models.HostedConversationTaskContext{ConversationID: "c1"}
 			a.Operations = nil
 			a.DelegateTargets = nil
-		}, []string{"turn_final_answer", "turn_report_progress", "wait", "ask_user", "react", "control_fork"}},
+		}, []string{"turn_report_progress", "wait", "ask_user", "react", "control_fork"}},
 		{"decision Run offers only its tool", func(a *agentrun.ControlAuthority) { a.FinalMode = agentrun.FinalModeDecision }, []string{"agent_request_decision"}},
 	}
 	for _, tc := range cases {
@@ -199,16 +199,16 @@ func TestControlSecondSettleCallInSameMessageIsRefused(t *testing.T) {
 }
 
 func TestFinalAnswerWithOtherCallsIsRefusedOthersRun(t *testing.T) {
-	refusals := CallRefusals(modelCalls("linear_get_issue", "turn_final_answer", "react"), allSettleTools)
+	refusals := CallRefusals(modelCalls("linear_get_issue", "agent_request_decision", "react"), allSettleTools)
 	if len(refusals) != 1 {
 		t.Fatalf("refusals = %v", refusals)
 	}
 	value := requireControlError(t, refusals["call-b"], models.ToolResultRefused, "final_answer_not_alone")
-	if value["message"] != "Call turn_final_answer alone after your other tools have returned." {
+	if value["message"] != "Call agent_request_decision alone after your other tools have returned." {
 		t.Fatalf("message = %v", value["message"])
 	}
 	// A refused final does not take the settle slot: the fork still settles.
-	refusals = CallRefusals(modelCalls("turn_final_answer", "control_fork"), allSettleTools)
+	refusals = CallRefusals(modelCalls("agent_request_decision", "control_fork"), allSettleTools)
 	if len(refusals) != 1 || refusals["call-b"] != nil {
 		t.Fatalf("refusals = %v", refusals)
 	}
@@ -223,7 +223,7 @@ func TestFinalAnswerWithOtherCallsIsRefusedOthersRun(t *testing.T) {
 		t.Fatalf("message = %v", value["message"])
 	}
 	// Alone, the final answer settles.
-	if refusals := CallRefusals(modelCalls("turn_final_answer"), allSettleTools); len(refusals) != 0 {
+	if refusals := CallRefusals(modelCalls("agent_request_decision"), allSettleTools); len(refusals) != 0 {
 		t.Fatalf("lone final refused: %v", refusals)
 	}
 }

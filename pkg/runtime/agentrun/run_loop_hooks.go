@@ -91,12 +91,12 @@ type BudgetExhaustion struct {
 	ActionCallID string                  // the denied governed call, if any
 }
 
-// FinalAnswer is produced only by the control section (decodeFinalAnswer /
-// PlainTextFinal).
+// FinalAnswer is produced only by the control section (PlainTextFinal, or a
+// final tool such as request_decision) or by a deterministic producer.
 type FinalAnswer struct {
 	StepID      string
-	ToolEntryID string // "" for plain text
-	ToolCallID  string // "" for plain text
+	ToolEntryID string // the final tool's entry; "" for plain text
+	ToolCallID  string // the final tool's call; "" for plain text
 	PlainText   bool
 	Answer      string
 	Output      map[string]interface{}
@@ -155,9 +155,8 @@ type ToolCallCheck func(ctx context.Context, in StepToolsInput, entry *models.Se
 type AfterToolEntryHook func(ctx context.Context, in StepToolsInput, entry *models.SessionEntry) error
 
 const (
-	FinalOutputSilentKey    = "silent"
-	FinalOutputBroadcastKey = "broadcastToChannel"
-	FinalOutputReactedKey   = "reacted"
+	FinalOutputSilentKey  = "silent"
+	FinalOutputReactedKey = "reacted"
 )
 
 // Silent: a spoken reply that needs no response; nothing is posted.
@@ -171,10 +170,3 @@ func (a FinalAnswer) ReactionsOnly() bool {
 	reacted, _ := a.Output[FinalOutputReactedKey].(bool)
 	return reacted
 }
-
-// BroadcastToChannel: a thread reply that also goes to the main timeline.
-func (a FinalAnswer) BroadcastToChannel() bool {
-	broadcast, _ := a.Output[FinalOutputBroadcastKey].(bool)
-	return broadcast
-}
-

@@ -185,7 +185,7 @@ func (c routineEventSeedContent) text() string {
 			b.WriteString("\n" + strconv.Itoa(c.dropped) + " more events were dropped because the routine fell behind.")
 		}
 	}
-	b.WriteString("\nIf nothing here needs the person's attention and you changed nothing, finish with silent set to true and an empty answer.")
+	b.WriteString("\nIf nothing here needs the person's attention and you changed nothing, finish with an empty reply.")
 	return b.String()
 }
 

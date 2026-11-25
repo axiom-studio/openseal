@@ -59,7 +59,6 @@ var (
 		"search_capabilities": true,
 	}
 	repeatKernelControlTools = map[string]bool{
-		"turn_final_answer":      true,
 		"agent_request_decision": true,
 		"turn_report_progress":   true,
 		"wait":                   true,

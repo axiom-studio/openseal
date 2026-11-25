@@ -432,7 +432,6 @@ func (r *TurnRunner) postAgentResponseWithReferences(
 	trigger *models.ChannelMessage,
 	content string,
 	references []models.ConversationReference,
-	broadcastToChannel bool,
 	guard *models.ReplyRunGuard,
 ) (*models.ChannelMessage, bool, error) {
 	key := models.ConversationRunResponseKey(run, trigger.ID)
@@ -468,13 +467,12 @@ func (r *TurnRunner) postAgentResponseWithReferences(
 			Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: participantID},
 			Intent: models.MessageIntentAnswer, Content: content, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 			ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
-			ResponseMode:       trigger.ResponseMode,
-			BroadcastToChannel: broadcastToChannel,
-			Mentions:           mentions,
-			References:         responseReferences,
-			RoutingReason:      routingReason,
-			IdempotencyKey:     key,
-			RunGuard:           guard,
+			ResponseMode:   trigger.ResponseMode,
+			Mentions:       mentions,
+			References:     responseReferences,
+			RoutingReason:  routingReason,
+			IdempotencyKey: key,
+			RunGuard:       guard,
 		}
 		result, err := r.conversations.PostChannelMessage(ctx, request)
 		if err == nil {

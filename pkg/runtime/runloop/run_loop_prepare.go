@@ -126,7 +126,7 @@ func (p *CatalogModelStepPreparer) PrepareModelStep(ctx context.Context, in agen
 		Model:             binding.Model,
 		System:            p.system(binding, set, tools),
 		Tools:             tools,
-		Stream:            p.stream(ctx, binding, tools),
+		Stream:            p.stream(ctx, binding),
 	}
 	if req.AgentID == "" {
 		req.AgentID = in.Run.AssignedAgentID
@@ -142,7 +142,6 @@ func (p *CatalogModelStepPreparer) PrepareModelStep(ctx context.Context, in agen
 	if in.Mode == agentrun.StepModeExplainFailure {
 		req.Purpose = models.ModelStepPurposeExplanation
 		req.Tools = nil
-		req.Stream.FinalAnswerTool = ""
 	}
 	entries, err := modelstep.ProjectSessionPath(ctx, in.Path, p.config.Render)
 	if err != nil {
@@ -260,6 +259,9 @@ func (p *CatalogModelStepPreparer) system(binding *agentrun.TurnRunnerBinding, s
 	if p.config.ImageInput {
 		texts[modelstep.LoopSectionMedia] = modelstep.LoopMediaText
 	}
+	if binding.Authority.VisualAllowed {
+		texts[modelstep.LoopSectionAnswerFormat] = modelstep.LoopAnswerFormatText()
+	}
 	if text := strings.TrimSpace(p.config.RoutineScript); text != "" {
 		texts[modelstep.LoopSectionRoutineScript] = text
 	}
@@ -294,19 +296,12 @@ func (p *CatalogModelStepPreparer) boundSkill(binding *agentrun.TurnRunnerBindin
 	return false
 }
 
-func (p *CatalogModelStepPreparer) stream(ctx context.Context, binding *agentrun.TurnRunnerBinding, tools []models.ModelStepTool) models.ModelStepStream {
-	stream := models.ModelStepStream{
+func (p *CatalogModelStepPreparer) stream(ctx context.Context, binding *agentrun.TurnRunnerBinding) models.ModelStepStream {
+	return models.ModelStepStream{
 		AnswerPreview:        models.HasTurnAnswerPreview(ctx),
 		ExternalChannelReply: binding.Authority.ExternalChannelReply,
 		Spoken:               binding.Authority.EffectiveFinalMode() == agentrun.FinalModeSpoken,
 	}
-	for _, tool := range tools {
-		if tool.Name == string(models.ControlToolFinalAnswer) {
-			stream.FinalAnswerTool = tool.Name
-			break
-		}
-	}
-	return stream
 }
 
 // loopCapabilityToolName is the toolName argument of ExecuteLoadCapabilities:

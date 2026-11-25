@@ -9,7 +9,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -19,7 +18,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/looptest"
-	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // resumeTrapStore sits over the fixture's crash store and kills the worker
@@ -315,9 +313,9 @@ func sendRules() []*looptest.ModelRule {
 		{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
 			content, isError, _ := v.ToolResult(looptest.GovernedTool(v, "send"))
 			if isError {
-				return looptest.FinalAnswer(map[string]any{"answer": "I may have sent it; please check: " + content})
+				return looptest.Say("I may have sent it; please check: " + content)
 			}
-			return looptest.FinalAnswer(map[string]any{"answer": "Sent."})
+			return looptest.Say("Sent.")
 		}},
 	}
 }
@@ -348,7 +346,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 				Reply: func(looptest.StepView) models.ModelStepResult { return looptest.Say("never") }},
 			&looptest.ModelRule{Name: "answer", When: func(v looptest.StepView) bool { return v.Step() == 2 },
 				Reply: func(looptest.StepView) models.ModelStepResult {
-					return looptest.FinalAnswer(map[string]any{"answer": "Issue 1 is open."})
+					return looptest.Say("Issue 1 is open.")
 				}},
 		))
 		run := f.StartRun(models.RunKindAgentWork, "Check issue 1")
@@ -368,7 +366,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		if requests[1].StepID != requests[2].StepID {
 			t.Fatalf("redo used step %s, the crashed call step %s: the running step row is reused", requests[2].StepID, requests[1].StepID)
 		}
-		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant,tool:completed")
+		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant")
 		if steps := f.Steps(run.ID); len(steps) != 2 {
 			t.Fatalf("step rows = %d, want 2", len(steps))
 		}
@@ -388,7 +386,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 					return looptest.Act("Looking both up.", looptest.Call(name, map[string]any{"id": "1"}), looptest.Call(name, map[string]any{"id": "2"}))
 				}},
 			&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": fmt.Sprintf("%d issues looked up.", len(v.ToolResultsSinceUser()))})
+				return looptest.Say(fmt.Sprintf("%d issues looked up.", len(v.ToolResultsSinceUser())))
 			}},
 		))
 		f.Dispatch.On("lookup", func(in agentrun.ActionDispatchInput) (map[string]interface{}, error) {
@@ -442,7 +440,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 				t.Fatalf("lookup{%v} RecoveredRunning = %v, want %v", c.Arguments["id"], c.RecoveredRunning, recovered)
 			}
 		}
-		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,tool:completed,assistant,tool:completed")
+		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,tool:completed,assistant")
 		for _, e := range resumeToolEntries(f, run.ID, "lookup") {
 			if !strings.Contains(resumeEntryText(e), "Issue ") {
 				t.Fatalf("lookup entry %s result = %s", e.ID, resumeEntryText(e))
@@ -464,7 +462,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		if n := f.Dispatch.Count("send"); n != 1 {
 			t.Fatalf("send dispatched %d times, want 1 (the blocked one): a write whose outcome is unknown is never sent again", n)
 		}
-		resumeMustLog(t, f, run.ID, "user,assistant,tool:interrupted,assistant,tool:completed")
+		resumeMustLog(t, f, run.ID, "user,assistant,tool:interrupted,assistant")
 		entries := resumeToolEntries(f, run.ID, "send")
 		if len(entries) != 1 || !strings.Contains(resumeEntryText(entries[0]), "may already have taken effect") {
 			t.Fatalf("send entry = %v", entries)
@@ -515,7 +513,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		if len(calls) != 1 || calls[0].Status != models.ActionCallStatusSucceeded || calls[0].RecoveredRunning {
 			t.Fatalf("send calls = %#v, want one succeeded call proposed on resume", calls)
 		}
-		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant,tool:completed")
+		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant")
 		if answer := resumeFinalAnswer(f, run.ID); answer != "Sent." {
 			t.Fatalf("final answer = %q", answer)
 		}
@@ -546,7 +544,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		if n := f.Dispatch.Count("send"); n != 1 {
 			t.Fatalf("send dispatched %d times, want 1", n)
 		}
-		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant,tool:completed")
+		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant")
 		entries := resumeToolEntries(f, run.ID, "send")
 		if len(entries) != 1 || !strings.Contains(resumeEntryText(entries[0]), `"sent":true`) {
 			t.Fatalf("send entry result = %q, want the call's output", resumeEntryText(entries[0]))
@@ -563,7 +561,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 					return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "4"}))
 				}},
 			&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Issue 4 is open."})
+				return looptest.Say("Issue 4 is open.")
 			}},
 		))
 		var rows int
@@ -598,81 +596,9 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		if f.Dispatch.Count("lookup") != 1 {
 			t.Fatalf("lookup dispatched %d times, want 1", f.Dispatch.Count("lookup"))
 		}
-		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant,tool:completed")
+		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant")
 		if steps := f.Steps(run.ID); len(steps) != 2 {
 			t.Fatalf("step rows = %d, want 2", len(steps))
-		}
-	})
-
-	resumeScenario(t, "final_of_failed_step_is_not_run", func(t *testing.T, store models.KernelStore) {
-		// Worker 1 dies after step 1's final_answer is appended; worker 2's
-		// resume of step 1 hits a host outage and fails the step, so its
-		// final_answer never settles. The next step refuses it as not run
-		// and the model answers again.
-		sawRefusal := false
-		f := looptest.NewFixture(t, store, looptest.WithRules(
-			&looptest.ModelRule{Name: "first", When: func(v looptest.StepView) bool { return v.Step() == 1 },
-				Reply: func(looptest.StepView) models.ModelStepResult {
-					return looptest.FinalAnswer(map[string]any{"answer": "First."})
-				}},
-			&looptest.ModelRule{Name: "second", Reply: func(v looptest.StepView) models.ModelStepResult {
-				_, isError, ok := v.ToolResult(string(models.ControlToolFinalAnswer))
-				sawRefusal = ok && isError
-				return looptest.FinalAnswer(map[string]any{"answer": "Second."})
-			}},
-		))
-		appended := false
-		trap := installResumeTrap(f, func(method string, arg any) bool {
-			if req, ok := arg.(models.AppendAgentSessionEntriesRequest); ok {
-				for _, e := range req.Entries {
-					if e.Type == models.SessionEntryTool && e.Tool != nil && e.Tool.Name == string(models.ControlToolFinalAnswer) {
-						appended = true
-					}
-				}
-				return false
-			}
-			return appended && method == "RecordAgentTurnStepModel"
-		})
-		run := f.StartRun(models.RunKindAgentWork, "Say something")
-		cancel, done := resumeStartClaim(f, run.ID)
-		resumeWait(t, done, "the trapped claim")
-		if !trap.didFire() {
-			t.Fatal("step 1 never recorded its model call")
-		}
-		f.Crash(cancel, done)
-		failed := false
-		trap.fail = func(method string, _ any) error {
-			if method != "RecordAgentTurnStepModel" || failed {
-				return nil
-			}
-			failed = true
-			return fmt.Errorf("record step: %w", modelstep.ErrTurnHostUnavailable)
-		}
-
-		final := f.DriveToRest(run.ID, 6)
-		f.MustStatus(final, models.AgentRunStatusCompleted)
-		if !failed {
-			t.Fatal("the resumed step never failed")
-		}
-		steps := f.Steps(run.ID)
-		if len(steps) != 2 || steps[0].Status != models.AgentTurnStatusFailed || steps[1].Status != models.AgentTurnStatusCompleted {
-			t.Fatalf("steps = %#v, want failed then completed", steps)
-		}
-		finals := resumeToolEntries(f, run.ID, string(models.ControlToolFinalAnswer))
-		if len(finals) != 2 || finals[0].State != models.ToolEntryError || finals[1].State != models.ToolEntryCompleted {
-			t.Fatalf("final_answer entries = %d, log %s", len(finals), resumeLog(f, run.ID))
-		}
-		if text := resumeEntryText(finals[0]); !strings.Contains(text, "not run") {
-			t.Fatalf("step 1's final_answer result = %q, want a not-run refusal", text)
-		}
-		if !sawRefusal {
-			t.Fatal("step 2's model call did not see the refused final_answer")
-		}
-		if requests := f.Model.Calls(models.ModelStepPurposeStep); len(requests) != 2 {
-			t.Fatalf("model step requests = %d, want 2", len(requests))
-		}
-		if answer := resumeFinalAnswer(f, run.ID); answer != "Second." {
-			t.Fatalf("final answer = %q", answer)
 		}
 	})
 
@@ -708,20 +634,17 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 	})
 }
 
-// resumeFinalAnswer is the answer argument of the Run's final answer call.
+// resumeFinalAnswer is the Run's final answer: the plain reply of its last
+// assistant entry without tool calls.
 func resumeFinalAnswer(f *looptest.Fixture, runID string) string {
 	f.T.Helper()
-	entries := resumeToolEntries(f, runID, string(models.ControlToolFinalAnswer))
-	if len(entries) == 0 {
-		return ""
+	answer := ""
+	for _, entry := range f.Entries(runID) {
+		if entry.Type == models.SessionEntryAssistant && entry.Assistant != nil && len(entry.Assistant.ToolCalls) == 0 {
+			answer = entry.Assistant.Text
+		}
 	}
-	var args struct {
-		Answer string `json:"answer"`
-	}
-	if err := json.Unmarshal(entries[len(entries)-1].Tool.Arguments, &args); err != nil {
-		f.T.Fatalf("final answer arguments: %v", err)
-	}
-	return args.Answer
+	return answer
 }
 
 // TestLoopResumeNeverDispatchesAWriteTwice kills worker 1 at a write of a
@@ -742,7 +665,7 @@ func TestLoopResumeNeverDispatchesAWriteTwice(t *testing.T) {
 					return looptest.Act("Sending it.", looptest.ReviewedCall(looptest.GovernedTool(v, "send"), map[string]any{"to": "bo", "text": "issue 3 is open"}, "Tell bo"))
 				}},
 			{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Done."})
+				return looptest.Say("Done.")
 			}},
 		}
 	}
