@@ -265,7 +265,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 	t.Run("visual", func(t *testing.T) {
 		looptest.EachStore(t, "port_visual", func(t *testing.T, store models.KernelStore) {
 			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Revenue is up.", "visual": failurePortVisual()})
+				return looptest.FinalAnswer(map[string]any{"answer": blocksAnswer("Revenue is up.", failurePortVisual())})
 			}}))
 			content := &looptest.AnswerVisualContent{}
 			convRunner(f, conversationrun.TurnRunnerConfig{AttachmentContent: content})
@@ -276,7 +276,7 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 			id := portVisualArtifactID(run.ID, trigger.ID)
 			answers := portAgentMessages(f, conversation.ID)
 			want := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}, {Kind: models.ConversationReferenceArtifact, ID: id, Version: 1}}
-			if len(answers) != 1 || answers[0].Content != "Revenue is up." || answers[0].Intent != models.MessageIntentAnswer ||
+			if len(answers) != 1 || answers[0].Content != "Revenue is up.\n\n::visual{#revenue}" || answers[0].Intent != models.MessageIntentAnswer ||
 				len(answers[0].References) != 2 || answers[0].References[0] != want[0] || answers[0].References[1] != want[1] {
 				t.Fatalf("answers = %#v", answers)
 			}
@@ -291,24 +291,26 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 				t.Fatalf("artifact = %#v, %v", artifact, err)
 			}
 			surface, err := presentation.Decode(content.Data)
-			if err != nil || surface.Title != "Quarterly revenue" || content.Puts != 1 {
+			if err != nil || len(surface.Components) != 1 || surface.Components[0].ID != "revenue" || content.Puts != 1 {
 				t.Fatalf("stored visual = %#v (%d puts), %v", surface, content.Puts, err)
 			}
-			if _, ok := done.Output[agentrun.FinalOutputVisualKey]; ok {
-				t.Fatalf("the visual stayed in the Run output: %#v", done.Output)
+			if done.Output[conversationrun.FinalOutputSummaryKey] != "Revenue is up." {
+				t.Fatalf("the blocks stayed in the Run summary: %#v", done.Output)
 			}
 		})
 	})
 
-	t.Run("visual_rejected_by_host", func(t *testing.T) {
+	t.Run("block_rejected_by_host", func(t *testing.T) {
 		looptest.EachStore(t, "port_visual_rejected", func(t *testing.T, store models.KernelStore) {
 			bound := failurePortVisual()
 			bound.Components = append(bound.Components, presentation.Component{ID: "next", Type: "actions", Actions: []presentation.Action{
 				{ID: "stop", Label: "Stop", Kind: presentation.ActionEntity, Command: "stop", Binding: &presentation.Binding{Kind: presentation.BindingRunbook, ID: "rb-1"}},
 			}})
-			f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Revenue is up.", "visual": bound})
-			}}))
+			answer := blocksAnswer("Revenue is up.", bound)
+			f := looptest.NewFixture(t, store, looptest.WithRules(answerSteps(
+				map[string]any{"answer": answer},
+				map[string]any{"answer": "", "repairs": map[string]any{"next": presentation.FormatBlock(bound.Components[1])}},
+			)))
 			content := &looptest.AnswerVisualContent{}
 			convRunner(f, conversationrun.TurnRunnerConfig{AttachmentContent: content, VisualChecks: func(*models.AgentRun) presentation.ValidateOptions {
 				return presentation.ValidateOptions{Bindings: presentation.BindingResolverFunc(func(context.Context, presentation.Binding) error {
@@ -316,18 +318,18 @@ func TestLoopFinalAnswerToolCarriesVisualSilentAndFiles(t *testing.T) {
 				})}
 			}})
 			conversation, run := f.StartChat("how is revenue?")
-			done := f.DriveToRest(run.ID, 3)
+			done := f.DriveToRest(run.ID, 4)
 			f.MustStatus(done, models.AgentRunStatusCompleted)
 			finals := portFinalEntries(f, run.ID)
-			if len(finals) != 1 || finals[0].State != models.ToolEntryCompleted {
+			if len(finals) != 2 || finals[1].State != models.ToolEntryCompleted {
 				t.Fatalf("final entries = %v", f.EntryTypes(run.ID))
 			}
-			// Only the component that fails the host checks is left out.
+			// Only the block that fails the host checks is left out.
 			answers := portAgentMessages(f, conversation.ID)
-			if len(answers) != 1 || answers[0].Content != "Revenue is up." || len(answers[0].References) != 2 || content.Puts != 1 {
+			if len(answers) != 1 || !portVisualNotShown(answers[0].Content, "Revenue is up.\n\n::visual{#revenue}") || len(answers[0].References) != 2 || content.Puts != 1 {
 				t.Fatalf("answers = %#v (%d visual puts), want the answer with the rest of the visual", answers, content.Puts)
 			}
-			if events := f.Events(run.ID, "turn.visual_rejected"); len(events) != 1 || events[0].Severity != models.ActivitySeverityWarning || events[0].Payload["componentId"] != "next" {
+			if events := f.Events(run.ID, "turn.visual_rejected"); len(events) != 1 || events[0].Severity != models.ActivitySeverityWarning || events[0].Payload["blockId"] != "next" {
 				t.Fatalf("visual rejected events = %#v", events)
 			}
 		})

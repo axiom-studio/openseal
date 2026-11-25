@@ -144,19 +144,41 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: output}, nil
 	}
 
-	// 6. Reactions only (also an answer that only repeats the reacted emoji).
-	visual := answer.Visual()
-	// Images the Run already attached (generate_image, present) show with the
-	// answer; a visual that only repeats them would show each one twice.
-	if visual != nil && content != "" && visualRepeatsAttachedImages(*visual, references) {
-		visual = nil
+	// 5. Visual blocks. A repair call's blocks go into the answer delivery
+	// asked it about; then every block is read with the host checks.
+	if repairs, _ := answer.Output[FinalOutputVisualRepairsKey].(map[string]string); len(repairs) > 0 {
+		repaired, rejection, err := h.repairedAnswer(ctx, run, repairs)
+		if err != nil {
+			return agentrun.FinalDeliveryResult{}, err
+		}
+		if rejection != "" {
+			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: rejection}, nil
+		}
+		content = repaired
 	}
+	visual, drops := r.readAnswerBlocks(ctx, run, content)
+	left := map[string]bool{}
+	for _, drop := range drops {
+		if drop.Whole {
+			left[drop.BlockID] = true
+		}
+	}
+	// Images the Run already attached (generate_image, present) show with the
+	// answer; blocks that only repeat them would show each one twice.
+	if visual != nil && presentation.PlainAnswer(content) != "" && visualRepeatsAttachedImages(*visual, references) {
+		for _, component := range visual.Components {
+			left[component.ID] = true
+		}
+		visual, drops = nil, nil
+	}
+
+	// 6. Reactions only (also an answer that only repeats the reacted emoji).
 	if visual == nil {
 		reactions, err := h.runReactions(ctx, run)
 		if err != nil {
 			return agentrun.FinalDeliveryResult{}, err
 		}
-		if len(reactions) > 0 && visual == nil && runtimeconversation.ReactionEcho(content, reactions) {
+		if len(reactions) > 0 && runtimeconversation.ReactionEcho(presentation.PlainAnswer(content), reactions) {
 			output := maps.Clone(base)
 			output[agentrun.FinalOutputReactedKey] = true
 			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: output}, nil
@@ -177,31 +199,35 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: conversationEmptyAnswerText}, nil
 	}
 
-	// 9 (second part). The visual, after the host checks. A part that fails
-	// them costs only itself, and a visual with nothing left never costs
-	// the answer, which has already streamed to the person: it is posted
-	// without the visual and says so, because the text may point at it or
-	// the person may have asked for it. The Run records every part left
-	// out, here and when the visual was read.
-	drops, _ := answer.Output[FinalOutputVisualDropsKey].([]presentation.Drop)
-	if visual != nil {
-		checked, hostDrops, checkErr := r.checkAnswerVisual(ctx, run, visual)
-		drops = append(drops, hostDrops...)
-		if checkErr == nil {
-			reference, storeErr := r.storeAnswerVisual(ctx, run, run.AssignedAgentID,
-				answerVisualArtifactID(run.ID, trigger.ID, answerVisualFollowUpKey(run)), *checked)
-			if storeErr != nil {
-				return agentrun.FinalDeliveryResult{}, storeErr
-			}
-			references = append(references, reference)
-		} else if !errors.Is(checkErr, errInvalidAnswerVisual) {
-			return agentrun.FinalDeliveryResult{}, checkErr
+	// 8. Repair, once per Run: blocks that failed are asked for again on
+	// their own. The person keeps the streamed answer meanwhile; nothing
+	// else of it is written again.
+	if slices.ContainsFunc(drops, func(drop presentation.BlockDrop) bool { return drop.Whole }) {
+		prior, err := h.priorDeliveryRejections(ctx, run, answer, isVisualRepairRequest)
+		if err != nil {
+			return agentrun.FinalDeliveryResult{}, err
+		}
+		if prior == 0 {
+			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: visualRepairRequest(drops)}, nil
 		}
 	}
 
+	// 9. The blocks that are left, as one card the message references. A
+	// block that still fails never costs the answer: its placeholder goes,
+	// the message says a visual could not be shown, and the Run records
+	// every part left out.
+	if visual != nil {
+		reference, err := r.storeAnswerVisual(ctx, run, run.AssignedAgentID,
+			answerVisualArtifactID(run.ID, trigger.ID, answerVisualFollowUpKey(run)), *visual)
+		if err != nil {
+			return agentrun.FinalDeliveryResult{}, err
+		}
+		references = append(references, reference)
+	}
+
 	// 10. Post under the reply guard.
-	posted := content
-	if slices.ContainsFunc(drops, func(drop presentation.Drop) bool { return drop.Path == "" }) {
+	posted := presentation.PlacedAnswer(content, left)
+	if slices.ContainsFunc(drops, func(drop presentation.BlockDrop) bool { return drop.Whole }) {
 		posted += "\n\n" + conversationVisualNotShownText
 	}
 	message, replayed, err := r.postAgentResponseWithReferences(ctx, run, conversation, trigger, posted, references, answer.BroadcastToChannel(), &guard)
@@ -220,12 +246,11 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	if output == nil {
 		output = map[string]interface{}{}
 	}
-	delete(output, agentrun.FinalOutputVisualKey)
-	delete(output, FinalOutputVisualDropsKey)
+	delete(output, FinalOutputVisualRepairsKey)
 	for key, value := range withConversationOutput(base, message, replayed) {
 		output[key] = value
 	}
-	output[FinalOutputSummaryKey] = content
+	output[FinalOutputSummaryKey] = presentation.PlainAnswer(content)
 	if answer.BroadcastToChannel() {
 		output[agentrun.FinalOutputBroadcastKey] = true
 	} else {
@@ -260,44 +285,109 @@ func answerVisualFollowUpKey(run *models.AgentRun) string {
 	return "followup:" + followUps[len(followUps)-1].MessageID
 }
 
-// checkAnswerVisual reads the visual with the host checks (bindings, links,
-// images, places) of TurnRunnerConfig.VisualChecks and stamps its places.
-// A component that fails them is left out and listed in the drops; when
-// nothing is left, the error wraps errInvalidAnswerVisual and the drops end
-// with the one of the whole visual.
-func (r *TurnRunner) checkAnswerVisual(ctx context.Context, run *models.AgentRun, visual *presentation.Visual) (*presentation.Visual, []presentation.Drop, error) {
+// readAnswerBlocks reads the answer's blocks with the host checks (bindings,
+// links, images, places) of TurnRunnerConfig.VisualChecks and stamps their
+// places. A block that fails is left out on its own and listed in the
+// drops; a place stamping failure costs every block, as it cannot say
+// which one it was.
+func (r *TurnRunner) readAnswerBlocks(ctx context.Context, run *models.AgentRun, content string) (*presentation.Visual, []presentation.BlockDrop) {
 	var options presentation.ValidateOptions
 	if r.config.VisualChecks != nil {
 		options = r.config.VisualChecks(run)
 	}
 	options.SkipHostChecks = false
-	checked, drops, _, err := presentation.Admit(ctx, *visual, options)
-	if err != nil {
-		return nil, drops, fmt.Errorf("%w: %v", errInvalidAnswerVisual, err)
+	visual, drops := presentation.ReadBlocks(ctx, content, options)
+	if visual == nil {
+		return nil, drops
 	}
-	surface := checked.Surface(presentation.StateReady)
+	surface := visual.Surface(presentation.StateReady)
 	if len(presentation.PlaceIDs(surface)) == 0 {
-		return checked, drops, nil
-	}
-	whole := func(err error) (*presentation.Visual, []presentation.Drop, error) {
-		return nil, append(drops, presentation.Drop{Reason: err.Error()}), fmt.Errorf("%w: %v", errInvalidAnswerVisual, err)
+		return visual, drops
 	}
 	fixes, err := presentation.ResolvePlaces(ctx, surface, options.PlaceProvenance)
-	if err != nil {
-		return whole(err)
+	if err == nil {
+		surface, err = presentation.StampPlaces(surface, fixes)
 	}
-	stamped, err := presentation.StampPlaces(surface, fixes)
 	if err != nil {
-		return whole(err)
+		for _, component := range visual.Components {
+			drops = append(drops, presentation.BlockDrop{BlockID: component.ID, Whole: true, Drop: presentation.Drop{ComponentID: component.ID, Reason: err.Error()}})
+		}
+		return nil, drops
 	}
-	return &presentation.Visual{Title: stamped.Title, Components: stamped.Components}, drops, nil
+	return &presentation.Visual{Title: surface.Title, Components: surface.Components}, drops
+}
+
+// visualRepairLead starts the request to repair failing blocks; a Run
+// asks it once.
+const visualRepairLead = "Some visual blocks in your answer could not be shown:"
+
+func isVisualRepairRequest(text string) bool {
+	return strings.HasPrefix(text, visualRepairLead)
+}
+
+// visualRepairRequest asks for the blocks that failed, by id, with why.
+func visualRepairRequest(drops []presentation.BlockDrop) string {
+	var b strings.Builder
+	b.WriteString(visualRepairLead)
+	var example string
+	for _, drop := range drops {
+		if !drop.Whole {
+			continue
+		}
+		fmt.Fprintf(&b, "\n- %s: %s", drop.BlockID, drop.Reason)
+		if example == "" {
+			example = drop.BlockID
+		}
+	}
+	fmt.Fprintf(&b, "\nCall turn_final_answer with only repairs, e.g. {\"repairs\": {%q: \"<the whole corrected block, ::: lines included>\"}}, "+
+		"one entry per block above (leave a block out to drop it). Your answer text stands; do not send it again.", example)
+	return b.String()
+}
+
+// repairedAnswer puts a repair call's blocks into the answer whose blocks
+// delivery asked to repair: the last turn_final_answer of this Run refused
+// with that request. It returns a rejection when there is none.
+func (h *conversationFinalHandler) repairedAnswer(ctx context.Context, run *models.AgentRun, repairs map[string]string) (string, string, error) {
+	const nothing = "There is no answer whose visual blocks were asked for; write the whole answer."
+	if h.sessions == nil {
+		return "", nothing, nil
+	}
+	entries, err := h.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: run.Scope, RunID: run.ID, ToolNames: []string{string(models.ControlToolFinalAnswer)},
+		States: []models.ToolEntryState{models.ToolEntryError}, Limit: models.MaxSessionEntryListLimit,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	for index := len(entries) - 1; index >= 0; index-- {
+		entry := entries[index]
+		if entry == nil || entry.Tool == nil || entry.Tool.Result == nil || !slices.ContainsFunc(entry.Tool.Result.Content, func(part models.ContentPart) bool {
+			return part.Type == models.ContentPartText && isVisualRepairRequest(strings.TrimSpace(part.Text))
+		}) {
+			continue
+		}
+		var asked struct {
+			Answer string `json:"answer"`
+			Report string `json:"report"`
+		}
+		if err := json.Unmarshal(entry.Tool.Arguments, &asked); err != nil {
+			return "", nothing, nil
+		}
+		base := strings.TrimSpace(asked.Report)
+		if base == "" {
+			base = strings.TrimSpace(asked.Answer)
+		}
+		repaired, _ := presentation.ReplaceBlocks(base, repairs)
+		return strings.TrimSpace(repaired), "", nil
+	}
+	return "", nothing, nil
 }
 
 // visualRejected records one part of the answer's visual that was left
 // out, or the whole visual (a drop with no path). The answer is already
 // posted; a lost warning is not retried. The event id is stable per Run,
 // step and drop, so a replayed delivery does not record it twice.
-func (h *conversationFinalHandler) visualRejected(ctx context.Context, run *models.AgentRun, step *models.AgentTurn, workerID string, drop presentation.Drop) {
+func (h *conversationFinalHandler) visualRejected(ctx context.Context, run *models.AgentRun, step *models.AgentTurn, workerID string, drop presentation.BlockDrop) {
 	if h.activity == nil {
 		return
 	}
@@ -305,20 +395,20 @@ func (h *conversationFinalHandler) visualRejected(ctx context.Context, run *mode
 	if runes := []rune(reason); len(runes) > 400 {
 		reason = string(runes[:400]) + "…"
 	}
-	summary := answerVisualRejectedSummary + " " + reason
-	if drop.Path != "" {
-		summary = fmt.Sprintf("%s %s (component %q): %s", answerVisualPartRejectedSummary, drop.Path, drop.ComponentID, reason)
+	summary := fmt.Sprintf("%s block %q: %s", answerVisualRejectedSummary, drop.BlockID, reason)
+	if !drop.Whole {
+		summary = fmt.Sprintf("%s %s (component %q of block %q): %s", answerVisualPartRejectedSummary, drop.Path, drop.ComponentID, drop.BlockID, reason)
 	}
 	stepID := ""
 	if step != nil {
 		stepID = step.ID
 	}
 	event := &models.ActivityEvent{
-		ID:    uuid.NewSHA1(uuid.NameSpaceOID, []byte(strings.Join([]string{"visual-rejected", run.ID, stepID, drop.Path, drop.Reason}, "\x00"))).String(),
+		ID:    uuid.NewSHA1(uuid.NameSpaceOID, []byte(strings.Join([]string{"visual-rejected", run.ID, stepID, drop.BlockID, drop.Path, drop.Reason}, "\x00"))).String(),
 		Scope: run.Scope, RunID: run.ID, TurnID: stepID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: models.TeamIDForRun(run),
 		EventType: answerVisualRejectedEvent, Severity: models.ActivitySeverityWarning, CreatedAt: h.runner.now(),
 		Summary: summary, Actor: models.ActivityActor{Type: "worker", ID: workerID},
-		Payload:    map[string]interface{}{"path": drop.Path, "componentId": drop.ComponentID, "reason": drop.Reason},
+		Payload:    map[string]interface{}{"blockId": drop.BlockID, "path": drop.Path, "componentId": drop.ComponentID, "reason": drop.Reason},
 		Visibility: models.ActivityVisibilityScope,
 	}
 	_, _ = h.activity.AppendActivity(ctx, event)
@@ -397,6 +487,6 @@ func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, 
 // FinalOutputSummaryKey is the final output field that holds the answer text.
 const FinalOutputSummaryKey = "summary"
 
-// FinalOutputVisualDropsKey is the final output field that lists the parts
-// of the answer's visual left out when it was read ([]presentation.Drop).
-const FinalOutputVisualDropsKey = "visualDrops"
+// FinalOutputVisualRepairsKey is the final output field of a call that only
+// repairs visual blocks: block id → the corrected block.
+const FinalOutputVisualRepairsKey = "visualRepairs"

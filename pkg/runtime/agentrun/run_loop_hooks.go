@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
 // The seams the runloop.Loop calls. Each owning section implements one; the loop
@@ -159,7 +158,6 @@ const (
 	FinalOutputSilentKey    = "silent"
 	FinalOutputBroadcastKey = "broadcastToChannel"
 	FinalOutputReactedKey   = "reacted"
-	FinalOutputVisualKey    = "visual"
 )
 
 // Silent: a spoken reply that needs no response; nothing is posted.
@@ -180,10 +178,3 @@ func (a FinalAnswer) BroadcastToChannel() bool {
 	return broadcast
 }
 
-// Visual is the structurally valid visual of the answer, or nil. Delivery
-// runs the host checks and place stamping, stores it, and removes it from the
-// Run output.
-func (a FinalAnswer) Visual() *presentation.Visual {
-	visual, _ := a.Output[FinalOutputVisualKey].(*presentation.Visual)
-	return visual
-}

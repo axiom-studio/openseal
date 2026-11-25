@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
 // TurnAnswerPreview is a provisional snapshot, never a validated run output.
@@ -15,7 +17,14 @@ type TurnAnswerPreview struct {
 	Sequence  uint64 `json:"sequence"`
 	Text      string `json:"text"`
 	Reset     bool   `json:"reset,omitempty"`
+	// Blocks are the visual blocks of Text that are closed and readable
+	// without the host (presentation.PreviewBlocks), by id; the client
+	// draws them in place while the answer streams.
+	Blocks []presentation.Component `json:"blocks,omitempty"`
 }
+
+// MaxTurnAnswerPreviewBlocksBytes bounds a preview's blocks as JSON.
+const MaxTurnAnswerPreviewBlocksBytes = 64 << 10
 
 type TurnAnswerPreviewObserver func(context.Context, TurnAnswerPreview) error
 type turnAnswerPreviewKey struct{}
@@ -44,8 +53,14 @@ func ReportTurnAnswerPreview(ctx context.Context, preview TurnAnswerPreview) err
 }
 
 func (preview TurnAnswerPreview) Validate() error {
-	if preview.AttemptID == "" || len(preview.AttemptID) > 128 || preview.Sequence == 0 || len(preview.Text) > 64<<10 || !utf8.ValidString(preview.Text) || preview.Reset && preview.Text != "" {
+	if preview.AttemptID == "" || len(preview.AttemptID) > 128 || preview.Sequence == 0 || len(preview.Text) > 64<<10 || !utf8.ValidString(preview.Text) || preview.Reset && (preview.Text != "" || len(preview.Blocks) > 0) {
 		return errors.New("invalid turn answer preview")
+	}
+	if len(preview.Blocks) > 0 {
+		encoded, err := json.Marshal(preview.Blocks)
+		if err != nil || len(encoded) > MaxTurnAnswerPreviewBlocksBytes {
+			return errors.New("invalid turn answer preview blocks")
+		}
 	}
 	return nil
 }
@@ -59,7 +74,7 @@ func ProjectTurnAnswerPreview(event *ActivityEvent) *TurnAnswerPreview {
 	}
 	data, err := json.Marshal(map[string]interface{}{
 		"attemptId": event.Payload["attemptId"], "sequence": event.Payload["sequence"],
-		"text": event.Payload["text"], "reset": event.Payload["reset"],
+		"text": event.Payload["text"], "reset": event.Payload["reset"], "blocks": event.Payload["blocks"],
 	})
 	if err != nil {
 		return nil

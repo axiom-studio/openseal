@@ -143,7 +143,9 @@ func deliverAnswer(t *testing.T, features []capability.ConversationAdapterFeatur
 	answer, err := conversations.PostChannelMessage(t.Context(), runtimeconversation.PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: endpoint.Owner.ID},
-		Intent: models.MessageIntentAnswer, Content: "Revenue grew 12% this quarter.",
+		// The placeholder marks where the visual stands in the chat; a
+		// channel gets the text without it.
+		Intent: models.MessageIntentAnswer, Content: "Revenue grew 12% this quarter.\n\n::visual{#revenue}",
 		Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel}, References: refs(t, store, content, endpoint), IdempotencyKey: "answer",
 	})
 	if err != nil {

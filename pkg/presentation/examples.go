@@ -1,5 +1,7 @@
 package presentation
 
+import "strings"
+
 // Example is a worked answer: either a visual answer from the §3 golden set,
 // built only from catalogue types, or a reply whose right form is plain text
 // (Visual is nil). Tests validate every example; hosts may show them to the
@@ -190,4 +192,16 @@ func VisualExamples() []Example {
 		Name: "text-fact", Prompt: "What's the capital of Australia?",
 		Lead: "Canberra.",
 	}}
+}
+
+// Answer is the example's answer as the model writes it: the lead, then
+// each component of its visual as a block.
+func (e Example) Answer() string {
+	parts := []string{e.Lead}
+	if e.Visual != nil {
+		for _, component := range e.Visual.Components {
+			parts = append(parts, FormatBlock(component))
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }

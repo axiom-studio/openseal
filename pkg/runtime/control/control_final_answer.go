@@ -28,7 +28,7 @@ import (
 // what the answer says: the checks only refuse an answer that cannot be
 // delivered at all.
 //
-// Pipeline order: decode → silent → content → skills → visual →
+// Pipeline order: decode → silent → content → skills →
 // FinalOutputPublisher.ValidateFinalAnswer → finalAnswerPark.
 
 // Final answer error codes (stable; the model sees them in the tool result).
@@ -55,7 +55,7 @@ const (
 type finalAnswerArgs struct {
 	Answer             string               `json:"answer"`
 	AppliedSkillRefs   []string             `json:"appliedSkillRefs,omitempty"`
-	Visual             *presentation.Visual `json:"visual,omitempty"`
+	Repairs            map[string]string    `json:"repairs,omitempty"`
 	BroadcastToChannel bool                 `json:"broadcastToChannel,omitempty"`
 	Report             string               `json:"report,omitempty"`
 	Silent             bool                 `json:"silent,omitempty"`
@@ -66,27 +66,22 @@ type finalAnswerArgs struct {
 // not a claim offers them. A publisher property with one of these names is
 // never offered or routed to the publisher.
 var finalAnswerKernelFields = map[string]bool{
-	"answer": true, "appliedSkillRefs": true, "visual": true, "broadcastToChannel": true,
+	"answer": true, "appliedSkillRefs": true, "repairs": true, "broadcastToChannel": true,
 	"report": true, "silent": true, "files": true,
 }
 
 // finalAnswerCall is the decoded call: the strict kernel arguments, which
 // keys were present, and the remaining (host extension) fields.
-// VisualDrops are the parts of the visual left out; when the whole visual
-// is left out, Args.Visual is nil.
 type finalAnswerCall struct {
-	Args        finalAnswerArgs
-	Present     map[string]bool
-	Extra       map[string]json.RawMessage
-	VisualDrops []presentation.Drop
+	Args    finalAnswerArgs
+	Present map[string]bool
+	Extra   map[string]json.RawMessage
 }
 
 // decodeFinalAnswerCall decodes raw as one JSON object. Kernel fields are
 // decoded strictly by type; every other key is kept in Extra and checked
 // against the claim's offered fields when the call settles (the dispatcher's
-// decode does not see the Run). The visual is decoded on its own: a visual
-// that does not decode (a key the format does not have) is a visual
-// rejection, which never costs the answer, not a refusal of the whole call.
+// decode does not see the Run).
 func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 	var fields map[string]json.RawMessage
 	if err := models.DecodeControlArguments(raw, &fields); err != nil {
@@ -98,11 +93,6 @@ func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 	call := &finalAnswerCall{Present: map[string]bool{}, Extra: map[string]json.RawMessage{}}
 	kernel := map[string]json.RawMessage{}
 	for key, value := range fields {
-		if key == "visual" {
-			call.Present[key] = true
-			call.Args.Visual, call.VisualDrops = decodeFinalVisual(value)
-			continue
-		}
 		if finalAnswerKernelFields[key] {
 			if key == "appliedSkillRefs" {
 				value = finalSkillRefsList(value)
@@ -121,17 +111,6 @@ func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 		return nil, err
 	}
 	return call, nil
-}
-
-// decodeFinalVisual reads the visual argument as the host reads every
-// visual (presentation.DecodeVisual): slips are read, and a part that fails
-// is left out and listed in the drops. null is no visual.
-func decodeFinalVisual(raw json.RawMessage) (*presentation.Visual, []presentation.Drop) {
-	if trimmed := strings.TrimSpace(string(raw)); trimmed == "" || trimmed == "null" {
-		return nil, nil
-	}
-	visual, drops, _ := presentation.DecodeVisual(raw)
-	return visual, drops
 }
 
 // finalSkillRefsList takes one Skill ref sent as a bare string as a list of
@@ -165,7 +144,7 @@ func finalFieldOffered(field string, a agentrun.ControlAuthority) bool {
 		return true
 	case "appliedSkillRefs":
 		return len(a.SkillPromptRefs) > 0
-	case "visual":
+	case "repairs":
 		return a.VisualAllowed
 	case "broadcastToChannel":
 		return a.BroadcastAllowed
@@ -194,6 +173,9 @@ func finalRequiredFields(a agentrun.ControlAuthority) []string {
 
 func finalAnswerSchema(a agentrun.ControlAuthority) map[string]interface{} {
 	answer := map[string]interface{}{"type": "string", "description": "The user-facing answer."}
+	if a.VisualAllowed {
+		answer["description"] = "The user-facing answer, in markdown. " + presentation.BlocksDescription()
+	}
 	if a.EffectiveFinalMode() == agentrun.FinalModeSpoken {
 		answer["description"] = "Only the words to speak; empty when silent is true."
 	}
@@ -207,10 +189,12 @@ func finalAnswerSchema(a agentrun.ControlAuthority) map[string]interface{} {
 			"items": map[string]interface{}{"type": "string"},
 		}
 	}
-	if finalFieldOffered("visual", a) {
-		visual := presentation.VisualJSONSchema()
-		visual["description"] = presentation.VisualFieldDescription()
-		properties["visual"] = visual
+	if finalFieldOffered("repairs", a) {
+		properties["repairs"] = map[string]interface{}{
+			"type": "object", "additionalProperties": map[string]interface{}{"type": "string"},
+			"description": "Only when a reply asks you to repair visual blocks: each block id it names, mapped to the whole corrected block (its ::: lines included). " +
+				"Leave answer empty then; the rest of your answer stands.",
+		}
 	}
 	if finalFieldOffered("broadcastToChannel", a) {
 		properties["broadcastToChannel"] = map[string]interface{}{
@@ -248,7 +232,7 @@ func finalAnswerSchema(a agentrun.ControlAuthority) map[string]interface{} {
 func finalAnswerDescription(a agentrun.ControlAuthority) string {
 	text := "Finish with the user-facing answer"
 	if a.VisualAllowed {
-		text += ", an optional visual shown under it"
+		text += ", with any visuals as blocks inside it"
 	}
 	if len(a.SkillPromptRefs) > 0 {
 		text += ", and the prompt Skills used"
@@ -324,7 +308,7 @@ func (finalAnswerHandler) Run(ctx context.Context, x *Executor, cc agentrun.Cont
 	if message := checkFinalAnswerFields(call, cc); message != "" {
 		return x.refuse(ctx, cc, controlArgumentsInvalid(message))
 	}
-	draft := &finalAnswerDraft{Args: call.Args, Extra: call.Extra, VisualDrops: call.VisualDrops}
+	draft := &finalAnswerDraft{Args: call.Args, Extra: call.Extra}
 	return x.acceptFinalAnswer(ctx, cc, draft)
 }
 
@@ -366,22 +350,20 @@ func checkFinalAnswerFields(call *finalAnswerCall, cc agentrun.ControlContext) s
 // Acceptance pipeline (§11.3)
 
 // finalAnswerDraft is a final answer under validation. Checks may change
-// Output (evidence grounding adds its review) and Visual. VisualDrops are
-// the parts of the sent visual left out when it was read.
+// Output (evidence grounding adds its review).
 type finalAnswerDraft struct {
 	Args            finalAnswerArgs
 	Extra           map[string]json.RawMessage
-	VisualDrops     []presentation.Drop
 	PlainText       bool
 	ReactionsOnly   bool
-	Visual          *presentation.Visual
 	SkillSelections []models.HostedSkillSelection
 	Output          map[string]interface{}
 }
 
-// sentVisual reports whether the call carried a visual, left out or not.
-func (d *finalAnswerDraft) sentVisual() bool {
-	return d.Args.Visual != nil || len(d.VisualDrops) > 0
+// repairing reports a call that only repairs visual blocks of the answer
+// delivery asked about; delivery puts them into that answer.
+func (d *finalAnswerDraft) repairing() bool {
+	return len(d.Args.Repairs) > 0 && strings.TrimSpace(d.Args.Answer) == "" && strings.TrimSpace(d.Args.Report) == ""
 }
 
 // content is the user-visible text: the trimmed report when present, else the
@@ -410,15 +392,15 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 	mode := cc.Authority.EffectiveFinalMode()
 	answer := strings.TrimSpace(d.Args.Answer)
 	// 2. Silent: a spoken reply or a routine occurrence, with an empty
-	// answer and no visual, report, files or extension fields. A routine occurrence that changed
+	// answer and no repairs, report, files or extension fields. A routine occurrence that changed
 	// something always reports it.
 	if d.Args.Silent {
 		routine := mode == agentrun.FinalModeDefault && cc.Authority.RoutineOccurrence
-		if (mode != agentrun.FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.sentVisual() ||
+		if (mode != agentrun.FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || len(d.Args.Repairs) > 0 ||
 			len(d.Args.Files) > 0 || len(d.Extra) > 0 {
-			message := "silent is only for a spoken reply that needs no response: leave answer empty and send no visual or files."
+			message := "silent is only for a spoken reply that needs no response: leave answer empty and send no files."
 			if routine {
-				message = "silent means nothing is posted: leave answer and report empty and send no visual or files."
+				message = "silent means nothing is posted: leave answer and report empty and send no files."
 			}
 			return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalSilentInvalidCode, Message: message})
 		}
@@ -433,13 +415,13 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 			}
 		}
 	}
-	// 3. Content, unless silent or reactions only.
-	if !d.Args.Silent && d.content() == "" {
+	// 3. Content, unless silent, reactions only or a repair of blocks.
+	if !d.Args.Silent && !d.repairing() && d.content() == "" {
 		reacted, err := x.runReacted(ctx, cc)
 		if err != nil {
 			return Result{}, err
 		}
-		if !reacted || d.sentVisual() {
+		if !reacted {
 			return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalAnswerEmptyCode,
 				Message: "The answer is empty; write the reply in answer."})
 		}
@@ -451,12 +433,9 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 		return x.rejectFinal(ctx, cc, d, rejection)
 	}
 	d.SkillSelections = selections
-	// 5. Visual: read when the call was decoded; the host's binding/link/
-	// image/place checks and place stamping run where the visual is stored
-	// (delivery). A part that fails never costs the answer, which has
-	// already streamed to the person, nor the rest of the visual: delivery
-	// records each part left out.
-	d.Visual = conversation.CloneVisual(d.Args.Visual)
+	// 5. Visual blocks are read where they are stored (delivery), with the
+	// host's checks: a block that fails costs only itself, and delivery asks
+	// once for a repair of just those blocks.
 	d.Output = d.output(mode)
 	// 6. Host extension fields.
 	if len(d.Extra) > 0 {
@@ -508,11 +487,8 @@ func (d *finalAnswerDraft) output(mode agentrun.FinalAnswerMode) map[string]inte
 	if files := conversation.HandedOverFileIDs(d.Args.Files); len(files) > 0 {
 		output[conversation.FinalOutputFilesKey] = files
 	}
-	if d.Visual != nil {
-		output[agentrun.FinalOutputVisualKey] = d.Visual
-	}
-	if len(d.VisualDrops) > 0 {
-		output[conversationrun.FinalOutputVisualDropsKey] = d.VisualDrops
+	if d.repairing() {
+		output[conversationrun.FinalOutputVisualRepairsKey] = maps.Clone(d.Args.Repairs)
 	}
 	if len(d.SkillSelections) > 0 {
 		output[finalOutputSkillSelectionsKey] = d.SkillSelections
@@ -809,7 +785,7 @@ func (x *Executor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContex
 	if finalOffered && strings.HasPrefix(trimmed, "{") {
 		if call, err := decodeFinalAnswerCall(json.RawMessage(trimmed)); err == nil && call.Present["answer"] &&
 			len(call.Extra) == 0 && checkFinalAnswerFields(call, cc) == "" {
-			return x.acceptFinalAnswer(ctx, cc, &finalAnswerDraft{Args: call.Args, Extra: call.Extra, VisualDrops: call.VisualDrops, PlainText: true})
+			return x.acceptFinalAnswer(ctx, cc, &finalAnswerDraft{Args: call.Args, Extra: call.Extra, PlainText: true})
 		}
 	}
 	// 2. Modes that need a structured final tool.

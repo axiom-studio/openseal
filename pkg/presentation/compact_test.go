@@ -1,7 +1,6 @@
 package presentation
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -98,7 +97,7 @@ func TestVisualFormatKeepsEverything(t *testing.T) {
 			t.Fatalf("format lacks icon %s", icon)
 		}
 	}
-	roots := map[string]map[string]interface{}{"visual": visualSchema(componentRef(), "")}
+	roots := map[string]map[string]interface{}{}
 	for _, name := range TypeNames() {
 		roots["component."+name] = componentTypeSchema(name, componentRef())
 	}
@@ -192,34 +191,14 @@ var compactKeywords = map[string]bool{
 	"description": true, "$ref": true, "contains": true, "minContains": true, "maxContains": true,
 }
 
-// TestModelFacingVisualBudget bounds what every turn sends: the answer's
-// visual field (loose schema plus the description with the whole format)
-// and the update_visual input schema.
+// TestModelFacingVisualBudget bounds what every turn sends for visuals:
+// the block text on the answer's description. The JSON visual field and
+// update_visual it replaced came to 30,647 bytes at most (ceiling 30 KB);
+// blocks drop the loose JSON schema and the update_visual schema, so the
+// ceiling is 26 KB.
 func TestModelFacingVisualBudget(t *testing.T) {
-	field := VisualJSONSchema()
-	field["description"] = VisualFieldDescription()
-	encodedField, err := json.Marshal(field)
-	if err != nil {
-		t.Fatal(err)
-	}
-	encodedUpdate, err := json.Marshal(UpdateVisualInputSchema())
-	if err != nil {
-		t.Fatal(err)
-	}
-	// 24 KB held through Wave 2 (22,714 bytes). Wave 3's ten types need
-	// 25,840 bytes even after the format stopped repeating notes and named
-	// the shared Format, Tone, Binding, Side and Rating shapes, so the
-	// ceiling moved to 26 KB (recorded in the Wave 3 contract). Wave 5's
-	// map and locations fit under it at 26,573 bytes. Telling the model
-	// each type's text limit and which types need a summary on the loose
-	// schema too (a caption was rejected for a limit the schema did not
-	// state) took it to 26,920, so the ceiling moved to 27 KB. Telling the
-	// model every rule that only Go checks (unique ids, references between
-	// fields, per-kind rules) took it to 28,732, so the ceiling moved to
-	// 29 KB. The cards and converter types and the sources every component
-	// takes (6.2.0) took it from 28,861 to 30,647, so the ceiling is 30 KB.
-	const ceiling = 30 * 1024
-	if total := len(encodedField) + len(encodedUpdate); total > ceiling {
-		t.Fatalf("visual field %d + update_visual %d = %d bytes; the ceiling is %d", len(encodedField), len(encodedUpdate), total, ceiling)
+	const ceiling = 26 * 1024
+	if size := len(BlocksDescription()); size > ceiling {
+		t.Fatalf("visual blocks description is %d bytes; the ceiling is %d", size, ceiling)
 	}
 }

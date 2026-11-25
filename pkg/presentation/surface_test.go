@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"os"
 	"strings"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite golden files")
@@ -377,41 +375,21 @@ func TestVisualRubricOnlyNamesCatalogueTypes(t *testing.T) {
 }
 
 func TestModelFacingTextAvoidsInternalWords(t *testing.T) {
-	definition := SkillDefinition()
 	examples, _ := json.Marshal(VisualExamples())
-	schema, _ := json.Marshal(VisualJSONSchema())
-	texts := map[string]string{
-		"rubric": VisualRubric(), "examples": string(examples), "schema": string(schema),
-		"description": definition.Description, "instructions": definition.Prompt.Instructions, "field": VisualFieldDescription(),
-		"update": definition.Actions[UpdateVisual].Description, "updateSchema": mustJSON(t, UpdateVisualInputSchema()), "name": definition.Name,
-		"tags": strings.Join(definition.Tags, " "),
-	}
+	texts := map[string]string{"rubric": VisualRubric(), "examples": string(examples), "blocks": BlocksDescription()}
 	for name, text := range texts {
 		// artifactId is the shared JSON key of an image reference; its
 		// description says "image already in this chat".
 		lower := strings.ToLower(strings.ReplaceAll(text, "artifactId", ""))
 		// runbook is a binding kind (a JSON value); prose says routine.
-		for _, token := range []string{`"runbook"`, "runbook|", "kind:runbook"} {
+		for _, token := range []string{`"runbook"`, "runbook|", "kind:runbook", "kind: runbook"} {
 			lower = strings.ReplaceAll(lower, token, "")
 		}
-		for _, word := range []string{"presentation", "surface", "artifact", "publish", "openseal", "runbook", "objective"} {
+		for _, word := range []string{"presentation", "surface", "artifact", "publish", "openseal", "runbook", "objective", "update_visual"} {
 			if strings.Contains(lower, word) {
 				t.Fatalf("%s mentions %q", name, word)
 			}
 		}
-	}
-}
-
-func TestSkillDefinitionRegisters(t *testing.T) {
-	definition := SkillDefinition()
-	if definition.ID != SkillID || definition.Version != "6.2.1" || !definition.Requirements.AlwaysAvailable {
-		t.Fatalf("definition = %#v", definition)
-	}
-	if err := skill.NewCatalog().Register(context.Background(), definition); err != nil {
-		t.Fatal(err)
-	}
-	if len(definition.Actions) != 1 || definition.Actions[UpdateVisual].Name != "update_visual" || !strings.Contains(definition.Prompt.Instructions, "update_visual") {
-		t.Fatalf("actions = %#v, instructions = %q", definition.Actions, definition.Prompt.Instructions)
 	}
 }
 
@@ -424,53 +402,11 @@ func mustJSON(t *testing.T, value interface{}) string {
 	return string(encoded)
 }
 
-func TestVisualFieldDescriptionCarriesRubricFormatAndExamples(t *testing.T) {
-	description := VisualFieldDescription()
-	if !strings.HasPrefix(description, "Optional visual") || !strings.Contains(description, VisualRubric()) || !strings.Contains(description, VisualFormat()) ||
-		!strings.Contains(description, `"userAsks":"What's the capital of Australia?"`) || !strings.Contains(description, `"format":"currency","currency":"GBP"`) {
+func TestBlocksDescriptionCarriesRubricFormatAndExamples(t *testing.T) {
+	description := BlocksDescription()
+	if !strings.HasPrefix(description, "Visuals go inside the answer") || !strings.Contains(description, VisualRubric()) || !strings.Contains(description, VisualFormat()) ||
+		!strings.Contains(description, "User: What's the capital of Australia?") || !strings.Contains(description, ":::comparison{#plans") {
 		t.Fatalf("description = %s", description)
 	}
 }
 
-func TestUpdateVisualSchemaSnapshot(t *testing.T) {
-	got, err := json.MarshalIndent(UpdateVisualInputSchema(), "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got = append(got, '\n')
-	const golden = "testdata/update_visual.schema.json"
-	if *updateGolden {
-		if err := os.WriteFile(golden, got, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(golden)
-	if err != nil {
-		t.Fatalf("%v (run go test ./pkg/presentation -update)", err)
-	}
-	if string(got) != string(want) {
-		t.Fatal("update_visual schema changed; review and run go test ./pkg/presentation -update")
-	}
-}
-
-func TestLooseSchemaListsEveryTypeAndPayload(t *testing.T) {
-	for name, schema := range map[string]map[string]interface{}{
-		"visual": VisualJSONSchema()["properties"].(map[string]interface{})["components"].(map[string]interface{}),
-		"update": UpdateVisualInputSchema()["properties"].(map[string]interface{})["components"].(map[string]interface{}),
-	} {
-		component := schema["items"].(map[string]interface{})
-		properties := component["properties"].(map[string]interface{})
-		types := properties["type"].(map[string]interface{})["enum"].([]interface{})
-		if len(types) != len(catalogue) || component["additionalProperties"] != nil {
-			t.Fatalf("%s: types %v, component %v", name, types, component)
-		}
-		for key := range payloadSchemas() {
-			if properties[key] == nil {
-				t.Fatalf("%s: no %s payload", name, key)
-			}
-		}
-		if children := properties["children"].(map[string]interface{}); children["items"].(map[string]interface{})["properties"] != nil {
-			t.Fatalf("%s: nested components are spelled out", name)
-		}
-	}
-}

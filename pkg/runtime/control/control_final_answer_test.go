@@ -13,7 +13,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
-	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -113,7 +112,7 @@ func schemaProperties(t *testing.T, schema map[string]interface{}) (map[string]i
 func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 	keys := func(m map[string]interface{}) []string {
 		var out []string
-		for _, field := range []string{"answer", "appliedSkillRefs", "visual", "broadcastToChannel", "report", "silent", "evidenceClaims", "files"} {
+		for _, field := range []string{"answer", "appliedSkillRefs", "repairs", "broadcastToChannel", "report", "silent", "evidenceClaims", "files"} {
 			if _, ok := m[field]; ok {
 				out = append(out, field)
 			}
@@ -130,7 +129,7 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 	}{
 		{"default", agentrun.ControlAuthority{}, []string{"answer", "report", "files"}, []string{"answer"}, false, nil},
 		{"chat with skills", agentrun.ControlAuthority{SkillPromptRefs: []string{"s1", "s2"}, VisualAllowed: true, BroadcastAllowed: true},
-			[]string{"answer", "appliedSkillRefs", "visual", "broadcastToChannel", "report", "files"}, []string{"answer", "appliedSkillRefs"}, false, []string{"s1", "s2"}},
+			[]string{"answer", "appliedSkillRefs", "repairs", "broadcastToChannel", "report", "files"}, []string{"answer", "appliedSkillRefs"}, false, []string{"s1", "s2"}},
 		{"spoken", agentrun.ControlAuthority{FinalMode: agentrun.FinalModeSpoken}, []string{"answer", "silent"}, []string{"answer", "silent"}, true, nil},
 	}
 	for _, tc := range cases {
@@ -334,102 +333,44 @@ func TestEmptyAnswerAfterReactionIsReactionsOnly(t *testing.T) {
 	}
 }
 
-// An invalid visual never costs the answer: it is delivered without the
-// visual, and the output records why.
-
-// finalVisualDropped reports whether the output lists the drop of the
-// whole visual with a reason containing want.
-func finalVisualDropped(final *agentrun.FinalAnswer, want string) bool {
-	drops, _ := final.Output[conversationrun.FinalOutputVisualDropsKey].([]presentation.Drop)
-	return len(drops) > 0 && drops[len(drops)-1].Path == "" && strings.Contains(drops[len(drops)-1].Reason, want)
-}
-
-func TestInvalidVisualIsDropped(t *testing.T) {
-	invalid := `{"answer":"Here.","visual":{"title":"Prices","components":[]}}`
-	f := newFinalFixture(t, finalCall("first", invalid))
-	final := requireFinal(t, f.settleFinal("first", agentrun.ControlAuthority{VisualAllowed: true}))
-	if final.Visual() != nil || final.Answer != "Here." {
+// Visual blocks travel in the answer text; the control reads none of them.
+// A call that only repairs blocks (repairs, no answer) is accepted and
+// carries the repairs to delivery.
+func TestRepairOnlyCallIsAccepted(t *testing.T) {
+	f := newFinalFixture(t, finalCall("repair", `{"answer":"","repairs":{"spend":":::chart{#spend kind=bar}\n| M | S |\n|---|---|\n| Jan | 3 |\n:::"}}`))
+	final := requireFinal(t, f.settleFinal("repair", agentrun.ControlAuthority{VisualAllowed: true}))
+	repairs, _ := final.Output[conversationrun.FinalOutputVisualRepairsKey].(map[string]string)
+	if final.Answer != "" || len(repairs) != 1 || !strings.HasPrefix(repairs["spend"], ":::chart") {
 		t.Fatalf("final = %#v", final)
 	}
-	if !finalVisualDropped(final, "at least one component") {
-		t.Fatalf("visual drops = %v", final.Output[conversationrun.FinalOutputVisualDropsKey])
-	}
-	// visual is not offered without VisualAllowed.
-	g := newFinalFixture(t, finalCall("final", invalid))
-	requireRejected(t, g, g.settleFinal("final", agentrun.ControlAuthority{}), "final", ArgumentsInvalidCode)
 }
 
-// A component that fails costs only itself: the rest of the visual rides on
-// the answer, and the output lists the part left out.
-func TestVisualPartIsDroppedOnItsOwn(t *testing.T) {
-	call := `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"ok","type":"text","text":"Fine"},{"id":"bad","type":"callout","callout":{"body":" "}}]}}`
-	f := newFinalFixture(t, finalCall("first", call))
-	final := requireFinal(t, f.settleFinal("first", agentrun.ControlAuthority{VisualAllowed: true}))
-	if visual := final.Visual(); visual == nil || len(visual.Components) != 1 || visual.Components[0].ID != "ok" {
-		t.Fatalf("visual = %#v", final.Visual())
-	}
-	drops, _ := final.Output[conversationrun.FinalOutputVisualDropsKey].([]presentation.Drop)
-	if len(drops) != 1 || drops[0].ComponentID != "bad" || drops[0].Path != "components[1]" || !strings.Contains(drops[0].Reason, "callout.body must not be blank") {
-		t.Fatalf("drops = %+v", drops)
-	}
-}
-
-// A visual with no component of a known type has nothing to draw: it is
-// dropped like a visual that fails Validate.
-func TestVisualWithNothingToDrawIsDropped(t *testing.T) {
-	invalid := `{"answer":"Here.","visual":{"title":"Prices","components":[{"id":"x","type":"hologram","text":"x"}]}}`
-	f := newFinalFixture(t, finalCall("first", invalid))
-	final := requireFinal(t, f.settleFinal("first", agentrun.ControlAuthority{VisualAllowed: true}))
-	if final.Visual() != nil || final.Answer != "Here." {
-		t.Fatalf("final = %#v", final)
-	}
-	if !finalVisualDropped(final, "") {
-		t.Fatalf("visual drops = %v", final.Output[conversationrun.FinalOutputVisualDropsKey])
-	}
-}
-
-// A plain reply that repairs into a final with a bad visual is delivered
-// without the visual too.
-func TestPlainFinalInvalidVisualIsDropped(t *testing.T) {
-	f := newFinalFixture(t)
-	authority := agentrun.ControlAuthority{VisualAllowed: true}
-	final := requireFinal(t, f.plain("step-1", 1, authority, `{"answer":"Here.","visual":{"title":"Prices","components":[]}}`))
-	if final.Visual() != nil || final.Answer != "Here." {
-		t.Fatalf("final = %#v", final)
-	}
-	if !finalVisualDropped(final, "at least one component") {
-		t.Fatalf("visual drops = %v", final.Output[conversationrun.FinalOutputVisualDropsKey])
-	}
-}
-
-// Errors outside the visual still refuse the whole call.
-func TestArgumentErrorOutsideVisualRefusesTheCall(t *testing.T) {
-	visual := `{"title":"Status","components":[{"id":"note","type":"text","text":"All good"}]}`
+// repairs is offered only where visuals are, and repairs with an answer is
+// a normal answer (the repairs are not carried).
+func TestRepairsNeedVisualsAndNoAnswer(t *testing.T) {
 	f := newFinalFixture(t,
-		finalCall("typed", `{"answer":42,"visual":`+visual+`}`),
-		finalCall("offered", `{"answer":"Done.","visual":`+visual+`}`),
+		finalCall("offered", `{"answer":"","repairs":{"a":":::text\nx\n:::"}}`),
+		finalCall("both", `{"answer":"Here.","repairs":{"a":":::text\nx\n:::"}}`),
 	)
-	requireRejected(t, f, f.settleFinal("typed", agentrun.ControlAuthority{VisualAllowed: true}), "typed", ArgumentsInvalidCode)
-	// visual is a top-level key this claim does not offer.
 	requireRejected(t, f, f.settleFinal("offered", agentrun.ControlAuthority{}), "offered", ArgumentsInvalidCode)
+	final := requireFinal(t, f.settleFinal("both", agentrun.ControlAuthority{VisualAllowed: true}))
+	if _, carried := final.Output[conversationrun.FinalOutputVisualRepairsKey]; carried || final.Answer != "Here." {
+		t.Fatalf("final = %#v", final)
+	}
 }
 
-func TestValidVisualRidesOnOutput(t *testing.T) {
-	visual := presentation.Visual{Title: "Status", Components: []presentation.Component{}}
-	if err := json.Unmarshal([]byte(`[{"id":"note","type":"text","text":"All good"}]`), &visual.Components); err != nil {
-		t.Fatalf("components: %v", err)
+// The answer's description carries the block format only where visuals are
+// allowed.
+func TestAnswerDescriptionCarriesBlocks(t *testing.T) {
+	describe := func(a agentrun.ControlAuthority) string {
+		properties := finalAnswerSchema(a)["properties"].(map[string]interface{})
+		return properties["answer"].(map[string]interface{})["description"].(string)
 	}
-	if _, err := presentation.Validate(context.Background(), visual.Surface(presentation.StateReady), presentation.ValidateOptions{SkipHostChecks: true}); err != nil {
-		t.Skipf("fixture visual is not valid in this catalogue: %v", err)
+	if !strings.Contains(describe(agentrun.ControlAuthority{VisualAllowed: true}), "Visuals go inside the answer") {
+		t.Fatal("chat answer lacks the block format")
 	}
-	args, _ := json.Marshal(map[string]interface{}{"answer": "Done.", "visual": visual})
-	f := newFinalFixture(t, finalCall("final", string(args)))
-	final := requireFinal(t, f.settleFinal("final", agentrun.ControlAuthority{VisualAllowed: true}))
-	if got := final.Visual(); got == nil || got.Title != "Status" || len(got.Components) != 1 {
-		t.Fatalf("visual = %#v", got)
-	}
-	if _, rejected := final.Output[conversationrun.FinalOutputVisualDropsKey]; rejected {
-		t.Fatal("valid visual rejected")
+	if strings.Contains(describe(agentrun.ControlAuthority{}), ":::") {
+		t.Fatal("answer without visuals describes blocks")
 	}
 }
 
