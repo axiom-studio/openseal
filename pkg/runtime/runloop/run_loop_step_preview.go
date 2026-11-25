@@ -86,7 +86,7 @@ func (d *drive) appendPreview(ctx context.Context, run *models.AgentRun, stepID 
 	_, err := d.l.activity.AppendActivity(ctx, &models.ActivityEvent{
 		Scope: run.Scope, RunID: run.ID, TurnID: stepID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: models.TeamIDForRun(run),
 		EventType: "turn.answer_preview", Summary: "Reply preview updated", Actor: d.actor(), Visibility: models.ActivityVisibilityScope,
-		Payload: map[string]interface{}{"attemptId": preview.AttemptID, "sequence": preview.Sequence, "text": preview.Text, "reset": preview.Reset},
+		Payload: previewPayload(preview),
 	})
 	return err
 }
@@ -105,4 +105,14 @@ func (d *drive) resetPreview(ctx context.Context, st *stepState) {
 		return
 	}
 	st.preview.seen(reset)
+}
+
+// previewPayload is the event payload of a preview; blocks only when it has
+// some, so a text-only preview stays as small as before.
+func previewPayload(preview models.TurnAnswerPreview) map[string]interface{} {
+	payload := map[string]interface{}{"attemptId": preview.AttemptID, "sequence": preview.Sequence, "text": preview.Text, "reset": preview.Reset}
+	if len(preview.Blocks) > 0 {
+		payload["blocks"] = preview.Blocks
+	}
+	return payload
 }
