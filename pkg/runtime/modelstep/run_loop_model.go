@@ -260,7 +260,6 @@ func (p *Producer) render(ctx context.Context, in agentrun.StepInput, prepared m
 	if in.Mode == agentrun.StepModeExplainFailure {
 		req.Purpose = models.ModelStepPurposeExplanation
 		req.Tools = nil
-		req.Stream.FinalAnswerTool = ""
 	}
 	req.Stream.AnswerPreview = models.HasTurnAnswerPreview(ctx)
 	if maxOutput > 0 && (req.MaxOutputTokens == 0 || maxOutput < req.MaxOutputTokens) {

@@ -30,19 +30,18 @@ type TurnRunnerBinding struct {
 	ModelCredential *capability.CredentialReference
 
 	// runloop.Loop seams (SPEC §2.4).
-	Producer    StepProducer
-	Session     *models.AgentSession // nil only for producers with no tool calls (routing)
-	Preparers   []StepPreparer       // run-start, then conversation
-	Tools       LoopToolExecutor     // disp-1
-	Compactor   StepCompactor        // G3
-	Final       FinalAnswerHandler   // CONV-08 for chats, runOutputFinalHandler otherwise
-	FinalOutput FinalOutputPublisher // nil = none
-	FinalGuard  FinalGuard           // nil = none
-	Host        StepHost
-	Authority   ControlAuthority   // section 04 §4, incl. the conversation flags of section 05 §7
-	Prompt      PromptContribution // kernel-authored system parts from the owning section
-	ToolCheck   ToolCallCheck      // optional (conversation CheckToolCall)
-	AfterTool   AfterToolEntryHook // optional (conversation artifact receipts)
+	Producer   StepProducer
+	Session    *models.AgentSession // nil only for producers with no tool calls (routing)
+	Preparers  []StepPreparer       // run-start, then conversation
+	Tools      LoopToolExecutor     // disp-1
+	Compactor  StepCompactor        // G3
+	Final      FinalAnswerHandler   // CONV-08 for chats, runOutputFinalHandler otherwise
+	FinalGuard FinalGuard           // nil = none
+	Host       StepHost
+	Authority  ControlAuthority   // section 04 §4, incl. the conversation flags of section 05 §7
+	Prompt     PromptContribution // kernel-authored system parts from the owning section
+	ToolCheck  ToolCallCheck      // optional (conversation CheckToolCall)
+	AfterTool  AfterToolEntryHook // optional (conversation artifact receipts)
 }
 
 // PreparedSkillRuntime binds one activation-time immutable runtime to the

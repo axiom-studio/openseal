@@ -147,7 +147,7 @@ func commentAnchorNextStep(kind string) string {
 	case commentedApp:
 		return "Change that spot in place, then call save_app again so the app gets a new version."
 	default:
-		return "Change that spot in place, then present the file again so the output gets a new version."
+		return "Change that spot in place, then link the file again in your answer so it gets a new version."
 	}
 }
 

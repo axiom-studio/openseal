@@ -588,7 +588,7 @@ func TestRunLoopResumeAppliesFinishedUnappliedStep(t *testing.T) {
 }
 
 func TestRunLoopResumeFinalToolStepDeliversOnce(t *testing.T) {
-	finalCall := resumeCall("c1", string(models.ControlToolFinalAnswer), `{"answer":"all done"}`)
+	finalCall := resumeCall("c1", string(models.ControlToolRequestDecision), `{"answer":"all done"}`)
 	t.Run("crash before settle", func(t *testing.T) {
 		eachLoopStore(t, "resume_final_settle", func(t *testing.T, store models.KernelStore) {
 			h := newResumeHarness(t, store, nil, resumeLease, resumeAct("", finalCall))

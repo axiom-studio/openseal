@@ -651,18 +651,15 @@ func (x *Executor) delegationOutcome(ctx context.Context, cc agentrun.ControlCon
 	return Resume{Resolved: true, Result: Result{Kind: Continue, Entry: entry}}, nil
 }
 
-// delegationAnswer is the delegated Agent's answer: the child's report or
-// summary as recorded on the source Run, else the request's completion
-// summary.
+// delegationAnswer is the delegated Agent's answer: the child's summary as
+// recorded on the source Run, else the request's completion summary.
 func delegationAnswer(run *models.AgentRun, request *models.AgentRequest) string {
 	if run != nil {
 		results, _ := run.Output["collaborationResults"].(map[string]interface{})
 		recorded, _ := results[request.ID].(map[string]interface{})
 		output, _ := recorded["output"].(map[string]interface{})
-		for _, key := range []string{"report", "summary"} {
-			if text, ok := output[key].(string); ok && strings.TrimSpace(text) != "" {
-				return strings.TrimSpace(text)
-			}
+		if text, ok := output["summary"].(string); ok && strings.TrimSpace(text) != "" {
+			return strings.TrimSpace(text)
 		}
 	}
 	return strings.TrimSpace(request.CompletionSummary)

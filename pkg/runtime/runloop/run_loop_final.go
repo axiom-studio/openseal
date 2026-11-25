@@ -24,21 +24,20 @@ const (
 	finalCompletedSummary = "Run completed with its final answer"
 	finalFailedSummary    = "Run failed with its final answer"
 	finalExplainedSummary = "Run failed after the agent explained what went wrong"
-	outputPublicationText = "Task output could not be saved. Resolve storage access and resume work to retry."
 	finalEntryAttempts    = 4
 )
 
 // finishFinal runs the final chain for an accepted final answer: park
-// without posting (pending setup), the D8 re-check, Deliver, output
-// publication, then the guarded terminal transition. status is the terminal
+// without posting (pending setup), the D8 re-check, Deliver, then the
+// guarded terminal transition. status is the terminal
 // status ("" = completed; failed for a deterministic failed LoopFinal). In
 // the explanation step the Run ends failed with its explained failure.
 //
 // An answer from a final-tool entry finishes the step first: a crash before
 // the terminal transition resumes through that pending entry
 // (ResumeOpenTools). A plain-text or deterministic final has no such entry,
-// so its step stays running under its heartbeat through Deliver and
-// publication, and FinishTurn completed comes just before the terminal
+// so its step stays running under its heartbeat through Deliver, and
+// FinishTurn completed comes just before the terminal
 // transition (§7.2). A crash in between resumes the recorded step, which
 // re-delivers idempotently instead of calling the model again (D14).
 func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.FinalAnswer, status models.AgentRunStatus) stepResult {
@@ -129,18 +128,7 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.
 	if output == nil {
 		output = maps.Clone(final.Output)
 	}
-	// 4. Host extension fields of turn_final_answer.
-	published, res, done := d.publishFinalOutput(ctx, st, final)
-	if done {
-		return res
-	}
-	for key, value := range published {
-		if output == nil {
-			output = map[string]interface{}{}
-		}
-		output[key] = value
-	}
-	// 5. The final tool entry is delivered.
+	// 4. The final tool entry is delivered.
 	if err := d.closeFinalEntry(ctx, final, models.ToolEntryCompleted, &models.ToolResult{
 		Status: models.ToolResultSucceeded, Content: []models.ContentPart{{Type: models.ContentPartJSON, Value: json.RawMessage(`{"status":"` + finalDeliveredStatus + `"}`)}},
 	}); err != nil {
@@ -149,7 +137,7 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *agentrun.
 	if result.Kind == agentrun.FinalDeliveryPark {
 		return d.park(ctx, st, final.Park.Park)
 	}
-	// 6. FinishTurn completed (a tool final finished above), then the
+	// 5. FinishTurn completed (a tool final finished above), then the
 	// guarded terminal transition, which also applies the step.
 	if err := d.finishCompleted(ctx, st); err != nil {
 		return exitResultPtr(d.writeErrorExit(err))
@@ -341,62 +329,6 @@ func (d *drive) closeFinalEntry(ctx context.Context, final *agentrun.FinalAnswer
 		lastErr = err
 	}
 	return lastErr
-}
-
-// publishFinalOutput publishes the host extension fields of the final tool
-// call through the binding's FinalOutputPublisher. A failure pauses the Run
-// (turn.output_publication_failed); done is then true.
-func (d *drive) publishFinalOutput(ctx context.Context, st *stepState, final *agentrun.FinalAnswer) (map[string]interface{}, stepResult, bool) {
-	publisher := d.binding.FinalOutput
-	if publisher == nil || final.ToolEntryID == "" {
-		return nil, stepResult{}, false
-	}
-	properties := publisher.FinalAnswerProperties(models.CloneAgentRun(d.run))
-	if len(properties) == 0 {
-		return nil, stepResult{}, false
-	}
-	entry, err := d.l.sessions.GetSessionEntry(ctx, d.run.Scope, final.ToolEntryID)
-	if err != nil {
-		return nil, d.stepError(ctx, st, err, ""), true
-	}
-	fields := map[string]json.RawMessage{}
-	if entry.Tool != nil && len(entry.Tool.Arguments) > 0 {
-		var args map[string]json.RawMessage
-		if err := json.Unmarshal(entry.Tool.Arguments, &args); err != nil {
-			return nil, d.stepError(ctx, st, fmt.Errorf("decode final answer arguments: %w", err), ""), true
-		}
-		for key := range properties {
-			if value, ok := args[key]; ok {
-				fields[key] = append(json.RawMessage(nil), value...)
-			}
-		}
-	}
-	if len(fields) == 0 {
-		return nil, stepResult{}, false
-	}
-	stepID := final.StepID
-	if stepID == "" {
-		stepID = entry.StepID
-	}
-	published, err := publisher.PublishFinalOutput(ctx, agentrun.FinalOutputPublication{
-		Run: models.CloneAgentRun(d.run), StepID: stepID, ToolCallID: final.ToolCallID, Fields: fields,
-	})
-	if err == nil {
-		return published, stepResult{}, false
-	}
-	d.l.logger.Warnw("publish final output", "run", d.run.ID, "step", stepID, "error", err)
-	if err := d.finishCompleted(ctx, st); err != nil {
-		return nil, exitResultPtr(d.writeErrorExit(err)), true
-	}
-	run, err := d.commitRun(ctx, st, activity.RunTransitionRequest{
-		Status: models.AgentRunStatusPaused, Summary: outputPublicationText, Error: outputPublicationText,
-		EventType: "turn.output_publication_failed", TurnID: stepID,
-		Payload: map[string]interface{}{"code": runFailureCodeOutputPublication},
-	}, false)
-	if err != nil {
-		return nil, exitResultPtr(d.writeErrorExit(err)), true
-	}
-	return nil, exitResultPtr(d.statusExit(run)), true
 }
 
 // fail is §3.5. The step (when still running) is finished failed. An

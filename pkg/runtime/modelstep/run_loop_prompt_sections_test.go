@@ -36,7 +36,7 @@ func TestPromptSectionsHaveNoFormWords(t *testing.T) {
 }
 
 func TestPromptSectionOrderAndTitles(t *testing.T) {
-	want := []string{"progress_rules", "conversation_tasks", "workspace", "media", "routine_script"}
+	want := []string{"progress_rules", "conversation_tasks", "workspace", "media", "answer_format", "routine_script"}
 	if strings.Join(modelstep.LoopKernelSectionOrder, ",") != strings.Join(want, ",") {
 		t.Fatalf("order = %v, want %v", modelstep.LoopKernelSectionOrder, want)
 	}

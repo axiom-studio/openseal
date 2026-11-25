@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime/modelstep/modelsteptest"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -109,7 +111,7 @@ func TestPrepareToolOrderStableAcrossSteps(t *testing.T) {
 	first := f.prepare("step-1")
 
 	want := []string{
-		"turn_final_answer", "turn_report_progress", "wait", "ask_user", "react",
+		"turn_report_progress", "wait", "ask_user", "react",
 		"conversation_start_task", "control_fork", "search_capabilities", "load_capabilities",
 	}
 	for _, spec := range modelstep.HostToolSpecs(workspace.ChatAuthority("chat-1")) {
@@ -127,9 +129,6 @@ func TestPrepareToolOrderStableAcrossSteps(t *testing.T) {
 		if tool.Group != group {
 			t.Errorf("tool %s group = %s, want %s", tool.Name, tool.Group, group)
 		}
-	}
-	if first.Stream.FinalAnswerTool != "turn_final_answer" {
-		t.Errorf("stream final tool = %q", first.Stream.FinalAnswerTool)
 	}
 
 	// A later step over a longer path (a read call and its result) sends the
@@ -257,7 +256,7 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 	if got.System.Sections[0].Text != modelstep.LoopProgressRulesTaskWorkText {
 		t.Errorf("task work progress text not used")
 	}
-	if names := toolNames(got.Tools); !reflect.DeepEqual(names, []string{"turn_final_answer", "turn_report_progress", "search_capabilities", "load_capabilities", "action_openseal_discover_skills", "action_openseal_list_setup_requests"}) {
+	if names := toolNames(got.Tools); !reflect.DeepEqual(names, []string{"turn_report_progress", "search_capabilities", "load_capabilities", "action_openseal_discover_skills", "action_openseal_list_setup_requests"}) {
 		t.Errorf("bare tools = %v", names)
 	}
 
@@ -269,9 +268,6 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 	}
 	if ids := sectionIDs(dreq.System.Sections); !reflect.DeepEqual(ids, []string{"channel_rules"}) {
 		t.Errorf("decision sections = %v", ids)
-	}
-	if dreq.Stream.FinalAnswerTool != "" {
-		t.Errorf("decision stream final tool = %q", dreq.Stream.FinalAnswerTool)
 	}
 
 	// Explaining a failure sends no tools.
@@ -286,6 +282,44 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 	if explain.Purpose != models.ModelStepPurposeExplanation || len(explain.Tools) != 0 || explain.Validate() != nil {
 		t.Errorf("explanation request purpose=%s tools=%d validate=%v", explain.Purpose, len(explain.Tools), explain.Validate())
 	}
+}
+
+// The visual block spec is a cached system section, present only where
+// the answer may carry visuals (not spoken or decision Runs).
+func TestPrepareAnswerFormatOnlyWhereVisualsAllowed(t *testing.T) {
+	authority := fullPrepareAuthority()
+	authority.VisualAllowed = true
+	req := newPrepareFixture(t, authority).prepare("step-1")
+	var section *models.ModelStepSystemSection
+	for i := range req.System.Sections {
+		if req.System.Sections[i].ID == modelstep.LoopSectionAnswerFormat {
+			section = &req.System.Sections[i]
+		}
+	}
+	if section == nil || !strings.HasPrefix(section.Text, modelstep.LoopShowFilesText) || !strings.HasSuffix(section.Text, presentation.BlocksDescription()) {
+		t.Fatalf("sections = %v; want the block spec", sectionIDs(req.System.Sections))
+	}
+	for _, tool := range req.Tools {
+		if strings.Contains(tool.Description, ":::chart") || strings.Contains(controlJSONForTest(t, tool.InputSchema), ":::chart") {
+			t.Fatalf("tool %s still carries the block spec", tool.Name)
+		}
+	}
+	spoken := fullPrepareAuthority()
+	spoken.FinalMode = agentrun.FinalModeSpoken
+	for _, a := range []agentrun.ControlAuthority{spoken, {AgentID: "agent-1", FinalMode: agentrun.FinalModeDecision}} {
+		if ids := sectionIDs(newPrepareFixture(t, a).prepare("step-1").System.Sections); slices.Contains(ids, modelstep.LoopSectionAnswerFormat) {
+			t.Fatalf("%s sections = %v; want no block spec", a.EffectiveFinalMode(), ids)
+		}
+	}
+}
+
+func controlJSONForTest(t *testing.T, value interface{}) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
 }
 
 func TestPrepareNoFormWords(t *testing.T) {

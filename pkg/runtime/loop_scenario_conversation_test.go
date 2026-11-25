@@ -49,7 +49,7 @@ func convRunner(f *looptest.Fixture, config conversationrun.TurnRunnerConfig) {
 // newest user message.
 func convAnswer(prefix string) *looptest.ModelRule {
 	return &looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
-		return looptest.FinalAnswer(map[string]any{"answer": prefix + steerText(v.LastUserText())})
+		return looptest.Say(prefix + steerText(v.LastUserText()))
 	}}
 }
 
@@ -191,9 +191,9 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 			f.Model.Add(&looptest.ModelRule{Name: "card", Reply: func(v looptest.StepView) models.ModelStepResult {
 				if first {
 					first = false
-					return looptest.FinalAnswer(map[string]any{"answer": blocksAnswer("Here is your list.", scenarioChecklistVisual())})
+					return looptest.Say(blocksAnswer("Here is your list.", scenarioChecklistVisual()))
 				}
-				return looptest.FinalAnswer(map[string]any{"answer": "Noted."})
+				return looptest.Say("Noted.")
 			}})
 			conversation, run := f.StartChat("Packing list please")
 			convDrive(f, run.ID)
@@ -252,9 +252,9 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 		f.Model.Add(&looptest.ModelRule{Name: "card", Reply: func(v looptest.StepView) models.ModelStepResult {
 			if first {
 				first = false
-				return looptest.FinalAnswer(map[string]any{"answer": blocksAnswer("Learn and cook.", scenarioFlashcardRecipeVisual())})
+				return looptest.Say(blocksAnswer("Learn and cook.", scenarioFlashcardRecipeVisual()))
 			}
-			return looptest.FinalAnswer(map[string]any{"answer": "Noted."})
+			return looptest.Say("Noted.")
 		}})
 		conversation, run := f.StartChat("Teach me and feed me")
 		convDrive(f, run.ID)
@@ -303,9 +303,9 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 		f.Model.Add(&looptest.ModelRule{Name: "poll", Reply: func(v looptest.StepView) models.ModelStepResult {
 			if first {
 				first = false
-				return looptest.FinalAnswer(map[string]any{"answer": blocksAnswer("Vote here.", &presentation.Visual{Title: "Dinner", Components: []presentation.Component{poll, explorer}})})
+				return looptest.Say(blocksAnswer("Vote here.", &presentation.Visual{Title: "Dinner", Components: []presentation.Component{poll, explorer}}))
 			}
-			return looptest.FinalAnswer(map[string]any{"answer": "Noted."})
+			return looptest.Say("Noted.")
 		}})
 		conversation, run := f.StartChat("Ask everyone where to eat")
 		convDrive(f, run.ID)
@@ -761,7 +761,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 						return looptest.Act("Picking it up.", looptest.Call(string(models.ControlToolReact), map[string]any{"messageId": triggerID, "emoji": "👀"}))
 					}},
 				&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
-					return looptest.FinalAnswer(map[string]any{"answer": "On it: the deploy is green."})
+					return looptest.Say("On it: the deploy is green.")
 				}},
 			)
 			conversation := convChat(f, models.ObjectiveOwner{}, nil)
@@ -831,7 +831,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 					return looptest.WithUsage(looptest.Act("Reading the items.", looptest.Call(looptest.GovernedTool(v, "list_items"), nil)), 1200, 40)
 				}},
 				&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
-					return looptest.WithUsage(looptest.FinalAnswer(map[string]any{"answer": "There are two items."}), 1300, 30)
+					return looptest.WithUsage(looptest.Say("There are two items."), 1300, 30)
 				}, Before: func(_ context.Context, _ looptest.StepView) error {
 					// The channel opts out while the Run works.
 					convParticipation(f, conversation.ID, false)
@@ -863,14 +863,7 @@ func TestReactAndParticipationAreTools(t *testing.T) {
 // spoken system section is offered, and the answer is posted spoken.
 func TestSpokenTriggerKeepsItsResponseMode(t *testing.T) {
 	f := looptest.NewFixture(t, kerneltest.NewStore(t), looptest.WithRules(&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
-		args := map[string]any{"answer": "Leave at seven."}
-		// The spoken final tool requires silent.
-		for _, tool := range v.Request().Tools {
-			if raw, _ := json.Marshal(tool); tool.Name == string(models.ControlToolFinalAnswer) && strings.Contains(string(raw), `"silent"`) {
-				args["silent"] = false
-			}
-		}
-		return looptest.FinalAnswer(args)
+		return looptest.Say("Leave at seven.")
 	}}))
 	conversation := convChat(f, models.ObjectiveOwner{}, nil)
 	spoken := convPost(f, conversation.ID, "when should I leave?", func(r *runtimeconversation.PostChannelMessageRequest) {

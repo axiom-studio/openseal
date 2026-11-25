@@ -58,14 +58,13 @@ type DesktopKernel interface {
 }
 
 // DesktopTurnResolver resolves the loop binding of every Run the daemon's
-// workers claim. Runs of Scope get the desktop provider as their step host and
-// the generated-files publisher; other Runs bind without a step host, so only
-// deterministic Runs execute there. Bind it to the kernel after
+// workers claim. Runs of Scope get the desktop provider as their step host;
+// other Runs bind without a step host, so only deterministic Runs execute
+// there. Bind it to the kernel after
 // the kernel is built and before it starts.
 type DesktopTurnResolver struct {
-	Scope     models.Scope
-	Host      *ProviderStepHost // nil: no model Run executes
-	Publisher *TaskArtifactPublisher
+	Scope models.Scope
+	Host  *ProviderStepHost // nil: no model Run executes
 
 	kernel DesktopKernel
 	config runworker.LoopBindingConfig
@@ -92,11 +91,7 @@ func (r *DesktopTurnResolver) ResolveTurnRunner(ctx context.Context, run *models
 		// interface.
 		config.Host = r.Host
 	}
-	binding, err := runworker.ResolveLoopBinding(ctx, r.kernel, run, config)
-	if err == nil && binding != nil && local && r.Publisher != nil {
-		binding.FinalOutput = r.Publisher
-	}
-	return binding, err
+	return runworker.ResolveLoopBinding(ctx, r.kernel, run, config)
 }
 
 // desktopLoopBindingConfig builds the run loop services of the daemon:

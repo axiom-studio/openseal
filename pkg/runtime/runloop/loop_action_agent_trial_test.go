@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder/agentbuildertest"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
+	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 )
 
 func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
@@ -46,7 +47,7 @@ func TestAgentTrialParksParentUntilDeadline(t *testing.T) {
 
 func TestAgentTrialFinalizerDeliversReceiptAndQueuesParent(t *testing.T) {
 	f := agentbuildertest.NewTrialFinalizerFixture(t, models.AgentRunStatusWaitingForEvent)
-	child := f.EndChild(t, models.AgentRunStatusCompleted, map[string]interface{}{agentbuilder.FinalOutputReportKey: "I would apologise and refund."}, "")
+	child := f.EndChild(t, models.AgentRunStatusCompleted, map[string]interface{}{conversationrun.FinalOutputSummaryKey: "I would apologise and refund."}, "")
 	var woken []models.Scope
 	nextCalls := 0
 	next := agentrun.RunTerminalFinalizerFunc(func(context.Context, *models.AgentRun) error { nextCalls++; return nil })
@@ -100,7 +101,7 @@ func TestAgentTrialResumeRendersFailure(t *testing.T) {
 func TestAgentTrialResumeReadsMissedChild(t *testing.T) {
 	f := agentbuildertest.NewTrialFinalizerFixture(t, models.AgentRunStatusRunning)
 	const replyLimit = 8 << 10 // the trial reply bound
-	f.EndChild(t, models.AgentRunStatusCompleted, map[string]interface{}{agentbuilder.FinalOutputReportKey: strings.Repeat("a", replyLimit+100)}, "")
+	f.EndChild(t, models.AgentRunStatusCompleted, map[string]interface{}{conversationrun.FinalOutputSummaryKey: strings.Repeat("a", replyLimit+100)}, "")
 	outcome := settleAgentTrialCall(t, f, f.Parent, nil, time.Now())
 	output := agentTrialResultOutput(t, outcome)
 	reply, _ := output["reply"].(string)

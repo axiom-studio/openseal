@@ -116,8 +116,7 @@ func TestRenderOpenAIStepBuildsSystemSummaryAndTools(t *testing.T) {
 			SkillPrompts:      []models.HostedSkillPrompt{{Name: "Notes", Reference: "skill:notes@1", Instructions: "Use notes."}},
 			Sections:          []models.ModelStepSystemSection{{ID: "progress_rules", Title: "Progress", Text: "Narrate."}, {ID: "empty", Title: "Empty", Text: ""}},
 		},
-		Tools:              []models.ModelStepTool{{Name: "turn_final_answer", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness}},
-		Stream:             models.ModelStepStream{FinalAnswerTool: "turn_final_answer"},
+		Tools:              []models.ModelStepTool{{Name: "ask_user", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness}},
 		Entries:            []models.SessionEntryView{userView("u", 1, "hi"), assistantView("a", 2, renderModel, "hello", "")},
 		SummaryInstruction: "Write a summary.",
 	}
@@ -128,7 +127,6 @@ func TestRenderOpenAIStepBuildsSystemSummaryAndTools(t *testing.T) {
 	system := *out.Messages[0].Content
 	wantSystem := strings.Join([]string{
 		openAIStepHarnessPrompt,
-		"Call turn_final_answer instead of replying with plain text when your answer needs one of its fields: a visual, a report with evidence, files, staying silent, or the Skills you applied.",
 		"## Agent\nBe Rowan.",
 		"## Skill: Notes (reference skill:notes@1)\nUse notes.",
 		"## Progress\nNarrate.",
@@ -149,7 +147,7 @@ func TestRenderOpenAIStepBuildsSystemSummaryAndTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Tools != nil || out.ToolChoice != nil || strings.Contains(*out.Messages[0].Content, "Call turn_final_answer") {
+	if out.Tools != nil || out.ToolChoice != nil {
 		t.Fatalf("tool-free step rendered tools: %+v", out)
 	}
 }
@@ -357,14 +355,14 @@ func TestRenderOpenAIMessagesRejectsMisplacedCompaction(t *testing.T) {
 func TestRenderOpenAIToolsValidatesNamesAndSchemas(t *testing.T) {
 	object := map[string]interface{}{"type": "object", "properties": map[string]interface{}{"q": map[string]interface{}{"type": "string"}}}
 	tools, err := renderOpenAITools([]models.ModelStepTool{
-		{Name: "turn_final_answer", Description: "Answer.", InputSchema: object, Group: models.ModelStepToolHarness},
+		{Name: "ask_user", Description: "Ask.", InputSchema: object, Group: models.ModelStepToolHarness},
 		{Name: "notes-search", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolCore},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(tools)
-	want := `[{"type":"function","function":{"name":"turn_final_answer","description":"Answer.","parameters":{"properties":{"q":{"type":"string"}},"type":"object"}}},{"type":"function","function":{"name":"notes-search","parameters":{"type":"object"}}}]`
+	want := `[{"type":"function","function":{"name":"ask_user","description":"Ask.","parameters":{"properties":{"q":{"type":"string"}},"type":"object"}}},{"type":"function","function":{"name":"notes-search","parameters":{"type":"object"}}}]`
 	if string(raw) != want {
 		t.Fatalf("tools\n got %s\nwant %s", raw, want)
 	}
@@ -389,7 +387,7 @@ func TestRenderOpenAIToolsValidatesNamesAndSchemas(t *testing.T) {
 }
 
 func TestRenderOpenAIToolChoice(t *testing.T) {
-	tools := []models.ModelStepTool{{Name: "turn_final_answer"}, {Name: "lookup"}}
+	tools := []models.ModelStepTool{{Name: "ask_user"}, {Name: "lookup"}}
 	for choice, want := range map[string]interface{}{"": "auto", "auto": "auto", "required": "required", "none": "none"} {
 		got, err := renderOpenAIToolChoice(choice, tools)
 		if err != nil || got != want {

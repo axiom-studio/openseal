@@ -173,10 +173,8 @@ func conversationTaskReportContent(ctx context.Context, store models.Conversatio
 		return conversation.TerminalRunFailureReply(ctx, store, store, run)
 	}
 	if run.Status == models.AgentRunStatusCompleted {
-		for _, key := range []string{"report", "summary"} {
-			if answer, ok := run.Output[key].(string); ok && strings.TrimSpace(answer) != "" {
-				return strings.TrimSpace(answer)
-			}
+		if answer, ok := run.Output[FinalOutputSummaryKey].(string); ok && strings.TrimSpace(answer) != "" {
+			return strings.TrimSpace(answer)
 		}
 	}
 	return fallback

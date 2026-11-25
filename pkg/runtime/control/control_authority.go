@@ -27,8 +27,7 @@ type AuthorityInput struct {
 	// DeploymentID is the Agent deployment that speaks for the Run.
 	DeploymentID      string
 	Catalog           conversationrun.AgentTurnCatalog
-	Scope             skill.ScopeReference // zero = Run.Scope
-	SkillPromptRefs   []string
+	Scope             skill.ScopeReference              // zero = Run.Scope
 	Operations        []agentrun.HostedRunbookOperation // binding.RunbookOperations
 	ConversationTasks models.ConversationTaskKernelStore
 	Runs              models.PortfolioStore
@@ -69,9 +68,7 @@ func ResolveControlAuthority(ctx context.Context, in AuthorityInput) (agentrun.C
 	chatReply := strings.TrimSpace(conversationID) != "" && strings.TrimSpace(triggerID) != ""
 	voiceCall := run.Context["voiceCallStarted"] == true
 
-	authority.SkillPromptRefs = append([]string(nil), in.SkillPromptRefs...)
 	authority.VisualAllowed = mode == agentrun.FinalModeDefault
-	authority.BroadcastAllowed = run.Kind == models.RunKindConversation
 	authority.TaskWork = taskWork
 	authority.CanReportProgress = true
 	authority.CanWait = !chatReply

@@ -30,7 +30,7 @@ func TestSkillDefinitionRegistersWithPolicies(t *testing.T) {
 	if err := catalog.Register(t.Context(), d); err != nil {
 		t.Fatal(err)
 	}
-	if d.ID != "openseal.computer" || d.Version != "1.1.0" || d.Name != "Computers" || d.Icon != "computer" || d.Category != "integrations" ||
+	if d.ID != "openseal.computer" || d.Version != "1.2.0" || d.Name != "Computers" || d.Icon != "computer" || d.Category != "integrations" ||
 		d.Transport.Kind != "tool" || d.Transport.Endpoint != SkillID || d.BindingTools != nil || len(d.Actions) != len(Actions()) || len(Actions()) != 10 {
 		t.Fatalf("definition = %#v", d)
 	}

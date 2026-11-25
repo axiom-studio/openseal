@@ -160,11 +160,11 @@ func waitCardRules(t *testing.T, tool string, open func(v looptest.StepView) mod
 		{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
 			for _, e := range v.ToolResultsSinceUser() {
 				if strings.HasSuffix(e.Tool.Name, tool) && e.Tool.State == models.ToolEntryCompleted {
-					return looptest.FinalAnswer(map[string]any{"answer": "Done after the card: " + looptest.PartsText(e.Tool.Result.Content)})
+					return looptest.Say("Done after the card: " + looptest.PartsText(e.Tool.Result.Content))
 				}
 			}
 			t.Errorf("answer step without the settled %s: %s", tool, v.Describe())
-			return looptest.FinalAnswer(map[string]any{"answer": "?"})
+			return looptest.Say("?")
 		}},
 	}
 }
@@ -300,7 +300,7 @@ func TestCardToolParksWaitingForEventAndSettleAppendsOutcome(t *testing.T) {
 					return looptest.Act("Sending.", looptest.ReviewedCall(waitTool(t, v, "send_mail"), map[string]any{"to": "ben@example.com"}, "Email ben"))
 				}},
 				&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
-					return looptest.FinalAnswer(map[string]any{"answer": "Ben has it now."})
+					return looptest.Say("Ben has it now.")
 				}},
 			)
 			conversation, run := f.StartChat("Email ben")

@@ -22,7 +22,6 @@ import (
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime/action"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversation"
 	"github.com/axiom-studio/openseal/pkg/runtime/conversationrun"
 	"github.com/axiom-studio/openseal/pkg/runtime/portfolio"
@@ -172,7 +171,6 @@ Options:
 	if err != nil {
 		sugar.Fatalf("failed to open artifact content store: %v", err)
 	}
-	artifactPublisher := &daemon.TaskArtifactPublisher{Scope: scope, Content: contentStore, Catalog: artifactcatalog.NewCatalog(store)}
 	contextTokens, err := standaloneContext.ContextTokens(os.Getenv("OPENSEAL_LLM_CONTEXT_TOKENS"))
 	if err != nil {
 		sugar.Fatal(err)
@@ -195,7 +193,7 @@ Options:
 		return append([]models.Scope(nil), workerScopes...), nil
 	})
 	var kernel *opensealkernel.Engine
-	resolver := &daemon.DesktopTurnResolver{Scope: scope, Host: stepHost, Publisher: artifactPublisher}
+	resolver := &daemon.DesktopTurnResolver{Scope: scope, Host: stepHost}
 	var turnResolver conversation.TurnRunnerResolver
 	if len(workerScopes) > 0 {
 		turnResolver = resolver

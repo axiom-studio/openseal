@@ -40,7 +40,7 @@ func ValidModelStepRequest() models.ModelStepRequest {
 			Sections:          []models.ModelStepSystemSection{{ID: "progress_rules", Title: "Progress", Text: "Report."}},
 		},
 		Tools: []models.ModelStepTool{
-			{Name: "turn_final_answer", Description: "Final.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness},
+			{Name: "ask_user", Description: "Ask.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness},
 			{Name: "lookup", Description: "Look up.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolCore},
 			{Name: "skill-live-browser_open", Description: "Open.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolLoaded, Capability: "skill-live-browser.open"},
 		},
@@ -51,7 +51,7 @@ func ValidModelStepRequest() models.ModelStepRequest {
 			userView("e4", 4, "steer"),
 			toolView("e5", 5, "c2", models.ToolEntryError),
 		},
-		Stream: models.ModelStepStream{FinalAnswerTool: "turn_final_answer", AnswerPreview: true},
+		Stream: models.ModelStepStream{AnswerPreview: true},
 	}
 }
 

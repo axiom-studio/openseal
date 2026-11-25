@@ -322,7 +322,7 @@ func TestDelegateCompletedResultCarriesAnswerAndArtifacts(t *testing.T) {
 	f := newDelegateFixture(t, kerneltest.NewStore(t), nil)
 	_, request := f.delegate()
 	f.finishChild(request.ID, models.AgentRunStatusCompleted, map[string]interface{}{
-		"report": "Ship it: no blockers found.", "summary": "Release analysed",
+		"summary": "Ship it: no blockers found.",
 	}, "")
 	resumed := f.resume()
 	if !resumed.Resolved || resumed.Result.Kind != Continue {

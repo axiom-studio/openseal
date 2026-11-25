@@ -204,7 +204,7 @@ func TestLoopTestkitResultBuildersPassValidation(t *testing.T) {
 	cases := map[string]models.ModelStepResult{
 		"say":       looptest.WithUsage(looptest.Say("done"), 10, 2),
 		"act":       looptest.WithReasoning(looptest.Act("Looking it up.", looptest.Call("lookup", map[string]any{"id": "7"}), looptest.Call("list_items", nil)), "think-1"),
-		"final":     looptest.FinalAnswer(map[string]any{"answer": "Closed."}),
+		"final":     looptest.Say("Closed."),
 		"emptyText": looptest.Act(""),
 	}
 	for name, built := range cases {
@@ -236,9 +236,6 @@ func TestLoopTestkitResultBuildersPassValidation(t *testing.T) {
 	}
 	if res.Narration != "two" || res.Assistant.StopReason != models.ModelStopToolCalls || res.Model.ContextTokens != 4096 {
 		t.Fatalf("result = %#v", res)
-	}
-	if res := looptest.FinalAnswer(nil); res.Assistant.ToolCalls[0].Name != string(models.ControlToolFinalAnswer) {
-		t.Fatalf("finalAnswer calls %s", res.Assistant.ToolCalls[0].Name)
 	}
 }
 
@@ -430,7 +427,7 @@ func TestLoopTestkitFixtureObjectiveRunReadsThenAnswers(t *testing.T) {
 			&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
 				for _, e := range v.ToolResultsSinceUser() {
 					if strings.Contains(looptest.PartsText(e.Tool.Result.Content), "Issue 7") {
-						return looptest.FinalAnswer(map[string]any{"answer": "Issue 7 is open."})
+						return looptest.Say("Issue 7 is open.")
 					}
 				}
 				return looptest.Say("I could not find it.")
@@ -439,7 +436,7 @@ func TestLoopTestkitFixtureObjectiveRunReadsThenAnswers(t *testing.T) {
 		run := f.StartRun(models.RunKindAgentWork, "Check issue 7")
 		done := f.DriveToRest(run.ID, 3)
 		f.MustStatus(done, models.AgentRunStatusCompleted)
-		if got, want := strings.Join(f.EntryTypes(run.ID), ","), "user,assistant,tool:completed,assistant,tool:completed"; got != want {
+		if got, want := strings.Join(f.EntryTypes(run.ID), ","), "user,assistant,tool:completed,assistant"; got != want {
 			t.Fatalf("log = %s, want %s", got, want)
 		}
 		if f.Dispatch.Count("lookup") != 1 {
@@ -485,7 +482,7 @@ func TestLoopTestkitFixtureApprovalParksAndResumes(t *testing.T) {
 				return looptest.Act("Closing it.", looptest.ReviewedCall(looptest.GovernedTool(v, "update_status"), map[string]any{"id": "7", "status": "closed"}, "Close issue 7"))
 			}},
 			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Closed issue 7."})
+				return looptest.Say("Closed issue 7.")
 			}},
 		))
 		run := f.StartRun(models.RunKindAgentWork, "Close issue 7")
@@ -511,7 +508,7 @@ func TestLoopTestkitFixtureCrashResumesOnSecondWorker(t *testing.T) {
 				return looptest.Act("Looking it up.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "9"}))
 			}},
 			&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Issue 9 is open."})
+				return looptest.Say("Issue 9 is open.")
 			}},
 		))
 		release := f.Dispatch.Hold("lookup")

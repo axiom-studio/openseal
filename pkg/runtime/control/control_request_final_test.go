@@ -239,3 +239,10 @@ func TestRequestFinalToolSchemas(t *testing.T) {
 		t.Fatalf("required fields = %q", got)
 	}
 }
+
+func schemaProperties(t *testing.T, schema map[string]interface{}) (map[string]interface{}, []string) {
+	t.Helper()
+	properties, _ := schema["properties"].(map[string]interface{})
+	required, _ := schema["required"].([]string)
+	return properties, required
+}

@@ -149,7 +149,7 @@ func TestModelStepProducerRequestShape(t *testing.T) {
 	}
 	// The prepared loaded tool has no load entry on the path, so the
 	// rendered request declares only the harness and core tools.
-	if len(req.Tools) != 2 || req.Stream.FinalAnswerTool != "turn_final_answer" {
+	if len(req.Tools) != 2 {
 		t.Fatalf("tools = %d, stream = %+v", len(req.Tools), req.Stream)
 	}
 	// Entries are the path rendered from the latest compaction.
@@ -231,8 +231,8 @@ func TestModelStepProducerExplainPurposeHasNoTools(t *testing.T) {
 	if req.Purpose != models.ModelStepPurposeExplanation {
 		t.Fatalf("purpose = %q", req.Purpose)
 	}
-	if len(req.Tools) != 0 || req.Stream.FinalAnswerTool != "" {
-		t.Fatalf("explanation tools = %d, finalAnswerTool = %q", len(req.Tools), req.Stream.FinalAnswerTool)
+	if len(req.Tools) != 0 {
+		t.Fatalf("explanation tools = %d", len(req.Tools))
 	}
 	if len(req.System.AgentInstructions) == 0 || len(req.Entries) == 0 {
 		t.Fatalf("explanation keeps system and entries: %+v", req.System)

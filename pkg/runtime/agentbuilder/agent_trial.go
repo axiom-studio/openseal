@@ -266,17 +266,10 @@ func truncateAgentTrialText(text, runID string) string {
 	return models.TruncateUTF8(text, agentTrialReplyBytes-len(suffix)) + suffix
 }
 
-// FinalOutputReportKey is the final output field that holds a Run's report.
-const FinalOutputReportKey = "report"
-
-// ChildRunAnswer is a child's final answer: its report, else its summary.
+// ChildRunAnswer is a child's final answer: its summary.
 func ChildRunAnswer(child *models.AgentRun) string {
-	for _, key := range []string{FinalOutputReportKey, conversationrun.FinalOutputSummaryKey} {
-		if text, ok := child.Output[key].(string); ok && strings.TrimSpace(text) != "" {
-			return strings.TrimSpace(text)
-		}
-	}
-	return ""
+	text, _ := child.Output[conversationrun.FinalOutputSummaryKey].(string)
+	return strings.TrimSpace(text)
 }
 
 // TrialCalls is how the run loop waits on try_agent calls: the parent parks

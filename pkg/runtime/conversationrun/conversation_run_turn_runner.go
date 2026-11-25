@@ -36,6 +36,9 @@ type TurnRunnerConfig struct {
 	// the checks know which Agent published. Nil rejects bound or linked
 	// visuals and visuals with images.
 	VisualChecks func(run *models.AgentRun) presentation.ValidateOptions
+	// ChatFiles stores the chat files an answer links (answer_files.go).
+	// Nil resolves links only against the files the Run's tools saved.
+	ChatFiles ChatFileSnapshotter
 	// HumanParticipants lists the people in a conversation. The card state
 	// note uses it to say how many of them voted in a poll ("4 of 5
 	// voted"); without it the note counts only the votes ("4 voted").
@@ -432,7 +435,6 @@ func (r *TurnRunner) postAgentResponseWithReferences(
 	trigger *models.ChannelMessage,
 	content string,
 	references []models.ConversationReference,
-	broadcastToChannel bool,
 	guard *models.ReplyRunGuard,
 ) (*models.ChannelMessage, bool, error) {
 	key := models.ConversationRunResponseKey(run, trigger.ID)
@@ -468,13 +470,12 @@ func (r *TurnRunner) postAgentResponseWithReferences(
 			Sender: models.ConversationParticipant{Type: models.ConversationParticipantAgent, ID: participantID},
 			Intent: models.MessageIntentAnswer, Content: content, Audience: models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 			ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
-			ResponseMode:       trigger.ResponseMode,
-			BroadcastToChannel: broadcastToChannel,
-			Mentions:           mentions,
-			References:         responseReferences,
-			RoutingReason:      routingReason,
-			IdempotencyKey:     key,
-			RunGuard:           guard,
+			ResponseMode:   trigger.ResponseMode,
+			Mentions:       mentions,
+			References:     responseReferences,
+			RoutingReason:  routingReason,
+			IdempotencyKey: key,
+			RunGuard:       guard,
 		}
 		result, err := r.conversations.PostChannelMessage(ctx, request)
 		if err == nil {

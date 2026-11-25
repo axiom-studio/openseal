@@ -116,7 +116,7 @@ func TestSpokenRulesSectionKeepsAuthorityCaveat(t *testing.T) {
 	if !strings.Contains(spoken.Text, "not authenticated approval") {
 		t.Fatalf("spoken_rules must say spoken speech is not approval: %q", spoken.Text)
 	}
-	if !strings.Contains(spoken.Text, "call turn_final_answer with silent=true") {
+	if !strings.Contains(spoken.Text, "reply with nothing at all") {
 		t.Fatalf("spoken_rules must name the silent final answer: %q", spoken.Text)
 	}
 	if strings.Contains(spoken.Text, "runOutput") {

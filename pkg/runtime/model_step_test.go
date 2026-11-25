@@ -54,7 +54,7 @@ func validModelStepRequest() models.ModelStepRequest {
 			Sections:          []models.ModelStepSystemSection{{ID: "progress_rules", Title: "Progress", Text: "Report."}},
 		},
 		Tools: []models.ModelStepTool{
-			{Name: "turn_final_answer", Description: "Final.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness},
+			{Name: "ask_user", Description: "Ask.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolHarness},
 			{Name: "lookup", Description: "Look up.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolCore},
 			{Name: "skill-live-browser_open", Description: "Open.", InputSchema: map[string]interface{}{"type": "object"}, Group: models.ModelStepToolLoaded, Capability: "skill-live-browser.open"},
 		},
@@ -65,7 +65,7 @@ func validModelStepRequest() models.ModelStepRequest {
 			userView("e4", 4, "steer"),
 			toolView("e5", 5, "c2", models.ToolEntryError),
 		},
-		Stream: models.ModelStepStream{FinalAnswerTool: "turn_final_answer", AnswerPreview: true},
+		Stream: models.ModelStepStream{AnswerPreview: true},
 	}
 }
 
@@ -191,7 +191,7 @@ func TestModelStepRequestValidateRejectsToolGroupOrder(t *testing.T) {
 	expectModelStepInvalid(t, req, "unknown group")
 
 	req = validModelStepRequest()
-	req.Tools[1].Name = "turn_final_answer"
+	req.Tools[1].Name = "ask_user"
 	expectModelStepInvalid(t, req, "duplicate tool name")
 
 	req = validModelStepRequest()
@@ -201,10 +201,6 @@ func TestModelStepRequestValidateRejectsToolGroupOrder(t *testing.T) {
 	req = validModelStepRequest()
 	req.Tools[1].InputSchema = map[string]interface{}{"type": "string"}
 	expectModelStepInvalid(t, req, "type object")
-
-	req = validModelStepRequest()
-	req.Stream.FinalAnswerTool = "missing_tool"
-	expectModelStepInvalid(t, req, "not a listed tool")
 
 	// Several tools in the same group, and empty groups, are fine.
 	req = validModelStepRequest()
@@ -299,8 +295,6 @@ func TestModelStepRequestValidatePurposes(t *testing.T) {
 		req.Purpose = models.ModelStepPurposeExplanation
 		expectModelStepInvalid(t, req, "sends no tools")
 		req.Tools = nil
-		expectModelStepInvalid(t, req, "not a listed tool")
-		req.Stream = models.ModelStepStream{}
 		if err := req.Validate(); err != nil {
 			t.Fatalf("explanation = %v", err)
 		}

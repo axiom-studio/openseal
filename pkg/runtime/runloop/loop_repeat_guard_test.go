@@ -459,7 +459,7 @@ func TestRepeatInterruptedNotCounted(t *testing.T) {
 
 func TestRepeatControlToolsNotCounted(t *testing.T) {
 	sim := newRepeatSim(t)
-	for _, name := range []string{"wait", "turn_report_progress", "load_capabilities", "turn_final_answer"} {
+	for _, name := range []string{"wait", "turn_report_progress", "load_capabilities", "agent_request_decision"} {
 		call := simCall{subject: kernelCall(name, map[string]interface{}{"x": 1}), result: "ok"}
 		for step := int64(1); step <= 6; step++ {
 			outcome := sim.one(step, call)

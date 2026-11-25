@@ -94,28 +94,24 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	base := map[string]interface{}{"conversationId": conversation.ID, "triggerMessageId": trigger.ID}
 	content := strings.TrimSpace(answer.Answer)
 	guard := d.Guard
-	// 9 (first part). The Run and the files its answer hands over.
 	references := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}
-	artifacts, err := runtimeconversation.RunActionArtifactReferences(ctx, h.sessions, h.actions, run)
+	saved, err := runtimeconversation.RunActionArtifactReferences(ctx, h.sessions, h.actions, run)
 	if err != nil {
 		return agentrun.FinalDeliveryResult{}, err
 	}
-	handedOver, unknownFiles := runtimeconversation.HandedOverArtifacts(artifacts, answer.Output)
-	references = append(references, handedOver...)
-	if len(unknownFiles) > 0 && !runtimeconversation.RunExplainingFailure(run) {
-		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: runtimeconversation.UnknownHandedOverFilesText(unknownFiles, artifacts)}, nil
-	}
-	// The files the Run saved and does not hand over were made to build its
-	// answer; the catalog remembers that so file lists can leave them out.
-	// It is bookkeeping for listings, so it never holds an answer back.
-	_ = models.MarkRunFiles(ctx, r.artifacts, run.Scope, artifacts, handedOver)
 
 	// 3. Failure explanation: always a visible text reply, never a visual.
 	if runtimeconversation.RunExplainingFailure(run) {
 		if content == "" {
 			content = runtimeconversation.TerminalRunFailureReply(ctx, h.sessions, h.actions, run)
 		}
-		message, replayed, err := r.postAgentResponseWithReferences(ctx, run, conversation, trigger, content, references, false, &guard)
+		files, err := r.resolveAnswerFiles(ctx, run, content, saved)
+		if err != nil {
+			return agentrun.FinalDeliveryResult{}, err
+		}
+		content = files.content
+		references = append(references, files.references...)
+		message, replayed, err := r.postAgentResponseWithReferences(ctx, run, conversation, trigger, content, references, &guard)
 		if errors.Is(err, errConversationParticipationStopped) {
 			return participationStoppedDelivery(), nil
 		}
@@ -144,18 +140,39 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryComplete, Output: output}, nil
 	}
 
-	// 5. Visual blocks. A repair call's blocks go into the answer delivery
-	// asked it about; then every block is read with the host checks.
-	if repairs, _ := answer.Output[FinalOutputVisualRepairsKey].(map[string]string); len(repairs) > 0 {
-		repaired, rejection, err := h.repairedAnswer(ctx, run, repairs)
+	// 5. Visual blocks. A reply of only the blocks delivery asked to repair
+	// goes into the answer it asked about; then every block is read with
+	// the host checks.
+	if answer.PlainText {
+		repaired, ok, err := h.repairedAnswer(ctx, run, answer, content)
 		if err != nil {
 			return agentrun.FinalDeliveryResult{}, err
 		}
-		if rejection != "" {
-			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: rejection}, nil
+		if ok {
+			content = repaired
 		}
-		content = repaired
 	}
+	// The files the answer links, stored as they are now. A link to a file
+	// that is not in the chat is asked about once, then left as its text.
+	files, err := r.resolveAnswerFiles(ctx, run, content, saved)
+	if err != nil {
+		return agentrun.FinalDeliveryResult{}, err
+	}
+	if len(files.unknown) > 0 {
+		prior, err := h.priorDeliveryRejections(ctx, run, answer, isFileLinkRepairRequest)
+		if err != nil {
+			return agentrun.FinalDeliveryResult{}, err
+		}
+		if prior == 0 {
+			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: fileLinkRepairRequest(files.unknown, saved)}, nil
+		}
+	}
+	content = files.content
+	references = append(references, files.references...)
+	// The files the Run saved and does not show were made to build its
+	// answer; the catalog remembers that so file lists can leave them out.
+	// It is bookkeeping for listings, so it never holds an answer back.
+	_ = models.MarkRunFiles(ctx, r.artifacts, run.Scope, saved, files.references)
 	visual, drops := r.readAnswerBlocks(ctx, run, content)
 	left := map[string]bool{}
 	for _, drop := range drops {
@@ -163,8 +180,8 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 			left[drop.BlockID] = true
 		}
 	}
-	// Images the Run already attached (generate_image, present) show with the
-	// answer; blocks that only repeat them would show each one twice.
+	// Images the answer links show with it; blocks that only repeat them
+	// would show each one twice.
 	if visual != nil && presentation.PlainAnswer(content) != "" && visualRepeatsAttachedImages(*visual, references) {
 		for _, component := range visual.Components {
 			left[component.ID] = true
@@ -172,8 +189,9 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 		visual, drops = nil, nil
 	}
 
-	// 6. Reactions only (also an answer that only repeats the reacted emoji).
-	if visual == nil {
+	// 6. Reactions only (also an answer that only repeats the reacted emoji
+	// and shows nothing else).
+	if visual == nil && len(files.references) == 0 {
 		reactions, err := h.runReactions(ctx, run)
 		if err != nil {
 			return agentrun.FinalDeliveryResult{}, err
@@ -230,7 +248,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	if slices.ContainsFunc(drops, func(drop presentation.BlockDrop) bool { return drop.Whole }) {
 		posted += "\n\n" + conversationVisualNotShownText
 	}
-	message, replayed, err := r.postAgentResponseWithReferences(ctx, run, conversation, trigger, posted, references, answer.BroadcastToChannel(), &guard)
+	message, replayed, err := r.postAgentResponseWithReferences(ctx, run, conversation, trigger, posted, references, &guard)
 	if errors.Is(err, errConversationParticipationStopped) {
 		return participationStoppedDelivery(), nil
 	}
@@ -240,22 +258,19 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	for _, drop := range drops {
 		h.visualRejected(ctx, run, d.Step, guard.WorkerID, drop)
 	}
+	for _, target := range files.unknown {
+		h.fileLinkRejected(ctx, run, d.Step, guard.WorkerID, target)
+	}
 
 	// 11. Output.
 	output := maps.Clone(answer.Output)
 	if output == nil {
 		output = map[string]interface{}{}
 	}
-	delete(output, FinalOutputVisualRepairsKey)
 	for key, value := range withConversationOutput(base, message, replayed) {
 		output[key] = value
 	}
 	output[FinalOutputSummaryKey] = presentation.PlainAnswer(content)
-	if answer.BroadcastToChannel() {
-		output[agentrun.FinalOutputBroadcastKey] = true
-	} else {
-		delete(output, agentrun.FinalOutputBroadcastKey)
-	}
 	kind := agentrun.FinalDeliveryComplete
 	if answer.Park != nil && answer.Park.Deliver {
 		// OTP: the answer asks for the code; the Run waits for the reply.
@@ -329,58 +344,81 @@ func isVisualRepairRequest(text string) bool {
 func visualRepairRequest(drops []presentation.BlockDrop) string {
 	var b strings.Builder
 	b.WriteString(visualRepairLead)
-	var example string
 	for _, drop := range drops {
-		if !drop.Whole {
-			continue
-		}
-		fmt.Fprintf(&b, "\n- %s: %s", drop.BlockID, drop.Reason)
-		if example == "" {
-			example = drop.BlockID
+		if drop.Whole {
+			fmt.Fprintf(&b, "\n- %s: %s", drop.BlockID, drop.Reason)
 		}
 	}
-	fmt.Fprintf(&b, "\nCall turn_final_answer with only repairs, e.g. {\"repairs\": {%q: \"<the whole corrected block, ::: lines included>\"}}, "+
-		"one entry per block above (leave a block out to drop it). Your answer text stands; do not send it again.", example)
+	b.WriteString("\nReply with only the corrected blocks, each whole with its ::: lines and the same #id, one per block above; " +
+		"leave a block out to drop it. Your answer text stands; do not write it again.")
 	return b.String()
 }
 
-// repairedAnswer puts a repair call's blocks into the answer whose blocks
-// delivery asked to repair: the last turn_final_answer of this Run refused
-// with that request. It returns a rejection when there is none.
-func (h *conversationFinalHandler) repairedAnswer(ctx context.Context, run *models.AgentRun, repairs map[string]string) (string, string, error) {
-	const nothing = "There is no answer whose visual blocks were asked for; write the whole answer."
-	if h.sessions == nil {
-		return "", nothing, nil
+// askedBlockIDs are the block ids a repair request lists ("- <id>: why").
+func askedBlockIDs(request string) map[string]bool {
+	ids := map[string]bool{}
+	for _, line := range strings.Split(request, "\n") {
+		if id, _, ok := strings.Cut(strings.TrimPrefix(line, "- "), ": "); ok && strings.HasPrefix(line, "- ") {
+			ids[strings.TrimSpace(id)] = true
+		}
+	}
+	return ids
+}
+
+// repairedAnswer merges a reply that holds only blocks delivery asked to
+// repair into the answer it asked about: the reply of the step refused with
+// this Run's repair request. ok is false for any other reply, which is an
+// answer of its own.
+func (h *conversationFinalHandler) repairedAnswer(ctx context.Context, run *models.AgentRun, answer agentrun.FinalAnswer, reply string) (string, bool, error) {
+	blocks := presentation.ParseAnswer(reply)
+	if h.sessions == nil || len(blocks) == 0 || strings.TrimSpace(presentation.PlainAnswer(reply)) != "" {
+		return "", false, nil
+	}
+	request, err := h.visualRepairRequestNote(ctx, run, answer)
+	if err != nil || request == nil {
+		return "", false, err
+	}
+	asked := askedBlockIDs(request.Note.Text)
+	repairs := make(map[string]string, len(blocks))
+	for _, block := range blocks {
+		if !block.Closed || !asked[block.ID] {
+			return "", false, nil
+		}
+		repairs[block.ID] = reply[block.Start:block.End]
 	}
 	entries, err := h.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
-		Scope: run.Scope, RunID: run.ID, ToolNames: []string{string(models.ControlToolFinalAnswer)},
-		States: []models.ToolEntryState{models.ToolEntryError}, Limit: models.MaxSessionEntryListLimit,
+		Scope: run.Scope, RunID: run.ID, StepID: request.StepID, Types: []models.SessionEntryType{models.SessionEntryAssistant}, Limit: models.MaxSessionEntryListLimit,
 	})
 	if err != nil {
-		return "", "", err
+		return "", false, err
 	}
 	for index := len(entries) - 1; index >= 0; index-- {
 		entry := entries[index]
-		if entry == nil || entry.Tool == nil || entry.Tool.Result == nil || !slices.ContainsFunc(entry.Tool.Result.Content, func(part models.ContentPart) bool {
-			return part.Type == models.ContentPartText && isVisualRepairRequest(strings.TrimSpace(part.Text))
-		}) {
+		if entry == nil || entry.Assistant == nil || len(entry.Assistant.ToolCalls) > 0 {
 			continue
 		}
-		var asked struct {
-			Answer string `json:"answer"`
-			Report string `json:"report"`
-		}
-		if err := json.Unmarshal(entry.Tool.Arguments, &asked); err != nil {
-			return "", nothing, nil
-		}
-		base := strings.TrimSpace(asked.Report)
-		if base == "" {
-			base = strings.TrimSpace(asked.Answer)
-		}
-		repaired, _ := presentation.ReplaceBlocks(base, repairs)
-		return strings.TrimSpace(repaired), "", nil
+		repaired, _ := presentation.ReplaceBlocks(strings.TrimSpace(entry.Assistant.Text), repairs)
+		return strings.TrimSpace(repaired), true, nil
 	}
-	return "", nothing, nil
+	return "", false, nil
+}
+
+// visualRepairRequestNote is this Run's repair request (a final_rejection
+// note on an earlier step), or nil.
+func (h *conversationFinalHandler) visualRepairRequestNote(ctx context.Context, run *models.AgentRun, answer agentrun.FinalAnswer) (*models.SessionEntry, error) {
+	notes, err := h.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: run.Scope, RunID: run.ID, NoteKinds: []models.NoteKind{models.NoteFinalRejection}, Limit: models.MaxSessionEntryListLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for index := len(notes) - 1; index >= 0; index-- {
+		note := notes[index]
+		if note != nil && note.Note != nil && note.StepID != answer.StepID && isVisualRepairRequest(strings.TrimSpace(note.Note.Text)) {
+			return note, nil
+		}
+	}
+	return nil, nil
 }
 
 // visualRejected records one part of the answer's visual that was left
@@ -441,31 +479,12 @@ func (h *conversationFinalHandler) runReactions(ctx context.Context, run *models
 	return reactions, nil
 }
 
-// priorDeliveryRejections counts this Run's earlier final attempts that
-// delivery rejected with a text matching match: final tool entries in error
-// and final_rejection notes. The answer being delivered is not counted.
+// priorDeliveryRejections counts this Run's earlier replies that delivery
+// rejected with a text matching match (final_rejection notes). The answer
+// being delivered is not counted.
 func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, run *models.AgentRun, answer agentrun.FinalAnswer, match func(string) bool) (int, error) {
 	if h.sessions == nil {
 		return 0, nil
-	}
-	count := 0
-	tools, err := h.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
-		Scope: run.Scope, RunID: run.ID, ToolNames: []string{string(models.ControlToolFinalAnswer)},
-		States: []models.ToolEntryState{models.ToolEntryError}, Limit: models.MaxSessionEntryListLimit,
-	})
-	if err != nil {
-		return 0, err
-	}
-	for _, entry := range tools {
-		if entry == nil || entry.ID == answer.ToolEntryID || entry.Tool == nil || entry.Tool.Result == nil {
-			continue
-		}
-		for _, part := range entry.Tool.Result.Content {
-			if part.Type == models.ContentPartText && match(strings.TrimSpace(part.Text)) {
-				count++
-				break
-			}
-		}
 	}
 	notes, err := h.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 		Scope: run.Scope, RunID: run.ID, NoteKinds: []models.NoteKind{models.NoteFinalRejection}, Limit: models.MaxSessionEntryListLimit,
@@ -473,6 +492,7 @@ func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, 
 	if err != nil {
 		return 0, err
 	}
+	count := 0
 	for _, entry := range notes {
 		if entry == nil || entry.Note == nil || answer.PlainText && entry.StepID == answer.StepID {
 			continue
@@ -486,7 +506,3 @@ func (h *conversationFinalHandler) priorDeliveryRejections(ctx context.Context, 
 
 // FinalOutputSummaryKey is the final output field that holds the answer text.
 const FinalOutputSummaryKey = "summary"
-
-// FinalOutputVisualRepairsKey is the final output field of a call that only
-// repairs visual blocks: block id → the corrected block.
-const FinalOutputVisualRepairsKey = "visualRepairs"

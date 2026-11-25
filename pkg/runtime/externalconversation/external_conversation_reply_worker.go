@@ -299,14 +299,6 @@ func (w *ReplyWorker) projectReply(
 		if !ok {
 			return nil, fmt.Errorf("%w: completed conversation Run has no canonical reply output", models.ErrInvalidExternalConversation)
 		}
-		saved, refErr := conversation.RunActionArtifactReferences(ctx, w.store, w.store, run)
-		if refErr != nil {
-			return nil, refErr
-		}
-		artifacts, _ := conversation.HandedOverArtifacts(saved, run.Output)
-		if catalog, ok := any(w.store).(models.ArtifactStore); ok {
-			_ = models.MarkRunFiles(ctx, catalog, run.Scope, saved, artifacts)
-		}
 		current, getErr := w.conversations.GetConversation(ctx, item.Scope, item.ConversationID)
 		if getErr != nil {
 			return nil, getErr
@@ -321,7 +313,7 @@ func (w *ReplyWorker) projectReply(
 			Intent: models.MessageIntentAnswer, Content: content,
 			Audience:         models.ConversationAudience{Kind: models.ConversationAudienceChannel},
 			ReplyToMessageID: item.ChannelMessageID, ResolvesMessageID: item.ChannelMessageID,
-			References:     append([]models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}, artifacts...),
+			References:     []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}},
 			IdempotencyKey: "external-conversation-reply:" + reply.id,
 		})
 		if postErr != nil {

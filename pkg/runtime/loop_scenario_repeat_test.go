@@ -256,7 +256,7 @@ func TestLoopIdenticalReadCountsResetAfterASuccessfulWrite(t *testing.T) {
 				return looptest.Act("Checking again.", looptest.Call(looptest.GovernedTool(v, "lookup"), repeatLookupArgs))
 			}},
 			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "6815 is open."})
+				return looptest.Say("6815 is open.")
 			}},
 		))
 		run := f.StartRun(models.RunKindAgentWork, "Reopen 6815 and confirm it")
@@ -302,7 +302,7 @@ func TestLoopIdenticalReadWithChangedResultIsNotARepeat(t *testing.T) {
 				return looptest.Act("Checking.", looptest.Call(looptest.GovernedTool(v, "lookup"), repeatLookupArgs))
 			}},
 			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "6815 keeps changing."})
+				return looptest.Say("6815 keeps changing.")
 			}},
 		))
 		var mu sync.Mutex
@@ -359,7 +359,7 @@ func TestLoopIdenticalReadsAreCanonicalisedByArguments(t *testing.T) {
 					`{ "reviewContext" : {"content":"Close 6816","summary":"Close 6816"}, "arguments" : {"status":"closed","id":"6816"} }`)
 			}},
 			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Done."})
+				return looptest.Say("Done.")
 			}},
 		))
 		run := f.StartRun(models.RunKindAgentWork, "Check 6815 and close 6816")
@@ -418,7 +418,7 @@ func TestLoopIdenticalWriteAfterSuccessIsSuppressed(t *testing.T) {
 				return looptest.Act("Telling ops again.", looptest.ReviewedCall(looptest.GovernedTool(v, "send"), sendArgs, "Tell ops 6815 is fixed"))
 			}},
 			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Ops know."})
+				return looptest.Say("Ops know.")
 			}},
 		))
 		run := f.StartRun(models.RunKindAgentWork, "Tell ops 6815 is fixed")
@@ -468,7 +468,7 @@ func TestLoopIdenticalWriteAfterFailureMayRetry(t *testing.T) {
 				return looptest.Act("Telling ops.", looptest.ReviewedCall(looptest.GovernedTool(v, "send"), sendArgs, "Tell ops 6815 is fixed"))
 			}},
 			&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "Ops know."})
+				return looptest.Say("Ops know.")
 			}},
 		))
 		var mu sync.Mutex
@@ -512,7 +512,7 @@ func TestLoopRepeatsAreCountedAcrossClaimsAndParks(t *testing.T) {
 				_, isError, ok := v.ToolResult(looptest.GovernedTool(v, "lookup"))
 				return ok && isError
 			}, Reply: func(looptest.StepView) models.ModelStepResult {
-				return looptest.FinalAnswer(map[string]any{"answer": "6815 is open."})
+				return looptest.Say("6815 is open.")
 			}},
 			&looptest.ModelRule{Name: "lookup", Reply: func(v looptest.StepView) models.ModelStepResult {
 				return looptest.Act("Checking.", looptest.Call(looptest.GovernedTool(v, "lookup"), repeatLookupArgs))
@@ -593,7 +593,7 @@ func TestLoopVMNestedCallsAreNotCountedAsRepeats(t *testing.T) {
 					return looptest.Act("Running the script.", looptest.Call(command, map[string]any{"command": "for i in 1 2 3; do seal call lookup 6815; done"}))
 				}},
 				&looptest.ModelRule{Name: "done", Reply: func(looptest.StepView) models.ModelStepResult {
-					return looptest.FinalAnswer(map[string]any{"answer": "6815 is open."})
+					return looptest.Say("6815 is open.")
 				}},
 			))
 		run := f.StartRun(models.RunKindAgentWork, "Look 6815 up from a script")

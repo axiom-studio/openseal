@@ -556,8 +556,8 @@ func TestEngineRunsAutonomousAgentPortfolio(t *testing.T) {
 	for _, tool := range requests[0].Tools {
 		offered[tool.Name] = true
 	}
-	if !offered["wait"] || !offered["turn_final_answer"] {
-		t.Fatalf("background work was not offered wait and turn_final_answer: %#v", requests[0].Tools)
+	if !offered["wait"] || offered["turn_final_answer"] {
+		t.Fatalf("background work was not offered wait, or was offered a final answer tool: %#v", requests[0].Tools)
 	}
 	steps, err := engine.ListAgentTurns(ctx, AgentTurnFilter{Scope: scope, RunID: run.ID})
 	if err != nil || len(steps) != 2 || steps[0].OutputSummary != "Pausing briefly before finishing." {
