@@ -504,11 +504,11 @@ func TestVisualStoredPerFollowUp(t *testing.T) {
 	})
 }
 
-// A block that fails the host checks is asked for again, once, on its
-// own; the repair goes into the answer in its place. A block that still
-// fails is left out with its placeholder, the answer says a visual could
-// not be shown, and the Run records it.
-func TestFailingBlockIsRepairedOnceThenLeftOut(t *testing.T) {
+// A block that fails the host checks is asked for again on its own, up to
+// visualRepairTries times; the repair goes into the answer in its place. A
+// block that still fails is left out with its placeholder, without a word
+// in the answer, and the Run records it.
+func TestFailingBlockIsRepairedThenLeftOutSilently(t *testing.T) {
 	refuse := func(*models.AgentRun) presentation.ValidateOptions {
 		return presentation.ValidateOptions{Bindings: presentation.BindingResolverFunc(func(context.Context, presentation.Binding) error {
 			return errors.New("not in this chat")
@@ -556,15 +556,43 @@ func TestFailingBlockIsRepairedOnceThenLeftOut(t *testing.T) {
 	})
 	forFinalDeliveryStores(t, finalDeliveryOptions{visualChecks: refuse}, func(t *testing.T, f *finalDeliveryFixture) {
 		askRepair(f)
+		// Repairs that fail again are asked for again, each merged into
+		// the answer through the repairs before it.
+		for try := 2; try <= visualRepairTries; try++ {
+			repair, step := f.finalEntry(stop, nil)
+			result := f.mustDeliver(repair, agentrun.FinalDeliveryRetryFinal)
+			if !strings.Contains(result.RejectionText, "- next: ") || strings.Contains(result.RejectionText, "revenue") {
+				t.Fatalf("repair request %d = %q", try, result.RejectionText)
+			}
+			f.reject(step, result.RejectionText)
+		}
 		repair, _ := f.finalEntry(stop, nil)
 		f.mustDeliver(repair, agentrun.FinalDeliveryComplete)
 		answers := f.answers()
-		if len(answers) != 1 || answers[0].Content != "Revenue is up.\n\n::visual{#revenue}\n\nAsk me anything.\n\n"+conversationVisualNotShownText || len(answers[0].References) != 2 {
+		if len(answers) != 1 || answers[0].Content != "Revenue is up.\n\n::visual{#revenue}\n\nAsk me anything." || len(answers[0].References) != 2 {
 			t.Fatalf("answers = %#v", answers)
 		}
 		events := rejections(f)
 		if len(events) == 0 || events[len(events)-1].Payload["blockId"] != "next" || !strings.Contains(events[len(events)-1].Summary, "not in this chat") {
 			t.Fatalf("visual_rejected events = %#v", events)
+		}
+	})
+	// A block asked for and left out of the repair is dropped.
+	forFinalDeliveryStores(t, finalDeliveryOptions{visualChecks: refuse}, func(t *testing.T, f *finalDeliveryFixture) {
+		later := strings.Replace(stop, "#next", "#later", 1)
+		answer, step := f.finalEntry("Two actions.\n\n"+stop+"\n\n"+later, nil)
+		result := f.mustDeliver(answer, agentrun.FinalDeliveryRetryFinal)
+		if !strings.Contains(result.RejectionText, "- next: ") || !strings.Contains(result.RejectionText, "- later: ") {
+			t.Fatalf("repair request = %q", result.RejectionText)
+		}
+		f.reject(step, result.RejectionText)
+		repair, _ := f.finalEntry(":::callout{#next}\nbody: Say stop to end it.\n:::", nil)
+		f.mustDeliver(repair, agentrun.FinalDeliveryComplete)
+		if answers := f.answers(); len(answers) != 1 || answers[0].Content != "Two actions.\n\n::visual{#next}" {
+			t.Fatalf("answers = %#v", answers)
+		}
+		if events := rejections(f); len(events) != 0 {
+			t.Fatalf("a block the repair dropped was recorded as failing: %#v", events)
 		}
 	})
 	// A reply of blocks nobody asked for is an answer of its own.

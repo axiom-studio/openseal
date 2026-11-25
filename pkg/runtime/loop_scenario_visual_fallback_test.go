@@ -2,7 +2,8 @@ package runtime
 
 // Run-loop scenarios for an answer whose visual blocks are wrong: the answer
 // has already streamed to the person, so a failing block is asked for again
-// on its own, once, and then goes without it; the Run records why. A visual
+// on its own, up to two times (three tries), and then goes without it, silently; the Run
+// records why. A visual
 // never costs the answer.
 
 import (
@@ -34,18 +35,19 @@ func answerSteps(replies ...string) *looptest.ModelRule {
 	}}
 }
 
-// A block that fails is asked for again once, on its own: the next reply
-// holds only the corrected block. A repair that still fails costs only that
-// block, never the answer.
-func TestLoopFailingBlockIsRepairedOnceThenLeftOut(t *testing.T) {
+// A block that fails is asked for again on its own: the next reply holds
+// only the corrected block. Repairs that still fail cost only that block,
+// never the answer, and the answer does not mention it.
+func TestLoopFailingBlockIsRepairedThenLeftOut(t *testing.T) {
 	broken := ":::hologram{#h}\nCheaper in spring.\n:::"
 	cases := map[string]struct {
 		repair  string
 		posted  string
+		asks    int
 		dropped bool
 	}{
-		"block_repaired": {repair: ":::callout{#h}\nbody: Cheaper in spring.\n:::", posted: "Spring is cheapest.\n\n::visual{#h}"},
-		"block_left_out": {repair: broken, posted: "Spring is cheapest.", dropped: true},
+		"block_repaired": {repair: ":::callout{#h}\nbody: Cheaper in spring.\n:::", posted: "Spring is cheapest.\n\n::visual{#h}", asks: 1},
+		"block_left_out": {repair: broken, posted: "Spring is cheapest.", asks: 2, dropped: true},
 	}
 	for name, tc := range cases {
 		looptest.EachStore(t, name, func(t *testing.T, store models.KernelStore) {
@@ -53,10 +55,10 @@ func TestLoopFailingBlockIsRepairedOnceThenLeftOut(t *testing.T) {
 			content := &looptest.AnswerVisualContent{}
 			convRunner(f, conversationrun.TurnRunnerConfig{AttachmentContent: content})
 			conversation, run := f.StartChat("when is it cheapest?")
-			done := f.DriveToRest(run.ID, 4)
+			done := f.DriveToRest(run.ID, 8)
 			f.MustStatus(done, models.AgentRunStatusCompleted)
 			rejections := portFinalRejections(f, run.ID)
-			if finals := portFinalReplies(f, run.ID); len(finals) != 2 || len(rejections) != 1 || rejections[0].StepID != finals[0].StepID ||
+			if finals := portFinalReplies(f, run.ID); len(finals) != tc.asks+1 || len(rejections) != tc.asks || rejections[0].StepID != finals[0].StepID ||
 				!strings.Contains(rejections[0].Note.Text, "Reply with only the corrected blocks") {
 				t.Fatalf("final replies = %v", f.EntryTypes(run.ID))
 			}
@@ -66,7 +68,7 @@ func TestLoopFailingBlockIsRepairedOnceThenLeftOut(t *testing.T) {
 			}
 			events := f.Events(run.ID, "turn.visual_rejected")
 			if tc.dropped {
-				if !portVisualNotShown(answers[0].Content, tc.posted) || len(answers[0].References) != 1 || content.Puts != 0 || len(events) != 1 {
+				if answers[0].Content != tc.posted || len(answers[0].References) != 1 || content.Puts != 0 || len(events) != 1 {
 					t.Fatalf("answer %q refs %d puts %d events %d", answers[0].Content, len(answers[0].References), content.Puts, len(events))
 				}
 				return
@@ -76,10 +78,4 @@ func TestLoopFailingBlockIsRepairedOnceThenLeftOut(t *testing.T) {
 			}
 		})
 	}
-}
-
-// portVisualNotShown: the posted answer is the model's text followed by the
-// line saying its visual could not be shown.
-func portVisualNotShown(posted, answer string) bool {
-	return strings.HasPrefix(posted, answer+"\n\n") && strings.Contains(posted, "couldn't be shown")
 }

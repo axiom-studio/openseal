@@ -326,14 +326,14 @@ func TestLoopFinalReplyCarriesVisualAndSilence(t *testing.T) {
 				})}
 			}})
 			conversation, run := f.StartChat("how is revenue?")
-			done := f.DriveToRest(run.ID, 4)
+			done := f.DriveToRest(run.ID, 8)
 			f.MustStatus(done, models.AgentRunStatusCompleted)
-			if finals, rejections := portFinalReplies(f, run.ID), portFinalRejections(f, run.ID); len(finals) != 2 || len(rejections) != 1 {
+			if finals, rejections := portFinalReplies(f, run.ID), portFinalRejections(f, run.ID); len(finals) != 3 || len(rejections) != 2 {
 				t.Fatalf("final replies = %v", f.EntryTypes(run.ID))
 			}
-			// Only the block that fails the host checks is left out.
+			// Only the block that fails the host checks is left out, silently.
 			answers := portAgentMessages(f, conversation.ID)
-			if len(answers) != 1 || !portVisualNotShown(answers[0].Content, "Revenue is up.\n\n::visual{#revenue}") || len(answers[0].References) != 2 || content.Puts != 1 {
+			if len(answers) != 1 || answers[0].Content != "Revenue is up.\n\n::visual{#revenue}" || len(answers[0].References) != 2 || content.Puts != 1 {
 				t.Fatalf("answers = %#v (%d visual puts), want the answer with the rest of the visual", answers, content.Puts)
 			}
 			if events := f.Events(run.ID, "turn.visual_rejected"); len(events) != 1 || events[0].Severity != models.ActivitySeverityWarning || events[0].Payload["blockId"] != "next" {

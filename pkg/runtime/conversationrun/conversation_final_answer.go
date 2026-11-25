@@ -27,7 +27,15 @@ const (
 	conversationEmptyAnswerText     = "The reply is empty. Write the user-visible answer."
 	conversationEmptyAnswerFailure  = "Agent channel response did not contain user-visible output"
 	conversationEmptyAnswerCode     = "empty_answer"
-	conversationVisualNotShownText  = "_The visual for this answer couldn't be shown._"
+	// visualRepairTries is how often a Run asks again for blocks that
+	// fail: with the first answer, three tries. After that they are left
+	// out without a word in the answer.
+	visualRepairTries = 2
+	// answerRejectionsAllowed keeps repairs under the run loop's bound
+	// (runloop maximumFinalRejections, 3): its third rejected answer in a
+	// row fails the Run, so a repair is not asked after two rejections of
+	// any kind.
+	answerRejectionsAllowed = 2
 )
 
 // conversationFinalHandler is the FinalAnswerHandler of an Agent chat Run
@@ -217,23 +225,27 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: conversationEmptyAnswerText}, nil
 	}
 
-	// 8. Repair, once per Run: blocks that failed are asked for again on
-	// their own. The person keeps the streamed answer meanwhile; nothing
-	// else of it is written again.
+	// 8. Repair, up to visualRepairTries times per Run: blocks that failed
+	// are asked for again on their own. The person keeps the streamed
+	// answer meanwhile; nothing else of it is written again.
 	if slices.ContainsFunc(drops, func(drop presentation.BlockDrop) bool { return drop.Whole }) {
 		prior, err := h.priorDeliveryRejections(ctx, run, answer, isVisualRepairRequest)
 		if err != nil {
 			return agentrun.FinalDeliveryResult{}, err
 		}
-		if prior == 0 {
+		rejected, err := h.priorDeliveryRejections(ctx, run, answer, func(string) bool { return true })
+		if err != nil {
+			return agentrun.FinalDeliveryResult{}, err
+		}
+		if prior < visualRepairTries && rejected < answerRejectionsAllowed {
 			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: visualRepairRequest(drops)}, nil
 		}
 	}
 
 	// 9. The blocks that are left, as one card the message references. A
-	// block that still fails never costs the answer: its placeholder goes,
-	// the message says a visual could not be shown, and the Run records
-	// every part left out.
+	// block that still fails never costs the answer: its placeholder goes
+	// without a word in the message, and the Run records every part left
+	// out.
 	if visual != nil {
 		reference, err := r.storeAnswerVisual(ctx, run, run.AssignedAgentID,
 			answerVisualArtifactID(run.ID, trigger.ID, answerVisualFollowUpKey(run)), *visual)
@@ -245,9 +257,6 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 
 	// 10. Post under the reply guard.
 	posted := presentation.PlacedAnswer(content, left)
-	if slices.ContainsFunc(drops, func(drop presentation.BlockDrop) bool { return drop.Whole }) {
-		posted += "\n\n" + conversationVisualNotShownText
-	}
 	message, replayed, err := r.postAgentResponseWithReferences(ctx, run, conversation, trigger, posted, references, &guard)
 	if errors.Is(err, errConversationParticipationStopped) {
 		return participationStoppedDelivery(), nil
@@ -333,7 +342,7 @@ func (r *TurnRunner) readAnswerBlocks(ctx context.Context, run *models.AgentRun,
 }
 
 // visualRepairLead starts the request to repair failing blocks; a Run
-// asks it once.
+// asks it up to visualRepairTries times.
 const visualRepairLead = "Some visual blocks in your answer could not be shown:"
 
 func isVisualRepairRequest(text string) bool {
@@ -367,58 +376,91 @@ func askedBlockIDs(request string) map[string]bool {
 
 // repairedAnswer merges a reply that holds only blocks delivery asked to
 // repair into the answer it asked about: the reply of the step refused with
-// this Run's repair request. ok is false for any other reply, which is an
-// answer of its own.
+// this Run's latest repair request. ok is false for any other reply, which
+// is an answer of its own.
 func (h *conversationFinalHandler) repairedAnswer(ctx context.Context, run *models.AgentRun, answer agentrun.FinalAnswer, reply string) (string, bool, error) {
-	blocks := presentation.ParseAnswer(reply)
-	if h.sessions == nil || len(blocks) == 0 || strings.TrimSpace(presentation.PlainAnswer(reply)) != "" {
+	if h.sessions == nil || !onlyBlocks(reply) {
 		return "", false, nil
 	}
-	request, err := h.visualRepairRequestNote(ctx, run, answer)
-	if err != nil || request == nil {
+	requests, err := h.visualRepairRequestNotes(ctx, run, answer)
+	if err != nil || len(requests) == 0 {
 		return "", false, err
 	}
+	return h.answerWithRepairs(ctx, run, requests, reply)
+}
+
+// onlyBlocks reports a reply of visual blocks and nothing else.
+func onlyBlocks(reply string) bool {
+	return len(presentation.ParseAnswer(reply)) > 0 && strings.TrimSpace(presentation.PlainAnswer(reply)) == ""
+}
+
+// answerWithRepairs swaps reply's blocks into the answer the last of
+// requests asked about. That answer is itself a repair reply when an
+// earlier request was answered with blocks that failed again; it goes into
+// its own answer first. A block asked for and left out of reply is dropped.
+func (h *conversationFinalHandler) answerWithRepairs(ctx context.Context, run *models.AgentRun, requests []*models.SessionEntry, reply string) (string, bool, error) {
+	request := requests[len(requests)-1]
 	asked := askedBlockIDs(request.Note.Text)
-	repairs := make(map[string]string, len(blocks))
-	for _, block := range blocks {
+	repairs := make(map[string]string, len(asked))
+	for _, block := range presentation.ParseAnswer(reply) {
 		if !block.Closed || !asked[block.ID] {
 			return "", false, nil
 		}
 		repairs[block.ID] = reply[block.Start:block.End]
 	}
+	for id := range asked {
+		if _, ok := repairs[id]; !ok {
+			repairs[id] = ""
+		}
+	}
+	about, err := h.stepReply(ctx, run, request.StepID)
+	if err != nil || about == "" {
+		return "", false, err
+	}
+	if len(requests) > 1 && onlyBlocks(about) {
+		merged, ok, err := h.answerWithRepairs(ctx, run, requests[:len(requests)-1], about)
+		if err != nil || !ok {
+			return "", false, err
+		}
+		about = merged
+	}
+	repaired, _ := presentation.ReplaceBlocks(about, repairs)
+	return strings.TrimSpace(repaired), true, nil
+}
+
+// stepReply is the text of the step's reply without tool calls, or "".
+func (h *conversationFinalHandler) stepReply(ctx context.Context, run *models.AgentRun, stepID string) (string, error) {
 	entries, err := h.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
-		Scope: run.Scope, RunID: run.ID, StepID: request.StepID, Types: []models.SessionEntryType{models.SessionEntryAssistant}, Limit: models.MaxSessionEntryListLimit,
+		Scope: run.Scope, RunID: run.ID, StepID: stepID, Types: []models.SessionEntryType{models.SessionEntryAssistant}, Limit: models.MaxSessionEntryListLimit,
 	})
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
 	for index := len(entries) - 1; index >= 0; index-- {
 		entry := entries[index]
-		if entry == nil || entry.Assistant == nil || len(entry.Assistant.ToolCalls) > 0 {
-			continue
+		if entry != nil && entry.Assistant != nil && len(entry.Assistant.ToolCalls) == 0 {
+			return strings.TrimSpace(entry.Assistant.Text), nil
 		}
-		repaired, _ := presentation.ReplaceBlocks(strings.TrimSpace(entry.Assistant.Text), repairs)
-		return strings.TrimSpace(repaired), true, nil
 	}
-	return "", false, nil
+	return "", nil
 }
 
-// visualRepairRequestNote is this Run's repair request (a final_rejection
-// note on an earlier step), or nil.
-func (h *conversationFinalHandler) visualRepairRequestNote(ctx context.Context, run *models.AgentRun, answer agentrun.FinalAnswer) (*models.SessionEntry, error) {
+// visualRepairRequestNotes are this Run's repair requests (final_rejection
+// notes on earlier steps), oldest first.
+func (h *conversationFinalHandler) visualRepairRequestNotes(ctx context.Context, run *models.AgentRun, answer agentrun.FinalAnswer) ([]*models.SessionEntry, error) {
 	notes, err := h.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
 		Scope: run.Scope, RunID: run.ID, NoteKinds: []models.NoteKind{models.NoteFinalRejection}, Limit: models.MaxSessionEntryListLimit,
 	})
 	if err != nil {
 		return nil, err
 	}
-	for index := len(notes) - 1; index >= 0; index-- {
-		note := notes[index]
+	var requests []*models.SessionEntry
+	for _, note := range notes {
 		if note != nil && note.Note != nil && note.StepID != answer.StepID && isVisualRepairRequest(strings.TrimSpace(note.Note.Text)) {
-			return note, nil
+			requests = append(requests, note)
 		}
 	}
-	return nil, nil
+	return requests, nil
 }
 
 // visualRejected records one part of the answer's visual that was left
