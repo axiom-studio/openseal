@@ -66,8 +66,6 @@ func TestFileToolContractsTakePathsAndRejectForeignInput(t *testing.T) {
 		{"save data", SaveAppData, map[string]interface{}{"path": "apps/tracker", "name": "pipeline_by_stage", "value": []interface{}{map[string]interface{}{"stage": "Discovery", "value": 1620000}}}, true},
 		{"save data with a path name", SaveAppData, map[string]interface{}{"path": "apps/tracker", "name": "../secrets", "value": 1}, false},
 		{"save data without a value", SaveAppData, map[string]interface{}{"path": "apps/tracker", "name": "pipeline"}, false},
-		{"present", Present, map[string]interface{}{"paths": []interface{}{"pages/report.html", "docs/report.pdf"}}, true},
-		{"present nothing", Present, map[string]interface{}{"paths": []interface{}{}}, false},
 		{"image", GenerateImage, map[string]interface{}{"prompt": "a seal", "path": "images/seal.png"}, true},
 		{"image with a style", GenerateImage, map[string]interface{}{"prompt": "a seal", "style": "cartoon"}, true},
 		{"image with an empty style", GenerateImage, map[string]interface{}{"prompt": "a seal", "style": ""}, false},
@@ -107,5 +105,21 @@ func TestFileToolContractsTakePathsAndRejectForeignInput(t *testing.T) {
 		if tc.valid && err != nil || !tc.valid && err == nil {
 			t.Fatalf("%s: schema validation: %v", tc.name, err)
 		}
+	}
+}
+
+// Files are shown by linking them in the answer; there is no present tool.
+func TestBuiltinHasNoPresentTool(t *testing.T) {
+	definition := SkillDefinition()
+	if _, ok := definition.Actions["present"]; ok {
+		t.Fatal("the built-in Skill still has present")
+	}
+	for _, name := range definition.Prompt.AllowedTools {
+		if name == "present" {
+			t.Fatal("present is still an allowed tool")
+		}
+	}
+	if strings.Contains(definition.Prompt.Instructions, "present") {
+		t.Fatalf("the built-in prompt still mentions present")
 	}
 }

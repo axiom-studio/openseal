@@ -65,7 +65,7 @@ func TestAnchoredReferenceRendersCommentBlock(t *testing.T) {
 		"app state: screen=#/pipeline\n" +
 		"rect 0.10,0.30,0.50,0.12\n" +
 		"</comment-anchor>\n" +
-		"Change that spot in place, then present the file again so the output gets a new version."
+		"Change that spot in place, then link the file again in your answer so it gets a new version."
 	if got := entry.User.Content[0].Text; got != want {
 		t.Fatalf("body\n got %q\nwant %q", got, want)
 	}

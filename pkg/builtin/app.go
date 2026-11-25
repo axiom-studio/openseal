@@ -22,7 +22,7 @@ func appActions() map[string]skill.Action {
 	appPath := chatPath("The app's directory, such as apps/tracker.")
 	return map[string]skill.Action{
 		SaveApp: {Name: SaveApp,
-			Description: "Build the app in a directory of this chat's files (its src/App.tsx exports the default App component) and show it live. Each save is a new version the person can view, undo, download and publish. Build errors come back so you can fix the files and save again.",
+			Description: "Build the app in a directory of this chat's files (its src/App.tsx exports the default App component); link the directory in your answer to show it live. Each save is a new version the person can view, undo, download and publish. Build errors come back so you can fix the files and save again.",
 			InputSchema: object([]interface{}{"path"}, map[string]interface{}{
 				"path":  appPath,
 				"title": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 300, "description": "The app's name; kept from the last save when omitted."},

@@ -21,7 +21,6 @@ func TestBoundedConversationArtifactsDoNotRequireApproval(t *testing.T) {
 	}{
 		{"generated image", builtin.SkillDefinition(), builtin.GenerateImage, ActionDispositionAllow},
 		{"private app", builtin.SkillDefinition(), builtin.SaveApp, ActionDispositionAllow},
-		{"present files", builtin.SkillDefinition(), builtin.Present, ActionDispositionAllow},
 		{"app data", builtin.SkillDefinition(), builtin.SaveAppData, ActionDispositionAllow},
 		{"read app data", builtin.SkillDefinition(), builtin.ReadAppData, ActionDispositionAllow},
 		{"find place", builtin.SkillDefinition(), builtin.FindPlace, ActionDispositionAllow},
