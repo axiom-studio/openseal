@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/builtin"
-	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
 func TestBoundedConversationArtifactsDoNotRequireApproval(t *testing.T) {
@@ -28,7 +27,6 @@ func TestBoundedConversationArtifactsDoNotRequireApproval(t *testing.T) {
 		{"find place", builtin.SkillDefinition(), builtin.FindPlace, ActionDispositionAllow},
 		{"find image", builtin.SkillDefinition(), builtin.FindImage, ActionDispositionAllow},
 		{"picture style", builtin.SkillDefinition(), builtin.SetImageStyle, ActionDispositionAllow},
-		{"update visual", presentation.SkillDefinition(), presentation.UpdateVisual, ActionDispositionAllow},
 		{"public app", builtin.SkillDefinition(), builtin.PublishApp, ActionDispositionRequireApproval},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

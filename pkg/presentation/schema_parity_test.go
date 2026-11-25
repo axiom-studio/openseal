@@ -17,7 +17,7 @@ import (
 // strictPayloads is every payload key's strict schema, as one map keyed by
 // payload, with text at its widest.
 func strictPayloads() map[string]interface{} {
-	properties := map[string]interface{}{"text": textPayloadSchema()}
+	properties := map[string]interface{}{"text": freeText()}
 	for key, schema := range payloadSchemas() {
 		properties[key] = schema
 	}

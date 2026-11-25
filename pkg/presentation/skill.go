@@ -1,13 +1,9 @@
 package presentation
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
-
-	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // rubric is the §6.1 "when to use what" guidance. A line names only the
@@ -76,63 +72,37 @@ func VisualRubric() string {
 	return b.String()
 }
 
-func SkillDefinition() *skill.Definition {
-	artifactRefs := map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 1, "items": closedObject([]interface{}{"id", "version", "requirementName"}, map[string]interface{}{
-		"id": str(0), "version": map[string]interface{}{"type": "integer", "minimum": 1}, "requirementName": str(0),
-	})}
-	return &skill.Definition{
-		ID: SkillID, Version: SkillVersion, Name: "Visuals",
-		Description: "Replace a visual you already showed in this chat with a newer version. New visuals belong on your answer.",
-		Icon:        "layout-dashboard", Category: "documents", Tags: []string{"interactive", "chart", "diagram", "form", "visual"},
-		Transport: skill.TransportReference{Kind: "tool", Endpoint: SkillID},
-		Actions: map[string]skill.Action{UpdateVisual: {
-			Name: UpdateVisual, Description: "Replace a visual you already showed in this chat with a newer version (e.g. as long work progresses).",
-			InputSchema: UpdateVisualInputSchema(),
-			OutputSchema: closedObject([]interface{}{"artifactRefs", "state"}, map[string]interface{}{
-				"artifactRefs": artifactRefs, "state": enum([]string{string(StateStreaming), string(StateReady)}),
-				// The components left out (Drop), each with its reason, so the next version can fix them.
-				"leftOut": map[string]interface{}{"type": "array", "items": closedObject([]interface{}{"reason"}, map[string]interface{}{
-					"path": freeText(), "componentId": freeText(), "reason": freeText(),
-				})},
-			}),
-			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
-			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{ArtifactType},
-		}},
-		Prompt: &capability.PromptModule{
-			Instructions: "Visuals go on your answer. Use update_visual only to replace a visual you already showed with a newer version, e.g. as long work progresses. " +
-				"Give each visual component a one-sentence summary for screen readers and voice. Never write HTML, scripts, colours or coordinates, and no URLs except the pages you fetched in a component's sources; images must already be in this chat and places come from find_place.",
-			UserInvocable: true, AllowedTools: []string{UpdateVisual},
-		},
-		Requirements: capability.Requirements{AlwaysAvailable: true},
-	}
-}
-
-// fieldExamples names the worked examples the visual field shows: one visual
-// answer and the replies that stay text.
+// fieldExamples names the worked examples the answer's description shows:
+// one visual answer and the replies that stay text.
 var fieldExamples = []string{"phone-plan", "text-feelings", "text-fact"}
 
-// VisualFieldDescription is the description of an answer's visual field: the
-// rubric, the exact format in the compact notation, and a few worked
-// examples, one compact JSON object per line.
-func VisualFieldDescription() string {
+// BlocksDescription is what the answer's description adds when the answer
+// may carry visuals: how to write a block, the rubric, the exact format of
+// every type and a few worked answers.
+func BlocksDescription() string {
 	var b strings.Builder
-	b.WriteString("Optional visual shown with your answer, directly under its text. ")
+	b.WriteString("Visuals go inside the answer, where they belong in the text, as blocks:\n" +
+		":::chart{#spend kind=bar title=\"Spend by month\"}\n| Month | Spend |\n|---|---|\n| Jan | 320 |\n:::\n" +
+		"A block opens with ::: and a type on its own line and closes with a ::: line. In {…}: #id (unique, short), title, summary, tone, " +
+		"and any field of the type's payload whose value is one word, number or quoted text (kind=bar, label=\"Rent\"). " +
+		"The body: for a layout (section, grid, carousel) its child blocks, with markdown between them read as text children, " +
+		"using more colons on the layout than on its children (::::section … :::text … ::: … ::::); " +
+		"for tabs one :::tab{label=\"…\"} block per tab; for text, caption and divider the text itself; " +
+		"for chart a markdown table whose first column is the point labels and each other column one series; " +
+		"for table a markdown table (add columns: in YAML above it for column kinds); " +
+		"for every other type the rest of its payload as YAML (lists and nested objects), " +
+		"where a markdown table can fill the payload's one list of flat items. binding and sources go in the YAML too.\n")
 	b.WriteString(VisualRubric())
 	b.WriteString("\n")
 	b.WriteString(VisualFormat())
-	b.WriteString("\nExamples (userAsks, your answer text, and the visual if any):")
+	b.WriteString("\nExamples:")
 	for _, example := range VisualExamples() {
 		if !contains(fieldExamples, example.Name) {
 			continue
 		}
-		encoded, err := json.Marshal(example)
-		if err != nil {
-			continue
-		}
-		b.WriteString("\n")
-		b.Write(encoded)
+		b.WriteString("\nUser: " + example.Prompt + "\nAnswer:\n" + example.Answer() + "\n")
 	}
-	return b.String()
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // VisualFormat spells out the exact shape of a visual in the compact
@@ -157,20 +127,18 @@ func VisualFormat() string {
 		}
 		b.WriteString(line + "\n")
 	}
-	b.WriteString("Visual = " + notation.render(visualSchema(componentRef(), "")) + "\n")
 	envelope := envelopeProperties(componentRef())
 	delete(envelope, "children")
-	envelope["type"] = describe(map[string]interface{}{"type": "string"}, "one of the types below")
-	b.WriteString("Component = " + notation.render(objectOf([]interface{}{"id", "type"}, envelope)) +
-		" plus only the payload whose key equals type (text, caption and divider use text); payloads of other types are ignored. " +
-		"A component whose type is missing or not one of the types below is left out.\n")
+	envelope["type"] = describe(map[string]interface{}{"type": "string"}, "the block's type, one of the types below")
+	b.WriteString("Each block is one Component = " + notation.render(objectOf([]interface{}{"id", "type"}, envelope)) +
+		" plus the payload of its type, written as above. A block of any other type is left out.\n")
 	var layouts []string
 	for _, name := range TypeNames() {
 		if IsLayout(name) {
 			layouts = append(layouts, name)
 		}
 	}
-	fmt.Fprintf(&b, "Components nest at most %d levels deep (top level is 1, so no %s at level %d); at most %d components in all including nested ones; at most %d KB of JSON.\n",
+	fmt.Fprintf(&b, "Blocks nest at most %d levels deep (top level is 1, so no %s at level %d); at most %d components in all including nested ones; at most %d KB in all.\n",
 		MaxDepth, strings.Join(layouts, ", "), MaxDepth, MaxComponents, MaxSurfaceBytes/1024)
 	b.WriteString("Also checked: " + strings.Join(sharedRules, "; ") + ".\n")
 	b.WriteString("Types:")
@@ -209,37 +177,6 @@ type Visual struct {
 // Surface completes a visual into a surface in the given state.
 func (v Visual) Surface(state State) Surface {
 	return Surface{Schema: Schema, Title: v.Title, State: state, Components: v.Components}
-}
-
-// VisualJSONSchema is the JSON Schema of a Visual for an answer's visual
-// field. It is deliberately loose: components list every envelope and
-// payload key but leave payloads open, because VisualFieldDescription
-// spells out every exact shape in a fraction of the tokens and Validate
-// checks each visual strictly.
-func VisualJSONSchema() map[string]interface{} {
-	return visualSchema(looseComponentSchema(), "Each component, its payload and any nested components follow the format in this visual's description exactly.")
-}
-
-// UpdateVisualInputSchema is the update_visual input schema. Its components
-// are as loose as an answer's visual field, which always travels with it.
-func UpdateVisualInputSchema() map[string]interface{} {
-	return closedObject([]interface{}{"visualId", "expectedLatestVersion", "title", "state", "components", "requirementName"}, map[string]interface{}{
-		"visualId":              describe(idSchema(), "Id of the visual to replace."),
-		"expectedLatestVersion": map[string]interface{}{"type": "integer", "minimum": 0, "description": "The visual's current version; 0 only when it does not exist yet."},
-		"title":                 filledText(),
-		"state":                 enum([]string{string(StateStreaming), string(StateReady)}),
-		"components": describe(array(looseComponentSchema(), 1, MaxComponents),
-			"Components in exactly the format described on your answer's visual field."),
-		"requirementName": strRange(1, 128),
-	})
-}
-
-func visualSchema(component map[string]interface{}, description string) map[string]interface{} {
-	components := array(component, 1, MaxComponents)
-	if description != "" {
-		components = describe(components, description)
-	}
-	return objectOf([]interface{}{"title", "components"}, map[string]interface{}{"title": filledText(), "components": components})
 }
 
 // componentRef stands for a nested component in the strict schemas.
@@ -344,40 +281,6 @@ func payloadSchemas() map[string]map[string]interface{} {
 			"label": filledText(), "children": childrenSchema(componentRef(), 1, maxChildren),
 		}), minTabs, maxTabs),
 	}
-}
-
-// looseComponentSchema lists every envelope and payload key with payloads
-// and nested components left open. Where one key means different things
-// per type (summary, text), its description gives each type's rule.
-func looseComponentSchema() map[string]interface{} {
-	open := map[string]interface{}{"type": "object"}
-	properties := envelopeProperties(open)
-	properties["type"] = describe(properties["type"].(map[string]interface{}), "Set only the payload whose key equals type (text, caption and divider use text).")
-	properties["text"] = textPayloadSchema()
-	for key, payload := range payloadSchemas() {
-		switch payload["type"] {
-		case "string":
-			properties[key] = payload
-		case "array":
-			properties[key] = map[string]interface{}{"type": "array", "items": open}
-		default:
-			properties[key] = open
-		}
-	}
-	return objectOf([]interface{}{"id", "type"}, properties)
-}
-
-// textPayloadSchema is the loose schema of the shared text key, with the
-// types that may leave it out in the description.
-func textPayloadSchema() map[string]interface{} {
-	var optional []string
-	for _, name := range TypeNames() {
-		spec := catalogue[name]
-		if spec.payload == "text" && spec.payloadOptional {
-			optional = append(optional, name)
-		}
-	}
-	return describe(freeText(), "Not blank, except that "+strings.Join(optional, ", ")+" may leave it out.")
 }
 
 func bindingSchema(allowed []BindingKind) map[string]interface{} {

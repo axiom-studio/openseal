@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/models"
+	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -227,6 +228,13 @@ func (w *DeliveryWorker) deliver(ctx context.Context, delivery *models.ExternalC
 		}
 	}
 	message = withRoutineReportHeader(delivery, message)
+	// A channel gets the text without visual blocks or their placeholders;
+	// the visuals themselves go as the request's visuals, where it shows them.
+	if len(presentation.ParseAnswer(message.Content)) > 0 {
+		plain := *message
+		plain.Content = presentation.PlainAnswer(message.Content)
+		message = &plain
+	}
 	deliveryEndpoint := models.CloneExternalConversationEndpoint(endpoint)
 	if origin := strings.TrimSpace(delivery.ExternalConversationID); origin != "" {
 		deliveryEndpoint.Address = origin

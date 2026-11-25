@@ -191,7 +191,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 			f.Model.Add(&looptest.ModelRule{Name: "card", Reply: func(v looptest.StepView) models.ModelStepResult {
 				if first {
 					first = false
-					return looptest.FinalAnswer(map[string]any{"answer": "Here is your list.", "visual": scenarioChecklistVisual()})
+					return looptest.FinalAnswer(map[string]any{"answer": blocksAnswer("Here is your list.", scenarioChecklistVisual())})
 				}
 				return looptest.FinalAnswer(map[string]any{"answer": "Noted."})
 			}})
@@ -252,7 +252,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 		f.Model.Add(&looptest.ModelRule{Name: "card", Reply: func(v looptest.StepView) models.ModelStepResult {
 			if first {
 				first = false
-				return looptest.FinalAnswer(map[string]any{"answer": "Learn and cook.", "visual": scenarioFlashcardRecipeVisual()})
+				return looptest.FinalAnswer(map[string]any{"answer": blocksAnswer("Learn and cook.", scenarioFlashcardRecipeVisual())})
 			}
 			return looptest.FinalAnswer(map[string]any{"answer": "Noted."})
 		}})
@@ -303,7 +303,7 @@ func TestRunStartNoteCarriesEphemeralContextNotTheSystemPrompt(t *testing.T) {
 		f.Model.Add(&looptest.ModelRule{Name: "poll", Reply: func(v looptest.StepView) models.ModelStepResult {
 			if first {
 				first = false
-				return looptest.FinalAnswer(map[string]any{"answer": "Vote here.", "visual": &presentation.Visual{Title: "Dinner", Components: []presentation.Component{poll, explorer}}})
+				return looptest.FinalAnswer(map[string]any{"answer": blocksAnswer("Vote here.", &presentation.Visual{Title: "Dinner", Components: []presentation.Component{poll, explorer}})})
 			}
 			return looptest.FinalAnswer(map[string]any{"answer": "Noted."})
 		}})
