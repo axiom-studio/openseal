@@ -20,7 +20,7 @@ import (
 // text and schemas come from pkg/workspace, so a change there is one too.
 const (
 	SkillID      = "openseal.computer"
-	SkillVersion = "1.1.0"
+	SkillVersion = "1.2.0"
 
 	// ListComputers is the only computer-only action; the host answers it.
 	ListComputers = "list_computers"
@@ -124,8 +124,8 @@ func computerProperty() map[string]interface{} {
 		"description": "The computer's name from list_computers. Required for changes and commands when the person has more than one computer. Reads without it use the person's default computer, or their only one online."}
 }
 
-// artifactRefs is the files present shows, as openseal.builtin's present
-// returns them, so the kernel attaches them to the answer the same way.
+// artifactRefs is the files present copied into the chat, with their chat
+// paths, so an answer that links a path attaches that file.
 func artifactRefs() map[string]interface{} {
 	return map[string]interface{}{"type": "array", "minItems": 1, "items": object([]interface{}{"id", "version"}, map[string]interface{}{
 		"id": stringProperty(), "version": map[string]interface{}{"type": "integer", "minimum": 1},
@@ -137,9 +137,9 @@ func artifactRefs() map[string]interface{} {
 func presentAction() skill.Action {
 	return skill.Action{
 		Name: Present,
-		Description: "Show the person a file from their own computer in this chat: a PDF, image, deck, spreadsheet or any other file, " +
-			"as a card they can open or download. It copies each file into the chat's files under computers/<computer>/ and returns artifactRefs " +
-			"with that chat path; name the path (or id) in your final answer's files to hand the file over. Use it instead of reading a file " +
+		Description: "Bring a file from the person's own computer into this chat: a PDF, image, deck, spreadsheet or any other file. " +
+			"It copies each file into the chat's files under computers/<computer>/ and returns artifactRefs with that chat path; " +
+			"link the path in your answer to show the file. Use it instead of reading a file " +
 			"that is not text, or re-creating it on the secure VM. Paths are full paths on that computer inside its allowed folders, " +
 			fmt.Sprintf("at most %d files of %d MB each.", bridge.MaxPresentFiles, bridge.MaxPresentBytes>>20),
 		InputSchema: object([]interface{}{"paths"}, map[string]interface{}{
