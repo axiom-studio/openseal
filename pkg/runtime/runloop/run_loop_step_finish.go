@@ -16,6 +16,12 @@ import (
 // finishAndSettle is phases 9-11 after an inline phase that did not end the
 // step: finish + apply, then the single settle-phase call.
 func (d *drive) finishAndSettle(ctx context.Context, st *stepState) stepResult {
+	// A cut-off step's note follows its tool results, which it explains.
+	if d.cutOff(st) {
+		if err := d.appendResumeNote(ctx, st); err != nil {
+			return d.stepError(ctx, st, err, "")
+		}
+	}
 	if err := d.finishCompleted(ctx, st); err != nil {
 		return exitResultPtr(d.writeErrorExit(err))
 	}

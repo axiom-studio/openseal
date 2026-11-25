@@ -154,9 +154,13 @@ type TurnHostFailure struct {
 	// loop compacts the session and sends the step once more.
 	ContextPressure *HostedContextPressure
 	// OutputLimitTokens is set with TurnHostOutputTruncated to the output
-	// cap that cut the call off, when the host knows it. The loop names it
-	// in the note that asks the model to work in smaller pieces.
+	// cap the host asked for, when it knows it.
 	OutputLimitTokens int64
+	// OutputTokens is set with TurnHostOutputTruncated to the output the
+	// provider reported for the cut-off call, when it reported any. The
+	// loop names it in the note that asks the model to work in smaller
+	// pieces: it is the size that did not fit.
+	OutputTokens int64
 }
 
 // TurnHostContextExceeded is the TurnHostFailure code for a step whose input
@@ -164,9 +168,10 @@ type TurnHostFailure struct {
 const TurnHostContextExceeded = "model_context_exceeded"
 
 // TurnHostOutputTruncated is the TurnHostFailure code for a model call the
-// provider cut off at its output cap. The response is incomplete (its tool
-// calls cannot be parsed), so the host returns no result; the loop discards
-// the step and asks the model to continue in smaller pieces.
+// provider cut off at its output cap with nothing usable in it: no text and
+// no complete tool call. A cut-off call with some is a result with stop
+// reason max_tokens instead, which the loop keeps and resumes from. The
+// loop discards this one and asks the model to continue in smaller pieces.
 const TurnHostOutputTruncated = "provider_output_truncated"
 
 // HostedContextPressure compares a host's estimate of a step's model input

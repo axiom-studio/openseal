@@ -714,6 +714,11 @@ func finalToolEntryID(entries []*models.SessionEntry) string {
 // inlinePhase is phase 8 for a model step, then phases 9-11.
 func (d *drive) inlinePhase(ctx context.Context, st *stepState) stepResult {
 	assistant := st.output
+	if d.cutOff(st) {
+		if res, done := d.resumeCutOff(ctx, st); done {
+			return res
+		}
+	}
 	if assistant == nil || len(assistant.ToolCalls) == 0 {
 		text := ""
 		if assistant != nil {
@@ -768,6 +773,13 @@ func (d *drive) plainTextFinal(ctx context.Context, st *stepState, text string) 
 			Output: map[string]interface{}{"summary": text},
 		}, "")
 	}
+	// An answer longer than one response was written across steps cut off
+	// at the output limit; it is all of them, in order.
+	lead, err := d.cutOffLead(ctx, st)
+	if err != nil {
+		return d.storeError(ctx, st, err, StepFailureProducerFailed)
+	}
+	text = lead + text
 	cc := control.NewContext(d.toolsInput(st, nil), nil)
 	result, err := d.l.config.PlainTextFinal(st.durCtx, cc, text)
 	if err != nil {

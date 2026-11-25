@@ -1,8 +1,10 @@
 package runtime
 
 // Run-loop scenarios for a model call the provider cuts off at its output
-// cap: the step is discarded, a note asks the model to continue in smaller
-// pieces, and only three cutoffs in a row fail the Run.
+// cap. A cut-off response with text or complete tool calls is kept: the
+// calls run, a note asks the model to resume, and an answer written across
+// cut-off steps is posted whole. One with nothing usable is discarded with a
+// note, and three of those in a row fail the Run.
 
 import (
 	"strings"
@@ -19,6 +21,7 @@ func outputCutoff() error {
 		Code:              modelstep.TurnHostOutputTruncated,
 		Message:           "Model output was truncated at 32000 tokens by the gateway's per-call output allowance for this model.",
 		OutputLimitTokens: 32_000,
+		OutputTokens:      31_990,
 	}
 }
 
@@ -60,7 +63,7 @@ func TestLoopOutputCutoffContinuesWithANote(t *testing.T) {
 			t.Fatalf("output_cutoff notes = %d, want 1", len(notes))
 		}
 		text := notes[0].Note.Text
-		for _, want := range []string{"32000 tokens", "was cut off", "smaller pieces", "append"} {
+		for _, want := range []string{"about 31990 tokens", "Nothing of that response was kept", "smaller pieces", "in parts"} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("note %q does not say %q", text, want)
 			}
@@ -137,6 +140,112 @@ func TestLoopSuccessfulStepResetsOutputCutoffs(t *testing.T) {
 		}
 		if f.Dispatch.Count("lookup") != 1 {
 			t.Fatalf("lookup dispatched %d times, want 1", f.Dispatch.Count("lookup"))
+		}
+	})
+}
+
+// cutOffReply is reply as a response the provider cut off at its output
+// limit after outputTokens.
+func cutOffReply(reply models.ModelStepResult, outputTokens int64) models.ModelStepResult {
+	reply.Assistant.StopReason = models.ModelStopMaxTokens
+	reply.Assistant.Usage.OutputTokens = outputTokens
+	return reply
+}
+
+// TestLoopCutOffAnswerIsKeptAndResumed: an answer longer than one response
+// is cut off twice; each part is kept, the model resumes after a note, and
+// the posted answer is all three parts in order.
+func TestLoopCutOffAnswerIsKeptAndResumed(t *testing.T) {
+	looptest.EachStore(t, "output_cutoff_kept_text", func(t *testing.T, store models.KernelStore) {
+		parts := []string{"The periodic table has 118 elem", "ents in 18 groups and 7 per", "iods."}
+		f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "answer", When: stepPurpose, Reply: func(v looptest.StepView) models.ModelStepResult {
+			step := v.Step()
+			if step > 1 {
+				if last := v.LastEntry(); last == nil || last.Note == nil || last.Note.Kind != string(models.NoteOutputCutoff) {
+					t.Errorf("step %d saw %s, want the cutoff note last", step, v.Describe())
+				}
+			}
+			if step < len(parts) {
+				return cutOffReply(looptest.Say(parts[step-1]), 8_000)
+			}
+			return looptest.Say(parts[len(parts)-1])
+		}}))
+		conversation, run := f.StartChat("explain the periodic table")
+		done := f.DriveToRest(run.ID, 2)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
+
+		answers := portAgentMessages(f, conversation.ID)
+		if len(answers) != 1 || answers[0].Content != strings.Join(parts, "") {
+			t.Fatalf("channel = %s, want the whole answer once", looptest.DescribeMessages(f.Messages(conversation.ID)))
+		}
+		notes := outputCutoffNotes(f, run.ID)
+		if len(notes) != 2 {
+			t.Fatalf("output_cutoff notes = %d, want 2", len(notes))
+		}
+		for _, want := range []string{"about 8000 tokens", "was kept", "Resume directly", "joined to it"} {
+			if !strings.Contains(notes[0].Note.Text, want) {
+				t.Fatalf("note %q does not say %q", notes[0].Note.Text, want)
+			}
+		}
+		var stops []string
+		for _, step := range f.SortedSteps(run.ID) {
+			stops = append(stops, string(step.Status)+":"+step.StopReason)
+		}
+		if got := strings.Join(stops, ","); got != "completed:max_tokens,completed:max_tokens,completed:end" {
+			t.Fatalf("steps = %s", got)
+		}
+	})
+}
+
+// TestLoopCutOffToolCallsRun: a response cut off after a complete tool call
+// keeps the call, which runs; the note follows its result.
+func TestLoopCutOffToolCallsRun(t *testing.T) {
+	looptest.EachStore(t, "output_cutoff_kept_calls", func(t *testing.T, store models.KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			&looptest.ModelRule{Name: "cut lookup", Times: 1, When: stepPurpose, Reply: func(v looptest.StepView) models.ModelStepResult {
+				return cutOffReply(looptest.Act("Looking up issue 3.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "3"})), 12_000)
+			}},
+			&looptest.ModelRule{Name: "answer", When: stepPurpose, Reply: func(v looptest.StepView) models.ModelStepResult {
+				if last := v.LastEntry(); last == nil || last.Note == nil || last.Note.Kind != string(models.NoteOutputCutoff) {
+					t.Errorf("the step after the cutoff saw %s, want the cutoff note last", v.Describe())
+				}
+				if len(v.ToolResultsSinceUser()) != 1 {
+					t.Errorf("the step after the cutoff saw %s, want the lookup result", v.Describe())
+				}
+				return looptest.Say("Issue 3 is open.")
+			}},
+		))
+		conversation, run := f.StartChat("check issue 3")
+		done := f.DriveToRest(run.ID, 2)
+		f.MustStatus(done, models.AgentRunStatusCompleted)
+		if f.Dispatch.Count("lookup") != 1 {
+			t.Fatalf("lookup dispatched %d times, want 1", f.Dispatch.Count("lookup"))
+		}
+		notes := outputCutoffNotes(f, run.ID)
+		if len(notes) != 1 || !strings.Contains(notes[0].Note.Text, "complete tool calls ran") {
+			t.Fatalf("output_cutoff notes = %#v", notes)
+		}
+		if answers := portAgentMessages(f, conversation.ID); len(answers) != 1 || answers[0].Content != "Issue 3 is open." {
+			t.Fatalf("channel = %s", looptest.DescribeMessages(f.Messages(conversation.ID)))
+		}
+	})
+}
+
+// TestLoopEndlessCutOffsFailTheRun: a model whose every response is cut off
+// keeps going only up to the bound, then the Run fails as a cutoff.
+func TestLoopEndlessCutOffsFailTheRun(t *testing.T) {
+	looptest.EachStore(t, "output_cutoff_endless", func(t *testing.T, store models.KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(&looptest.ModelRule{Name: "rambling", When: stepPurpose, Reply: func(looptest.StepView) models.ModelStepResult {
+			return cutOffReply(looptest.Say("and more "), 8_000)
+		}}))
+		_, run := f.StartChat("tell me everything")
+		failed := f.DriveToRest(run.ID, 4)
+		f.MustStatus(failed, models.AgentRunStatusFailed)
+		if failed.FailureExplanation == nil || failed.FailureExplanation.Code != modelstep.TurnHostOutputTruncated {
+			t.Fatalf("failure = %#v", failed.FailureExplanation)
+		}
+		if got := len(f.Model.Calls(models.ModelStepPurposeStep)); got != 12 {
+			t.Fatalf("step calls = %d, want 12", got)
 		}
 	})
 }

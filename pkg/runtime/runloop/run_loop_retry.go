@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/models"
@@ -87,9 +89,15 @@ func (d *drive) hostUnavailable(ctx context.Context, st *stepState, cause error)
 	}, cause, StepFailureHostUnavailable)
 }
 
-// maximumOutputCutoffs is the bound of consecutive output cutoffs: the third
-// fails the Run with provider_output_truncated.
+// maximumOutputCutoffs is the bound of consecutive output cutoffs that kept
+// nothing: the third fails the Run with provider_output_truncated.
 const maximumOutputCutoffs = 3
+
+// maximumResumedCutoffs bounds consecutive cut-off steps of any kind. A
+// cutoff that kept text or tool calls is progress, so it does not count
+// toward maximumOutputCutoffs; this keeps a model that never finishes a
+// response from going on forever.
+const maximumResumedCutoffs = 12
 
 // outputCutoff handles a model call cut off at its output cap. The cut-off
 // response is discarded: the host returns no result for it, and its tool
@@ -109,14 +117,14 @@ func (d *drive) outputCutoff(ctx context.Context, st *stepState, failure *models
 	// always has it; a crash in between redoes the model call with the note.
 	_, err = d.appendStepEntries(ctx, func(session *models.AgentSession) ([]*models.SessionEntry, error) {
 		key := models.OutputCutoffEntryKey(st.step.ID)
-		data, err := json.Marshal(outputCutoffNoteData{OutputLimitTokens: failure.OutputLimitTokens})
+		data, err := json.Marshal(outputCutoffNoteData{OutputLimitTokens: failure.OutputLimitTokens, OutputTokens: failure.OutputTokens})
 		if err != nil {
 			return nil, err
 		}
 		note := &models.SessionEntry{
 			ID: models.SessionEntryID(session.ID, key), Scope: d.run.Scope, SessionID: session.ID, RunID: d.run.ID,
 			StepID: st.step.ID, Step: st.step.Sequence, Type: models.SessionEntryNote, SourceKey: key,
-			Note: &models.NoteEntry{Kind: models.NoteOutputCutoff, Text: outputCutoffNoteText(failure.OutputLimitTokens), Data: data},
+			Note: &models.NoteEntry{Kind: models.NoteOutputCutoff, Text: outputCutoffNoteText(failure.OutputTokens), Data: data},
 		}
 		note.Tokens = modelstep.EstimateEntryTokens(note)
 		return []*models.SessionEntry{note}, nil
@@ -135,6 +143,9 @@ func (d *drive) outputCutoff(ctx context.Context, st *stepState, failure *models
 	payload := map[string]interface{}{"reason": modelstep.TurnHostOutputTruncated, "consecutiveCutoffs": cutoffs}
 	if failure.OutputLimitTokens > 0 {
 		payload["outputLimitTokens"] = failure.OutputLimitTokens
+	}
+	if failure.OutputTokens > 0 {
+		payload["outputTokens"] = failure.OutputTokens
 	}
 	run, err := d.commitRun(ctx, st, activity.RunTransitionRequest{
 		Status: models.AgentRunStatusRunning, EventType: runEventOutputCutoff, Severity: models.ActivitySeverityWarning,
@@ -157,16 +168,138 @@ const runEventOutputCutoff = "run.output_cutoff"
 // outputCutoffNoteData is the kernel data of an output_cutoff note.
 type outputCutoffNoteData struct {
 	OutputLimitTokens int64 `json:"outputLimitTokens,omitempty"`
+	OutputTokens      int64 `json:"outputTokens,omitempty"`
+	// Kept marks a cutoff whose text and complete tool calls were kept.
+	Kept bool `json:"kept,omitempty"`
 }
 
-// outputCutoffNoteText is what the model reads after a cutoff.
-func outputCutoffNoteText(limitTokens int64) string {
-	limit := "the output limit"
-	if limitTokens > 0 {
-		limit = fmt.Sprintf("the output limit of %d tokens", limitTokens)
-	}
-	return "Your last response hit " + limit + " and was cut off, so it was discarded and none of it ran. " +
-		"Don't try to produce it again in one response. Continue from where you are and split long work into smaller pieces: " +
-		"write a long file in parts (create it with the first part, then append the rest in later steps), " +
+// outputCutoffNoteText is what the model reads after a cutoff that kept
+// nothing.
+func outputCutoffNoteText(outputTokens int64) string {
+	return "Output token limit hit" + cutOffSize(outputTokens) + ". Nothing of that response was kept and none of it ran. " +
+		"Don't produce it again in one response: break the work into smaller pieces, one per response. " +
+		"Write a long file in parts (create it with the first part, then add the rest in later responses), " +
 		"or give a shorter answer and put the detail in a file."
+}
+
+// cutOffSize is " after about N tokens", or "" when the host did not say.
+func cutOffSize(outputTokens int64) string {
+	if outputTokens <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" after about %d tokens", outputTokens)
+}
+
+// cutOff reports a step whose model response the provider cut off at its
+// output limit with something usable in it (text or complete tool calls):
+// the loop keeps that and has the model resume from it.
+func (d *drive) cutOff(st *stepState) bool {
+	return st.output != nil && st.output.StopReason == models.ModelStopMaxTokens &&
+		st.mode == agentrun.StepModeNormal && d.session != nil
+}
+
+// resumeCutOff keeps a cut-off step and goes on to the next, as a person
+// working in Claude Code would see it: the partial response stays, its
+// complete tool calls run, and a note asks the model to resume. Text alone
+// is never the final answer. done is false for a step with tool calls,
+// which run as usual (finishAndSettle adds the note after their results).
+func (d *drive) resumeCutOff(ctx context.Context, st *stepState) (stepResult, bool) {
+	earlier, err := consecutiveCutOffSteps(ctx, d.l.store, d.run.Scope, d.run.ID, st.step.Sequence-1, maximumResumedCutoffs)
+	if err != nil {
+		return d.storeError(ctx, st, err, StepFailureProducerFailed), true
+	}
+	cutoffs := earlier + 1
+	d.l.logger.Warnw("model output cut off; keeping it and resuming", "run", d.run.ID, "step", st.step.ID,
+		"outputTokens", st.output.Usage.OutputTokens, "toolCalls", len(st.output.ToolCalls), "consecutiveCutoffs", cutoffs)
+	if cutoffs >= maximumResumedCutoffs {
+		return d.fail(ctx, st, agentrun.LoopFailure{
+			Kind: conversation.RunFailureKindExecution, Code: modelstep.TurnHostOutputTruncated,
+			Message: fmt.Sprintf("The model's responses hit their output limit %d times in a row, so the run stopped.", cutoffs),
+		}, nil, modelstep.TurnHostOutputTruncated), true
+	}
+	if len(st.output.ToolCalls) > 0 {
+		return stepResult{}, false
+	}
+	if err := d.appendResumeNote(ctx, st); err != nil {
+		return d.stepError(ctx, st, err, ""), true
+	}
+	return d.continueAfter(ctx, st, stepNext), true
+}
+
+// appendResumeNote adds the note after a kept cutoff. Its id is keyed by the
+// step, so a step redone after a crash does not add it twice.
+func (d *drive) appendResumeNote(ctx context.Context, st *stepState) error {
+	_, err := d.appendStepEntries(ctx, func(session *models.AgentSession) ([]*models.SessionEntry, error) {
+		key := models.OutputCutoffEntryKey(st.step.ID)
+		data, err := json.Marshal(outputCutoffNoteData{OutputTokens: st.output.Usage.OutputTokens, Kept: true})
+		if err != nil {
+			return nil, err
+		}
+		note := &models.SessionEntry{
+			ID: models.SessionEntryID(session.ID, key), Scope: d.run.Scope, SessionID: session.ID, RunID: d.run.ID,
+			StepID: st.step.ID, Step: st.step.Sequence, Type: models.SessionEntryNote, SourceKey: key,
+			Note: &models.NoteEntry{Kind: models.NoteOutputCutoff, Text: resumeNoteText(st.output.Usage.OutputTokens, len(st.output.ToolCalls) > 0), Data: data},
+		}
+		note.Tokens = modelstep.EstimateEntryTokens(note)
+		return []*models.SessionEntry{note}, nil
+	})
+	return err
+}
+
+// resumeNoteText is what the model reads after a cutoff that was kept.
+func resumeNoteText(outputTokens int64, ranTools bool) string {
+	kept := "Your response so far was kept."
+	if ranTools {
+		kept = "Your response so far was kept and its complete tool calls ran."
+	}
+	return "Output token limit hit" + cutOffSize(outputTokens) + ". " + kept + " A tool call you had not finished was dropped and did not run. " +
+		"Resume directly where you stopped: no apology, no recap. If you were writing your answer, continue it from the exact point " +
+		"it was cut, mid-sentence if need be; what you write next is joined to it. Break the remaining work into smaller pieces."
+}
+
+// consecutiveCutOffSteps counts the steps through sequence through that
+// ended at the output limit, kept or not, newest first, up to limit.
+func consecutiveCutOffSteps(ctx context.Context, turns models.AgentTurnStore, scope models.Scope, runID string, through int64, limit int) (int, error) {
+	rows, err := turns.ListAgentTurns(ctx, models.AgentTurnFilter{Scope: scope, RunID: runID, Descending: true, Limit: limit + 2})
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, row := range rows {
+		if row == nil || row.Sequence > through {
+			continue
+		}
+		kept := row.Status == models.AgentTurnStatusCompleted && row.StopReason == string(models.ModelStopMaxTokens)
+		lost := row.Status == models.AgentTurnStatusFailed && row.FailureCode == modelstep.TurnHostOutputTruncated
+		if !kept && !lost {
+			break
+		}
+		count++
+	}
+	return count, nil
+}
+
+// cutOffLead is the text of the steps right before this one that were cut
+// off with text only: the start of an answer longer than one response.
+func (d *drive) cutOffLead(ctx context.Context, st *stepState) (string, error) {
+	entries, err := d.l.sessions.ListAgentSessionEntries(ctx, models.SessionEntryFilter{
+		Scope: d.run.Scope, RunID: d.run.ID, Types: []models.SessionEntryType{models.SessionEntryAssistant},
+		Descending: true, Limit: maximumResumedCutoffs + 2,
+	})
+	if err != nil {
+		return "", err
+	}
+	var parts []string
+	for _, entry := range entries {
+		if entry == nil || entry.Assistant == nil || entry.StepID == st.step.ID {
+			continue
+		}
+		a := entry.Assistant
+		if a.StopReason != models.ModelStopMaxTokens || len(a.ToolCalls) > 0 {
+			break
+		}
+		parts = append(parts, a.Text)
+	}
+	slices.Reverse(parts)
+	return strings.Join(parts, ""), nil
 }
