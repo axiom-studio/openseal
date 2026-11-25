@@ -94,27 +94,23 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	base := map[string]interface{}{"conversationId": conversation.ID, "triggerMessageId": trigger.ID}
 	content := strings.TrimSpace(answer.Answer)
 	guard := d.Guard
-	// 9 (first part). The Run and the files its answer hands over.
 	references := []models.ConversationReference{{Kind: models.ConversationReferenceRun, ID: run.ID}}
-	artifacts, err := runtimeconversation.RunActionArtifactReferences(ctx, h.sessions, h.actions, run)
+	saved, err := runtimeconversation.RunActionArtifactReferences(ctx, h.sessions, h.actions, run)
 	if err != nil {
 		return agentrun.FinalDeliveryResult{}, err
 	}
-	handedOver, unknownFiles := runtimeconversation.HandedOverArtifacts(artifacts, answer.Output)
-	references = append(references, handedOver...)
-	if len(unknownFiles) > 0 && !runtimeconversation.RunExplainingFailure(run) {
-		return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: runtimeconversation.UnknownHandedOverFilesText(unknownFiles, artifacts)}, nil
-	}
-	// The files the Run saved and does not hand over were made to build its
-	// answer; the catalog remembers that so file lists can leave them out.
-	// It is bookkeeping for listings, so it never holds an answer back.
-	_ = models.MarkRunFiles(ctx, r.artifacts, run.Scope, artifacts, handedOver)
 
 	// 3. Failure explanation: always a visible text reply, never a visual.
 	if runtimeconversation.RunExplainingFailure(run) {
 		if content == "" {
 			content = runtimeconversation.TerminalRunFailureReply(ctx, h.sessions, h.actions, run)
 		}
+		files, err := r.resolveAnswerFiles(ctx, run, content, saved)
+		if err != nil {
+			return agentrun.FinalDeliveryResult{}, err
+		}
+		content = files.content
+		references = append(references, files.references...)
 		message, replayed, err := r.postAgentResponseWithReferences(ctx, run, conversation, trigger, content, references, &guard)
 		if errors.Is(err, errConversationParticipationStopped) {
 			return participationStoppedDelivery(), nil
@@ -156,6 +152,27 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 			content = repaired
 		}
 	}
+	// The files the answer links, stored as they are now. A link to a file
+	// that is not in the chat is asked about once, then left as its text.
+	files, err := r.resolveAnswerFiles(ctx, run, content, saved)
+	if err != nil {
+		return agentrun.FinalDeliveryResult{}, err
+	}
+	if len(files.unknown) > 0 {
+		prior, err := h.priorDeliveryRejections(ctx, run, answer, isFileLinkRepairRequest)
+		if err != nil {
+			return agentrun.FinalDeliveryResult{}, err
+		}
+		if prior == 0 {
+			return agentrun.FinalDeliveryResult{Kind: agentrun.FinalDeliveryRetryFinal, RejectionText: fileLinkRepairRequest(files.unknown, saved)}, nil
+		}
+	}
+	content = files.content
+	references = append(references, files.references...)
+	// The files the Run saved and does not show were made to build its
+	// answer; the catalog remembers that so file lists can leave them out.
+	// It is bookkeeping for listings, so it never holds an answer back.
+	_ = models.MarkRunFiles(ctx, r.artifacts, run.Scope, saved, files.references)
 	visual, drops := r.readAnswerBlocks(ctx, run, content)
 	left := map[string]bool{}
 	for _, drop := range drops {
@@ -163,8 +180,8 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 			left[drop.BlockID] = true
 		}
 	}
-	// Images the Run already attached (generate_image, present) show with the
-	// answer; blocks that only repeat them would show each one twice.
+	// Images the answer links show with it; blocks that only repeat them
+	// would show each one twice.
 	if visual != nil && presentation.PlainAnswer(content) != "" && visualRepeatsAttachedImages(*visual, references) {
 		for _, component := range visual.Components {
 			left[component.ID] = true
@@ -172,8 +189,9 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 		visual, drops = nil, nil
 	}
 
-	// 6. Reactions only (also an answer that only repeats the reacted emoji).
-	if visual == nil {
+	// 6. Reactions only (also an answer that only repeats the reacted emoji
+	// and shows nothing else).
+	if visual == nil && len(files.references) == 0 {
 		reactions, err := h.runReactions(ctx, run)
 		if err != nil {
 			return agentrun.FinalDeliveryResult{}, err
@@ -239,6 +257,9 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d agentrun.Final
 	}
 	for _, drop := range drops {
 		h.visualRejected(ctx, run, d.Step, guard.WorkerID, drop)
+	}
+	for _, target := range files.unknown {
+		h.fileLinkRejected(ctx, run, d.Step, guard.WorkerID, target)
 	}
 
 	// 11. Output.

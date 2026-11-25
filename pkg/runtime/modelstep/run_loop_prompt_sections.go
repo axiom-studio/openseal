@@ -77,9 +77,15 @@ const LoopMediaText = "Images appear in messages and tool results in the order t
 // on the catalog, so it is guidance in the capabilities note.
 const LoopReviewSummariesText = "Tools that change something carry a summary for the person who approves them. When a tool's input has arguments and reviewContext, put the exact tool arguments in arguments and describe the effect in reviewContext: summary states exactly what will happen, content is the exact text or payload that will be sent or published, and target, audience, consequences and facts name what is affected. When a tool's input has _reviewSummary, set it to one sentence a reviewer reads on the approval card: what the call does and to what. Review fields are never passed to the tool, so put everything the tool needs in its own arguments. An action waiting for approval has not happened yet; never say it is done until its result says so."
 
-// LoopAnswerFormatText is the answer_format section: the visual block spec.
-// It is the same for every Run that may show visuals, so it stays in the
-// cached prefix.
+// LoopShowFilesText says how an answer shows files: markdown links to the
+// chat's files, which delivery stores and attaches.
+const LoopShowFilesText = "Files and images go in your answer as markdown links to files saved in this chat, by their path in the chat's files (or a saved file id): " +
+	"![a short description](images/cat.png) shows an image, [Q3 report](docs/q3-report.pdf) any other file, page or app (an app by its directory, such as apps/tracker). " +
+	"Only the files you link go out with your answer, as they are when you answer; drafts and parts you do not link stay in the chat's files."
+
+// LoopAnswerFormatText is the answer_format section: how to show files and
+// the visual block spec. It is the same for every Run that may show
+// visuals, so it stays in the cached prefix.
 func LoopAnswerFormatText() string {
-	return presentation.BlocksDescription()
+	return LoopShowFilesText + "\n\n" + presentation.BlocksDescription()
 }

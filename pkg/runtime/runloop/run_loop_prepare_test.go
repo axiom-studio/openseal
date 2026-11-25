@@ -296,7 +296,7 @@ func TestPrepareAnswerFormatOnlyWhereVisualsAllowed(t *testing.T) {
 			section = &req.System.Sections[i]
 		}
 	}
-	if section == nil || section.Text != presentation.BlocksDescription() {
+	if section == nil || !strings.HasPrefix(section.Text, modelstep.LoopShowFilesText) || !strings.HasSuffix(section.Text, presentation.BlocksDescription()) {
 		t.Fatalf("sections = %v; want the block spec", sectionIDs(req.System.Sections))
 	}
 	for _, tool := range req.Tools {

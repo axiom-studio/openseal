@@ -71,6 +71,7 @@ type finalDeliveryOptions struct {
 	participation bool // RequireParticipationOptIn with participation disabled
 	coordinator   func(*testing.T, *runtimeconversation.Service) *runtimeconversation.Coordinator
 	visualChecks  func(*models.AgentRun) presentation.ValidateOptions
+	chatFiles     ChatFileSnapshotter
 }
 
 func forFinalDeliveryStores(t *testing.T, options finalDeliveryOptions, test func(*testing.T, *finalDeliveryFixture)) {
@@ -144,6 +145,7 @@ func newFinalDeliveryFixture(t *testing.T, base conversationtest.ThreadStartStor
 	content := &visualTestContent{}
 	runner, err := NewTurnRunner(store, coordinator(t, service), TurnRunnerConfig{
 		AttachmentContent: content, RequireParticipationOptIn: options.participation, VisualChecks: options.visualChecks,
+		ChatFiles: options.chatFiles,
 	})
 	if err != nil {
 		t.Fatal(err)

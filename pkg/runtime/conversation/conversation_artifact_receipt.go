@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/axiom-studio/openseal/pkg/builtin"
-	"github.com/axiom-studio/openseal/pkg/computer"
 	"github.com/axiom-studio/openseal/pkg/models"
 )
 
@@ -16,8 +14,8 @@ const ArtifactReceiptService = "openseal.artifact-delivery"
 
 // RunActionArtifactReferences returns the artifact references of run's
 // succeeded governed tool calls, in entry order, deduplicated by (id,
-// version). They ride on the Run's final answer. A Run with no session log
-// (or stores that cannot read it) has none.
+// version): the files the Run's tools saved, which its answer may link. A
+// Run with no session log (or stores that cannot read it) has none.
 func RunActionArtifactReferences(ctx context.Context, sessions LoopSessionEntryLister, actions models.ActionCallReader, run *models.AgentRun) ([]models.SavedArtifact, error) {
 	if sessions == nil || actions == nil || run == nil || run.ID == "" {
 		return nil, nil
@@ -44,9 +42,7 @@ func RunActionArtifactReferences(ctx context.Context, sessions LoopSessionEntryL
 		if call == nil || call.RunID != run.ID || call.Status != models.ActionCallStatusSucceeded {
 			continue
 		}
-		shown := actionShowsInChat(call)
 		for _, ref := range actionCallArtifactReferences(call) {
-			ref.Shown = shown
 			key := fmt.Sprintf("%s\x00%d", ref.Ref.ID, ref.Ref.Version)
 			if _, duplicate := seen[key]; duplicate {
 				continue
@@ -56,24 +52,6 @@ func RunActionArtifactReferences(ctx context.Context, sessions LoopSessionEntryL
 		}
 	}
 	return references, nil
-}
-
-// actionShowsInChat reports whether call is one whose purpose is to show its
-// files in the conversation: saving an app ("build it and show it live") or
-// presenting files. A model that made one has handed the result over; when
-// the answer had to repeat the id, an answer that did not left the person
-// with "the app is above" and nothing above.
-func actionShowsInChat(call *models.ActionCall) bool {
-	if call == nil {
-		return false
-	}
-	switch call.SkillID {
-	case builtin.SkillID:
-		return call.Action == builtin.Present || call.Action == builtin.SaveApp
-	case computer.SkillID:
-		return call.Action == computer.Present
-	}
-	return false
 }
 
 // actionCallArtifactReferences parses call.Output["artifactRefs"]: valid
@@ -107,8 +85,18 @@ func actionCallArtifactReferences(call *models.ActionCall) []models.SavedArtifac
 		}
 		references = append(references, models.SavedArtifact{
 			Ref:  models.ConversationReference{Kind: models.ConversationReferenceArtifact, ID: id, Version: artifact.Version},
-			Path: handedOverPath(artifact.Path),
+			Path: savedFilePath(artifact.Path),
 		})
 	}
 	return references
+}
+
+// savedFilePath is a chat path as a tool may return it: "docs/a.pdf",
+// "/docs/a.pdf" or "./docs/a.pdf" all name the same file.
+func savedFilePath(name string) string {
+	name = strings.TrimSpace(name)
+	for strings.HasPrefix(name, "./") {
+		name = name[2:]
+	}
+	return strings.TrimLeft(name, "/")
 }

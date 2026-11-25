@@ -830,8 +830,9 @@ func PlacedAnswer(answer string, dropped map[string]bool) string {
 	return collapseBlankLines(b.String())
 }
 
-// PlainAnswer is answer without its blocks or placeholders: the text for
-// channels, notifications, copies and search.
+// PlainAnswer is answer without its blocks or placeholders, and without
+// the stored files it shows (an image goes, a file link reads as its
+// label): the text for channels, notifications, copies and search.
 func PlainAnswer(answer string) string {
 	blocks := ParseAnswer(answer)
 	var b strings.Builder
@@ -841,7 +842,7 @@ func PlainAnswer(answer string) string {
 		last = block.End
 	}
 	b.WriteString(answer[last:])
-	return collapseBlankLines(b.String())
+	return collapseBlankLines(plainLinks(b.String()))
 }
 
 var blankRun = regexp.MustCompile(`\n{3,}`)

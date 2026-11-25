@@ -36,6 +36,9 @@ type TurnRunnerConfig struct {
 	// the checks know which Agent published. Nil rejects bound or linked
 	// visuals and visuals with images.
 	VisualChecks func(run *models.AgentRun) presentation.ValidateOptions
+	// ChatFiles stores the chat files an answer links (answer_files.go).
+	// Nil resolves links only against the files the Run's tools saved.
+	ChatFiles ChatFileSnapshotter
 	// HumanParticipants lists the people in a conversation. The card state
 	// note uses it to say how many of them voted in a poll ("4 of 5
 	// voted"); without it the note counts only the votes ("4 voted").

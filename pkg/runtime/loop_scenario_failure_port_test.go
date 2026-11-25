@@ -270,8 +270,8 @@ func TestLoopTerminalFailureCarriesTypedFailureExplanation(t *testing.T) {
 // Final answer fields
 
 // TestLoopFinalReplyCarriesVisualAndSilence: what the plain reply carries
-// reaches the chat (ported from conversation_answer_visual_test.go and the
-// spoken case of the old runner).
+// reaches the chat: visual blocks, silence and linked files (ported from
+// conversation_answer_visual_test.go and the spoken case of the old runner).
 func TestLoopFinalReplyCarriesVisualAndSilence(t *testing.T) {
 	t.Run("visual", func(t *testing.T) {
 		looptest.EachStore(t, "port_visual", func(t *testing.T, store models.KernelStore) {
@@ -361,6 +361,39 @@ func TestLoopFinalReplyCarriesVisualAndSilence(t *testing.T) {
 			}
 			if finals, rejections := portFinalReplies(f, run.ID), portFinalRejections(f, run.ID); len(finals) != 1 || len(rejections) != 0 {
 				t.Fatalf("final replies = %v", f.EntryTypes(run.ID))
+			}
+		})
+	})
+
+	t.Run("linked_files", func(t *testing.T) {
+		looptest.EachStore(t, "port_linked_files", func(t *testing.T, store models.KernelStore) {
+			f := looptest.NewFixture(t, store, looptest.WithRules(
+				&looptest.ModelRule{Name: "export", Times: 1, Reply: func(v looptest.StepView) models.ModelStepResult {
+					return looptest.Act("Exporting the report.", looptest.Call(looptest.GovernedTool(v, "lookup"), map[string]any{"id": "report"}))
+				}},
+				&looptest.ModelRule{Name: "answer", Reply: func(looptest.StepView) models.ModelStepResult {
+					return looptest.Say("Here is the [quarterly report](docs/q3.pdf).")
+				}},
+			))
+			f.Dispatch.On("lookup", func(agentrun.ActionDispatchInput) (map[string]interface{}, error) {
+				return map[string]interface{}{"artifactRefs": []interface{}{
+					map[string]interface{}{"id": "report-pdf", "version": 1, "path": "docs/q3.pdf"},
+					map[string]interface{}{"id": "report-csv", "version": 2, "path": "docs/q3.csv"},
+				}}, nil
+			})
+			conversation, run := f.StartChat("export the quarterly report")
+			done := f.DriveToRest(run.ID, 3)
+			f.MustStatus(done, models.AgentRunStatusCompleted)
+			answers := portAgentMessages(f, conversation.ID)
+			if len(answers) != 1 || answers[0].Content != "Here is the [quarterly report]("+presentation.ArtifactContentURL("report-pdf", 1)+")." {
+				t.Fatalf("channel = %s", looptest.DescribeMessages(f.Messages(conversation.ID)))
+			}
+			want := []models.ConversationReference{
+				{Kind: models.ConversationReferenceRun, ID: run.ID},
+				{Kind: models.ConversationReferenceArtifact, ID: "report-pdf", Version: 1},
+			}
+			if got := answers[0].References; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+				t.Fatalf("references = %#v, want only the linked file %#v", got, want)
 			}
 		})
 	})

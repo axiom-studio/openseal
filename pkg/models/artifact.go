@@ -500,12 +500,8 @@ func RunContextConversationID(run *AgentRun) string {
 }
 
 // SavedArtifact is a file a tool saved, with the chat path it was saved from
-// when the tool reported one, so an answer can hand it over by either.
-//
-// Shown is set for a file the Agent showed in the chat itself (save_app,
-// present): it goes out with the answer whether or not the answer names it.
+// when the tool reported one, so an answer can link it by either.
 type SavedArtifact struct {
-	Ref   ConversationReference
-	Path  string
-	Shown bool
+	Ref  ConversationReference
+	Path string
 }
