@@ -2,7 +2,7 @@
 //
 // Everything an Agent makes is a file in its chat's files (see pkg/chatfs),
 // which it reads and writes with the Workspace tools. These tools do only what
-// files cannot do on their own: generate an image, build and publish an app,
+// files cannot do on their own: generate an image or a video, build and publish an app,
 // look up places and photos, and read history. An answer shows files by
 // linking them.
 package builtin
@@ -14,11 +14,12 @@ import (
 
 const (
 	SkillID                 = "openseal.builtin"
-	SkillVersion            = "2.7.0"
+	SkillVersion            = "2.8.0"
 	ReadAttachment          = "read_attachment"
 	ReadConversationHistory = "read_conversation_history"
 	GenerateProfileImage    = "generate_profile_image"
 	GenerateImage           = "generate_image"
+	GenerateVideo           = "generate_video"
 	SaveApp                 = "save_app"
 	PublishApp              = "publish_app"
 	SaveAppData             = "save_app_data"
@@ -27,6 +28,8 @@ const (
 	FindPlace               = "find_place"
 	Route                   = "route"
 	FindImage               = "find_image"
+	// MaximumVideoSeconds is the longest clip generate_video asks for.
+	MaximumVideoSeconds = 15
 	// MaximumImageStyleRunes bounds a picture style, such as "cartoon".
 	MaximumImageStyleRunes = 60
 )
@@ -39,6 +42,7 @@ Files a tool returns, such as screenshots, images, PDFs or audio from a connecte
 - Pages: write a complete HTML document under pages/, such as pages/report.html, then link it in your answer.
 - Decks, documents, PDFs and spreadsheets: you can make real .docx, .xlsx, .pptx and PDF files, so never tell the user you can't or offer text to paste instead. Build them in the chat's secure VM with run_command and real tools, which give far better results than hand-written files. PowerPoint with python-pptx (save as slides/name.pptx), Word with python-docx, PDFs with weasyprint from HTML or reportlab, Excel with openpyxl, charts with matplotlib or seaborn saved as images and placed in the file. Write the script to a file, run it, read any error and fix it, then link the result in your answer. The chat shows .pptx, .docx and .xlsx files as they are, so link the file itself; make a PDF copy only when asked for one. Decks are always real PowerPoint files; never write a deck as HTML.
 - Images: generate_image saves one in this chat's files; link it in your answer to show it, such as ![A red fox at dusk](images/fox.png), not as a visual block; pass path to choose where it goes. The user's saved picture style applies automatically; when they ask for a style to stick, remember it with set_image_style.
+- Videos: generate_video makes one short clip with sound and saves it in this chat's files; it takes a minute or more, so call it once per clip and link the result in your answer, such as [Fox at dusk](media/fox-at-dusk.mp4). Keep the default length unless the person asks for longer: every second costs. To bring a picture to life, pass it as image.
 - Spreadsheets: build them in the VM with openpyxl, with real formulas, number formats, column widths, frozen headers, filters and charts where they help, and save as .xlsx. For a large CSV or Excel input, query it in the VM with duckdb or pandas and keep only what the answer needs.
 - Charts in files (a deck, document, PDF, page or report): draw them in the VM with matplotlib or seaborn from the real data, save PNG or SVG under images/ and place them in the file. A chart that is the answer itself is a visual block in your answer, not an image.
 - Heavy work: do it in the secure VM with run_command instead of one tool call at a time. To understand or search a whole repository, clone it there (git clone --filter=blob:none https://git.seal/github.com/<owner>/<repo>.git) and use git log and grep. Read or transform many files, query large data with duckdb or pandas, and convert files there too. For many calls to the same tool, write a script that runs seal call <tool> (seal tools lists them). Reading one or two files directly is fine.
@@ -85,7 +89,7 @@ var artifactRefs = map[string]interface{}{"type": "array", "minItems": 1, "items
 func SkillDefinition() *skill.Definition {
 	definition := &skill.Definition{
 		ID: SkillID, Version: SkillVersion, Name: "Built-in tools",
-		Description: "Make images, pages, slides, documents and apps as files in the chat, look up places, directions and photos, and read the conversation.",
+		Description: "Make images, videos, pages, slides, documents and apps as files in the chat, look up places, directions and photos, and read the conversation.",
 		Icon:        "file-text", Category: "documents", Tags: []string{"pdf", "attachment", "read"},
 		Transport: skill.TransportReference{Kind: "tool", Endpoint: SkillID},
 		Actions: map[string]skill.Action{
@@ -118,6 +122,21 @@ func SkillDefinition() *skill.Definition {
 				SideEffect:   skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
 				Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
 			},
+			GenerateVideo: {
+				Name: GenerateVideo, Description: "Generate one short video clip and save it in this chat's files; link it in your answer to show it. It takes a minute or more. The host selects an available video model; do not include a model, provider, URL, or credentials.",
+				InputSchema: object([]interface{}{"prompt"}, map[string]interface{}{
+					"prompt": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 4096, "description": "What happens in the clip: subject, action, setting, camera and sound."},
+					"seconds": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": MaximumVideoSeconds,
+						"description": "Length in seconds. Leave it out for the model's default (about 8); longer clips cost more, so ask for more only when the person wants it."},
+					"aspectRatio": map[string]interface{}{"type": "string", "enum": []interface{}{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"},
+						"description": "16:9 when omitted; 9:16 for phone and social stories."},
+					"image": chatPath("An image in this chat's files to start the clip from, such as images/fox.png, to bring a picture to life."),
+					"path":  chatPath("Where to save it, such as media/fox.mp4. The host picks a path under media/ when omitted."),
+				}),
+				OutputSchema: object([]interface{}{"artifactRefs"}, map[string]interface{}{"path": map[string]interface{}{"type": "string"}, "artifactRefs": artifactRefs}),
+				SideEffect:   skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
+				Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
+			},
 			SetImageStyle: {
 				Name: SetImageStyle, Description: "Remember the picture style this user asked for, for all their future images with any agent. Only when they ask for a style to stick, e.g. 'always cartoon', 'more realistic please'.",
 				InputSchema: object([]interface{}{"style"}, map[string]interface{}{
@@ -142,6 +161,6 @@ func SkillDefinition() *skill.Definition {
 	for name, action := range appActions() {
 		definition.Actions[name] = action
 	}
-	definition.Prompt.AllowedTools = []string{GenerateImage, SetImageStyle, SaveApp, PublishApp, SaveAppData, ReadAppData, ReadConversationHistory, ReadAttachment, GenerateProfileImage, FindPlace, Route, FindImage}
+	definition.Prompt.AllowedTools = []string{GenerateImage, GenerateVideo, SetImageStyle, SaveApp, PublishApp, SaveAppData, ReadAppData, ReadConversationHistory, ReadAttachment, GenerateProfileImage, FindPlace, Route, FindImage}
 	return definition
 }

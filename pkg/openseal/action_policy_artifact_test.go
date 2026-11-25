@@ -20,6 +20,7 @@ func TestBoundedConversationArtifactsDoNotRequireApproval(t *testing.T) {
 		want       ActionDisposition
 	}{
 		{"generated image", builtin.SkillDefinition(), builtin.GenerateImage, ActionDispositionAllow},
+		{"generated video", builtin.SkillDefinition(), builtin.GenerateVideo, ActionDispositionAllow},
 		{"private app", builtin.SkillDefinition(), builtin.SaveApp, ActionDispositionAllow},
 		{"app data", builtin.SkillDefinition(), builtin.SaveAppData, ActionDispositionAllow},
 		{"read app data", builtin.SkillDefinition(), builtin.ReadAppData, ActionDispositionAllow},

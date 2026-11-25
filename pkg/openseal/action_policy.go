@@ -26,7 +26,7 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input action.
 	// These host-owned actions create bounded conversation artifacts. Public
 	// app publication and all unrelated writes still follow approval policy.
 	if input.Bound.Definition.ID == builtin.SkillID && input.Bound.Definition.Version == builtin.SkillVersion &&
-		(input.Bound.Action.Name == builtin.GenerateImage || input.Bound.Action.Name == builtin.SaveApp || input.Bound.Action.Name == builtin.SaveAppData || input.Bound.Action.Name == builtin.FindImage) {
+		(input.Bound.Action.Name == builtin.GenerateImage || input.Bound.Action.Name == builtin.GenerateVideo || input.Bound.Action.Name == builtin.SaveApp || input.Bound.Action.Name == builtin.SaveAppData || input.Bound.Action.Name == builtin.FindImage) {
 		return action.PolicyDecision{Disposition: action.DispositionAllow, Reason: "create bounded conversation artifact"}, nil
 	}
 	// Remembering the asking user's own picture style changes only how their
