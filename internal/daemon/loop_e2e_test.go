@@ -2,8 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -17,15 +15,16 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
-	"github.com/axiom-studio/openseal/pkg/runtime/artifactcatalog"
 	"github.com/axiom-studio/openseal/pkg/runtime/runworker"
 	"github.com/axiom-studio/openseal/pkg/runtime/store/sqlite"
 	"github.com/axiom-studio/openseal/pkg/runtime/workqueue"
 )
 
+var localScope = models.Scope{Kind: "local", ID: "default"}
+
 // desktopLoop is the daemon's task wiring over a real kernel: SQLite under
-// t.TempDir(), the desktop resolver, the provider step host against an
-// httptest Chat Completions endpoint and the generated-files publisher.
+// t.TempDir(), the desktop resolver and the provider step host against an
+// httptest Chat Completions endpoint.
 type desktopLoop struct {
 	kernel   *opensealkernel.Engine
 	store    *sqlite.Store
@@ -50,10 +49,7 @@ func newDesktopLoop(t *testing.T, provider *fakeProvider, wrap func(models.Artif
 	if wrap != nil {
 		content = wrap(local)
 	}
-	resolver := &DesktopTurnResolver{
-		Scope: localScope, Host: provider.host(t, 0),
-		Publisher: &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: artifactcatalog.NewCatalog(store)},
-	}
+	resolver := &DesktopTurnResolver{Scope: localScope, Host: provider.host(t, 0)}
 	scopes := workqueue.WorkerScopeSourceFunc(func(context.Context) ([]models.Scope, error) { return []models.Scope{localScope}, nil })
 	kernel, err := opensealkernel.New(
 		opensealkernel.WithPersistentStore(store),
@@ -140,40 +136,9 @@ func (l *desktopLoop) steps(t *testing.T, runID string) []*models.AgentTurn {
 	return steps
 }
 
-func (l *desktopLoop) artifacts(t *testing.T, runID string) []*models.Artifact {
-	t.Helper()
-	artifacts, err := l.kernel.ListArtifacts(t.Context(), models.ArtifactFilter{Scope: localScope, ProducerRunID: runID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return artifacts
-}
-
-// finalCall answers with turn_final_answer carrying one generated file.
-func finalCall(id string) map[string]interface{} {
-	args, _ := json.Marshal(map[string]interface{}{
-		"answer":         "The report is attached.",
-		"generatedFiles": []interface{}{map[string]string{"name": "report.md", "mediaType": "text/markdown", "text": "# Report\n\nAll good."}},
-	})
-	return chatCall(id, string(models.ControlToolFinalAnswer), string(args))
-}
-
-// offersGeneratedFiles reports whether the request's turn_final_answer tool
-// carries the publisher's generatedFiles property.
-func offersGeneratedFiles(body map[string]interface{}) bool {
-	tools, _ := body["tools"].([]interface{})
-	for _, raw := range tools {
-		tool, _ := raw.(map[string]interface{})
-		function, _ := tool["function"].(map[string]interface{})
-		if function["name"] != string(models.ControlToolFinalAnswer) {
-			continue
-		}
-		parameters, _ := function["parameters"].(map[string]interface{})
-		properties, _ := parameters["properties"].(map[string]interface{})
-		_, ok := properties[generatedFilesProperty]
-		return ok
-	}
-	return false
+// finalReply is the model's plain final reply.
+func finalReply(w http.ResponseWriter, usage map[string]int) {
+	chatReply(w, "stop", map[string]interface{}{"role": "assistant", "content": "The report is ready."}, usage)
 }
 
 func toolMessages(body map[string]interface{}) []map[string]interface{} {
@@ -187,13 +152,10 @@ func toolMessages(body map[string]interface{}) []map[string]interface{} {
 	return out
 }
 
-func TestDesktopTaskLoopRunsStepsAndPublishesGeneratedFiles(t *testing.T) {
+func TestDesktopTaskLoopRunsStepsToItsFinalReply(t *testing.T) {
 	const narration = "Checking the forecast first."
 	var unknownToolResult atomic.Value
 	provider := newFakeProvider(t, func(call int, w http.ResponseWriter, body map[string]interface{}) {
-		if !offersGeneratedFiles(body) {
-			t.Errorf("step %d: turn_final_answer does not offer generatedFiles", call)
-		}
 		switch call {
 		case 1:
 			chatReply(w, "tool_calls", map[string]interface{}{"role": "assistant", "content": narration,
@@ -203,8 +165,7 @@ func TestDesktopTaskLoopRunsStepsAndPublishesGeneratedFiles(t *testing.T) {
 				content, _ := results[0]["content"].(string)
 				unknownToolResult.Store(content)
 			}
-			chatReply(w, "tool_calls", map[string]interface{}{"role": "assistant", "content": "",
-				"tool_calls": []interface{}{finalCall("call-2")}}, map[string]int{"prompt_tokens": 1000, "completion_tokens": 40})
+			finalReply(w, map[string]int{"prompt_tokens": 1000, "completion_tokens": 40})
 		default:
 			t.Errorf("unexpected provider call %d", call)
 			w.WriteHeader(http.StatusInternalServerError)
@@ -226,105 +187,19 @@ func TestDesktopTaskLoopRunsStepsAndPublishesGeneratedFiles(t *testing.T) {
 	if steps[0].OutputSummary != narration {
 		t.Fatalf("step 1 narration = %q", steps[0].OutputSummary)
 	}
-	refs, _ := run.Output["artifactRefs"].([]interface{})
-	if len(refs) != 1 {
-		t.Fatalf("run output artifactRefs = %#v", run.Output)
-	}
-	artifacts := loop.artifacts(t, run.ID)
-	if len(artifacts) != 1 || artifacts[0].Name != "report.md" {
-		t.Fatalf("artifacts = %#v", artifacts)
-	}
-	if ref, _ := refs[0].(map[string]interface{}); ref["id"] != artifacts[0].ID {
-		t.Fatalf("artifact ref %#v does not name %s", refs[0], artifacts[0].ID)
-	}
-	if artifacts[0].Provenance.TurnID != steps[1].ID || artifacts[0].Provenance.RunID != run.ID {
-		t.Fatalf("artifact provenance = %#v, final step %s", artifacts[0].Provenance, steps[1].ID)
+	if run.Output["summary"] != "The report is ready." {
+		t.Fatalf("run output = %#v", run.Output)
 	}
 }
 
-// failFirstPut refuses the first content write.
-type failFirstPut struct {
-	models.ArtifactContentStore
-	mu    sync.Mutex
-	puts  int
-	fails int
-}
-
-func (s *failFirstPut) Put(ctx context.Context, write models.ArtifactContentWrite) (models.ArtifactStoredContent, error) {
-	s.mu.Lock()
-	s.puts++
-	fail := s.puts == 1
-	if fail {
-		s.fails++
-	}
-	s.mu.Unlock()
-	if fail {
-		return models.ArtifactStoredContent{}, errors.New("simulated disk interruption")
-	}
-	return s.ArtifactContentStore.Put(ctx, write)
-}
-
-func TestDesktopTaskLoopResumesPublicationWithoutModelReinvocation(t *testing.T) {
-	provider := newFakeProvider(t, func(call int, w http.ResponseWriter, body map[string]interface{}) {
-		if call != 1 {
-			t.Errorf("the model was called again (call %d)", call)
-		}
-		chatReply(w, "tool_calls", map[string]interface{}{"role": "assistant", "content": "",
-			"tool_calls": []interface{}{finalCall("call-1")}}, map[string]int{"prompt_tokens": 800, "completion_tokens": 30})
-	})
-	content := &failFirstPut{}
-	loop := newDesktopLoop(t, provider, func(inner models.ArtifactContentStore) models.ArtifactContentStore {
-		content.ArtifactContentStore = inner
-		return content
-	})
-	created := loop.start(t, "Write the paused report")
-	paused := loop.wait(t, created.ID, models.AgentRunStatusPaused)
-	if len(loop.artifacts(t, created.ID)) != 0 {
-		t.Fatal("a failed publication registered an artifact")
-	}
-	if _, err := loop.kernel.CommandAgentRun(t.Context(), agentrun.CommandRequest{
-		Scope: localScope, RunID: paused.ID, ExpectedRevision: paused.Revision, Kind: agentrun.CommandResume,
-		Actor: models.ActivityActor{Type: "user", ID: "local-operator"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	loop.kernel.WakeAgentWorkers()
-	run := loop.wait(t, created.ID, models.AgentRunStatusCompleted)
-
-	if got := provider.n.Load(); got != 1 {
-		t.Fatalf("provider calls = %d, want 1", got)
-	}
-	if content.fails != 1 {
-		t.Fatalf("content failures = %d, want 1", content.fails)
-	}
-	artifacts := loop.artifacts(t, run.ID)
-	refs, _ := run.Output["artifactRefs"].([]interface{})
-	if len(artifacts) != 1 || len(refs) != 1 {
-		t.Fatalf("artifacts = %d, refs = %#v", len(artifacts), run.Output["artifactRefs"])
-	}
-	modelSteps := 0
-	for _, step := range loop.steps(t, run.ID) {
-		if step.Model != "" {
-			modelSteps++
-		}
-		if step.ID == artifacts[0].Provenance.TurnID && step.Model == "" {
-			t.Fatalf("artifact provenance names step %s, which made no model call", step.ID)
-		}
-	}
-	if modelSteps != 1 {
-		t.Fatalf("model steps = %d, want 1", modelSteps)
-	}
-}
-
-func TestDesktopTaskLoopCanceledStepPublishesNothing(t *testing.T) {
+func TestDesktopTaskLoopCanceledStepEndsCanceled(t *testing.T) {
 	called := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
 	provider := newFakeProvider(t, func(call int, w http.ResponseWriter, body map[string]interface{}) {
 		once.Do(func() { close(called) })
 		<-release
-		chatReply(w, "tool_calls", map[string]interface{}{"role": "assistant", "content": "",
-			"tool_calls": []interface{}{finalCall("call-1")}}, map[string]int{"prompt_tokens": 800, "completion_tokens": 30})
+		finalReply(w, map[string]int{"prompt_tokens": 800, "completion_tokens": 30})
 	})
 	loop := newDesktopLoop(t, provider, nil)
 	created := loop.start(t, "Write the canceled report")
@@ -348,12 +223,6 @@ func TestDesktopTaskLoopCanceledStepPublishesNothing(t *testing.T) {
 	// Stopping waits for the worker, so its step has settled however it ended.
 	loop.kernel.Stop()
 
-	if refs, ok := run.Output["artifactRefs"]; ok {
-		t.Fatalf("canceled run output carries artifactRefs %#v", refs)
-	}
-	if artifacts := loop.artifacts(t, run.ID); len(artifacts) != 0 {
-		t.Fatalf("canceled step published %d artifacts", len(artifacts))
-	}
 	final, err := loop.kernel.GetAgentRun(t.Context(), localScope, run.ID)
 	if err != nil {
 		t.Fatal(err)

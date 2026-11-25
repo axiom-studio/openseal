@@ -975,7 +975,7 @@ func TestResolveLoopBindingAgentTrial(t *testing.T) {
 	}
 	if binding.DeploymentID != "finn" || binding.DefinitionID != "finn-definition" || binding.DefinitionVersion != "7" ||
 		binding.Model != "gpt-6-luna" || len(binding.ModelActions) != 0 || len(binding.RunbookOperations) != 0 ||
-		binding.Final != nil || binding.FinalOutput != nil {
+		binding.Final != nil {
 		t.Fatalf("binding = %#v", binding)
 	}
 	authority := binding.Authority

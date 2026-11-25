@@ -1,7 +1,6 @@
 package control
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -548,91 +547,11 @@ func TestTaskFinalParksOnPendingSetup(t *testing.T) {
 	}
 }
 
-type recordingPublisher struct {
-	properties map[string]interface{}
-	validated  []map[string]json.RawMessage
-	reject     error
-}
-
-func (p *recordingPublisher) FinalAnswerProperties(run *models.AgentRun) map[string]interface{} {
-	return p.properties
-}
-
-func (p *recordingPublisher) ValidateFinalAnswer(run *models.AgentRun, fields map[string]json.RawMessage) error {
-	p.validated = append(p.validated, fields)
-	return p.reject
-}
-
-func (p *recordingPublisher) PublishFinalOutput(ctx context.Context, publication agentrun.FinalOutputPublication) (map[string]interface{}, error) {
-	return nil, errors.New("not called by the control section")
-}
-
-func TestFinalOutputPublisherValidatesExtensionFields(t *testing.T) {
-	files := `[{"name":"a.md","mediaType":"text/markdown","text":"# A"}]`
-	f := newFinalFixture(t,
-		finalCall("unknown", `{"answer":"x","attachments":[]}`),
-		finalCall("rejected", `{"answer":"x","generatedFiles":`+files+`}`),
-		finalCall("ok", `{"answer":"Done.","generatedFiles":`+files+`}`),
-		finalCall("none", `{"answer":"Done."}`),
-	)
-	publisher := &recordingPublisher{properties: map[string]interface{}{
-		"generatedFiles": map[string]interface{}{"type": "array"},
-		"answer":         map[string]interface{}{"type": "number"}, // kernel names are never the host's
-	}}
-	context := func(callID string) agentrun.ControlContext {
-		cc := f.context(callID, agentrun.ControlAuthority{})
-		cc.Binding.FinalOutput = publisher
-		return cc
-	}
-	settle := func(callID string) Result {
-		result, err := f.exec.Settle(f.ctx, context(callID))
-		if err != nil {
-			t.Fatalf("settle %s: %v", callID, err)
-		}
-		return result
-	}
-	// A field nobody offers is dropped, not refused: the answer stands.
-	requireFinal(t, settle("unknown"))
-	if len(publisher.validated) != 0 {
-		t.Fatalf("a dropped field reached the publisher: %#v", publisher.validated)
-	}
-	publisher.reject = errors.New("generatedFiles[0].name must end in .txt")
-	value := requireRejected(t, f, settle("rejected"), "rejected", finalOutputInvalidCode)
-	if value["message"] != "generatedFiles[0].name must end in .txt" {
-		t.Fatalf("message = %v", value["message"])
-	}
-	publisher.reject = nil
-	final := requireFinal(t, settle("ok"))
-	if _, leaked := final.Output["generatedFiles"]; leaked || final.Output["summary"] != "Done." {
+func TestFinalAnswerDropsUnknownFields(t *testing.T) {
+	f := newFinalFixture(t, finalCall("final", `{"answer":"Done.","generatedFiles":[]}`))
+	final := requireFinal(t, f.settleFinal("final", agentrun.ControlAuthority{}))
+	if final.Output["generatedFiles"] != nil || final.Output["summary"] != "Done." {
 		t.Fatalf("output = %#v", final.Output)
-	}
-	last := publisher.validated[len(publisher.validated)-1]
-	if len(last) != 1 || string(last["generatedFiles"]) != files {
-		t.Fatalf("validated fields = %#v", last)
-	}
-	publication, err := FinalOutputPublicationFor(f.run, *final, f.stored("ok"), publisher)
-	if err != nil || publication == nil || publication.StepID != f.step.ID || publication.ToolCallID != "ok" ||
-		string(publication.Fields["generatedFiles"]) != files || len(publication.Fields) != 1 {
-		t.Fatalf("publication = %#v, %v", publication, err)
-	}
-	final = requireFinal(t, settle("none"))
-	if publication, err := FinalOutputPublicationFor(f.run, *final, f.stored("none"), publisher); err != nil || publication != nil {
-		t.Fatalf("publication without fields = %#v, %v", publication, err)
-	}
-	// The tool offered to the model gains the host properties, never required.
-	tools := WithFinalOutputProperties(builtinControlModelStepTools(agentrun.ControlAuthority{}), f.run, publisher)
-	properties, required := schemaProperties(t, tools[0].InputSchema)
-	if tools[0].Name != string(models.ControlToolFinalAnswer) || properties["generatedFiles"] == nil ||
-		properties["answer"].(map[string]interface{})["type"] != "string" || !reflect.DeepEqual(required, []string{"answer"}) {
-		t.Fatalf("tool = %#v", tools[0])
-	}
-	if base := builtinControlModelStepTools(agentrun.ControlAuthority{}); base[0].InputSchema["properties"].(map[string]interface{})["generatedFiles"] != nil {
-		t.Fatal("WithFinalOutputProperties changed the base tool")
-	}
-	// Extension fields without a publisher are dropped as unknown.
-	g := newFinalFixture(t, finalCall("final", `{"answer":"x","generatedFiles":[]}`))
-	if dropped := requireFinal(t, g.settleFinal("final", agentrun.ControlAuthority{})); dropped.Output["generatedFiles"] != nil {
-		t.Fatalf("an unknown field reached the output: %#v", dropped.Output)
 	}
 }
 

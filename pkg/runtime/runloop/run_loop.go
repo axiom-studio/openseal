@@ -60,7 +60,6 @@ const (
 	StepFailurePreparationFailed    = "step_preparation_failed"
 	runFailureCodePreparedRuntime   = "prepared_runtime_invalid"
 	runFailureCodeFinalDelivery     = "final_delivery_failed"
-	runFailureCodeOutputPublication = "output_publication_failed"
 	runRequeueReasonParkReplan      = "park_replan_exhausted"
 	runRequeueReasonStepLeaseHeld   = "step_lease_held"
 	runRequeueReasonHostUnavailable = "host_unavailable"
@@ -156,7 +155,7 @@ const (
 	ExitParked    ExitReason = "parked"     // waiting_* / sleeping
 	ExitYielded   ExitReason = "yielded"    // fairness, queued
 	ExitRequeued  ExitReason = "requeued"   // host retry, stale step lease or park re-plans, queued with AvailableAt
-	ExitPaused    ExitReason = "paused"     // budget or output publication
+	ExitPaused    ExitReason = "paused"     // budget
 	ExitFailed    ExitReason = "failed"     // Run failed; with Err and the Run left running: an infrastructure error
 	ExitLeaseLost ExitReason = "lease_lost" // nothing written after the loss
 	ExitEnded     ExitReason = "ended"      // Run became terminal by command

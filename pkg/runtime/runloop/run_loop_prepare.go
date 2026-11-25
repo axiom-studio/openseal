@@ -110,7 +110,7 @@ func (p *CatalogModelStepPreparer) PrepareModelStep(ctx context.Context, in agen
 	}
 	binding := in.Binding
 	set := p.CapabilitySet(in)
-	tools := control.WithFinalOutputProperties(p.tools(binding, set), in.Run, binding.FinalOutput)
+	tools := p.tools(binding, set)
 
 	req := models.ModelStepRequest{
 		APIVersion:        models.ModelStepAPIVersion,

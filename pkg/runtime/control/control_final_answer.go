@@ -28,8 +28,7 @@ import (
 // what the answer says: the checks only refuse an answer that cannot be
 // delivered at all.
 //
-// Pipeline order: decode → silent → content → skills →
-// FinalOutputPublisher.ValidateFinalAnswer → finalAnswerPark.
+// Pipeline order: decode → silent → content → skills → finalAnswerPark.
 
 // Final answer error codes (stable; the model sees them in the tool result).
 const (
@@ -37,7 +36,6 @@ const (
 	finalSilentAfterChangeCode  = "silent_after_change"
 	finalAnswerEmptyCode        = "answer_empty"
 	finalSkillIdentityCode      = "final_skill_identity_invalid"
-	finalOutputInvalidCode      = "final_output_invalid"
 	finalToolRequiredCode       = "final_tool_required"
 	finalEmptyReplyCode         = "empty_answer"
 	finalPlainTextAttemptsLimit = 3 // the 3rd plain-text attempt where a final tool is required fails the Run
@@ -50,16 +48,15 @@ const (
 	finalOutputSkillSelectionsKey = "skillSelections"
 )
 
-// finalAnswerArgs are the kernel fields of turn_final_answer. Host extension
-// fields (FinalOutputPublisher) are kept apart in finalAnswerCall.Extra.
+// finalAnswerArgs are the fields of turn_final_answer.
 type finalAnswerArgs struct {
-	Answer             string               `json:"answer"`
-	AppliedSkillRefs   []string             `json:"appliedSkillRefs,omitempty"`
-	Repairs            map[string]string    `json:"repairs,omitempty"`
-	BroadcastToChannel bool                 `json:"broadcastToChannel,omitempty"`
-	Report             string               `json:"report,omitempty"`
-	Silent             bool                 `json:"silent,omitempty"`
-	Files              []string             `json:"files,omitempty"`
+	Answer             string            `json:"answer"`
+	AppliedSkillRefs   []string          `json:"appliedSkillRefs,omitempty"`
+	Repairs            map[string]string `json:"repairs,omitempty"`
+	BroadcastToChannel bool              `json:"broadcastToChannel,omitempty"`
+	Report             string            `json:"report,omitempty"`
+	Silent             bool              `json:"silent,omitempty"`
+	Files              []string          `json:"files,omitempty"`
 }
 
 // finalAnswerKernelFields are the property names the kernel owns, whether or
@@ -240,56 +237,6 @@ func finalAnswerDescription(a agentrun.ControlAuthority) string {
 	return text + ". Call it alone, after your other tools have returned."
 }
 
-// finalOutputFieldNames are the publisher's extension properties offered on
-// this Run (kernel names excluded).
-func finalOutputFieldNames(run *models.AgentRun, publisher agentrun.FinalOutputPublisher) map[string]interface{} {
-	if publisher == nil || run == nil {
-		return nil
-	}
-	properties := publisher.FinalAnswerProperties(run)
-	offered := map[string]interface{}{}
-	for name, schema := range properties {
-		if !finalAnswerKernelFields[name] && strings.TrimSpace(name) != "" {
-			offered[name] = schema
-		}
-	}
-	if len(offered) == 0 {
-		return nil
-	}
-	return offered
-}
-
-// WithFinalOutputProperties adds the FinalOutputPublisher's extension
-// properties of run to the turn_final_answer tool in tools (prep-2 calls it on
-// the ControlModelStepTools list). They are never required. Other tools and the
-// input slice are left unchanged.
-func WithFinalOutputProperties(tools []models.ModelStepTool, run *models.AgentRun, publisher agentrun.FinalOutputPublisher) []models.ModelStepTool {
-	extra := finalOutputFieldNames(run, publisher)
-	if len(extra) == 0 {
-		return tools
-	}
-	out := make([]models.ModelStepTool, len(tools))
-	copy(out, tools)
-	for i, tool := range out {
-		if tool.Name != string(models.ControlToolFinalAnswer) {
-			continue
-		}
-		schema := maps.Clone(tool.InputSchema)
-		properties := map[string]interface{}{}
-		if existing, ok := schema["properties"].(map[string]interface{}); ok {
-			for key, value := range existing {
-				properties[key] = value
-			}
-		}
-		for key, value := range extra {
-			properties[key] = value
-		}
-		schema["properties"] = properties
-		out[i].InputSchema = schema
-	}
-	return out
-}
-
 type finalAnswerHandler struct{}
 
 func (finalAnswerHandler) Spec(a agentrun.ControlAuthority) ToolSpec {
@@ -324,15 +271,8 @@ func checkFinalAnswerFields(call *finalAnswerCall, cc agentrun.ControlContext) s
 			unknown = append(unknown, key)
 		}
 	}
-	var publisher agentrun.FinalOutputPublisher
-	if cc.Binding != nil {
-		publisher = cc.Binding.FinalOutput
-	}
-	extensions := finalOutputFieldNames(cc.Run, publisher)
 	for key := range call.Extra {
-		if _, ok := extensions[key]; !ok {
-			delete(call.Extra, key)
-		}
+		delete(call.Extra, key)
 	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
@@ -437,19 +377,6 @@ func (x *Executor) acceptFinalAnswer(ctx context.Context, cc agentrun.ControlCon
 	// host's checks: a block that fails costs only itself, and delivery asks
 	// once for a repair of just those blocks.
 	d.Output = d.output(mode)
-	// 6. Host extension fields.
-	if len(d.Extra) > 0 {
-		var publisher agentrun.FinalOutputPublisher
-		if cc.Binding != nil {
-			publisher = cc.Binding.FinalOutput
-		}
-		if publisher == nil {
-			return Result{}, errors.New("turn_final_answer has extension fields but the binding has no FinalOutputPublisher")
-		}
-		if err := publisher.ValidateFinalAnswer(cc.Run, cloneRawFields(d.Extra)); err != nil {
-			return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalOutputInvalidCode, Message: err.Error()})
-		}
-	}
 	final := &agentrun.FinalAnswer{PlainText: d.PlainText, Answer: d.content(), Output: d.Output}
 	if d.Args.Silent || d.ReactionsOnly {
 		final.Answer = ""
@@ -742,14 +669,6 @@ func (x *Executor) finalPark(ctx context.Context, cc agentrun.ControlContext, an
 	return &agentrun.FinalPark{Deliver: plan.Deliver, Park: agentrun.LoopPark{Status: plan.Status, Wake: plan.Wake, Summary: plan.Summary}}, nil
 }
 
-func cloneRawFields(fields map[string]json.RawMessage) map[string]json.RawMessage {
-	out := make(map[string]json.RawMessage, len(fields))
-	for key, value := range fields {
-		out[key] = append(json.RawMessage(nil), value...)
-	}
-	return out
-}
-
 // ---------------------------------------------------------------------------
 // Plain-text final (§11.2)
 
@@ -854,34 +773,4 @@ func (r Registry) finalToolRequiredFields(tool models.ControlToolName, a agentru
 		return "its required fields"
 	}
 	return strings.Join(required, ", ")
-}
-
-// ---------------------------------------------------------------------------
-// Accessors for delivery (CONV-08, runOutputFinalHandler)
-
-// FinalOutputPublicationFor returns the publish request for the host
-// extension fields of an accepted turn_final_answer (SPEC §3.3 step 4), or nil
-// when the call carried none. entry is the final tool entry.
-func FinalOutputPublicationFor(run *models.AgentRun, answer agentrun.FinalAnswer, entry *models.SessionEntry, publisher agentrun.FinalOutputPublisher) (*agentrun.FinalOutputPublication, error) {
-	if publisher == nil || answer.ToolEntryID == "" {
-		return nil, nil
-	}
-	if entry == nil || entry.Tool == nil || entry.ID != answer.ToolEntryID {
-		return nil, errors.New("final output publication needs the final tool entry")
-	}
-	call, err := decodeFinalAnswerCall(entry.Tool.Arguments)
-	if err != nil {
-		return nil, err
-	}
-	extensions := finalOutputFieldNames(run, publisher)
-	fields := map[string]json.RawMessage{}
-	for key, value := range call.Extra {
-		if _, ok := extensions[key]; ok {
-			fields[key] = value
-		}
-	}
-	if len(fields) == 0 {
-		return nil, nil
-	}
-	return &agentrun.FinalOutputPublication{Run: run, StepID: answer.StepID, ToolCallID: answer.ToolCallID, Fields: fields}, nil
 }

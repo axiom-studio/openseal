@@ -284,27 +284,6 @@ parallel chat execution system.
 Artifact content operations are advertised only when their store or resolver is
 wired. A content reference is opaque; clients must not treat it as a local path.
 
-### Desktop model-generated text files
-
-On desktop tasks (local `agent_work` Runs) the `turn_final_answer` tool offers
-an optional `generatedFiles` field: entries `{name, mediaType, text}` for
-`text/plain`, `text/markdown`, `text/csv`, and `application/json`, at most
-eight files and 256 KiB total UTF-8 content. Names must be unique portable
-filenames without paths; text/JSON are validated. Model-supplied
-`artifactRefs` and extra file metadata are rejected, and a rejected final
-answer comes back to the model as a tool error. This is generated output, not
-arbitrary filesystem access or a new artifact-upload endpoint.
-
-After the final answer is accepted, the configured output publisher assigns
-host-owned scoped identities, integrity metadata, provenance, and
-classification, then publishes content/catalog records before completing the
-Run. Each artifact's `provenance.turnId` is the id of the final model step.
-Run output contains `artifactRefs` in place of bodies. Storage failure pauses
-the Run; Resume re-runs publication from the saved final answer without
-calling the model again and without duplicate records. A step canceled before
-the provider returns publishes nothing; previously accepted output can have
-partially published files and is not an atomic multi-file batch.
-
 ### Agent turns (v2)
 
 `/agent-turns` (capability `agent-turns`, version `2`) lists the model steps of
