@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/models"
-	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
 // maxCommentAnchorPathLen bounds the chat-file path a comment block names.
@@ -19,10 +18,9 @@ const maxCommentAnchorPathLen = 512
 
 // Kinds of commented output; each names the tool that makes its next version.
 const (
-	commentedFile   = "file"
-	commentedApp    = "app"
-	commentedVisual = "visual"
-	commentedImage  = "image"
+	commentedFile  = "file"
+	commentedApp   = "app"
+	commentedImage = "image"
 )
 
 // describeCommented fills what the comment block names: the output's kind,
@@ -32,8 +30,6 @@ func (r *AttachmentReader) describeCommented(ctx context.Context, artifact *mode
 	switch {
 	case isConversationAppArtifact(artifact):
 		attached.Kind = commentedApp
-	case artifact.Type == presentation.ArtifactType || mediaType == presentation.MediaType:
-		attached.Kind = commentedVisual
 	case mediaType == "image/png" || mediaType == "image/jpeg":
 		attached.Kind = commentedImage
 	default:
@@ -150,8 +146,6 @@ func commentAnchorNextStep(kind string) string {
 	switch kind {
 	case commentedApp:
 		return "Change that spot in place, then call save_app again so the app gets a new version."
-	case commentedVisual:
-		return "Change that spot in place, then call update_visual so the visual gets a new version."
 	default:
 		return "Change that spot in place, then present the file again so the output gets a new version."
 	}
@@ -162,7 +156,7 @@ func commentAnchorNextStep(kind string) string {
 // escapes longest, the largest version, and the longest closing line.
 func commentAnchorReserve(ref models.ConversationReference) int {
 	worst := 0
-	for _, kind := range []string{commentedFile, commentedApp, commentedVisual} {
+	for _, kind := range []string{commentedFile, commentedApp} {
 		worst = max(worst, len(renderCommentAnchor(conversationAttachedArtifact{
 			ID: ref.ID, Version: ref.Version, Latest: math.MaxInt64, Kind: kind, Anchor: ref.Anchor,
 			Name: strings.Repeat("&", conversationAttachedNameBytes), Path: strings.Repeat("&", maxCommentAnchorPathLen),
