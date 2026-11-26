@@ -513,6 +513,30 @@ type BeforeAfterLabels struct {
 	After  string `json:"after,omitempty"`
 }
 
+// beforeAfterLabelSeparators split labels written as one text ("Original
+// | New") into the two sides.
+var beforeAfterLabelSeparators = []string{"|", "→", "->", "/"}
+
+// coerceBeforeAfterLabels reads labels given as one text with one separator
+// between the two names as {before, after}.
+func coerceBeforeAfterLabels(payload map[string]interface{}) {
+	text, ok := payload["labels"].(string)
+	if !ok {
+		return
+	}
+	for _, separator := range beforeAfterLabelSeparators {
+		if strings.Count(text, separator) != 1 {
+			continue
+		}
+		before, after, _ := strings.Cut(text, separator)
+		before, after = strings.TrimSpace(before), strings.TrimSpace(after)
+		if before != "" && after != "" {
+			payload["labels"] = map[string]interface{}{"before": before, "after": after}
+		}
+		return
+	}
+}
+
 // BeforeAfterModes lists the values of BeforeAfter.Mode: diff (texts, with
 // changed words highlighted), split (side by side) and slider (images).
 var BeforeAfterModes = []string{"diff", "split", "slider"}

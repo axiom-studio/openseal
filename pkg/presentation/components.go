@@ -86,7 +86,7 @@ var catalogue = map[string]typeSpec{
 	"math":            {payload: "math", validate: validateMath, sentence: "A worked solution, one LaTeX line (no $ delimiters) per step with an optional note; reveal stepwise to show one step at a time."},
 	"definition":      {payload: "definition", validate: validateDefinition, sentence: "One term made simple, with an optional example and image."},
 	"flashcards":      {payload: "flashcards", validate: validateFlashcards, sentence: "A practice deck of 2-30 cards; people flip each, mark it Got it or Again, and you hear their tally when they finish."},
-	"before_after":    {payload: "before_after", validate: validateBeforeAfter, sentence: "A change shown side by side: two texts (diff highlights changed words, or split) or two images already in this chat (slider or split)."},
+	"before_after":    {payload: "before_after", validate: validateBeforeAfter, coerce: coerceBeforeAfterLabels, sentence: "A change shown side by side: two texts (diff highlights changed words, or split) or two images already in this chat (slider or split)."},
 	"draft":           {payload: "draft", bindings: []BindingKind{BindingApproval}, validate: validateDraft, sentence: "A message you wrote for them (email, message, post or note); they can say it looks good, ask for it shorter, or edit it; bind it to the approval of a send you proposed so its buttons send or cancel."},
 	"recipe":          {payload: "recipe", validate: validateRecipe, sentence: "A dish with ingredients (qty for the servings given; people rescale it) and steps; checkable lets people tick ingredients off together."},
 	"item":            {payload: "item", validate: validateItem, sentence: "One product, option or listing with price, rating and up to 4 facts."},

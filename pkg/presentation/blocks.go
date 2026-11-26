@@ -179,7 +179,14 @@ func parseAttributes(raw string) map[string]interface{} {
 		}
 		return string(text[begin:index])
 	}
-	readValue := func() string {
+	readValue := func() interface{} {
+		if index < len(text) && (text[index] == '[' || text[index] == '{') {
+			if end := bracketEnd(text, index); end > 0 {
+				begin := index
+				index = end
+				return bracketedValue(string(text[begin:end]))
+			}
+		}
 		if index < len(text) && (text[index] == '"' || text[index] == '\'') {
 			quote := text[index]
 			index++
@@ -220,6 +227,66 @@ func parseAttributes(raw string) map[string]interface{} {
 		setPath(attrs, key, true)
 	}
 	return attrs
+}
+
+// bracketEnd is the index just past the bracket group that opens at begin,
+// skipping quoted text; -1 when the group never closes.
+func bracketEnd(text []rune, begin int) int {
+	depth := 0
+	var quote rune
+	for index := begin; index < len(text); index++ {
+		switch r := text[index]; {
+		case quote != 0:
+			if r == '\\' {
+				index++
+			} else if r == quote {
+				quote = 0
+			}
+		case r == '"' || r == '\'':
+			quote = r
+		case r == '[' || r == '{':
+			depth++
+		case r == ']' || r == '}':
+			depth--
+			if depth == 0 {
+				return index + 1
+			}
+		}
+	}
+	return -1
+}
+
+// bracketedValue reads an attribute value written as a list or an object:
+// JSON or YAML flow ([{"url": …}], {kind: agent}), or an object of
+// attributes ({kind=agent id=x}). A model writes an object field in the
+// header this way as often as in the body; anything else stays text.
+func bracketedValue(raw string) interface{} {
+	var value interface{}
+	if err := yaml.Unmarshal([]byte(raw), &value); err == nil {
+		switch typed := plainYAML(value).(type) {
+		case []interface{}:
+			return typed
+		case map[string]interface{}:
+			if !hasNullField(typed) {
+				return typed
+			}
+		}
+	}
+	if strings.HasPrefix(raw, "{") && strings.HasSuffix(raw, "}") && strings.Contains(raw, "=") {
+		return parseAttributes(raw)
+	}
+	return raw
+}
+
+// hasNullField reports a key with no value, which is how YAML reads
+// {kind=agent id=x}.
+func hasNullField(object map[string]interface{}) bool {
+	for _, value := range object {
+		if value == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func setPath(object map[string]interface{}, key string, value interface{}) {

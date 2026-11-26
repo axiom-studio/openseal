@@ -269,3 +269,28 @@ func TestPreviewBlocksSkipOpenAndHostBlocks(t *testing.T) {
 		t.Fatalf("blocks = %+v", blocks)
 	}
 }
+
+// The three header slips prod answers made (2026-11-26), each of which cost
+// the answer a repair round: an object field written in the header.
+func TestObjectFieldsWrittenInTheHeader(t *testing.T) {
+	chart := readOne(t, ":::chart{#odds kind=bar title=\"Outcomes\" sources=[{\"url\":\"https://finance.yahoo.com/quote/%5EGSPC/history/\",\"title\":\"Yahoo Finance — S&P 500, daily\"}]}\n| Outcome | Share |\n|---|---|\n| Up | 67 |\n| Down | 33 |\n:::\n")
+	if len(chart.Sources) != 1 || chart.Sources[0].URL != "https://finance.yahoo.com/quote/%5EGSPC/history/" || chart.Sources[0].Title != "Yahoo Finance — S&P 500, daily" {
+		t.Fatalf("sources %+v", chart.Sources)
+	}
+	labels := readOne(t, ":::before_after{#sum mode=diff labels=\"Original | New\"}\nbefore:\n  text: Send it now.\nafter:\n  text: Could you send it today?\n:::\n")
+	if labels.BeforeAfter.Labels == nil || labels.BeforeAfter.Labels.Before != "Original" || labels.BeforeAfter.Labels.After != "New" {
+		t.Fatalf("labels %+v", labels.BeforeAfter.Labels)
+	}
+}
+
+func TestBracketedAttributes(t *testing.T) {
+	attrs := parseAttributes(`{#a binding={kind=agent id=aVx} list=[1, "two"] yaml={kind: run, id: r1} open=[draft label=x}`)
+	want := map[string]interface{}{"id": "a",
+		"binding": map[string]interface{}{"kind": "agent", "id": "aVx"},
+		"list":    []interface{}{1, "two"},
+		"yaml":    map[string]interface{}{"kind": "run", "id": "r1"},
+		"open":    "[draft", "label": "x"}
+	if !reflect.DeepEqual(attrs, want) {
+		t.Fatalf("attrs %#v", attrs)
+	}
+}
