@@ -106,13 +106,28 @@ func withToolResultContent(result ToolResult, content []ContentPart) ToolResult 
 	return result
 }
 
-// toolOutputPayload is the file that holds the full text/json content: plain
-// text for exactly one text part, otherwise the parts as json.
+// toolOutputPayload is the file that holds the full text/json content, in
+// the shape the preview shows the model, so a command it writes against the
+// preview (jq '.output.results[]') reads the file: plain text for exactly one
+// text part, the value itself for exactly one json part, otherwise a json
+// list of the parts in order (a text part as a string, a json part as its
+// value).
 func toolOutputPayload(content []ContentPart) toolfile.Payload {
 	if len(content) == 1 && content[0].Type == ContentPartText {
 		return toolfile.Payload{Name: "output.txt", MimeType: "text/plain", Data: []byte(content[0].Text)}
 	}
-	data, _ := json.Marshal(content)
+	if len(content) == 1 {
+		return toolfile.Payload{Name: "output.json", MimeType: "application/json", Data: []byte(content[0].Value)}
+	}
+	values := make([]json.RawMessage, len(content))
+	for i, part := range content {
+		if part.Type == ContentPartText {
+			values[i], _ = json.Marshal(part.Text)
+		} else {
+			values[i] = part.Value
+		}
+	}
+	data, _ := json.Marshal(values)
 	return toolfile.Payload{Name: "output.json", MimeType: "application/json", Data: data}
 }
 

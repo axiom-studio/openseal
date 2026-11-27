@@ -99,9 +99,10 @@ func TestBoundToolResultKeepsFullOutputAsFile(t *testing.T) {
 	if keeper.paths[0] != "tool-output/call-1/output.json" || payload.MimeType != "application/json" {
 		t.Fatalf("payload kept at %q as %q", keeper.paths[0], payload.MimeType)
 	}
-	var parts []ContentPart
-	if err := json.Unmarshal(payload.Data, &parts); err != nil || len(parts) != 2 || string(parts[1].Value) != string(value) {
-		t.Fatalf("payload does not hold the full content: %v", err)
+	var parts []json.RawMessage
+	if err := json.Unmarshal(payload.Data, &parts); err != nil || len(parts) != 2 ||
+		string(parts[0]) != `"found 400 items"` || string(parts[1]) != string(value) {
+		t.Fatalf("payload does not hold the parts' values in order: %v", err)
 	}
 	if got.Status != ToolResultSucceeded || len(got.Content) != 2 {
 		t.Fatalf("unexpected result: %#v", got)
@@ -118,6 +119,26 @@ func TestBoundToolResultKeepsFullOutputAsFile(t *testing.T) {
 		t.Fatalf("unexpected file part: %#v", file)
 	}
 	requireToolResultFitsCap(t, got)
+}
+
+// A single json part is kept as its value, the shape the preview shows, so
+// jq '.output' written against the preview reads the file (prod run
+// 8e0abe3d: the file was [{"type":"json","value":…}] and jq failed).
+func TestBoundToolResultSingleJSONKeepsTheValue(t *testing.T) {
+	keeper := &fakeToolOutputKeeper{}
+	value := bigJSONValue(t)
+	_, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-2"}, ToolResult{
+		Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartJSON, Value: value}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keeper.payloads) != 1 || keeper.paths[0] != "tool-output/call-2/output.json" {
+		t.Fatalf("kept %d payloads at %v", len(keeper.payloads), keeper.paths)
+	}
+	if string(keeper.payloads[0].Data) != string(value) {
+		t.Fatalf("file is not the json value: %.120s", keeper.payloads[0].Data)
+	}
 }
 
 func TestBoundToolResultTextUsesTxt(t *testing.T) {
