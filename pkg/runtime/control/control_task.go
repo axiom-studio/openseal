@@ -22,8 +22,10 @@ type startTaskHandler struct{}
 
 func (startTaskHandler) Spec(agentrun.ControlAuthority) ToolSpec {
 	return ToolSpec{
-		Description: "Start one durable background task for substantial requested work and reply with a brief acknowledgment. " +
-			"Call it alone; it ends your reply to this message.",
+		Description: "Start one durable background task to build something that takes several minutes, such as an app, " +
+			"a slide deck, a website or a report file, and reply with a brief acknowledgment. Never use it to answer a " +
+			"question, even one that needs research: answer that in your reply. A reply that runs long moves to the " +
+			"background on its own. Call it alone; it ends your reply to this message.",
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []interface{}{"goal", "acknowledgment"},
 			"properties": map[string]interface{}{
