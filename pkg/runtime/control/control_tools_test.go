@@ -95,7 +95,7 @@ func TestControlToolSpecsStableOrderAndPresence(t *testing.T) {
 	}{
 		{"everything", func(*agentrun.ControlAuthority) {}, []string{
 			"turn_report_progress", "wait", "ask_user", "react", "conversation_start_task",
-			"control_fork", "run_operation", "agent_delegate", "agent_delegate_reply",
+			"start_subagents", "run_operation", "agent_delegate", "agent_delegate_reply",
 		}},
 		{"zero authority offers nothing", func(a *agentrun.ControlAuthority) { *a = agentrun.ControlAuthority{} }, []string{}},
 		{"spoken offers no final tool", func(a *agentrun.ControlAuthority) {
@@ -103,13 +103,13 @@ func TestControlToolSpecsStableOrderAndPresence(t *testing.T) {
 		}, []string{"react"}},
 		{"voice call hides task start", func(a *agentrun.ControlAuthority) { a.VoiceCallStarted = true }, []string{
 			"turn_report_progress", "wait", "ask_user", "react",
-			"control_fork", "run_operation", "agent_delegate", "agent_delegate_reply",
+			"start_subagents", "run_operation", "agent_delegate", "agent_delegate_reply",
 		}},
 		{"task context that cannot start", func(a *agentrun.ControlAuthority) {
 			a.TaskStart = &models.HostedConversationTaskContext{ConversationID: "c1"}
 			a.Operations = nil
 			a.DelegateTargets = nil
-		}, []string{"turn_report_progress", "wait", "ask_user", "react", "control_fork"}},
+		}, []string{"turn_report_progress", "wait", "ask_user", "react", "start_subagents"}},
 		{"decision Run offers only its tool", func(a *agentrun.ControlAuthority) { a.FinalMode = agentrun.FinalModeDecision }, []string{"agent_request_decision"}},
 	}
 	for _, tc := range cases {
@@ -179,7 +179,7 @@ func requireControlError(t *testing.T, result *models.ToolResult, status models.
 }
 
 func TestControlSecondSettleCallInSameMessageIsRefused(t *testing.T) {
-	calls := modelCalls("control_fork", "react", "ask_user", "linear_get_issue", "wait")
+	calls := modelCalls("start_subagents", "react", "ask_user", "linear_get_issue", "wait")
 	refusals := CallRefusals(calls, allSettleTools)
 	if len(refusals) != 2 || refusals["call-a"] != nil || refusals["call-b"] != nil || refusals["call-d"] != nil {
 		t.Fatalf("refusals = %v", refusals)
@@ -193,7 +193,7 @@ func TestControlSecondSettleCallInSameMessageIsRefused(t *testing.T) {
 		t.Fatalf("conflicts = %v", got)
 	}
 	// One settle call among inline and governed calls is fine.
-	if refusals := CallRefusals(modelCalls("react", "control_fork", "linear_get_issue"), allSettleTools); len(refusals) != 0 {
+	if refusals := CallRefusals(modelCalls("react", "start_subagents", "linear_get_issue"), allSettleTools); len(refusals) != 0 {
 		t.Fatalf("single settle call refused: %v", refusals)
 	}
 }
@@ -208,7 +208,7 @@ func TestFinalAnswerWithOtherCallsIsRefusedOthersRun(t *testing.T) {
 		t.Fatalf("message = %v", value["message"])
 	}
 	// A refused final does not take the settle slot: the fork still settles.
-	refusals = CallRefusals(modelCalls("agent_request_decision", "control_fork"), allSettleTools)
+	refusals = CallRefusals(modelCalls("agent_request_decision", "start_subagents"), allSettleTools)
 	if len(refusals) != 1 || refusals["call-b"] != nil {
 		t.Fatalf("refusals = %v", refusals)
 	}
@@ -392,7 +392,7 @@ func (f *controlFixture) stored(callID string) *models.SessionEntry {
 
 func TestControlArgumentsRejectUnknownFields(t *testing.T) {
 	f := newControlFixture(t, []agentrun.LoopToolCall{
-		{ID: "unknown", Name: "control_fork", Arguments: json.RawMessage(`{"goal":"x","budget":3}`)},
+		{ID: "unknown", Name: "start_subagents", Arguments: json.RawMessage(`{"goal":"x","budget":3}`)},
 		{ID: "string", Name: "wait", Arguments: json.RawMessage(`{"goal":3}`)},
 		{ID: "ok", Name: "ask_user", Arguments: json.RawMessage(`{"goal":"x"}`)},
 	})
@@ -407,7 +407,7 @@ func TestControlArgumentsRejectUnknownFields(t *testing.T) {
 		}
 		requireControlError(t, f.stored(callID).Tool.Result, models.ToolResultFailed, "tool_arguments_invalid")
 	}
-	if f.handlers[models.ControlToolFork].calls != 0 || f.handlers[models.ControlToolWait].calls != 0 {
+	if f.handlers[models.ControlToolStartSubagents].calls != 0 || f.handlers[models.ControlToolWait].calls != 0 {
 		t.Fatal("a handler ran with invalid arguments")
 	}
 	result, err := f.exec.Settle(f.ctx, f.context("ok", authority))
@@ -436,7 +436,7 @@ func TestControlArgumentsRejectUnknownFields(t *testing.T) {
 
 func TestControlToolNotOfferedIsError(t *testing.T) {
 	f := newControlFixture(t, []agentrun.LoopToolCall{
-		{ID: "fork", Name: "control_fork", Arguments: json.RawMessage(`{"goal":"x"}`)},
+		{ID: "fork", Name: "start_subagents", Arguments: json.RawMessage(`{"goal":"x"}`)},
 		{ID: "decide", Name: "agent_request_decision", Arguments: json.RawMessage(`{}`)},
 		{ID: "kernel", Name: "agent_delegate", Arguments: json.RawMessage(`{"goal":"x"}`),
 			Directive: &agentrun.ToolCallDirective{IdempotencyKey: "runbook-step"}},
@@ -455,7 +455,7 @@ func TestControlToolNotOfferedIsError(t *testing.T) {
 			t.Fatalf("tool = %v", value["tool"])
 		}
 	}
-	if f.handlers[models.ControlToolFork].calls != 0 || f.handlers[models.ControlToolRequestDecision].calls != 0 {
+	if f.handlers[models.ControlToolStartSubagents].calls != 0 || f.handlers[models.ControlToolRequestDecision].calls != 0 {
 		t.Fatal("a handler ran for a tool that was not offered")
 	}
 	// A kernel-origin call (runbook directive) is preauthorized.
@@ -530,7 +530,7 @@ func TestControlDispatcherPhaseAndStateRules(t *testing.T) {
 func TestControlSettleEntryPicksOpenSettleCall(t *testing.T) {
 	entries := []*models.SessionEntry{
 		storetest.ToolSessionEntry("t1", "s1", "c1", models.ToolEntryPending),
-		{ID: "t2", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, Tool: &models.ToolEntry{Name: "control_fork"}},
+		{ID: "t2", Type: models.SessionEntryTool, State: models.ToolEntryCompleted, Tool: &models.ToolEntry{Name: "start_subagents"}},
 		{ID: "t3", Type: models.SessionEntryTool, State: models.ToolEntryPending, Tool: &models.ToolEntry{Name: "react"}},
 		{ID: "t4", Type: models.SessionEntryTool, State: models.ToolEntryPending, Tool: &models.ToolEntry{Name: "ask_user"}},
 	}
@@ -579,7 +579,7 @@ func cloneRunForTest(run *models.AgentRun) *models.AgentRun {
 }
 
 func TestControlNotOfferedCallDoesNotTakeSettleSlot(t *testing.T) {
-	calls := modelCalls("wait", "control_fork")
+	calls := modelCalls("wait", "start_subagents")
 	refusals := CallRefusals(calls, agentrun.ControlAuthority{ForkAllowed: true})
 	if len(refusals) != 0 {
 		t.Fatalf("refusals = %v", refusals)

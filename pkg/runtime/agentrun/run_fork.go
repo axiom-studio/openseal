@@ -132,7 +132,7 @@ type CreateRunForkRequest struct {
 	// fresh session at their first claim.
 	SessionForks map[string]*SessionForkRef
 	// ToolTransition moves the source's control tool entry to awaiting_child
-	// in the same transaction (control_fork, run_operation).
+	// in the same transaction (start_subagents, run_operation).
 	ToolTransition *models.ToolEntryTransitionRequest
 	// RequireInterventionCount refuses the create with ErrSteeringArrived
 	// unless the source still has exactly that many PendingInterventions.

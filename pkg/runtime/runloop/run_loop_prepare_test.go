@@ -112,7 +112,7 @@ func TestPrepareToolOrderStableAcrossSteps(t *testing.T) {
 
 	want := []string{
 		"turn_report_progress", "wait", "ask_user", "react",
-		"conversation_start_task", "control_fork", "search_capabilities", "load_capabilities",
+		"conversation_start_task", "start_subagents", "search_capabilities", "load_capabilities",
 	}
 	for _, spec := range modelstep.HostToolSpecs(workspace.ChatAuthority("chat-1")) {
 		want = append(want, spec.ToolName)

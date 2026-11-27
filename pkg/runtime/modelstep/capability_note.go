@@ -325,7 +325,7 @@ func ControlTargetItems(a agentrun.ControlAuthority) []CapabilityNoteItem {
 	if ControlToolOffered(models.ControlToolDelegate, a) {
 		addAgents(a.DelegateTargets)
 	}
-	if ControlToolOffered(models.ControlToolFork, a) {
+	if ControlToolOffered(models.ControlToolStartSubagents, a) {
 		addAgents(a.ForkTargets)
 	}
 	if ControlToolOffered(models.ControlToolRunOperation, a) {

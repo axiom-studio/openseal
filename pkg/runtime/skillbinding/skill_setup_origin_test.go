@@ -321,7 +321,7 @@ func TestSkillSetupOriginDeniesTamperedGoal(t *testing.T) {
 		"task-acknowledgment": func(_ *models.SessionEntry, task *models.ConversationTask) { task.Acknowledgment = "Something else" },
 		"task-key":            func(_ *models.SessionEntry, task *models.ConversationTask) { task.TaskKey = "task-other" },
 		"entry-tool": func(entry *models.SessionEntry, _ *models.ConversationTask) {
-			entry.Tool.Name = string(models.ControlToolFork)
+			entry.Tool.Name = string(models.ControlToolStartSubagents)
 		},
 		"entry-open": func(entry *models.SessionEntry, _ *models.ConversationTask) { entry.State = models.ToolEntryPending },
 		"entry-run":  func(entry *models.SessionEntry, _ *models.ConversationTask) { entry.RunID = "other-run" },

@@ -411,7 +411,7 @@ func TestUnofferedToolIsError(t *testing.T) {
 	f := newToolExecFixture(t, agentrun.ControlAuthority{})
 	step := f.step("step-1", models.AgentTurnStatusRunning,
 		toolCall("call-unknown", "made_up_tool", `{}`),
-		toolCall("call-fork", "control_fork", `{"goal":"x"}`),
+		toolCall("call-fork", "start_subagents", `{"goal":"x"}`),
 		toolCall("call-load", "load_capabilities", `{"ids":["action:x"]}`),
 		toolCall("call-read", "workspace_read_file", `{"path":"a.md"}`),
 	)
@@ -433,7 +433,7 @@ func TestUnofferedToolIsError(t *testing.T) {
 	if stored := f.entry(step.entries[2]); !stored.Tool.Result.IsError || resultValue(t, stored)["status"] != "not_available" {
 		t.Fatalf("load of an unknown ID = %s %v", stored.State, stored.Tool.Result)
 	}
-	if f.handlers[models.ControlToolFork].calls != 0 {
+	if f.handlers[models.ControlToolStartSubagents].calls != 0 {
 		t.Fatal("an unoffered control tool ran")
 	}
 	if read := f.entry(step.entries[3]); read.State != models.ToolEntryCompleted {
@@ -469,7 +469,7 @@ func (h *committedForkHandler) Run(ctx context.Context, x *control.Executor, cc 
 	h.settles++
 	key := "fork-" + cc.Entry.ID
 	h.groups[key]++
-	meta, err := json.Marshal(&control.EntryMeta{Kind: models.ControlToolFork, ForkID: key, GroupID: key})
+	meta, err := json.Marshal(&control.EntryMeta{Kind: models.ControlToolStartSubagents, ForkID: key, GroupID: key})
 	if err != nil {
 		return control.Result{}, err
 	}
@@ -496,10 +496,10 @@ func (h *committedForkHandler) Run(ctx context.Context, x *control.Executor, cc 
 // CTL-6b).
 func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
 	fork := &committedForkHandler{groups: map[string]int{}}
-	f := newToolExecFixture(t, agentrun.ControlAuthority{ForkAllowed: true}, control.NewTool(models.ControlToolFork, fork))
+	f := newToolExecFixture(t, agentrun.ControlAuthority{ForkAllowed: true}, control.NewTool(models.ControlToolStartSubagents, fork))
 	// Step 1 asked for a fork; the step finished and was applied, then the
 	// worker died before the settle phase created the group.
-	step := f.step("step-1", models.AgentTurnStatusCompleted, toolCall("call-fork", "control_fork", `{"goal":"split"}`))
+	step := f.step("step-1", models.AgentTurnStatusCompleted, toolCall("call-fork", "start_subagents", `{"goal":"split"}`))
 	if step.entries[0].Tool.RepeatEffect != string(RepeatEffectWrite) {
 		t.Fatalf("fork repeat effect = %q", step.entries[0].Tool.RepeatEffect)
 	}

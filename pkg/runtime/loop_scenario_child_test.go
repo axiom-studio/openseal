@@ -56,7 +56,7 @@ func TestLoopForkCreatesChildSessionAndResumesWithItsFinalText(t *testing.T) {
 				return looptest.Act("Counting in parallel.", childForkCall("count items", "count boxes"))
 			}},
 			&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
-				content, isError, ok := v.ToolResult(string(models.ControlToolFork))
+				content, isError, ok := v.ToolResult(string(models.ControlToolStartSubagents))
 				if !ok || isError || !strings.Contains(content, "2 items") {
 					return looptest.Say("The count failed.")
 				}
@@ -73,7 +73,7 @@ func TestLoopForkCreatesChildSessionAndResumesWithItsFinalText(t *testing.T) {
 		if waiting.Status != models.AgentRunStatusWaitingForDependency || waiting.LeaseOwner != "" {
 			t.Fatalf("parent = %s lease %q", waiting.Status, waiting.LeaseOwner)
 		}
-		forkEntry := c.toolEntry(parent.ID, string(models.ControlToolFork))
+		forkEntry := c.toolEntry(parent.ID, string(models.ControlToolStartSubagents))
 		if forkEntry.State != models.ToolEntryAwaitingChild {
 			t.Fatalf("fork entry = %s", forkEntry.State)
 		}
@@ -150,7 +150,7 @@ func TestLoopForkCreatesChildSessionAndResumesWithItsFinalText(t *testing.T) {
 		}
 
 		// The parent's tool entry completed with the children's final texts.
-		forkEntry = c.toolEntry(parent.ID, string(models.ControlToolFork))
+		forkEntry = c.toolEntry(parent.ID, string(models.ControlToolStartSubagents))
 		if forkEntry.State != models.ToolEntryCompleted || forkEntry.Tool.Result.IsError {
 			t.Fatalf("fork entry = %s %q", forkEntry.State, childResultText(forkEntry))
 		}
@@ -192,7 +192,7 @@ func TestLoopTwoParallelForksJoinBeforeResume(t *testing.T) {
 		if len(children) != 2 {
 			t.Fatalf("children = %d", len(children))
 		}
-		forks := c.toolEntries(parent.ID, string(models.ControlToolFork))
+		forks := c.toolEntries(parent.ID, string(models.ControlToolStartSubagents))
 		if len(forks) != 2 || forks[0].State != models.ToolEntryAwaitingChild || forks[1].State != models.ToolEntryError ||
 			!strings.Contains(childResultText(forks[1]), "control_one_settle_call") {
 			t.Fatalf("fork entries = %v / %q", c.EntryTypes(parent.ID), childResultText(forks[len(forks)-1]))
@@ -204,7 +204,7 @@ func TestLoopTwoParallelForksJoinBeforeResume(t *testing.T) {
 		if got := c.MustRun(parent.ID); got.Status != models.AgentRunStatusWaitingForDependency {
 			t.Fatalf("parent woke after one of two branches: %s", got.Status)
 		}
-		if entry := c.toolEntries(parent.ID, string(models.ControlToolFork))[0]; entry.State != models.ToolEntryAwaitingChild {
+		if entry := c.toolEntries(parent.ID, string(models.ControlToolStartSubagents))[0]; entry.State != models.ToolEntryAwaitingChild {
 			t.Fatalf("fork entry after one branch = %s", entry.State)
 		}
 		if n := len(c.requestsFor(parent.ID)); n != 1 {
@@ -216,7 +216,7 @@ func TestLoopTwoParallelForksJoinBeforeResume(t *testing.T) {
 		}
 		c.work(4)
 		c.MustStatus(parent, models.AgentRunStatusCompleted)
-		forks = c.toolEntries(parent.ID, string(models.ControlToolFork))
+		forks = c.toolEntries(parent.ID, string(models.ControlToolStartSubagents))
 		entry := forks[0]
 		branches, _ := childResultJSON(t, entry)["branches"].([]interface{})
 		if entry.State != models.ToolEntryCompleted || len(branches) != 2 || forks[1].State != models.ToolEntryError || forks[0].Sequence > forks[1].Sequence {
@@ -252,7 +252,7 @@ func TestLoopChildFailureIsAToolError(t *testing.T) {
 				return looptest.Act("Checking both.", childForkCall("read the ledger", "count the inventory"))
 			}},
 			&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
-				if _, isError, _ := v.ToolResult(string(models.ControlToolFork)); isError {
+				if _, isError, _ := v.ToolResult(string(models.ControlToolStartSubagents)); isError {
 					return looptest.Say("One check failed.")
 				}
 				return looptest.Say("All checks passed.")
@@ -270,7 +270,7 @@ func TestLoopChildFailureIsAToolError(t *testing.T) {
 		if failed == nil || failed.Status != models.AgentRunStatusFailed || failed.FailureExplanation == nil || failed.FailureExplanation.Message == "" {
 			t.Fatalf("failed child = %#v", failed)
 		}
-		entry := c.toolEntry(parent.ID, string(models.ControlToolFork))
+		entry := c.toolEntry(parent.ID, string(models.ControlToolStartSubagents))
 		if entry.State != models.ToolEntryError || !entry.Tool.Result.IsError {
 			t.Fatalf("fork entry = %s error=%v", entry.State, entry.Tool.Result.IsError)
 		}

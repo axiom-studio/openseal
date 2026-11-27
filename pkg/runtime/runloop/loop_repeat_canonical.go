@@ -47,7 +47,7 @@ const (
 // here is treated as a write: identical to an earlier success it is suppressed.
 var (
 	repeatKernelWriteTools = map[string]bool{
-		"control_fork":            true,
+		"start_subagents":         true,
 		"agent_delegate":          true,
 		"agent_delegate_reply":    true,
 		"run_operation":           true,

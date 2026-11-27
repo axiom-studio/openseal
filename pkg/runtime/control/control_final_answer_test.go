@@ -353,7 +353,7 @@ func TestControlToolsStableAcrossTargets(t *testing.T) {
 	more.DelegateTargets = append(more.DelegateTargets, agentrun.HostedAgentTarget{ID: "agent-3", DisplayName: "Bo"})
 	more.ForkTargets = append(more.ForkTargets, agentrun.HostedAgentTarget{ID: "agent-3"})
 	more.Operations = append(more.Operations, agentrun.HostedRunbookOperation{Entrypoint: "audit", Name: "Audit"})
-	for _, name := range []models.ControlToolName{models.ControlToolDelegate, models.ControlToolFork, models.ControlToolRunOperation} {
+	for _, name := range []models.ControlToolName{models.ControlToolDelegate, models.ControlToolStartSubagents, models.ControlToolRunOperation} {
 		handler := NewRegistry(BuiltinTools()...)[name]
 		if controlJSON(t, handler.Spec(targets)) != controlJSON(t, handler.Spec(more)) {
 			t.Fatalf("%s changes with its targets", name)

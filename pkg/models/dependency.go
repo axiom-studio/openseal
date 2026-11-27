@@ -136,7 +136,7 @@ type RunDependencyGroupCreateRecord struct {
 	SourceRun              *AgentRun
 	ExpectedSourceRevision int64
 	Event                  *ActivityEvent
-	// ToolTransition moves the source Run's control tool entry (control_fork,
+	// ToolTransition moves the source Run's control tool entry (start_subagents,
 	// run_operation) to awaiting_child in the same transaction. Its Lease is
 	// checked against the source Run before the park releases that lease.
 	ToolTransition *ToolEntryTransitionRequest

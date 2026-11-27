@@ -29,7 +29,7 @@ type forkTestStore interface {
 }
 
 // forkCall is one claimed Run whose finished, applied step called
-// control_fork (entry pending), ready to settle.
+// start_subagents (entry pending), ready to settle.
 type forkCall struct {
 	t         *testing.T
 	ctx       context.Context
@@ -58,7 +58,7 @@ func forkStores(t *testing.T, fn func(t *testing.T, store forkTestStore)) {
 }
 
 // newForkCall creates and claims a Run with budget (nil = unbounded), gives
-// it a run session holding one user entry, and records a control_fork call
+// it a run session holding one user entry, and records a start_subagents call
 // with arguments.
 func newForkCall(t *testing.T, store forkTestStore, budget *models.BudgetPolicy, arguments string) *forkCall {
 	t.Helper()
@@ -98,13 +98,13 @@ func newForkCall(t *testing.T, store forkTestStore, budget *models.BudgetPolicy,
 		ID: models.SessionEntryID(session.ID, models.AssistantEntryKey(stepID)), RunID: claimed.ID, StepID: stepID, Step: 1,
 		Type: models.SessionEntryAssistant, Assistant: &models.AssistantEntry{
 			Provider: models.ModelStepProviderAnthropic, Model: "claude-x", StopReason: models.ModelStopToolCalls, Text: "Splitting the work.",
-			ToolCalls: []models.ModelToolCall{{ID: callID, Name: string(models.ControlToolFork), Arguments: raw}},
+			ToolCalls: []models.ModelToolCall{{ID: callID, Name: string(models.ControlToolStartSubagents), Arguments: raw}},
 		},
 	}
 	tool := &models.SessionEntry{
 		ID: models.SessionEntryID(session.ID, models.ToolEntryKey(stepID, callID)), RunID: claimed.ID, StepID: stepID, Step: 1,
 		Type: models.SessionEntryTool, State: models.ToolEntryPending, ToolCallID: callID,
-		Tool: &models.ToolEntry{Name: string(models.ControlToolFork), Arguments: raw, SideEffect: models.ToolSideEffectWrite},
+		Tool: &models.ToolEntry{Name: string(models.ControlToolStartSubagents), Arguments: raw, SideEffect: models.ToolSideEffectWrite},
 	}
 	if _, err := sessions.AppendAgentSessionEntries(ctx, models.AppendAgentSessionEntriesRequest{
 		Scope: scope, SessionID: session.ID, RunID: claimed.ID, Lease: &lease, Entries: []*models.SessionEntry{user}, Now: now,
@@ -152,7 +152,7 @@ func (c *forkCall) settle() Result {
 	c.t.Helper()
 	result, err := c.exec.Settle(c.ctx, c.context())
 	if err != nil {
-		c.t.Fatalf("settle control_fork: %v", err)
+		c.t.Fatalf("settle start_subagents: %v", err)
 	}
 	if result.Entry != nil {
 		c.entry = result.Entry
@@ -245,7 +245,7 @@ func (c *forkCall) resume() Resume {
 	c.t.Helper()
 	resumed, err := c.exec.Resume(c.ctx, c.context())
 	if err != nil {
-		c.t.Fatalf("resume control_fork: %v", err)
+		c.t.Fatalf("resume start_subagents: %v", err)
 	}
 	if resumed.Resolved && resumed.Result.Entry != nil {
 		c.entry = resumed.Result.Entry
@@ -279,7 +279,7 @@ func TestForkParksSourceAndCreatesAgentWorkChildren(t *testing.T) {
 			t.Fatalf("result = %#v park %#v", result, result.Park)
 		}
 		meta := c.meta()
-		if meta.Kind != models.ControlToolFork || meta.ForkID != "fork-"+c.entry.ID || len(meta.ChildRunIDs) != 2 ||
+		if meta.Kind != models.ControlToolStartSubagents || meta.ForkID != "fork-"+c.entry.ID || len(meta.ChildRunIDs) != 2 ||
 			meta.GroupID != agentrun.StableForkIdentifier(c.run.ID, meta.ForkID, "group") || result.Park.Wake.Reference != meta.GroupID {
 			t.Fatalf("meta = %#v", meta)
 		}
@@ -626,8 +626,8 @@ func TestForkResumeWhileGroupWaitsReparks(t *testing.T) {
 }
 
 func TestForkSpecSameWithAndWithoutTargets(t *testing.T) {
-	self := forkHandler{}.Spec(agentrun.ControlAuthority{ForkAllowed: true})
-	targets := forkHandler{}.Spec(agentrun.ControlAuthority{ForkAllowed: true, ForkTargets: []agentrun.HostedAgentTarget{{ID: "agent-b"}}})
+	self := startSubagentsHandler{}.Spec(agentrun.ControlAuthority{ForkAllowed: true})
+	targets := startSubagentsHandler{}.Spec(agentrun.ControlAuthority{ForkAllowed: true, ForkTargets: []agentrun.HostedAgentTarget{{ID: "agent-b"}}})
 	if !reflect.DeepEqual(self, targets) {
 		t.Fatal("fork targets changed the fork tool")
 	}

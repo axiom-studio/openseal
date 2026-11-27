@@ -23,7 +23,7 @@ const (
 	ControlToolAskUser         ControlToolName = "ask_user"
 	ControlToolReact           ControlToolName = "react"
 	ControlToolStartTask       ControlToolName = "conversation_start_task"
-	ControlToolFork            ControlToolName = "control_fork"
+	ControlToolStartSubagents  ControlToolName = "start_subagents"
 	ControlToolRunOperation    ControlToolName = "run_operation"
 	ControlToolDelegate        ControlToolName = "agent_delegate"
 	ControlToolDelegateReply   ControlToolName = "agent_delegate_reply"

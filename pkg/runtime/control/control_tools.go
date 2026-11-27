@@ -32,7 +32,7 @@ var controlToolOrder = []models.ControlToolName{
 	models.ControlToolReportProgress,
 	models.ControlToolWait, models.ControlToolAskUser, models.ControlToolReact,
 	models.ControlToolStartTask,
-	models.ControlToolFork, models.ControlToolRunOperation, models.ControlToolDelegate, models.ControlToolDelegateReply,
+	models.ControlToolStartSubagents, models.ControlToolRunOperation, models.ControlToolDelegate, models.ControlToolDelegateReply,
 	models.ControlToolRunbookFork, models.ControlToolRunbookDelegate,
 }
 
@@ -60,7 +60,7 @@ var controlToolRules = map[models.ControlToolName]controlToolRule{
 	models.ControlToolAskUser:         {Phase: PhaseSettle},
 	models.ControlToolReact:           {Phase: PhaseInline},
 	models.ControlToolStartTask:       {Phase: PhaseSettle, Alone: true}, // A4
-	models.ControlToolFork:            {Phase: PhaseSettle},
+	models.ControlToolStartSubagents:  {Phase: PhaseSettle},
 	models.ControlToolRunOperation:    {Phase: PhaseSettle},
 	models.ControlToolDelegate:        {Phase: PhaseSettle},
 	models.ControlToolDelegateReply:   {Phase: PhaseSettle},
@@ -265,7 +265,7 @@ func BuiltinTools() []Tool {
 		{name: models.ControlToolAskUser, handler: askUserHandler{}},
 		{name: models.ControlToolDelegate, handler: delegateHandler{}},
 		{name: models.ControlToolDelegateReply, handler: delegateReplyHandler{}},
-		{name: models.ControlToolFork, handler: forkHandler{}},
+		{name: models.ControlToolStartSubagents, handler: startSubagentsHandler{}},
 		{name: models.ControlToolReact, handler: reactControlHandler{}},
 		{name: models.ControlToolWait, handler: waitControlHandler{}},
 		{name: models.ControlToolRunOperation, handler: operationHandler{}},

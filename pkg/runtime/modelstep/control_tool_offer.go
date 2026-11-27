@@ -25,7 +25,7 @@ func ControlToolOffered(name models.ControlToolName, a agentrun.ControlAuthority
 		return a.CanReact
 	case models.ControlToolStartTask:
 		return a.TaskStart != nil && a.TaskStart.CanStart && !a.VoiceCallStarted
-	case models.ControlToolFork:
+	case models.ControlToolStartSubagents:
 		return a.ForkAllowed
 	case models.ControlToolRunOperation:
 		return len(a.Operations) > 0

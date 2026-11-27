@@ -152,7 +152,7 @@ func TestTaskWorkerForksSelfOnlyAndCannotDelegateOrStartTasks(t *testing.T) {
 		t.Fatalf("task worker may start tasks: %#v", worker.TaskStart)
 	}
 	got := offeredControlTools(worker)
-	if !reflect.DeepEqual(got, []string{"turn_report_progress", "wait", "control_fork", "run_operation"}) {
+	if !reflect.DeepEqual(got, []string{"turn_report_progress", "wait", "start_subagents", "run_operation"}) {
 		t.Fatalf("task worker offered = %v", got)
 	}
 }
@@ -167,8 +167,8 @@ func TestForkChildCannotFork(t *testing.T) {
 		t.Fatalf("fork child may fork: %#v", authority)
 	}
 	for _, name := range offeredControlTools(authority) {
-		if name == string(models.ControlToolFork) {
-			t.Fatal("control_fork offered to a fork child")
+		if name == string(models.ControlToolStartSubagents) {
+			t.Fatal("start_subagents offered to a fork child")
 		}
 	}
 	// A fork child keeps its other authority (delegation in a Team).
@@ -212,7 +212,7 @@ func TestChatReplyCannotWait(t *testing.T) {
 		t.Fatalf("chat authority = %#v", chat)
 	}
 	got := offeredControlTools(chat)
-	if !reflect.DeepEqual(got, []string{"turn_report_progress", "ask_user", "react", "conversation_start_task", "control_fork"}) {
+	if !reflect.DeepEqual(got, []string{"turn_report_progress", "ask_user", "react", "conversation_start_task", "start_subagents"}) {
 		t.Fatalf("chat offered = %v", got)
 	}
 

@@ -153,7 +153,7 @@ func TestRepeatEffectOf(t *testing.T) {
 		{"host copy_from_chat", LoopToolHost, capability.SideEffectWrite, false, workspace.OperationCopyFromChat, RepeatEffectStateful},
 		{"host run_command", LoopToolHost, capability.SideEffectWrite, false, workspace.OperationRunCommand, RepeatEffectStateful},
 
-		{"kernel fork", LoopToolKernel, "", false, "control_fork", RepeatEffectWrite},
+		{"kernel fork", LoopToolKernel, "", false, "start_subagents", RepeatEffectWrite},
 		{"kernel delegate", LoopToolKernel, "", false, "agent_delegate", RepeatEffectWrite},
 		{"kernel delegate reply", LoopToolKernel, "", false, "agent_delegate_reply", RepeatEffectWrite},
 		{"kernel run_operation", LoopToolKernel, "", false, "run_operation", RepeatEffectWrite},

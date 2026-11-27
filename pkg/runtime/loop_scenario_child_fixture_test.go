@@ -512,5 +512,5 @@ func childForkCall(goals ...string) looptest.ToolCall {
 	for i, goal := range goals {
 		branches[i] = map[string]interface{}{"goal": goal}
 	}
-	return looptest.Call(string(models.ControlToolFork), map[string]any{"branches": branches})
+	return looptest.Call(string(models.ControlToolStartSubagents), map[string]any{"branches": branches})
 }
