@@ -154,3 +154,18 @@ type AgentSessionPath struct {
 	Entries    []*SessionEntry // render order; never contains compaction entries
 	Tokens     int64           // Compaction.Tokens + sum(Entries.Tokens)
 }
+
+// RootSessionID is the session at the root of the path's fork chain: the one
+// whose rendered prompt every session on the chain starts with.
+func (p *AgentSessionPath) RootSessionID() string {
+	if p == nil {
+		return ""
+	}
+	if len(p.Chain) > 0 && p.Chain[0] != nil {
+		return p.Chain[0].ID
+	}
+	if p.Session != nil {
+		return p.Session.ID
+	}
+	return ""
+}

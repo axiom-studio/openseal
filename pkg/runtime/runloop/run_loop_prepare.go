@@ -148,6 +148,7 @@ func (p *CatalogModelStepPreparer) PrepareModelStep(ctx context.Context, in agen
 		return models.ModelStepRequest{}, err
 	}
 	req.Entries = entries
+	req.PromptSessionID = in.Path.RootSessionID()
 	if len(req.Tools) > 0 {
 		req.Tools = modelstep.ApplySurfaces(req.Tools, in.Path, req.Entries)
 	}

@@ -57,13 +57,19 @@ var ErrInvalidModelStepRequest = errors.New("invalid model step request")
 // ModelStepRequest is the whole input of one model call. Identity is
 // StepID + Attempt; the model grant's TurnID and InvocationID are StepID.
 type ModelStepRequest struct {
-	APIVersion        string                          `json:"apiVersion"`
-	Purpose           ModelStepPurpose                `json:"purpose"`
-	Scope             Scope                           `json:"scope"`
-	RunID             string                          `json:"runId"`
-	StepID            string                          `json:"stepId"`
-	Attempt           int                             `json:"attempt"` // 0-based; forced-compaction retry = 1; logs only
-	SessionID         string                          `json:"sessionId"`
+	APIVersion string           `json:"apiVersion"`
+	Purpose    ModelStepPurpose `json:"purpose"`
+	Scope      Scope            `json:"scope"`
+	RunID      string           `json:"runId"`
+	StepID     string           `json:"stepId"`
+	Attempt    int              `json:"attempt"` // 0-based; forced-compaction retry = 1; logs only
+	SessionID  string           `json:"sessionId"`
+	// PromptSessionID is the root session of SessionID's fork chain. A forked
+	// session renders its parent's path first, so its calls start with the
+	// same prompt and must stay on the parent's provider cache shard (and
+	// Automatic lane). It is SessionID itself for an unforked session and ""
+	// when there is no session.
+	PromptSessionID   string                          `json:"promptSessionId,omitempty"`
 	AgentID           string                          `json:"agentId"`
 	DefinitionID      string                          `json:"definitionId"`
 	DefinitionVersion string                          `json:"definitionVersion"`

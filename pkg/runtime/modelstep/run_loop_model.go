@@ -282,6 +282,7 @@ func (p *Producer) render(ctx context.Context, in agentrun.StepInput, prepared m
 		return models.ModelStepRequest{}, fmt.Errorf("render session path: %w", err)
 	}
 	req.Entries = entries
+	req.PromptSessionID = path.RootSessionID()
 	if len(req.Tools) > 0 {
 		req.Tools = ApplySurfaces(req.Tools, path, req.Entries)
 	}

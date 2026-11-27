@@ -477,6 +477,19 @@ func TestLoopConversationTaskStartsWithoutPark(t *testing.T) {
 		// The task works on its own session and reports to the chat.
 		c.work(6)
 		c.MustStatus(work, models.AgentRunStatusCompleted)
+		// Its calls start with the chat's prompt, so they name the chat
+		// session as their prompt session (one provider cache shard).
+		if source := c.requestsFor(source.ID)[0]; source.PromptSessionID != chat {
+			t.Fatalf("chat request prompt session = %q, want %q", source.PromptSessionID, chat)
+		}
+		if len(c.requestsFor(work.ID)) == 0 {
+			t.Fatal("the task made no model requests")
+		}
+		for _, req := range c.requestsFor(work.ID) {
+			if req.SessionID != work.SessionID || req.PromptSessionID != chat {
+				t.Fatalf("task request session %q prompt session %q, want %q and %q", req.SessionID, req.PromptSessionID, work.SessionID, chat)
+			}
+		}
 		for _, e := range c.sessionEntries(work.SessionID) {
 			if e.RunID != work.ID {
 				t.Fatalf("task session holds entry %s of run %s", e.ID, e.RunID)
