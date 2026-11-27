@@ -275,6 +275,8 @@ func fixtureSkillDefinition() *skill.Definition {
 // Fixture
 
 type Fixture struct {
+	// Freshness, when set, is every claim's BindingFreshness.
+	Freshness agentrun.BindingFreshness
 	T        *testing.T
 	Ctx      context.Context
 	Raw      models.KernelStore // the store under the crash wrapper
@@ -732,6 +734,7 @@ func (f *Fixture) AgentBinding(_ context.Context, run *models.AgentRun) (*agentr
 		},
 		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(sessions, f.Store)},
 		Tools:     f.Dispatcher.ForClaim(runloop.LoopToolClaim{Workspace: authority, CapabilityConfig: loopFixtureCapabilities}),
+		Freshness: f.Freshness,
 	}
 	return binding, nil
 }

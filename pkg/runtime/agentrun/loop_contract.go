@@ -42,6 +42,18 @@ type TurnRunnerBinding struct {
 	Prompt     PromptContribution // kernel-authored system parts from the owning section
 	ToolCheck  ToolCallCheck      // optional (conversation CheckToolCall)
 	AfterTool  AfterToolEntryHook // optional (conversation artifact receipts)
+	// Freshness reports whether the Agent deployment this binding was
+	// resolved from has changed since; nil = the binding never goes stale.
+	Freshness BindingFreshness
+}
+
+// BindingFreshness tells the loop that a claim's binding no longer matches
+// its Agent: the Agent amended its own behavior (amend_behavior) or was
+// otherwise changed mid-Run. Model grants are issued only for the
+// deployment's active version, so the next step would be refused; the loop
+// gives the claim back and the next claim resolves the current Agent.
+type BindingFreshness interface {
+	BindingStale(ctx context.Context) (bool, error)
 }
 
 // PreparedSkillRuntime binds one activation-time immutable runtime to the

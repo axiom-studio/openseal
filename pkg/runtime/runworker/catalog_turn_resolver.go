@@ -134,7 +134,7 @@ func ResolveLoopBinding(ctx context.Context, catalog conversationrun.AgentTurnCa
 	if accepted != nil && (definition.ID != accepted.DefinitionID || definition.Version != accepted.DefinitionVersion || definition.Runbook == nil || definition.Runbook.ID != accepted.RunbookID || definition.Runbook.Version != accepted.RunbookVersion) {
 		return nil, models.ErrAcceptedRunExecution
 	}
-	r := &loopBindingResolution{config: config, catalog: catalog, run: run, scope: scope, deployment: deployment, definition: definition}
+	r := &loopBindingResolution{config: config, catalog: catalog, run: run, scope: scope, deployment: deployment, definition: definition, pinned: accepted != nil}
 	if trial, ok, trialErr := agentbuilder.AgentTrialContextForRun(run); trialErr != nil {
 		return nil, trialErr
 	} else if ok {
@@ -321,6 +321,9 @@ type loopBindingResolution struct {
 	explaining bool
 	// trial is a try_agent child: offered only the final answer.
 	trial bool
+	// pinned is a Run whose accepted execution pins its definition version,
+	// so a newer deployment never changes its binding.
+	pinned bool
 }
 
 func (r *loopBindingResolution) now() time.Time {
@@ -332,12 +335,35 @@ func (r *loopBindingResolution) now() time.Time {
 
 // identity is the Agent identity every binding of the Run carries.
 func (r *loopBindingResolution) identity(actionDeploymentID string) *agentrun.TurnRunnerBinding {
-	return &agentrun.TurnRunnerBinding{
+	binding := &agentrun.TurnRunnerBinding{
 		DeploymentID: r.deployment.ID, ActionDeploymentID: actionDeploymentID,
 		DefinitionID: r.definition.ID, DefinitionVersion: r.definition.Version,
 		BudgetReservation: models.BudgetUsage{Turns: 1},
 		ModelCredential:   deploymentModelCredential(r.deployment),
 	}
+	if !r.pinned {
+		binding.Freshness = deploymentFreshness{catalog: r.catalog, scope: r.scope, id: r.deployment.ID, revision: r.deployment.Revision}
+	}
+	return binding
+}
+
+// deploymentFreshness is stale once the deployment's revision moved past the
+// one the binding was resolved from (prod run 8c2b7ed4: the Agent's approved
+// amend_behavior activated a new version, and every later step of the claim
+// was refused its model grant).
+type deploymentFreshness struct {
+	catalog  conversationrun.AgentTurnCatalog
+	scope    skill.ScopeReference
+	id       string
+	revision int64
+}
+
+func (f deploymentFreshness) BindingStale(ctx context.Context) (bool, error) {
+	deployment, err := f.catalog.GetAgentDeployment(ctx, f.scope, f.id)
+	if err != nil {
+		return false, fmt.Errorf("check Agent deployment %s: %w", f.id, err)
+	}
+	return deployment == nil || deployment.Revision != f.revision, nil
 }
 
 // model completes binding for a model-driven Run: the claim's session, chat

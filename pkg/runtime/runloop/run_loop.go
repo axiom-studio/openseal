@@ -213,6 +213,9 @@ func (l *Loop) Drive(ctx context.Context, claim Claim) Exit {
 		if models.RunAttemptBudgetExceeded(d.run) {
 			return d.withSteps(d.pauseAttempts(ctx))
 		}
+		if exit := d.rebindIfStale(ctx); exit != nil {
+			return d.withSteps(*exit)
+		}
 		res := d.runStep(ctx, resumed)
 		resumed = nil
 		if res.produced {
@@ -456,6 +459,31 @@ func (d *drive) yield(ctx context.Context) Exit {
 		return *d.writeErrorExit(err)
 	}
 	return Exit{Run: run, Reason: ExitYielded}
+}
+
+// rebindIfStale ends the claim when its binding no longer matches the Agent
+// (BindingFreshness), so the next claim resolves the current Agent. It is
+// checked before every step: an approved action that changed the Agent may
+// have run in this claim's reconcile as well as in its last step.
+func (d *drive) rebindIfStale(ctx context.Context) *Exit {
+	if d.binding.Freshness == nil {
+		return nil
+	}
+	stale, err := d.binding.Freshness.BindingStale(ctx)
+	if err != nil {
+		return d.errorExit(err)
+	}
+	if !stale {
+		return nil
+	}
+	run, err := d.commitRun(ctx, nil, runtimeactivity.RunTransitionRequest{
+		Status: models.AgentRunStatusQueued, EventType: "run.yielded", Summary: "Run yielded to pick up its changed Agent",
+		Payload: map[string]interface{}{"steps": d.steps, "reason": "agent_changed"},
+	}, false)
+	if err != nil {
+		return d.writeErrorExit(err)
+	}
+	return &Exit{Run: run, Reason: ExitYielded}
 }
 
 // requeue puts the Run back in the queue, claimable at availableAt. st's

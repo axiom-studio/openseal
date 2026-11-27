@@ -932,3 +932,46 @@ func TestRunLoopDeterministicParkUsesLoopTransition(t *testing.T) {
 		}
 	})
 }
+
+// staleAfter reports the binding stale from the given BindingStale call on,
+// as when the Agent's approved amend_behavior activated a new version.
+type staleAfter struct {
+	calls, from int
+	fresh       bool // the next claim's binding (resolved again) is current
+}
+
+func (s *staleAfter) BindingStale(context.Context) (bool, error) {
+	s.calls++
+	return !s.fresh && s.calls >= s.from, nil
+}
+
+// An Agent that changes itself mid-claim (prod run 8c2b7ed4): the claim gives
+// the Run back before its next step instead of sending a step whose model
+// grant names the old version, and the next claim carries on.
+func TestRunLoopYieldsWhenItsAgentChanged(t *testing.T) {
+	looptest.EachStore(t, "rl_agent_changed", func(t *testing.T, store models.KernelStore) {
+		f := looptest.NewFixture(t, store, looptest.WithRules(
+			lookupRule("lookup", 0, stepAtMost(1), nil),
+			&looptest.ModelRule{Name: "answer", When: func(v looptest.StepView) bool { return v.Step() == 2 },
+				Reply: func(looptest.StepView) models.ModelStepResult { return looptest.Say("Updated and done.") }},
+		))
+		freshness := &staleAfter{from: 2}
+		f.Freshness = freshness
+		run := f.StartRun(models.RunKindAgentWork, "Update how you work, then check the issue")
+		exit, yielded := f.RunClaim(run.ID)
+		if exit.Reason != runloop.ExitYielded || exit.Err != nil || exit.Steps != 1 {
+			t.Fatalf("first claim = %s after %d steps (%v), want yielded after 1", exit.Reason, exit.Steps, exit.Err)
+		}
+		f.MustStatus(yielded, models.AgentRunStatusQueued)
+		events := f.Events(run.ID, "run.yielded")
+		if len(events) != 1 || events[0].Payload["reason"] != "agent_changed" {
+			t.Fatalf("run.yielded = %#v", events)
+		}
+		freshness.fresh = true
+		exit, done := f.RunClaim(run.ID)
+		if exit.Reason != runloop.ExitFinal {
+			t.Fatalf("second claim = %s (%v)", exit.Reason, exit.Err)
+		}
+		f.MustStatus(done, models.AgentRunStatusCompleted)
+	})
+}
