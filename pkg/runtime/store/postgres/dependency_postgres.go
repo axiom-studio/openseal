@@ -178,6 +178,11 @@ func (s *Store) CreateRunDependencyGroup(ctx context.Context, record models.RunD
 // create's transaction. The source Run row is already locked and fenced by
 // the caller, so the lock order stays Run -> session -> entry.
 func (s *Store) applyPostgresDependencyGroupSessionWrites(ctx context.Context, tx *sql.Tx, record models.RunDependencyGroupCreateRecord, sourceSessionID string, result *models.RunDependencyResult) error {
+	for _, handOver := range record.SessionHandOvers {
+		if err := s.handOverPostgresAgentSessionTx(ctx, tx, record, handOver); err != nil {
+			return err
+		}
+	}
 	for i := range record.ChildSessions {
 		created, err := s.createRunAgentSessionTx(ctx, tx, models.DependencyGroupChildSession(record, i))
 		if err != nil {
@@ -205,6 +210,46 @@ func (s *Store) applyPostgresDependencyGroupSessionWrites(ctx context.Context, t
 	}
 	result.ToolEntry = moved.Entry
 	result.Events = append(result.Events, moved.Events...)
+	return nil
+}
+
+// handOverPostgresAgentSessionTx moves a run session from its terminal owner
+// to one of the record's new Runs.
+func (s *Store) handOverPostgresAgentSessionTx(ctx context.Context, tx *sql.Tx, record models.RunDependencyGroupCreateRecord, handOver models.AgentSessionHandOver) error {
+	scope := record.Group.Scope
+	from, err := s.getPostgresAgentRunTx(ctx, tx, scope, handOver.FromRunID, true)
+	if err != nil {
+		return err
+	}
+	session, err := s.getPostgresAgentSessionTx(ctx, tx, scope, handOver.SessionID, true)
+	if err != nil {
+		return err
+	}
+	var to *models.AgentRun
+	for _, target := range record.TargetRuns {
+		if target.ID == handOver.ToRunID {
+			to = target
+		}
+	}
+	next, err := models.HandOverAgentSession(session, from, to, handOver, record.Group.CreatedAt)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	updated, err := tx.ExecContext(ctx, `UPDATE `+s.table("agent_sessions")+` SET owner_run_id = $1, revision = $2, updated_at = $3,
+		payload = $4::jsonb WHERE scope_kind = $5 AND scope_id = $6 AND id = $7 AND revision = $8`,
+		next.OwnerRunID, next.Revision, next.UpdatedAt, string(payload), scope.Kind, scope.ID, next.ID, session.Revision)
+	if err != nil {
+		return err
+	}
+	if affected, err := updated.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return models.ErrAgentSessionConflict
+	}
 	return nil
 }
 

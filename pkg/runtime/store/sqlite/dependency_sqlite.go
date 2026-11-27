@@ -168,6 +168,11 @@ func (s *Store) CreateRunDependencyGroup(ctx context.Context, record models.RunD
 // child sessions and moves the source's control tool entry, inside the
 // create's BEGIN IMMEDIATE. The source fence was checked by the caller.
 func (s *Store) applySQLiteDependencyGroupSessionWrites(ctx context.Context, conn *sql.Conn, record models.RunDependencyGroupCreateRecord, sourceSessionID string, result *models.RunDependencyResult) error {
+	for _, handOver := range record.SessionHandOvers {
+		if err := handOverSQLiteAgentSession(ctx, conn, record, handOver); err != nil {
+			return err
+		}
+	}
 	for i := range record.ChildSessions {
 		created, err := s.createRunAgentSessionTx(ctx, conn, models.DependencyGroupChildSession(record, i))
 		if err != nil {
@@ -195,6 +200,46 @@ func (s *Store) applySQLiteDependencyGroupSessionWrites(ctx context.Context, con
 	}
 	result.ToolEntry = moved.Entry
 	result.Events = append(result.Events, moved.Events...)
+	return nil
+}
+
+// handOverSQLiteAgentSession moves a run session from its terminal owner to
+// one of the record's new Runs.
+func handOverSQLiteAgentSession(ctx context.Context, conn *sql.Conn, record models.RunDependencyGroupCreateRecord, handOver models.AgentSessionHandOver) error {
+	scope := record.Group.Scope
+	from, err := getSQLiteAgentRun(ctx, conn, scope, handOver.FromRunID)
+	if err != nil {
+		return err
+	}
+	session, err := getSQLiteAgentSession(ctx, conn, scope, handOver.SessionID)
+	if err != nil {
+		return err
+	}
+	var to *models.AgentRun
+	for _, target := range record.TargetRuns {
+		if target.ID == handOver.ToRunID {
+			to = target
+		}
+	}
+	next, err := models.HandOverAgentSession(session, from, to, handOver, record.Group.CreatedAt)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	updated, err := conn.ExecContext(ctx, `UPDATE agent_sessions SET owner_run_id = ?, revision = ?, updated_at = ?, payload = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
+		next.OwnerRunID, next.Revision, sqliteSessionTime(next.UpdatedAt), string(payload), scope.Kind, scope.ID, next.ID, session.Revision)
+	if err != nil {
+		return err
+	}
+	if affected, err := updated.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return models.ErrAgentSessionConflict
+	}
 	return nil
 }
 

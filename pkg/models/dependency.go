@@ -153,6 +153,9 @@ type RunDependencyGroupCreateRecord struct {
 	// ErrSteeringArrived unless the stored source Run has exactly that many
 	// PendingInterventions.
 	RequireInterventionCount *int
+	// SessionHandOvers give an existing run session to one of TargetRuns in
+	// the same transaction (a finished subagent continued by a new Run).
+	SessionHandOvers []AgentSessionHandOver
 }
 
 type RunDependencyResolutionRecord struct {

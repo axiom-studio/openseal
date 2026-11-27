@@ -94,14 +94,21 @@ func validateDependencyGroupSessionWrites(record RunDependencyGroupCreateRecord)
 			return err
 		}
 	}
-	if len(record.ChildSessions) == 0 {
-		return nil
-	}
 	targets := make(map[string]*AgentRun, len(record.TargetRuns))
 	for _, target := range record.TargetRuns {
 		targets[target.ID] = target
 	}
-	seen := make(map[string]bool, len(record.ChildSessions))
+	seen := make(map[string]bool, len(record.ChildSessions)+len(record.SessionHandOvers))
+	for _, handOver := range record.SessionHandOvers {
+		if err := handOver.validate(); err != nil {
+			return err
+		}
+		target := targets[handOver.ToRunID]
+		if target == nil || seen[handOver.ToRunID] || target.SessionID != handOver.SessionID {
+			return fmt.Errorf("%w: session hand-over to %q is not for one of the group's new runs bound to it", ErrInvalidRunDependency, handOver.ToRunID)
+		}
+		seen[handOver.ToRunID] = true
+	}
 	for i := range record.ChildSessions {
 		child := DependencyGroupChildSession(record, i)
 		target := targets[child.OwnerRunID]

@@ -34,6 +34,17 @@ type RunForkBranch struct {
 	Budget          *models.BudgetPolicy   `json:"budget,omitempty"`
 	Timeout         time.Duration          `json:"timeout,omitempty"`
 	Mode            runbook.DelegateMode   `json:"mode,omitempty"`
+	// Continues makes the child the next Run of a finished child's session (a
+	// follow-up to a subagent): it is bound to that session, which is handed
+	// over to it in the create's transaction, and reads Message first.
+	Continues *ForkContinuation `json:"-"`
+}
+
+// ForkContinuation is the finished child a branch continues.
+type ForkContinuation struct {
+	SessionID string
+	FromRunID string
+	Message   models.AgentRunIntervention
 }
 
 // TurnRunbookProposal invokes one exact callable entrypoint on the current
@@ -258,6 +269,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 	children := make([]*models.AgentRun, 0, len(req.Branches))
 	edges := make([]*models.RunDependency, 0, len(req.Branches))
 	var childSessions []models.CreateRunAgentSessionTxRequest
+	var handOvers []models.AgentSessionHandOver
 	for _, branch := range req.Branches {
 		branch.ID = strings.TrimSpace(branch.ID)
 		childID := StableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
@@ -349,6 +361,13 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		if sessionFork != nil {
 			childRequest.SessionID = models.RunAgentSessionID(source.Scope, childID)
 		}
+		if continues := branch.Continues; continues != nil {
+			if sessionFork != nil || strings.TrimSpace(continues.SessionID) == "" {
+				return nil, fmt.Errorf("branch %s continues a session and cannot fork one", branch.ID)
+			}
+			childRequest.SessionID = continues.SessionID
+			handOvers = append(handOvers, models.AgentSessionHandOver{SessionID: continues.SessionID, FromRunID: continues.FromRunID, ToRunID: childID})
+		}
 		inherit := entrypoint != "" && assignedAgentID == source.AssignedAgentID && entrypoint == source.Entrypoint
 		if err := PrepareAcceptedChildRun(ctx, source, &childRequest, c.executionPreparer, inherit); err != nil {
 			return nil, err
@@ -356,6 +375,11 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		child, err := portfolio.BuildAgentRun(ctx, c.store, childRequest, childID, now)
 		if err != nil {
 			return nil, err
+		}
+		if continues := branch.Continues; continues != nil {
+			message := continues.Message
+			message.CreatedAt = now
+			child.PendingInterventions = []models.AgentRunIntervention{message}
 		}
 		children = append(children, child)
 		if sessionFork != nil {
@@ -420,6 +444,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		Group: group, Dependencies: edges, TargetRuns: children, SourceRun: updatedSource,
 		ExpectedSourceRevision: source.Revision, Event: event,
 		ToolTransition: req.ToolTransition, ChildSessions: childSessions, RequireInterventionCount: req.RequireInterventionCount,
+		SessionHandOvers: handOvers,
 	})
 	if err != nil {
 		return nil, err

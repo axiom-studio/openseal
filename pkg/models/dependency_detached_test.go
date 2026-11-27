@@ -66,3 +66,35 @@ func TestDetachedGroupReconcilesWhileItsSourceSteps(t *testing.T) {
 		t.Fatalf("reconciled = group %s edge %s wake %v", result.Group.Status, result.Dependencies[0].State, result.Evaluation.Wake)
 	}
 }
+
+func TestHandOverAgentSessionOnlyFromAFinishedSameAgentRun(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "one"}
+	now := time.Now().UTC()
+	session := &AgentSession{ID: RunAgentSessionID(scope, "child-1"), Scope: scope, Kind: AgentSessionKindRun, AgentID: "agent-a",
+		OwnerRunID: "child-1", RootSessionID: "root", NextSequence: 4, Revision: 3}
+	from := &AgentRun{ID: "child-1", Scope: scope, AssignedAgentID: "agent-a", Status: AgentRunStatusCompleted}
+	to := &AgentRun{ID: "child-2", Scope: scope, AssignedAgentID: "agent-a", Status: AgentRunStatusQueued, SessionID: session.ID}
+	handOver := AgentSessionHandOver{SessionID: session.ID, FromRunID: from.ID, ToRunID: to.ID}
+	next, err := HandOverAgentSession(session, from, to, handOver, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.OwnerRunID != to.ID || next.Revision != 4 || session.OwnerRunID != from.ID {
+		t.Fatalf("handed over = owner %s revision %d (stored owner %s)", next.OwnerRunID, next.Revision, session.OwnerRunID)
+	}
+	running := *from
+	running.Status = AgentRunStatusRunning
+	if _, err := HandOverAgentSession(session, &running, to, handOver, now); !errors.Is(err, ErrAgentSessionConflict) {
+		t.Fatalf("hand-over from a running Run = %v", err)
+	}
+	other := *to
+	other.AssignedAgentID = "agent-b"
+	if _, err := HandOverAgentSession(session, from, &other, handOver, now); !errors.Is(err, ErrAgentSessionConflict) {
+		t.Fatalf("hand-over to another Agent = %v", err)
+	}
+	stolen := handOver
+	stolen.FromRunID = "child-9"
+	if _, err := HandOverAgentSession(session, from, to, stolen, now); !errors.Is(err, ErrAgentSessionConflict) {
+		t.Fatalf("hand-over by a Run that does not own it = %v", err)
+	}
+}
