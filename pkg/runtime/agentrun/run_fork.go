@@ -137,8 +137,11 @@ type CreateRunForkRequest struct {
 	// RequireInterventionCount refuses the create with ErrSteeringArrived
 	// unless the source still has exactly that many PendingInterventions.
 	RequireInterventionCount *int
-	Actor                    models.ActivityActor
-	Visibility               models.ActivityVisibility
+	// Detached keeps the source running (background subagents): the group
+	// never parks or wakes it, and ToolTransition completes the entry.
+	Detached   bool
+	Actor      models.ActivityActor
+	Visibility models.ActivityVisibility
 }
 
 type RunForkResult struct {
@@ -378,7 +381,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		ID: groupID, Scope: source.Scope, SourceRunID: source.ID, Policy: req.Policy,
 		ExpectedCount: len(edges), Status: models.RunDependencyGroupWaiting, Revision: 1,
 		CreatedAt: now, UpdatedAt: now, SealedAt: &sealedAt,
-		IdempotencyKey: key,
+		IdempotencyKey: key, Detached: req.Detached,
 	}
 	updatedSource := models.CloneAgentRun(source)
 	for index, child := range children {
@@ -386,13 +389,15 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			return nil, err
 		}
 	}
-	updatedSource.Status = models.AgentRunStatusWaitingForDependency
-	updatedSource.WakeCondition = &models.WakeCondition{Type: "run_dependencies", Reference: group.ID}
 	updatedSource.Checkpoint = maps.Clone(req.ContinuationCheckpoint)
 	updatedSource.Revision++
 	updatedSource.UpdatedAt = now
-	updatedSource.LeaseOwner = ""
-	updatedSource.LeaseExpiresAt = nil
+	if !req.Detached {
+		updatedSource.Status = models.AgentRunStatusWaitingForDependency
+		updatedSource.WakeCondition = &models.WakeCondition{Type: "run_dependencies", Reference: group.ID}
+		updatedSource.LeaseOwner = ""
+		updatedSource.LeaseExpiresAt = nil
+	}
 	visibility := req.Visibility
 	if visibility == "" {
 		visibility = models.ActivityVisibilityScope
@@ -406,7 +411,10 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		AgentID: source.AssignedAgentID, ObjectiveID: source.ObjectiveID, TeamID: models.TeamIDForRun(source),
 		EventType: "run.forked", Summary: fmt.Sprintf("Forked %d concurrent child Runs", len(children)),
 		Actor: actor, Visibility: visibility, CorrelationID: group.ID,
-		Payload: map[string]interface{}{"forkId": req.ForkID, "groupId": group.ID, "mode": req.Policy.Mode, "childCount": len(children)}, CreatedAt: now,
+		Payload: map[string]interface{}{
+			"forkId": req.ForkID, "groupId": group.ID, "mode": req.Policy.Mode, "childCount": len(children),
+			"detached": req.Detached, "children": forkEventChildren(edges),
+		}, CreatedAt: now,
 	}
 	result, err := c.store.CreateRunDependencyGroup(ctx, models.RunDependencyGroupCreateRecord{
 		Group: group, Dependencies: edges, TargetRuns: children, SourceRun: updatedSource,
@@ -427,6 +435,16 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		}
 	}
 	return &RunForkResult{DependencyGroup: result, Children: children}, nil
+}
+
+// forkEventChildren names each child Run of a fork by its branch id (a
+// subagent's id), for the surfaces that show the children.
+func forkEventChildren(edges []*models.RunDependency) []interface{} {
+	children := make([]interface{}, len(edges))
+	for i, edge := range edges {
+		children[i] = map[string]interface{}{"id": edge.ID, "runId": edge.TargetRunID}
+	}
+	return children
 }
 
 // overlayForkBranchContext is the context of a branch that runs as the

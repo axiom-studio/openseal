@@ -125,7 +125,9 @@ func ApplyDependencyGroupReconciliation(group *RunDependencyGroup, edges []*RunD
 	if IsTerminalDependencyGroup(group) {
 		return result, nil
 	}
-	if group.Revision != record.ExpectedGroupRevision || source.Revision != record.ExpectedSourceRevision {
+	// A detached group never writes its source, so a source that moved on
+	// (it keeps stepping) does not conflict with repairing its edges.
+	if group.Revision != record.ExpectedGroupRevision || !group.Detached && source.Revision != record.ExpectedSourceRevision {
 		return nil, ErrRevisionConflict
 	}
 	if group.Status != RunDependencyGroupWaiting {
@@ -134,7 +136,7 @@ func ApplyDependencyGroupReconciliation(group *RunDependencyGroup, edges []*RunD
 	if IsTerminalAgentRunStatus(source.Status) {
 		return retireDependencyGroup(group, edges, source, record.Actor, record.Visibility, record.OccurredAt)
 	}
-	if waiting, _ := SourceWaitsForDependencyGroup(source, group.ID); !waiting {
+	if waiting, _ := SourceWaitsForDependencyGroup(source, group.ID); !waiting && !group.Detached {
 		return nil, ErrInvalidRunTransition
 	}
 	var events []*ActivityEvent

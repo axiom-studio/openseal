@@ -109,6 +109,11 @@ type RunDependencyGroup struct {
 	ResolvedAt     *time.Time               `json:"resolvedAt,omitempty"`
 	WakeSignalID   string                   `json:"wakeSignalId,omitempty"`
 	IdempotencyKey string                   `json:"idempotencyKey,omitempty"`
+	// Detached groups belong to a source that keeps running while its
+	// children work (background subagents). Resolving an edge records the
+	// outcome but never writes or wakes the source: a detached group is never
+	// the source's wake condition.
+	Detached bool `json:"detached,omitempty"`
 }
 
 type RunDependencyResult struct {
@@ -488,6 +493,9 @@ func ApplyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 		updatedGroup.ResolvedAt = &resolvedAt
 		updatedGroup.WakeSignalID = fmt.Sprintf("dependency-group:%s:%d", group.ID, updatedGroup.Revision)
 	}
+	if group.Detached {
+		return applyDetachedDependencyResolution(updatedGroup, current, clonedEdges, source, evaluation, record)
+	}
 	updatedSource := CloneAgentRun(source)
 	paused := false
 	if group.Status == RunDependencyGroupWaiting {
@@ -536,6 +544,23 @@ func ApplyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 	return &RunDependencyResult{
 		Group: updatedGroup, Dependency: cloneRunDependency(current), Dependencies: clonedEdges,
 		Source: updatedSource, Evaluation: evaluation, Events: events,
+	}, nil
+}
+
+// applyDetachedDependencyResolution is the result of resolving an edge of a
+// detached group: the edge and the group change, the source does not.
+func applyDetachedDependencyResolution(group *RunDependencyGroup, edge *RunDependency, edges []*RunDependency, source *AgentRun, evaluation RunDependencyEvaluation, record RunDependencyResolutionRecord) (*RunDependencyResult, error) {
+	if err := group.Validate(); err != nil {
+		return nil, err
+	}
+	events := []*ActivityEvent{dependencyResolvedEvent(source, group, edge, record.Actor, record.Visibility, record.OccurredAt)}
+	if evaluation.Wake {
+		events = append(events, dependencyGroupResolvedEvent(source, group, evaluation, record.Actor, record.Visibility, record.OccurredAt))
+	}
+	evaluation.Wake = false
+	return &RunDependencyResult{
+		Group: group, Dependency: cloneRunDependency(edge), Dependencies: edges,
+		Source: CloneAgentRun(source), Evaluation: evaluation, Events: events,
 	}, nil
 }
 

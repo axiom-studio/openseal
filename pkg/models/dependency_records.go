@@ -22,9 +22,7 @@ func ValidateRunDependencyGroupCreateRecord(record RunDependencyGroupCreateRecor
 		return err
 	}
 	if record.SourceRun.Scope != record.Group.Scope || record.SourceRun.ID != record.Group.SourceRunID ||
-		record.SourceRun.Status != AgentRunStatusWaitingForDependency || record.SourceRun.WakeCondition == nil ||
-		record.SourceRun.WakeCondition.Type != "run_dependencies" || record.SourceRun.WakeCondition.Reference != record.Group.ID ||
-		record.SourceRun.Revision != record.ExpectedSourceRevision+1 {
+		record.SourceRun.Revision != record.ExpectedSourceRevision+1 || !dependencyGroupSourceState(record) {
 		return ErrInvalidRunDependency
 	}
 	if record.Event.Scope != record.Group.Scope || record.Event.RunID != record.Group.SourceRunID || record.Event.CorrelationID != record.Group.ID {
@@ -57,6 +55,17 @@ func ValidateRunDependencyGroupCreateRecord(record RunDependencyGroupCreateRecor
 	return validateDependencyGroupSessionWrites(record)
 }
 
+// dependencyGroupSourceState: a source parks on its group, except a detached
+// group's source, which keeps running with no wake condition.
+func dependencyGroupSourceState(record RunDependencyGroupCreateRecord) bool {
+	source := record.SourceRun
+	if record.Group.Detached {
+		return source.Status == AgentRunStatusRunning && source.WakeCondition == nil
+	}
+	return source.Status == AgentRunStatusWaitingForDependency && source.WakeCondition != nil &&
+		source.WakeCondition.Type == "run_dependencies" && source.WakeCondition.Reference == record.Group.ID
+}
+
 // validateDependencyGroupSessionWrites checks the session half of a create
 // record (ToolTransition, ChildSessions, RequireInterventionCount) before
 // any backend opens a transaction.
@@ -68,7 +77,11 @@ func validateDependencyGroupSessionWrites(record RunDependencyGroupCreateRecord)
 		if transition.Scope != record.Group.Scope || transition.RunID != record.SourceRun.ID {
 			return fmt.Errorf("%w: tool transition belongs to another run", ErrInvalidRunDependency)
 		}
-		if transition.To != ToolEntryAwaitingChild || transition.Wait == nil || transition.Wait.GroupID != record.Group.ID {
+		if record.Group.Detached {
+			if transition.To != ToolEntryCompleted || transition.Wait != nil {
+				return fmt.Errorf("%w: the tool entry of a detached group completes at once", ErrInvalidRunDependency)
+			}
+		} else if transition.To != ToolEntryAwaitingChild || transition.Wait == nil || transition.Wait.GroupID != record.Group.ID {
 			return fmt.Errorf("%w: tool transition must await this group's children", ErrInvalidRunDependency)
 		}
 		if strings.TrimSpace(transition.Lease.WorkerID) == "" {
