@@ -652,9 +652,19 @@ func StableForkIdentifier(runID, forkID, suffix string) string {
 
 // CompleteChild resolves a branch edge from the child Run's durable terminal
 // state. For join_any it also cancels and resolves every losing child so no
-// second wake or unnecessary background work survives the winner.
+// second wake or unnecessary background work survives the winner. When the
+// parent is parked on a wait group over this child (wait_subagents), that
+// edge is resolved too; the result is the wait's when it woke the parent.
 func (c *RunForkCoordinator) CompleteChild(ctx context.Context, child *models.AgentRun, actor models.ActivityActor) (*models.RunDependencyResult, error) {
-	return c.completeChild(ctx, child, actor, true)
+	result, err := c.completeChild(ctx, child, actor, true)
+	waited, waitErr := c.resolveSourceWait(ctx, child, actor)
+	if waitErr != nil && !errors.Is(waitErr, models.ErrDependencyConflict) {
+		return nil, errors.Join(err, waitErr)
+	}
+	if waited != nil && !waited.Replayed && waited.Evaluation.Wake {
+		return waited, err
+	}
+	return result, err
 }
 
 func (c *RunForkCoordinator) completeChild(ctx context.Context, child *models.AgentRun, actor models.ActivityActor, cancelLosers bool) (*models.RunDependencyResult, error) {
@@ -695,13 +705,7 @@ func (c *RunForkCoordinator) completeChild(ctx context.Context, child *models.Ag
 	if !ownedForkChild(group, edge, child) {
 		return nil, models.ErrInvalidRunDependency
 	}
-	state := models.RunDependencyStateSatisfied
-	errorMessage := ""
-	if child.Status == models.AgentRunStatusFailed {
-		state, errorMessage = models.RunDependencyStateFailed, child.Error
-	} else if child.Status == models.AgentRunStatusCanceled {
-		state, errorMessage = models.RunDependencyStateCanceled, child.Error
-	}
+	state, errorMessage := childDependencyOutcome(child)
 	if actor.Type == "" || actor.ID == "" {
 		actor = models.ActivityActor{Type: "system", ID: "run-fork-coordinator"}
 	}
