@@ -670,7 +670,7 @@ func TestStartSubagentsInBackgroundKeepsTheSourceRunning(t *testing.T) {
 			t.Fatalf("entry = %s wait %#v surfaced %d", stored.State, stored.Tool.Wait, len(stored.Tool.SurfacedTools))
 		}
 		value, raw := forkResult(t, stored)
-		if subagents, _ := value["subagents"].([]interface{}); len(subagents) != 2 || !strings.Contains(raw, `"id":"s2"`) {
+		if subagents, _ := value["subagents"].([]interface{}); len(subagents) != 2 || subagents[1].(map[string]interface{})["id"] != "s2" {
 			t.Fatalf("result = %s", raw)
 		}
 		meta := c.meta()
