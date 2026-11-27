@@ -315,7 +315,8 @@ func TestLoopStopSubagentEndsItWithoutANote(t *testing.T) {
 			t.Fatalf("children = %v", children)
 		}
 		stop := c.toolEntry(parent.ID, string(models.ControlToolStopSubagents))
-		if stop.State != models.ToolEntryCompleted || !strings.Contains(childResultText(stop), `"status":"stopped"`) {
+		stopped, _ := childResultJSON(t, stop)["subagents"].([]interface{})
+		if stop.State != models.ToolEntryCompleted || len(stopped) != 1 || stopped[0].(map[string]interface{})["status"] != "stopped" {
 			t.Fatalf("stop entry = %s %s", stop.State, childResultText(stop))
 		}
 		if notes := c.notesOf(parent.ID, models.NoteSubagent); len(notes) != 0 {
