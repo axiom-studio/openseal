@@ -732,7 +732,7 @@ func (f *Fixture) AgentBinding(_ context.Context, run *models.AgentRun) (*agentr
 			Budget: modelstep.NewRunActivityCompactionBudget(f.Store, activity.NewRunActivityService(f.Store, f.Store), f.Clock.Now),
 			Now:    f.Clock.Now,
 		},
-		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(sessions, f.Store)},
+		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(sessions, f.Store, f.Store)},
 		Tools:     f.Dispatcher.ForClaim(runloop.LoopToolClaim{Workspace: authority, CapabilityConfig: loopFixtureCapabilities}),
 		Freshness: f.Freshness,
 	}

@@ -125,7 +125,7 @@ func controlChildSeedBrief(run *models.AgentRun) (kind, text string, ok bool) {
 		return "delegation", "Requested work. Goal:\n" + goal + controlSeedContext("Shared context", run.Context), true
 	}
 	if _, runbook := run.Context[RunbookInvocationContextKey]; !runbook && run.Source == models.RunSourceFork && run.Checkpoint["forkChild"] != nil && goal != "" {
-		return "fork_branch", "You are working on one branch of a parallel task. Goal:\n" + goal + controlSeedContext("Context", run.Context), true
+		return "fork_branch", "You are a subagent working on one part of a larger task; your final answer goes back to the Run that started you. Goal:\n" + goal + controlSeedContext("Context", run.Context), true
 	}
 	return "", "", false
 }

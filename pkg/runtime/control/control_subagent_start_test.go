@@ -267,7 +267,7 @@ func forkResult(t *testing.T, entry *models.SessionEntry) (map[string]interface{
 	return value, raw
 }
 
-const twoBranchFork = `{"branches":[{"goal":"Research vendor A","context":{"vendor":"A"}},{"goal":"Research vendor B"}]}`
+const twoBranchFork = `{"subagents":[{"goal":"Research vendor A","context":{"vendor":"A"}},{"goal":"Research vendor B"}]}`
 
 func TestForkParksSourceAndCreatesAgentWorkChildren(t *testing.T) {
 	forkStores(t, func(t *testing.T, store forkTestStore) {
@@ -336,23 +336,30 @@ func TestForkResumeReturnsEachBranchFinalAnswer(t *testing.T) {
 			t.Fatalf("entry = %s %#v", c.entry.State, c.entry.Tool.Result)
 		}
 		value, raw := forkResult(t, c.entry)
-		branches, _ := value["branches"].([]interface{})
-		if value["status"] != "satisfied" || value["mode"] != "all" || len(branches) != 2 {
+		subagents, _ := value["subagents"].([]interface{})
+		if value["status"] != "succeeded" || len(subagents) != 2 || strings.Contains(raw, meta.ChildRunIDs[0]) {
 			t.Fatalf("result = %s", raw)
 		}
 		for i, want := range []string{"Vendor A costs 10.", "Vendor B costs 12."} {
-			branch := branches[i].(map[string]interface{})
-			if branch["answer"] != want || branch["status"] != "completed" || branch["branch"] != fmt.Sprintf("branch-%d", i+1) ||
-				branch["runId"] != meta.ChildRunIDs[i] {
-				t.Fatalf("branch %d = %v", i, branch)
+			subagent := subagents[i].(map[string]interface{})
+			if subagent["answer"] != want || subagent["status"] != "completed" || subagent["id"] != fmt.Sprintf("s%d", i+1) {
+				t.Fatalf("subagent %d = %v", i, subagent)
 			}
+		}
+		// The answers reached the parent here: no subagent note follows, and
+		// the result makes the follow-up tools callable.
+		if after := c.meta(); len(after.Reported) != 2 {
+			t.Fatalf("reported = %v", after.Reported)
+		}
+		if names := surfacedNames(c.entry); strings.Join(names, ",") != "wait_subagents,read_subagent,message_subagent,stop_subagents" {
+			t.Fatalf("surfaced = %v", names)
 		}
 	})
 }
 
 func TestForkAnyCancelsLosersAndReportsWinner(t *testing.T) {
 	forkStores(t, func(t *testing.T, store forkTestStore) {
-		c := newForkCall(t, store, nil, `{"mode":"any","branches":[{"goal":"Try mirror one"},{"goal":"Try mirror two"},{"goal":"Try mirror three"}]}`)
+		c := newForkCall(t, store, nil, `{"mode":"any","subagents":[{"goal":"Try mirror one"},{"goal":"Try mirror two"},{"goal":"Try mirror three"}]}`)
 		c.settle()
 		meta := c.meta()
 		c.finishChild(meta.ChildRunIDs[1], models.AgentRunStatusCompleted, "Mirror two works.", "")
@@ -364,15 +371,15 @@ func TestForkAnyCancelsLosersAndReportsWinner(t *testing.T) {
 		c.reclaim()
 		c.resume()
 		value, raw := forkResult(t, c.entry)
-		if c.entry.State != models.ToolEntryCompleted || value["status"] != "satisfied" || value["mode"] != "any" {
+		if c.entry.State != models.ToolEntryCompleted || value["status"] != "succeeded" {
 			t.Fatalf("entry %s result %s", c.entry.State, raw)
 		}
-		branches := value["branches"].([]interface{})
+		subagents := value["subagents"].([]interface{})
 		statuses := []string{}
-		for _, branch := range branches {
-			statuses = append(statuses, branch.(map[string]interface{})["status"].(string))
+		for _, subagent := range subagents {
+			statuses = append(statuses, subagent.(map[string]interface{})["status"].(string))
 		}
-		if strings.Join(statuses, ",") != "canceled,completed,canceled" || branches[1].(map[string]interface{})["answer"] != "Mirror two works." {
+		if strings.Join(statuses, ",") != "stopped,completed,stopped" || subagents[1].(map[string]interface{})["answer"] != "Mirror two works." {
 			t.Fatalf("result = %s", raw)
 		}
 	})
@@ -384,9 +391,14 @@ func TestForkFailedBranchIsErrorResultNotRunFailure(t *testing.T) {
 		c.settle()
 		meta := c.meta()
 		c.finishChild(meta.ChildRunIDs[0], models.AgentRunStatusFailed, "", "vendor A site is down")
+		// Every subagent ends before the parent resumes, failed or not.
+		if source := c.getRun(c.run.ID); source.Status != models.AgentRunStatusWaitingForDependency {
+			t.Fatalf("source woke while a subagent still runs: %s", source.Status)
+		}
+		c.finishChild(meta.ChildRunIDs[1], models.AgentRunStatusFailed, "", "vendor B site is down")
 		source := c.getRun(c.run.ID)
 		if source.Status != models.AgentRunStatusQueued {
-			t.Fatalf("source after a failed branch = %s", source.Status)
+			t.Fatalf("source after both failed = %s", source.Status)
 		}
 		if source.FailureExplanation != nil {
 			t.Fatalf("failed group recorded a final failure: %#v", source.FailureExplanation)
@@ -400,7 +412,7 @@ func TestForkFailedBranchIsErrorResultNotRunFailure(t *testing.T) {
 			t.Fatalf("entry = %s %#v", c.entry.State, c.entry.Tool.Result)
 		}
 		value, raw := forkResult(t, c.entry)
-		first := value["branches"].([]interface{})[0].(map[string]interface{})
+		first := value["subagents"].([]interface{})[0].(map[string]interface{})
 		if value["status"] != "failed" || first["status"] != "failed" || first["error"] != "vendor A site is down" {
 			t.Fatalf("result = %s", raw)
 		}
@@ -468,7 +480,7 @@ func TestForkCrashBeforeCreateResettlesOnce(t *testing.T) {
 
 func TestSameAgentBranchInheritsParentPathOtherAgentDoesNot(t *testing.T) {
 	forkStores(t, func(t *testing.T, store forkTestStore) {
-		c := newForkCall(t, store, nil, `{"branches":[{"goal":"Research vendor A"},{"goal":"Research vendor B","agentId":"agent-b"}]}`)
+		c := newForkCall(t, store, nil, `{"subagents":[{"goal":"Research vendor A"},{"goal":"Research vendor B","agentId":"agent-b"}]}`)
 		c.settle()
 		meta := c.meta()
 		self, other := c.getRun(meta.ChildRunIDs[0]), c.getRun(meta.ChildRunIDs[1])
@@ -507,7 +519,7 @@ func TestSameAgentBranchInheritsParentPathOtherAgentDoesNot(t *testing.T) {
 
 func TestForkOtherAgentNotOfferedIsToolError(t *testing.T) {
 	forkStores(t, func(t *testing.T, store forkTestStore) {
-		c := newForkCall(t, store, nil, `{"branches":[{"goal":"A"},{"goal":"B","agentId":"agent-z"}]}`)
+		c := newForkCall(t, store, nil, `{"subagents":[{"goal":"A"},{"goal":"B","agentId":"agent-z"}]}`)
 		result := c.settle()
 		value, raw := forkResult(t, c.entry)
 		if result.Kind != Continue || c.entry.State != models.ToolEntryError || value["error"] != "agent_not_eligible" {
@@ -631,9 +643,84 @@ func TestForkSpecSameWithAndWithoutTargets(t *testing.T) {
 	if !reflect.DeepEqual(self, targets) {
 		t.Fatal("fork targets changed the fork tool")
 	}
-	items := targets.InputSchema["properties"].(map[string]interface{})["branches"].(map[string]interface{})["items"].(map[string]interface{})
+	items := targets.InputSchema["properties"].(map[string]interface{})["subagents"].(map[string]interface{})["items"].(map[string]interface{})
 	agent, ok := items["properties"].(map[string]interface{})["agentId"].(map[string]interface{})
 	if _, enum := agent["enum"]; !ok || enum {
 		t.Fatalf("agentId = %#v", agent)
 	}
+}
+
+func surfacedNames(entry *models.SessionEntry) []string {
+	var names []string
+	for _, tool := range entry.Tool.SurfacedTools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+func TestStartSubagentsInBackgroundKeepsTheSourceRunning(t *testing.T) {
+	forkStores(t, func(t *testing.T, store forkTestStore) {
+		c := newForkCall(t, store, nil, `{"background":true,"subagents":[{"goal":"Research vendor A"},{"goal":"Research vendor B","fresh":true}]}`)
+		result := c.settle()
+		if result.Kind != Continue || result.Run == nil || result.Run.Status != models.AgentRunStatusRunning || result.Run.LeaseOwner != forkTestWorker {
+			t.Fatalf("result = %#v", result)
+		}
+		stored := c.storedEntry()
+		if stored.State != models.ToolEntryCompleted || stored.Tool.Wait != nil || len(stored.Tool.SurfacedTools) != 4 {
+			t.Fatalf("entry = %s wait %#v surfaced %d", stored.State, stored.Tool.Wait, len(stored.Tool.SurfacedTools))
+		}
+		value, raw := forkResult(t, stored)
+		if subagents, _ := value["subagents"].([]interface{}); len(subagents) != 2 || !strings.Contains(raw, `"id":"s2"`) {
+			t.Fatalf("result = %s", raw)
+		}
+		meta := c.meta()
+		if len(meta.Subagents) != 2 || !meta.Subagents[0].Background || len(meta.Waited) != 0 {
+			t.Fatalf("meta = %#v", meta)
+		}
+		group, err := store.GetRunDependencyGroup(c.ctx, c.scope, meta.GroupID)
+		if err != nil || group == nil || !group.Detached || group.Status != models.RunDependencyGroupWaiting {
+			t.Fatalf("group = %#v, %v", group, err)
+		}
+		source := c.getRun(c.run.ID)
+		if source.Status != models.AgentRunStatusRunning || source.WakeCondition != nil {
+			t.Fatalf("source = %s %#v", source.Status, source.WakeCondition)
+		}
+		// fresh: the second starts from its brief alone though it runs as the
+		// source Agent.
+		if self, fresh := c.getRun(meta.Subagents[0].RunID), c.getRun(meta.Subagents[1].RunID); self.SessionID == "" || fresh.SessionID != "" {
+			t.Fatalf("sessions = %q / %q", self.SessionID, fresh.SessionID)
+		}
+		// A child's end resolves its edge and leaves the running source alone.
+		before := c.getRun(c.run.ID).Revision
+		c.finishChild(meta.Subagents[0].RunID, models.AgentRunStatusCompleted, "A costs 10.", "")
+		if after := c.getRun(c.run.ID); after.Revision != before || after.Status != models.AgentRunStatusRunning {
+			t.Fatalf("source after a background end = %s revision %d (was %d)", after.Status, after.Revision, before)
+		}
+	})
+}
+
+func TestStartSubagentsRefusesMoreThanEightAtOnce(t *testing.T) {
+	forkStores(t, func(t *testing.T, store forkTestStore) {
+		goals := make([]string, 8)
+		for i := range goals {
+			goals[i] = fmt.Sprintf(`{"goal":"part %d"}`, i+1)
+		}
+		c := newForkCall(t, store, nil, `{"background":true,"subagents":[`+strings.Join(goals, ",")+`]}`)
+		if result := c.settle(); result.Kind != Continue || c.storedEntry().State != models.ToolEntryCompleted {
+			t.Fatalf("first start = %#v", result)
+		}
+		subagents, err := LoadSubagents(c.ctx, c.sessions, store, c.getRun(c.run.ID), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := subagents.nextIDs(1); got[0] != "s9" {
+			t.Fatalf("next id = %v", got)
+		}
+		if refusal := subagentCapacityRefusal(subagents, 1); refusal == nil || !strings.Contains(ResultText(refusal), "At most 8") {
+			t.Fatalf("ninth subagent refusal = %v", refusal)
+		}
+		if refusal := subagentCapacityRefusal(subagents, 0); refusal != nil {
+			t.Fatalf("no new subagent refused: %v", ResultText(refusal))
+		}
+	})
 }

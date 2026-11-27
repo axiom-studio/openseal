@@ -297,7 +297,7 @@ func (f *ChatFixture) BindAgent(run *models.AgentRun, agentID string, producer a
 	f.Agents[run.ID] = &agentrun.TurnRunnerBinding{
 		DeploymentID: agentID, DefinitionID: "agent-definition", DefinitionVersion: "1",
 		ModelProvider: string(models.ModelStepProviderAnthropic), Model: "chat-model", ModelActions: actions,
-		Producer: producer, Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(f.Store, f.Store)},
+		Producer: producer, Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(f.Store, f.Store, f.Store)},
 		// What ResolveControlAuthority grants the speaking Agent of a chat.
 		Authority: agentrun.ControlAuthority{AgentID: agentID, CanAskUser: true, CanReact: true},
 	}

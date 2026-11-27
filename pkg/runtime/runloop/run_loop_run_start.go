@@ -20,6 +20,9 @@ import (
 //   - rate_limited_source: the Run's newest Lightpanda failure is a typed
 //     source rate limit, so live-browser calls will be refused (section 07
 //     §8.1). One note per failing call; the tool list never changes.
+//   - subagent: a background subagent of the Run ended and its end has not
+//     reached the Run yet (control.SubagentNotes). One note per ended child
+//     Run; the note is how the parent learns of it at its next step.
 //   - setup_pending: a foreground Run whose governed history holds a pending
 //     setup form (section 07 §8.3). Same id and source key as the note the
 //     governed executor appends after the tool entry (pendingSkillSetupNote),
@@ -37,14 +40,16 @@ func RateLimitedSourceKey(runID, actionCallID string) string {
 }
 
 // RunStartPreparer is the StepPreparer the Loop runs first. Actions may be
-// nil (no governed tools); then it produces no notes.
+// nil (no governed tools); then it produces no governed notes. Runs reads the
+// Run's subagents.
 type RunStartPreparer struct {
 	sessions models.AgentSessionStore
 	actions  models.ActionStore
+	runs     models.PortfolioStore
 }
 
-func NewRunStartPreparer(sessions models.AgentSessionStore, actions models.ActionStore) *RunStartPreparer {
-	return &RunStartPreparer{sessions: sessions, actions: actions}
+func NewRunStartPreparer(sessions models.AgentSessionStore, actions models.ActionStore, runs models.PortfolioStore) *RunStartPreparer {
+	return &RunStartPreparer{sessions: sessions, actions: actions, runs: runs}
 }
 
 var _ agentrun.StepPreparer = (*RunStartPreparer)(nil)
@@ -66,6 +71,13 @@ func (p *RunStartPreparer) BeforeStep(ctx context.Context, in agentrun.StepInput
 		if note := runStartSetupPendingNote(run, session.ID, step, views); note != nil {
 			notes = append(notes, note)
 		}
+	}
+	if p.runs != nil && p.sessions != nil {
+		ended, err := control.SubagentNotes(ctx, p.sessions, p.runs, run, session.ID, step, in.Path)
+		if err != nil {
+			return nil, fmt.Errorf("run start: %w", err)
+		}
+		notes = append(notes, ended...)
 	}
 	fresh := notes[:0]
 	for _, note := range notes {

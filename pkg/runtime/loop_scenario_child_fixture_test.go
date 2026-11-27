@@ -303,7 +303,7 @@ func (c *childFixture) bindingFor(run *models.AgentRun) *agentrun.TurnRunnerBind
 		DefinitionID: looptest.FixtureDefinition, DefinitionVersion: "1",
 		ModelProvider: string(looptest.ModelProvider), Model: looptest.ModelName,
 		Producer: producer, Host: host, Authority: control,
-		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(c.Store.(models.AgentSessionStore), c.Store)},
+		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(c.Store.(models.AgentSessionStore), c.Store, c.Store)},
 		Tools:     c.Dispatcher.ForClaim(runloop.LoopToolClaim{}),
 	}
 	if _, decision := run.Context[agentrun.AgentRequestInboxContextKey]; !decision {
@@ -487,7 +487,7 @@ func entryViewIDs(entries []models.SessionEntryView) []string {
 // user entry after the parent's path is the branch brief.
 func isForkBranch(v looptest.StepView) bool {
 	for _, text := range v.UserTexts() {
-		if strings.Contains(text, "one branch of a parallel task") {
+		if strings.Contains(text, "You are a subagent working on one part of a larger task") {
 			return true
 		}
 	}
@@ -496,7 +496,7 @@ func isForkBranch(v looptest.StepView) bool {
 
 func branchGoal(v looptest.StepView) string {
 	for _, text := range v.UserTexts() {
-		if i := strings.Index(text, "Goal:\n"); i >= 0 && strings.Contains(text, "one branch of a parallel task") {
+		if i := strings.Index(text, "Goal:\n"); i >= 0 && strings.Contains(text, "You are a subagent working on one part of a larger task") {
 			goal := text[i+len("Goal:\n"):]
 			if j := strings.Index(goal, "\n"); j >= 0 {
 				goal = goal[:j]
@@ -508,9 +508,18 @@ func branchGoal(v looptest.StepView) string {
 }
 
 func childForkCall(goals ...string) looptest.ToolCall {
-	branches := make([]interface{}, len(goals))
+	return childStartCall(false, goals...)
+}
+
+// childStartCall is a start_subagents call of goals, background or not.
+func childStartCall(background bool, goals ...string) looptest.ToolCall {
+	subagents := make([]interface{}, len(goals))
 	for i, goal := range goals {
-		branches[i] = map[string]interface{}{"goal": goal}
+		subagents[i] = map[string]interface{}{"goal": goal}
 	}
-	return looptest.Call(string(models.ControlToolStartSubagents), map[string]any{"branches": branches})
+	args := map[string]any{"subagents": subagents}
+	if background {
+		args["background"] = true
+	}
+	return looptest.Call(string(models.ControlToolStartSubagents), args)
 }

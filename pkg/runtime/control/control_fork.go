@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/models"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentbuilder"
 	"github.com/axiom-studio/openseal/pkg/runtime/agentrun"
+	"github.com/axiom-studio/openseal/pkg/runtime/modelstep"
 )
 
 // Executor.Fork is the fan-out primitive of start_subagents, run_operation
@@ -39,6 +40,19 @@ type ForkSpec struct {
 	// NoSessionForks keeps every child on a fresh session even when it runs
 	// as the source Agent (deterministic children: run_operation).
 	NoSessionForks bool
+	// Fresh names the branches that start from their brief alone although
+	// they run as the source Agent (start_subagents fresh).
+	Fresh map[string]bool
+	// Background keeps the source running (model origin only): the group is
+	// detached and the entry completes at once with BackgroundResult.
+	Background       bool
+	BackgroundResult *models.ToolResult
+	// Subagents names the children for the model (EntryMeta.Subagents), and
+	// Waited the ones the entry's result reports when it resumes.
+	Subagents []SubagentRef
+	// Surfaced are the tools a background entry makes callable as it
+	// completes; a parked entry surfaces them when it resumes.
+	Surfaced []models.SurfacedTool
 }
 
 // Fork creates spec's child Runs and parks the source on their dependency
@@ -66,7 +80,7 @@ func (x *Executor) Fork(ctx context.Context, cc agentrun.ControlContext, spec Fo
 			return Result{}, errors.New("model fork branches cannot carry a checkpoint")
 		}
 		childIDs[i] = agentrun.StableForkIdentifier(run.ID, spec.ForkID, "child:"+strings.TrimSpace(branch.ID))
-		if !model || spec.NoSessionForks {
+		if !model || spec.NoSessionForks || spec.Fresh[strings.TrimSpace(branch.ID)] {
 			continue
 		}
 		agentID := strings.TrimSpace(branch.AssignedAgentID)
@@ -84,7 +98,13 @@ func (x *Executor) Fork(ctx context.Context, cc agentrun.ControlContext, spec Fo
 	if model {
 		checkpoint = maps.Clone(run.Checkpoint)
 	}
-	meta := EntryMeta{Kind: cc.ToolName(), ForkID: spec.ForkID, GroupID: groupID, ChildRunIDs: childIDs}
+	if spec.Background && (!model || cc.Entry == nil || spec.BackgroundResult == nil) {
+		return Result{}, errors.New("a background fork needs a model call's entry and its result")
+	}
+	meta := EntryMeta{Kind: cc.ToolName(), ForkID: spec.ForkID, GroupID: groupID, ChildRunIDs: childIDs, Subagents: spec.Subagents}
+	if !spec.Background {
+		meta.Waited = spec.Subagents
+	}
 	if meta.Kind == "" {
 		meta.Kind = models.ControlToolStartSubagents
 	}
@@ -121,15 +141,22 @@ func (x *Executor) Fork(ctx context.Context, cc agentrun.ControlContext, spec Fo
 				Wait:   &models.ToolEntryWait{GroupID: groupID, ChildRunIDs: append([]string(nil), childIDs...)},
 				Kernel: &models.ToolEntryKernelPatch{Control: control}, Now: now,
 			}
+			if spec.Background {
+				transition.To, transition.Wait, transition.Result = models.ToolEntryCompleted, nil, spec.BackgroundResult
+				transition.Kernel.SurfacedTools = models.CloneSurfacedTools(spec.Surfaced)
+				transition.Tokens = modelstep.EstimateEntryTokens(WithToolResult(entry, models.ToolEntryCompleted, spec.BackgroundResult))
+			}
 		}
 		created, err := x.Forks.Create(ctx, agentrun.CreateRunForkRequest{
 			Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: current.Revision, WorkerID: cc.WorkerID,
 			ForkID: spec.ForkID, Policy: spec.Policy, Branches: spec.Branches, ContinuationCheckpoint: checkpoint,
 			ChildKind: spec.ChildKind, SessionForks: sessionForks,
-			ToolTransition: transition, RequireInterventionCount: required,
+			ToolTransition: transition, RequireInterventionCount: required, Detached: spec.Background,
 			Actor: models.ActivityActor{Type: "worker", ID: cc.WorkerID},
 		})
 		switch {
+		case err == nil && spec.Background:
+			return x.forkStarted(ctx, cc, created)
 		case err == nil:
 			return x.forkParked(ctx, cc, created, groupID, len(childIDs))
 		case errors.Is(err, models.ErrSteeringArrived):
@@ -175,6 +202,27 @@ func (x *Executor) forkRefuse(ctx context.Context, cc agentrun.ControlContext, r
 		return Result{}, fmt.Errorf("fork refused: %s", ResultText(result))
 	}
 	return x.refuse(ctx, cc, result)
+}
+
+// forkStarted is the outcome of a background fork: the entry completed in
+// the create's transaction and the source keeps running.
+func (x *Executor) forkStarted(ctx context.Context, cc agentrun.ControlContext, created *agentrun.RunForkResult) (Result, error) {
+	var entry *models.SessionEntry
+	var source *models.AgentRun
+	if created != nil && created.DependencyGroup != nil {
+		entry, source = created.DependencyGroup.ToolEntry, created.DependencyGroup.Source
+	}
+	if entry == nil {
+		reread, err := x.Sessions.GetSessionEntry(ctx, cc.Run.Scope, cc.Entry.ID)
+		if err != nil {
+			return Result{}, err
+		}
+		entry = reread
+	}
+	if entry.State != models.ToolEntryCompleted {
+		return Result{}, fmt.Errorf("%w: background fork entry %s is %s after the group was created", models.ErrToolEntryStateConflict, entry.ID, entry.State)
+	}
+	return Result{Kind: Continue, Run: source, Entry: entry}, nil
 }
 
 func (x *Executor) forkParked(ctx context.Context, cc agentrun.ControlContext, created *agentrun.RunForkResult, groupID string, children int) (Result, error) {

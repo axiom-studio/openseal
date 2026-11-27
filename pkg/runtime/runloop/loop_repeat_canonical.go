@@ -48,6 +48,8 @@ const (
 var (
 	repeatKernelWriteTools = map[string]bool{
 		"start_subagents":         true,
+		"message_subagent":        true,
+		"stop_subagents":          true,
 		"agent_delegate":          true,
 		"agent_delegate_reply":    true,
 		"run_operation":           true,
@@ -57,11 +59,13 @@ var (
 	}
 	repeatKernelReadTools = map[string]bool{
 		"search_capabilities": true,
+		"read_subagent":       true,
 	}
 	repeatKernelControlTools = map[string]bool{
 		"agent_request_decision": true,
 		"turn_report_progress":   true,
 		"wait":                   true,
+		"wait_subagents":         true,
 		"load_capabilities":      true,
 	}
 	// Host reads; every other host operation (writes, copy_from_chat,

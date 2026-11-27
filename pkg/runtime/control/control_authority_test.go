@@ -19,12 +19,13 @@ import (
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
-// offeredControlTools lists the control tools an authority offers, in the
-// advertised order.
+// offeredControlTools lists the control tools an authority advertises, in
+// order. Surfaced tools are offered too but listed by the entry that
+// surfaces them.
 func offeredControlTools(a agentrun.ControlAuthority) []string {
 	names := []string{}
 	for _, name := range controlToolOrder {
-		if modelstep.ControlToolOffered(name, a) {
+		if modelstep.ControlToolOffered(name, a) && !controlToolRules[name].Surfaced {
 			names = append(names, string(name))
 		}
 	}

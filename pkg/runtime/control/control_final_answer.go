@@ -22,7 +22,8 @@ import (
 // answer says: the checks only refuse a reply that cannot be delivered at
 // all. Decision Runs finish with request_decision instead.
 //
-// Order: mode → empty (silent, reactions, routine rule) → finalAnswerPark.
+// Order: mode → running background subagents → empty (silent, reactions,
+// routine rule) → finalAnswerPark.
 
 // Final answer error codes (stable; the model sees them in the rejection).
 const (
@@ -288,9 +289,16 @@ func (x *Executor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContex
 		}
 		return x.rejectFinal(ctx, cc, true, rejection)
 	}
+	// 2. Background subagents still working.
+	if rejection, err := x.subagentsRunningRejection(ctx, cc); err != nil || rejection != nil {
+		if err != nil {
+			return Result{}, err
+		}
+		return x.rejectFinal(ctx, cc, true, rejection)
+	}
 	answer := strings.TrimSpace(text)
 	output := map[string]interface{}{conversationrun.FinalOutputSummaryKey: answer}
-	// 2. An empty reply: silent when spoken, the reactions when the Run
+	// 3. An empty reply: silent when spoken, the reactions when the Run
 	// reacted, nothing to report for a routine occurrence that changed
 	// nothing; otherwise refused.
 	if answer == "" {
@@ -304,7 +312,7 @@ func (x *Executor) PlainTextFinal(ctx context.Context, cc agentrun.ControlContex
 		output = empty
 	}
 	final := &agentrun.FinalAnswer{PlainText: true, StepID: cc.Step.ID, Answer: answer, Output: output}
-	// 3. OTP wait or pending setup (section 07 §8).
+	// 4. OTP wait or pending setup (section 07 §8).
 	park, err := x.finalPark(ctx, cc, answer)
 	if err != nil {
 		return Result{}, err

@@ -32,7 +32,9 @@ var controlToolOrder = []models.ControlToolName{
 	models.ControlToolReportProgress,
 	models.ControlToolWait, models.ControlToolAskUser, models.ControlToolReact,
 	models.ControlToolStartTask,
-	models.ControlToolStartSubagents, models.ControlToolRunOperation, models.ControlToolDelegate, models.ControlToolDelegateReply,
+	models.ControlToolStartSubagents, models.ControlToolWaitSubagents, models.ControlToolReadSubagent,
+	models.ControlToolMessageSubagent, models.ControlToolStopSubagents,
+	models.ControlToolRunOperation, models.ControlToolDelegate, models.ControlToolDelegateReply,
 	models.ControlToolRunbookFork, models.ControlToolRunbookDelegate,
 }
 
@@ -48,9 +50,12 @@ const (
 
 // controlToolRule is the static, authority-independent part of a control
 // tool: its phase and whether it must be the only call of its assistant entry.
+// A Surfaced tool is never in a step's tool list: an entry makes it callable
+// (the subagent follow-ups surface with start_subagents' result).
 type controlToolRule struct {
-	Phase Phase
-	Alone bool
+	Phase    Phase
+	Alone    bool
+	Surfaced bool
 }
 
 var controlToolRules = map[models.ControlToolName]controlToolRule{
@@ -61,6 +66,10 @@ var controlToolRules = map[models.ControlToolName]controlToolRule{
 	models.ControlToolReact:           {Phase: PhaseInline},
 	models.ControlToolStartTask:       {Phase: PhaseSettle, Alone: true}, // A4
 	models.ControlToolStartSubagents:  {Phase: PhaseSettle},
+	models.ControlToolWaitSubagents:   {Phase: PhaseSettle, Surfaced: true},
+	models.ControlToolReadSubagent:    {Phase: PhaseInline, Surfaced: true},
+	models.ControlToolMessageSubagent: {Phase: PhaseSettle, Surfaced: true},
+	models.ControlToolStopSubagents:   {Phase: PhaseInline, Surfaced: true},
 	models.ControlToolRunOperation:    {Phase: PhaseSettle},
 	models.ControlToolDelegate:        {Phase: PhaseSettle},
 	models.ControlToolDelegateReply:   {Phase: PhaseSettle},
@@ -141,6 +150,12 @@ type EntryMeta struct {
 	QuestionMessageID string                 `json:"questionMessageId,omitempty"`
 	WakeAt            *time.Time             `json:"wakeAt,omitempty"`
 	ErrorCode         string                 `json:"errorCode,omitempty"` // e.g. answer_empty
+	// Subagents are the subagents this call started or continued; Waited
+	// the ones its result reports when it resumes; Reported the child Runs
+	// whose end its result carried (no subagent note follows for them).
+	Subagents []SubagentRef `json:"subagents,omitempty"`
+	Waited    []SubagentRef `json:"waited,omitempty"`
+	Reported  []string      `json:"reported,omitempty"`
 }
 
 // DecodeControlEntryMeta reads an entry's kernel control metadata (nil when
@@ -266,6 +281,10 @@ func BuiltinTools() []Tool {
 		{name: models.ControlToolDelegate, handler: delegateHandler{}},
 		{name: models.ControlToolDelegateReply, handler: delegateReplyHandler{}},
 		{name: models.ControlToolStartSubagents, handler: startSubagentsHandler{}},
+		{name: models.ControlToolWaitSubagents, handler: waitSubagentsHandler{}},
+		{name: models.ControlToolReadSubagent, handler: readSubagentHandler{}},
+		{name: models.ControlToolMessageSubagent, handler: messageSubagentHandler{}},
+		{name: models.ControlToolStopSubagents, handler: stopSubagentsHandler{}},
 		{name: models.ControlToolReact, handler: reactControlHandler{}},
 		{name: models.ControlToolWait, handler: waitControlHandler{}},
 		{name: models.ControlToolRunOperation, handler: operationHandler{}},
@@ -289,12 +308,13 @@ func (r Registry) register(name models.ControlToolName, h Handler) {
 }
 
 // Specs lists the offered tools in the stable order. A tool is offered when
-// the authority allows it and a handler is registered.
+// the authority allows it and a handler is registered; surfaced tools are
+// left out (an entry declares them).
 func (r Registry) Specs(a agentrun.ControlAuthority) []ToolSpec {
 	var specs []ToolSpec
 	for _, name := range controlToolOrder {
 		h, ok := r[name]
-		if !ok || !modelstep.ControlToolOffered(name, a) {
+		if !ok || controlToolRules[name].Surfaced || !modelstep.ControlToolOffered(name, a) {
 			continue
 		}
 		spec := h.Spec(a)
@@ -530,7 +550,16 @@ func (x *Executor) complete(ctx context.Context, cc agentrun.ControlContext, res
 // ErrToolEntryStateConflict) is retried once after re-reading the entry,
 // while it is still in the state the caller saw.
 func (x *Executor) transitionControlEntry(ctx context.Context, cc agentrun.ControlContext, to models.ToolEntryState, wait *models.ToolEntryWait, result *models.ToolResult, meta *EntryMeta) (*models.SessionEntry, error) {
+	return x.transitionSurfacing(ctx, cc, to, wait, result, meta, nil)
+}
+
+// transitionSurfacing is transitionControlEntry that also makes surfaced
+// callable from this entry on (ToolEntry.SurfacedTools).
+func (x *Executor) transitionSurfacing(ctx context.Context, cc agentrun.ControlContext, to models.ToolEntryState, wait *models.ToolEntryWait, result *models.ToolResult, meta *EntryMeta, surfaced []models.SurfacedTool) (*models.SessionEntry, error) {
 	var kernel *models.ToolEntryKernelPatch
+	if len(surfaced) > 0 {
+		kernel = &models.ToolEntryKernelPatch{SurfacedTools: models.CloneSurfacedTools(surfaced)}
+	}
 	if meta != nil {
 		stored := *meta // the handler's value is left as it was
 		if stored.Kind == "" {
@@ -540,7 +569,10 @@ func (x *Executor) transitionControlEntry(ctx context.Context, cc agentrun.Contr
 		if err != nil {
 			return nil, fmt.Errorf("encode control metadata: %w", err)
 		}
-		kernel = &models.ToolEntryKernelPatch{Control: encoded}
+		if kernel == nil {
+			kernel = &models.ToolEntryKernelPatch{}
+		}
+		kernel.Control = encoded
 	}
 	current := cc.Entry
 	for attempt := 0; ; attempt++ {

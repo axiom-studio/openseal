@@ -481,8 +481,8 @@ type ToolEntry struct {
 	Wait               *ToolEntryWait    `json:"wait,omitempty"`   // set only in awaiting_* states
 	Result             *ToolResult       `json:"result,omitempty"` // set only in terminal states
 	Control            json.RawMessage   `json:"control,omitempty"`
-	// SurfacedTools (load_capabilities only) are the definitions of the tools
-	// the load made callable, frozen as the model first saw them: later
+	// SurfacedTools (load_capabilities, start_subagents) are the definitions
+	// of the tools the call made callable, frozen as the model first saw them: later
 	// steps of the session declare exactly these bytes, whatever the catalog
 	// says now.
 	SurfacedTools []SurfacedTool `json:"surfacedTools,omitempty"`
@@ -569,13 +569,16 @@ const (
 	// that depends on them. Appended in full once per compaction window, then
 	// as deltas when the catalog changes (pkg/runtime/modelstep/capability_note.go).
 	NoteCapabilities NoteKind = "capabilities"
+	// NoteSubagent reports that a background subagent ended (finished,
+	// failed or was stopped) to the Run that started it.
+	NoteSubagent NoteKind = "subagent"
 )
 
 func (k NoteKind) Valid() bool {
 	switch k {
 	case NoteRunContext, NoteRepeat, NoteHost, NoteFailureExplanation, NoteRunFailed, NoteTaskPromoted,
 		NoteFinalRejection, NoteSetupPending, NoteHistoryOmitted, NoteRateLimitedSource,
-		NoteBrowserWaitingCode, NoteCapabilities, NoteOutputCutoff:
+		NoteBrowserWaitingCode, NoteCapabilities, NoteOutputCutoff, NoteSubagent:
 		return true
 	}
 	return false

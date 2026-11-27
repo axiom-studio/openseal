@@ -125,7 +125,7 @@ func capabilityNoteSectionHead(section, mode string) string {
 		}
 		return "Capabilities you can load (copy an ID verbatim into load_capabilities):"
 	case capabilityNoteAgents:
-		return "Agents you can hand work to (agentId for delegate and fork):"
+		return "Agents you can hand work to (agentId for agent_delegate and start_subagents):"
 	case capabilityNoteOperations:
 		return "Operations you can start with run_operation (entrypoint):"
 	case CapabilityNoteUnavailable:
@@ -302,7 +302,7 @@ func ensureCapabilityNote(ctx context.Context, store capabilityNoteAppender, in 
 // ---------------------------------------------------------------------------
 // The catalog preparer's listing
 
-// ControlTargetItems are the Agents delegate and fork accept and the
+// ControlTargetItems are the Agents delegate and start_subagents accept and the
 // operations run_operation starts. Their tools carry no list or enum, so a
 // new Agent or operation never changes a tool definition; each handler
 // validates the target it is given.

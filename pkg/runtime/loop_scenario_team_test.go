@@ -84,7 +84,7 @@ func convMemberAgentBinding(f *looptest.Fixture, run *models.AgentRun) *agentrun
 		ModelProvider: string(looptest.ModelProvider), Model: looptest.ModelName,
 		ModelActions: append([]capability.ModelAction(nil), f.Offered...),
 		Producer:     producer, Session: session, Host: host, Authority: control,
-		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(sessions, f.Store)},
+		Preparers: []agentrun.StepPreparer{runloop.NewRunStartPreparer(sessions, f.Store, f.Store)},
 		Tools:     f.Dispatcher.ForClaim(runloop.LoopToolClaim{}),
 	}
 	return binding

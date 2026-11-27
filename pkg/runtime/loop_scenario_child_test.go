@@ -155,13 +155,13 @@ func TestLoopForkCreatesChildSessionAndResumesWithItsFinalText(t *testing.T) {
 			t.Fatalf("fork entry = %s %q", forkEntry.State, childResultText(forkEntry))
 		}
 		value := childResultJSON(t, forkEntry)
-		branches, _ := value["branches"].([]interface{})
-		if len(branches) != 2 {
+		subagents, _ := value["subagents"].([]interface{})
+		if len(subagents) != 2 {
 			t.Fatalf("fork result = %s", childResultText(forkEntry))
 		}
 		for i, want := range []string{"2 items", "3 boxes"} {
-			if branch := branches[i].(map[string]interface{}); branch["answer"] != want || branch["status"] != string(models.AgentRunStatusCompleted) {
-				t.Fatalf("branch %d = %v", i, branch)
+			if subagent := subagents[i].(map[string]interface{}); subagent["answer"] != want || subagent["status"] != string(models.AgentRunStatusCompleted) {
+				t.Fatalf("subagent %d = %v", i, subagent)
 			}
 		}
 		if got := done.Output[conversationrun.FinalOutputSummaryKey]; got != "There are 2 items and 3 boxes." {
@@ -218,14 +218,14 @@ func TestLoopTwoParallelForksJoinBeforeResume(t *testing.T) {
 		c.MustStatus(parent, models.AgentRunStatusCompleted)
 		forks = c.toolEntries(parent.ID, string(models.ControlToolStartSubagents))
 		entry := forks[0]
-		branches, _ := childResultJSON(t, entry)["branches"].([]interface{})
-		if entry.State != models.ToolEntryCompleted || len(branches) != 2 || forks[1].State != models.ToolEntryError || forks[0].Sequence > forks[1].Sequence {
+		subagents, _ := childResultJSON(t, entry)["subagents"].([]interface{})
+		if entry.State != models.ToolEntryCompleted || len(subagents) != 2 || forks[1].State != models.ToolEntryError || forks[0].Sequence > forks[1].Sequence {
 			t.Fatalf("fork entries = %s %s / %s", entry.State, childResultText(entry), forks[1].State)
 		}
-		// Branch results come back in call order, not finish order.
+		// Subagent results come back in call order, not finish order.
 		for i, want := range []string{"done: survey north", "done: survey south"} {
-			if branch := branches[i].(map[string]interface{}); branch["answer"] != want || branch["branch"] != fmt.Sprintf("branch-%d", i+1) {
-				t.Fatalf("branch %d = %v", i, branch)
+			if subagent := subagents[i].(map[string]interface{}); subagent["answer"] != want || subagent["id"] != fmt.Sprintf("s%d", i+1) {
+				t.Fatalf("subagent %d = %v", i, subagent)
 			}
 		}
 		// The resumed step saw the joined result.
@@ -252,7 +252,7 @@ func TestLoopChildFailureIsAToolError(t *testing.T) {
 				return looptest.Act("Checking both.", childForkCall("read the ledger", "count the inventory"))
 			}},
 			&looptest.ModelRule{Name: "answer", Reply: func(v looptest.StepView) models.ModelStepResult {
-				if _, isError, _ := v.ToolResult(string(models.ControlToolStartSubagents)); isError {
+				if content, _, _ := v.ToolResult(string(models.ControlToolStartSubagents)); strings.Contains(content, `"status":"failed"`) {
 					return looptest.Say("One check failed.")
 				}
 				return looptest.Say("All checks passed.")
@@ -270,8 +270,9 @@ func TestLoopChildFailureIsAToolError(t *testing.T) {
 		if failed == nil || failed.Status != models.AgentRunStatusFailed || failed.FailureExplanation == nil || failed.FailureExplanation.Message == "" {
 			t.Fatalf("failed child = %#v", failed)
 		}
+		// One subagent succeeded, so the call did; the failure is in its result.
 		entry := c.toolEntry(parent.ID, string(models.ControlToolStartSubagents))
-		if entry.State != models.ToolEntryError || !entry.Tool.Result.IsError {
+		if entry.State != models.ToolEntryCompleted || entry.Tool.Result.IsError {
 			t.Fatalf("fork entry = %s error=%v", entry.State, entry.Tool.Result.IsError)
 		}
 		if text := childResultText(entry); !strings.Contains(text, failed.FailureExplanation.Message) && !strings.Contains(text, failed.Error) {

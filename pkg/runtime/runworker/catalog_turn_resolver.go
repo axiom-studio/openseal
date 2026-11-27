@@ -433,7 +433,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *agentrun.Tur
 		Budget: modelstep.NewRunActivityCompactionBudget(r.config.Store, activity.NewRunActivityService(r.config.Store, r.config.Store, models.WithClock(r.config.Now)), r.config.Now),
 		Now:    r.config.Now,
 	}
-	binding.Preparers = []agentrun.StepPreparer{runloop.NewRunStartPreparer(r.config.Store, r.config.Store)}
+	binding.Preparers = []agentrun.StepPreparer{runloop.NewRunStartPreparer(r.config.Store, r.config.Store, r.config.Store)}
 	binding.Tools = r.config.Tools.ForClaim(runloop.LoopToolClaim{
 		Workspace: chat, SkillPrompts: prompts, CapabilityConfig: r.config.Capabilities, CommandPins: script.CommandPins(),
 	})

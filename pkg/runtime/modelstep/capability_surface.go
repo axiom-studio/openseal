@@ -8,7 +8,8 @@ import (
 )
 
 // Surfaced tools (cache-stable capability loading). A load_capabilities call
-// freezes the definitions of the tools it makes callable on its tool entry
+// (or a start_subagents call, for its follow-up tools) freezes the
+// definitions of the tools it makes callable on its tool entry
 // (ToolEntry.SurfacedTools). Every later step declares exactly those bytes in
 // the loaded group, tagged with the entry they surfaced at
 // (ModelStepTool.Surface, SessionEntryView.Surfaces), so a load only appends
@@ -68,9 +69,12 @@ func SurfacedOnPath(path *models.AgentSessionPath) []SurfacedLoad {
 	return loads
 }
 
+// completedLoadEntry is a completed entry that made tools callable: a
+// load_capabilities call, or a start_subagents call (its follow-up tools).
 func completedLoadEntry(entry *models.SessionEntry) bool {
 	return entry != nil && entry.Type == models.SessionEntryTool && entry.Tool != nil &&
-		entry.Tool.Name == LoadCapabilitiesTool && entry.State == models.ToolEntryCompleted
+		entry.State == models.ToolEntryCompleted &&
+		(entry.Tool.Name == LoadCapabilitiesTool || entry.Tool.Name == string(models.ControlToolStartSubagents))
 }
 
 // PathCarriedCapabilityIDs is the capabilities of the tools carried over the
